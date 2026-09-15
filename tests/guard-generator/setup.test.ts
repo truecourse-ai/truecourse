@@ -3,12 +3,12 @@
  *
  * The engine no longer owns any LLM call: the recipe repair, the dependency
  * catalog, the interfaces step (reconcile + web authoring), the seed and the
- * auth proof are all SEAMS the command adapter injects (plan 03 steps 8–14).
+ * auth proof are all SEAMS the command adapter injects.
  * What this file pins is the engine's own contract:
  *
- *  - the §7.6 STEP SPINE — six rows, in order, each with its input fingerprint;
+ *  - the STEP SPINE — six rows, in order, each with its input fingerprint;
  *  - SKIP-WHEN-SETTLED — a step whose fingerprint matches a settled row is
- *    skipped whole, `--refresh` forces every one of them, and a step that WRITES
+ *    skipped whole, `refresh` forces every one of them, and a step that WRITES
  *    records the tree it left behind so it matches itself next run;
  *  - the HARD GATE is still step 1 and only step 1 (catalog, interfaces, seed
  *    and auth are soft and report their own outcome);
@@ -210,14 +210,14 @@ function baseOpts(r: string, over: Partial<GuardSetupOptions> = {}): GuardSetupO
 describe('runGuardSetup — the gates', () => {
   // Step 0.5. Setup is the SECOND link of a three-stage chain; half-completing would
   // leave a recipe no spec ever justified.
-  it('refuses without a corpus and names `spec scan`', async () => {
+  it('refuses without a corpus and names the Document scan', async () => {
     const r = fixtureRepo({ corpus: false })
     writeRecipe(r)
 
     const { report } = await runGuardSetup(baseOpts(r))
 
     expect(report.status).toBe('failed')
-    expect(report.reason).toMatch(/truecourse spec scan/)
+    expect(report.reason).toMatch(/Document scan/)
     expect(report.steps).toEqual([])
   })
 
@@ -249,7 +249,7 @@ describe('runGuardSetup — the gates', () => {
 // Step 8 — the spine
 // ---------------------------------------------------------------------------
 
-describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
+describe('runGuardSetup — the step spine', () => {
   it('records seven rows in taxonomy order, and the record round-trips the schema', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
@@ -279,7 +279,7 @@ describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
     expect(byKey.auth).toMatchObject({ status: 'skipped' })
     expect(byKey.auth.reason).toMatch(/not wired into setup yet/)
 
-    // The persisted record is what `guard status` and the externals view read.
+    // The persisted record is what the setup report and the externals view read.
     expect(GuardSetupReportSchema.safeParse(report).success).toBe(true)
     writeGuardSetup(r, report)
     expect(readGuardSetup(r)?.steps.map((s) => s.key)).toEqual([
@@ -374,7 +374,7 @@ describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
 // Step 8 — skip when settled
 // ---------------------------------------------------------------------------
 
-describe('runGuardSetup — skip when settled (plan 03 step 8)', () => {
+describe('runGuardSetup — skip when settled', () => {
   /** Run setup and persist the report, exactly as the command adapter does. */
   async function runAndPersist(
     r: string,
@@ -408,7 +408,7 @@ describe('runGuardSetup — skip when settled (plan 03 step 8)', () => {
     })
     // The whole point of skipping the recipe step: no server is booted again.
     expect(probe.calls).toBe(1)
-    // The committed seed is still REPORTED on the legacy field, from the recipe.
+    // The existing seed is still REPORTED on the legacy field, from the recipe.
     expect(second.seed).toMatchObject({ status: 'ok', outcome: 'exists', command: 'node mine.mjs' })
 
     // A `skipped/unchanged` row settles too, so run three does not bounce back.
@@ -434,7 +434,7 @@ describe('runGuardSetup — skip when settled (plan 03 step 8)', () => {
       // A refresh RE-DERIVES: the dependency-free fixture declares no start script,
       // so the model fallback would be reached — the repair seam stands in for it.
       // That it is reached AT ALL is the proof discovery ran with `ignoreExisting`:
-      // a discovery that saw the committed recipe would have returned `exists`.
+      // a discovery that saw the existing recipe would have returned `exists`.
       repair: async () => {
         repairs++
         return {
@@ -767,8 +767,9 @@ describe('runGuardSetup — the soft steps', () => {
     expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(before)
   })
 
-  // `--refresh` is not consent. A seed script is a committed, human-reviewed file,
-  // and a non-TTY caller answers false — so a flag alone can never clobber it.
+  // `refresh` is not consent. A seed script is a durable, human-reviewed file,
+  // and a caller that cannot confirm answers false — so the option alone can
+  // never clobber it.
   it('--refresh does NOT reach the seed seam when the replacement is not confirmed', async () => {
     const r = fixtureRepo()
     writeRecipe(r, {
@@ -877,7 +878,7 @@ describe('runGuardSetup — the soft steps', () => {
 // Step 11 — the interfaces step's engine half
 // ---------------------------------------------------------------------------
 
-describe('runGuardSetup — the interfaces step (plan 03 step 11)', () => {
+describe('runGuardSetup — the interfaces step', () => {
   const DERIVED: InterfacesFile = {
     version: 2,
     generatedAt: '2026-08-19T00:00:00.000Z',
@@ -942,7 +943,7 @@ describe('runGuardSetup — the interfaces step (plan 03 step 11)', () => {
       reason: 'unchanged',
     })
 
-    // Delete the authored half (a fresh clone has none) ⇒ the step is work again,
+    // Delete the authored half (an unauthored tree has none) ⇒ the step is work again,
     // matching fingerprint or not.
     fs.rmSync(guardAuthoredInterfacesPath(r))
     const third = step()
@@ -1123,13 +1124,14 @@ describe('detectRoleColumns', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The catalog settle record — the COMMITTABLE session skip
+// The catalog settle record — the durable session skip
 // ---------------------------------------------------------------------------
-// The legacy skip lives in gitignored guard/setup.json, so a fresh checkout
-// re-ran the catalog session every time — and its LLM-nondeterministic
-// additions grew the committed catalog, which moved the recipe fingerprint,
-// which re-authored every flow. `scenarios/dependencies.settle.json` commits
-// the "these inputs were already classified" verdict next to the catalog.
+// The legacy skip lives in guard/setup.json, which does not travel in the setup
+// bundle, so a commit whose bundle is materialized fresh re-ran the catalog
+// session every time — and its LLM-nondeterministic additions grew the catalog,
+// which moved the recipe fingerprint, which re-authored every flow.
+// `scenarios/dependencies.settle.json` travels with the catalog and carries the
+// "these inputs were already classified" verdict.
 
 describe('runGuardSetup — the catalog settle record', () => {
   const settlePath = (r: string): string =>
@@ -1159,9 +1161,9 @@ describe('runGuardSetup — the catalog settle record', () => {
     expect(first.report.steps.find((s) => s.key === 'catalog')).toMatchObject({ status: 'ok' })
     expect(fs.existsSync(settlePath(r))).toBe(true)
 
-    // guard/setup.json was never persisted — the fresh-checkout case. The
-    // committable settle record must skip the session on its own, and the
-    // committed catalog must stand byte-for-byte.
+    // guard/setup.json was never persisted — the fresh-materialization case. The
+    // settle record must skip the session on its own, and the catalog must stand
+    // byte-for-byte.
     const bytes = fs.readFileSync(dependenciesPath(r), 'utf-8')
     const second = await runGuardSetup(baseOpts(r, { catalogSession: session }))
     expect(state.calls).toBe(1)

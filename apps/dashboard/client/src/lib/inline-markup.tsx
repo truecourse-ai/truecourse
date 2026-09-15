@@ -4,7 +4,7 @@
  * arrive with backticked identifiers and the occasional **emphasis**, because
  * that is how a model writes prose about code.
  *
- * Exactly two marks are rendered — inline code and bold — and everything else
+ * Exactly two marks are rendered, inline code and bold, and everything else
  * (headings, lists, links, images) stays literal. These strings are SENTENCES,
  * not documents: a note that could grow a heading would be a second document
  * viewer inside a step row, and the spec docs already have one

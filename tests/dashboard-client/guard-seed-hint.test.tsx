@@ -1,13 +1,13 @@
 /**
  * The SEED hint in the UI. A section blocked on missing data has exactly
  * one action, and which one depends on where the seed stands:
- *   no seed → plain `blocked-on`, and the hint offers `guard seed --init`;
+ *   no seed → plain `blocked-on`, and the hint offers Flow setup;
  *   a seed the last generate never saw → the core read path promotes the gap to
  *     needs-setup's "setup done" sub-state, whose action is the re-generate
  *     COMMAND — and the hint must not also appear (there is nothing left to draft);
  *   a seed that already FED the last generate → the gap survived a run with this
  *     very seed, so the seed doesn't create the data; the banner says so and the
- *     action is EXTENDING the seed script — never "re-run guard generate", which
+ *     action is EXTENDING the seed script — never "re-run Flow generation", which
  *     would only re-derive the same gap from cache.
  * The word for the synthetic service key is "seed data", never `missing-data`.
  */
@@ -20,7 +20,7 @@ import { GuardSectionDetail } from '@/components/guard/GuardSectionDetail';
 import {
   guardNeedsSetupHeadline,
   guardNeedsSetupNeed,
-  GUARD_SEED_INIT_COMMAND,
+  GUARD_SEED_INIT_ACTION,
 } from '@/lib/guard-flow-status';
 
 afterEach(cleanup);
@@ -44,11 +44,11 @@ const section = (over: Partial<GuardSectionCoverage> = {}): GuardSectionCoverage
 const noop = () => {};
 
 describe('the missing-data seed hint', () => {
-  it('offers `guard seed --init` on a section blocked on missing data', () => {
+  it('offers Flow setup on a section blocked on missing data', () => {
     render(<GuardSectionDetail section={section()} onOpenFlow={noop} onClose={noop} />);
 
     expect(screen.getByText(/No seed script yet/)).toBeTruthy();
-    expect(screen.getByText(GUARD_SEED_INIT_COMMAND)).toBeTruthy();
+    expect(screen.getByText(new RegExp(GUARD_SEED_INIT_ACTION))).toBeTruthy();
   });
 
   it('is silent on a section blocked on anything else', () => {
@@ -86,7 +86,7 @@ describe('the missing-data seed hint', () => {
       screen.getByText(guardNeedsSetupHeadline({ services: [], provided: ['missing-data'] })),
     ).toBeTruthy();
     expect(screen.getByText(/^seed data is already set up/)).toBeTruthy();
-    expect(screen.getByText('truecourse guard generate')).toBeTruthy();
+    expect(screen.getByText(/Flow generation/)).toBeTruthy();
   });
 
   it('says the seed is INSUFFICIENT — never "already set up" — when it fed the last generate', () => {
@@ -111,7 +111,7 @@ describe('the missing-data seed hint', () => {
     expect(screen.getByText(/the seed script ran, but doesn’t create the data/)).toBeTruthy();
     // The action is editing the seed, then re-generating — never the externals page.
     expect(screen.getByText(/Extend the seed script to create it/)).toBeTruthy();
-    expect(screen.getByText('truecourse guard generate')).toBeTruthy();
+    expect(screen.getByText(/Flow generation/)).toBeTruthy();
     expect(screen.queryByText(/External APIs/)).toBeNull();
   });
 
@@ -119,7 +119,7 @@ describe('the missing-data seed hint', () => {
     expect(guardSetupServiceLabel('missing-data')).toBe('seed data');
     expect(guardSetupServiceLabel('open-meteo')).toBe('open-meteo');
     expect(guardNeedsSetupNeed({ services: [], provided: ['missing-data'] })).toBe(
-      'seed data is set up — re-run guard generate to author these flows',
+      'seed data is set up, re-run Flow generation to author these flows',
     );
   });
 });

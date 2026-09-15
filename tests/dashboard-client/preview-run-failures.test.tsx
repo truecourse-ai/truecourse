@@ -44,8 +44,8 @@ vi.mock('@/lib/socket', () => {
   };
 });
 
-import PreviewApp from '@/preview/PreviewApp';
-import { toFailure } from '@/preview/shell/real-runs';
+import DashboardApp from '@/dashboard/DashboardApp';
+import { toFailure } from '@/dashboard/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 if (!Element.prototype.scrollTo) {
@@ -56,7 +56,7 @@ const REAL = {
   id: 'linkwarden',
   name: 'linkwarden/linkwarden',
   path: '/clones/linkwarden__linkwarden',
-  remoteUrl: 'https://github.com/linkwarden/linkwarden',
+  provider: 'github',
 };
 
 const REASON = 'The provider refused the key: 401 invalid x-api-key';
@@ -131,18 +131,18 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
       <Toaster />
     </MemoryRouter>,
   );
 }
 
-const AGENT = '/preview/agent';
+const AGENT = '/agent';
 
 beforeEach(() => {
   listeners.clear();
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -183,7 +183,7 @@ describe('what a failed run says about itself', () => {
       id: `real-${REAL.id}-${failed().runId}`,
       title: 'Document scan failed on linkwarden/linkwarden',
       body: REASON,
-      href: `/preview/agent/${encodeURIComponent(failed().runId)}`,
+      href: `/agent/${encodeURIComponent(failed().runId)}`,
     });
     // A run that is merely finished is not an announcement.
     expect(toFailure(repo, scan({ status: 'completed' }))).toBeNull();
@@ -218,11 +218,15 @@ describe('the Agent index', () => {
 describe('the failure toast', () => {
   it('fires once when a watched run dies, and carries the reason', async () => {
     const state = serve([scan()]);
-    renderAt('/preview/code');
+    renderAt('/code');
 
-    // The world is loaded and the scan is up; NOW it dies.
+    // The world is loaded and the scan is up; NOW it dies. The repo name
+    // proves only the repo list; the row's onboarding marker proves the RUNNING
+    // scan was read (the workspace read started at mount, so it landed
+    // earlier). Swapping the served runs before that read lands would make the
+    // failure "already dead on load", which the toast rightly stays silent on.
     await screen.findByText('linkwarden/linkwarden');
-    await waitFor(() => expect(state.runs[0]!.status).toBe('running'));
+    await screen.findByText('onboarding');
     state.runs = [failed()];
     fireSocket('session:runs-changed', { repoId: REAL.id });
 
@@ -240,7 +244,7 @@ describe('the failure toast', () => {
 
   it('stays silent for a run that was already dead when the page loaded', async () => {
     serve([failed()]);
-    renderAt('/preview/code');
+    renderAt('/code');
 
     await screen.findByText('linkwarden/linkwarden');
     // The row knows; the shell does not shout about it.

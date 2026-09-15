@@ -22,10 +22,12 @@
  *
  * STALENESS is ONE stamp (`context_workspaces`), bumped by every mutation that
  * changes what a repository would read: a sync that added, changed or removed
- * anything, a link made or dropped, a source removed. It is a stamp rather than
- * a query over the rows because the two mutations that matter most leave
- * NOTHING behind to read a timestamp off — an unlink deletes its binding row,
- * and removing a source deletes every binding to it.
+ * anything, a link made or dropped, a source removed, and — through
+ * `markChanged` — an inclusion decision, which is stored with the spec and so
+ * passes none of the writes below. It is a stamp rather than a query over the
+ * rows because the mutations that matter most leave NOTHING behind to read a
+ * timestamp off — an unlink deletes its binding row, and removing a source
+ * deletes every binding to it.
  */
 
 import { and, asc, desc, eq, inArray, isNull, lt, ne, or } from 'drizzle-orm';
@@ -473,6 +475,10 @@ export class PgContextStore implements ContextStore {
       .where(eq(contextWorkspaces.workspaceOrgId, org))
       .limit(1);
     return iso(rows[0]?.changedAt ?? null);
+  }
+
+  markChanged(org: string, at?: string): Promise<void> {
+    return this.touch(org, at);
   }
 
   private touch(org: string, at?: string): Promise<void> {

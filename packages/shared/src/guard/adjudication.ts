@@ -1,6 +1,6 @@
 /**
- * RUN ADJUDICATION — the verdict `truecourse guard adjudicate` attaches to one
- * failing scenario of a guard run (plan 05, steps 21–23). The corpus runs'
+ * RUN ADJUDICATION — the verdict Failure adjudication attaches to one
+ * failing scenario of a guard run. The corpus runs'
  * largest recurring hand cost was reading every failure's transcript before
  * classifying it; the adjudication session does that read and ends with THIS
  * shape, and the deterministic pre-pass produces the same shape without a
@@ -10,7 +10,7 @@
  * The verdict CLASSES, and what each routes to (see the fold in
  * `@truecourse/core`'s guard-adjudicate service):
  *  - `expected-red`     — the failure IS the committed red the flow worker
- *                         declared (`expectedReds`, plan 04 §17): the doc and
+ *                         declared (`expectedReds`): the doc and
  *                         the code disagree exactly as predicted. Recorded;
  *                         nothing to do until one of them moves.
  *  - `drift`            — the doc and the code disagree in a way nothing
@@ -26,10 +26,10 @@
  *                         one may auto-dismiss the claim.
  *  - `seed-defect`      — the seeded world (or the scenario's own `setup`
  *                         declaration) failed before the behavior under test
- *                         was reached. Recorded, surfaced in `guard status`.
+ *                         was reached. Recorded, surfaced on the run's findings.
  *  - `infrastructure`   — nothing about the repo is in dispute: a refused run,
  *                         an unserved route, a dead sandbox. Recorded,
- *                         surfaced in `guard status`.
+ *                         surfaced on the run's findings.
  *
  * The schema is also the SESSION OUTCOME of `guard-adjudicate.failure`, so it
  * obeys the outcome-schema rules: ONE strict object at the root (a root union
@@ -51,7 +51,7 @@ export const GuardAdjudicationClassSchema = z.enum([
 export type GuardAdjudicationClass = z.infer<typeof GuardAdjudicationClassSchema>
 
 /**
- * The control experiment's record on a `bug` verdict (plan 05 step 22): what
+ * The control experiment's record on a `bug` verdict: what
  * the independent control child concluded, why, and which control run the
  * conclusion came from. `transcriptRef` is the ENGINE-minted reference the
  * `verify_bug` tool named on dispatch — the fold refuses a fresh outcome whose
@@ -99,7 +99,7 @@ export const GuardAdjudicationSchema = z
     confidence: z.enum(['low', 'medium', 'high']),
     /**
      * Code-vs-docs/derivation discrepancies read en route — the doc-bug feed,
-     * appended to the committable `guard/adjudicate.findings.md` ledger.
+     * appended to the `guard/adjudicate.findings.md` ledger.
      * Distinct from `evidence` (which grounds THIS verdict). REQUIRED (empty
      * array when none): a session outcome schema may not carry `.default()`.
      */

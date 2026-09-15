@@ -1,5 +1,5 @@
 /**
- * THE CONTEXT PASS, over a real working tree — the adapter half of item 105.
+ * THE CONTEXT PASS, over a real working tree — the adapter half.
  *
  * The RULES of the pack are pinned in `tests/interface-mapper/web-context.test.ts`
  * over synthetic analyses. What this file asserts is the join between the three

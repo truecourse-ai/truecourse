@@ -1,6 +1,6 @@
 import { dashboardActivity } from '../../services/dashboard-activity.service.js';
 /**
- * `repo.guard-generate` — `truecourse guard generate` over an ephemeral clone.
+ * `repo.guard-generate` — Flow generation over an ephemeral clone.
  *
  * The third link of onboarding: a successful setup chains into it, and the
  * Generate button enqueues it. The generator reads and writes files, so the
@@ -278,7 +278,7 @@ export function createRepoGuardGenerateTask(
       runIds.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however the generate ended.
-      await emitRepoLifecycle(ctx.payload.repoFullName, 'guard-generate');
+      await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-generate');
       // Only a generate that left a scenario set has anything to run: a blocked
       // corpus ends the chain here (its notification already says why), and so
       // does a failure or a cancel. An unchanged set still runs — the code under

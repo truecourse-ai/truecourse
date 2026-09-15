@@ -1,24 +1,16 @@
 /**
  * Postgres implementation of core's `SpecStore`. Routes each artifact to its
  * proper home:
- *   - immutable per-commit artifacts (corpus / inferredDecisions / the docs
- *     snapshot manifest) → content-addressed in `content`, with a `spec_sets`
- *     manifest row pointing in by sha (deduped: an unchanged artifact across
- *     commits is stored once); the document bodies the snapshot points at live
- *     in the same scope, one object per distinct body;
- *   - decisions → the per-scope `decisions` ledger (mutable, always-latest, NOT
- *     per-commit — the core's `_repo` sentinel commit is ignored here).
+ *   - the workspace's corpus and the docs snapshot manifest → content-addressed
+ *     in `content`, with a `workspace_spec_sets` row pointing in by sha; the
+ *     document bodies the snapshot points at live in the same scope, one object
+ *     per distinct body;
+ *   - decisions → the per-scope `decisions` ledger (mutable, always-latest).
  */
 
-import { and, desc, eq } from 'drizzle-orm';
-import {
-  specSets,
-  workspaceSpecSets,
-  decisions,
-  type Db,
-} from '@truecourse/db';
+import { and, eq } from 'drizzle-orm';
+import { workspaceSpecSets, decisions, type Db } from '@truecourse/db';
 import type {
-  RepoRef,
   WorkspaceRef,
   SpecArtifact,
   SpecStore,
@@ -31,121 +23,11 @@ interface SpecDocsManifest {
   files: Record<string, string>;
 }
 
-function requireCommit(ref: RepoRef): string {
-  if (!ref.commitSha) {
-    throw new Error('[ee-data-store] saveSpec requires a non-empty commit SHA');
-  }
-  return ref.commitSha;
-}
-
-/**
- * The decisions-ledger scope for a repo ref. The repo row is keyed by `repoKey`
- * (the core's `_repo` / empty sentinel commit is discarded); a PR overlay uses
- * the core's `_pr/<n>` sentinel commit, mapped to a distinct `${repoKey}#pr/<n>`
- * scope so a PR's resolutions never leak into the base repo view.
- */
-function decisionsScope(ref: RepoRef): string {
-  const m = /^_pr\/(\d+)$/.exec(ref.commitSha ?? '');
-  return m ? `${ref.repoKey}#pr/${m[1]}` : ref.repoKey;
-}
-
 export class PgSpecStore implements SpecStore {
-  readonly materializesInPlace = false;
   private readonly content: ContentStore;
 
   constructor(private readonly db: Db) {
     this.content = new ContentStore(db);
-  }
-
-  async saveSpec(ref: RepoRef, artifact: SpecArtifact, json: unknown): Promise<void> {
-    if (artifact === 'decisions') {
-      await this.saveDecisions(decisionsScope(ref), json);
-      return;
-    }
-    const commitSha = requireCommit(ref);
-    const sha = await this.content.putText(contentScope.spec(ref.repoKey), JSON.stringify(json));
-    const now = new Date().toISOString();
-    await this.db
-      .insert(specSets)
-      .values({ repoKey: ref.repoKey, commitSha, artifact, contentSha: sha, createdAt: now, updatedAt: now })
-      .onConflictDoUpdate({
-        target: [specSets.repoKey, specSets.commitSha, specSets.artifact],
-        set: { contentSha: sha, updatedAt: now },
-      });
-  }
-
-  async loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null> {
-    if (artifact === 'decisions') {
-      return this.loadDecisions<T>(decisionsScope(ref));
-    }
-    const rows = await this.db
-      .select({ contentSha: specSets.contentSha })
-      .from(specSets)
-      .where(
-        and(
-          eq(specSets.repoKey, ref.repoKey),
-          eq(specSets.commitSha, ref.commitSha),
-          eq(specSets.artifact, artifact),
-        ),
-      )
-      .limit(1);
-    if (!rows[0]) return null;
-    return this.content.getJson<T>(contentScope.spec(ref.repoKey), rows[0].contentSha);
-  }
-
-  // Only `decisions` is deletable — dropping a PR overlay row on merge/close.
-  // Idempotent: a DELETE with no match is a no-op.
-  async deleteSpec(ref: RepoRef, artifact: SpecArtifact): Promise<void> {
-    if (artifact !== 'decisions') {
-      throw new Error('[ee-data-store] deleteSpec supports only the decisions artifact');
-    }
-    await this.deleteDecisions(decisionsScope(ref));
-  }
-
-  async loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact): Promise<T | null> {
-    if (artifact === 'decisions') {
-      return this.loadDecisions<T>(repoKey);
-    }
-    const rows = await this.db
-      .select({ contentSha: specSets.contentSha })
-      .from(specSets)
-      .where(and(eq(specSets.repoKey, repoKey), eq(specSets.artifact, artifact)))
-      .orderBy(desc(specSets.createdAt))
-      .limit(1);
-    if (!rows[0]) return null;
-    return this.content.getJson<T>(contentScope.spec(repoKey), rows[0].contentSha);
-  }
-
-  /** Every body content-addressed once (an unchanged document across scans costs
-   *  a manifest entry), the manifest stored as the `docs` artifact of `ref`. */
-  async saveSpecDocs(ref: RepoRef, files: Record<string, string>): Promise<void> {
-    const scope = contentScope.spec(ref.repoKey);
-    const manifest: Record<string, string> = {};
-    for (const [docRef, body] of Object.entries(files)) {
-      manifest[docRef] = await this.content.putText(scope, body);
-    }
-    await this.saveSpec(ref, 'docs', { v: 1, files: manifest });
-  }
-
-  async loadSpecDoc(repoKey: string, docRef: string, commitSha?: string): Promise<string | null> {
-    const manifest = commitSha
-      ? await this.loadSpec<SpecDocsManifest>({ repoKey, commitSha }, 'docs')
-      : await this.loadLatest<SpecDocsManifest>(repoKey, 'docs');
-    const sha = manifest?.files?.[docRef];
-    if (!sha) return null;
-    return this.content.get(contentScope.spec(repoKey), sha);
-  }
-
-  // The commit of the latest stored `corpus` — i.e. the latest scanned commit,
-  // so per-commit lookups (the gate) and the dashboard-latest stay consistent.
-  async latestCommit(repoKey: string): Promise<string | null> {
-    const rows = await this.db
-      .select({ commitSha: specSets.commitSha })
-      .from(specSets)
-      .where(and(eq(specSets.repoKey, repoKey), eq(specSets.artifact, 'corpus')))
-      .orderBy(desc(specSets.createdAt))
-      .limit(1);
-    return rows[0]?.commitSha ?? null;
   }
 
   // --- Workspace scope (always-latest, keyed by org, no commit) -------------
@@ -208,7 +90,7 @@ export class PgSpecStore implements SpecStore {
     return this.content.get(contentScope.workspaceSpec(workspaceOrgId), sha);
   }
 
-  // --- decisions ledger (per scope: a repo key, or `ws:<org>`) --------------
+  // --- decisions ledger (scope: `ws:<org>`) ---------------------------------
 
   private async saveDecisions(scope: string, json: unknown): Promise<void> {
     const now = new Date().toISOString();
@@ -225,9 +107,5 @@ export class PgSpecStore implements SpecStore {
       .where(eq(decisions.scope, scope))
       .limit(1);
     return rows[0] ? (rows[0].payload as T) : null;
-  }
-
-  private async deleteDecisions(scope: string): Promise<void> {
-    await this.db.delete(decisions).where(eq(decisions.scope, scope));
   }
 }

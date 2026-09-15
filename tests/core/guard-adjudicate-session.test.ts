@@ -1,17 +1,16 @@
 /**
- * THE ADJUDICATION SESSION AT THE COMMAND LEVEL (plan 05, step 21 items 2/5/6
- * and step 22 item 3's fold half) — the verdict cache, the pre-flight plan, the
- * `read_evidence` precondition, and what the fold does with a verdict that
- * breaks a structural invariant.
+ * THE ADJUDICATION SESSION AT THE COMMAND LEVEL — the verdict cache, the
+ * pre-flight plan, the `read_evidence` precondition, and what the fold does
+ * with a verdict that breaks a structural invariant.
  *
  * There is no driver seam on `RunGuardAdjudicationOptions` (an open end the
  * implementation named), so the session driver is scripted at the module the
- * BUILT core imports it from — the pattern `tests/cli/guard-adjudication-e2e`
- * established. Everything else is real: the stores, the cache, the pool, the
- * loop, the fold.
+ * BUILT core imports it from. Everything else is real: the stores, the cache,
+ * the pool, the loop, the fold.
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { noProviderTransport } from '@truecourse/shared/llm'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -23,7 +22,7 @@ let sessionScript: StubScript = () => {
 vi.mock('../../packages/core/dist/services/llm/session-driver.js', () => ({
   SESSION_MODEL_CLAUDE_CODE: 'opus',
   assertSessionBackendReady: async () => {},
-  createConfiguredSessionDriver: () => {
+  createClaudeCodeSessionDriver: () => {
     const { driver } = stubDriver((call) => sessionScript(call))
     return { driver, mode: 'claude-code', attribution: driver.attribution }
   },
@@ -54,14 +53,24 @@ import {
   scenarioDoc,
 } from './guard-adjudicate-helpers'
 import { memoryPersistence, outcome, stubDriver, type StubCall, type StubScript } from './spec-scan-session-stub'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 
 const repos: string[] = []
 beforeEach(() => {
+  installWorkTreeGuardStore()
+  installMemorySessionRuns()
+  installMemoryKvCache()
   sessionScript = () => {
     throw new Error('no session script installed for this case')
   }
 })
 afterEach(() => {
+  resetGuardStore()
+  resetSessionRuns()
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {
@@ -86,10 +95,13 @@ const DRIFT = {
   findings: [],
 }
 
-const cachePath = (r: string, key: string): string =>
-  path.join(r, '.truecourse', '.cache', ADJUDICATE_CACHE_NAME, `${key}.json`)
+/** Seed / read the verdict cache through the KV seam the command uses. */
+const seedCache = (r: string, key: string, value: unknown): Promise<void> =>
+  setCacheEntry(r, ADJUDICATE_CACHE_NAME, key, value)
+const readCache = (r: string, key: string): Promise<unknown | null> =>
+  getCacheEntry(r, ADJUDICATE_CACHE_NAME, key)
 
-/** Write a committed scenario yaml so the run joins it to the row. */
+/** Write a stored scenario yaml so the run joins it to the row. */
 function commitScenario(r: string, id: string, steps?: unknown): void {
   const doc = scenarioDoc(id, steps ? ({ steps } as never) : {})
   const target = path.join(r, '.truecourse', 'scenarios', 'area', `${id}.yaml`)
@@ -171,10 +183,9 @@ describe('runGuardAdjudication — the verdict cache', () => {
 
   it('serves an identical failure from the cache, spending no session', async () => {
     const { r, key } = seedOneFailure()
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(cachePath(r, key), JSON.stringify(DRIFT))
+    await seedCache(r, key, DRIFT)
 
-    const run = await runGuardAdjudication({ repoRoot: r })
+    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'cache' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')
@@ -184,8 +195,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
 
   it('re-adjudicates once the scenario’s behavior moves', async () => {
     const { r, key } = seedOneFailure()
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(cachePath(r, key), JSON.stringify(DRIFT))
+    await seedCache(r, key, DRIFT)
     expect((await planGuardAdjudication(r)).cached).toBe(1)
 
     // The same failure, a different test: the behavior hash is in the key.
@@ -197,15 +207,14 @@ describe('runGuardAdjudication — the verdict cache', () => {
   /**
    * `--scenario <id>` is the documented escape hatch: "An explicitly named row
    * re-adjudicates, its prior verdict briefed" (prepareAdjudication's own
-   * comment, and the CLI's help). The row's identity has not changed, so the
+   * comment). The row's identity has not changed, so the
    * cached verdict is keyed on exactly what a re-adjudication would look up —
    * an explicit scope must therefore beat the cache, or the hatch is a no-op
    * that rewrites the verdict the user asked to overturn.
    */
   it('re-adjudicates an explicitly scoped row instead of serving its cached verdict', async () => {
     const { r, key } = seedOneFailure()
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(cachePath(r, key), JSON.stringify(DRIFT))
+    await seedCache(r, key, DRIFT)
     commitEvidence(r, 'scn.a')
 
     const plan = await planGuardAdjudication(r, { scenarios: ['scn.a'] })
@@ -237,8 +246,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
     commitScenario(r, 'scn.a')
     commitEvidence(r, 'scn.a')
     const key = adjudicationCacheKey(item({ flowId: 'flow.a', scenario: scenarioDoc('scn.a') }))
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(cachePath(r, key), JSON.stringify(prior))
+    await seedCache(r, key, prior)
 
     let briefing = ''
     sessionScript = async (call) => {
@@ -255,7 +263,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
       return outcome(DRIFT)
     }
 
-    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'] })
+    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'], transport: noProviderTransport })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'session' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')
@@ -264,14 +272,14 @@ describe('runGuardAdjudication — the verdict cache', () => {
     expect(briefing).toContain('authoring-defect')
     expect(briefing).toContain('the assertion was mis-authored')
     // The stale memory is replaced, so the next DEFAULT run cannot serve it back.
-    expect(JSON.parse(fs.readFileSync(cachePath(r, key), 'utf-8'))).toMatchObject({ class: 'drift' })
+    expect(await readCache(r, key)).toMatchObject({ class: 'drift' })
     const latest = JSON.parse(fs.readFileSync(path.join(r, '.truecourse', 'guard', 'LATEST.json'), 'utf-8'))
     expect(latest.scenarios[0].adjudication.class).toBe('drift')
   }, 30_000)
 
   /**
    * Skipping the CACHE is not skipping the PRE-PASS: the pre-pass re-derives
-   * its answer off the committed corpus and the board row rather than
+   * its answer off the stored corpus and the board row rather than
    * remembering one, so a scoped declared red still costs zero sessions.
    */
   it('still settles a scoped declared red deterministically, with no session', async () => {
@@ -287,7 +295,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
       sessions: 0,
     })
 
-    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'] })
+    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'], transport: noProviderTransport })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'pre-pass' })
     expect(run.scenarios[0].verdict?.class).toBe('expected-red')
@@ -298,11 +306,8 @@ describe('runGuardAdjudication — the verdict cache', () => {
   /** A cached entry that would be REFUSED at the fold must not be served. */
   it('treats a structurally invalid cached verdict as a miss', async () => {
     const { r, key } = seedOneFailure()
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(
-      cachePath(r, key),
-      JSON.stringify({ ...DRIFT, class: 'bug', confidence: 'low' }), // `bug` with no `code`
-    )
+    // `bug` with no `code`
+    await seedCache(r, key, { ...DRIFT, class: 'bug', confidence: 'low' })
 
     expect(await planGuardAdjudication(r)).toMatchObject({ failures: 1, cached: 0, sessions: 1 })
   })
@@ -331,8 +336,7 @@ describe('planGuardAdjudication', () => {
     const cachedKey = adjudicationCacheKey(
       item({ row: failRow('scn.cached'), flowId: 'flow.cached', scenario: scenarioDoc('scn.cached') }),
     )
-    fs.mkdirSync(path.dirname(cachePath(r, cachedKey)), { recursive: true })
-    fs.writeFileSync(cachePath(r, cachedKey), JSON.stringify(DRIFT))
+    await seedCache(r, cachedKey, DRIFT)
 
     expect(await planGuardAdjudication(r)).toMatchObject({
       failures: 3,
@@ -429,7 +433,7 @@ describe('the `read_evidence` precondition', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The fold's refusal, end to end (step 22 item 3's second half)
+// The fold's refusal, end to end
 // ---------------------------------------------------------------------------
 
 describe('runGuardAdjudication — a refused verdict costs a re-run, never a cache entry', () => {
@@ -481,7 +485,7 @@ describe('runGuardAdjudication — a refused verdict costs a re-run, never a cac
       })
     }
 
-    const run = await runGuardAdjudication({ repoRoot: r })
+    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
 
     expect(controlRef).toMatch(/^control-[0-9a-f]{8}$/)
     expect(run.scenarios[0].source).toBe('session')
@@ -489,7 +493,7 @@ describe('runGuardAdjudication — a refused verdict costs a re-run, never a cac
     expect(run.scenarios[0].failed).toContain('verdict refused')
     expect(run.scenarios[0].failed).toContain('downgrade the class')
     // Nothing refused may be cached, and nothing refused may reach the board.
-    expect(fs.existsSync(cachePath(r, key))).toBe(false)
+    expect(await readCache(r, key)).toBeNull()
     const latest = JSON.parse(fs.readFileSync(path.join(r, '.truecourse', 'guard', 'LATEST.json'), 'utf-8'))
     expect(latest.scenarios[0].adjudication).toBeUndefined()
     expect(run.usage.sessions.count).toBe(1)
@@ -516,12 +520,12 @@ describe('runGuardAdjudication — a refused verdict costs a re-run, never a cac
       return outcome({ ...DRIFT, findings: ['docs/spec.md says exit 0; the CLI has always exited 2'] })
     }
 
-    const run = await runGuardAdjudication({ repoRoot: r })
+    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'session' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')
     expect(run.scenarios[0].verdict?.sessionId).toBeTruthy()
-    expect(JSON.parse(fs.readFileSync(cachePath(r, key), 'utf-8'))).toMatchObject({ class: 'drift' })
+    expect(await readCache(r, key)).toMatchObject({ class: 'drift' })
     // The findings ledger is the doc-bug feed, appended per run.
     expect(run.findingsLedger?.appended).toBe(1)
     expect(fs.readFileSync(path.join(r, '.truecourse', 'guard', 'adjudicate.findings.md'), 'utf-8')).toContain(

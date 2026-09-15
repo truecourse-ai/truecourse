@@ -1,5 +1,5 @@
 /**
- * THE VERDICT WRITE PATH (plan 05 step 23) — `persistAdjudication`, the fold's
+ * THE VERDICT WRITE PATH — `persistAdjudication`, the fold's
  * persist half. A verdict judges ONE run's recorded actual, so it lands on that
  * run's snapshot unconditionally and on the BOARD only while the board still
  * shows that run's row: a scenario re-run since the adjudication started must
@@ -25,13 +25,16 @@ import {
 } from '@truecourse/shared'
 import { persistAdjudication } from '../../packages/core/src/services/guard-adjudicate/fold'
 import type { AdjudicationItem } from '../../packages/core/src/services/guard-adjudicate/pre-pass'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 let repo: string
 
 beforeEach(() => {
+  installWorkTreeGuardStore()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-adjudicate-persist-'))
 })
 afterEach(() => {
+  resetGuardStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -131,7 +134,8 @@ describe('persistAdjudication', () => {
   })
 
   it('does not throw when the run snapshot is gone — the board is still patched', async () => {
-    // `guard/runs/` is gitignored: a fresh clone has the board and no snapshots.
+    // A tree may hold the board without the per-run snapshots, so the write must
+    // not depend on one.
     writeGuardLatest(repo, latest('r1', [row('a')]))
 
     const result = await persistAdjudication({ repoRoot: repo, item: item(), verdict })

@@ -1,61 +1,43 @@
 /**
- * Seam for reading a repo doc's content by its repo-relative path.
+ * Seam for reading one document's content by its ref.
  *
- * The Spec tab renders source docs (README.md, docs/adr/*.md) by path. OSS reads
- * them straight off the working tree — `repoKey` IS the checkout root. Hosted EE
- * has no persistent checkout (the repo lives on GitHub), so it installs a reader
- * at boot that fetches the file via the GitHub App installation. Callers use
- * `readRepoDoc` and never touch `fs` directly, so a single route works in both
- * editions with no edition branching.
+ * A repository has no persistent checkout, so a document is never read from a
+ * tree: boot installs a reader over the stored state — a `context/` ref through
+ * the workspace's live body (else the scan's snapshot), any other ref through
+ * the repository's own snapshot. Callers use `readRepoDoc` and never touch `fs`.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-
-/** Options for a doc read. `commit` pins the revision (EE only; OSS ignores it). */
+/** Options for a doc read. `commit` pins which stored snapshot is read. */
 export interface RepoDocReadOptions {
-  /** The git commit to read the doc at. EE fetches this ref; OSS ignores it. */
+  /** The commit whose snapshot to read the document from. */
   commit?: string;
 }
 
-/** Read `docPath` (repo-relative) for `repoKey`; resolves to null when absent. */
+/** Read `docPath` for `repoKey`; resolves to null when the document is absent. */
 export type RepoDocReader = (
   repoKey: string,
   docPath: string,
   opts?: RepoDocReadOptions,
 ) => Promise<string | null>;
 
-/**
- * OSS default: read from the local working tree, where `repoKey` is the checkout
- * root. Confined to the repo tree (no traversal); returns null for a missing path
- * or a non-file. The `commit` option is meaningless on a live checkout, so it's
- * ignored.
- */
-const fileRepoDocReader: RepoDocReader = async (repoKey, docPath) => {
-  const root = path.resolve(repoKey);
-  const full = path.resolve(root, docPath);
-  if (full !== root && !full.startsWith(root + path.sep)) return null;
-  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
-  return fs.readFileSync(full, 'utf-8');
-};
+let reader: RepoDocReader | null = null;
 
-let reader: RepoDocReader = fileRepoDocReader;
-
-/** Install a reader (EE swaps in a GitHub-backed one at boot). */
+/** Install the reader (boot: the one over the stored documents). */
 export function setRepoDocReader(fn: RepoDocReader): void {
   reader = fn;
 }
 
-/** Restore the working-tree default (tests). */
+/** Forget the installed reader (tests). */
 export function resetRepoDocReader(): void {
-  reader = fileRepoDocReader;
+  reader = null;
 }
 
-/** Read a repo doc through the installed reader (FS in OSS, GitHub in EE). */
+/** Read one document through the installed reader. */
 export function readRepoDoc(
   repoKey: string,
   docPath: string,
   opts?: RepoDocReadOptions,
 ): Promise<string | null> {
+  if (!reader) throw new Error('No repo doc reader installed (boot did not run installDbStores).');
   return reader(repoKey, docPath, opts);
 }

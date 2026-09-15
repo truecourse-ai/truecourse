@@ -22,9 +22,8 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import type { Runner } from 'graphile-worker';
 
-// app.ts pulls the analyses router, which imports the socket-handlers module;
-// stub it so nothing tries to open a real socket (same shape as the other
-// route suites).
+// The routers import the socket-handlers module; stub it so nothing tries to
+// open a real socket (same shape as the other route suites).
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
@@ -36,15 +35,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   }
   return {
     ...actual,
-    emitAnalysisProgress: vi.fn(),
-    emitAnalysisComplete: vi.fn(),
-    emitViolationsReady: vi.fn(),
-    emitFilesChanged: vi.fn(),
-    emitAnalysisCanceled: vi.fn(),
-    createSocketTracker: () => new NoopTracker(),
     createSocketSpecTracker: () => new NoopTracker(),
-    createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
-    createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
     emitSpecProgress: vi.fn(),
     emitSpecComplete: vi.fn(),
   };
@@ -55,7 +46,12 @@ import { JobStore } from '@truecourse/data-store';
 import { registerJob } from '@truecourse/jobs';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { createTestApp, TEST_ORG } from '../helpers/test-app';
-import { readRegistry, registerProject, unregisterProject } from '@truecourse/core/config/registry';
+import { readRegistry } from '@truecourse/core/config/registry';
+import { clearTestRegistry, installTestRegistry, setupTestFixture } from '../helpers/test-fixture';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import {
   createServerJobs,
   type JobsMount,
@@ -114,8 +110,6 @@ let setupImpl: (options: { signal?: AbortSignal }) => Promise<unknown>;
 let claimJobs: boolean;
 
 beforeAll(async () => {
-  // The registry hangs off TRUECOURSE_HOME; point it at a throwaway dir.
-  process.env.TRUECOURSE_HOME = makeTmpDir('tc-disconnect-home-');
   app = createTestApp();
   pg = new PGlite();
   db = drizzle(pg, { schema }) as unknown as Db;
@@ -123,12 +117,17 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  installTestRegistry();
+  installMemorySessionRuns();
+  installMemorySpecStore();
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
   running = [];
   claimJobs = true;
   setupImpl = async () => ({ report: { status: 'ok' } });
   // The job clones; there is no GitHub here, so the "clone" is the fixture repo
   // itself and disposing it is a no-op — the tree is not what this suite is about.
-  setWorkTreeProvider(async (repoKey) => ({ dir: repoKey, dispose: () => {} }));
+  setWorkTreeProvider('github', async (repoKey) => ({ dir: repoKey, dispose: () => {} }));
   jobs = createServerJobs({
     db,
     connectionString: 'postgres://unused',
@@ -156,10 +155,14 @@ beforeEach(async () => {
 
 afterEach(async () => {
   setRepoJobsCanceller(null);
-  setWorkTreeProvider(null);
+  setWorkTreeProvider('github', null);
   await Promise.all(running);
   await jobs.stop();
-  for (const entry of await readRegistry()) await unregisterProject(entry.slug);
+  clearTestRegistry();
+  resetSessionRuns();
+  resetSpecStore();
+  resetGuardStore();
+  resetGuardOverlayStore();
 });
 
 afterAll(async () => {
@@ -174,14 +177,14 @@ describe('POST /api/repos/connect', () => {
       .send({ url: 'https://github.com/acme/widgets' })
       .expect(404);
 
-    expect(await readRegistry()).toHaveLength(0);
+    expect(await readRegistry(TEST_ORG)).toHaveLength(0);
   });
 });
 
 describe('DELETE /api/repos/:id', () => {
   it('cancels the job THIS process is running and disconnects anyway', async () => {
     const local = makeGitRepo('tc-disconnect-working-');
-    const entry = await registerProject(local);
+    const { project: entry } = await setupTestFixture(local);
 
     // A setup that ends only when it is cancelled — the disconnect's job.
     let reached = false;
@@ -208,12 +211,12 @@ describe('DELETE /api/repos/:id', () => {
     expect((await new JobStore(db).get(queued.jobId))?.status).toBe('cancelled');
     // The source tree is not the server's to delete.
     expect(fs.existsSync(local)).toBe(true);
-    expect(await readRegistry()).toHaveLength(0);
+    expect(await readRegistry(TEST_ORG)).toHaveLength(0);
   });
 
   it('cancels a job that is still queued, so its body never runs', async () => {
     const local = makeGitRepo('tc-disconnect-queued-');
-    const entry = await registerProject(local);
+    const { project: entry } = await setupTestFixture(local);
     // Nothing claims the row: what a job waiting for a free worker looks like.
     claimJobs = false;
     const queued = await jobs.enqueueGuardSetup({
@@ -231,7 +234,7 @@ describe('DELETE /api/repos/:id', () => {
 
   it('refuses while ANOTHER process is running the repo’s job — it is not ours to stop', async () => {
     const local = makeGitRepo('tc-disconnect-foreign-');
-    const entry = await registerProject(local);
+    const { project: entry } = await setupTestFixture(local);
     // A row claimed by another replica: `running`, but absent from this
     // process's cancel registry, so nothing here can abort it.
     const store = new JobStore(db);
@@ -245,7 +248,7 @@ describe('DELETE /api/repos/:id', () => {
 
     const refused = await request(app).delete(`/api/repos/${entry.slug}`).expect(409);
     expect(refused.body.error).toMatch(/another process/i);
-    expect((await readRegistry()).map((e) => e.slug)).toEqual([entry.slug]);
+    expect((await readRegistry(TEST_ORG)).map((e) => e.slug)).toEqual([entry.slug]);
     expect((await store.get(row.id))?.status).toBe('running');
   });
 });

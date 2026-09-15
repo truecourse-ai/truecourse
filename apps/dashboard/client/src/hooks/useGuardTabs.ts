@@ -1,15 +1,16 @@
 /**
- * The reusable Guard main-pane tab model — the same transient/pinned tab model as
- * the Spec doc tabs (single-click opens a preview tab the next single-click
+ * The reusable Guard main-pane tab model, the same transient/pinned tab model as
+ * the corpus document tabs (single-click opens a preview tab the next single-click
  * replaces; double-click pins; the tab bar and close buttons render like the
  * other viewers). Parameterised by the URL it mirrors so each Guard surface gets
  * its OWN addressable tab set from ONE reducer, never a second implementation:
- * the Scenarios tab passes `'gscn'`, the Runs tab passes `'gdrift'`, and Coverage
- * passes a {@link GuardTabsParam} codec that binds TWO params (`?guard` docs +
- * `?gconf` conflicts) to one heterogeneous tab set. Owned by Guard so no state is
- * shared with BL Drift's DriftViewContext (the no-bleed rule). Writes merge into
- * the existing query so sibling params (`?gsec` and the other tab set's param)
- * are preserved.
+ * the Runs tab passes `'result'`, the Flows page a `?flow` codec, and the
+ * coverage view passes a {@link GuardTabsParam} codec that binds TWO params
+ * (`?doc` docs + `?conflict` conflicts) to one heterogeneous tab set.
+ *
+ * `deselect` clears the selection while the open tabs stay, what the strip's
+ * pinned home tab calls. Writes merge into the existing query so sibling params
+ * (`?section` and the other tab set's param) are preserved.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -22,34 +23,29 @@ export interface GuardTab {
 
 /**
  * How a tab set that spans MORE than one URL param reads/writes its active id.
- * A plain `param: string` covers the single-param case; a codec covers Coverage,
- * whose active tab is a doc (`?guard`) OR a conflict (`?gconf`).
+ * A plain `param: string` covers the single-param case; a codec covers the
+ * coverage view, whose active tab is a doc (`?doc`) OR a conflict (`?conflict`).
  */
 export interface GuardTabsParam {
-  /** The active id from the current query, or null when the overview shows. */
+  /** The active id from the current query, or null when nothing is selected. */
   read: (params: URLSearchParams) => string | null;
   /** Write the active id into `next` (a mutable copy of the query), clearing the
    *  sibling param(s) it owns while leaving unrelated params untouched. */
   write: (next: URLSearchParams, id: string | null) => void;
   /** Ids besides the active one a deep link should also materialize as pinned
-   *  tabs (e.g. the `?guard` doc alongside an active `?gconf` conflict). */
+   *  tabs (e.g. the `?doc` doc alongside an active `?conflict` conflict). */
   deepLinkTabs?: (params: URLSearchParams) => string[];
 }
 
 export interface GuardTabsState {
-  /** The active id, or null when the overview shows. */
+  /** The active id, or null when nothing is selected. */
   activeId: string | null;
   openTabs: GuardTab[];
-  /**
-   * The permanent Overview pseudo-tab is active exactly when no item tab is —
-   * i.e. when the URL selection is absent. It is never one of {@link openTabs}
-   * (nothing to close, no pin state) — the strip renders it first from this flag.
-   */
   /** Single-click = transient preview (replaces the unpinned tab); double-click = pin. */
   open: (id: string, pinned: boolean) => void;
   close: (id: string) => void;
-  /** Select the Overview tab: clear the item selection, open no new tab. */
-  selectOverview: () => void;
+  /** Clear the selection, keeping the open tabs, the strip's home tab. */
+  deselect: () => void;
 }
 
 export function useGuardTabs(param: string | GuardTabsParam, repoId: string | undefined): GuardTabsState {
@@ -100,10 +96,6 @@ export function useGuardTabs(param: string | GuardTabsParam, repoId: string | un
     [openTabs, activeId, setActive],
   );
 
-  // The permanent Overview tab: clearing the selection drops the item back to the
-  // overview without adding a tab (closing the last item tab lands here too).
-  const selectOverview = useCallback(() => setActive(null), [setActive]);
-
   // Back/Forward + deep links: the active id (and any sibling deep-link ids the
   // codec surfaces) that the tab set doesn't know yet get a pinned tab, mirroring
   // how the inferred/spec viewers rehydrate from the URL.
@@ -120,7 +112,7 @@ export function useGuardTabs(param: string | GuardTabsParam, repoId: string | un
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, deepKey]);
 
-  // Reset the open tabs when switching repos — but keep an initial deep link on mount.
+  // Reset the open tabs when switching repos, but keep an initial deep link on mount.
   const repoRef = useRef(repoId);
   useEffect(() => {
     if (repoRef.current === repoId) return;
@@ -129,5 +121,7 @@ export function useGuardTabs(param: string | GuardTabsParam, repoId: string | un
     setActive(null);
   }, [repoId, setActive]);
 
-  return { activeId, openTabs, open, close, selectOverview };
+  const deselect = useCallback(() => setActive(null), [setActive]);
+
+  return { activeId, openTabs, open, close, deselect };
 }

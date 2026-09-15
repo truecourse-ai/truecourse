@@ -1,5 +1,0 @@
-constant storage.writer.batch_depth_limit {
-  origin "reference/specs/storage.md" "Writer configuration" 5..25
-  type number
-  expected-value 500
-}

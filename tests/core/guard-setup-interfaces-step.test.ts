@@ -1,5 +1,5 @@
 /**
- * THE INTERFACES STEP's AUTHORING HALF (plan 03 step 11) — `buildInterfacesStep`
+ * THE INTERFACES STEP's AUTHORING HALF — `buildInterfacesStep`
  * with no cli disputes to reconcile, which is the ordinary case: the step's job
  * is then the web-task authoring run, injected as a thunk so the service layer
  * never imports the command layer.
@@ -215,7 +215,7 @@ describe('buildInterfacesStep — the authoring half', () => {
     expect(result.status).toBe('ok');
   });
 
-  // A fresh clone has no authored half at all: every screen is work.
+  // An unauthored tree has no authored half at all: every screen is work.
   it('authors every screen when the authored half is missing', async () => {
     const r = repo();
     writeHalves(r);

@@ -1,8 +1,8 @@
 import { afterEach, describe, it, expect } from 'vitest';
 import { resolveClaudeBinary } from '../../packages/shared/src/claude-binary.js';
 
-// Single source of truth for which `claude` binary every command, the LLM
-// provider, and each extraction runner spawns. `CLAUDE_CODE_BINARY` is
+// Single source of truth for which `claude` binary the session drivers, the
+// one-shot transport and the pre-flight probe spawn. `CLAUDE_CODE_BINARY` is
 // canonical; `CLAUDE_CODE_BIN` is a legacy alias. This precedence is what lets
 // the up-front preflight test the same binary the real work will use.
 describe('resolveClaudeBinary', () => {
@@ -24,6 +24,11 @@ describe('resolveClaudeBinary', () => {
     process.env.CLAUDE_CODE_BINARY = '/opt/canonical/claude';
     process.env.CLAUDE_CODE_BIN = '/opt/legacy/claude';
     expect(resolveClaudeBinary()).toBe('/opt/canonical/claude');
+  });
+
+  it('passes a Windows path through unchanged', () => {
+    process.env.CLAUDE_CODE_BINARY = 'C:\\custom\\claude.exe';
+    expect(resolveClaudeBinary()).toBe('C:\\custom\\claude.exe');
   });
 
   it('falls back to the legacy CLAUDE_CODE_BIN when canonical is unset/empty', () => {

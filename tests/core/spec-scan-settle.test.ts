@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resetKvCacheStore } from '@truecourse/llm'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import {
@@ -489,7 +489,7 @@ describe('check_settlement — one pushback on a no-op draft over a fragmented v
 let repo: string
 
 beforeEach(() => {
-  resetKvCacheStore()
+  installMemoryKvCache()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-settle-'))
 })
 

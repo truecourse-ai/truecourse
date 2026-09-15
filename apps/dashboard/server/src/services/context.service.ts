@@ -58,12 +58,14 @@ export function setContextDriverDeps(next: ContextDriverDeps | null): void {
 }
 
 /**
- * The driver deps this server runs on: repositories are cloned through the
+ * The driver deps this server runs on: repositories are read through the
  * work-tree seam, and every site fetch is refused a non-public destination —
  * this process must never be talked into reaching its own network.
  *
- * A repository source names the installation it reads through, so the clone is
- * minted from that installation and lands under this workspace.
+ * A repository source carries what it reads through: the installation a clone
+ * is minted from, or the folder a copy is made of. Either way the tree lands
+ * under this workspace, and the source can name a repository Code never
+ * connected.
  */
 export function contextDriverDeps(org: string): ContextDriverDeps {
   return (
@@ -71,7 +73,9 @@ export function contextDriverDeps(org: string): ContextDriverDeps {
       publicOnly: true,
       acquireTree: async (config) =>
         acquireWorkTree(config.repoFullName, {
-          installationId: config.installationId,
+          ...(config.provider ? { provider: config.provider } : {}),
+          ...(config.installationId === undefined ? {} : { installationId: config.installationId }),
+          ...(config.path ? { location: config.path } : {}),
           workspaceOrgId: org,
           ...(config.branch ? { defaultBranch: config.branch } : {}),
         }),

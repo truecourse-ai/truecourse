@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { facetDimensions, type FacetDimension } from '@/preview/ui/filter-facets';
+import { facetDimensions, type FacetDimension } from '@/dashboard/ui/filter-facets';
 
 interface Row {
   title: string;

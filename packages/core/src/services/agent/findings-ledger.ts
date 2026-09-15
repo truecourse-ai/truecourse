@@ -1,6 +1,6 @@
 /**
- * THE FINDINGS LEDGER — the generic append behind every committable
- * `*.findings.md` a session-pool command keeps.
+ * THE FINDINGS LEDGER — the generic append behind every `*.findings.md` a
+ * session-pool command keeps.
  *
  * Sessions read the repository against what the repository says about itself,
  * and some of the time the two disagree. The command decides WHICH file holds
@@ -15,10 +15,11 @@
  * - **Append-only, markdown, one `## <runId> (<iso>)` section per run.** A
  *   finding is a claim about the repository at a moment; overwriting would
  *   answer "is this still true" by deleting the question. Plain append, not
- *   the store's write-tmp-and-rename — a rename would rewrite the whole file
- *   and two worktrees would each drop the other's history.
- * - **Committed.** What a ledger holds is a report about the REPOSITORY, not a
- *   record of a run — keep any new ledger path out of `GITIGNORE_CONTENTS`.
+ *   write-tmp-and-rename — a rename rewrites the whole file, and two writers
+ *   would each drop the other's history.
+ * - **A report about the REPOSITORY, not a record of a run.** A ledger travels
+ *   with the repository's stored state, so it is collected back out of a run's
+ *   work tree rather than discarded with it.
  * - **Deduped within the run only.** The identity of a finding is its LINE:
  *   two work items reporting the same sentence are one bug, and one bullet is
  *   the honest count of it; across runs the repetition is the signal that
@@ -50,8 +51,7 @@ export interface FindingsLedgerInput {
  * Append one run's findings under a `## <runId> (<iso>)` header, one bullet
  * per distinct line (`- \`<workItem>\` — <line>`, first work item to report a
  * line keeps it). Returns `undefined` without touching the file when the run
- * found nothing: an empty section says the same as no section and costs a diff
- * on a committed file.
+ * found nothing: an empty section says the same as no section.
  */
 export function appendFindingsLedger(
   input: FindingsLedgerInput,

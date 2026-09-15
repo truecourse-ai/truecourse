@@ -1,11 +1,11 @@
 /**
  * Ephemeral per-run clones. A connected repository has NO persistent working
- * copy: every run (spec scan today; guard setup/generate/run later) clones the
- * repo into its own directory under `<getGlobalDir()>/run-clones/<workspace>/`,
- * reads or writes what it needs, and deletes the directory when it settles.
- * All durable state lives in Postgres (see ../stores.ts), so the clone is pure
- * input — nothing under this root is ever the source of truth, which is what
- * makes wholesale deletion (and the boot sweep below) safe.
+ * copy: every run clones the repo into its own directory under
+ * `<runtime dir>/run-clones/<workspace>/`, reads or writes what it needs, and
+ * deletes the directory when it settles. All durable state lives in Postgres
+ * (see ../stores.ts), so the clone is pure input — nothing under this root is
+ * ever the source of truth, which is what makes wholesale deletion (and the
+ * boot sweep below) safe.
  *
  * The per-workspace level exists for isolation and auditability: a clone of a
  * private repo only ever materializes under its owning workspace's directory,
@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createAppError } from '@truecourse/core/lib/errors';
-import { getGlobalDir } from '@truecourse/core/config/paths';
+import { getRuntimeDir } from '@truecourse/core/config/runtime-dir';
 import { log } from '@truecourse/core/lib/logger';
 import { cloneAuthArgs, cloneUrl } from '@truecourse/github-app';
 
@@ -67,7 +67,7 @@ export function repoDirName(repoFullName: string): string {
 
 /** Root of all per-run clones, one subdirectory per workspace. */
 export function getRunClonesDir(): string {
-  return path.join(getGlobalDir(), 'run-clones');
+  return path.join(getRuntimeDir(), 'run-clones');
 }
 
 /**
@@ -156,12 +156,57 @@ export async function createRunClone(
 }
 
 /**
+ * Copy a folder on this machine into a fresh per-run directory — the local
+ * provider's answer to a clone.
+ *
+ * The run works on the COPY and never on the folder itself: `guard setup`
+ * writes inside the tree it is given, and a developer's checkout is theirs. The
+ * copy is whole (`.git` included, so the run resolves the same commit the
+ * developer is on) and it is the only tree the run ever touches; disposing it
+ * leaves the original exactly as it was.
+ */
+export async function createRunCopy(
+  sourceDir: string,
+  opts: { workspaceOrgId: string },
+): Promise<RunClone> {
+  if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
+    throw createAppError(`${sourceDir} is not a folder on this machine any more.`, 404);
+  }
+
+  const tenantRoot = path.join(
+    getRunClonesDir(),
+    sanitizeSegment(opts.workspaceOrgId) || 'workspace',
+  );
+  fs.mkdirSync(tenantRoot, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(tenantRoot, RUN_CLONE_PREFIX));
+
+  const dispose = (): void => {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // best-effort — the boot sweep picks up what a busy file handle blocks
+    }
+  };
+
+  try {
+    // `dereference: false` keeps a symlink a symlink, so a link pointing out of
+    // the folder is copied as the link it is rather than dragging the tree it
+    // names into the run.
+    fs.cpSync(sourceDir, dir, { recursive: true, dereference: false, force: true });
+    return { dir, dispose };
+  } catch (err) {
+    dispose();
+    throw createAppError(`Could not copy ${sourceDir}: ${(err as Error).message}`, 500);
+  }
+}
+
+/**
  * Remove every run clone under this machine's run-clones dir. Called once at
  * boot: a clone belongs to the process that made it and dies with it, and a
  * booting process has made none — so whatever is there is debris from a run
  * that never got to dispose it, however recently it was written. This is the
  * only process that reads or writes the dir (a second server on one machine
- * relocates it with TRUECOURSE_HOME), so there is no live run to protect.
+ * relocates it with TRUECOURSE_RUNTIME_DIR), so there is no live run to protect.
  */
 export function sweepRunClones(): number {
   let removed = 0;

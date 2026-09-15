@@ -9,16 +9,16 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toPreviewRepo } from '@/preview/data/real-repos';
-import type { GuardStatusSummary } from '@/preview/vendor/shared';
-import CodePage from '@/preview/pages/CodePage';
+import { toDashboardRepo } from '@/dashboard/data/real-repos';
+import type { GuardStatusSummary } from '@truecourse/shared';
+import CodePage from '@/dashboard/pages/CodePage';
 
-const state = vi.hoisted(() => ({ repos: [] as ReturnType<typeof toPreviewRepo>[] }));
+const state = vi.hoisted(() => ({ repos: [] as ReturnType<typeof toDashboardRepo>[] }));
 const listeners = vi.hoisted(() => new Map<string, Set<(payload: unknown) => void>>());
-vi.mock('@/preview/shell/preview-state', () => ({
-  usePreviewState: () => ({ workspace: { name: 'Test workspace' }, repos: state.repos }),
+vi.mock('@/dashboard/shell/dashboard-state', () => ({
+  useDashboardState: () => ({ workspace: { name: 'Test workspace' }, repos: state.repos }),
 }));
-vi.mock('@/preview/pages/ConnectDialog', () => ({ ConnectDialog: () => null }));
+vi.mock('@/dashboard/pages/ConnectDialog', () => ({ ConnectDialog: () => null }));
 vi.mock('@/lib/socket', () => ({
   connectSocket: () => ({
     on(event: string, handler: (payload: unknown) => void) {
@@ -30,8 +30,8 @@ vi.mock('@/lib/socket', () => ({
   }),
 }));
 
-const repo = toPreviewRepo({ id: 'expense-tracker', name: 'expenses', path: '/expenses', remoteUrl: 'https://github.com/spiderhands/expense-tracker' });
-const corpus = { corpus: { version: 3, generatedAt: new Date().toISOString(), docs: [], areas: [] }, corpusCommit: '58899f746bc470cfafb802d1cb27b35893631ad6' };
+const repo = toDashboardRepo({ id: 'expense-tracker', name: 'expenses', path: '/expenses', provider: 'github', defaultBranch: 'main' });
+const corpus = { corpus: { version: 3, generatedAt: new Date().toISOString(), docs: [], areas: [] } };
 const empty: GuardStatusSummary = { sections: null, coverage: null, lastRun: null, lastGenerate: null };
 const counts = { failed: 1, blocked: 1, 'never-run': 1, succeeded: 3, 'not-testable': 0 };
 function summary(): GuardStatusSummary {
@@ -60,10 +60,10 @@ function serve(initial = summary()) {
   return server;
 }
 function renderCode() {
-  return render(<MemoryRouter initialEntries={['/preview/code']}><Routes>
-    <Route path="/preview/code" element={<CodePage />} />
-    <Route path="/preview/repos/:id" element={<p>Console destination</p>} />
-    <Route path="/preview/repos/:id/runs" element={<p>Runs destination</p>} />
+  return render(<MemoryRouter initialEntries={['/code']}><Routes>
+    <Route path="/code" element={<CodePage />} />
+    <Route path="/repos/:id" element={<p>Console destination</p>} />
+    <Route path="/repos/:id/runs" element={<p>Runs destination</p>} />
   </Routes></MemoryRouter>);
 }
 function row() { return within(screen.getByText(repo.fullName).closest('tr')!); }
@@ -81,7 +81,7 @@ describe('Code, the repositories and their stored summaries', () => {
     expect(screen.queryByText(/sections · /)).toBeNull();
     expect(screen.queryByRole('img', { name: /^Flows:/ })).toBeNull();
     expect(row().getByText('Failing')).toBeInTheDocument();
-    expect(row().getByText('58899f7')).toHaveAttribute('title', corpus.corpusCommit);
+    expect(row().getByText('main')).toBeInTheDocument();
     expect(row().queryByText('no corpus yet')).toBeNull();
     await userEvent.click(row().getByRole('link'));
     expect(screen.getByText('Runs destination')).toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('Code, the repositories and their stored summaries', () => {
     expect(await screen.findByText('no corpus yet')).toBeInTheDocument();
     expect(row().getAllByText('no baseline yet')).toHaveLength(1);
     expect(row().getByText('—')).toBeInTheDocument();
-    expect(row().getByRole('link')).toHaveAttribute('href', `/preview/agent?repo=${repo.id}`);
+    expect(row().getByRole('link')).toHaveAttribute('href', `/agent?repo=${repo.id}`);
   });
 
   it('reports failed reads instead of claiming there is no corpus, and recovers on reconnect', async () => {

@@ -1,8 +1,8 @@
 # TrueCourse server image (dashboard server + built client) — the one deployment
 # artifact, for self-hosting and the hosted product alike. Deliberately
 # cloud-neutral: configuration is env vars + a Postgres DATABASE_URL, no cloud
-# SDK at runtime. `docker compose up --build` boots it with a database (see
-# docker-compose.yml for the required env vars).
+# SDK at runtime. The database it needs is `docker-compose.yml`'s; running the
+# server from a checkout instead is the local setup (see CONTRIBUTING.md).
 
 ############################################
 # 1. Builder — install + build the whole pnpm/turbo workspace
@@ -50,16 +50,16 @@ RUN apt-get update \
 
 ENV NODE_ENV=production \
     PORT=3001 \
-    TRUECOURSE_LOG_DIR=/data/logs
+    TRUECOURSE_RUNTIME_DIR=/data
 
 WORKDIR /app
-# Copy the whole built workspace. We DON'T prune devDependencies: the analyzer's
+# Copy the whole built workspace. We DON'T prune devDependencies: the
 # tree-sitter WASM grammars are declared as devDeps but are needed at runtime, so
-# pruning would break `analyze`. (Image-size trimming is a later optimization.)
+# pruning would break interface mapping. (Image-size trimming is a later optimization.)
 COPY --from=builder /app /app
 
-# Writable data dir for logs. Durable state lives in Postgres; per-run clones
-# and session transcripts go under the node user's home (~/.truecourse).
+# Writable runtime dir: the log, the per-run clones and a run's session scratch.
+# Nothing durable — that all lives in Postgres.
 RUN mkdir -p /data/logs && chown -R node:node /data
 USER node
 WORKDIR /data
@@ -70,4 +70,8 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
   CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||3001)+'/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
 
-CMD ["node", "/app/apps/dashboard/server/dist/index.js"]
+# Whichever edition this image was built from. The enterprise bundle's entry
+# registers its features and then boots the same server; with no `ee/` in the
+# build context there is only the open edition's entry. The client made the same
+# choice at build time, through its `@edition` alias.
+CMD ["sh", "-c", "if [ -f /app/ee/packages/server/dist/main.js ]; then exec node /app/ee/packages/server/dist/main.js; else exec node /app/apps/dashboard/server/dist/index.js; fi"]

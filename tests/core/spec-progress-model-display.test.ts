@@ -2,11 +2,11 @@
  * Progress model display.
  *
  * The mechanism: a progress step's detail carries the models its stages actually
- * called; when no real usage was recorded (a full cache) OSS falls back to the
- * per-stage RESOLVED model, and EE — which runs one model for every stage and
- * records no per-stage usage — suppresses that fallback
+ * called; when no real usage was recorded (a full cache) the library default
+ * falls back to the per-stage RESOLVED model, and the dashboard — which runs one
+ * model per run and records no per-stage usage — suppresses that fallback
  * (`setShowResolvedStageModel(false)`), because otherwise progress would show a
- * misleading OSS tier ("sonnet, haiku") that EE never called.
+ * tier ("sonnet, haiku") the run never called.
  *
  * SPEC SCAN NO LONGER PARTICIPATES. Its stages are agent
  * SESSIONS on ONE model: there are no per-stage tiers left to display, and
@@ -18,7 +18,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resetKvCacheStore } from '@truecourse/llm';
 import {
   curateInProcess,
   setShowResolvedStageModel,
@@ -26,29 +25,31 @@ import {
   CURATE_STEPS,
 } from '../../packages/core/src/commands/spec-in-process';
 import { StepTracker } from '../../packages/core/src/progress';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import type { DriverResult, SessionDriver } from '../../packages/agent-loop/src/index';
 
 const MODEL_TIER = /\b(haiku|sonnet|opus)\b/;
 
 let repo: string;
 beforeEach(() => {
-  resetKvCacheStore();
+  installMemorySessionRuns();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-progress-model-'));
   fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'docs', 'alpha.md'), '# Orders alpha\nbody');
   fs.writeFileSync(path.join(repo, 'docs', 'beta.md'), '# Orders beta\nbody');
 });
 afterEach(() => {
-  setShowResolvedStageModel(true); // restore the OSS default
+  setShowResolvedStageModel(true); // restore the module default
+  resetSessionRuns();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
 describe('stageUsageTag — the model fallback and its EE suppression', () => {
   // No usage was recorded for these stages in this process, so both cases take
-  // the fallback path — the state a full cache (or EE) leaves behind. The stage
-  // must be a LIVE per-stage id: guard generate's content stages became agent
-  // sessions on one model and left the table, so a retired id
-  // resolves to no model at all and would pass the EE case vacuously.
+  // the fallback path — the state a full cache (or the dashboard) leaves behind.
+  // The stage must be a LIVE per-stage id: guard generate's content stages became
+  // agent sessions on one model and left the table, so a retired id resolves to no
+  // model at all and would pass the suppressed case vacuously.
   it('OSS (default): falls back to the resolved per-stage model', () => {
     const tag = stageUsageTag(['guard.match'], repo);
     expect(MODEL_TIER.test(tag)).toBe(true);

@@ -1,5 +1,5 @@
 /**
- * THE FLOW-SYNTHESIS SESSIONS — `guard-generate.flows` (plan 04 step 16): one
+ * THE FLOW-SYNTHESIS SESSIONS — `guard-generate.flows`: one
  * session per AREA composes that area's extracted claims into user-goal flows;
  * one epic session, AFTER the area pool (a true barrier), chains the results
  * across areas. They replace the per-area one-shots + their single corrective
@@ -51,7 +51,7 @@ export const FLOWS_SESSION_KIND = 'guard-generate.flows'
  *  carry their own prompt fingerprint, so the two generations never collide. */
 export const FLOWS_SESSION_CACHE_NAME = 'guard/flows'
 
-/** The three numbers (§3.3): outlines + claims arrive briefed, so the turns go
+/** The three numbers: outlines + claims arrive briefed, so the turns go
  *  to a few section reads and the check/fix loop. */
 export const FLOWS_SESSION_BUDGET: SessionBudget = {
   turns: 12,
@@ -133,7 +133,7 @@ function sha(text: string): string {
 }
 
 /**
- * The area session's cache key (plan 04 step 16): session prompt fingerprint ::
+ * The area session's cache key: session prompt fingerprint ::
  * areaId :: sha(claims) :: sha(outlines) — the SAME claim/outline material the
  * one-shot key hashes (claims now fold `needs`), under the session prompt's
  * fingerprint. Grounding (interface digests, dependency catalog) is
@@ -153,7 +153,7 @@ export function flowsEpicSessionCacheKey(digests: readonly FlowDigest[]): string
 }
 
 /** The work items, as the session index and the transcripts record them. A
- *  SHARDED area (item 133) names its chunk, so its sessions stay tellable apart
+ *  SHARDED area names its chunk, so its sessions stay tellable apart
  *  in the index, the transcripts and the progress line. */
 export function flowsSessionWorkItem(areaId: string, chunk?: number): string {
   return chunk === undefined ? `area:${areaId}` : `area:${areaId}#${chunk}`

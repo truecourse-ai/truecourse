@@ -1,20 +1,16 @@
 /**
- * Pluggable key-value store for the LLM-stage caches (per-slice extraction
- * results, per-block extractions). File-backed by default — entries live under
- * `<scope>/.truecourse/.cache/<cacheName>/<key>.json`, exactly as before — so the
- * OSS/local edition is unchanged. The enterprise edition injects a Postgres-
- * backed impl via `setKvCacheStore` so the load-bearing cache survives ephemeral
- * clones: keys are content hashes (slice/block id + prompt fingerprint), so an
- * unchanged slice/block hits the cache across runs and commits and skips the LLM.
+ * The key-value store behind the LLM-stage caches — the per-session and
+ * per-slice outcomes a re-run reads instead of paying for the model again.
  *
- * The seam lives here in `@truecourse/llm` because both IL packages
- * (`contract-extractor`, `spec-consolidator`) depend on it directly and these
- * are LLM-result caches. `scope` is the repo root: the file impl uses it as the
- * cache directory location; the (content-addressed) EE impl ignores it.
+ * Keys are content hashes, so a hit is valid across runs, commits and clones,
+ * which is what keeps re-runs cheap now that every run's working tree is
+ * discarded. The seam exists because the engine packages cannot depend on
+ * `@truecourse/data-store`: boot installs the Postgres store over it.
+ *
+ * With nothing installed every read MISSES and every write is dropped: a cache
+ * is an optimization, and a run without one is correct, only slower. `scope`
+ * names the repository a key belongs to; the content-addressed store ignores it.
  */
-
-import fs from 'node:fs';
-import path from 'node:path';
 
 export interface KvCacheStore {
   /** The cached JSON value, or `null` on a miss. */
@@ -23,42 +19,28 @@ export interface KvCacheStore {
   set(scope: string, cacheName: string, key: string, value: unknown): Promise<void>;
 }
 
-class FileKvCacheStore implements KvCacheStore {
-  private file(scope: string, cacheName: string, key: string): string {
-    return path.join(scope, '.truecourse', '.cache', cacheName, `${key}.json`);
-  }
+const NO_CACHE: KvCacheStore = {
+  async get() {
+    return null;
+  },
+  async set() {
+    /* nothing to store into */
+  },
+};
 
-  async get(scope: string, cacheName: string, key: string): Promise<unknown | null> {
-    const file = this.file(scope, cacheName, key);
-    if (!fs.existsSync(file)) return null;
-    try {
-      return JSON.parse(fs.readFileSync(file, 'utf-8'));
-    } catch {
-      // Malformed entry — treat as a miss so the next run rewrites it.
-      return null;
-    }
-  }
+let active: KvCacheStore = NO_CACHE;
 
-  async set(scope: string, cacheName: string, key: string, value: unknown): Promise<void> {
-    const file = this.file(scope, cacheName, key);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(value, null, 2));
-  }
-}
-
-let active: KvCacheStore = new FileKvCacheStore();
-
-/** The active KV cache store (file-backed unless EE installed a Postgres one). */
+/** The active KV cache store. */
 export function getKvCacheStore(): KvCacheStore {
   return active;
 }
-/** Install a KV cache store (e.g. the enterprise Postgres impl). */
+/** Install the KV cache store (boot: the Postgres one). */
 export function setKvCacheStore(store: KvCacheStore): void {
   active = store;
 }
-/** Restore the file-backed default (tests). */
+/** Forget the installed store, so every stage misses again (tests). */
 export function resetKvCacheStore(): void {
-  active = new FileKvCacheStore();
+  active = NO_CACHE;
 }
 
 export const getCacheEntry = (

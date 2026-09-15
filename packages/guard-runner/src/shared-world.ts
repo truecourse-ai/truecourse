@@ -34,8 +34,8 @@
  * runs the teardown only if a boot ever started.
  *
  * The handle is IN-PROCESS (same class as `signal`/`visualJudge` on the
- * executor seam): a hosted/EE executor simply ignores it and keeps booting its
- * own per-run worlds — remote runs never shared a host to race on.
+ * executor seam): an executor that runs elsewhere simply ignores it and keeps
+ * booting its own per-run worlds — remote runs never shared a host to race on.
  */
 
 /** The world's lifecycle thunks, registered by whichever `ensure` boots it. */

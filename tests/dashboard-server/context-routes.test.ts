@@ -28,7 +28,7 @@ import {
 } from '../helpers/test-app';
 import type { GithubMount } from '../../apps/dashboard/server/src/github/index';
 import type { RepositorySourceConfig } from '@truecourse/shared';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import { memoryContextStore, type MemoryContextStore } from '../helpers/memory-context-store';
 import {
   setContextDriverDeps,

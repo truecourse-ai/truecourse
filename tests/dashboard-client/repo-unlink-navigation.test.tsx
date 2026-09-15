@@ -18,7 +18,7 @@ vi.mock('sonner', () => ({ toast: toastMock }));
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 
 vi.mock('@/lib/socket', () => {
   const socket = { connected: false, on: vi.fn(), off: vi.fn(), emit: vi.fn(), connect: vi.fn() };
@@ -52,7 +52,7 @@ beforeEach(() => {
       id: 'spiderhands-filecli',
       name: 'spiderhands/filecli',
       path: '/tmp/clones/spiderhands__filecli',
-      remoteUrl: 'https://github.com/spiderhands/filecli',
+      provider: 'github',
     },
   ];
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -76,11 +76,11 @@ afterEach(() => {
 
 describe('unlinking a repository from its settings', () => {
   it('returns to Home instead of stranding the user on the dead repo route', async () => {
-    window.history.replaceState({}, '', '/preview/repos/spiderhands-filecli/settings');
+    window.history.replaceState({}, '', '/repos/spiderhands-filecli/settings');
     render(
-      <MemoryRouter initialEntries={['/preview/repos/spiderhands-filecli/settings']}>
+      <MemoryRouter initialEntries={['/repos/spiderhands-filecli/settings']}>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -96,11 +96,11 @@ describe('unlinking a repository from its settings', () => {
 
   it('says why when the server refuses, and lets the row come back', async () => {
     refusal = 'Another process is scanning this repository. Wait for it to finish, then disconnect.';
-    window.history.replaceState({}, '', '/preview/repos/spiderhands-filecli/settings');
+    window.history.replaceState({}, '', '/repos/spiderhands-filecli/settings');
     render(
-      <MemoryRouter initialEntries={['/preview/repos/spiderhands-filecli/settings']}>
+      <MemoryRouter initialEntries={['/repos/spiderhands-filecli/settings']}>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </MemoryRouter>,
     );

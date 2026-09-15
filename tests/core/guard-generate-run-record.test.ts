@@ -21,9 +21,11 @@ import {
   GUARD_GENERATE_STEPS,
   OpenConflictsError,
 } from '../../packages/core/src/commands/guard-in-process.js';
-import { listSessionRuns } from '../../packages/core/src/lib/sessions-store.js';
+import { listStoredSessionRuns } from '../../packages/core/src/lib/sessions-store.js';
 import { resetSpecStore } from '../../packages/core/src/lib/spec-store.js';
 import { StepTracker } from '../../packages/core/src/progress.js';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 
 let repo: string;
 let sessionsKey: string;
@@ -32,12 +34,16 @@ const transport = (async () => '{}') as LlmTransport;
 
 beforeEach(() => {
   resetSpecStore();
+  installMemorySessionRuns();
+  installWorkTreeGuardStore();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-run-record-'));
   sessionsKey = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-run-key-'));
   fs.mkdirSync(path.join(repo, '.truecourse'), { recursive: true });
 });
 
 afterEach(() => {
+  resetSessionRuns();
+  resetGuardStore();
   fs.rmSync(repo, { recursive: true, force: true });
   fs.rmSync(sessionsKey, { recursive: true, force: true });
 });
@@ -55,8 +61,8 @@ describe('guard generate run record', () => {
     expect(guard.status).toBe('no-docs');
 
     // Keyed by the identity, not the tree the run happened in.
-    expect(listSessionRuns(repo, 'guard-generate')).toHaveLength(0);
-    const [run] = listSessionRuns(sessionsKey, 'guard-generate');
+    expect(await listStoredSessionRuns(repo, 'guard-generate')).toHaveLength(0);
+    const [run] = await listStoredSessionRuns(sessionsKey, 'guard-generate');
     expect(run).toMatchObject({
       command: 'guard-generate',
       status: 'failed',
@@ -93,7 +99,7 @@ describe('guard generate run record', () => {
 
   it('defaults the record to the working tree, and names the saved provider', async () => {
     await guardGenerateInProcess(repo, { transport, transportMode: 'claude-code' });
-    const [run] = listSessionRuns(repo, 'guard-generate');
+    const [run] = await listStoredSessionRuns(repo, 'guard-generate');
     expect(run).toMatchObject({ status: 'failed', llm: { mode: 'claude-code', provider: 'claude-code' } });
     expect(run.llm?.model).toBeTruthy();
   });
@@ -104,7 +110,7 @@ describe('guard generate run record', () => {
     await expect(
       guardGenerateInProcess(repo, { transport, transportMode: 'api', signal: controller.signal, sessionsKey }),
     ).rejects.toBeInstanceOf(GuardGenerateAborted);
-    const [run] = listSessionRuns(sessionsKey, 'guard-generate');
+    const [run] = await listStoredSessionRuns(sessionsKey, 'guard-generate');
     expect(run).toMatchObject({ status: 'interrupted' });
     expect(run.error).toBeUndefined();
   });
@@ -141,7 +147,7 @@ describe('a generate the gates stop is on record too', () => {
       guardGenerateInProcess(repo, { tracker, transport, transportMode: 'api', sessionsKey }),
     ).rejects.toBeInstanceOf(OpenConflictsError);
 
-    const [run] = listSessionRuns(sessionsKey, 'guard-generate');
+    const [run] = await listStoredSessionRuns(sessionsKey, 'guard-generate');
     const reason = '1 open spec conflict must be resolved before guard generate.';
     expect(run).toMatchObject({ status: 'failed', error: { kind: 'open-conflicts', message: reason } });
     // The gate stops the run on `index`, the way a mid-run abort would: the
@@ -180,7 +186,7 @@ describe('a generate the gates stop is on record too', () => {
       }),
     ).rejects.toBeInstanceOf(EstimateDeclined);
 
-    const [run] = listSessionRuns(sessionsKey, 'guard-generate');
+    const [run] = await listStoredSessionRuns(sessionsKey, 'guard-generate');
     expect(run).toMatchObject({ status: 'interrupted' });
     expect(run.error).toBeUndefined();
   });

@@ -44,7 +44,7 @@ function doc(p: string, content = `body of ${p}`): DocCandidate {
 }
 
 // The kept docs carry pairwise-shared claim tokens so the deterministic
-// collision pairing (item 119) nominates every within-area pair — without a
+// collision pairing nominates every within-area pair — without a
 // shared identifier or heading, a doc pair costs no session and can flag
 // nothing. The bodies keep the `body of <path>` line the flag() quotes pin.
 const DOCS = [
@@ -357,18 +357,16 @@ describe('the scan run — overlap adjudication', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Include-scope — the real filesystem discovery path (NOT docSource, which
-// bypasses scoping), so config `spec.include` actually applies.
+// The real filesystem discovery path (NOT docSource, which supplies its own
+// doc set): the run walks the whole tree — scope is the orchestrator's verdicts,
+// never a glob the run is configured with.
 // ---------------------------------------------------------------------------
 
-describe('the scan run — include-scope', () => {
+describe('the scan run — discovery over the tree', () => {
   function place(rel: string, body: string): void {
     const full = path.join(repo, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, body);
-  }
-  function config(include: string[]): void {
-    place('.truecourse/config.json', JSON.stringify({ spec: { include } }));
   }
   function runFs(decisions: DecisionsFile = EMPTY_DECISIONS) {
     const stub = stubDriver(
@@ -388,56 +386,20 @@ describe('the scan run — include-scope', () => {
       persistence: memoryPersistence().persistence,
       decisions,
       disableOverlapDetection: true,
-      // The scope orchestrator is step 6's own subject; these cases are about the
-      // config-level include scope, so they run with it switched off.
+      // The scope orchestrator is step 6's own subject; these cases are about
+      // what the walk itself yields, so they run with it switched off.
       disableScopeOrchestration: true,
       skipGit: true,
     });
   }
 
-  it('scans only in-scope docs and reports the active scope', async () => {
-    config(['docs/**']);
-    place('docs/spec.md', '# in scope');
-    place('reference/answers.md', '# out of scope');
-
-    const result = await runFs();
-    expect(result.stats.scopeGlobs).toEqual(['docs/**']);
-    expect(result.stats.docsScanned).toBe(1);
-    expect(result.corpus.docs.map((d) => d.ref)).toEqual(['docs/spec.md']);
-  });
-
-  it('an out-of-scope doc never appears in skippedDocs', async () => {
-    config(['docs/**']);
-    place('docs/spec.md', '# in scope');
-    place('reference/answers.md', '# out of scope');
-
-    const result = await runFs();
-    // Out-of-scope docs never enter the universe, so they are neither kept nor
-    // "skipped" — they must not surface in the dashboard's not-included list.
-    expect(result.skippedDocs.map((s) => s.path)).not.toContain('reference/answers.md');
-    expect(result.corpus.skippedDocs.map((s) => s.ref)).not.toContain('reference/answers.md');
-  });
-
-  it('surfaces an out-of-scope manualInclude instead of silently dropping it', async () => {
-    config(['docs/**']);
-    place('docs/spec.md', '# in scope');
-    place('reference/answers.md', '# out of scope, but force-included');
-
-    const result = await runFs({ ...EMPTY_DECISIONS, manualIncludes: ['reference/answers.md'] });
-    // A manual include is a relevance-level override, not a universe override:
-    // the out-of-scope path stays out, but is surfaced so it isn't a silent no-op.
-    expect(result.stats.outOfScopeManualIncludes).toEqual(['reference/answers.md']);
-    expect(result.corpus.docs.map((d) => d.ref)).toEqual(['docs/spec.md']);
-  });
-
-  it('no scope configured → empty scopeGlobs, everything scanned', async () => {
+  it('walks the whole tree — nothing narrows it', async () => {
     place('docs/spec.md', '# a');
     place('reference/x.md', '# b');
 
     const result = await runFs();
-    expect(result.stats.scopeGlobs).toEqual([]);
-    expect(result.stats.outOfScopeManualIncludes).toEqual([]);
     expect(result.stats.docsScanned).toBe(2);
+    expect(result.corpus.docs.map((d) => d.ref).sort()).toEqual(['docs/spec.md', 'reference/x.md']);
   });
 });
 
@@ -507,9 +469,9 @@ describe('the scan run — third-party visibility', () => {
     ]);
   });
 
-  // EE scans an ephemeral shallow clone in a temp dir. If an explicit null were
-  // treated as "resolve it yourself", the basename `tc-gate-scan-XXXX` would
-  // become the repo's identity — and it would reach the session in the briefing.
+  // A scan runs over an ephemeral scratch tree. If an explicit null were treated
+  // as "resolve it yourself", the temp basename would become the repo's identity
+  // — and it would reach the session in the briefing.
   it('honors an explicitly null identity instead of resolving one', async () => {
     const briefings: string[] = [];
     const stub = stubDriver(

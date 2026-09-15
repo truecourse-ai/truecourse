@@ -14,11 +14,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { guardAuthoredInterfacesPath, guardInterfacesPath } from '@truecourse/guard-runner';
-import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths';
 import type { InterfacesFile } from '../../packages/shared/src/index';
 import { readGuardInterfacesAuthorView, runGuardInterfaceAuthoring } from '../../packages/core/src/commands/guard-interfaces';
 import { stubDriver, outcome, toolResult } from './spec-scan-session-stub.js';
-import { createSessionRun, listSessionRuns } from '../../packages/core/src/lib/sessions-store';
+import { createStoredSessionRun, listStoredSessionRuns } from '../../packages/core/src/lib/sessions-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import type { LlmTransport } from '@truecourse/shared/llm';
+
+/** Nothing is authored in these runs, so the closing reconciliation never asks. */
+const noOneShot: LlmTransport = async () => {
+  throw new Error('no one-shot call is expected here');
+};
 
 let repo: string;
 
@@ -63,11 +69,13 @@ const AUTHORED: InterfacesFile = {
 };
 
 beforeEach(() => {
+  installMemorySessionRuns();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-iface-cmd-'));
   fs.mkdirSync(path.dirname(guardInterfacesPath(repo)), { recursive: true });
 });
 
 afterEach(() => {
+  resetSessionRuns();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
@@ -106,8 +114,8 @@ describe('the read view', () => {
   });
 
   it('reads an authored task standing on a derived place — the half-catalog case', () => {
-    // The derived half is gitignored, so a fresh clone has the authored file and
-    // nothing else. Reading it must not fail on an `at` its own half cannot resolve.
+    // A tree that has not been mapped has the authored file and nothing else.
+    // Reading it must not fail on an `at` its own half cannot resolve.
     fs.writeFileSync(guardAuthoredInterfacesPath(repo), JSON.stringify(AUTHORED));
     const view = readGuardInterfacesAuthorView(repo);
     expect(view.unmapped).toBe(true);
@@ -115,71 +123,54 @@ describe('the read view', () => {
   });
 });
 
-describe('the findings ledger', () => {
-  /**
-   * It is a report about the REPOSITORY (a doc that disagrees with the source),
-   * so it travels through git like the authored half beside it. The store's
-   * ignore template must not catch it — by a line of its own, or by a directory
-   * pattern over `guard/`.
-   */
-  it('is committable: no line of the ignore template catches it', () => {
-    const rel = 'guard/interfaces.findings.md';
-    const catching = GITIGNORE_CONTENTS.split('\n')
-      .filter((line) => line !== '')
-      .filter((line) => rel === line || (line.endsWith('/') && rel.startsWith(line)));
-    expect(catching).toEqual([]);
-    // The derived catalog beside it IS ignored — the two halves differ on this.
-    expect(GITIGNORE_CONTENTS.split('\n')).toContain('guard/interfaces.json');
-  });
-});
-
 describe('the sessions store', () => {
   it.each([false, true])('persists authoring in the owning run, shared=%s', async (shared) => {
     fs.writeFileSync(guardInterfacesPath(repo), JSON.stringify(DERIVED));
-    const parent = shared ? createSessionRun(repo, { command: 'guard-setup', gitRef: 'abc', activityStream: true }) : undefined;
+    const parent = shared ? await createStoredSessionRun(repo, { command: 'guard-setup', gitRef: 'abc' }) : undefined;
     const onRunStarted = vi.fn();
     const { driver } = stubDriver(async (call) => {
       await call.emit(toolResult('check_draft'));
       return outcome({ interfaces: [], unresolved: ['No actions on this screen'] });
     });
-    const result = await runGuardInterfaceAuthoring({ repoRoot: repo, driver, transportMode: 'api', sessionRun: parent, onRunStarted });
-    const runs = listSessionRuns(repo);
+    const result = await runGuardInterfaceAuthoring({ repoRoot: repo, driver, transport: noOneShot, transportMode: 'api', sessionRun: parent, onRunStarted });
+    const runs = await listStoredSessionRuns(repo);
     expect(runs).toHaveLength(1);
     expect(runs[0].command).toBe(shared ? 'guard-setup' : 'guard-interfaces');
     expect(runs[0].status).toBe(shared ? 'running' : 'completed');
     expect(runs[0].sessions).toHaveLength(2);
     expect(runs[0].sessions.every(session => session.kind === 'guard-interfaces.web-tasks')).toBe(true);
+    const journal = fs.readFileSync(path.join(result.runDir, 'activity.jsonl'), 'utf8');
     for (const session of runs[0].sessions) {
-      const transcript = fs.readFileSync(path.join(result.runDir, `${session.sessionId}.jsonl`), 'utf8');
-      expect(transcript).toContain('session-start');
-      expect(transcript).toContain('check_draft');
+      expect(journal).toContain(session.sessionId);
     }
+    expect(journal).toContain('session-start');
+    expect(journal).toContain('check_draft');
     expect(onRunStarted).toHaveBeenCalledTimes(shared ? 0 : 1);
     if (parent) {
       expect(result.runId).toBe(parent.runId);
       expect(result.runDir).toBe(parent.dir);
       expect(parent.record().llm).toBeUndefined();
-      expect(fs.readFileSync(path.join(parent.dir, 'activity.jsonl'), 'utf8')).toContain('session-event');
+      expect(journal).toContain('session-event');
     }
   });
 
   it.each([false, true])('leaves failure finalization to the run owner, shared=%s', async (shared) => {
-    const parent = shared ? createSessionRun(repo, { command: 'guard-setup', gitRef: 'abc' }) : undefined;
+    const parent = shared ? await createStoredSessionRun(repo, { command: 'guard-setup', gitRef: 'abc' }) : undefined;
     const { driver } = stubDriver(() => outcome({ interfaces: [] }));
     await expect(runGuardInterfaceAuthoring({
-      repoRoot: repo, driver, transportMode: 'api', sessionRun: parent,
+      repoRoot: repo, driver, transport: noOneShot, transportMode: 'api', sessionRun: parent,
       onStatus: () => { throw new Error('context failed'); },
     })).rejects.toThrow('context failed');
-    const runs = listSessionRuns(repo);
+    const runs = await listStoredSessionRuns(repo);
     expect(runs).toHaveLength(1);
     expect(runs[0].status).toBe(shared ? 'running' : 'failed');
     expect(runs[0].error?.message).toBe(shared ? undefined : 'context failed');
   });
 
-  it('gives interface authoring a command of its own', () => {
+  it('gives interface authoring a command of its own', async () => {
     fs.writeFileSync(guardInterfacesPath(repo), JSON.stringify(DERIVED));
     // No run has happened, so the store is empty — but the command is a legal
-    // one, which is what `createSessionRun` would need.
-    expect(listSessionRuns(repo, 'guard-interfaces')).toEqual([]);
+    // one, which is what creating a run would need.
+    expect(await listStoredSessionRuns(repo, 'guard-interfaces')).toEqual([]);
   });
 });

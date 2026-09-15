@@ -4,7 +4,7 @@
  * A `blocked-on` gap names capability nouns (`composeBlockedOnReason`), and
  * external-service detection puts DETECTED SERVICE NAMES (`open-meteo`, `stripe`)
  * among them. Some of those services are ones the user can simply hand guard an
- * account for (the External APIs page) — and the moment they do, the recipe
+ * account for (the Dependencies page) — and the moment they do, the recipe
  * fingerprint moves and the next `guard generate` authors the flows that were
  * blocked. That is a to-do, not an inert grey wall.
  *
@@ -55,8 +55,7 @@ export type GuardExternalSetupIndex = Readonly<Record<string, GuardExternalSetup
  * means the seed does not create those rows, so the gap renders as a to-do
  * ("extend the seed script"), never as "already set up". It is NEVER carried as
  * `unprovided`: without a seed there is no form to send anyone to, and the gap
- * stays plain `blocked-on` (the CLI/dashboard hint offers `guard seed --init`
- * instead).
+ * stays plain `blocked-on` (the hint points at authoring a seed instead).
  */
 export const MISSING_DATA_NOUN = 'missing-data'
 

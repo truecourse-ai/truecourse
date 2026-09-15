@@ -1,9 +1,9 @@
 /**
  * SEED GROUNDING + WRITE PATH — what remains of the one-shot seed draft after
- * the SEED SESSION (plan 03 step 13) took over the drafting itself.
+ * the SEED SESSION took over the drafting itself.
  *
  * The draft used to be a single model call verified by the engine
- * (`draftSeed`, retired 2026-08-19). It is now `guard-setup.seed` — an agent
+ * (`draftSeed`, since retired). It is now `guard-setup.seed` — an agent
  * session in `@truecourse/core` (`services/guard-setup/seed-session.ts`) that
  * iterates against the LIVE services and proves its script by running it. What
  * this module keeps is everything that session and the engine still share:
@@ -38,7 +38,7 @@ import type { SeedProposal } from './schemas.js'
 import type { SeedBlockedClaim } from './prompts.js'
 import type { RecipeEcosystem } from './recipe-propose.js'
 
-/** The session-outcome cache of the seed session (kept name — plan 03 step 13). */
+/** The session-outcome cache of the seed session (name kept from the one-shot). */
 export const SEED_CACHE_NAME = 'guard/seed'
 
 /** The parsed schema the draft is grounded in — the analyzer's own output. */
@@ -104,7 +104,7 @@ export function seedDraftGate(input: {
   replaceExisting?: boolean
 }): { ok: true } | { ok: false; reason: string } {
   if (!input.recipe) {
-    return { ok: false, reason: 'no recipe.json — run `truecourse guard setup` first' }
+    return { ok: false, reason: 'no recipe.json — Flow setup has not discovered one yet' }
   }
   if (!input.recipe.api) {
     return {
@@ -116,7 +116,7 @@ export function seedDraftGate(input: {
     return {
       ok: false,
       reason:
-        'the recipe already declares `api.seed` — an existing seed is a committed, human-reviewed file and is never silently overwritten (`truecourse guard setup --refresh` replaces it, with a confirmation)',
+        'the recipe already declares `api.seed` — an existing seed is a human-reviewed file and is never silently overwritten (a refreshing Flow setup replaces it, with a confirmation)',
     }
   }
   if (input.database === undefined) return { ok: true }

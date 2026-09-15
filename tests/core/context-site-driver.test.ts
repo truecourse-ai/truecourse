@@ -4,9 +4,8 @@
  * Every fetch goes to a local fixture site, never the real internet. What is
  * asserted is the driver's contract: a check reads the index and stores
  * nothing, a sync hands back every page with its body and a diff against the
- * ledger, snapshot paths stay put when a neighbour moves, and nothing is
- * written to any tree — a workspace source has no `sources.json` and no
- * `.truecourse/specs/sources/` directory.
+ * ledger, page paths stay put when a neighbour moves, and nothing is written to
+ * any tree.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';

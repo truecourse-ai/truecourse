@@ -188,7 +188,7 @@ export function guardNoFlowClaimGapKind(reason: string): GuardCoverageGapKind {
   return 'untestable'
 }
 
-// --- The flow-worker session outcome (plan 04 step 17) ----------------------
+// --- The flow-worker session outcome ----------------------------------------
 
 /**
  * One PREDICTED red step of a submitted scenario — the flow worker's own verdict
@@ -283,8 +283,7 @@ export const GuardRemainingObligationSchema = z.object({
 export type GuardRemainingObligation = z.infer<typeof GuardRemainingObligationSchema>
 
 /**
- * The `guard-generate.flow-worker` session's outcome (plan 04 step 17) —
- * exhaustive: a worker cannot end without one of these four kinds.
+ * The `guard-generate.flow-worker` session's outcome — exhaustive: a worker cannot end without one of these four kinds.
  *
  * ONE object discriminated by `kind`, carrying exactly the payload fields that
  * match it — deliberately NOT a `z.discriminatedUnion`: a union renders as a

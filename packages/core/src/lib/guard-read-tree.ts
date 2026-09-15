@@ -2,7 +2,7 @@
  * A SCRATCH WORKING TREE for the guard readers that were written against a
  * repository on disk — the dependencies view and its registration write, which
  * compose the catalog, the recipe, the overlays, the setup snapshot, the last
- * generate report, the committed scenarios and the flow corpus, and read every
+ * generate report, the stored scenarios and the flow corpus, and read every
  * one of them as a file.
  *
  * A hosted repository has all of that in the store and none of it on disk, so a

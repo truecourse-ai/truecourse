@@ -7,7 +7,7 @@
  * stream event), so it decides whether a long-reasoning call is allowed to
  * finish or is SIGKILLed mid-flight.
  *
- * Only TWO one-shot stages are left (plan 04 step 20): recipe discovery and
+ * Only TWO one-shot stages are left: recipe discovery and
  * realization matching. Extraction, flow synthesis, authoring, fidelity and
  * triage run as agent sessions now, and a session's ceiling is its BUDGET
  * (turns / resumes / token ceiling), pinned beside each session def — there is

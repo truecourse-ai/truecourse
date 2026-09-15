@@ -2,12 +2,12 @@ import { GuardFailureObservationSchema } from './failure-observation.js'
 import { GuardPreparationEvidenceSchema } from './preparation.js'
 /**
  * Guard run result types — the materialized current state a `guard run` writes to
- * `.truecourse/guard/LATEST.json` and the dashboard / `guard status` read back.
+ * `.truecourse/guard/LATEST.json` and the dashboard reads back.
  *
- * LATEST is committable (LATEST.json convention) and travels via git, so a clone
- * renders section coverage without a local run. Because `evidence/` is gitignored,
- * failure detail is kept **inline-compact** here (`{ step, expected, actual }`) with
- * only a pointer into `evidence/`; the full transcript lives where the run happened.
+ * The snapshot is stored as the repo's run row, so a surface renders section
+ * coverage without a local run. Failure detail is kept **inline-compact** here
+ * (`{ step, expected, actual }`) with only a pointer into `evidence/`; the full
+ * transcript is stored beside the run.
  */
 
 import { z } from 'zod'
@@ -26,7 +26,7 @@ import { hasMilestone, type GuardStepMilestone } from './step-parts.js'
  * executes anything — a stale/orphaned scenario is never run.
  *
  * `blocked` is the sixth and likewise NON-EXECUTED state: the scenario binds a
- * SUPPLIED dependency (§7.2's dependency catalog) for which no instance is
+ * SUPPLIED dependency (the dependency catalog's) for which no instance is
  * registered on this machine. Nothing about the repo is in dispute, so it must
  * never read as `fail` — the run makes no network call, spawns no child, and
  * settles with the dependency and its rolled-up requirement named, which is the
@@ -94,12 +94,8 @@ export const GuardRunEnvelopeSchema = z.preprocess(
     recipeFingerprint: z.string(),
     /**
      * Identity of the scenario corpus this run executed (`sha256:…` over the
-     * scenario ids + bindings — see the hosted gate's `guardCorpusFingerprint`).
-     * Stamped by the gate when it persists a PR-head run so a stored run only
-     * decides a later delivery when the corpus the gate would run still matches
-     * (a force spec-regen run executes the PR's OWN regenerated corpus, whose
-     * ids don't align with the committed set). Optional so CLI runs and
-     * pre-change snapshots keep parsing.
+     * scenario ids + bindings). Optional: a run recorded before the field
+     * existed carries none.
      */
       corpusFingerprint: z.string().optional(),
       /**
@@ -109,11 +105,12 @@ export const GuardRunEnvelopeSchema = z.preprocess(
        * it. The honest warning, on the record a reader actually opens.
        */
       worldLeftDirty: z.boolean().optional(),
-      /** The pull request this run gated; absent on a default-branch run. */
+      /** The pull request this run belongs to, when one does; the PR flow is
+       *  what will set it. */
       pullRequest: z.number().int().positive().optional(),
       /**
-       * Where the run executed: the hosted runner, or a developer's machine
-       * through the CLI. Absent reads as `hosted`.
+       * Where the run executed: the hosted runner, or a developer's machine.
+       * Absent reads as `hosted`.
        */
       origin: GuardRunOriginSchema.optional(),
     })
@@ -313,9 +310,8 @@ export const GuardScenarioResultSchema = z
      */
     blockedOn: GuardBlockedDependencySchema.optional(),
     /**
-     * The ADJUDICATION VERDICT this failure carries (`truecourse guard
-     * adjudicate`, plan 05 step 23) — written AFTER the run by the adjudication
-     * fold, never by the runner. The board merge carries it with an untouched
+     * The ADJUDICATION VERDICT this failure carries — written AFTER the run by
+     * the adjudication fold, never by the runner. The board merge carries it with an untouched
      * row and DROPS it from a re-run one (a new actual needs a new verdict —
      * see `mergeGuardBoard`). Present only on `fail` / `error` rows that were
      * adjudicated; optional so every pre-existing snapshot parses.

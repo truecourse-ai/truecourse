@@ -23,6 +23,42 @@ import { repositorySourceId } from '@truecourse/core/services/context';
 import { type ContextSource } from '@truecourse/shared';
 import { emitContextChanged } from './context.service.js';
 
+/** How a repository's Repository source is refreshed (on connect, and on a change). */
+export type ContextSyncStart = (
+  orgId: string,
+  sourceId: string,
+  source: 'add' | 'push',
+) => Promise<'queued' | 'busy' | 'failed'>;
+
+/**
+ * Re-read a repository's own documentation because its default branch moved: a
+ * push for a connected provider, a file changing on disk for a folder. A
+ * repository with no source of its own has nothing to do here.
+ *
+ * Fire-and-forget by contract — whatever moved the repository has already
+ * happened, and a sync that could not be enqueued is a log line, not a failure.
+ */
+export function syncRepositorySource(
+  org: string,
+  repoFullName: string,
+  start: ContextSyncStart,
+): void {
+  void (async () => {
+    try {
+      const source = await repositoryContextSource(org, repoFullName);
+      if (!source) return;
+      const outcome = await start(org, source.id, 'push');
+      if (outcome !== 'queued') {
+        log.info(`[context] ${repoFullName} moved, context sync ${outcome}`);
+      }
+    } catch (err) {
+      log.warn(
+        `[context] could not sync ${repoFullName}'s context after a change: ${(err as Error).message}`,
+      );
+    }
+  })();
+}
+
 /** The workspace's Repository source for this repository, or null. */
 export async function repositoryContextSource(
   org: string,

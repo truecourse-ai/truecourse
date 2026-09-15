@@ -1,12 +1,12 @@
 /**
- * THE DETERMINISTIC PRE-PASS (plan 05 step 21) — zero sessions for the common
+ * THE DETERMINISTIC PRE-PASS — zero sessions for the common
  * case. A guard run's failure often explains itself off facts the stores
  * already hold, and a session spent re-deriving one of them is a session
  * wasted; each rule below produces the SAME `GuardAdjudication` shape a
  * session would, with the machine as the author:
  *
  *  1. `expected-red` — the scenario's committed diagnosis carries the flow
- *     worker's own adjudication (`expectedRed`, plan 04 §17). When the failing
+ *     worker's own adjudication (`expectedRed`). When the failing
  *     step is the declared one AND the recorded actual matches the worker's
  *     `predictedActual` (the same normalized-containment rule the worker's
  *     acceptance gate used), the red is exactly the disagreement the corpus

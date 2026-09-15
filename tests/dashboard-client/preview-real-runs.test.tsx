@@ -22,6 +22,7 @@ import { Toaster } from 'sonner';
 // subscribed, which is the only thing these cases need it to do.
 const listeners = new Map<string, Set<(payload: unknown) => void>>();
 const socketMock = vi.hoisted(() => ({ joins: [] as string[], leaves: [] as string[] }));
+const ORG = 'org_test';
 
 vi.mock('@/lib/socket', () => {
   const socket = {
@@ -43,13 +44,14 @@ vi.mock('@/lib/socket', () => {
     connectSocket: () => socket,
     getSocket: () => socket,
     disconnectSocket: vi.fn(),
-    joinRepoRoom: (id: string) => socketMock.joins.push(id),
-    leaveRepoRoom: (id: string) => socketMock.leaves.push(id),
+    joinRepoRoom: (org: string, id: string) => socketMock.joins.push(`${org}/${id}`),
+    leaveRepoRoom: (org: string, id: string) => socketMock.leaves.push(`${org}/${id}`),
   };
 });
 
-import PreviewApp from '@/preview/PreviewApp';
-import { relativeTime, repoRunState, toJobChain } from '@/preview/shell/real-runs';
+import DashboardApp from '@/dashboard/DashboardApp';
+import { AuthProvider } from '@/auth/AuthContext';
+import { relativeTime, repoRunState, toJobChain } from '@/dashboard/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 function fireSocket(event: string, payload: unknown): void {
@@ -64,7 +66,7 @@ const REAL = {
   id: 'linkwarden',
   name: 'linkwarden/linkwarden',
   path: '/clones/linkwarden__linkwarden',
-  remoteUrl: 'https://github.com/linkwarden/linkwarden',
+  provider: 'github',
 };
 
 function runningScan(overrides: Partial<PublicSessionRun> = {}): PublicSessionRun {
@@ -102,6 +104,9 @@ function serve(runs: PublicSessionRun[]) {
   window.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(href, window.location.origin);
+    if (pathname === '/api/auth/me') {
+      return json({ user: { id: 'u1', email: 'u@acme.test', organizationId: ORG, organizationName: 'Acme' } });
+    }
     if (pathname === '/api/repos') return json([REAL]);
     if (pathname === `/api/repos/${REAL.id}/sessions/runs`) return json({ runs: state.runs });
     return json({ error: 'not found' }, 404);
@@ -117,9 +122,12 @@ function renderAt(path: string) {
   window.history.replaceState({}, '', path);
   render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
-      </Routes>
+      {/* The shell joins a room as the workspace it is signed into, which the session probe answers. */}
+      <AuthProvider>
+        <Routes>
+          <Route path="/*" element={<DashboardApp />} />
+        </Routes>
+      </AuthProvider>
       {/* The real app mounts the Toaster; the preview routes are a descendant of it. */}
       <Toaster />
     </MemoryRouter>,
@@ -130,7 +138,7 @@ beforeEach(() => {
   listeners.clear();
   socketMock.joins.length = 0;
   socketMock.leaves.length = 0;
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -147,7 +155,7 @@ describe('a run record as the shell reads it', () => {
   it('is an onboarding job whose steps are the run checklist', () => {
     const job = toJobChain(repo, runningScan(), true);
     expect(job.title).toBe('Onboarding linkwarden/linkwarden');
-    expect(job.href).toBe(`/preview/agent/${encodeURIComponent(runningScan().runId)}`);
+    expect(job.href).toBe(`/agent/${encodeURIComponent(runningScan().runId)}`);
     expect(job.steps).toEqual([
       { key: 'discover', label: 'Discover documents', state: 'done', counter: '41 docs · 12 to curate' },
       { key: 'tag', label: 'Curate documents', state: 'active', counter: '3/12 docs' },
@@ -158,7 +166,7 @@ describe('a run record as the shell reads it', () => {
 
   it('opens the run’s own conversation from its job', () => {
     const run = runningScan();
-    expect(toJobChain(repo, run, true).href).toBe(`/preview/agent/${encodeURIComponent(run.runId)}`);
+    expect(toJobChain(repo, run, true).href).toBe(`/agent/${encodeURIComponent(run.runId)}`);
   });
 
   it('names the command instead of onboarding on a re-scan', () => {
@@ -213,11 +221,11 @@ describe('a run in the shell', () => {
     const state = serve([]);
     // Home is not where the subscription lives — the shell is — so any address
     // would do here. This one is also the address that shows the marker.
-    renderAt('/preview/code');
+    renderAt('/code');
 
-    // The room is joined for the real repository — that is what makes the
-    // server watch its store at all.
-    await waitFor(() => expect(socketMock.joins).toContain('linkwarden'));
+    // The room is joined for the real repository, as this workspace — that is
+    // what makes the server watch its store at all.
+    await waitFor(() => expect(socketMock.joins).toContain(`${ORG}/linkwarden`));
     // The world is loaded and idle; NOW the scan starts.
     const row = (await screen.findByText('linkwarden/linkwarden')).closest('tr')!;
     state.runs = [runningScan()];
@@ -238,7 +246,7 @@ describe('a run in the shell', () => {
 
   it('stays silent for a run already in flight when the page loads (every sign-in reloads)', async () => {
     serve([runningScan()]);
-    renderAt('/preview/code');
+    renderAt('/code');
 
     // The run is known — the row carries the onboarding marker — but it was
     // in flight on arrival, so it never toasts. The runs arrive AFTER the
@@ -257,7 +265,7 @@ describe('a run in the shell', () => {
       return json({ error: 'not found' }, 404);
     }) as unknown as typeof window.fetch;
 
-    renderAt('/preview/code');
+    renderAt('/code');
 
     // The one empty line, and no repository's sessions store ever asked about.
     // The workspace's own runs are still read once: a Document scan belongs to
@@ -273,7 +281,7 @@ describe('a run in the shell', () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
 
-    renderAt('/preview/code');
+    renderAt('/code');
     expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
     expect(screen.queryByText(/Onboarding linkwarden/)).toBeNull();
   });

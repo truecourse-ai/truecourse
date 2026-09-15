@@ -1,11 +1,11 @@
 /**
  * Web spec sources — the llms.txt half of the doc universe.
  *
- * A registered docs site is fetched once (`addSource`) into a committable
- * markdown snapshot under `.truecourse/specs/sources/<id>/`, and reconciled with
- * the site on demand (`refreshSource`). Nothing here is prompt-aware and nothing
- * caches an LLM call: `spec scan` stays offline and deterministic because the
- * network is touched only by these entry points.
+ * A documentation site is read through its llms.txt: the index is parsed, every
+ * link on the site's own origin is fetched as markdown, and each page comes
+ * back with the path and content hash its caller stores it under. Nothing here
+ * is prompt-aware and nothing caches an LLM call: the scan stays offline and
+ * deterministic because the network is touched only by these entry points.
  */
 
 export { parseLlmsTxt, flattenLinks, normalizeSourceUrl } from './llms-txt.js';
@@ -22,41 +22,14 @@ export {
 export type { FetchOptions, FetchProgress, FetchPagesResult, FetchedPage, SourcePreview } from './fetcher.js';
 
 export {
-  addSource,
-  assertSourceAddable,
-  refreshSource,
-  removeSource,
-  listSources,
-  readSourcesFile,
-  writeSourcesFile,
-  sourcesFilePath,
-  sourcesDirPath,
-  sourceDirPath,
-  sourceDocAbsPath,
-  sourceDocRef,
-  sourceIdFromUrl,
-  slugifyId,
   urlToSnapshotPath,
   mapUrlsToPaths,
   hashContent,
-  SOURCES_REF_PREFIX,
-} from './store.js';
-export type { AddSourceOptions, AddSourceResult, RefreshSourceResult } from './store.js';
+  sourceIdFromUrl,
+  slugifyId,
+} from './paths.js';
 
-export {
-  SourceSkipReasonSchema,
-  SourceSkipSchema,
-  SourceDocSchema,
-  SpecSourceSchema,
-  SourcesFileSchema,
-} from './types.js';
-export type { SourceSkipReason, SourceSkip, SourceDoc, SpecSource, SourcesFile } from './types.js';
+export { SourceSkipReasonSchema, SourceSkipSchema } from './types.js';
+export type { SourceSkipReason, SourceSkip } from './types.js';
 
-export {
-  InvalidSourceUrlError,
-  LlmsTxtFetchError,
-  SourceExistsError,
-  SourceNotFoundError,
-  SourcesFileError,
-  SourcePathError,
-} from './errors.js';
+export { InvalidSourceUrlError, LlmsTxtFetchError, SourcePathError } from './errors.js';

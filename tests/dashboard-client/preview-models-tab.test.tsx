@@ -32,7 +32,7 @@ vi.mock('@/lib/socket', () => {
   };
 });
 
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 
 const realFetch = window.fetch;
 
@@ -85,19 +85,19 @@ function json(body: unknown, status = 200): Response {
 }
 
 function renderModels() {
-  const path = '/preview/settings/models';
+  const path = '/settings/models';
   window.history.replaceState({}, '', path);
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {

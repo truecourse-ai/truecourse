@@ -1,6 +1,6 @@
 /**
  * COMPOSITION validation — the rules the scenario schema accepts but the engine
- * cannot execute. On the worker path (plan 04 step 17) they are part of
+ * cannot execute. On the worker path they are part of
  * `run_scenario`/`submit_scenario`'s deterministic PRE-FLIGHT: a defect comes
  * back as the tool error WITHOUT an execution, and the session revises in-loop.
  * They are per driver, because the two surfaces compose differently:

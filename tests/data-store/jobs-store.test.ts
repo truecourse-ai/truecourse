@@ -72,34 +72,37 @@ describe('JobStore — single-flight', () => {
     expect(await store.getActiveByKey('org_A', 'k')).toBeNull();
   });
 
-  it('failOrphaned reaps queued/running jobs (boot recovery), returns them with their payload, and frees the key', async () => {
+  it('interruptOrphaned reaps queued/running jobs (boot recovery), returns them with their payload, and frees the key', async () => {
     const store = new JobStore(db);
-    const a = await store.create({ org: 'org_A', type: 'knowledge.sync', key: 'a' });
+    const a = await store.create({ org: 'org_A', type: 'context.sync', key: 'a' });
     const b = await store.create({
       org: 'org_A',
-      type: 'guard.gate',
+      type: 'repo.guard-run',
       key: 'b',
-      payload: { repoFullName: 'acme/api', headSha: 'sha1', installationId: 42, checkRunId: 7 },
+      payload: { repoFullName: 'acme/api', workspaceOrgId: 'org_A' },
     });
     await store.markRunning(b.id);
 
     // The reaped rows come back with type + stored payload, so boot recovery can
-    // settle side effects the dead job left dangling (e.g. a gate's PR Check).
-    const reaped = await store.failOrphaned();
+    // settle side effects the dead job left dangling.
+    const reaped = await store.interruptOrphaned();
     expect(reaped).toHaveLength(2);
     const reapedGate = reaped.find((j) => j.id === b.id);
     expect(reapedGate).toMatchObject({
-      type: 'guard.gate',
+      type: 'repo.guard-run',
       key: 'b',
       workspaceOrgId: 'org_A',
-      payload: { repoFullName: 'acme/api', headSha: 'sha1', installationId: 42, checkRunId: 7 },
+      payload: { repoFullName: 'acme/api', workspaceOrgId: 'org_A' },
     });
     expect(reaped.find((j) => j.id === a.id)?.payload).toBeNull();
     expect(await store.listActive('org_A')).toEqual([]);
-    expect((await store.get(a.id))?.status).toBe('failed');
+    expect(await store.get(a.id)).toMatchObject({
+      status: 'interrupted',
+      error: 'interrupted by a server restart',
+    });
 
     // The freed key accepts a fresh job.
-    const fresh = await store.create({ org: 'org_A', type: 'knowledge.sync', key: 'a' });
+    const fresh = await store.create({ org: 'org_A', type: 'context.sync', key: 'a' });
     expect(fresh.status).toBe('queued');
   });
 

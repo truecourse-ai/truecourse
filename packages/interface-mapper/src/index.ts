@@ -1,8 +1,8 @@
 /**
  * `@truecourse/interface-mapper` — the code side of guard: turn the app's own
  * surfaces into INTERFACES (entry-rooted interaction paths). Pure derivation, zero
- * LLM, no dependency on a prior `truecourse analyze` run — it consumes analyzer
- * artifacts directly and, for a cli whose framework no extractor reads, the
+ * LLM, no dependency on a prior analysis — it consumes the per-file facts
+ * directly and, for a cli whose framework no extractor reads, the
  * program's own help output.
  *
  * Maps the cli surface (tree-first, probe fallback) and the api surface (route

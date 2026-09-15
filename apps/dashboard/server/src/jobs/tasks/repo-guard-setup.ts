@@ -1,6 +1,6 @@
 import { dashboardActivity } from '../../services/dashboard-activity.service.js';
 /**
- * `repo.guard-setup` — `truecourse guard setup` over an ephemeral clone.
+ * `repo.guard-setup` — Flow setup over an ephemeral clone.
  *
  * Setup writes files INSIDE the repo (the recipe, the dependency catalog, the
  * seed script, its own step spine), and a hosted clone is thrown away when the
@@ -10,8 +10,6 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  * after. That bundle is what carries the per-step fingerprints forward, so a
  * re-run over unchanged inputs settles every step without spending.
  *
- * A repository with no stored corpus is refused up front — setup reads the
- * curated doc universe, and there is nothing to catalogue against without it.
  * A setup whose recipe gate held chains straight into `repo.guard-generate`.
  */
 
@@ -189,7 +187,7 @@ export function createRepoGuardSetupTask(
       runIds.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however setup ended.
-      await emitRepoLifecycle(ctx.payload.repoFullName, 'guard-setup');
+      await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-setup');
       // Only a setup whose recipe gate held has anything to generate against: a
       // refused setup ends the chain here, and its notification already says why.
       if (outcome !== 'succeeded') return;

@@ -7,8 +7,8 @@ import type { GuardVerification } from '@truecourse/shared'
  * reviewer's base), realization matching, recipe discovery, and the seed
  * doctrine guard-setup's session reuses — plus their content fingerprints
  * (folded into the cache keys so a prompt edit re-runs the affected stage).
- * The retired one-shot extract/flows prompts are gone (plan 04 step 20); the
- * session prompts that replaced them live in `@truecourse/core`.
+ * The retired one-shot extract/flows prompts are gone; the session prompts
+ * that replaced them live in `@truecourse/core`.
  *
  * Every output shape a prompt asks for is the JSON Schema rendered from the SAME
  * Zod definition the engine validates the reply with — never hand-written prose
@@ -96,9 +96,9 @@ export interface OutlineEntry {
 // Retired one-shot stages
 // ---------------------------------------------------------------------------
 
-// The one-shot EXTRACT / FLOWS / FLOWS_EPIC prompts were RETIRED (plan 04
-// step 20): extraction and flow synthesis run as agent sessions whose prompts
-// live in `@truecourse/core` (`services/guard-generate/{extract,flows}.ts`).
+// The one-shot EXTRACT / FLOWS / FLOWS_EPIC prompts were RETIRED: extraction
+// and flow synthesis run as agent sessions whose prompts live in
+// `@truecourse/core` (`services/guard-generate/{extract,flows}.ts`).
 // Their frozen fingerprints survive as literal salt inside
 // `flowGenerationInputsHash` (see `section-plan.ts`) so committed flow hashes
 // did not move when the prompts left.
@@ -1158,7 +1158,7 @@ function resourceLines(place: InterfaceResource): string[] {
   ]
   const r = place.readables
   // A cli command group and an api noun carry NO readables — those are DOM
-  // facts (plan item 102) — so such a place renders its identity line and stops,
+  // facts — so such a place renders its identity line and stops,
   // exactly as an unfleshed web place does.
   if (!r) return lines
   for (const m of r.markers ?? []) {
@@ -2192,7 +2192,7 @@ export interface SeedDraftInput {
   appImports: string[]
   /**
    * The flows that could not be authored, with the data they said they needed. Now
-   * that `truecourse guard setup` owns seed drafting this is OPTIONAL grounding, not
+   * that Flow setup owns seed drafting this is OPTIONAL grounding, not
    * the trigger: setup drafts a seed BEFORE authoring has ever run, so on a first
    * setup this list is legitimately empty.
    */

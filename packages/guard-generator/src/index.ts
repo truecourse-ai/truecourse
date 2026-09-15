@@ -11,7 +11,7 @@ export {
   generateGuards,
   looksWorldMutating,
   workerCacheKey,
-  // Single-step mode (the CLI's `--only-<step>` flags): the pipeline's session
+  // Single-step mode (`only`): the pipeline's session
   // steps in order. `@truecourse/core` enforces the cache-only replay of the
   // prior ones against these.
   GENERATE_SESSION_STEPS,
@@ -26,8 +26,8 @@ export {
   type GuardGenerateError,
   type GuardExtractionFailure,
   type InterfaceProvider,
-  // The flow-worker session seam (plan 04 steps 17 + 18) — implemented by
-  // `@truecourse/core`, injected by the command adapter.
+  // The flow-worker session seam — implemented by `@truecourse/core`, injected
+  // by the command adapter.
   type FlowWorkerSessionSeam,
   type FlowWorkerSessionResult,
   type FlowWorkerTask,
@@ -239,7 +239,7 @@ export {
   type SeedDraftDatabase,
 } from './seed-draft.js'
 
-// `truecourse guard setup` — the cheap preparation stage between the spec scan and
+// Flow setup — the cheap preparation stage between the spec scan and
 // the (expensive) generate.
 export {
   runGuardSetup,
@@ -295,11 +295,10 @@ export {
 // Scenario yaml round-trip helpers the worker session path reads through.
 export { serializeScenarioYaml, parseRawScenarioYaml, parseScenarioYaml } from './serialize.js'
 
-// The failing-test TRIAGE stage is RETIRED (plan 04 step 20): a committed
-// red's adjudication is the flow worker's own confirmed `expectedReds`
-// prediction. The orphaned `.cache/guard/triage` files remain on disk
-// (derived, deletable); `GuardTriageSchema` lives on in `@truecourse/shared`
-// because committed manifests still carry historical triage verdicts read-side.
+// The failing-test TRIAGE stage is RETIRED: a committed red's adjudication is
+// the flow worker's own confirmed `expectedReds` prediction. `GuardTriageSchema`
+// lives on in `@truecourse/shared` because stored manifests still carry
+// historical triage verdicts read-side.
 
 export {
   GENERATE_SYSTEM_PROMPT,

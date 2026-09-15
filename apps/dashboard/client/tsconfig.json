@@ -13,7 +13,10 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
-    "paths": { "@/*": ["./src/*"] }
+    "paths": {
+      "@edition": ["./src/dashboard/shell/open-edition.ts"],
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules", "dist"]

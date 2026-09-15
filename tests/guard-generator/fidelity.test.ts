@@ -1,5 +1,5 @@
 /**
- * THE FIDELITY JUDGE'S EFFECT ON THE CORPUS (plan 04 step 18), from the
+ * THE FIDELITY JUDGE'S EFFECT ON THE CORPUS, from the
  * engine's side: what a green candidate the judge FLAGS does to the run.
  *
  * The judge is no longer a pipeline stage — it is the depth-1 child

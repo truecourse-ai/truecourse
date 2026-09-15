@@ -7,7 +7,8 @@
  *
  * Doc universe = the corpus-kept docs (`.truecourse/specs/corpus.json`, read
  * tolerantly) — the corpus is the single authority on which docs are spec.
- * A repo without a corpus has nothing to generate against: run `spec scan`.
+ * A repo without a corpus has nothing to generate against: the Document scan
+ * curates one first.
  * (The RUNNER additionally indexes scenario-bound docs, which it must for
  * stale/orphan detection; generation deliberately does not.)
  */
@@ -42,10 +43,11 @@ import {
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 import { buildOperationIndex, matchedSchemaFingerprint } from './openapi-enrich.js'
 import { securityFingerprintForSection } from './openapi-security.js'
+import { corpusFilePath } from '@truecourse/shared/work-tree'
 
 /**
  * The RETIRED one-shot extract / flows / epic prompts' fingerprints, FROZEN as
- * literals (plan 04 step 20). They stay in {@link flowGenerationInputsHash} as
+ * literals. They stay in {@link flowGenerationInputsHash} as
  * constant salt on purpose: swapping in the session prompts' fingerprints (or
  * dropping these) would move EVERY committed flow's hash and mass-re-author
  * every user's corpus for no behavioral reason. The trade: an edit to the
@@ -142,7 +144,7 @@ const CorpusShape = z
 
 /** Doc ref → its canonical area ids, read tolerantly from the corpus (or empty). */
 export function readCorpusAreaTags(repoRoot: string): Map<string, string[]> {
-  const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json')
+  const file = corpusFilePath(repoRoot)
   const map = new Map<string, string[]>()
   if (!fs.existsSync(file)) return map
   try {
@@ -241,7 +243,7 @@ export function flowGenerationInputsHash(input: {
 
 /** Whether a corpus exists — the corpus is generation's only doc authority. */
 export function hasGuardUniverse(repoRoot: string): boolean {
-  return fs.existsSync(path.join(repoRoot, '.truecourse', 'specs', 'corpus.json'))
+  return fs.existsSync(corpusFilePath(repoRoot))
 }
 
 /**

@@ -175,5 +175,5 @@ function baseUrlVars(service: DetectedExternalService): { envVar: string; defaul
 function describe(service: DetectedExternalService): string {
   const how = service.source === 'http' ? 'an HTTP call' : 'an SDK import'
   const kind = service.category ? `${service.category} service, ` : ''
-  return `declared by \`truecourse guard setup\` — ${kind}detected from ${how}; no account provided yet`
+  return `declared by Flow setup — ${kind}detected from ${how}; no account provided yet`
 }

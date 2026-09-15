@@ -32,9 +32,8 @@ import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { registerJob } from '@truecourse/jobs';
 import type { AuthResult, AuthVerifier } from '@truecourse/shared';
 
-// app.ts pulls the analyses router, which imports the socket-handlers module;
-// stub it so nothing tries to open a real socket (same shape as the other
-// route suites).
+// The routers import the socket-handlers module; stub it so nothing tries to
+// open a real socket (same shape as the other route suites).
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
@@ -46,15 +45,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   }
   return {
     ...actual,
-    emitAnalysisProgress: vi.fn(),
-    emitAnalysisComplete: vi.fn(),
-    emitViolationsReady: vi.fn(),
-    emitFilesChanged: vi.fn(),
-    emitAnalysisCanceled: vi.fn(),
-    createSocketTracker: () => new NoopTracker(),
     createSocketSpecTracker: () => new NoopTracker(),
-    createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
-    createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
     emitSpecProgress: vi.fn(),
     emitSpecComplete: vi.fn(),
   };
@@ -95,15 +86,15 @@ import {
   type RegistryEntry,
   type RegistryStore,
 } from '@truecourse/core/config/registry';
-import {
-  createSessionRun,
-  sessionsDir,
-  setSessionsRootResolver,
-  resetSessionsRootResolver,
-} from '@truecourse/core/lib/sessions-store';
+import type { RepositoryRecord } from '@truecourse/shared';
+import { createStoredSessionRun, sessionsDir } from '@truecourse/core/lib/sessions-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
 import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
-import { MemoryGateStore } from '../github-app/memory-store';
+import { MemoryInstallationStore } from '../github-app/memory-store';
 import { memoryContextStore } from '../helpers/memory-context-store';
 
 const ORG = 'org_A';
@@ -156,33 +147,23 @@ const verify: AuthVerifier = async (cookieHeader) => {
 };
 
 /**
- * The registry as production runs it: a live view of the link store, exactly
- * what GhReposRegistryStore derives from gh_repos. Mutations are no-ops.
+ * The registry as production runs it: a live view of the repositories, exactly
+ * what RepositoriesRegistryStore reads off them, scoped to one workspace.
  */
-function derivedRegistry(gate: MemoryGateStore): RegistryStore {
-  const toEntry = (repoFullName: string, defaultBranch: string): RegistryEntry => ({
-    slug: slugify(repoFullName, []),
-    name: repoFullName,
-    path: repoFullName,
-    defaultBranch,
-    remoteUrl: `https://github.com/${repoFullName}`,
+function derivedRegistry(gate: MemoryInstallationStore): RegistryStore {
+  const toEntry = (r: RepositoryRecord): RegistryEntry => ({
+    slug: r.slug,
+    name: r.repoFullName,
+    path: r.repoFullName,
+    provider: 'github',
+    ...(r.defaultBranch ? { defaultBranch: r.defaultBranch } : {}),
   });
-  const all = async (): Promise<RegistryEntry[]> =>
-    (await gate.listRepos()).map((r) => toEntry(r.repoFullName, r.defaultBranch));
+  const mine = async (org: string): Promise<RegistryEntry[]> =>
+    (await gate.listReposForWorkspace(org)).map(toEntry);
   return {
-    readRegistry: all,
-    pruneStaleProjects: all,
-    getProjectBySlug: async (slug) => (await all()).find((e) => e.slug === slug) ?? null,
-    getProjectByPath: async (p) => (await all()).find((e) => e.path === p) ?? null,
-    registerProject: async (repoPath) =>
-      (await all()).find((e) => e.path === repoPath) ?? {
-        slug: slugify(repoPath, []),
-        name: repoPath,
-        path: repoPath,
-      },
-    unregisterProject: async () => true,
-    touchProject: async () => {},
-    setLastAnalyzed: async () => {},
+    readRegistry: mine,
+    getProjectBySlug: async (org, slug) => (await mine(org)).find((e) => e.slug === slug) ?? null,
+    getProjectByPath: async (org, p) => (await mine(org)).find((e) => e.path === p) ?? null,
   };
 }
 
@@ -195,18 +176,25 @@ interface MountOptions {
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
 }
 
-let store: MemoryGateStore;
+let store: MemoryInstallationStore;
 /** The workspace's Context, so a test can plant a source and read it back. */
 let contextStore: ReturnType<typeof memoryContextStore>;
 
 function buildApp(opts: MountOptions = {}): Express {
   const github = createGithubConnection({
     store,
+    repos: store,
     octokitFor: () => octokit,
     ...opts,
   });
   if (!github) throw new Error('expected a configured GitHub connection');
-  return createApp({ serveStatic: false, authVerifier: verify, github, jobs: null });
+  return createApp({
+    serveStatic: false,
+    authVerifier: verify,
+    repoLinks: store,
+    github,
+    jobs: null,
+  });
 }
 
 /** Poll until a fire-and-forget handler has landed. */
@@ -226,19 +214,17 @@ function signed(body: unknown): { payload: string; signature: string } {
 }
 
 beforeAll(() => {
-  process.env.TRUECOURSE_HOME = makeTmpDir('tc-github-home-');
   Object.assign(process.env, APP_ENV);
-  // The production sessions layout: transcripts keyed by repo identity under
-  // the global dir, so they exist independent of any work tree.
-  setSessionsRootResolver((key) =>
-    path.isAbsolute(key)
-      ? path.join(key, '.truecourse', 'sessions')
-      : path.join(process.env.TRUECOURSE_HOME!, 'sessions', key.replace('/', '__')),
-  );
 });
 
 beforeEach(async () => {
-  store = new MemoryGateStore();
+  installMemorySessionRuns();
+  // The per-repo guard surfaces this suite reaches are about VISIBILITY, not
+  // guard data: the stores are here so the routes resolve, and hold nothing.
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
+  installMemorySpecStore();
+  store = new MemoryInstallationStore();
   // A push looks for the source that scopes the repository, so the workspace
   // store has to exist for the push hook to do anything.
   contextStore = memoryContextStore();
@@ -268,12 +254,15 @@ afterEach(() => {
   resetContextStore();
   resetWorkspaceLlmConfigStore();
   resetWorkspaceLlmBackend();
-  setWorkTreeProvider(null);
-  fs.rmSync(path.join(process.env.TRUECOURSE_HOME!, 'sessions'), { recursive: true, force: true });
+  setWorkTreeProvider('github', null);
+  resetSessionRuns();
+  resetGuardStore();
+  resetGuardOverlayStore();
+  resetSpecStore();
+  fs.rmSync(sessionsDir(REPO), { recursive: true, force: true });
 });
 
 afterAll(() => {
-  resetSessionsRootResolver();
   for (const key of Object.keys(APP_ENV)) delete process.env[key];
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -287,14 +276,20 @@ describe('a server with no GitHub App configured', () => {
     const saved = { ...process.env };
     for (const key of Object.keys(APP_ENV)) delete process.env[key];
     try {
-      expect(createGithubConnection()).toBeNull();
+      expect(createGithubConnection({ repos: store })).toBeNull();
     } finally {
       Object.assign(process.env, saved);
     }
   });
 
   it('answers every /api/github route with an actionable 503', async () => {
-    const app = createApp({ serveStatic: false, authVerifier: null, github: null, jobs: null });
+    const app = createApp({
+      serveStatic: false,
+      authVerifier: null,
+      repoLinks: null,
+      github: null,
+      jobs: null,
+    });
 
     const status = await request(app).get('/api/github/status').expect(503);
     expect(status.body.error).toMatch(/GITHUB_APP_ID/);
@@ -541,8 +536,7 @@ describe('linking a repository', () => {
     expect(detail.body).toMatchObject({
       name: REPO,
       defaultBranch: 'main',
-      // The preview reads `remoteUrl` to tell a real repository from a fixture.
-      remoteUrl: `https://github.com/${REPO}`,
+      provider: 'github',
     });
 
     // The setup was started for the repository that landed, no sync went with
@@ -621,7 +615,7 @@ describe('disconnecting a repository', () => {
     await linkRepo(app).expect(201);
 
     // Transcripts a scan left behind, keyed by identity.
-    createSessionRun(REPO, { command: 'spec-scan', gitRef: 'abc' }).finish('completed');
+    (await createStoredSessionRun(REPO, { command: 'spec-scan', gitRef: 'abc' })).finish('completed');
     expect(fs.existsSync(sessionsDir(REPO))).toBe(true);
 
     await request(app)
@@ -688,16 +682,16 @@ describe('a slug that belongs to another workspace', () => {
       .expect(200);
   });
 
-  it('404s the per-repo config route', async () => {
+  it('404s the per-repo guard routes', async () => {
     const server = app();
     await linkRepo(server).expect(201);
 
     await request(server)
-      .get(`/api/repos/${REPO_SLUG}/config`)
+      .get(`/api/repos/${REPO_SLUG}/guard/staleness`)
       .set('Cookie', `tc_session=${OTHER_ORG}`)
       .expect(404);
     await request(server)
-      .get(`/api/repos/${REPO_SLUG}/config`)
+      .get(`/api/repos/${REPO_SLUG}/guard/staleness`)
       .set('Cookie', `tc_session=${ORG}`)
       .expect(200);
   });
@@ -720,6 +714,19 @@ describe('a slug that belongs to another workspace', () => {
 // ---------------------------------------------------------------------------
 
 describe('GET /api/repos with a link store', () => {
+  it("answers each repository's default branch, which the row recorded on link", async () => {
+    const app = buildApp({ startSetup: async () => 'queued' });
+    await linkRepo(app).expect(201);
+
+    const mine = await request(app)
+      .get('/api/repos')
+      .set('Cookie', `tc_session=${ORG}`)
+      .expect(200);
+    expect((mine.body as Array<{ name: string; defaultBranch: string | null }>).map((r) => [r.name, r.defaultBranch])).toEqual([
+      [REPO, 'main'],
+    ]);
+  });
+
   it("hides another workspace's connected repository", async () => {
     const app = buildApp({ startSetup: async () => 'queued' });
     await linkRepo(app).expect(201);

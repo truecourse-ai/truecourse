@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readUIMessageStream } from 'ai';
-import { createSessionRun, openSessionRun, reconcileSessionsStore, recoverSessionActivity } from '@truecourse/core/lib/sessions-store';
+import { createStoredSessionRun, openStoredSessionRun } from '@truecourse/core/lib/sessions-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { readActivityEvents, readActivityProgress, subscribeActivity } from '@truecourse/core/lib/activity-journal';
 import { createActivityStream } from '../../apps/dashboard/server/src/services/activity-stream.service';
 import { dashboardActivity } from '../../apps/dashboard/server/src/services/dashboard-activity.service';
@@ -16,12 +17,12 @@ const event = (seq = 0): SessionEvent => ({ type: 'user-message', seq, ts: new D
 
 describe('dashboard activity journal and stream', () => {
   let root: string;
-  beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-activity-')); });
-  afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
-  const create = () => createSessionRun(root, { command: 'spec-scan', gitRef: 'abc', activityStream: true });
+  beforeEach(() => { installMemorySessionRuns(); root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-activity-')); });
+  afterEach(() => { resetSessionRuns(); fs.rmSync(root, { recursive: true, force: true }); });
+  const create = () => createStoredSessionRun(root, { command: 'spec-scan', gitRef: 'abc' });
 
   it('pages a large replay and preserves all transcript events through completion', async () => {
-    const run = create();
+    const run = await create();
     const history: import('@truecourse/shared/activity-stream').ActivityEvent[] =
       Array.from({ length: 300 }, (_, cursor) => ({ cursor, kind: 'session-event', sessionId: 's', event: event(cursor) }));
     history.push({ cursor: 300, kind: 'run', run: { ...run.record(), status: 'completed' } });
@@ -42,7 +43,7 @@ describe('dashboard activity journal and stream', () => {
 
   it('delivers local updates without replay and catches up periodically and on remote notification', async () => {
     vi.useFakeTimers();
-    const run = create();
+    const run = await create();
     const history = readActivityEvents(run.dir);
     run.readActivity = vi.fn(async after => history.filter(e => e.cursor > after));
     let remote: (() => void) | undefined;
@@ -84,8 +85,8 @@ describe('dashboard activity journal and stream', () => {
     } finally { controller.abort(); await consume; vi.useRealTimers(); }
   });
 
-  it('publishes only persisted events, with independent session identities and byte cursors', () => {
-    const run = create();
+  it('publishes only persisted events, with independent session identities and byte cursors', async () => {
+    const run = await create();
     let observed = 0;
     const unsubscribe = subscribeActivity(run.dir, () => { observed = readActivityEvents(run.dir).length; });
     run.persistence.appendEvent('a', event());
@@ -101,7 +102,7 @@ describe('dashboard activity journal and stream', () => {
   });
 
   it('publishes immutable run snapshots directly and keeps slow viewers lossless', async () => {
-    const run = create();
+    const run = await create();
     const published: import('@truecourse/shared/activity-stream').ActivityEvent[] = [];
     const unsubscribe = subscribeActivity(run.dir, event => { if (event) published.push(event); });
     run.persistence.updateIndex({ sessionId: 'a', kind: 'scan', workItem: 'doc', status: 'running', spent: { turns: 0, tokens: 0, costUsd: 0 } });
@@ -122,12 +123,8 @@ describe('dashboard activity journal and stream', () => {
     unsubscribe();
   });
 
-  it('keeps CLI storage unchanged and does not publish credentials', () => {
-    const legacy = createSessionRun(root, { command: 'spec-scan', gitRef: 'abc' });
-    legacy.persistence.appendEvent('a', event());
-    expect(fs.existsSync(path.join(legacy.dir, 'activity.jsonl'))).toBe(false);
-    expect(legacy.persistence.publishProgress).toBeUndefined();
-    const run = create();
+  it('does not publish credentials', async () => {
+    const run = await create();
     run.setEndpoint({ url: 'http://localhost:1234', token: 'NEVER-PUBLIC' });
     const journal = fs.readFileSync(path.join(run.dir, 'activity.jsonl'), 'utf8');
     expect(journal).not.toContain('NEVER-PUBLIC');
@@ -135,26 +132,14 @@ describe('dashboard activity journal and stream', () => {
     expect(journal).not.toContain('"endpoint"');
   });
 
-  it('repairs a crash between transcript persistence and journal append, including a partial tail', () => {
-    const run = create();
-    fs.appendFileSync(path.join(run.dir, 'a.jsonl'), JSON.stringify(event())+'\n');
-    fs.appendFileSync(path.join(run.dir, 'activity.jsonl'), '{"cursor":');
-    recoverSessionActivity(run);
-    expect(readActivityEvents(run.dir).filter(e => e.kind === 'session-event')).toHaveLength(1);
-    recoverSessionActivity(run);
-    expect(readActivityEvents(run.dir).filter(e => e.kind === 'session-event')).toHaveLength(1);
-    run.finish('completed');
-    expect(readActivityEvents(run.dir).at(-1)).toMatchObject({ kind: 'run', run: { status: 'completed' } });
-  });
-
-  it('fails loudly for complete corrupt records', () => {
-    const run = create();
+  it('fails loudly for complete corrupt records', async () => {
+    const run = await create();
     fs.appendFileSync(path.join(run.dir, 'activity.jsonl'), 'corrupt\n');
     expect(() => readActivityEvents(run.dir)).toThrow();
   });
 
   it('replays a finished run as SDK data parts, even when no viewer saw it live', async () => {
-    const run = create();
+    const run = await create();
     run.persistence.appendEvent('a', event());
     run.finish('completed');
     const snapshots = [];
@@ -167,7 +152,7 @@ describe('dashboard activity journal and stream', () => {
   });
 
   it('catches events written while replay is being consumed and isolates viewer cancellation', async () => {
-    const run = create();
+    const run = await create();
     const first = createActivityStream(run, -1, new AbortController().signal).getReader();
     const second = createActivityStream(run, -1, new AbortController().signal).getReader();
     expect((await first.read()).value?.type).toBe('start');
@@ -182,12 +167,13 @@ describe('dashboard activity journal and stream', () => {
     expect(chunks.at(-1)).toMatchObject({ type: 'finish' });
   });
 
-  it('replays missed events from a cursor after reopening the run and records dead-process recovery', async () => {
-    const run = create();
+  it('replays missed events from a cursor after reopening an interrupted run', async () => {
+    const run = await create();
     const cursor = readActivityEvents(run.dir).at(-1)!.cursor;
     run.persistence.appendEvent('a', event());
-    reconcileSessionsStore(root, { isProcessAlive: () => false });
-    const reopened = openSessionRun(root, 'spec-scan', run.runId);
+    // What the boot sweep leaves behind for a run a dead process abandoned.
+    run.finish('interrupted');
+    const reopened = await openStoredSessionRun(root, 'spec-scan', run.runId);
     expect(reopened.record().status).toBe('interrupted');
     const reader = createActivityStream(reopened, cursor, new AbortController().signal).getReader();
     const replay = [];
@@ -196,8 +182,8 @@ describe('dashboard activity journal and stream', () => {
     expect(replay.at(-1)).toMatchObject({ kind: 'run', run: { status: 'interrupted' } });
   });
 
-  it('keeps partial progress transient and removes it when the complete turn lands', () => {
-    const run = create();
+  it('keeps partial progress transient and removes it when the complete turn lands', async () => {
+    const run = await create();
     const initial = readActivityEvents(run.dir).length;
     run.persistence.publishProgress!('a', { kind: 'text', turnId: 'turn-1', text: 'Reading…' });
     expect(readActivityProgress(run.dir).a).toMatchObject({ text: 'Reading…' });
@@ -211,8 +197,9 @@ describe('dashboard activity journal and stream', () => {
 
 
 it('does not lose a commit arriving while an asynchronous replay query is in flight', async () => {
+  installMemorySessionRuns();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-activity-await-'));
-  const run = createSessionRun(root, { command: 'guard-generate', gitRef: 'abc', activityStream: true });
+  const run = await createStoredSessionRun(root, { command: 'guard-generate', gitRef: 'abc' });
   let resolveRead!: () => void;
   const gate = new Promise<void>(resolve => { resolveRead = resolve; });
   let reading!: () => void;
@@ -235,11 +222,13 @@ it('does not lose a commit arriving while an asynchronous replay query is in fli
   expect(chunks.filter(c => c?.type === 'data-activity')).toHaveLength(3);
   expect(chunks.at(-1)).toMatchObject({ type: 'finish' });
   fs.rmSync(root, { recursive: true, force: true });
+  resetSessionRuns();
 });
 
 // The hosted job's tracker is the only route a phase's own words have to the
 // stored run: whatever the engine said it did must survive the mirror.
 it('mirrors a step fact onto the run record checklist, beside its counter', async () => {
+  installMemorySessionRuns();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-activity-facts-'));
   const ctx: JobContext<OnboardingJobPayload> = {
     payload: {
@@ -272,7 +261,7 @@ it('mirrors a step fact onto the run record checklist, beside its counter', asyn
     },
   );
 
-  const record = openSessionRun(root, 'spec-scan', runId).record();
+  const record = (await openStoredSessionRun(root, 'spec-scan', runId)).record();
   const block = KnownDisplayBlockSchema.parse(
     record.display?.blocks.find(b => b.kind === 'checklist'),
   );
@@ -285,4 +274,5 @@ it('mirrors a step fact onto the run record checklist, beside its counter', asyn
   ]);
   expect(block.items.find(item => item.key === 'clone')?.facts).toBeUndefined();
   fs.rmSync(root, { recursive: true, force: true });
+  resetSessionRuns();
 });

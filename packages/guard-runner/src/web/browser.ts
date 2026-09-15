@@ -84,7 +84,7 @@ export interface LaunchWebBrowserOptions {
 
 /**
  * The message a missing browser binary earns — it names the one command that fixes
- * it. The engine never downloads mid-run (§10.3), so this is the whole remedy.
+ * it. The engine never downloads mid-run, so this is the whole remedy.
  */
 export const BROWSER_MISSING_MESSAGE =
   'the web driver needs the Chromium browser, which is not installed — run ' +

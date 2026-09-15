@@ -11,7 +11,7 @@
  * not interface data), so it lands here.
  *
  * The append discipline itself — append-only markdown, one `## <runId>` section
- * per run, committed, deduped within the run only — is the generic
+ * per run, deduped within the run only — is the generic
  * {@link appendFindingsLedger}; this module only fixes WHICH file
  * (`guardInterfaceFindingsPath`) and what its preamble says.
  */
@@ -37,8 +37,7 @@ export interface AppendFindingsInput {
 
 /**
  * Append one run's findings under a `## <runId>` header. Returns nothing when
- * the run found none: an empty section says the same as no section and costs a
- * diff on a committed file.
+ * the run found none: an empty section says the same as no section.
  */
 export function appendInterfaceFindings(
   input: AppendFindingsInput,

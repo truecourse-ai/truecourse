@@ -1,12 +1,12 @@
 import type { GuardSetupPreparationSession } from '@truecourse/guard-generator';
 /**
- * In-process driver for `truecourse guard setup` — the cheap preparation
- * stage between `spec scan` and `guard generate`.
+ * In-process driver for Flow setup — the cheap preparation stage between the
+ * Document scan and Flow generation.
  *
  * The ENGINE is `@truecourse/guard-generator`'s `runGuardSetup` (recipe discovery +
  * the live endpoint probe, detection, the catalog step with its externals skeleton,
  * the one seed — the step spine with per-step fingerprints). THIS module is the
- * adapter both the CLI and (later) the dashboard call: it owns step 0 (is a
+ * adapter the dashboard calls: it owns step 0 (is a
  * provider configured — a CONFIG question, which the engine package deliberately
  * has no dependency on), model + transport resolution, the pre-flight cost
  * estimate, usage accounting, persisting `guard/setup.json`, and the AGENT-SESSION
@@ -38,30 +38,17 @@ import {
 } from '@truecourse/guard-generator';
 import { writeGuardSetup, readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
 import {
-  getDefaultTransport,
-  agentTransport,
-  cliTransport,
   getStageUsage,
   resetStageUsage,
   setLlmCallSink,
-  isLlmConfigured,
   noProviderTransport,
   NO_LLM_PROVIDER_MESSAGE,
   type LlmTransport,
 } from '@truecourse/shared/llm';
-import { resolveClaudeBinary } from '@truecourse/shared';
 import type { RunError, SessionDriver } from '@truecourse/agent-loop';
 import type { GuardSetupReport } from '@truecourse/shared';
-import {
-  LlmApiConfigError,
-  createConfiguredApiTransport,
-  getConfiguredLlmMode,
-  createClaudeCodeTransport,
-  isClaudeCodeTransport,
-} from '../services/llm/install-transport.js';
-import { isCliBinaryAvailable } from '../lib/cli-binary.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
-import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
+import type { LlmTransportMode } from '../services/llm/provider-config.js';
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
@@ -84,7 +71,7 @@ import {
 } from '../services/guard-setup/index.js';
 import { INTERFACE_AUTHOR_SESSION_KIND } from '../services/interface-author/index.js';
 import { runGuardInterfaceAuthoring } from './guard-interfaces.js';
-import type { LlmEstimate } from './analyze-core.js';
+import type { LlmEstimate } from '../services/llm/token-estimator.js';
 import { EstimateDeclined } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
@@ -108,23 +95,15 @@ export class NoLlmProviderError extends Error {
 export interface GuardSetupInProcessOptions {
   tracker?: StepTracker;
   /**
-   * LLM transport: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or
-   * `api` (the provider configured in `~/.truecourse/config.json`). Unset
-   * follows the saved selection.
+   * The transport the ONE-SHOT calls run on: the one the dashboard server
+   * built from the asking workspace's stored provider config, or the
+   * operator's Claude Code. Credentials travel with the run, never through a
+   * process-wide default, and the run has no other way to reach a model.
    */
-  llm?: 'cli' | 'agent' | 'api';
-  io?: string;
+  transport: LlmTransport;
   /**
-   * Run the ONE-SHOT calls on THIS transport instead of resolving one. The
-   * dashboard server passes the transport it built from the asking workspace's
-   * stored provider config — credentials travel with the run, never through a
-   * process-wide default — and step 0 is answered by its existence.
-   */
-  transport?: LlmTransport;
-  /**
-   * The mode an explicit `transport`/`driver` runs in, which decides the stage
-   * models and the run record's attribution. Unset, the saved selection (as a
-   * `--llm` flag may have overridden it) answers.
+   * The mode an explicit `transport`/`driver` runs in, which the run record's
+   * attribution states. Unset, the run is on this process's Claude Code.
    */
   transportMode?: LlmTransportMode;
   /**
@@ -153,13 +132,12 @@ export interface GuardSetupInProcessOptions {
   replace?: boolean;
   /**
    * A sessions-store run record just came into being — setup's own (on its first
-   * session, or at once under `eagerRun`), so the CLI can print its
-   * "watch live" deep link. A lazy run spending
-   * no session never fires it.
+   * session, or at once under `eagerRun`), so the caller learns the run's id.
+   * A lazy run spending no session never fires it.
    */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
-   * Single-step mode (the CLI's `--only-<step>` flags): run only this step —
+   * Single-step mode (`only`): run only this step —
    * prior steps replay from what they left on disk (a step nobody ran throws
    * {@link SetupStepNotReadyError}), later steps never start, and the persisted
    * `guard/setup.json` merges over the previous one. The estimate gate prices
@@ -195,103 +173,34 @@ export interface GuardSetupInProcessResult {
   /** Absolute path of the persisted `guard/setup.json`. */
   reportPath: string;
   /**
-   * Setup's transcript directory, including interface authoring sessions.
-   * Empty when no run was opened.
+   * Setup's scratch directory under the runtime dir, including interface
+   * authoring sessions. Empty when no run was opened.
    */
   sessionsRunDirs: string[];
 }
 
 /**
- * STEP 0 — a usable LLM provider must exist. Cheap and call-free: the EE
- * no-provider sentinel is a hard refusal, and the Claude Code transports (the
- * Agent SDK one-shot, or an explicit `--llm-transport cli` spawn) only need the
- * `claude` binary ON PATH here — the CLI command additionally runs the full auth
- * round-trip, exactly as `guard generate` does.
- *
- * The binary is demanded of exactly the runs that SPAWN it: one that resolved no
- * transport at all, and one whose resolved transport runs on `claude` — the SDK
- * default of claude-code mode, or `cliTransport`. Resolving a transport is not
- * evidence the thing it spawns exists, and letting that count would move the missing
- * binary from step 0 to minutes later, after the install, build, boot and analysis
- * this gate exists to protect. In API mode {@link resolveTransport} answers from the
- * saved provider config, so this never looks for a binary that mode never spawns.
+ * STEP 0 — a usable LLM provider must exist. Cheap and call-free: the
+ * no-provider sentinel is a hard refusal. A real transport is taken at its
+ * word — the dashboard server probed the workspace's provider (or the
+ * operator's Claude Code login) before it built the run, so there is nothing
+ * left to check here.
  *
  * It runs FIRST because both of setup's LLM stages happen after real work (a build,
  * a boot, an analysis pass), and discovering "no provider" then would waste all of it.
  */
-export function assertLlmProviderConfigured(
-  transport?: LlmTransport,
-  opts: { spawnsClaudeCli?: boolean } = {},
-): void {
+export function assertLlmProviderConfigured(transport: LlmTransport): void {
   if (transport === noProviderTransport) throw new NoLlmProviderError(NO_LLM_PROVIDER_MESSAGE);
-  if (transport) {
-    if (!opts.spawnsClaudeCli) return;
-  } else if (getDefaultTransport() !== undefined) {
-    if (!isLlmConfigured()) throw new NoLlmProviderError(NO_LLM_PROVIDER_MESSAGE);
-    return;
-  }
-  const binary = resolveClaudeBinary();
-  if (!isCliBinaryAvailable(binary)) {
-    throw new NoLlmProviderError(
-      `No LLM provider is configured: \`${binary}\` is not installed or not on your PATH. ` +
-        'Install Claude Code (https://docs.anthropic.com/en/docs/claude-code), set CLAUDE_CODE_BINARY to its path, ' +
-        'or configure a provider with `truecourse config`.',
-    );
-  }
 }
 
-/**
- * Build the LLM transport for a run — an explicit per-run override of the saved
- * selection. `agent` → the filesystem mailbox under `options.io`; `api` → the
- * direct-API transport from the user's global config (throws when it isn't
- * configured); `cli` → `claude -p`, forcing Claude Code even when an API
- * transport is the installed default; unset → the installed default.
- *
- * The unset case falls back to BUILDING the configured transport when API mode is
- * selected and nobody installed one: the stage models come from that same config
- * (`resolveModel` → `llm.api.model`), so a transport that ignored it would hand an
- * API model name to `claude -p` — one config, read once, or not at all. The
- * converse is {@link effectiveLlmMode}: a `cli` flag moves model resolution off
- * the API config too, so the two never disagree.
- */
-function resolveTransport(options: {
-  llm?: 'cli' | 'agent' | 'api';
-  io?: string;
-  transport?: LlmTransport;
-}): ResolvedSetupTransport {
-  // A caller that built its own transport has already answered every question
-  // this function asks — including step 0's, since the object exists.
-  if (options.transport) return { transport: options.transport };
-  if (options.llm === 'agent') {
-    if (!options.io) {
-      throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
-    }
-    return { transport: agentTransport(options.io) };
-  }
-  if (options.llm === 'api') return { transport: createConfiguredApiTransport() };
-  // The one resolved transport that still needs step 0's binary check: it spawns
-  // `claude`, and a transport object is no evidence that binary exists.
-  if (options.llm === 'cli') return { transport: cliTransport(), spawnsClaudeCli: true };
-  const installed = getDefaultTransport();
-  if (installed) return { transport: installed, spawnsClaudeCli: isClaudeCodeTransport(installed) };
-  return getConfiguredLlmMode() === 'api'
-    ? { transport: createConfiguredApiTransport() }
-    : { transport: createClaudeCodeTransport(), spawnsClaudeCli: true };
-}
-
-/** What a run resolved, plus whether that answer is the `claude`-spawning transport. */
-interface ResolvedSetupTransport {
-  transport?: LlmTransport;
-  spawnsClaudeCli?: boolean;
-}
-
-/** The pre-flight estimate the CLI prompt renders — the SAME one the gate uses. */
+/** The pre-flight estimate the gate prices the run with. */
 export async function estimateGuardSetupCost(
   repoRoot: string,
   opts: {
     refresh?: boolean;
     replace?: boolean;
-    mode?: LlmTransportMode;
+    /** The model the run's sessions will run on, when the caller knows it. */
+    sessionModel?: string;
     /** Single-step mode: price ONLY this step's sessions. */
     only?: GuardSetupOnlyStep;
   } = {},
@@ -301,8 +210,8 @@ export async function estimateGuardSetupCost(
 
 /**
  * The ONE-SHOT stage setup can still spend on: the legacy recipe fallback,
- * which fires only on runs without a session driver (the `agent` mailbox
- * transport, or an injected `recipeRunner` test seam). The sessions' spend is
+ * which fires only on runs without a session driver (an injected `recipeRunner`
+ * test seam). The sessions' spend is
  * accounted separately — the loop's `BudgetSpent` has no input/output token
  * split, so it rides `usage.sessions` instead of being forced into these fields.
  */
@@ -325,30 +234,18 @@ const GUARD_SETUP_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
 
 export async function guardSetupInProcess(
   repoRoot: string,
-  options: GuardSetupInProcessOptions = {},
+  options: GuardSetupInProcessOptions,
 ): Promise<GuardSetupInProcessResult> {
   const { tracker } = options;
   // Step 0, before the estimate: never ask to spend, then fail on a missing
-  // provider. In API mode the provider IS the saved config, so an unusable one is
-  // the same refusal a missing `claude` binary is.
-  let resolved: ResolvedSetupTransport;
-  try {
-    resolved = resolveTransport(options);
-  } catch (e) {
-    if (e instanceof LlmApiConfigError) throw new NoLlmProviderError(e.message);
-    throw e;
-  }
-  const transport = resolved.transport;
-  assertLlmProviderConfigured(transport, {
-    ...(resolved.spawnsClaudeCli ? { spawnsClaudeCli: true } : {}),
-  });
-  // The transport this run actually uses decides the models — never the saved
-  // selection a `--llm-transport` flag just overrode.
-  const mode = options.transportMode ?? effectiveLlmMode(options.llm);
+  // provider.
+  const { transport } = options;
+  assertLlmProviderConfigured(transport);
+  const mode: LlmTransportMode = options.transportMode ?? 'claude-code';
 
   if (options.onLlmEstimate) {
     const estimate = await estimateGuardSetupCost(repoRoot, {
-      mode,
+      ...(options.driver?.attribution.model ? { sessionModel: options.driver.attribution.model } : {}),
       ...(options.refresh ? { refresh: true } : {}),
       ...(options.replace ? { replace: true } : {}),
       ...(options.only ? { only: options.only } : {}),
@@ -364,14 +261,13 @@ export async function guardSetupInProcess(
   if (llmLog) setLlmCallSink(llmLog.sink);
   const startedAt = Date.now();
 
-  // THE SESSION SEAMS. Production wires the real agent
-  // sessions; a run with an injected one-shot recipe runner (the test seam)
-  // keeps the legacy path those tests drive, and the `agent` mailbox transport
-  // has no session driver at all. The context is LAZY by default — a run whose
-  // deterministic paths settle everything never creates a run record and never
-  // builds a driver — until a hosted caller asks for an eager one, which has a
-  // watcher from the first second and must be visible even when it spends nothing.
-  const sessionsAvailable = options.llm !== 'agent' && options.recipeRunner === undefined;
+  // THE SESSION SEAMS. Production wires the real agent sessions; a run with an
+  // injected one-shot recipe runner (the test seam) keeps the legacy path those
+  // tests drive. The context is LAZY by default — a run whose deterministic
+  // paths settle everything never creates a run record and never builds a
+  // driver — until a hosted caller asks for an eager one, which has a watcher
+  // from the first second and must be visible even when it spends nothing.
+  const sessionsAvailable = options.recipeRunner === undefined;
   const sessionContextOptions = {
     repoRoot,
     ...(options.sessionRun ? { run: options.sessionRun } : {}),
@@ -379,7 +275,6 @@ export async function guardSetupInProcess(
     ...(options.sessionsKey ? { sessionsKey: options.sessionsKey } : {}),
     ...(options.tracker ? { tracker: options.tracker } : {}),
     ...(options.eagerRun ? { eager: true } : {}),
-    ...(options.llm === 'cli' || options.llm === 'api' ? { transport: options.llm } : {}),
     ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
   };
   const sessionContext = !sessionsAvailable
@@ -391,7 +286,6 @@ export async function guardSetupInProcess(
           transportMode: mode,
         })
       : createGuardSetupSessionContext(sessionContextOptions);
-  const transportFlag = options.llm === 'cli' || options.llm === 'api' ? options.llm : undefined;
   const repair =
     options.repair ??
     (sessionContext
@@ -423,7 +317,7 @@ export async function guardSetupInProcess(
               },
               driver: acquired.driver,
               transportMode: mode,
-              ...(transportFlag ? { transport: transportFlag } : {}),
+              transport,
               ...(options.signal ? { signal: options.signal } : {}),
               onStatus: (message) => tracker?.detail('interfaces', message),
             });
@@ -434,6 +328,7 @@ export async function guardSetupInProcess(
               places: run.places,
               diagnostics: run.diagnostics,
               spent: run.spent,
+              ...(run.reconcile ? { reconcile: run.reconcile } : {}),
             };
           },
           ...(options.signal ? { signal: options.signal } : {}),
@@ -455,7 +350,7 @@ export async function guardSetupInProcess(
         })
       : undefined);
 
-  /** All setup sessions share one transcript directory. */
+  /** All setup sessions share one scratch directory. */
   const sessionsRunDirs = (): string[] => {
     const key = options.sessionsKey ?? repoRoot;
     const setupRunId = sessionContext?.runId();
@@ -485,8 +380,8 @@ export async function guardSetupInProcess(
         options.recipeRunner ??
         spawnRecipeRunner({
           transport,
-          model: resolveModel('guard.recipe', undefined, repoRoot, mode),
-          fallbackModel: resolveFallbackModel(repoRoot, mode) ?? undefined,
+          model: resolveModel('guard.recipe'),
+          fallbackModel: resolveFallbackModel() ?? undefined,
         }),
       interfaces:
         options.interfaces ??
@@ -520,8 +415,8 @@ export async function guardSetupInProcess(
         tracker?.done(step, detail);
       },
       // The live phase inside a step — an install, a build, a boot, a model call.
-      // A string the engine already composed, so the terminal checklist and the
-      // dashboard popup render it without either of them knowing what a phase is.
+      // A string the engine already composed, so the dashboard popup renders it
+      // without knowing what a phase is.
       onStepDetail: (step, detail) => tracker?.detail(step, detail),
       // One line per thing the step did. They ride the checklist into the run
       // record, so a surface that never saw the process reads what setup did.
@@ -529,7 +424,7 @@ export async function guardSetupInProcess(
     });
 
     // A hard-gate failure ran NO later step: the step it died in takes the error and
-    // every later one stays PENDING, so the terminal never ticks work that never ran.
+    // every later one stays PENDING, so the checklist never ticks work that never ran.
     if (result.report.status === 'failed') {
       tracker?.error(steps[current], firstLine(result.report.reason) ?? 'aborted');
       closingFailure = { message: result.report.reason ?? 'guard setup failed', kind: 'setup' };

@@ -1,5 +1,5 @@
 /**
- * Shared fixtures for the `guard adjudicate` tests (plan 05, steps 21–22): a
+ * Shared fixtures for the `guard adjudicate` tests: a
  * throwaway repo, a board with failing rows, a manifest carrying a flow
  * worker's declared red, and the `AdjudicationItem` shape the pre-pass, the
  * cache key, the briefing and the fold all read.

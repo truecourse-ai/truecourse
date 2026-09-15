@@ -1,5 +1,5 @@
 /**
- * INTERFACE RECONCILIATION (plan 03 step 12) — the `guard-setup.reconcile-interfaces`
+ * INTERFACE RECONCILIATION — the `guard-setup.reconcile-interfaces`
  * session and the two halves around it:
  *
  *  - the pure fold (`validateResolutions` / `applyReconcileResolutions`): the
@@ -16,12 +16,13 @@
  * precondition are the shell's, not a mock's.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SessionRunInput } from '../../packages/agent-loop/src/index';
 import { computeRecipeFingerprint } from '@truecourse/guard-runner';
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import {
   InterfacesFileSchema,
   interfaceFingerprint,
@@ -43,9 +44,15 @@ import { buildInterfacesStep } from '../../packages/core/src/services/guard-setu
 import type { GuardSetupSessionContext } from '../../packages/core/src/services/guard-setup/session-context';
 import { mapInterfaces } from '../../packages/core/src/services/interface.service';
 import { memoryPersistence, stubDriver, outcome } from './spec-scan-session-stub';
+import { installMemoryKvCache, resetKvCacheStore, type MemoryKvCacheStore } from '../helpers/memory-kv-cache';
 
 const repos: string[] = [];
+let cache: MemoryKvCacheStore;
+beforeEach(() => {
+  cache = installMemoryKvCache();
+});
 afterEach(() => {
+  resetKvCacheStore();
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
 });
 
@@ -307,7 +314,8 @@ describe('runReconcileInterfacesSession', () => {
     });
 
     expect(result).toEqual({ outcome: null });
-    expect(fs.existsSync(path.join(repo, '.truecourse', '.cache', 'guard'))).toBe(false);
+    // Nothing ran, so nothing was remembered.
+    expect(cache.size).toBe(0);
   });
 
   it('runs one session, caches its outcome, and answers the second call from the cache', async () => {
@@ -347,14 +355,9 @@ describe('runReconcileInterfacesSession', () => {
     expect(acquired).toBe(1);
     // `run_entry` appends the argv to the resolved entry, never a binary path.
     expect(argvSeen).toEqual([[...ENTRY, 'add', '--help']]);
-    const cacheFile = path.join(
-      repo,
-      '.truecourse',
-      '.cache',
-      RECONCILE_INTERFACES_CACHE_NAME,
-      `${reconcileInterfacesCacheKey(disputes, 'fp-1')}.json`,
-    );
-    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf-8'))).toEqual({ resolutions });
+    expect(
+      await getCacheEntry(repo, RECONCILE_INTERFACES_CACHE_NAME, reconcileInterfacesCacheKey(disputes, 'fp-1')),
+    ).toEqual({ resolutions });
 
     // Same disputes, same recipe: the cache answers and no driver is acquired.
     const second = await runReconcileInterfacesSession({
@@ -462,11 +465,9 @@ function seedReconcileCache(
   repo: string,
   diagnostics: readonly MapperDiagnostic[],
   resolutions: InterfaceResolution[],
-): void {
+): Promise<void> {
   const key = reconcileInterfacesCacheKey(diagnostics, computeRecipeFingerprint(repo));
-  const file = path.join(repo, '.truecourse', '.cache', RECONCILE_INTERFACES_CACHE_NAME, `${key}.json`);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ resolutions }, null, 2));
+  return setCacheEntry(repo, RECONCILE_INTERFACES_CACHE_NAME, key, { resolutions });
 }
 
 const stepInput = (repo: string, interfaces: Interface[], diagnostics: MapperDiagnostic[]) => ({
@@ -502,7 +503,7 @@ describe('buildInterfacesStep — the reconcile half', () => {
 
   it('applies a cached `tree-right` verdict to the snapshot and records it on the row', async () => {
     const { repo, catalog } = catalogRepo(unionCatalog());
-    seedReconcileCache(repo, [treeMissingFlag], [answer(treeMissingFlag.subject, 'tree-right')]);
+    await seedReconcileCache(repo, [treeMissingFlag], [answer(treeMissingFlag.subject, 'tree-right')]);
 
     const result = await buildInterfacesStep(forbiddenContext(), { author: neverAuthors })(
       stepInput(repo, catalog.interfaces, [treeMissingFlag]),
@@ -526,7 +527,7 @@ describe('buildInterfacesStep — the reconcile half', () => {
   it('leaves the catalog untouched when every verdict is `unknown`', async () => {
     const { repo, catalog } = catalogRepo(unionCatalog());
     const before = fs.readFileSync(path.join(repo, '.truecourse', 'guard', 'interfaces.json'), 'utf-8');
-    seedReconcileCache(repo, [treeMissingFlag], [answer(treeMissingFlag.subject, 'unknown')]);
+    await seedReconcileCache(repo, [treeMissingFlag], [answer(treeMissingFlag.subject, 'unknown')]);
 
     const result = await buildInterfacesStep(forbiddenContext(), { author: neverAuthors })(
       stepInput(repo, catalog.interfaces, [treeMissingFlag]),
@@ -542,7 +543,7 @@ describe('buildInterfacesStep — the reconcile half', () => {
     // The cache entry is keyed on THESE disputes, but answers a subject that is
     // no longer one of them (a moved world writing the same key is impossible —
     // this is the shape of the check, driven directly).
-    seedReconcileCache(repo, [treeMissingFlag], [answer('relkit add --gone', 'probe-right')]);
+    await seedReconcileCache(repo, [treeMissingFlag], [answer('relkit add --gone', 'probe-right')]);
 
     const result = await buildInterfacesStep(forbiddenContext(), { author: neverAuthors })(
       stepInput(repo, catalog.interfaces, [treeMissingFlag]),
@@ -657,5 +658,32 @@ describe('mapInterfaces — diagnostics are run reporting', () => {
       source: { cli: 'probes' },
     };
     expect(InterfacesFileSchema.parse(file).source).toEqual({ cli: 'probes' });
+  });
+});
+
+describe('buildInterfacesStep — the authoring half', () => {
+  it("says on the step row what the closing state reconciliation could not do", async () => {
+    const { repo, catalog } = catalogRepo(unionCatalog());
+    // One derived screen with nothing authored for it: the authoring run has work.
+    const withScreen: InterfacesFile = {
+      ...catalog,
+      resources: { web: [{ id: 'root', kind: 'screen', title: '/', address: '/' }] },
+      source: { cli: 'union', web: 'tree' },
+    };
+    fs.writeFileSync(path.join(repo, '.truecourse', 'guard', 'interfaces.json'), JSON.stringify(withScreen, null, 2));
+    const author = async () => ({
+      runId: 'run-1',
+      authored: 1,
+      skipped: [],
+      places: [{ status: 'completed', placeId: 'root' }],
+      diagnostics: [],
+      spent: { turns: 1, tokens: 10, costUsd: 0 },
+      reconcile: { problems: ['the reconciliation call failed: provider down'] },
+    });
+
+    const result = await buildInterfacesStep(forbiddenContext(), { author })(stepInput(repo, catalog.interfaces, []));
+
+    expect(result.status).toBe('ok');
+    expect(result.reason).toContain('state registry not reconciled: the reconciliation call failed: provider down');
   });
 });

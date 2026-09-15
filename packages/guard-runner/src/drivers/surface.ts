@@ -1,7 +1,7 @@
 /**
  * THE SANDBOX'S SERVED SURFACE — one server, shared by every driver that talks to it.
  *
- * The sandbox is ONE WORLD (§2, 2026-08-09), and a world has one address. A browser
+ * The sandbox is ONE WORLD, and a world has one address. A browser
  * step drives the served app and a `request` step reads the same app's structured
  * answer, so both must reach the SAME origin: two lazily-booted servers would be two
  * worlds wearing one scenario's name, and a request would read state the page never

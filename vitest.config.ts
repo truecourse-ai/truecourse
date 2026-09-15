@@ -3,10 +3,11 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
 // Two test projects sharing one `pnpm test` invocation:
-//   - node:   the existing suite (analyzer, core, dashboard-server, cli, ...).
-//             Boots tree-sitter WASM once via tests/setup.ts.
-//   - client: the dashboard React UI. jsdom + @testing-library/react.
-// New projects (e.g. an ee/ test project later) just add another entry.
+//   - node:   the engine and the server (core, guard, the stores, the routes),
+//             and the enterprise bundle's server features. Boots tree-sitter
+//             WASM once via tests/setup.ts.
+//   - client: the dashboard React UI, and the enterprise bundle's client
+//             features, which register into the same shell. jsdom + RTL.
 export default defineConfig({
   test: {
     projects: [
@@ -19,6 +20,7 @@ export default defineConfig({
             'tests/fixtures/**',
             // Owned by the `client` project below.
             'tests/dashboard-client/**',
+            'tests/ee-client/**',
           ],
           testTimeout: 30000,
           setupFiles: ['./tests/setup.ts'],
@@ -34,7 +36,10 @@ export default defineConfig({
         test: {
           name: 'client',
           environment: 'jsdom',
-          include: ['tests/dashboard-client/**/*.test.{ts,tsx}'],
+          include: [
+            'tests/dashboard-client/**/*.test.{ts,tsx}',
+            'tests/ee-client/**/*.test.{ts,tsx}',
+          ],
           setupFiles: ['./tests/dashboard-client/setup.ts'],
           // jsdom + RTL are fast; the long node timeout would just hide hangs.
           testTimeout: 10000,

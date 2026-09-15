@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import type { ContextDocumentRow } from '@truecourse/shared';
 
 vi.mock('@/lib/socket', () => {
@@ -33,7 +34,7 @@ vi.mock('@/lib/socket', () => {
   };
 });
 
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = (() => {}) as Element['scrollTo'];
@@ -44,12 +45,14 @@ if (!Element.prototype.scrollIntoView) {
 
 const realFetch = window.fetch;
 
-const REPO_A = { id: 'web', name: 'acme/web', path: 'acme/web', remoteUrl: 'https://github.com/acme/web' };
-const REPO_B = { id: 'api', name: 'acme/api', path: 'acme/api', remoteUrl: 'https://github.com/acme/api' };
+const REPO_A = { id: 'web', name: 'acme/web', path: 'acme/web', provider: 'github' };
+const REPO_B = { id: 'api', name: 'acme/api', path: 'acme/api', provider: 'github' };
 
 const REFUNDS_REF = 'context/site-docs-acme/refunds.md';
 const PAYOUTS_REF = 'context/site-docs-acme/payouts.md';
 const LONELY_REF = 'context/site-docs-acme/lonely.md';
+const CHANGELOG_REF = 'context/site-docs-acme/changelog.md';
+const LEGACY_REF = 'context/site-docs-acme/legacy.md';
 
 const REFUNDS: ContextDocumentRow = {
   ref: REFUNDS_REF,
@@ -65,6 +68,10 @@ const REFUNDS: ContextDocumentRow = {
     { repository: REPO_A.name, status: 'proved' },
   ],
   status: 'failed',
+  inCorpus: true,
+  decision: null,
+  inclusion: 'in-corpus',
+  skipReason: null,
   updatedAt: '2026-09-01T10:00:00.000Z',
 };
 
@@ -78,7 +85,39 @@ const LONELY: ContextDocumentRow = {
   repositories: [],
   readings: [],
   status: 'not-linked',
+  inCorpus: true,
+  decision: null,
+  inclusion: 'in-corpus',
+  skipReason: null,
   updatedAt: '2026-09-01T10:00:00.000Z',
+};
+
+/** A document the scan left out, with the words it left it out in. */
+const CHANGELOG: ContextDocumentRow = {
+  ref: CHANGELOG_REF,
+  title: 'Changelog',
+  area: '',
+  sourceId: 'site-docs-acme',
+  sourceTitle: 'docs.acme.com',
+  sourceKind: 'site',
+  repositories: [],
+  readings: [],
+  status: null,
+  inCorpus: false,
+  decision: null,
+  inclusion: 'not-included',
+  skipReason: 'a changelog, not a specification',
+  updatedAt: '2026-09-01T10:00:00.000Z',
+};
+
+/** One a reader dropped, which a scan has since applied. */
+const LEGACY: ContextDocumentRow = {
+  ...CHANGELOG,
+  ref: LEGACY_REF,
+  title: 'Legacy',
+  decision: 'exclude',
+  inclusion: 'excluded',
+  skipReason: null,
 };
 
 /** A workspace corpus with one area and one disagreement inside it. */
@@ -122,6 +161,9 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/** Every write of a run, with the document it named: the decisions' own record. */
+let writes: { path: string; method: string; ref: unknown }[] = [];
+
 function serve(documents: ContextDocumentRow[] = [REFUNDS, LONELY]) {
   const calls: string[] = [];
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -129,6 +171,13 @@ function serve(documents: ContextDocumentRow[] = [REFUNDS, LONELY]) {
     const url = new URL(href, window.location.origin);
     const method = (init?.method ?? 'GET').toUpperCase();
     calls.push(method === 'GET' ? `${url.pathname}${url.search}` : `${method} ${url.pathname}`);
+    if (method !== 'GET') {
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
+      writes.push({ path: url.pathname, method, ref: body.ref });
+    }
+    if (url.pathname === '/api/context/includes' || url.pathname === '/api/context/excludes') {
+      return json({ manualIncludes: [], manualExcludes: [] });
+    }
     if (url.pathname === '/api/repos') return json([REPO_A, REPO_B]);
     if (url.pathname === '/api/llm/config') {
       return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
@@ -201,18 +250,20 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
       <Address />
+      <Toaster />
     </MemoryRouter>,
   );
 }
 
 const docAt = (ref: string, query = '') =>
-  `/preview/context/doc/${encodeURIComponent(ref)}${query}`;
+  `/context/doc/${encodeURIComponent(ref)}${query}`;
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
+  writes = [];
 });
 
 afterEach(() => {
@@ -230,7 +281,7 @@ describe('one document of Context', () => {
     expect(within(crumbs).getByRole('link', { name: 'Context' })).toBeInTheDocument();
     expect(within(crumbs).getByRole('link', { name: 'docs.acme.com' })).toHaveAttribute(
       'href',
-      '/preview/context/documents?source=site-docs-acme',
+      '/context/documents?source=site-docs-acme',
     );
     expect(await screen.findByRole('heading', { name: 'Refunds' })).toBeInTheDocument();
 
@@ -281,7 +332,7 @@ describe('one document of Context', () => {
     // And where it could be linked.
     expect(screen.getByRole('link', { name: REPO_A.name })).toHaveAttribute(
       'href',
-      `/preview/repos/${REPO_A.id}/context`,
+      `/repos/${REPO_A.id}/context`,
     );
   });
 
@@ -291,15 +342,125 @@ describe('one document of Context', () => {
     expect(await screen.findByText('No such document')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Context' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
+  });
+});
+
+/**
+ * The document's own page is where a document is included or excluded, because
+ * it is where a reader can see what they are deciding about. One action, in the
+ * header where the document's name is, writing the WORKSPACE's decisions — and
+ * saying what the next scan will do with them, because until then nothing has
+ * changed.
+ */
+describe('deciding a document in or out', () => {
+  const world = [REFUNDS, LONELY, CHANGELOG, LEGACY];
+
+  it('opens a document the corpus does not hold, with the scan’s own reason', async () => {
+    serve(world);
+    renderAt(docAt(CHANGELOG_REF));
+
+    expect(await screen.findByRole('heading', { name: 'Changelog' })).toBeInTheDocument();
+    expect(screen.getByText('Not included')).toBeInTheDocument();
+    expect(screen.getByText('a changelog, not a specification')).toBeInTheDocument();
+    expect(await screen.findByText('A refund settles within two business days.')).toBeInTheDocument();
+    // Nothing can prove a document the corpus does not hold, so nothing offers to.
+    expect(screen.queryByText(/to have it proven/)).toBeNull();
+  });
+
+  it('includes the one the scan skipped, and says the next scan applies it', async () => {
+    serve(world);
+    renderAt(docAt(CHANGELOG_REF));
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Include' }));
+
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        path: '/api/context/includes',
+        method: 'POST',
+        ref: CHANGELOG_REF,
+      }),
+    );
+    expect(
+      await screen.findByText('Included. The next scan adds it to the corpus.'),
+    ).toBeInTheDocument();
+    // The row moves now: the decision stands, and the corpus is behind it.
+    expect(await screen.findByText('Included at the next scan')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo include' })).toBeInTheDocument();
+  });
+
+  it('takes an include back', async () => {
+    serve([REFUNDS, LONELY, { ...CHANGELOG, decision: 'include' }, LEGACY]);
+    renderAt(docAt(CHANGELOG_REF));
+    const user = userEvent.setup();
+
+    expect(await screen.findByText('Included at the next scan')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo include' }));
+
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        path: '/api/context/includes',
+        method: 'DELETE',
+        ref: CHANGELOG_REF,
+      }),
+    );
+    expect(
+      await screen.findByText('Include undone. The next scan decides again.'),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Include' })).toBeInTheDocument();
+  });
+
+  it('excludes a document the corpus holds, which keeps its coverage until a scan', async () => {
+    serve(world);
+    renderAt(docAt(LONELY_REF));
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Exclude' }));
+
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        path: '/api/context/excludes',
+        method: 'POST',
+        ref: LONELY_REF,
+      }),
+    );
+    expect(
+      await screen.findByText('Excluded. The next scan drops it from the corpus.'),
+    ).toBeInTheDocument();
+    expect(await screen.findByText('Excluded at the next scan')).toBeInTheDocument();
+    expect(screen.getByText('Not linked')).toBeInTheDocument();
+  });
+
+  it('takes an exclusion back', async () => {
+    serve(world);
+    renderAt(docAt(LEGACY_REF));
+    const user = userEvent.setup();
+
+    expect(await screen.findByText('Excluded')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo exclude' }));
+
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        path: '/api/context/excludes',
+        method: 'DELETE',
+        ref: LEGACY_REF,
+      }),
+    );
+    expect(
+      await screen.findByText('Exclusion undone. The next scan decides again.'),
+    ).toBeInTheDocument();
+    // Back to a document the corpus simply does not hold.
+    expect(await screen.findByRole('button', { name: 'Include' })).toBeInTheDocument();
+    expect(screen.getByText('Not included')).toBeInTheDocument();
   });
 });
 
 describe('the conflicts of the workspace', () => {
   it('lists every conflict of the workspace corpus, open first', async () => {
     serve();
-    renderAt('/preview/context/conflicts');
+    renderAt('/context/conflicts');
 
     const table = await screen.findByRole('table', { name: 'Conflicts' });
     await waitFor(() => expect(within(table).getAllByRole('row')).toHaveLength(2));
@@ -315,7 +476,7 @@ describe('the conflicts of the workspace', () => {
 
   it('opens the conflict with its resolver, on the workspace corpus', async () => {
     const calls = serve();
-    renderAt('/preview/context/conflicts');
+    renderAt('/context/conflicts');
     const user = userEvent.setup();
 
     const table = await screen.findByRole('table', { name: 'Conflicts' });
@@ -324,7 +485,7 @@ describe('the conflicts of the workspace', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        '/preview/context/conflicts/overlap%3A%3A',
+        '/context/conflicts/overlap%3A%3A',
       ),
     );
     expect(
@@ -339,7 +500,7 @@ describe('the conflicts of the workspace', () => {
 
   it('says so at an address the corpus has no conflict at', async () => {
     serve();
-    renderAt('/preview/context/conflicts/overlap%3A%3Anope%3A%3Aa%3A%3Ab%3A%3A0000');
+    renderAt('/context/conflicts/overlap%3A%3Anope%3A%3Aa%3A%3Ab%3A%3A0000');
     expect((await screen.findAllByText('No such conflict')).length).toBeGreaterThan(0);
   });
 });

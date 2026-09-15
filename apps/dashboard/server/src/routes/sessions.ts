@@ -1,8 +1,6 @@
 /**
- * Agent-sessions routes — the dashboard read surface over the sessions store
- * (Postgres for dashboard repositories, local files for file-mode callers).
- * Read-only. Dashboard activity runs expose a replayable AI SDK SSE stream;
- * legacy runs use the socket tail (`joinRun` → `session:*` events).
+ * Agent-sessions routes — the dashboard read surface over the sessions store.
+ * Read-only. A run's activity is a replayable AI SDK SSE stream.
  *
  *   GET /:id/sessions/runs                                    every run record, newest first
  *   GET /:id/sessions/runs/:command/:runId                    one run record (404 if absent)
@@ -10,7 +8,7 @@
  *   GET /:id/sessions/runs/:command/:runId/activity           one history page, ?after=&limit=
  *   GET /:id/sessions/runs/:command/:runId/transcript/:sessionId
  *       one session's transcript events; ?since=<seq> returns only events past
- *       that cursor (the client's catch-up read after a socket subscribe)
+ *       that cursor (the reader's catch-up after it subscribed)
  *
  * The workspace router (`createWorkspaceSessionsRouter`, mounted at
  * /api/sessions) is the same surface across every repository the caller's
@@ -39,6 +37,7 @@ import { createActivityStream } from '../services/activity-stream.service.js';
 import { RunStatusSchema, SessionCommandSchema } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
+import { orgOf } from '../services/workspace-llm.service.js';
 import { readRegistry, type RegistryEntry } from '@truecourse/core/config/registry';
 import {
   SessionRunNotFoundError,
@@ -53,7 +52,6 @@ import {
   toPublicRunRecord,
   validateStoredActivityCursor,
   readStoredTranscript,
-  recoverSessionActivity,
   type PublicRunRecord,
   type RepoRunRecord,
   type SessionRunQuery,
@@ -76,7 +74,7 @@ router.get('/:id/sessions/runs/:command/:runId/stream', async (req, res, next) =
   const detach = () => controller.abort();
   res.once('close', detach);
   try {
-    const repo = await resolveProjectForRequest(req.params.id);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id);
     let run;
     try { run = await openStoredSessionRun(repo.path, command, req.params.runId); }
     catch (error) {
@@ -86,7 +84,6 @@ router.get('/:id/sessions/runs/:command/:runId/stream', async (req, res, next) =
     if (run.record().activityStream !== 'ai-sdk-v1') {
       res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
     }
-    if (!run.readActivity) recoverSessionActivity(run);
     // Reject bad cursors before sending SSE headers.
     try { await validateStoredActivityCursor(run, after); }
     catch (error) {
@@ -176,7 +173,7 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
     if (req.query.compact !== undefined && req.query.compact !== '1') {
       res.status(400).json({ error: 'compact must be 1 when supplied' }); return;
     }
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     let run;
     try { run = await openStoredSessionRun(repo.path, command, req.params.runId as string); }
     catch (error) {
@@ -186,7 +183,6 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
     if (run.record().activityStream !== 'ai-sdk-v1') {
       res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
     }
-    if (!run.readActivity) recoverSessionActivity(run);
     try {
       res.json(await readStoredActivityPage(run, after, limit, req.query.compact === '1'));
     } catch (error) {
@@ -202,9 +198,10 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
 
 router.get('/:id/sessions/runs', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
-    // listSessionRuns sweeps as a side effect: a run left `running` by a dead
-    // pid reads `interrupted` here without any separate boot reconciliation.
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
+    // The listing sweeps as a side effect: a run whose lease a dead process
+    // stopped renewing reads `interrupted` here, the same word the boot sweep
+    // gives it.
     res.json({ runs: (await listStoredSessionRuns(repo.path)).map(toPublicRunRecord) });
   } catch (e) {
     next(e);
@@ -215,7 +212,7 @@ router.get(
   '/:id/sessions/runs/:command/:runId',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
       const command = parseCommand(req.params.command as string);
       if (!command) {
         res.status(400).json({ error: `Unknown session command: ${req.params.command}` });
@@ -238,7 +235,7 @@ router.get(
   '/:id/sessions/runs/:command/:runId/transcript/:sessionId',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
       const command = parseCommand(req.params.command as string);
       if (!command) {
         res.status(400).json({ error: `Unknown session command: ${req.params.command}` });
@@ -267,9 +264,9 @@ router.get(
 export default router;
 
 /**
- * Just enough of the GitHub link store to scope a workspace's runs: which
- * repositories it connected. Structural, so the real `GateStore` satisfies it
- * without this module depending on the GitHub package.
+ * Just enough of the repository store to scope a workspace's runs: which
+ * repositories it connected. Structural, so the real `RepositoryStore` satisfies it
+ * without this module depending on the store package.
  */
 export interface WorkspaceRepoLinks {
   listReposForWorkspace(workspaceOrgId: string): Promise<{ repoFullName: string }[]>;
@@ -277,7 +274,7 @@ export interface WorkspaceRepoLinks {
 
 export interface WorkspaceSessionsDeps {
   /** Present when the server has a GitHub App configured; null otherwise. */
-  githubLinks?: WorkspaceRepoLinks | null;
+  repoLinks?: WorkspaceRepoLinks | null;
 }
 
 /**
@@ -289,17 +286,17 @@ export interface WorkspaceSessionsDeps {
 export type WorkspaceRun = PublicRunRecord & { repo: { id: string; fullName: string } | null };
 
 /**
- * The repositories this caller's runs may come from. With a link store the
- * workspace is exactly what it connected, so a session without one has nothing
- * to read (401). Without a link store the server has no workspaces at all
- * (file mode) and the registry IS the workspace.
+ * The repositories this caller's runs may come from: exactly what their
+ * workspace connected, so a session with no workspace has nothing to read
+ * (401). A test app that installs no store at all has nothing to assert the
+ * registry against, and there the registry IS the workspace.
  */
 async function workspaceRepos(deps: WorkspaceSessionsDeps, req: Request): Promise<RegistryEntry[]> {
-  const entries = await readRegistry();
-  const links = deps.githubLinks;
-  if (!links) return entries;
   const org = req.user?.organizationId;
   if (!org) throw createAppError('This session has no workspace.', 401);
+  const entries = await readRegistry(org);
+  const links = deps.repoLinks;
+  if (!links) return entries;
   const mine = new Set((await links.listReposForWorkspace(org)).map((r) => r.repoFullName));
   return entries.filter((e) => mine.has(e.name));
 }
@@ -429,7 +426,6 @@ export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}):
       if (run.record().activityStream !== 'ai-sdk-v1') {
         res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
       }
-      if (!run.readActivity) recoverSessionActivity(run);
       try {
         res.json(await readStoredActivityPage(run, after, limit));
       } catch (error) {
@@ -473,7 +469,6 @@ export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}):
       if (run.record().activityStream !== 'ai-sdk-v1') {
         res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
       }
-      if (!run.readActivity) recoverSessionActivity(run);
       try { await validateStoredActivityCursor(run, after); }
       catch (error) {
         if (error instanceof Error && error.message.startsWith('Activity cursor')) {

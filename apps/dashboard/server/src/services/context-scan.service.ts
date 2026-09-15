@@ -24,9 +24,10 @@ import type { RippleRepo } from '../jobs/context-ripple.js';
 
 /**
  * Every repository of the workspace, with the sources it reads. A repository is
- * "of the workspace" by having a Context link — connecting one always creates
- * and links its Repository source, so the bindings ARE the membership list, and
- * they are workspace-scoped by construction (the registry is not).
+ * "of the workspace" by having a Context link — made in Context (the connect
+ * dialog links the sources that already exist) — so the bindings ARE the
+ * membership list, and they are workspace-scoped by construction (the registry
+ * is not).
  *
  * A repository source whose repository has somehow lost its link still names
  * that repository: its documents are the repository's own, and leaving it out
@@ -45,7 +46,7 @@ export async function workspaceRepositories(org: string): Promise<RippleRepo[]> 
   // a repository Code does not know, and that repository is nobody's to set up.
   const repos: RippleRepo[] = [];
   for (const [repoFullName, sourceIds] of [...byRepo.entries()].sort()) {
-    const entry = await connectedEntry(repoFullName);
+    const entry = await connectedEntry(org, repoFullName);
     if (!entry) continue;
     repos.push({ repoId: entry.slug, repoFullName, sourceIds: [...sourceIds].sort() });
   }
@@ -65,14 +66,14 @@ export async function repositoryOfSource(
   if (!source || source.kind !== 'repository') return null;
   const repoFullName = (source.config as RepositorySourceConfig).repoFullName;
   if (!repoFullName) return null;
-  const entry = await connectedEntry(repoFullName);
+  const entry = await connectedEntry(org, repoFullName);
   return entry ? { repoId: entry.slug, repoFullName } : null;
 }
 
-/** The registry entry of a repository Code has connected, or null. */
-async function connectedEntry(repoFullName: string): Promise<{ slug: string } | null> {
+/** The registry entry of a repository Code has connected in this workspace, or null. */
+async function connectedEntry(org: string, repoFullName: string): Promise<{ slug: string } | null> {
   try {
-    return await getProjectByPath(repoFullName);
+    return await getProjectByPath(org, repoFullName);
   } catch {
     // A registry that will not answer must not stop the ripple; it just
     // ripples to nobody.
@@ -112,7 +113,6 @@ export async function recordFailedWorkspaceScanRun(
     const run = await createStoredSessionRun(workspaceSessionsKey(org), {
       command: 'spec-scan',
       gitRef: 'unknown',
-      activityStream: true,
     });
     run.finish('failed', { error });
     await run.flush?.();

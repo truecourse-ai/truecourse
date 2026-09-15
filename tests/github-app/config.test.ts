@@ -6,7 +6,6 @@ const KEYS = [
   'GITHUB_APP_PRIVATE_KEY',
   'GITHUB_APP_WEBHOOK_SECRET',
   'GITHUB_APP_SLUG',
-  'RESEND_API_KEY',
   'DATABASE_URL',
 ] as const;
 
@@ -48,7 +47,6 @@ describe('loadGithubAppConfig', () => {
     expect(cfg!.appId).toBe('123');
     expect(cfg!.privateKey).toContain('BEGIN');
     expect(cfg!.appSlug).toBe('truecourse-gate');
-    expect(cfg!.resendApiKey).toBeNull();
     expect(cfg!.databaseUrl).toBeNull();
   });
 
@@ -69,15 +67,12 @@ describe('loadGithubAppConfig', () => {
     expect(loadGithubAppConfig()!.privateKey).toBe(PEM);
   });
 
-  it('passes through optional resend + database url', () => {
+  it('passes through the optional database url', () => {
     process.env.GITHUB_APP_ID = '1';
     process.env.GITHUB_APP_PRIVATE_KEY = PEM;
     process.env.GITHUB_APP_WEBHOOK_SECRET = 's';
     process.env.GITHUB_APP_SLUG = 'slug';
-    process.env.RESEND_API_KEY = 're_123';
     process.env.DATABASE_URL = 'postgres://localhost/db';
-    const cfg = loadGithubAppConfig()!;
-    expect(cfg.resendApiKey).toBe('re_123');
-    expect(cfg.databaseUrl).toBe('postgres://localhost/db');
+    expect(loadGithubAppConfig()!.databaseUrl).toBe('postgres://localhost/db');
   });
 });

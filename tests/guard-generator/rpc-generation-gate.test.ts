@@ -1,5 +1,5 @@
 /**
- * THE RPC GENERATION GATE (SPEC_GUARD_PLAN item 12).
+ * THE RPC GENERATION GATE.
  *
  * A mounted tRPC tree derives real, invocable api interfaces — and this round
  * they are deliberately NOT authored against: the request body of

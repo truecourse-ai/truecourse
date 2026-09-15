@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ZodType } from 'zod';
+import { z, type ZodType } from 'zod';
 import { jsonSchemaHint, type LlmRequest, type LlmTransport } from '@truecourse/shared/llm';
 import { resetKvCacheStore } from '@truecourse/llm';
 import { assertOpenAiStrictValid } from './strict-assert.js';
@@ -29,7 +29,7 @@ vi.mock('../../packages/llm-api/src/model.js', () => ({ buildModel: buildModelMo
 import { createApiTransport } from '../../packages/llm-api/src/index';
 
 // --- spec scan ---------------------------------------------------------------
-// The five spec stages are AGENT SESSIONS now (plan 02): they build no
+// The five spec stages are AGENT SESSIONS now: they build no
 // `LlmRequest`, so they contribute nothing to the request sweep below. Their
 // outcome schemas ride the session driver's toolset instead, and are checked
 // object-rooted in their own describe at the end of this file.
@@ -39,26 +39,8 @@ import { OverlapOutcomeSchema } from '../../packages/core/src/services/spec-scan
 import { ScanScopeOutcomeSchema } from '../../packages/core/src/services/spec-scan/orchestrate';
 import type { DocCandidate } from '../../packages/spec-consolidator/src/index.js';
 
-// --- contract-extractor ------------------------------------------------------
-import {
-  generateContractsFromCorpus,
-  reconcileTargets,
-  judgeGaps,
-} from '../../packages/contract-extractor/src/index.js';
-import type {
-  AreaGenInput,
-  AreaTargets,
-  CoverageGap,
-  TargetSpec,
-} from '../../packages/contract-extractor/src/index.js';
-import { EnumerateResultSchema } from '../../packages/contract-extractor/src/index.js';
-import { ExtractionResultSchema } from '../../packages/contract-extractor/src/types.js';
-import { repair } from '../../packages/contract-extractor/src/repair.js';
-import type { MergedArtifact } from '../../packages/contract-extractor/src/merger.js';
-import type { SpecSlice } from '../../packages/contract-extractor/src/types.js';
-
 // --- guard-generator ---------------------------------------------------------
-// Guard generate keeps exactly TWO one-shot stages (plan 04 step 20): realization
+// Guard generate keeps exactly TWO one-shot stages: realization
 // matching and recipe discovery. Extraction, flow synthesis, authoring, the
 // evidence retry, fidelity review and triage are agent SESSIONS (or retired), so
 // they build no `LlmRequest` and contribute nothing to the sweep below — their
@@ -73,12 +55,12 @@ import type {
   RecipeDiscoveryInput,
 } from '../../packages/guard-generator/src/prompts.js';
 
-// --- guard generate (plan 04) ------------------------------------------------
+// --- guard generate ----------------------------------------------------------
 import { ExtractOutcomeSchema, GuardFlowWorkerOutcomeSchema } from '../../packages/shared/src/index.js';
 import { EpicSynthesisSchema } from '../../packages/guard-generator/src/schemas.js';
 import { FidelityVerdictSchema } from '../../packages/core/src/services/guard-generate/fidelity.js';
 
-// --- guard setup (plan 03) ---------------------------------------------------
+// --- guard setup -------------------------------------------------------------
 // Six one-shot stages became agent SESSIONS here too; like the scan's, their
 // outcome schemas ride the driver's toolset and are checked object-rooted below.
 import { RecipeProposalSchema } from '../../packages/guard-generator/src/schemas.js';
@@ -86,19 +68,6 @@ import { CatalogDraftSchema } from '../../packages/core/src/services/guard-setup
 import { ReconcileResolutionsSchema } from '../../packages/core/src/services/guard-setup/reconcile-interfaces.js';
 import { SeedSessionOutcomeSchema } from '../../packages/core/src/services/guard-setup/seed-session.js';
 import { AuthProofOutcomeSchema } from '../../packages/core/src/services/guard-setup/auth-proof.js';
-
-// --- analyze (core cli-provider transport branch) ----------------------------
-import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
-import {
-  ServiceViolationOutputSchema,
-  DatabaseViolationOutputSchema,
-  ModuleViolationOutputSchema,
-  DiffViolationOutputSchema,
-  LifecycleServiceOutputSchema,
-  CodeViolationOutputSchema,
-  CodeViolationLifecycleOutputSchema,
-  FlowEnrichmentOutputSchema,
-} from '../../packages/core/src/services/llm/schemas.js';
 
 const cfg = { provider: 'anthropic' as const, model: 'm', apiKey: 'test' };
 
@@ -112,25 +81,6 @@ function capture(): { transport: LlmTransport; reqs: LlmRequest[] } {
       return '{}';
     },
   };
-}
-
-/** Reaches the analyze provider's real schema rendering + transport branch. */
-class AnalyzeProbe extends BaseCLIProvider {
-  get binaryName() {
-    return 'claude';
-  }
-  get baseArgs() {
-    return [];
-  }
-  get modelFlag() {
-    return [];
-  }
-  render(schema: ZodType): string {
-    return this.toJsonSchema(schema);
-  }
-  send(schema: ZodType, label: string): Promise<string> {
-    return this.spawnCLI('prompt', this.render(schema), { label });
-  }
 }
 
 function doc(p: string): DocCandidate {
@@ -147,31 +97,6 @@ function doc(p: string): DocCandidate {
   };
 }
 
-const AREA: AreaGenInput = {
-  areaId: 'core/orders',
-  product: 'core',
-  concern: 'orders',
-  docs: [
-    {
-      ref: 'docs/orders.md',
-      content: '# Orders\n\nThe Order entity has an id.',
-      lastTouched: '2026-01-01T00:00:00Z',
-      status: 'shipped',
-      kind: 'prd',
-    },
-  ],
-};
-
-const ORDER_TARGET: TargetSpec = { kind: 'Entity', identity: 'Order' };
-
-const ORDER_FRAGMENT = {
-  kind: 'Entity',
-  identity: 'Order',
-  tcSource: 'entity Order {\n  origin "docs/orders.md" "Order" 1..2\n  field id: string immutable\n}\n',
-  origin: { source: 'docs/orders.md', section: 'Order', lines: [1, 2] },
-  obligationKeys: [],
-};
-
 /** One collected call: the label we report it under plus the real request. */
 interface Collected {
   name: string;
@@ -184,80 +109,6 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
   const push = (name: string, reqs: LlmRequest[]) => {
     for (const req of reqs) if (req.schema) out.push({ name, req });
   };
-
-  // contracts generate
-  {
-    const reqs: LlmRequest[] = [];
-    const transport: LlmTransport = async (req) => {
-      reqs.push(req);
-      return req.stage === 'contract.enumerate'
-        ? JSON.stringify({ targets: [ORDER_TARGET] })
-        : JSON.stringify({ fragments: [ORDER_FRAGMENT] });
-    };
-    await generateContractsFromCorpus({
-      repoRoot: repo,
-      transport,
-      corpusInput: [AREA],
-      disableTargetReconciliation: true,
-      disableGapJudge: true,
-      disableExtractCache: true,
-      disableManifest: true,
-      dryRun: true,
-    });
-    push('contract.enumerate', reqs.filter((r) => r.stage === 'contract.enumerate'));
-    push('contract.extract', reqs.filter((r) => r.stage === 'contract.extract'));
-  }
-  {
-    const c = capture();
-    const t = (identity: string): TargetSpec => ({ kind: 'ArchitectureDecision', identity });
-    const byArea: AreaTargets[] = [
-      {
-        area: { areaId: 'core/architecture', product: 'core', concern: 'architecture', docs: [] },
-        targets: [t('outbox-pattern'), t('transactional-outbox')],
-      },
-    ];
-    await reconcileTargets(repo, byArea, { transport: c.transport });
-    push('contract.reconcile', c.reqs);
-  }
-  {
-    const c = capture();
-    const gaps: CoverageGap[] = [
-      { areaId: AREA.areaId, kind: 'ForbiddenArtifact', identity: 'replace-order-endpoint' },
-    ];
-    await judgeGaps(repo, AREA, gaps, [], { transport: c.transport });
-    push('contract.gapJudge', c.reqs);
-  }
-  {
-    const reqs: LlmRequest[] = [];
-    const transport: LlmTransport = async (req) => {
-      reqs.push(req);
-      return JSON.stringify({ fragments: [ORDER_FRAGMENT] });
-    };
-    const malformed: MergedArtifact = {
-      kind: 'Entity',
-      identity: 'Order',
-      winning: {
-        kind: 'Entity',
-        identity: 'Order',
-        tcSource: 'entity Order {\n  this is not a valid clause\n}\n',
-        origin: { source: 'docs/orders.md', section: 'Order', lines: [1, 2] },
-        obligationKeys: [],
-      },
-      winningRank: 1,
-      overridden: [],
-      sameRankConflicts: [],
-    };
-    const slice: SpecSlice = {
-      id: 'orders/order',
-      specPath: 'docs/orders.md',
-      headingPath: ['orders', 'order'],
-      lineRange: [1, 50],
-      text: '# Order\nThe Order entity has an id.',
-      headingLevel: 1,
-    };
-    await repair([malformed], [slice], { transport });
-    push('contract.repair', reqs.slice(0, 1));
-  }
 
   // guard generate — the two remaining one-shot runners, driven with a minimal context
   {
@@ -280,27 +131,6 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
     };
     await spawnRecipeRunner(t)(recipeCtx);
     push('guard.recipe', c.reqs.splice(0));
-  }
-
-  // analyze — the cli-provider's transport branch, one call per output schema
-  {
-    const c = capture();
-    const probe = new AnalyzeProbe(c.transport);
-    const schemas: Array<[string, ZodType]> = [
-      ['service', ServiceViolationOutputSchema],
-      ['database', DatabaseViolationOutputSchema],
-      ['module', ModuleViolationOutputSchema],
-      ['diff', DiffViolationOutputSchema],
-      ['lifecycle', LifecycleServiceOutputSchema],
-      ['code', CodeViolationOutputSchema],
-      ['code-lifecycle', CodeViolationLifecycleOutputSchema],
-      ['flow', FlowEnrichmentOutputSchema],
-    ];
-    for (const [label, schema] of schemas) {
-      c.reqs.length = 0;
-      await probe.send(schema as ZodType, label);
-      push(`analyze.${label}`, c.reqs);
-    }
   }
 
   return out;
@@ -334,8 +164,6 @@ function formatCapturingModel() {
 
 /** The stages whose schemas strict structured output cannot express. */
 const EXPECTED_OPT_OUTS = [
-  'contract.gapJudge', // `verdicts` record
-  'contract.reconcile', // `merges` record
   'guard.recipe', // `env` / `servers` records
 ];
 
@@ -357,11 +185,10 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   });
 
   it('collects a schema from every stage', () => {
-    // 15 since the five spec stages (plan 02), the seed draft (plan 03 step 13)
-    // and guard generate's six content stages (plan 04) became agent sessions —
-    // they build no LlmRequest at all. A NEW schema-bearing call site still has
-    // to raise it.
-    expect(collected.length).toBeGreaterThanOrEqual(15);
+    // The spec stages, the seed draft and guard generate's content stages are
+    // agent sessions — they build no LlmRequest at all. A NEW schema-bearing
+    // call site still has to raise this floor.
+    expect(collected.length).toBeGreaterThanOrEqual(2);
     // Each collected call site contributed exactly one request.
     expect(new Set(collected.map((c) => c.name)).size).toBe(collected.length);
   });
@@ -409,18 +236,11 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   // on the API transport — the failure mode this list exists to prevent.
   it('carries a schema on EVERY guard generate stage', () => {
     const guard = collected.filter((c) => c.name.startsWith('guard.')).map((c) => c.name);
-    // Two one-shots left (plan 04 step 20). A stage reappearing here means a
+    // Two one-shots left. A stage reappearing here means a
     // session was quietly turned back into a transport call.
     expect(guard.sort()).toEqual(['guard.match', 'guard.recipe']);
   });
 
-  it('keeps the analyze path fully enforced', () => {
-    const analyze = collected.filter((c) => c.name.startsWith('analyze.'));
-    expect(analyze).toHaveLength(8);
-    for (const { name, req } of analyze) {
-      expect(req.enforceSchema, `${name} must stay enforced`).toBeUndefined();
-    }
-  });
 });
 
 /** A model that answers with exactly `text`. */
@@ -483,59 +303,13 @@ describe('the nulls normalization asks for never reach the stage Zod', () => {
     expect(parsed.untestable).toEqual([]);
   });
 
-  it('lets a `.default()` field fall back to its default', async () => {
+  it('keeps a null the schema legitimately allows', async () => {
+    const Schema = z.object({ targetServiceId: z.string().nullable() });
     const out = await driveWithReply(
-      jsonSchemaHint(EnumerateResultSchema),
-      JSON.stringify({ targets: null }),
+      jsonSchemaHint(Schema),
+      JSON.stringify({ targetServiceId: null }),
     );
-    expect(JSON.parse(out)).toEqual({});
-    expect(EnumerateResultSchema.parse(JSON.parse(out))).toEqual({ targets: [] });
-  });
-
-  it('strips optionals nested in an extraction result and keeps the tuple intact', async () => {
-    const reply = JSON.stringify({
-      fragments: [
-        {
-          kind: 'Entity',
-          identity: 'Order',
-          tcSource: 'entity Order {\n}\n',
-          origin: { source: 'docs/orders.md', section: 'Order', lines: [1, 2] },
-          obligationKeys: null,
-          reason: null,
-        },
-      ],
-      notes: null,
-    });
-
-    const out = await driveWithReply(jsonSchemaHint(ExtractionResultSchema), reply);
-    const parsed = ExtractionResultSchema.parse(JSON.parse(out));
-    expect(parsed.fragments[0].obligationKeys).toEqual([]);
-    expect(parsed.fragments[0].reason).toBeUndefined();
-    expect(parsed.notes).toBeUndefined();
-    expect(parsed.fragments[0].origin.lines).toEqual([1, 2]);
-  });
-
-  it('keeps a null the stage schema legitimately allows (analyze `nullable: true`)', async () => {
-    const schema = new AnalyzeProbe().render(ServiceViolationOutputSchema);
-    const reply = JSON.stringify({
-      violations: [
-        {
-          type: 'service',
-          title: 't',
-          content: 'c',
-          severity: 'high',
-          targetServiceId: null,
-          fixPrompt: null,
-          ruleKey: 'rule',
-        },
-      ],
-      serviceDescriptions: [],
-    });
-
-    const out = await driveWithReply(schema, reply);
-    const parsed = ServiceViolationOutputSchema.parse(JSON.parse(out));
-    expect(parsed.violations[0].targetServiceId).toBeNull();
-    expect(parsed.violations[0].fixPrompt).toBeNull();
+    expect(Schema.parse(JSON.parse(out)).targetServiceId).toBeNull();
   });
 });
 
@@ -639,7 +413,7 @@ describe('spec-scan session outcome schemas', () => {
 });
 
 /**
- * The guard-setup sessions (plan 03 steps 9–14) reach a provider the same way:
+ * The guard-setup sessions reach a provider the same way:
  * the api driver renders the outcome schema as the injected `outcome` TOOL's
  * input schema, and the Agent SDK driver hands it to `outputFormat.json_schema`.
  * Both places take a JSON SCHEMA OBJECT — a tool's `input_schema` must be
@@ -664,8 +438,8 @@ describe('guard-setup session outcome schemas', () => {
 });
 
 /**
- * Guard generate's six content stages became sessions the same way (plan 04
- * steps 15–18), so the same rule binds them: the api session driver renders each
+ * Guard generate's six content stages became sessions the same way, so the same
+ * rule binds them: the api session driver renders each
  * `outcomeSchema` as the injected `outcome` TOOL's `inputSchema`
  * (`packages/llm-api/src/session-driver.ts` → `buildToolset`), and a tool's
  * input schema must be `type: "object"` on every provider — an `anyOf` root is

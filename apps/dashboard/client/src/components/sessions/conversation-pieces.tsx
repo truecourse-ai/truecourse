@@ -13,7 +13,7 @@ import { Link } from 'react-router-dom';
 import { ArrowUpRight, Check } from 'lucide-react';
 import { buildCorpusConflicts, resolutionForConflict } from '@truecourse/shared';
 import type { DisplayDispute, KnownDisplayBlock } from '@truecourse/agent-loop';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import * as api from '@/lib/api';
 import type { SpecConflictResolution } from '@/lib/api';
 
@@ -263,23 +263,18 @@ export function FindingResolveProvider({
   };
   const resolveCtx: FindingResolveCtx = {
     resolutions,
-    resolve: async (d, verdict) =>
-      applyAck(
-        repoId
-          ? await api.postSpecConflictResolution(repoId, { ...d, verdict })
-          : await api.postContextConflictResolution({ ...d, verdict }),
-      ),
+    // The verdict is the WORKSPACE's however the finding was reached: the
+    // repository read above is only its slice of those documents, and the
+    // decisions folded into it are the workspace's.
+    resolve: async (d, verdict) => applyAck(await api.postContextConflictResolution({ ...d, verdict })),
     undo: async (d) => {
-      const dispute = {
-        docA: d.docA,
-        anchorA: d.anchorA,
-        docB: d.docB,
-        anchorB: d.anchorB,
-      };
       applyAck(
-        repoId
-          ? await api.deleteSpecConflictResolution(repoId, dispute)
-          : await api.deleteContextConflictResolution(dispute),
+        await api.deleteContextConflictResolution({
+          docA: d.docA,
+          anchorA: d.anchorA,
+          docB: d.docB,
+          anchorB: d.anchorB,
+        }),
       );
     },
     // Link the dispute's EXACT Coverage record: match against the same derived
@@ -291,7 +286,7 @@ export function FindingResolveProvider({
       const match = (conflicts ?? []).find((c) =>
         resolutionForConflict([{ ...d, verdict: 'a' }], c.a, c.b, c.overlap.sections),
       );
-      return match ? `?tab=coverage&gconf=${encodeURIComponent(match.id)}` : '?tab=coverage';
+      return match ? `?tab=coverage&conflict=${encodeURIComponent(match.id)}` : '?tab=coverage';
     },
   };
 

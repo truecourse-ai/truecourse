@@ -11,15 +11,15 @@
  * what it reads in the repository.
  *
  * The outcome is {@link CatalogDraftSchema} — entries + findings — and the
- * FOLD (here, after the outcome, never in a tool) merges it into the committed
+ * FOLD (here, after the outcome, never in a tool) merges it into the shared
  * `scenarios/dependencies.json` and writes registration skeletons for new
- * supplied entries into the gitignored `scenarios/dependencies.local.json`.
+ * supplied entries into the instance overlay `scenarios/dependencies.local.json`.
  * ADD-ONLY by the externals-skeleton rule: an entry the catalog already
  * declares is left byte-identical — re-running detection or this session must
  * never destroy a curated classification.
  *
  * Cache: `guard/dependency-catalog`, keyed on the catalog step's own input
- * fingerprint (detection ∷ recipe ∷ committed catalog) plus the prompt
+ * fingerprint (detection ∷ recipe ∷ the stored catalog) plus the prompt
  * fingerprint — author-class, so completed drafts cache; the fold re-runs on
  * every hit (idempotent: add-only against a catalog that already has the
  * entries adds nothing).
@@ -60,6 +60,7 @@ import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
+import { corpusFilePath } from '@truecourse/shared/work-tree';
 
 export const DEPENDENCY_CATALOG_SESSION_KIND = 'guard-setup.dependency-catalog';
 export const DEPENDENCY_CATALOG_CACHE_NAME = 'guard/dependency-catalog';
@@ -221,20 +222,20 @@ function substantiatedService(service: GuardSetupCatalogSessionInput['detected']
 // ---------------------------------------------------------------------------
 
 export interface CatalogFoldResult {
-  /** Names newly added to the committed catalog (existing names are never edited). */
+  /** Names newly added to the stored catalog (existing names are never edited). */
   added: string[];
   /** Names skipped because the catalog already declares them. */
   alreadyDeclared: string[];
 }
 
 /**
- * Merge a VALIDATED draft into the two catalog files. ADD-ONLY: the committed
+ * Merge a VALIDATED draft into the two catalog files. ADD-ONLY: the catalog
  * file only ever grows, and an entry a human (or an earlier fold) already
  * declared is left byte-identical. Supplied entries get their machine-side
  * skeleton: an env-shaped registration derived from detection when the entry
  * IS a detected service (its base-URL variables), a path registration
  * otherwise (a real-world input the engine must never fabricate is usually a
- * project/corpus on disk); and an empty instance row in the gitignored overlay
+ * project/corpus on disk); and an empty instance row in the instance overlay
  * so the user sees exactly which fields to fill in.
  */
 export function foldCatalogDraft(
@@ -466,7 +467,7 @@ export function dependencyCatalogBriefing(
 /** The corpus's area tags with their doc counts — the domain map the catalog
  *  grounds on. A missing/unreadable corpus yields nothing, never a failure. */
 function corpusAreaSummary(repoRoot: string): { area: string; docs: number }[] {
-  const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json');
+  const file = corpusFilePath(repoRoot);
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
       docs?: { areaTags?: string[] }[];
@@ -566,8 +567,9 @@ function catalogCacheKey(stepFingerprint: string): string {
  * The `GuardSetupCatalogSession` the command adapter injects. One session,
  * concurrency 1; the fold runs here after the outcome — on cache hits too,
  * where its add-only merge makes the write idempotent. Findings are appended
- * to the committed `guard/setup.findings.md` ledger only when the session
- * actually RAN (a cache hit re-appending them every run would drown the feed).
+ * to the `guard/setup.findings.md` ledger the setup bundle carries, only when
+ * the session actually RAN (a cache hit re-appending them every run would drown
+ * the feed).
  */
 export function buildCatalogSession(
   context: GuardSetupSessionContext,

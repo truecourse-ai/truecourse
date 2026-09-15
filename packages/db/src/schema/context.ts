@@ -1,7 +1,7 @@
 /**
  * Context — the workspace's documentation sources, what they yielded, and which
  * repositories read them. Workspace-scoped (`workspace_org_id`, the same
- * convention as `gh_repos` / `knowledge_documents`), because a source belongs
+ * convention as `repositories`), because a source belongs
  * to the workspace and a repository only BINDS it.
  *
  *   context_sources   — one feed of documents of one kind, with its scope

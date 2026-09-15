@@ -4,21 +4,19 @@
  * (verb + ISO time) for a repo card. Route→driver: the Express `/api/repos`
  * adapter stays thin and all cross-store composition lives here.
  *
- * Every read is isolated and tolerant: a missing/corrupt file or an unreadable
- * repo path skips only that source (never throws). When no store yields a
- * timestamp we fall back to the registry's `lastAnalyzed` as an `analyzed`
- * event; when even that is absent the event is `null`.
+ * Every read is isolated and tolerant: an absent row, a malformed stored
+ * document or an unreachable store skips only that source (never throws). When
+ * no store yields a timestamp the event is `null`.
  */
 
 import { readGuardLatest, readGuardResult } from '../lib/guard-store.js';
-import { readLatest } from '../lib/analysis-store.js';
-import { loadLatestSpec } from '../lib/spec-store.js';
 
 /**
  * The lifecycle verbs a repo card can show. `generated` is `guard generate` (the
- * scenario set); `guarded` is a `guard run`.
+ * scenario set); `guarded` is a `guard run`. The scan is the WORKSPACE's, so it
+ * is not one of a repository's own events.
  */
-export type LatestEventKind = 'analyzed' | 'scanned' | 'generated' | 'guarded';
+export type LatestEventKind = 'generated' | 'guarded';
 
 export interface LatestEvent {
   kind: LatestEventKind;
@@ -34,15 +32,11 @@ interface EventCandidate {
 
 /**
  * Newest valid-timestamped candidate wins. Candidates with a missing or
- * unparseable `at` are ignored. With no valid candidate, fall back to the
- * registry's `lastAnalyzed` as an `analyzed` event; with none, `null`. Pure (no
- * I/O), so newest-wins is unit-testable directly. On an exact timestamp tie the
- * earlier candidate in the passed order wins.
+ * unparseable `at` are ignored; with none, `null`. Pure (no I/O), so
+ * newest-wins is unit-testable directly. On an exact timestamp tie the earlier
+ * candidate in the passed order wins.
  */
-export function pickLatestEvent(
-  candidates: readonly EventCandidate[],
-  registryLastAnalyzed?: string | null,
-): LatestEvent | null {
+export function pickLatestEvent(candidates: readonly EventCandidate[]): LatestEvent | null {
   let best: LatestEvent | null = null;
   let bestMs = -Infinity;
   for (const c of candidates) {
@@ -53,11 +47,7 @@ export function pickLatestEvent(
       best = { kind: c.kind, at: c.at as string };
     }
   }
-  if (best) return best;
-  if (toEpochMs(registryLastAnalyzed) !== null) {
-    return { kind: 'analyzed', at: registryLastAnalyzed as string };
-  }
-  return null;
+  return best;
 }
 
 function toEpochMs(at: string | null | undefined): number | null {
@@ -68,23 +58,15 @@ function toEpochMs(at: string | null | undefined): number | null {
 
 /**
  * Read every per-repo store's own timestamp tolerantly and return the newest
- * lifecycle event, or `null`. Never throws — each source is wrapped so a
- * corrupt file or an unreadable repo path skips just that source.
+ * lifecycle event, or `null`. Never throws — each source is wrapped so an absent
+ * row, a malformed document or an unreachable store skips just that source.
  */
-export async function resolveLatestEvent(
-  repoPath: string,
-  registryLastAnalyzed?: string | null,
-): Promise<LatestEvent | null> {
+export async function resolveLatestEvent(repoPath: string): Promise<LatestEvent | null> {
   const candidates: EventCandidate[] = [
-    { kind: 'analyzed', at: await safe(async () => (await readLatest(repoPath))?.analysis.createdAt) },
-    {
-      kind: 'scanned',
-      at: await safe(async () => (await loadLatestSpec<{ generatedAt?: string }>(repoPath, 'corpus'))?.generatedAt),
-    },
     { kind: 'generated', at: await safe(async () => (await readGuardResult(repoPath))?.generatedAt) },
     { kind: 'guarded', at: await safe(async () => (await readGuardLatest(repoPath))?.run.ranAt) },
   ];
-  return pickLatestEvent(candidates, registryLastAnalyzed);
+  return pickLatestEvent(candidates);
 }
 
 async function safe(fn: () => Promise<string | null | undefined>): Promise<string | null> {

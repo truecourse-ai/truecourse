@@ -33,7 +33,7 @@ vi.mock('@/lib/socket', () => {
   };
 });
 
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = (() => {}) as Element['scrollTo'];
@@ -45,13 +45,13 @@ const REPO_A = {
   id: 'web',
   name: 'acme/web',
   path: 'acme/web',
-  remoteUrl: 'https://github.com/acme/web',
+  provider: 'github',
 };
 const REPO_B = {
   id: 'api',
   name: 'acme/api',
   path: 'acme/api',
-  remoteUrl: 'https://github.com/acme/api',
+  provider: 'github',
 };
 
 const SITE: ContextSourceView = {
@@ -200,7 +200,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
       <Address />
       <Toaster />
@@ -208,10 +208,10 @@ function renderAt(path: string) {
   );
 }
 
-const at = (source: ContextSourceView) => `/preview/context/sources/${source.id}`;
+const at = (source: ContextSourceView) => `/context/sources/${source.id}`;
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -228,11 +228,11 @@ describe('the source page', () => {
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Context' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
     expect(within(crumbs).getByRole('link', { name: 'Sources' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
     expect(screen.getByText('Synced')).toBeInTheDocument();
     // The workspace's own actions ride along, on every Context page.
@@ -242,7 +242,7 @@ describe('the source page', () => {
 
   it('is where a Sources row goes', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/context');
     const user = userEvent.setup();
 
     const table = await screen.findByRole('table', { name: 'Sources' });
@@ -284,6 +284,32 @@ describe('the scope', () => {
         state.calls.filter((c) => c === `/api/context/sources/${SITE.id}`).length,
       ).toBeGreaterThan(before),
     );
+  });
+
+  it('keeps what a reader typed when a read returns the same scope', async () => {
+    const state = serve();
+    renderAt(at(SITE));
+    const user = userEvent.setup();
+
+    const url = await screen.findByLabelText('llms.txt URL');
+    await user.clear(url);
+    await user.type(url, 'https://docs.acme.com/docs/llms.txt');
+
+    // Sync now re-reads the source, and it comes back unchanged. That is not
+    // the server changing the scope, so the typing stays.
+    const before = state.calls.filter((c) => c === `/api/context/sources/${SITE.id}`).length;
+    const sync = screen.getByRole('button', { name: 'Sync now' });
+    await user.click(sync);
+    await waitFor(() =>
+      expect(
+        state.calls.filter((c) => c === `/api/context/sources/${SITE.id}`).length,
+      ).toBeGreaterThan(before),
+    );
+    // The action settles only once its re-read has landed.
+    await waitFor(() => expect(sync).toBeEnabled());
+
+    expect(screen.getByLabelText('llms.txt URL')).toHaveValue('https://docs.acme.com/docs/llms.txt');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 
   it("shows a repository's stored branch and patterns, and saves them", async () => {
@@ -413,7 +439,7 @@ describe('the syncs', () => {
 
     expect(await screen.findByRole('link', { name: '12 documents' })).toHaveAttribute(
       'href',
-      `/preview/context/documents?source=${SITE.id}`,
+      `/context/documents?source=${SITE.id}`,
     );
   });
 
@@ -480,7 +506,7 @@ describe('what the header can do to the source', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(state.calls).toContain(`DELETE /api/context/sources/${SITE.id}`));
     await waitFor(() =>
-      expect(screen.getByTestId('address').textContent).toBe('/preview/context'),
+      expect(screen.getByTestId('address').textContent).toBe('/context'),
     );
   });
 
@@ -496,7 +522,7 @@ describe('what the header can do to the source', () => {
 describe('the documents narrowed to one source', () => {
   it('leads back to the source’s page', async () => {
     serve();
-    renderAt(`/preview/context/documents?source=${SITE.id}`);
+    renderAt(`/context/documents?source=${SITE.id}`);
 
     const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'docs.acme.com' })).toHaveAttribute(

@@ -8,17 +8,17 @@
  *                                 The failing tile is marked, because a reader
  *                                 scanning pictures is looking for exactly one of
  *                                 them. The session video LEADS the strip as the
- *                                 Replay tile — its own first frame under a play
+ *                                 Replay tile, its own first frame under a play
  *                                 glyph, in the strip's tile anatomy, set off by a
  *                                 hairline; clicking it plays the recording in a
  *                                 modal ({@link GuardVideoLightbox}).
  *   {@link GuardStepScreenshot}   ONE step's screenshot, inside that step's
- *                                 expanded record — the picture is the step's own
+ *                                 expanded record, the picture is the step's own
  *                                 evidence, exactly like its url and its page
  *                                 text. A cli/api step recorded no picture, so its
  *                                 record simply has none.
  *   {@link GuardScreenshotLightbox} the run's screenshots as ONE CAROUSEL, full
- *                                 size, in the app — opened from a tile or from a
+ *                                 size, in the app, opened from a tile or from a
  *                                 step's picture, with "Go to step" as the way
  *                                 back to the record behind a picture.
  *                                 A browser run is a sequence, and reading it means
@@ -30,16 +30,16 @@
  *
  * THE LIGHTBOXES GIVE THEIR SUBJECT REAL HEIGHT. `object-contain` only ever fits
  * media to the box it is IN, so a box sized by its content leaves a small
- * screenshot rendered small — the exact complaint the full-size reading exists to
+ * screenshot rendered small, the exact complaint the full-size reading exists to
  * answer. The overlays therefore hand the media column a viewport-sized box
  * (90vw × 85vh) and let `object-contain` scale UP into it.
  *
- * A web step spawns nothing — no exit code, no streams — so a picture is the only
+ * A web step spawns nothing, no exit code, no streams, so a picture is the only
  * record of what it did. It renders for a GREEN run exactly as for a red one:
  * visuals are evidence, not failure decoration.
  *
  * Additive by construction. A bundle with no visuals (every cli/api run, and every
- * run recorded before the web driver existed) renders NOTHING — no strip, no empty
+ * run recorded before the web driver existed) renders NOTHING, no strip, no empty
  * gallery, no "no screenshots" line.
  */
 
@@ -54,13 +54,13 @@ import {
 import type { GuardEvidenceVisual } from "@truecourse/shared";
 import * as api from "@/lib/api";
 
-/** What one visual is called on the page — its step, or the file when it names none. */
+/** What one visual is called on the page, its step, or the file when it names none. */
 function visualLabel(visual: GuardEvidenceVisual): string {
   return visual.step != null ? `Step ${visual.step}` : visual.file;
 }
 
 /**
- * The shared overlay shell of both lightboxes — the app's one modal idiom (the
+ * The shared overlay shell of both lightboxes, the app's one modal idiom (the
  * estimate modal's): a fixed overlay that closes on a click, a stopPropagation'd
  * body, Escape to dismiss, a labelled header with the close button flush to the
  * media's right edge.
@@ -76,7 +76,7 @@ function MediaLightbox({
   after,
   children,
 }: {
-  /** The dialog's stable accessible name — never the per-item label. */
+  /** The dialog's stable accessible name, never the per-item label. */
   dialogLabel: string;
   /** The close button's stable accessible name. */
   closeLabel: string;
@@ -134,7 +134,7 @@ function MediaLightbox({
 
 /**
  * The open screenshot, full size over the page. The arrows are the carousel's
- * own: ← and → step and stop at the ends — a step sequence has a first and a
+ * own: ← and → step and stop at the ends, a step sequence has a first and a
  * last, and the disabled arrow is what says "you are at the edge". With a single
  * screenshot there is nothing to step through and no arrow renders.
  */
@@ -153,7 +153,7 @@ export function GuardScreenshotLightbox({
   index: number;
   onIndex: (next: number) => void;
   onClose: () => void;
-  /** Leave the carousel at this picture's step — expand it and bring it into view. */
+  /** Leave the carousel at this picture's step, expand it and bring it into view. */
   onGoToStep?: (step: number) => void;
 }) {
   const count = screenshots.length;
@@ -226,7 +226,7 @@ export function GuardScreenshotLightbox({
   );
 }
 
-/** The session recording, playing over the page — opened from the Replay tile. */
+/** The session recording, playing over the page, opened from the Replay tile. */
 export function GuardVideoLightbox({
   repoId,
   where,
@@ -286,7 +286,7 @@ export function GuardStepScreenshot({
     <button
       type="button"
       onClick={onOpen}
-      aria-label={`${label} — open full size`}
+      aria-label={`${label}, open full size`}
       className="group block w-full cursor-pointer rounded outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       <img
@@ -302,7 +302,7 @@ export function GuardStepScreenshot({
 }
 
 /**
- * THE RUN AS A STRIP — one tile per captured step, in step order, doubling as a
+ * THE RUN AS A STRIP, one tile per captured step, in step order, doubling as a
  * photographic index. It is not a time axis: guard runs 2–24 steps, so a tile
  * maps to a step, and clicking one expands that step in the list below and
  * brings its picture into view.
@@ -317,7 +317,7 @@ export function GuardRunFilmstrip({
   onGoToStep,
 }: {
   repoId: string;
-  /** The bundle these came from — the same handle their bytes are addressed by. */
+  /** The bundle these came from, the same handle their bytes are addressed by. */
   where: api.GuardEvidenceWhere;
   /** In step order, as the server listed them. */
   screenshots: readonly GuardEvidenceVisual[];
@@ -327,7 +327,7 @@ export function GuardRunFilmstrip({
   failedStep?: number;
   /** Open the carousel at this index of the screenshot sequence. */
   onOpenShot: (index: number) => void;
-  /** Expand this step's record and bring it into view — the tile-level jump. */
+  /** Expand this step's record and bring it into view, the tile-level jump. */
   onGoToStep?: (step: number) => void;
 }) {
   const [replay, setReplay] = useState(false);
@@ -336,13 +336,13 @@ export function GuardRunFilmstrip({
 
   return (
     <section aria-label="Run filmstrip" className="min-w-0 shrink-0">
-      {/* The strip is a FRAMED BAND, like the verdict card — the run's
+      {/* The strip is a FRAMED BAND, like the verdict card, the run's
           photographic record is a first-class pane of the workspace, not loose
           thumbnails floating between two framed neighbours. */}
       <div className="flex min-w-0 items-start gap-2 rounded border border-border bg-card p-2">
         {videos.length > 0 && (
           <>
-            {/* The session video, AS A TILE — the strip's own vocabulary, not a
+            {/* The session video, AS A TILE, the strip's own vocabulary, not a
                 chip beside it. It LEADS the strip: the whole-run record first,
                 then the per-step frames, with a hairline keeping the two kinds
                 of evidence apart. The poster is the recording's first frame
@@ -368,7 +368,7 @@ export function GuardRunFilmstrip({
                   )}
                   className="pointer-events-none h-full w-full object-cover object-top"
                 />
-                {/* The scrim earns the glyph its contrast — a run's first frame
+                {/* The scrim earns the glyph its contrast, a run's first frame
                     is usually a white page, and a white glyph on it would
                     vanish. */}
                 <span className="absolute inset-0 flex items-center justify-center bg-black/40 transition-colors group-hover:bg-black/50">

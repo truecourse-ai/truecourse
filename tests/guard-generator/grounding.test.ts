@@ -82,7 +82,7 @@ function ctx(extra: Partial<AuthorUserContext> = {}): AuthorUserContext {
 }
 
 /** An api interface carrying its own request contract — the catalog shape the
- *  mapper writes since the contract found its one home (plan item 102). */
+ *  mapper writes since the contract found its one home on the operation. */
 function contracted(
   method: string,
   path: string,
@@ -132,7 +132,7 @@ describe('buildInterfaceContractHints', () => {
     expect(hints).toHaveLength(1);
   });
 
-  it('leaves an RPC-derived operation out — it is not authored against this round (item 12)', () => {
+  it('leaves an RPC-derived operation out — it is not authored against this round', () => {
     // The operation is real and invocable; its request grammar is the procedure's
     // input schema in tRPC's `?input=` envelope, which no hint here describes.
     const rpc = { ...apiInterface('GET', '/api/trpc/post.getLatest'), procedure: 'post.getLatest' };

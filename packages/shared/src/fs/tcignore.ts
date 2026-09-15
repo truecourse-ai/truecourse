@@ -1,13 +1,13 @@
 /**
  * `.truecourseignore` — a single, shared ignore mechanism for every
- * directory walk TrueCourse performs: code-file analysis, the spec
- * doc-scan (consolidator), and the verifier's code-side extractors.
+ * directory walk TrueCourse performs: document discovery, the agent's repo
+ * tools, and the route-manifest scan.
  *
  * The file uses gitignore syntax (parsed by the `ignore` package) and
  * lives at the repo root. Patterns are always anchored at that root, so
  * the same `reference/` line excludes those paths whether the caller is
- * walking the repo root (doc-scan) or a subdirectory like `code/` (the
- * verifier). Callers that already know the repo root can pass it; those
+ * walking the repo root (doc discovery) or a subdirectory like `apps/web/`.
+ * Callers that already know the repo root can pass it; those
  * that start from a subdirectory let `loadTcIgnore` walk up to find it.
  *
  * Scope boundary: an ignore file governs only the subtree it claims. When
@@ -28,9 +28,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ignore, { type Ignore } from 'ignore';
+import { WORK_TREE_DIR } from './work-tree.js';
 
 /** Markers that identify a repo root, in priority order. */
-const ROOT_MARKERS = ['.truecourseignore', '.truecourse', '.git'];
+const ROOT_MARKERS = ['.truecourseignore', WORK_TREE_DIR, '.git'];
 
 export interface TcIgnore {
   /** The directory the `.truecourseignore` was anchored at. */

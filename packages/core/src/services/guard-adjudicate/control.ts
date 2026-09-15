@@ -1,8 +1,8 @@
 /**
- * THE VERIFICATION CHILD — `guard-adjudicate.control` (plan 05 step 22), a
- * depth-1 session the parent adjudicator dispatches when it leans `bug` at
- * medium-or-better confidence. Fresh context IS the independence (§3.4 — same
- * model): the child is told the suspected mechanism and asked the one question
+ * THE VERIFICATION CHILD — `guard-adjudicate.control`, a depth-1 session the
+ * parent adjudicator dispatches when it leans `bug` at medium-or-better
+ * confidence. Fresh context IS the independence (the same model): the child is
+ * told the suspected mechanism and asked the one question
  * that matters — what result would DISPROVE the bug — and given exactly one
  * tool to answer it with.
  *

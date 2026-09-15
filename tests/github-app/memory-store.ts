@@ -1,25 +1,26 @@
 /**
- * In-memory GateStore for the connection-layer tests. The real adapters (the ee
- * file store, the Postgres store) have their own suites — this one exists so the
- * router tests exercise routing, ownership and payload handling without a
- * filesystem or a database.
+ * In-memory stores for the connection-layer tests: the GitHub App's own rows
+ * and the connected repositories, in one object that satisfies both contracts.
+ * The real adapters have their own suites — this one exists so the router tests
+ * exercise routing, ownership and payload handling without a filesystem or a
+ * database.
  */
 
 import type {
-  GateStore,
+  RepositoryLink,
+  RepositoryProviderId,
+  RepositoryRecord,
+  RepositoryStore,
+} from '@truecourse/shared';
+import { slugify } from '@truecourse/core/config/registry';
+import type {
+  InstallationStore,
   InstallationRecord,
-  RepoLinkRecord,
-  BaselineRecord,
-  GateRunRecord,
-  PrRecord,
 } from '../../packages/github-app/src/store/types';
 
-export class MemoryGateStore implements GateStore {
+export class MemoryInstallationStore implements InstallationStore, RepositoryStore {
   private installations = new Map<number, InstallationRecord>();
-  private repos = new Map<string, RepoLinkRecord>();
-  private baselines = new Map<string, BaselineRecord>();
-  private runs: GateRunRecord[] = [];
-  private prs = new Map<string, PrRecord>();
+  private repos = new Map<string, RepositoryRecord>();
 
   async saveInstallation(rec: InstallationRecord): Promise<void> {
     this.installations.set(rec.installationId, { ...rec });
@@ -31,9 +32,6 @@ export class MemoryGateStore implements GateStore {
 
   async removeInstallation(installationId: number): Promise<void> {
     this.installations.delete(installationId);
-    for (const [name, repo] of this.repos) {
-      if (repo.installationId === installationId) this.repos.delete(name);
-    }
   }
 
   async linkInstallationToWorkspace(
@@ -52,55 +50,63 @@ export class MemoryGateStore implements GateStore {
     );
   }
 
-  async linkRepo(rec: RepoLinkRecord): Promise<void> {
-    this.repos.set(rec.repoFullName, { ...rec });
+  /** Mints the slug the way the Postgres store does: against the workspace's own slugs. */
+  async linkRepo(rec: RepositoryLink): Promise<RepositoryRecord> {
+    const existing = this.repos.get(rec.repoFullName);
+    const taken = [...this.repos.values()]
+      .filter((r) => r.workspaceOrgId === rec.workspaceOrgId)
+      .map((r) => r.slug);
+    const stored: RepositoryRecord = { ...rec, slug: existing?.slug ?? slugify(rec.repoFullName, taken) };
+    this.repos.set(rec.repoFullName, stored);
+    return stored;
   }
 
   async unlinkRepo(repoFullName: string): Promise<void> {
     this.repos.delete(repoFullName);
   }
 
-  async getRepo(repoFullName: string): Promise<RepoLinkRecord | null> {
+  async getRepo(repoFullName: string): Promise<RepositoryRecord | null> {
     return this.repos.get(repoFullName) ?? null;
   }
 
-  async listReposForWorkspace(workspaceOrgId: string): Promise<RepoLinkRecord[]> {
+  async listReposForWorkspace(workspaceOrgId: string): Promise<RepositoryRecord[]> {
     return [...this.repos.values()].filter((r) => r.workspaceOrgId === workspaceOrgId);
   }
 
-  async listReposForInstallation(installationId: number): Promise<RepoLinkRecord[]> {
-    return [...this.repos.values()].filter((r) => r.installationId === installationId);
+  async listReposForAccount(
+    provider: RepositoryProviderId,
+    accountId: string,
+  ): Promise<RepositoryRecord[]> {
+    return [...this.repos.values()].filter(
+      (r) => r.provider === provider && r.accountId === accountId,
+    );
   }
 
-  /** Every link row, regardless of workspace — what a derived registry reads. */
-  async listRepos(): Promise<RepoLinkRecord[]> {
+  /** Every repository row, regardless of workspace — what a derived registry reads. */
+  async listRepos(): Promise<RepositoryRecord[]> {
     return [...this.repos.values()];
   }
+}
 
-  async saveBaseline(rec: BaselineRecord): Promise<void> {
-    this.baselines.set(rec.repoFullName, { ...rec });
-  }
-
-  async getBaseline(repoFullName: string): Promise<BaselineRecord | null> {
-    return this.baselines.get(repoFullName) ?? null;
-  }
-
-  async recordRun(rec: GateRunRecord): Promise<void> {
-    this.runs.push({ ...rec });
-  }
-
-  async listRuns(repoFullName: string, limit = 50): Promise<GateRunRecord[]> {
-    return this.runs
-      .filter((r) => r.repoFullName === repoFullName)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .slice(0, limit);
-  }
-
-  async upsertPr(rec: PrRecord): Promise<void> {
-    this.prs.set(`${rec.repoFullName}#${rec.prNumber}`, { ...rec });
-  }
-
-  async listPrs(repoFullName: string): Promise<PrRecord[]> {
-    return [...this.prs.values()].filter((p) => p.repoFullName === repoFullName);
-  }
+/** A connected GitHub repository, as the connect flow writes one. */
+export function githubRepoRecord(
+  repoFullName: string,
+  installationId: number,
+  workspaceOrgId: string,
+  overrides: Partial<RepositoryRecord> = {},
+): RepositoryRecord {
+  const now = new Date().toISOString();
+  return {
+    repoFullName,
+    provider: 'github',
+    accountId: String(installationId),
+    workspaceOrgId,
+    defaultBranch: 'main',
+    blocking: true,
+    enabled: true,
+    notifyEmails: [],
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
 }

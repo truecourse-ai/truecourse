@@ -5,14 +5,15 @@
  *
  * Workspace-scoped like every route behind the gate. It joins what is already
  * stored and composes it in core (`@truecourse/core/services/home`): today's
- * sections, the trend across the repositories' baseline runs, each area's
+ * flows, the trend across the repositories' baseline runs, each area's
  * composition, what waits on a person and which documents moved.
  *
  * The reads are the Documents view's, one guard state per repository rather
- * than one per document, plus two the Documents view has no use for: each
- * repository's stored SECTION HISTORY (the trend, which no re-derivation could
- * honestly reconstruct) and the runs, conflicts, sources and provider the
- * attention rows are made of.
+ * than one per document, plus three the Documents view has no use for: each
+ * repository's FLOWS (the headline, read exactly as the Flows page reads them),
+ * its stored COVERAGE HISTORY (the trend; a run stored before flows were
+ * recorded has its own filled in from its snapshot, once) and the runs,
+ * conflicts, sources and provider the attention rows are made of.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -34,9 +35,10 @@ import {
 } from '@truecourse/core/services/home';
 import {
   docCoverageWords,
+  listGuardFlows,
+  readGuardCoverageHistory,
   readGuardCoverageSources,
 } from '@truecourse/core/commands/guard-read';
-import { readGuardRunSections } from '@truecourse/core/lib/guard-store';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
 import {
@@ -44,6 +46,7 @@ import {
   workspaceSessionsKey,
 } from '@truecourse/core/lib/sessions-store';
 import {
+  guardFlowPlainStatus,
   openConflicts,
   HOME_PERIODS,
   type GuardCoveragePlainStatus,
@@ -58,7 +61,7 @@ import {
 
 export interface HomeRouterDeps {
   /** Present when the server has a GitHub App configured; null otherwise. */
-  githubLinks?: RepoOwnershipLookup | null;
+  repoLinks?: RepoOwnershipLookup | null;
 }
 
 /**
@@ -86,8 +89,8 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
   /** The repositories this caller can see, by the `owner/repo` every store keys by. */
   async function visibleRepos(req: Request): Promise<Map<string, RegistryEntry>> {
     const visible = new Map<string, RegistryEntry>();
-    for (const entry of await readRegistry()) {
-      if (!(await isVisibleTo(deps.githubLinks, req, entry))) continue;
+    for (const entry of await readRegistry(orgOf(req))) {
+      if (!(await isVisibleTo(deps.repoLinks, req, entry))) continue;
       visible.set(entry.name, entry);
     }
     return visible;
@@ -133,7 +136,8 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
       }
 
       // One guard-state read per repository, then every document it reads
-      // composed against it, the Documents view's reading kept per SECTION.
+      // composed against it, the Documents view's reading kept per SECTION —
+      // plus the repository's FLOWS, which are what the headline counts.
       const repos: HomeRepoView[] = [];
       const coverage = new Map<string, Map<string, GuardCoveragePlainStatus>>();
       for (const [repoFullName, refs] of refsByRepo) {
@@ -155,17 +159,22 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
         repos.push({
           repository: repoFullName,
           sections,
+          flows: await readRepoFlows(visible.get(repoFullName)!.path),
           blockedReasons,
-          history: await readGuardRunSections(visible.get(repoFullName)!.path),
+          history: await readGuardCoverageHistory(visible.get(repoFullName)!.path),
         });
       }
 
-      // The repositories that read nothing still have a history worth drawing.
+      // A repository that reads no document still has flows and a history worth
+      // drawing: the headline is the workspace's proving, not its documentation.
       for (const [repoFullName, entry] of visible) {
         if (refsByRepo.has(repoFullName)) continue;
-        const history = await readGuardRunSections(entry.path);
-        if (history.length === 0) continue;
-        repos.push({ repository: repoFullName, sections: new Map(), history });
+        const [flows, history] = await Promise.all([
+          readRepoFlows(entry.path),
+          readGuardCoverageHistory(entry.path),
+        ]);
+        if (flows.length === 0 && history.length === 0) continue;
+        repos.push({ repository: repoFullName, sections: new Map(), flows, history });
       }
 
       const documents = corpus
@@ -213,6 +222,16 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
   });
 
   return router;
+}
+
+/**
+ * ONE repository's flows today, as the words they wear on the Flows page — the
+ * same read that page makes, so Home's headline and the list it opens can only
+ * ever agree. A repository with nothing generated yet answers an empty list.
+ */
+async function readRepoFlows(repoPath: string): Promise<GuardCoveragePlainStatus[]> {
+  const { flows } = await listGuardFlows(repoPath);
+  return flows.map((flow) => guardFlowPlainStatus(flow));
 }
 
 /**

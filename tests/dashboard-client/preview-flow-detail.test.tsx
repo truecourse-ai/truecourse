@@ -7,8 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import type { GuardFlowDetail as GuardFlowDetailData } from '@/preview/vendor/shared';
-import { GuardFlowDetail } from '@/preview/vendor/components/guard/GuardFlowDetail';
+import type { GuardFlowDetail as GuardFlowDetailData } from '@truecourse/shared';
+import { GuardFlowDetail } from '@/components/guard/GuardFlowDetail';
 
 const DETAIL: GuardFlowDetailData = {
   flowId: 'write-then-read',
@@ -49,23 +49,39 @@ function renderDetail(detail: GuardFlowDetailData = DETAIL) {
   );
 }
 
-/** The label/value pairs under the title, in render order. */
-function facts(container: HTMLElement): [string, string][] {
-  const list = container.querySelector('dl')!;
-  return [...list.querySelectorAll('div')].map((row) => [
-    within(row as HTMLElement).getByRole('term').textContent ?? '',
-    within(row as HTMLElement).getByRole('definition').textContent ?? '',
-  ]);
-}
+describe('the milestone chain', () => {
+  it('lists a milestone’s single case under its claim', () => {
+    renderDetail({
+      ...DETAIL,
+      milestones: [
+        {
+          order: 1,
+          doc: 'docs/conversion.md',
+          anchor: 'conversion-behaviors',
+          claimTitle: 'Conversion behaviors',
+          headingText: 'Conversion behaviors',
+          live: true,
+          drifted: false,
+          cases: [{ id: 'missing-key', claim: 'A missing key converts to an empty string.' }],
+        },
+      ],
+    });
+
+    const chain = screen.getByRole('list', { name: 'Milestones' });
+    expect(within(chain).getByText('Conversion behaviors')).toBeInTheDocument();
+    expect(within(chain).getByText('A missing key converts to an empty string.')).toBeInTheDocument();
+  });
+});
 
 describe('the flow detail header', () => {
-  it('reads its facts as plain rows, one per line', () => {
+  it('states no progress of its own: the body says what ran and what is missing', () => {
     const { container } = renderDetail();
-    expect(facts(container)).toEqual([
-      ['Execution', 'Not run'],
-      ['Coverage', '0 of 3 cases verified'],
-      ['Generation', 'Incomplete'],
-    ]);
+    // Execution / Coverage / Generation each restated something the body
+    // already carries — the verdict, the milestone list, the blocked block —
+    // in a third vocabulary, so the header states the flow and nothing else.
+    expect(container.querySelector('dl')).toBeNull();
+    expect(screen.queryByText('Execution')).toBeNull();
+    expect(screen.queryByText('Generation')).toBeNull();
   });
 
   it('hides nothing behind a collapsible', () => {
@@ -74,25 +90,11 @@ describe('the flow detail header', () => {
     expect(screen.queryByText('Execution and coverage details')).toBeNull();
   });
 
-  it('keeps ONE status word in the header, above the facts', () => {
+  it('keeps ONE status word in the header', () => {
     renderDetail();
     const title = screen.getByRole('heading', { name: 'Writes a file and reads it back' });
     const header = within(title.parentElement!);
     expect(header.getAllByText('Blocked')).toHaveLength(1);
-    // The facts never wear a status word of their own.
-    expect(header.queryByText('Not run')).toBeInTheDocument();
     expect(header.queryByText('Blocked 0')).toBeNull();
-  });
-
-  it('says a coverage nothing recorded rather than a count it does not have', () => {
-    const { container } = renderDetail({
-      ...DETAIL,
-      progress: { ...DETAIL.progress!, coverage: 'unknown', execution: 'passed', generation: 'ready' },
-    });
-    expect(facts(container)).toEqual([
-      ['Execution', 'Passed'],
-      ['Coverage', 'Not recorded'],
-      ['Generation', 'Ready'],
-    ]);
   });
 });

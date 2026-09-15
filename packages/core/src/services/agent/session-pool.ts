@@ -17,10 +17,10 @@
  *   signal is already aborted, and the sessions in flight get the signal
  *   through `runAgentLoop` and end themselves;
  * - every persisted transcript event is tee'd to the caller's observer, AFTER
- *   the shell stamped it (`seq`/`ts`), so the CLI's live line sees exactly what
+ *   the shell stamped it (`seq`/`ts`), so the observer sees exactly what
  *   the transcript records.
  *
- * SERIAL GROUPS (item 8's cluster discipline, generalized). Items that share a
+ * SERIAL GROUPS — the cluster discipline, generalized. Items that share a
  * `serialKey` run one after another, in work-list order, on a single worker —
  * each one starts only after its predecessor has FOLDED, so its briefing can
  * include the peer's landed work. The permit unit is the group: groups run
@@ -28,7 +28,7 @@
  * its own length. Absent `serialKey`, every item is its own group and the pool
  * is fully concurrent up to the cap.
  *
- * THE THROTTLE GOVERNOR (01 step 2i). `TRUECOURSE_MAX_CONCURRENCY` (or the
+ * THE THROTTLE GOVERNOR. `TRUECOURSE_MAX_CONCURRENCY` (or the
  * caller's `concurrency`) is a CEILING, not a fixed level: the pool watches the
  * `provider-retry` events its sessions already emit, and on a 429 halves its
  * live permits (floor 1) — twenty sessions each politely obeying a provider's
@@ -85,6 +85,7 @@ import {
  *   guard-setup.recipe-repair     guard-setup.dependency-catalog
  *   guard-setup.reconcile-interfaces
  *   guard-setup.seed              guard-setup.auth-proof
+ *   guard-setup.preparations      guard-setup.preparation-observations
  *   guard-generate.extract        guard-generate.flows
  *   guard-generate.flow-worker    guard-generate.fidelity
  *   guard-adjudicate.failure      guard-adjudicate.control

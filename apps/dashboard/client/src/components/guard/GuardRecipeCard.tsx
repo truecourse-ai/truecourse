@@ -1,10 +1,10 @@
 /**
  * The preparation recipe as a CARD — the structured half of {@link
  * GuardRecipeDetail}, which each surface's recipe row in the Interfaces catalog
- * opens. The committed `recipe.json` plus its short inputs fingerprint,
+ * opens. The stored `recipe.json` plus its short inputs fingerprint,
  * provenance, and a staleness signal (inputs changed since the last run).
  * Compact and read-only: the recipe is discovered + human-reviewed by
- * `truecourse guard setup` and re-derived only there.
+ * Flow setup and re-derived only there.
  *
  * ONE GRAMMAR FOR EVERY SURFACE. The wire hands each surface the same shape
  * ({@link GuardRecipeSurface}), and this card renders it through one ordered
@@ -33,7 +33,7 @@ import type {
   GuardRecipeSurface,
 } from '@truecourse/shared';
 import { GUARD_DRIVERS, guardDriver } from '@truecourse/shared';
-import { HoverPopover } from '@/components/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { shortFingerprint } from '@/lib/guard-drifts';
 
 const LABEL = 'text-[10px] font-semibold uppercase tracking-wider text-muted-foreground';
@@ -192,7 +192,7 @@ export function GuardRecipeCard({
           <HoverPopover portal
             align="end"
             width="wide"
-            content="The recipe-discovery inputs (package.json, lockfile, build config) changed since the last run recorded its fingerprint — the recipe may need re-discovery (truecourse guard recipe --refresh)."
+            content="The recipe-discovery inputs (package.json, lockfile, build config) changed since the last run recorded its fingerprint — the recipe may need re-discovery, which a fresh Flow setup does."
           >
             <span className="ml-auto inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <AlertTriangle className="h-3 w-3" />
@@ -234,7 +234,7 @@ export function GuardRecipeCard({
           <span className="font-mono">fingerprint {shortFingerprint(recipe.fingerprint)}</span>
         </HoverPopover>
         <span>·</span>
-        <span>Committed · reviewed at first generate</span>
+        <span>Reviewed at first generate</span>
       </div>
     </div>
   );

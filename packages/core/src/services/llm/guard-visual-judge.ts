@@ -1,17 +1,17 @@
 /**
- * THE VISUAL JUDGE — the only LLM call `truecourse guard run` ever makes, and it
+ * THE VISUAL JUDGE — the only LLM call a Flow run ever makes, and it
  * only ever makes it about something that has ALREADY failed.
  *
  * A web step asserts on the DOM: a role, an accessible name, a substring of the
  * page's text. When one of those misses, the transcript can say the words were not
  * found and the run leaves a full-page PNG behind — but the question a human
- * actually has ("so what WAS on the screen?") is answerable only by opening that
- * PNG out of a gitignored directory. This stage answers it in the transcript: it
+ * actually has ("so what WAS on the screen?") is answered only by opening that
+ * PNG. This stage answers it in the transcript instead: it
  * hands the screenshot, the step's claim, its mechanical expectation and the
  * deterministic mismatch to a vision model and records what it saw.
  *
  * THE RULES, all of which follow from the runner's determinism rule:
- *  - OPT-IN, off by default. The judge is PARKED (2026-08-14): fully implemented
+ *  - OPT-IN, off by default. The judge is PARKED: fully implemented
  *    and tested, but its vision call slows every red run, so day-to-day runs skip
  *    it until its cost/value is settled. `TRUECOURSE_GUARD_VISUAL_JUDGE=1` turns
  *    it back on — see {@link guardVisualJudgeEnabled}.
@@ -38,15 +38,13 @@ import {
 } from '@truecourse/shared';
 import type { GuardVisualJudge, GuardVisualJudgeInput } from '@truecourse/guard-runner';
 import {
-  cliTransport,
   extractJsonValue,
-  getDefaultTransport,
+  noProviderTransport,
   jsonSchemaHint,
   OUTPUT_ONLY_GUARDRAIL,
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { resolveFallbackModel, resolveModel } from '../../config/llm-models.js';
-import { installConfiguredLlmTransport } from './install-transport.js';
 
 /** Where verdicts are cached — under `.truecourse/.cache/`, derived and disposable. */
 export const VISUAL_JUDGE_CACHE_NAME = 'guard/visual-judge';
@@ -185,11 +183,11 @@ export type VisualJudgeRunner = (
   screenshotBase64: string,
 ) => Promise<unknown>;
 
-/** Build the production runner: one vision call over the shared transport seam. */
+/** Build the production runner: one vision call over the run's transport. */
 export function spawnVisualJudgeRunner(
   opts: { transport?: LlmTransport; model?: string; fallbackModel?: string; timeoutMs?: number } = {},
 ): VisualJudgeRunner {
-  const transport = opts.transport ?? cliTransport();
+  const transport = opts.transport ?? noProviderTransport;
   const timeoutMs = opts.timeoutMs ?? VISUAL_JUDGE_TIMEOUT_MS;
   return async (ctx, screenshotBase64) => {
     const raw = await transport({
@@ -325,28 +323,12 @@ function quoteInvalidOutput(raw: unknown): string {
 }
 
 /**
- * The transport the judge calls through. `guard run` is LLM-free up front and
- * installs no transport at entry, so by the time a web step fails NOTHING has
- * run the installer — and `getDefaultTransport()` alone would fall back to
- * spawning `claude` with an api-mode model id the binary rejects: a guaranteed
- * fast failure and a silently absent verdict. The judge therefore resolves the
- * user's configured transport itself: `api` mode installs the direct-API
- * transport as the process default (idempotent — repeat calls are one `stat`),
- * `claude-code` mode installs nothing and the runner falls back to `claude -p`.
- * An EE-injected transport is honored either way (the installer never clears a
- * transport it did not install).
- */
-export function resolveVisualJudgeTransport(): LlmTransport | undefined {
-  installConfiguredLlmTransport();
-  return getDefaultTransport();
-}
-
-/**
- * Whether `guard run` should wire the judge in at all. Off by default: the judge
- * is parked, not deleted — every red web step would otherwise wait on a vision
- * call, and that cost is not currently buying its keep. `TRUECOURSE_GUARD_VISUAL_JUDGE=1`
- * (or `true`) opts a run back in; everything downstream (cache, schema, CLI and
- * dashboard rendering) is unchanged and springs back to life with the flag.
+ * Whether the hosted run job should wire the judge in at all, on the workspace's
+ * transport. Off by default: the judge is parked, not deleted — every red web
+ * step would otherwise wait on a vision call, and that cost is not currently
+ * buying its keep. `TRUECOURSE_GUARD_VISUAL_JUDGE=1` (or `true`) opts a run back
+ * in; everything downstream (cache, schema, dashboard rendering) is unchanged and
+ * springs back to life with the flag.
  */
 export function guardVisualJudgeEnabled(): boolean {
   const value = process.env.TRUECOURSE_GUARD_VISUAL_JUDGE?.trim().toLowerCase();
@@ -354,31 +336,30 @@ export function guardVisualJudgeEnabled(): boolean {
 }
 
 /**
- * The judge `guard run` is wired with: the real transport, the repo's configured
- * model for the stage, and every failure mode flattened to `null`.
+ * The judge a run is wired with: the run's transport, the stage's model, and
+ * every failure mode flattened to `null`.
  *
  * The transport is resolved LAZILY, inside the call: building it eagerly would
- * resolve the `claude` binary (or the API config) on every run, including the
- * overwhelming majority that never fail a web step.
+ * cost every run, including the overwhelming majority that never fail a web
+ * step.
  */
 export function createGuardVisualJudge(
   repoRoot: string,
   opts: {
     /**
-     * Judge on THIS transport instead of the configured one — a hosted run
-     * passes the asking workspace's provider, whose credentials never install
-     * process-wide.
+     * The transport the judge asks through — the asking workspace's provider,
+     * whose credentials never install process-wide.
      */
-    transport?: LlmTransport;
-  } = {},
+    transport: LlmTransport;
+  },
 ): GuardVisualJudge {
   return async (input) => {
     let runner: VisualJudgeRunner;
     try {
       runner = spawnVisualJudgeRunner({
-        transport: opts.transport ?? resolveVisualJudgeTransport(),
-        model: resolveModel('guard.visualJudge', undefined, repoRoot),
-        fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
+        transport: opts.transport,
+        model: resolveModel('guard.visualJudge'),
+        fallbackModel: resolveFallbackModel() ?? undefined,
       });
     } catch {
       // No usable transport (no `claude` on PATH, unbuildable API config) — the

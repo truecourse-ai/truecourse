@@ -14,7 +14,7 @@ import {
   type CliProbeExec,
 } from '../../packages/interface-mapper/src/cli-probes'
 import { deriveCliInterfacesFromTree } from '../../packages/interface-mapper/src/cli-tree'
-import { analyzeFileContent } from '../../packages/analyzer/src/file-analyzer'
+import { analyzeFileContent } from '../../packages/source-facts/src/file-analyzer'
 
 const ENTRY = ['/usr/local/bin/node', '/repo/dist/shipit.js']
 

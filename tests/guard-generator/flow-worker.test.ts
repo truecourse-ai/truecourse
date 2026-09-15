@@ -1,5 +1,5 @@
 /**
- * THE FLOW-WORKER ENGINE HALF (plan 04 step 17) — everything deterministic
+ * THE FLOW-WORKER ENGINE HALF — everything deterministic
  * about one (flow, surface) work unit, driven through the closures a session
  * would call: the det pre-flight, the fresh-sandbox execution, the
  * red-prediction done-gate, the accepted-yaml STASH, and the routing fold that

@@ -12,7 +12,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { llmProviderConfig, type Db } from '@truecourse/db';
 import type { LlmConfigUpdate, LlmProviderConfigView, LlmProviderKind } from '@truecourse/shared';
-import type { GlobalApiLlmConfig } from '@truecourse/core/config/global-config';
+import type { LlmApiConfig } from '@truecourse/core/services/llm/provider-config';
 import { decryptSecret, encryptSecret, maskKey } from './crypto.js';
 
 export class PgLlmConfigStore {
@@ -60,12 +60,12 @@ export class PgLlmConfigStore {
    * null when this workspace has configured no provider. Never handed to a
    * browser — it carries the key in clear.
    */
-  async getConfig(orgId: string): Promise<GlobalApiLlmConfig | null> {
+  async getConfig(orgId: string): Promise<LlmApiConfig | null> {
     const row = await this.getRow(orgId);
     if (!row) return null;
     const secret = row.apiKeyEnc ? decryptSecret(row.apiKeyEnc, this.masterSecret) : undefined;
     const provider = row.provider as LlmProviderKind;
-    const config: GlobalApiLlmConfig = {
+    const config: LlmApiConfig = {
       provider,
       model: row.model,
       ...(row.fallbackModel ? { fallbackModel: row.fallbackModel } : {}),

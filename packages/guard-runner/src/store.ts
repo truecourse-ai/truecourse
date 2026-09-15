@@ -1,35 +1,30 @@
 /**
- * Guard store paths + readers/writers under `<repo>/.truecourse/guard/`, mirroring
- * the verify store: per-run snapshots, a materialized LATEST, and append-only
- * history. No `diff.json` — guard shows current state only.
- *
- *   guard/runs/<runId>.json      per-run snapshots (gitignored)
- *   guard/LATEST.json            materialized current run state (committable)
- *   guard/history.json           per-run summaries, append-only (gitignored)
- *   guard/result.json            last `guard generate` report (gitignored)
- *   guard/setup.json             last `guard setup` record + detection snapshot (gitignored)
- *   guard/interfaces.json        last interface-mapping catalog (gitignored, re-derived)
- *   guard/interfaces.authored.json  the hand-authored half of that catalog (COMMITTED)
- *   guard/interfaces.findings.md    the authoring sessions' doc-bug feed (COMMITTED)
- *   guard/setup.findings.md      the setup sessions' code-vs-docs findings ledger (COMMITTED)
- *   guard/adjudicate.findings.md the adjudication sessions' findings ledger (COMMITTED)
- *   guard/findings.md            the rendered findings report (COMMITTED)
- *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
- *
- * The committable corpus files live one level over, under `scenarios/`:
- *
- *   scenarios/recipe.json        how to build/run the app (committable)
- *   scenarios/manifest.json      flow → scenario map (committable)
- *   scenarios/flows.json         the synthesized flow corpus (committable)
- *   scenarios/claims.json        the extracted claim corpus (committable)
- *   scenarios/decisions.json     user-authored dismissals (committable)
- *   scenarios/dependencies.json  the dependency catalog (committable)
- *   scenarios/dependencies.local.json the machine's registered instances (gitignored)
+ * The guard store: the readers and writers over the work tree's `guard/` run
+ * store and `scenarios/` corpus. The tree's LAYOUT is owned by
+ * `@truecourse/shared/work-tree` — every path below comes from there — and this
+ * module is what reads and writes through those paths.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import type { z } from 'zod'
+import {
+  guardAutoResolutionsPath,
+  guardClaimsPath,
+  guardDir,
+  guardFlowsPath,
+  guardAuthoredInterfacesPath,
+  guardHistoryPath,
+  guardInterfacesPath,
+  guardLatestPath,
+  guardResultPath,
+  guardRunPath,
+  guardRunsDir,
+  guardSetupPath,
+  manifestPath,
+  recipePath,
+  scenariosDir,
+} from '@truecourse/shared/work-tree'
 import {
   GuardAutoResolutionsSchema,
   GuardClaimsFileSchema,
@@ -53,209 +48,37 @@ import {
   type MapperDiagnostic,
 } from '@truecourse/shared'
 
-const TRUECOURSE_DIR = '.truecourse'
-const GUARD_DIR = 'guard'
-const SCENARIOS_DIR = 'scenarios'
-const RUNS_DIR = 'runs'
-const EVIDENCE_DIR = 'evidence'
-const LATEST_FILE = 'LATEST.json'
-const HISTORY_FILE = 'history.json'
-const RESULT_FILE = 'result.json'
-const SETUP_FILE = 'setup.json'
-const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
-const INTERFACES_FILE = 'interfaces.json'
-const AUTHORED_INTERFACES_FILE = 'interfaces.authored.json'
-const INTERFACE_FINDINGS_FILE = 'interfaces.findings.md'
-const SETUP_FINDINGS_FILE = 'setup.findings.md'
-const ADJUDICATE_FINDINGS_FILE = 'adjudicate.findings.md'
-const FINDINGS_REPORT_FILE = 'findings.md'
-const RECIPE_FILE = 'recipe.json'
-const MANIFEST_FILE = 'manifest.json'
-const DECISIONS_FILE = 'decisions.json'
-const FLOWS_FILE = 'flows.json'
-const CLAIMS_FILE = 'claims.json'
-const EXTERNALS_LOCAL_FILE = 'externals.local.json'
-const DEPENDENCIES_FILE = 'dependencies.json'
-const DEPENDENCIES_LOCAL_FILE = 'dependencies.local.json'
-
-export function guardDir(repoRoot: string): string {
-  return path.join(repoRoot, TRUECOURSE_DIR, GUARD_DIR)
-}
-
-export function guardLatestPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), LATEST_FILE)
-}
-
-export function guardRunsDir(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), RUNS_DIR)
-}
-
-/** Per-run snapshot path; the runId is already `<iso>_<short>` filesystem-safe. */
-export function guardRunPath(repoRoot: string, runId: string): string {
-  return path.join(guardRunsDir(repoRoot), `${runId}.json`)
-}
-
-export function guardHistoryPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), HISTORY_FILE)
-}
-
-export function guardResultPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), RESULT_FILE)
-}
-
-/** The last `guard setup` record — derived, gitignored, may be absent. */
-export function guardSetupPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), SETUP_FILE)
-}
-
-/** The interface catalog the last mapping wrote — derived, gitignored, may be absent. */
-export function guardInterfacesPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), INTERFACES_FILE)
-}
-
-/**
- * The HAND-AUTHORED half of the catalog — committed, and the one file under
- * `guard/` no derivation ever writes. See {@link readAuthoredInterfaceCatalog}.
- */
-export function guardAuthoredInterfacesPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), AUTHORED_INTERFACES_FILE)
-}
-
-/**
- * The FINDINGS LEDGER the authoring sessions append to — committed, like the
- * catalog half beside it, because what it holds is a report about the
- * REPOSITORY (a doc that disagrees with the source), not a record of a run. A
- * teammate who never ran authoring still has to be able to read it.
- */
-export function guardInterfaceFindingsPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), INTERFACE_FINDINGS_FILE)
-}
-
-/**
- * The SETUP FINDINGS LEDGER — where `guard setup`'s sessions (the dependency
- * catalog, the seed session) append the code-vs-docs discrepancies they read.
- * Committed: what it holds is a report about the REPOSITORY, not a record of a
- * run, so a teammate who never ran setup can still read it. Keep it out of
- * `GITIGNORE_CONTENTS`.
- */
-export function guardSetupFindingsPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), SETUP_FINDINGS_FILE)
-}
-
-/**
- * THE WORLD-DIRTY MARKER (`guard/.world-dirty`, gitignored, derived): written
- * before a `world: mutates` tail runs — by `guard run` and by generate's
- * mutator wave alike — and cleared by a successful `api.services.reset`. A
- * marker that survives (a crash mid-tail, a recipe with no reset) means the
- * world still carries the tail's damage; the next world boot resets before
- * `up` when it can.
- */
-export function guardWorldDirtyMarkerPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), '.world-dirty')
-}
-
-/**
- * The ADJUDICATION FINDINGS LEDGER — where `guard adjudicate`'s sessions append
- * the code-vs-docs discrepancies they read while classifying failures (the
- * outcome's `findings`). Committed for the same reason its two
- * siblings above are: a report about the REPOSITORY, not a record of a run.
- * Keep it out of `GITIGNORE_CONTENTS`.
- */
-export function guardAdjudicateFindingsPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), ADJUDICATE_FINDINGS_FILE)
-}
-
-/**
- * THE FINDINGS REPORT — `guard/findings.md`: the on-demand
- * render of the board's `bug` / `drift` adjudications, one `## F<n>` per
- * finding with stable first-seen numbering persisted in the file itself.
- * COMMITTABLE (deliberately not in `GITIGNORE_CONTENTS`): it is the repo's
- * findings record, regenerated — never appended — by
- * `truecourse guard adjudicate --report`.
- */
-export function guardFindingsReportPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), FINDINGS_REPORT_FILE)
-}
-
-export function scenariosDir(repoRoot: string): string {
-  return path.join(repoRoot, TRUECOURSE_DIR, SCENARIOS_DIR)
-}
-
-export function recipePath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), RECIPE_FILE)
-}
-
-export function manifestPath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), MANIFEST_FILE)
-}
-
-/** The committable, user-authored guard decisions file — next to recipe/manifest,
- *  NOT under the mostly-gitignored `guard/` run store. */
-export function guardDecisionsPath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), DECISIONS_FILE)
-}
-
-/** The committable synthesized flow corpus — `scenarios/flows.json`. */
-export function guardFlowsPath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), FLOWS_FILE)
-}
-
-/**
- * The committable extracted claim corpus — `scenarios/claims.json`, next to the
- * flow corpus it is the denominator of. Committable for the same reason
- * `flows.json` is: claims are what scenarios' milestones and flows' bindings
- * REFERENCE, so a fresh clone that inherits the scenarios must inherit the claims
- * they name or every reference dangles.
- */
-export function guardClaimsPath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), CLAIMS_FILE)
-}
-
-/**
- * The GITIGNORED secrets overlay for `api.externals` — sibling of
- * recipe.json, deliberately NOT committable: it carries the API keys and the
- * per-developer sandbox URLs the committed declaration must never hold.
- */
-export function externalsLocalPath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), EXTERNALS_LOCAL_FILE)
-}
-
-/**
- * The COMMITTED dependency catalog — `scenarios/dependencies.json`, sibling of the
- * recipe it is fingerprinted with. Committable for the recipe's reason: it declares
- * WHAT starting state the program needs, which every teammate's run must agree on.
- */
-export function dependenciesPath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), DEPENDENCIES_FILE)
-}
-
-/**
- * The GITIGNORED instance overlay — `scenarios/dependencies.local.json`. Holds the
- * machine-specific half the committed catalog must never carry (a path to a real
- * project, a config dir, an API key), merged over the declaration per field at load
- * time and deliberately outside every fingerprint.
- */
-export function dependenciesLocalPath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), DEPENDENCIES_LOCAL_FILE)
-}
-
-export function evidenceRunDir(repoRoot: string, runId: string): string {
-  return path.join(guardDir(repoRoot), EVIDENCE_DIR, runId)
-}
-
-export function evidenceScenarioDir(repoRoot: string, runId: string, scenarioId: string): string {
-  return path.join(evidenceRunDir(repoRoot, runId), sanitizeSegment(scenarioId))
-}
-
-/** Repo-relative evidence pointer stored in LATEST (portable, POSIX separators). */
-export function evidenceRelPath(runId: string, scenarioId: string): string {
-  return [TRUECOURSE_DIR, GUARD_DIR, EVIDENCE_DIR, runId, sanitizeSegment(scenarioId)].join('/')
-}
-
-/** A scenario id may contain dots; keep it filesystem-safe as a directory name. */
-export function sanitizeSegment(segment: string): string {
-  return segment.replace(/[^a-zA-Z0-9._-]/g, '_')
-}
+export {
+  dependenciesLocalPath,
+  dependenciesPath,
+  evidenceRelPath,
+  evidenceRunDir,
+  evidenceScenarioDir,
+  externalsLocalPath,
+  guardAdjudicateFindingsPath,
+  guardAuthoredInterfacesPath,
+  guardAutoResolutionsPath,
+  guardClaimsPath,
+  guardDecisionsPath,
+  guardDir,
+  guardFindingsReportPath,
+  guardFlowsPath,
+  guardHistoryPath,
+  guardInterfaceFindingsPath,
+  guardInterfacesPath,
+  guardLatestPath,
+  guardResultPath,
+  guardRunPath,
+  guardRunsDir,
+  guardSectionsPath,
+  guardSetupFindingsPath,
+  guardSetupPath,
+  guardWorldDirtyMarkerPath,
+  manifestPath,
+  recipePath,
+  sanitizeSegment,
+  scenariosDir,
+} from '@truecourse/shared/work-tree'
 
 /**
  * Write `data` to `targetPath` atomically (write-to-tmp + rename). Mirrors core's
@@ -310,12 +133,6 @@ export function readGuardResult(repoRoot: string): GuardGenerateReport | null {
   return readJsonOr(guardResultPath(repoRoot), GuardGenerateReportSchema, null)
 }
 
-/** The durable auto-resolve ledger + flow-taint set — gitignored run
- *  memory under `guard/`, like `result.json`. */
-export function guardAutoResolutionsPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), AUTO_RESOLUTIONS_FILE)
-}
-
 /**
  * Read the ledger; a missing or corrupt file reads as empty (never blocks a run).
  * Every call returns a FRESH object — never the shared
@@ -349,8 +166,8 @@ export function writeGuardSetup(repoRoot: string, report: GuardSetupReport): str
 
 /**
  * Read the last `guard setup` record, or `null` when absent or unparseable. A
- * missing/corrupt file means "setup has not run" — never a failure: the file is
- * derived and gitignored, so a fresh clone legitimately has none.
+ * missing/corrupt file means "setup has not run" — never a failure: a clone
+ * whose bundle carried none legitimately has none.
  */
 export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
   return readJsonOr(guardSetupPath(repoRoot), GuardSetupReportSchema, null)
@@ -358,8 +175,8 @@ export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
 
 /**
  * Read the interface catalog the last mapping DERIVED, or `null` when it is absent
- * or unparseable. The catalog is derived and gitignored, so a missing/corrupt one is
- * simply "no interface knowledge" — it never fails a run, it only means the drift
+ * or unparseable. The catalog is derived, so a missing/corrupt one is simply
+ * "no interface knowledge" — it never fails a run, it only means the drift
  * annotation has nothing to compare against.
  *
  * This is HALF the catalog. A consumer asking what surfaces the repo has wants
@@ -372,7 +189,7 @@ export function readInterfaceCatalog(repoRoot: string): InterfacesFile | null {
 }
 
 /**
- * Read the COMMITTED authored catalog — `guard/interfaces.authored.json`, the
+ * Read the AUTHORED catalog — `guard/interfaces.authored.json`, the
  * home of the interfaces and places NO derivation produces. The mapper derives
  * `cli` and `api` and nothing else, so every web surface in existence is
  * hand-authored; until this file existed they lived in the derived snapshot and
@@ -388,9 +205,9 @@ export function readInterfaceCatalog(repoRoot: string): InterfacesFile | null {
  *
  * It is read as a FRAGMENT (`InterfacesFragmentSchema`): the shape in full, the
  * cross-reference rules not here. An authored task stands on a place the
- * DERIVATION writes (the web screens land in the gitignored half),
- * so its `at`/`to` ids resolve in the merge and nowhere else — and on a fresh
- * clone, where nothing has mapped yet, the derived half does not exist at all.
+ * DERIVATION writes (the web screens land in the derived half), so its `at`/`to`
+ * ids resolve in the merge and nowhere else — and in a clone where nothing has
+ * mapped yet, the derived half does not exist at all.
  * Checking them here would refuse a file that is correct. They are checked where
  * they can be: against the merged catalog, by the authoring write path.
  */
@@ -551,9 +368,9 @@ export type InterfaceMergeDiagnostic = MapperDiagnostic
  * An authored screen whose id no derivation produced usually means the routing
  * tree moved on: the measured case is a route module that now only redirects
  * (which the derivation correctly drops), leaving an authored entry that re-earns an
- * authoring session on every `--replace` run for an address nobody can stand at.
- * The MERGE keeps the entry regardless — a fresh clone has no derived half at
- * all, and dropping authored places there would drop every web surface — so
+ * authoring session on every re-author with `replace` for an address nobody can
+ * stand at. The MERGE keeps the entry regardless — a clone that has not mapped
+ * yet has no derived half at all, and dropping authored places there would drop every web surface — so
  * the rule lives here as a REPORT for the authoring work-list to act on, never
  * as a merge rule.
  *

@@ -1,5 +1,5 @@
 /**
- * THE READ VIEW AND CONVERGENCE (plan 05 step 23) — `readGuardAdjudicationView`.
+ * THE READ VIEW AND CONVERGENCE — `readGuardAdjudicationView`.
  *
  * "documenso ran 9 times" is the cost this computes instead of counting by hand:
  * a corpus has CONVERGED when the last two runs produced the same per-scenario
@@ -21,13 +21,16 @@ import {
 } from '@truecourse/guard-runner'
 import type { GuardLatest, GuardScenarioAdjudication, GuardScenarioResult, GuardSummary } from '@truecourse/shared'
 import { readGuardAdjudicationView } from '../../packages/core/src/commands/guard-adjudicate'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 let repo: string
 
 beforeEach(() => {
+  installWorkTreeGuardStore()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-adjudicate-converge-'))
 })
 afterEach(() => {
+  resetGuardStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -169,8 +172,8 @@ describe('convergence', () => {
     seedBoard()
     expect((await readGuardAdjudicationView(repo)).converged).toBe(true)
 
-    // `guard/runs/` is gitignored: on a teammate's clone the snapshot is simply
-    // not there, and a guess would be worse than a "not converged".
+    // A run snapshot is not always materialized: when it is simply not there,
+    // a guess would be worse than a "not converged".
     fs.rmSync(guardRunPath(repo, 'r1'))
     expect((await readGuardAdjudicationView(repo)).converged).toBe(false)
   })

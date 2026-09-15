@@ -1,9 +1,9 @@
 /**
- * BLAST-RADIUS SCHEDULING (plan item 143): a scenario declaring
+ * BLAST-RADIUS SCHEDULING: a scenario declaring
  * `world: mutates` runs LAST, serialized, and the world is restored afterwards
  * through `api.services.reset` — so a delete-account/change-password scenario
  * can no longer poison the scenarios beside it (documenso 2026-08-28: one
- * committed delete-account scenario cost the run 452 sign-in failures) or the
+ * stored delete-account scenario cost the run 452 sign-in failures) or the
  * run after it. The `.world-dirty` marker survives a run that could not
  * restore, and the next world boot resets before building on the damage.
  */

@@ -7,9 +7,13 @@ import { type Express } from 'express';
 /**
  * The dependencies routes — `GET /guard/dependencies` (the joined catalog view),
  * `PUT /guard/dependencies` (register ONE instance) and `GET
- * /guard/dependency/raw` (the committed catalog entry behind a row). Real engine,
- * real files, real temp repo: what lands on disk is the whole point, so nothing
- * here is mocked except the socket emitter.
+ * /guard/dependency/raw` (the declared catalog entry behind a row). Real engine,
+ * nothing mocked except the socket emitter.
+ *
+ * The DECLARED half (the catalog, the recipe) is seeded as files in the fixture
+ * tree, which is what the tree-backed guard store reads. The REGISTERED half —
+ * the two instance overlays — never touches a repository tree any more: they are
+ * one stored row, so it is seeded and read back through the overlay store.
  */
 
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
@@ -22,9 +26,18 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
+import {
+  EMPTY_GUARD_OVERLAYS,
+  readGuardOverlays,
+  writeGuardOverlays,
+} from '@truecourse/core/lib/guard-overlays';
+
+
 
 describe('Guard dependencies routes', () => {
   let app: Express;
@@ -42,9 +55,10 @@ describe('Guard dependencies routes', () => {
     `/api/repos/${fixture.project.slug}/guard/dependency/raw?id=${encodeURIComponent(name)}`;
 
   const CATALOG = '.truecourse/scenarios/dependencies.json';
-  const LOCAL = '.truecourse/scenarios/dependencies.local.json';
   const RECIPE = '.truecourse/scenarios/recipe.json';
-  const EXTERNALS_LOCAL = '.truecourse/scenarios/externals.local.json';
+
+  /** The stored overlays, as the route left them. */
+  const overlays = async () => (await readGuardOverlays(root)) ?? EMPTY_GUARD_OVERLAYS;
 
   const ACCOUNT = {
     name: 'anthropic',
@@ -71,6 +85,8 @@ describe('Guard dependencies routes', () => {
   };
 
   beforeEach(async () => {
+    installWorkTreeGuardStore();
+    installMemoryGuardOverlays();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     vi.mocked(emitSpecComplete).mockClear();
@@ -78,6 +94,8 @@ describe('Guard dependencies routes', () => {
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+    resetGuardStore();
+    resetGuardOverlayStore();
   });
 
   it('GET answers an honest empty view on a repo with nothing declared', async () => {
@@ -113,13 +131,16 @@ describe('Guard dependencies routes', () => {
    */
   it('GET carries every registered value — the readable one as it is, the key as a mask', async () => {
     writeJson(CATALOG, { dependencies: [ACCOUNT_WITH_URL] });
-    writeJson(LOCAL, {
-      anthropic: {
-        env: {
-          ANTHROPIC_BASE_URL: 'https://llm.internal',
-          ANTHROPIC_API_KEY: 'test-key-not-a-real-one',
+    await writeGuardOverlays(root, {
+      dependencies: {
+        anthropic: {
+          env: {
+            ANTHROPIC_BASE_URL: 'https://llm.internal',
+            ANTHROPIC_API_KEY: 'test-key-not-a-real-one',
+          },
         },
       },
+      externals: {},
     });
 
     const res = await request(app).get(url()).expect(200);
@@ -162,7 +183,7 @@ describe('Guard dependencies routes', () => {
     ]);
     expect(JSON.stringify(res.body)).not.toContain('test-key-not-a-real-one');
     // What the overlay holds is the real one — the mask is a reading, never a write.
-    expect(readJson(LOCAL)).toEqual({
+    expect((await overlays()).dependencies).toEqual({
       anthropic: {
         env: {
           ANTHROPIC_API_KEY: 'test-key-not-a-real-one',
@@ -182,19 +203,19 @@ describe('Guard dependencies routes', () => {
     // The response IS the fresh view — no follow-up GET needed.
     expect(res.body.dependencies[0]).toMatchObject({ name: 'anthropic', state: 'provided' });
     expect(JSON.stringify(res.body)).not.toContain('sk-secret');
-    expect(readJson(LOCAL)).toEqual({ anthropic: { env: { ANTHROPIC_API_KEY: 'sk-secret' } } });
-    // The committed catalog is untouched: the declaration already said all of this.
+    expect((await overlays()).dependencies).toEqual({ anthropic: { env: { ANTHROPIC_API_KEY: 'sk-secret' } } });
+    // The declared catalog is untouched: the declaration already said all of this.
     expect(readJson(CATALOG).dependencies).toEqual([ACCOUNT]);
-    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'guard-externals');
+    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(TEST_ORG, fixture.project.slug, 'guard-externals');
   });
 
   /**
-   * A SERVICE row's account: the origin the team shares, and the transport detail
-   * one machine holds. The split is the point — the token and the headers are
-   * secrets, so they land in the gitignored overlay and the committed recipe never
-   * sees them, and neither does the response.
+   * A SERVICE row's account. The recipe DECLARES the service and is
+   * never edited by a registration; everything the registration supplies — the
+   * origin as well as the token and the headers — lands in the stored overlay,
+   * and none of it is echoed back.
    */
-  it('PUT stores a service’s token and headers locally, and echoes neither secret back', async () => {
+  it('PUT stores a service’s origin, token and headers in the overlay, and echoes neither secret back', async () => {
     writeJson(RECIPE, {
       build: 'true',
       api: {
@@ -214,13 +235,14 @@ describe('Guard dependencies routes', () => {
       })
       .expect(200);
 
-    expect(readJson(EXTERNALS_LOCAL)).toEqual({
+    expect((await overlays()).externals).toEqual({
       stripe: {
+        baseUrl: 'https://api.stripe.test',
         token: 'sk_live_secret',
         headers: { 'X-Api-Key': 'hk_secret', 'X-Tenant': 'acme' },
       },
     });
-    // The committed half carries the declaration and nothing else.
+    // The declared half carries the declaration and nothing else.
     expect(fs.readFileSync(path.join(root, RECIPE), 'utf-8')).not.toContain('sk_live_secret');
     expect(JSON.stringify(res.body)).not.toContain('sk_live_secret');
     expect(JSON.stringify(res.body)).not.toContain('hk_secret');
@@ -240,8 +262,9 @@ describe('Guard dependencies routes', () => {
       build: 'true',
       api: { serve: ['node', 'server.mjs'], externals: { stripe: { baseUrlEnv: 'STRIPE_BASE_URL' } } },
     });
-    writeJson(EXTERNALS_LOCAL, {
-      stripe: { token: 'sk_live_secret', headers: { 'X-Tenant': 'acme' } },
+    await writeGuardOverlays(root, {
+      dependencies: {},
+      externals: { stripe: { token: 'sk_live_secret', headers: { 'X-Tenant': 'acme' } } },
     });
 
     // A patch that says nothing about the token leaves it exactly as it was: the
@@ -251,7 +274,7 @@ describe('Guard dependencies routes', () => {
       .send({ name: 'stripe', baseUrlEnv: 'STRIPE_BASE_URL', headers: { 'X-Tenant': null } })
       .expect(200);
 
-    expect(readJson(EXTERNALS_LOCAL)).toEqual({ stripe: { token: 'sk_live_secret' } });
+    expect((await overlays()).externals).toEqual({ stripe: { token: 'sk_live_secret' } });
     expect(res.body.dependencies[0].service).toMatchObject({ tokenSet: true, headers: [] });
   });
 
@@ -265,7 +288,7 @@ describe('Guard dependencies routes', () => {
       .send({ name: 'stripe', baseUrlEnv: 'STRIPE_BASE_URL', headers: { 'X Tenant: nope': 'acme' } })
       .expect(422);
     expect(res.body.error).toContain('header name');
-    expect(fs.existsSync(path.join(root, EXTERNALS_LOCAL))).toBe(false);
+    expect((await overlays()).externals).toEqual({});
   });
 
   it('PUT rejects a body with no name (400) and an undeclared variable (422)', async () => {
@@ -277,7 +300,7 @@ describe('Guard dependencies routes', () => {
       .send({ name: 'anthropic', env: { SNEAKY: 'x' } })
       .expect(422);
     expect(refused.body.error).toContain('SNEAKY');
-    expect(fs.existsSync(path.join(root, LOCAL))).toBe(false);
+    expect((await overlays()).dependencies).toEqual({});
     expect(vi.mocked(emitSpecComplete)).not.toHaveBeenCalled();
   });
 
@@ -301,7 +324,10 @@ describe('Guard dependencies routes', () => {
 
   it('the raw route never exposes the gitignored overlay', async () => {
     writeJson(CATALOG, { dependencies: [ACCOUNT] });
-    writeJson(LOCAL, { anthropic: { env: { ANTHROPIC_API_KEY: 'sk-secret' } } });
+    await writeGuardOverlays(root, {
+      dependencies: { anthropic: { env: { ANTHROPIC_API_KEY: 'sk-secret' } } },
+      externals: {},
+    });
     const res = await request(app).get(rawUrl('anthropic')).expect(200);
     expect(res.body.content).not.toContain('sk-secret');
   });

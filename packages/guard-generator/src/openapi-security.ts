@@ -158,7 +158,7 @@ export function validateCredentialSatisfies(
       errors: [],
       warnings: [
         `${declared.length} api credential${declared.length === 1 ? '' : 's'} declare a \`satisfies\` (${names.join(', ')}) but the corpus has no OpenAPI document — ` +
-          `nothing can resolve those scheme names, so the credentials fall back to header matching. Curate the API spec (\`truecourse spec scan\`) or drop the \`satisfies\`.`,
+          `nothing can resolve those scheme names, so the credentials fall back to header matching. Curate the API spec (a Document scan) or drop the \`satisfies\`.`,
       ],
     }
   }

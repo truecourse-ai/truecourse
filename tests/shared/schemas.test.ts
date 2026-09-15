@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-
-  AnalyzeRepoSchema,
-  GenerateViolationsSchema,
-} from '../../packages/shared/src/schemas/index';
-import {
   FileAnalysisSchema,
   SourceLocationSchema,
   FunctionDefinitionSchema,
@@ -24,9 +19,6 @@ import {
   LayerDetailSchema,
   LayerDependencyInfoSchema,
 } from '../../packages/shared/src/types/entity';
-import {
-  ViolationSchema,
-} from '../../packages/shared/src/types/violations';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -42,53 +34,6 @@ const validLocation = {
 
 // ---------------------------------------------------------------------------
 // API Schemas
-// ---------------------------------------------------------------------------
-
-describe('AnalyzeRepoSchema', () => {
-  it('accepts { mode: "full" }', () => {
-    const result = AnalyzeRepoSchema.safeParse({ mode: 'full' });
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts { mode: "diff" }', () => {
-    const result = AnalyzeRepoSchema.safeParse({ mode: 'diff' });
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts { mode: "full", skipGit: true }', () => {
-    const result = AnalyzeRepoSchema.safeParse({ mode: 'full', skipGit: true });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects {} (mode is required)', () => {
-    const result = AnalyzeRepoSchema.safeParse({});
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects { mode: "banana" }', () => {
-    const result = AnalyzeRepoSchema.safeParse({ mode: 'banana' });
-    expect(result.success).toBe(false);
-  });
-});
-
-describe('GenerateViolationsSchema', () => {
-  it('accepts { analysisId: valid-uuid }', () => {
-    const result = GenerateViolationsSchema.safeParse({
-      analysisId: '550e8400-e29b-41d4-a716-446655440000',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects { analysisId: "not-a-uuid" }', () => {
-    const result = GenerateViolationsSchema.safeParse({
-      analysisId: 'not-a-uuid',
-    });
-    expect(result.success).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Analysis Type Schemas
 // ---------------------------------------------------------------------------
 
 describe('SupportedLanguageSchema', () => {
@@ -271,70 +216,6 @@ describe('EntitySchema', () => {
 
 // ---------------------------------------------------------------------------
 // Violation Schema
-// ---------------------------------------------------------------------------
-
-describe('ViolationSchema', () => {
-  it('accepts valid violation', () => {
-    const result = ViolationSchema.safeParse({
-      id: 'ins-1',
-      type: 'architecture',
-      title: 'Microservices detected',
-      content: 'The project uses a microservices architecture.',
-      severity: 'info',
-      createdAt: '2025-01-01T00:00:00Z',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts violation with optional fields', () => {
-    const result = ViolationSchema.safeParse({
-      id: 'ins-2',
-      type: 'violation',
-      title: 'Circular dependency',
-      content: 'Service A depends on Service B which depends on A.',
-      severity: 'high',
-      targetService: 'service-a',
-      fixPrompt: 'Extract shared code into a library.',
-      createdAt: '2025-01-01T00:00:00Z',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects missing required fields', () => {
-    const result = ViolationSchema.safeParse({
-      id: 'ins-3',
-      type: 'architecture',
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects invalid type', () => {
-    const result = ViolationSchema.safeParse({
-      id: 'ins-4',
-      type: 'invalid-type',
-      title: 'Test',
-      content: 'Test',
-      severity: 'info',
-      createdAt: '2025-01-01T00:00:00Z',
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects invalid severity', () => {
-    const result = ViolationSchema.safeParse({
-      id: 'ins-5',
-      type: 'architecture',
-      title: 'Test',
-      content: 'Test',
-      severity: 'extreme',
-      createdAt: '2025-01-01T00:00:00Z',
-    });
-    expect(result.success).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Phase 2: Layer Detail & Dependency Schemas
 // ---------------------------------------------------------------------------
 
 describe('LayerDetailSchema', () => {

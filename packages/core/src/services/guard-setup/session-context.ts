@@ -1,7 +1,8 @@
 /**
  * THE SHARED SESSION CONTEXT of one `guard setup` run — the lazy holder every
- * setup session seam (recipe repair, dependency catalog; later seed and auth)
- * draws its driver and its sessions-store run from.
+ * setup session seam (recipe repair, the dependency catalog, the interfaces
+ * step, the seed, the preparations, the auth proof) draws its driver and its
+ * sessions-store run from.
  *
  * LAZY on purpose, twice over:
  *  - the RUN RECORD is only created when a session is actually about to run.
@@ -19,9 +20,8 @@
  * EAGERLY — a run nobody can see is a run nobody can watch fail.
  *
  * ONE run record covers every session of the setup invocation, whatever seam
- * ran it — the sessions-store convention is one run per COMMAND invocation
- * (`sessions/guard-setup/<runId>/`), with each session's own transcript and
- * index row inside it.
+ * ran it — the sessions-store convention is one run row per COMMAND invocation,
+ * with each session's transcript appended to that run's journal.
  */
 
 import path from 'node:path';
@@ -31,10 +31,10 @@ import type {
   SessionFailure,
   SessionPersistence,
 } from '@truecourse/agent-loop';
-import { createSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../../lib/sessions-store.js';
+import { createStoredSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../../lib/sessions-store.js';
 import { resolveCommitSha } from '../../lib/repo-ref.js';
-import { createConfiguredSessionDriver } from '../llm/session-driver.js';
-import type { LlmTransportFlag, LlmTransportMode } from '../../config/global-config.js';
+import { createClaudeCodeSessionDriver } from '../llm/session-driver.js';
+import type { LlmTransportMode } from '../llm/provider-config.js';
 import type { StepTracker } from '../../progress.js';
 
 export interface AcquiredSessionContext {
@@ -99,13 +99,10 @@ interface SessionContextBase {
    */
   sessionsKey?: string;
   run?: SessionRunStore;
-  /** A per-run `--llm-transport` flag; the saved selection answers otherwise.
-   *  Ignored when a driver is injected — that caller already chose. */
-  transport?: LlmTransportFlag;
   /**
-   * Mirror the command's step checklist into the run record. The CLI renders
-   * the tracker locally; a surface watching from elsewhere can only see what
-   * run.json carries, and setup's steps are minutes of work each.
+   * Mirror the command's step checklist into the run record. A surface
+   * watching from elsewhere can only see what run.json carries, and setup's
+   * steps are minutes of work each.
    */
   tracker?: StepTracker;
   /** Which session kinds do each checklist step's work, by step key — stamped
@@ -131,7 +128,7 @@ interface InjectedDriverOptions extends SessionContextBase {
   transportMode: LlmTransportMode;
 }
 
-/** The sessions run on the configured driver, built lazily from global config. */
+/** The sessions run on this process's own Claude Code, built lazily. */
 interface ConfiguredDriverOptions extends SessionContextBase {
   driver?: undefined;
   transportMode?: undefined;
@@ -151,14 +148,15 @@ export function createGuardSetupSessionContext(
 
   const build = async (): Promise<{ run: SessionRunStore; driver: SessionDriver }> => {
     const gitRef = await resolveCommitSha(opts.repoRoot);
-    const store = opts.run ?? createSessionRun(opts.sessionsKey ?? opts.repoRoot, {
-      command: 'guard-setup',
-      gitRef,
-    });
+    const store =
+      opts.run ??
+      (await createStoredSessionRun(opts.sessionsKey ?? opts.repoRoot, {
+        command: 'guard-setup',
+        gitRef,
+      }));
     const { driver, mode, attribution } = opts.driver
       ? { driver: opts.driver, mode: opts.transportMode, attribution: opts.driver.attribution }
-      : createConfiguredSessionDriver({
-          ...(opts.transport ? { transport: opts.transport } : {}),
+      : createClaudeCodeSessionDriver({
           cwd: opts.repoRoot,
           providerStateDir: path.join(store.dir, 'provider'),
         });

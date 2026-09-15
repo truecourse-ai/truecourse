@@ -1,9 +1,7 @@
 /**
- * The sessions store record shapes:
- * `.truecourse/sessions/<command>/<runId>/run.json` plus one transcript
- * jsonl per session. Types live here so the OSS file store (core), the EE
- * table store, and the dashboard client all speak one shape; the store
- * implementations live behind `SessionPersistence`.
+ * The sessions store record shapes. Types live here so the Postgres store
+ * (`@truecourse/data-store`) and the dashboard client speak one shape; the
+ * store implementations live behind `SessionPersistence`.
  */
 
 import { z } from 'zod';
@@ -83,16 +81,15 @@ const RunRecordFieldsSchema = z.object({
    * Not every phase of an agentic command is a session (spec scan's
    * discovery/tagging run before any session exists) and the dashboard can
    * only see what the run record carries, so the run process stamps its own
-   * presentation here; every rewrite streams out over the existing run.json
-   * tail.
+   * presentation here; every rewrite streams out as another event on the
+   * run's journal.
    */
   display: DisplayBlocksSchema.optional(),
-  /** The run process's pid — the OSS reconciliation sweep's liveness probe
-   *  (nothing stays `running` on a dead process's memory). EE's
-   *  table store tracks liveness its own way and may omit it. */
+  /** The run process's pid, recorded for diagnostics. Liveness is the row's
+   *  writer lease, so the boot sweep never reads it. */
   pid: z.number().int().optional(),
   /** The live session API while the process runs — a URL plus auth token,
-   *  never a bare port, so the EE runner's service endpoint fits the field. */
+   *  never a bare port. */
   endpoint: z.object({ url: z.string(), token: z.string() }).optional(),
   /**
    * What the run's sessions ran on: the transport MODE the config selected
@@ -123,9 +120,9 @@ const RunRecordFieldsSchema = z.object({
  *
  * `progress` is a legacy shape, not a live field: runs written before the
  * checklist became a display block carry their phases there. Lifting it into a
- * `checklist` block on the way in is what keeps such a run readable — the boot
- * sweep rewrites every record it touches, so anything dropped at parse is
- * erased from disk on the next boot.
+ * `checklist` block on the way in is what keeps such a run readable — anything
+ * dropped at parse is erased from the stored record the next time the sweep
+ * rewrites it.
  */
 export const RunRecordSchema = z.preprocess((raw) => {
   if (typeof raw !== 'object' || raw === null) return raw;
@@ -136,20 +133,19 @@ export const RunRecordSchema = z.preprocess((raw) => {
 export type RunRecord = z.infer<typeof RunRecordFieldsSchema>;
 
 /**
- * What the policy shell needs from a store — file-backed in OSS (core),
- * table-backed in EE. Implementations must boot with the reconciliation
- * sweep: a run left `running` by a dead process is marked
- * interrupted, and nothing stays `running` or `waiting` on the strength of
- * a dead process's memory.
+ * What the policy shell needs from a store — Postgres-backed, installed at
+ * boot. Implementations must boot with the reconciliation sweep: a run left
+ * `running` by a dead process is marked interrupted, and nothing stays
+ * `running` or `waiting` on the strength of a dead process's memory.
  */
 export interface SessionPersistence {
   /** Await committed history before the session returns its outcome. */
   flush?(): Promise<void>;
-  /** Optional live channel. CLI stores and replay transcripts do not need it. */
+  /** Optional live channel; a replay transcript does not need it. */
   publishProgress?(sessionId: string, progress: import('./session-driver.js').SessionProgress): void;
   appendEvent(sessionId: string, event: SessionEvent): void;
   updateIndex(entry: SessionIndexEntry): void;
-  /** Full transcript read-back; tolerates (drops) a crash-truncated final
-   *  line, which the per-session `seq` makes detectable. */
+  /** Full transcript read-back; only the live writer can serve it (a reopened
+   *  run reads its journal instead). */
   readEvents(sessionId: string): SessionEvent[];
 }

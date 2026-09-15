@@ -1,53 +1,36 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { defaultClientConditions, defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'node:path';
-import fs from 'node:fs';
 
 const repoRoot = path.resolve(__dirname, '../../..');
-const eeClientEntry = path.resolve(repoRoot, 'ee/packages/client/src/index.tsx');
-// The enterprise overlay is optional: a community checkout has no `ee/`.
-const eePresent = fs.existsSync(eeClientEntry);
 
-export default defineConfig(({ mode, command }) => {
-  // Whether the enterprise client code is included in this build. Requires
-  // the ee overlay to be present, and is on in dev or an explicit enterprise
-  // build; a plain production (community) build leaves it off so the ee chunk
-  // is tree-shaken out and never shipped to community users.
-  const includeEe = eePresent && (mode !== 'production' || process.env.VITE_TC_EE === 'true');
+/**
+ * The edition module `main.tsx` imports: the enterprise bundle when this
+ * checkout has one, the open edition's no-op when it does not. The edition is
+ * decided here, at build time, so the app carries no loader and no branch.
+ */
+const eeEdition = path.resolve(repoRoot, 'ee/packages/client/src/edition.tsx');
+const edition = fs.existsSync(eeEdition)
+  ? eeEdition
+  : path.resolve(__dirname, './src/dashboard/shell/open-edition.ts');
 
-  return {
-    plugins: [react()],
-    define: {
-      'import.meta.env.VITE_TC_EE': JSON.stringify(includeEe),
+export default defineConfig(({ command }) => ({
+  plugins: [react()],
+  resolve: {
+    conditions: command === 'serve'
+      ? ['truecourse-source', ...defaultClientConditions]
+      : [...defaultClientConditions],
+    alias: {
+      '@edition': edition,
+      '@': path.resolve(__dirname, './src'),
     },
-    resolve: {
-      conditions: command === 'serve'
-        ? ['truecourse-source', ...defaultClientConditions]
-        : [...defaultClientConditions],
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-        // Resolve the enterprise client to its source (not the node_modules
-        // symlink) so Vite's React plugin transforms its TSX — the plugin
-        // skips node_modules. The OSS client only ever reaches this via a
-        // gated dynamic import; the alias is config, not a source import, so
-        // the open-core boundary holds. Only registered when ee/ exists, so a
-        // community build never tries to resolve the (absent) module.
-        ...(eePresent ? { '@truecourse/ee-client': eeClientEntry } : {}),
-      },
-    },
-    server: {
-      // Allow serving the ee/ source, which lives outside the client root.
-      fs: { allow: [repoRoot] },
-    },
-    build: {
-      outDir: 'dist',
-      rollupOptions: {
-        // Without the ee overlay there's nothing to resolve for the gated
-        // dynamic import; mark it external so the community build doesn't try
-        // to bundle it. The import is dead code when `includeEe` is false, so
-        // it's never executed at runtime.
-        external: eePresent ? [] : ['@truecourse/ee-client'],
-      },
-    },
-  };
-});
+  },
+  server: {
+    // Allow serving workspace sources, which live outside the client root.
+    fs: { allow: [repoRoot] },
+  },
+  build: {
+    outDir: 'dist',
+  },
+}));

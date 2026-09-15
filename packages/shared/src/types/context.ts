@@ -13,6 +13,7 @@
  */
 
 import type { GuardCoveragePlainStatus } from '../guard/dashboard.js';
+import type { RepositoryProviderId } from './repositories.js';
 
 /** Every kind a source can be. Only `repository` and `site` have a driver. */
 export const CONTEXT_SOURCE_KINDS = [
@@ -67,11 +68,16 @@ export const CONTEXT_SOURCE_STATUS_ORDER = [
 export interface RepositorySourceConfig {
   /** `owner/repo` — the identity every store, clone and link keys by. */
   repoFullName: string;
+  /** The provider the sync reads it through. Absent means the GitHub App. */
+  provider?: RepositoryProviderId;
   /**
    * The GitHub App installation the sync reads the repository through, which is
-   * what lets a source read a repository Code has not connected.
+   * what lets a source read a repository Code has not connected. Absent for a
+   * folder on this machine, which has no account behind it.
    */
-  installationId: number;
+  installationId?: number;
+  /** Where the provider finds it: a folder's absolute path on this machine. */
+  path?: string;
   /** Gitignore-style globs a file must match to enter the source. */
   include: string[];
   /** Gitignore-style globs that subtract after the include selects. */
@@ -87,7 +93,7 @@ export interface SiteSourceConfig {
 
 export type ContextSourceConfig = RepositorySourceConfig | SiteSourceConfig | Record<string, unknown>;
 
-/** The default scope a Repository source is created with (plan §3). */
+/** The default scope a Repository source is created with. */
 export const DEFAULT_REPOSITORY_INCLUDE: readonly string[] = ['docs/**', '**/*.md'];
 
 /** Changelogs and licenses are documentation of the release, not of the product. */
@@ -284,7 +290,56 @@ export interface ContextDocumentReading {
   status: ContextDocumentStatus;
 }
 
-/** One row of the Documents view — one document of the workspace corpus. */
+// --- Inclusion: the dimension coverage is not ---------------------------------
+
+/**
+ * Whether the corpus HOLDS a document. It is a separate dimension from
+ * coverage: the five coverage words are about proof, and nothing can be proven
+ * of a document the corpus does not carry. So a document is in the corpus, or
+ * it is one the scan did not include, or it is one a reader excluded.
+ */
+export type ContextDocumentInclusion = 'in-corpus' | 'not-included' | 'excluded';
+
+/** The order the Inclusion filter offers them in, and the tally counts them in. */
+export const CONTEXT_INCLUSION_ORDER = [
+  'in-corpus',
+  'not-included',
+  'excluded',
+] as const satisfies readonly ContextDocumentInclusion[];
+
+/** The ONE word per inclusion state. Nothing else may name where a document stands. */
+export const CONTEXT_INCLUSION_WORD: Record<ContextDocumentInclusion, string> = {
+  'in-corpus': 'In corpus',
+  'not-included': 'Not included',
+  excluded: 'Excluded',
+};
+
+/**
+ * A reader's standing decision about a document (`manualIncludes` /
+ * `manualExcludes`). A decision changes nothing by itself: the next Document
+ * scan is what applies it.
+ */
+export type ContextDocumentDecision = 'include' | 'exclude';
+
+/** The two facts folded into the one word the list shows and narrows by. */
+export function contextInclusionOf(
+  inCorpus: boolean,
+  decision: ContextDocumentDecision | null,
+): ContextDocumentInclusion {
+  if (decision === 'exclude') return 'excluded';
+  return inCorpus ? 'in-corpus' : 'not-included';
+}
+
+/** Whether a decision stands that the corpus does not show yet. */
+export function contextDecisionPending(
+  row: Pick<ContextDocumentRow, 'inCorpus' | 'decision'>,
+): boolean {
+  if (row.decision === 'include') return !row.inCorpus;
+  if (row.decision === 'exclude') return row.inCorpus;
+  return false;
+}
+
+/** One row of the Documents view — one document the workspace's Context knows. */
 export interface ContextDocumentRow {
   /** `context/<sourceId>/<docPath>` — the document's address everywhere. */
   ref: string;
@@ -299,8 +354,20 @@ export interface ContextDocumentRow {
   repositories: string[];
   /** The same repositories with what each says about the document, WORST FIRST. */
   readings: ContextDocumentReading[];
-  /** Folded worst-first across those repositories; `not-linked` when there are none. */
-  status: ContextDocumentStatus;
+  /**
+   * Folded worst-first across those repositories; `not-linked` when there are
+   * none, and NULL when the corpus does not hold the document: coverage is
+   * about proof, and nothing was asked to prove what is not in the corpus.
+   */
+  status: ContextDocumentStatus | null;
+  /** Whether the corpus holds the document. Only a scan puts it there. */
+  inCorpus: boolean;
+  /** The reader's standing decision, or null when they made none. */
+  decision: ContextDocumentDecision | null;
+  /** The two above as the one word: {@link contextInclusionOf}. */
+  inclusion: ContextDocumentInclusion;
+  /** The scan's own words for skipping the document; null when it did not skip it. */
+  skipReason: string | null;
   /** When the document last changed at its source, or null when the ledger has lost it. */
   updatedAt: string | null;
 }

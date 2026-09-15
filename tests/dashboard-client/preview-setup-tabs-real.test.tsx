@@ -27,7 +27,7 @@ vi.mock('@/lib/socket', () => {
   };
 });
 
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 import type { GuardDriverId, GuardInterfaceRow, GuardInterfacesView } from '@truecourse/shared';
 
 if (!Element.prototype.scrollTo) {
@@ -40,7 +40,7 @@ const REAL = {
   id: 'filecli',
   name: 'spiderhands/filecli',
   path: 'spiderhands/filecli',
-  remoteUrl: 'https://github.com/spiderhands/filecli',
+  provider: 'github',
 };
 
 function json(body: unknown, status = 200): Response {
@@ -136,14 +136,14 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -153,7 +153,7 @@ afterEach(() => {
 describe('the Dependencies tab of a connected repository', () => {
   it('lists supplied dependencies and hides resources created by tests', async () => {
     const calls = serve();
-    renderAt(`/preview/repos/${REAL.id}/dependencies`);
+    renderAt(`/repos/${REAL.id}/dependencies`);
 
     const table = await screen.findByRole('table', { name: 'Dependencies' });
     await within(table).findByText('anthropic');
@@ -167,7 +167,7 @@ describe('the Dependencies tab of a connected repository', () => {
 
   it('opens a dependency as its own page, with the registration form', async () => {
     serve();
-    renderAt(`/preview/repos/${REAL.id}/dependencies`);
+    renderAt(`/repos/${REAL.id}/dependencies`);
     const user = userEvent.setup();
 
     const table = await screen.findByRole('table', { name: 'Dependencies' });
@@ -183,14 +183,14 @@ describe('the Dependencies tab of a connected repository', () => {
 describe('the Interfaces tab of a connected repository', () => {
   it('says what setup read when the stored catalog is empty', async () => {
     serve();
-    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    renderAt(`/repos/${REAL.id}/interfaces`);
 
     await screen.findByText(/Setup read cli by tree, api by tree, web by tree and derived no interfaces\./);
   });
 
   it('shows a failed read instead of "no match"', async () => {
     serve({ interfaces: { error: 'the catalog could not be read' }, interfacesStatus: 500 });
-    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    renderAt(`/repos/${REAL.id}/interfaces`);
 
     await screen.findByText(/the catalog could not be read/);
     expect(screen.queryByText('No interface matches.')).toBeNull();
@@ -231,7 +231,7 @@ const CATALOG: GuardInterfacesView = {
 describe('the full-page interface catalog', () => {
   it('aggregates dialog actions into screens and orders API operations while keeping commands separate', async () => {
     serve({ interfaces: CATALOG });
-    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    renderAt(`/repos/${REAL.id}/interfaces`);
     const table = await screen.findByRole('table', { name: 'Interfaces' });
     await within(table).findByRole('link', { name: 'Profile /profile' });
     const rows = within(table).getAllByRole('row');
@@ -248,7 +248,7 @@ describe('the full-page interface catalog', () => {
 
   it('finds a screen by its nested action and keeps mixed-origin screens in either origin filter', async () => {
     serve({ interfaces: CATALOG });
-    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    renderAt(`/repos/${REAL.id}/interfaces`);
     const user = userEvent.setup();
     const table = await screen.findByRole('table', { name: 'Interfaces' });
     await within(table).findByRole('link', { name: 'Profile /profile' });
@@ -270,7 +270,7 @@ describe('the full-page interface catalog', () => {
 
   it('opens a screen as its own page, expands its action and returns to the full catalog', async () => {
     serve({ interfaces: CATALOG });
-    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    renderAt(`/repos/${REAL.id}/interfaces`);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('link', { name: 'Profile /profile' }));
     expect(await screen.findByText('Actions · 2')).toBeInTheDocument();
@@ -287,7 +287,7 @@ describe('the full-page interface catalog', () => {
 
   it('opens an old task URL on its owning screen with the action expanded and allows collapse', async () => {
     serve({ interfaces: CATALOG });
-    renderAt(`/preview/repos/${REAL.id}/interfaces/web%2Fsave`);
+    renderAt(`/repos/${REAL.id}/interfaces/web%2Fsave`);
     const user = userEvent.setup();
     expect(await screen.findByText('Sequence')).toBeInTheDocument();
     expect(screen.getByText('Actions · 2')).toBeInTheDocument();
@@ -300,7 +300,7 @@ describe('the full-page interface catalog', () => {
 
   it('opens an API operation directly and follows its sibling on the same endpoint', async () => {
     serve({ interfaces: CATALOG });
-    renderAt(`/preview/repos/${REAL.id}/interfaces/api:get-profile`);
+    renderAt(`/repos/${REAL.id}/interfaces/api:get-profile`);
     const user = userEvent.setup();
     expect(await screen.findByRole('heading', { name: 'GET /profiles' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'POST /profiles' }));
@@ -309,7 +309,7 @@ describe('the full-page interface catalog', () => {
 
   it('filters by surface and opens the entry points outside any screen', async () => {
     serve({ interfaces: CATALOG });
-    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    renderAt(`/repos/${REAL.id}/interfaces`);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Add filter' }));
     await user.click(screen.getByRole('option', { name: /^Surface / }));
@@ -327,7 +327,7 @@ describe('the full-page interface catalog', () => {
     serve({ interfaces: CATALOG, recipe: { surfaces: {
       web: { serve: ['pnpm', 'web'] }, cli: { build: 'pnpm build', entry: ['node', 'cli.js'] },
     }, fingerprint: 'sha256:abc', stale: false } });
-    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    renderAt(`/repos/${REAL.id}/interfaces`);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('link', { name: 'Web recipe' }));
     const recipe = await screen.findByRole('region', { name: 'Recipe' });

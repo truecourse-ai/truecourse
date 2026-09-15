@@ -9,7 +9,7 @@
  * subtract, and hands every kept file back with its body. Nothing is written
  * into the checkout, and the tree is disposed whatever happens.
  *
- * The scan no longer looks for documents (plan §5): this walk IS the discovery,
+ * The scan no longer looks for documents: this walk IS the discovery,
  * and what it yields is what the workspace corpus curates.
  *
  * BRANCH. The checkout the provider hands over is the repository's default
@@ -76,8 +76,7 @@ export function createRepositoryDriver(deps: RepositoryDriverDeps): ContextSourc
   /**
    * Walk a checkout and keep what the scope selects, in discovery order. The
    * source's own patterns are the whole scope: the repository's `spec.include`
-   * does not narrow it, and its registered llms.txt snapshots are not its
-   * files (a site is a source of its own).
+   * does not narrow it.
    */
   function scopedDocs(
     dir: string,
@@ -86,8 +85,8 @@ export function createRepositoryDriver(deps: RepositoryDriverDeps): ContextSourc
   ): DocCandidate[] {
     const { include, exclude } = repositoryConfig(config);
     const keep = scopeFilter(include, exclude);
-    return discoverDocs(dir, { skipGit: opts.skipGit, scope: EVERYTHING, registeredSources: false }).filter(
-      (doc) => keep(doc.path),
+    return discoverDocs(dir, { skipGit: opts.skipGit, scope: EVERYTHING }).filter((doc) =>
+      keep(doc.path),
     );
   }
 

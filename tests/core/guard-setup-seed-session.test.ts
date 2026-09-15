@@ -1,5 +1,5 @@
 /**
- * THE SEED AUTHORING SESSION — `guard-setup.seed` (plan 03 step 13), driven end
+ * THE SEED AUTHORING SESSION — `guard-setup.seed`, driven end
  * to end over the `seed-draft` fixture: a dependency-free node app whose
  * "database" is one JSON file named by `SEED_STORE`, so the whole lifecycle
  * (services up, the session's real `run_seed_draft`, the fold's fresh-world
@@ -16,7 +16,7 @@
  * never called at all.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,12 +51,17 @@ import {
 } from '../../packages/core/src/services/guard-setup/seed-session';
 import type { GuardSetupSessionContext } from '../../packages/core/src/services/guard-setup/session-context';
 import { memoryPersistence, stubDriver, outcome, malformedFailure } from './spec-scan-session-stub';
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
 const TARGET = '.truecourse/scenarios/guard-seed.mjs';
 
 const repos: string[] = [];
+beforeEach(() => {
+  installMemoryKvCache();
+});
 afterEach(() => {
+  resetKvCacheStore();
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
 });
 
@@ -281,7 +286,7 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
     // During the session: the draft exists ONLY in scratch.
     expect(seen.targetDuringSession).toBe(false);
     expect(seen.scratchDrafts).toEqual(['draft-1.mjs']);
-    // After the fold: both artifacts, at the committed paths.
+    // After the fold: both artifacts, at their durable paths.
     expect(result).toMatchObject({ status: 'ok', scriptPath: TARGET, command: COMMAND, fixtures: ['org'] });
     expect(fs.readFileSync(path.join(r, TARGET), 'utf-8')).toBe(goodScript());
     expect(recipeOf(r).api?.seed).toEqual({ command: COMMAND, script: TARGET, provides: PROVIDES });
@@ -472,7 +477,7 @@ describe('buildSeedSession — credential probes', () => {
     const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
 
     expect(result).toMatchObject({ status: 'ok', scriptPath: TARGET, credentials: ['owner'] });
-    // The probes are session-side verification, never part of the committed recipe.
+    // The probes are session-side verification, never part of the recipe.
     expect(recipeOf(r).api?.seed).toEqual({ command: COMMAND, script: TARGET, provides: MINT_PROVIDES });
   }, 60_000);
 
@@ -1166,8 +1171,8 @@ describe('the seed session definition', () => {
 
     expect(def.kind).toBe('guard-setup.seed');
     expect(def.outcomePrecondition?.tool).toBe('run_seed_draft');
-    // The item-118 checkpoint, extended to the seed session (2026-08-23 bench:
-    // two sessions spent their whole first grant exploring with zero drafts).
+    // The draft checkpoint, extended to the seed session after a bench in which
+    // two sessions spent their whole first grant exploring with zero drafts.
     expect(def.draftCheckpoint).toMatchObject({ tool: 'run_seed_draft', afterTurn: 10 });
     expect(def.draftCheckpoint?.message).toMatch(/run_seed_draft/);
     expect(def.tools.map((t) => t.name).sort()).toEqual([
@@ -1575,7 +1580,7 @@ describe('runGuardSetup — the seed step honors confirmSeedReplace', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Root-cause cleanup (plan 03, subpoint 6): one FINGERPRINT_INPUTS list
+// Root-cause cleanup: one FINGERPRINT_INPUTS list
 // ---------------------------------------------------------------------------
 
 describe('ecosystemFingerprint', () => {

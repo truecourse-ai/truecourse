@@ -2,19 +2,16 @@
  * Live per-token model prices for the pre-flight COST estimate.
  *
  * Anthropic publishes no machine-readable pricing API, so we pull OpenRouter's
- * public model list (`GET /api/v1/models`, no auth) and cache it under the global
- * dir for a day. The resulting figure is deliberately a CEILING:
+ * public model list (`GET /api/v1/models`, no auth) and hold it in memory for a
+ * day. The resulting figure is deliberately a CEILING:
  *   - per tier we take the MOST EXPENSIVE matching model, and
  *   - we don't model prompt-caching / batch discounts (which only ever reduce cost).
  * So the real bill lands at or below what we show.
  *
- * Network failure degrades gracefully: fresh cache → stale cache → bundled table.
- * `getModelPrices()` never throws — it always returns a usable table.
+ * Network failure degrades gracefully: the table already in memory, however
+ * stale, then the bundled one. `getModelPrices()` never throws — it always
+ * returns a usable table.
  */
-
-import fs from 'node:fs';
-import path from 'node:path';
-import { getGlobalDir } from '../../config/paths.js';
 
 /** USD per token, split by direction (Anthropic output ≈ 5× input). */
 export interface ModelPrice {
@@ -35,7 +32,6 @@ export interface PriceTable {
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/models';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // refetch once a day
 const FETCH_TIMEOUT_MS = 8000;
-const CACHE_FILE = 'openrouter-prices.json';
 const TIERS = ['opus', 'sonnet', 'haiku'] as const;
 
 // Last-resort Anthropic list prices (USD per token) when we're offline with no
@@ -51,28 +47,8 @@ function tierOf(id: string): (typeof TIERS)[number] | null {
   return s.includes('opus') ? 'opus' : s.includes('sonnet') ? 'sonnet' : s.includes('haiku') ? 'haiku' : null;
 }
 
-function cacheFilePath(): string {
-  return path.join(getGlobalDir(), 'cache', CACHE_FILE);
-}
-
-function readCache(): PriceTable | null {
-  try {
-    const t = JSON.parse(fs.readFileSync(cacheFilePath(), 'utf-8')) as PriceTable;
-    if (t && t.tiers && t.byId && typeof t.fetchedAt === 'number') return t;
-  } catch {
-    /* missing / unreadable cache — fall through */
-  }
-  return null;
-}
-
-function writeCache(t: PriceTable): void {
-  try {
-    fs.mkdirSync(path.dirname(cacheFilePath()), { recursive: true });
-    fs.writeFileSync(cacheFilePath(), JSON.stringify(t));
-  } catch {
-    /* cache is best-effort; a write failure must not break the estimate */
-  }
-}
+/** The last table this process fetched. A server outlives many estimates. */
+let cached: PriceTable | null = null;
 
 function bundledTable(): PriceTable {
   return { tiers: { ...BUNDLED }, byId: {}, fetchedAt: 0, source: 'bundled' };
@@ -121,12 +97,10 @@ export async function getModelPrices(): Promise<PriceTable> {
   // skip the fetch + cache and price from the bundled list prices.
   if (process.env.TRUECOURSE_NO_PRICE_FETCH) return bundledTable();
 
-  const cached = readCache();
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached;
   try {
-    const fresh = await fetchPrices();
-    writeCache(fresh);
-    return fresh;
+    cached = await fetchPrices();
+    return cached;
   } catch {
     if (cached) return { ...cached, source: 'cache' }; // stale, but real numbers
     return bundledTable();

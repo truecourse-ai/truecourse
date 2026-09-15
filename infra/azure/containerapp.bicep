@@ -72,7 +72,7 @@ var sentryEnvironment = contains(toLower(name), 'prod') ? 'production' : 'develo
 var plainEnvVars = [
   { name: 'PORT', value: string(targetPort) }
   { name: 'TRUECOURSE_EDITION', value: edition }
-  { name: 'TRUECOURSE_LOG_DIR', value: '/data/logs' }
+  { name: 'TRUECOURSE_RUNTIME_DIR', value: '/data' }
   { name: 'SENTRY_ENVIRONMENT', value: sentryEnvironment }
 ]
 

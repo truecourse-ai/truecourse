@@ -47,11 +47,9 @@ import {
   saveWorkspaceSpec,
   setSpecStore,
 } from '@truecourse/core/lib/spec-store';
-import {
-  resetSessionsRootResolver,
-  setSessionsRootResolver,
-} from '@truecourse/core/lib/sessions-store';
 import { resetGuardStore, setGuardStore } from '@truecourse/core/lib/guard-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import type { CuratedCorpus, DecisionsFile } from '../../packages/spec-consolidator/src/index.js';
 import type {
   ContextDriverDocument,
@@ -267,14 +265,12 @@ function mount(documents: ContextDriverDocument[]): JobsMount {
 
 beforeAll(async () => {
   home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tc-onboard-home-')));
-  setSessionsRootResolver(() => path.join(home, 'sessions'));
   client = new PGlite();
   db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
 });
 
 afterAll(async () => {
-  resetSessionsRootResolver();
   await client.close();
   fs.rmSync(home, { recursive: true, force: true });
 });
@@ -290,11 +286,13 @@ beforeEach(async () => {
   setContextEventPublisher(() => {});
   // A clone the setup job can acquire — a real one-commit repository, because
   // what a job stores is keyed by the commit it ran on.
-  setWorkTreeProvider(async () => ({ dir: fakeClone(), dispose: () => {} }));
+  setWorkTreeProvider('github', async () => ({ dir: fakeClone(), dispose: () => {} }));
   pending = [];
   failures = [];
   enqueued = [];
   setGuardStore(new PgGuardStore(db));
+  installMemorySessionRuns();
+  installMemoryGuardOverlays();
   // Context holds the repository's own documentation, and the repository reads
   // it: the connect dialog's Context step wrote that binding.
   await context.createSource(ORG, {
@@ -305,16 +303,11 @@ beforeEach(async () => {
   });
   await setContextBindings(ORG, REPO, [SOURCE]);
   // And it is a repository Code knows: only a connected one is set up.
-  const entry = { slug: `acme-widgets-${orgCounter}`, name: REPO, path: REPO };
+  const entry = { slug: `acme-widgets-${orgCounter}`, name: REPO, path: REPO, provider: 'github' };
   const registry: RegistryStore = {
     readRegistry: async () => [entry],
-    pruneStaleProjects: async () => [],
-    getProjectBySlug: async (slug) => (slug === entry.slug ? entry : null),
-    getProjectByPath: async (repoPath) => (repoPath === REPO ? entry : null),
-    registerProject: async (repoPath, name) => ({ slug: 'stub', name: name ?? repoPath, path: repoPath }),
-    unregisterProject: async () => false,
-    touchProject: async () => {},
-    setLastAnalyzed: async () => {},
+    getProjectBySlug: async (_org, slug) => (slug === entry.slug ? entry : null),
+    getProjectByPath: async (_org, repoPath) => (repoPath === REPO ? entry : null),
   };
   setRegistryStore(registry);
 });
@@ -326,8 +319,10 @@ afterEach(async () => {
   resetContextStore();
   resetSpecStore();
   setContextEventPublisher(null);
-  setWorkTreeProvider(null);
+  setWorkTreeProvider('github', null);
   resetGuardStore();
+  resetSessionRuns();
+  resetGuardOverlayStore();
 });
 
 const jobsOfType = async (type: string): Promise<JobView[]> =>

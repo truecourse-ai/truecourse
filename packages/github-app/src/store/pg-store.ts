@@ -1,45 +1,31 @@
 /**
- * Postgres GateStore — the multi-tenant adapter, built on Drizzle ORM. Selected
- * when a shared db is available; deployments without one pick a different
- * adapter. Takes a ready (migrated) Drizzle db: the server owns the pool and the
+ * Postgres InstallationStore — the GitHub App's own rows, built on Drizzle ORM.
+ * An installation is a PROVIDER ACCOUNT (`provider_accounts`, provider
+ * `github`), whose id is text there and a number in GitHub's own language, so
+ * the conversion happens at this boundary and nowhere else. The repositories an
+ * installation brought live in `repositories` and are written through
+ * `PgRepositoryStore`.
+ *
+ * Takes a ready (migrated) Drizzle db: the server owns the pool and the
  * migrations, and tests inject a PGlite-backed db.
  */
 
-import { eq, and, desc, inArray, notInArray, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
-import type {
-  GateStore,
-  InstallationRecord,
-  RepoLinkRecord,
-  BaselineRecord,
-  GateRunRecord,
-  PrRecord,
-} from './types.js';
-import {
-  ghInstallations,
-  ghRepos,
-  ghBaselines,
-  ghRuns,
-  ghPrs,
-} from '@truecourse/db';
+import type { InstallationStore, InstallationRecord } from './types.js';
+import { providerAccounts } from '@truecourse/db';
+import { GITHUB_PROVIDER } from '../provider.js';
 
 /** Any Drizzle Postgres db (node-postgres in prod, PGlite in tests). */
-export type GateDb = PgDatabase<any, any, any>;
-
-/** Per-repo run-history cap (matches the file adapter). */
-const RUN_CAP = 200;
+export type InstallationDb = PgDatabase<any, any, any>;
 
 const toIso = (v: string): string => new Date(v).toISOString();
 
-type InstallationRow = typeof ghInstallations.$inferSelect;
-type RepoRow = typeof ghRepos.$inferSelect;
-type BaselineRow = typeof ghBaselines.$inferSelect;
-type RunRow = typeof ghRuns.$inferSelect;
-type PrRow = typeof ghPrs.$inferSelect;
+type InstallationRow = typeof providerAccounts.$inferSelect;
 
 function toInstallation(r: InstallationRow): InstallationRecord {
   return {
-    installationId: r.installationId,
+    installationId: Number(r.accountId),
     accountLogin: r.accountLogin,
     accountType: r.accountType,
     workspaceOrgId: r.workspaceOrgId,
@@ -48,67 +34,39 @@ function toInstallation(r: InstallationRow): InstallationRecord {
   };
 }
 
-function toRepo(r: RepoRow): RepoLinkRecord {
-  return {
-    repoFullName: r.repoFullName,
-    installationId: r.installationId,
-    workspaceOrgId: r.workspaceOrgId,
-    defaultBranch: r.defaultBranch,
-    blocking: r.blocking,
-    codeQualityBlocking: r.codeQualityBlocking,
-    codeQualityMinSeverity: r.codeQualityMinSeverity as RepoLinkRecord['codeQualityMinSeverity'],
-    enabled: r.enabled,
-    notifyEmails: r.notifyEmails,
-    notifications: (r.notifications as unknown as RepoLinkRecord['notifications']) ?? undefined,
-    createdAt: toIso(r.createdAt),
-    updatedAt: toIso(r.updatedAt),
-  };
-}
-
-function toRun(r: RunRow): GateRunRecord {
-  return {
-    id: r.id,
-    repoFullName: r.repoFullName,
-    prNumber: r.prNumber,
-    headSha: r.headSha,
-    baseSha: r.baseSha,
-    conclusion: r.conclusion as GateRunRecord['conclusion'],
-    addedCount: r.addedCount,
-    resolvedCount: r.resolvedCount,
-    createdAt: toIso(r.createdAt),
-  };
-}
-
-function toPr(r: PrRow): PrRecord {
-  return {
-    repoFullName: r.repoFullName,
-    prNumber: r.prNumber,
-    title: r.title,
-    state: r.state as PrRecord['state'],
-    headSha: r.headSha,
-    updatedAt: toIso(r.updatedAt),
-  };
-}
-
-export class PostgresGateStore implements GateStore {
+export class PostgresInstallationStore implements InstallationStore {
   constructor(
-    private readonly db: GateDb,
+    private readonly db: InstallationDb,
     private readonly onClose?: () => Promise<void>,
   ) {}
 
-  // --- installations ---
+  /** One installation's row, in the provider-generic key. */
+  private account(installationId: number) {
+    return and(
+      eq(providerAccounts.provider, GITHUB_PROVIDER),
+      eq(providerAccounts.accountId, String(installationId)),
+    );
+  }
 
   async saveInstallation(rec: InstallationRecord): Promise<void> {
     await this.db
-      .insert(ghInstallations)
-      .values(rec)
+      .insert(providerAccounts)
+      .values({
+        provider: GITHUB_PROVIDER,
+        accountId: String(rec.installationId),
+        accountLogin: rec.accountLogin,
+        accountType: rec.accountType,
+        workspaceOrgId: rec.workspaceOrgId,
+        createdAt: rec.createdAt,
+        updatedAt: rec.updatedAt,
+      })
       .onConflictDoUpdate({
-        target: ghInstallations.installationId,
+        target: [providerAccounts.provider, providerAccounts.accountId],
         set: {
           accountLogin: sql`excluded.account_login`,
           accountType: sql`excluded.account_type`,
           // Don't wipe an existing link when a re-sent event has no workspace.
-          workspaceOrgId: sql`coalesce(excluded.workspace_org_id, ${ghInstallations.workspaceOrgId})`,
+          workspaceOrgId: sql`coalesce(excluded.workspace_org_id, ${providerAccounts.workspaceOrgId})`,
           updatedAt: sql`excluded.updated_at`,
         },
       });
@@ -119,36 +77,14 @@ export class PostgresGateStore implements GateStore {
   ): Promise<InstallationRecord | null> {
     const rows = await this.db
       .select()
-      .from(ghInstallations)
-      .where(eq(ghInstallations.installationId, installationId))
+      .from(providerAccounts)
+      .where(this.account(installationId))
       .limit(1);
     return rows[0] ? toInstallation(rows[0]) : null;
   }
 
   async removeInstallation(installationId: number): Promise<void> {
-    // Cascade baselines + runs for this installation's repos, then the repos,
-    // then the installation itself — atomically, so a mid-cascade failure can't
-    // orphan a repo or baseline.
-    await this.db.transaction(async (tx) => {
-      const repos = await tx
-        .select({ name: ghRepos.repoFullName })
-        .from(ghRepos)
-        .where(eq(ghRepos.installationId, installationId));
-      const names = repos.map((r) => r.name);
-      if (names.length > 0) {
-        await tx
-          .delete(ghBaselines)
-          .where(inArray(ghBaselines.repoFullName, names));
-        await tx.delete(ghRuns).where(inArray(ghRuns.repoFullName, names));
-        await tx.delete(ghPrs).where(inArray(ghPrs.repoFullName, names));
-      }
-      await tx
-        .delete(ghRepos)
-        .where(eq(ghRepos.installationId, installationId));
-      await tx
-        .delete(ghInstallations)
-        .where(eq(ghInstallations.installationId, installationId));
-    });
+    await this.db.delete(providerAccounts).where(this.account(installationId));
   }
 
   async linkInstallationToWorkspace(
@@ -156,9 +92,9 @@ export class PostgresGateStore implements GateStore {
     workspaceOrgId: string,
   ): Promise<void> {
     await this.db
-      .update(ghInstallations)
+      .update(providerAccounts)
       .set({ workspaceOrgId, updatedAt: new Date().toISOString() })
-      .where(eq(ghInstallations.installationId, installationId));
+      .where(this.account(installationId));
   }
 
   async listInstallationsForWorkspace(
@@ -166,163 +102,14 @@ export class PostgresGateStore implements GateStore {
   ): Promise<InstallationRecord[]> {
     const rows = await this.db
       .select()
-      .from(ghInstallations)
-      .where(eq(ghInstallations.workspaceOrgId, workspaceOrgId));
-    return rows.map(toInstallation);
-  }
-
-  // --- repo links ---
-
-  async linkRepo(rec: RepoLinkRecord): Promise<void> {
-    await this.db
-      .insert(ghRepos)
-      .values({
-        ...rec,
-        notifyEmails: rec.notifyEmails ?? [],
-        notifications: (rec.notifications ?? null) as Record<string, boolean> | null,
-        codeQualityBlocking: rec.codeQualityBlocking ?? true,
-        codeQualityMinSeverity: rec.codeQualityMinSeverity ?? 'high',
-      })
-      .onConflictDoUpdate({
-        target: ghRepos.repoFullName,
-        set: {
-          installationId: sql`excluded.installation_id`,
-          workspaceOrgId: sql`excluded.workspace_org_id`,
-          defaultBranch: sql`excluded.default_branch`,
-          blocking: sql`excluded.blocking`,
-          codeQualityBlocking: sql`excluded.code_quality_blocking`,
-          codeQualityMinSeverity: sql`excluded.code_quality_min_severity`,
-          enabled: sql`excluded.enabled`,
-          notifyEmails: sql`excluded.notify_emails`,
-          notifications: sql`excluded.notifications`,
-          updatedAt: sql`excluded.updated_at`,
-        },
-      });
-  }
-
-  async unlinkRepo(repoFullName: string): Promise<void> {
-    await this.db.delete(ghRepos).where(eq(ghRepos.repoFullName, repoFullName));
-  }
-
-  async getRepo(repoFullName: string): Promise<RepoLinkRecord | null> {
-    const rows = await this.db
-      .select()
-      .from(ghRepos)
-      .where(eq(ghRepos.repoFullName, repoFullName))
-      .limit(1);
-    return rows[0] ? toRepo(rows[0]) : null;
-  }
-
-  async listReposForWorkspace(
-    workspaceOrgId: string,
-  ): Promise<RepoLinkRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(ghRepos)
-      .where(eq(ghRepos.workspaceOrgId, workspaceOrgId))
-      .orderBy(ghRepos.repoFullName);
-    return rows.map(toRepo);
-  }
-
-  async listReposForInstallation(
-    installationId: number,
-  ): Promise<RepoLinkRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(ghRepos)
-      .where(eq(ghRepos.installationId, installationId))
-      .orderBy(ghRepos.repoFullName);
-    return rows.map(toRepo);
-  }
-
-  // --- baseline ---
-
-  async saveBaseline(rec: BaselineRecord): Promise<void> {
-    // gh_baselines is just the pointer to the last-scanned baseline commit.
-    await this.db
-      .insert(ghBaselines)
-      .values({
-        repoFullName: rec.repoFullName,
-        commitSha: rec.commitSha,
-        capturedAt: rec.capturedAt,
-      })
-      .onConflictDoUpdate({
-        target: ghBaselines.repoFullName,
-        set: {
-          commitSha: sql`excluded.commit_sha`,
-          capturedAt: sql`excluded.captured_at`,
-        },
-      });
-  }
-
-  async getBaseline(repoFullName: string): Promise<BaselineRecord | null> {
-    const [row] = await this.db
-      .select()
-      .from(ghBaselines)
-      .where(eq(ghBaselines.repoFullName, repoFullName))
-      .limit(1);
-    if (!row) return null;
-    return {
-      repoFullName: row.repoFullName,
-      commitSha: row.commitSha,
-      capturedAt: toIso(row.capturedAt),
-    };
-  }
-
-  // --- runs ---
-
-  async recordRun(rec: GateRunRecord): Promise<void> {
-    await this.db
-      .insert(ghRuns)
-      .values(rec)
-      .onConflictDoNothing({ target: ghRuns.id });
-    // Cap retained runs per repo (matches the file adapter).
-    const keep = this.db
-      .select({ id: ghRuns.id })
-      .from(ghRuns)
-      .where(eq(ghRuns.repoFullName, rec.repoFullName))
-      .orderBy(desc(ghRuns.createdAt))
-      .limit(RUN_CAP);
-    await this.db
-      .delete(ghRuns)
+      .from(providerAccounts)
       .where(
-        and(eq(ghRuns.repoFullName, rec.repoFullName), notInArray(ghRuns.id, keep)),
+        and(
+          eq(providerAccounts.provider, GITHUB_PROVIDER),
+          eq(providerAccounts.workspaceOrgId, workspaceOrgId),
+        ),
       );
-  }
-
-  async listRuns(repoFullName: string, limit = 50): Promise<GateRunRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(ghRuns)
-      .where(eq(ghRuns.repoFullName, repoFullName))
-      .orderBy(desc(ghRuns.createdAt))
-      .limit(limit);
-    return rows.map(toRun);
-  }
-
-  // --- PR state ---
-
-  async upsertPr(rec: PrRecord): Promise<void> {
-    await this.db
-      .insert(ghPrs)
-      .values(rec)
-      .onConflictDoUpdate({
-        target: [ghPrs.repoFullName, ghPrs.prNumber],
-        set: {
-          title: sql`excluded.title`,
-          state: sql`excluded.state`,
-          headSha: sql`excluded.head_sha`,
-          updatedAt: sql`excluded.updated_at`,
-        },
-      });
-  }
-
-  async listPrs(repoFullName: string): Promise<PrRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(ghPrs)
-      .where(eq(ghPrs.repoFullName, repoFullName));
-    return rows.map(toPr);
+    return rows.map(toInstallation);
   }
 
   async close(): Promise<void> {

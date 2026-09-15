@@ -2,9 +2,9 @@
  * NEEDS SETUP in the UI — the blocked gap that is a to-do.
  *
  * Three things must be true wherever it renders: it is told APART from a failure
- * and from the grey blocked wall (its own word, its own orange paint, in both
- * themes), it NAMES the third party, and it carries the one action that clears it
- * — a link to the named service's card on the External APIs page, or, once the
+ * and from the grey blocked wall (by the Blocked word and its amber dot, never a
+ * wash of its own), it NAMES the third party, and it carries the one action that clears it
+ * — a link to the named service's card on the Dependencies page, or, once the
  * account exists, the re-generate command instead.
  *
  * "Wherever" is ONE component (`GuardNeedsSetupCta`) on both surfaces that host
@@ -20,13 +20,10 @@ import type {
   GuardFlowGap,
   GuardNeedsSetup,
   GuardSectionCoverage,
-  GuardSectionCoverageStatus,
 } from '@truecourse/shared';
 import { MISSING_DATA_NOUN } from '@truecourse/shared';
 import { GuardFlowDetail } from '@/components/guard/GuardFlowDetail';
 import { GuardSectionDetail } from '@/components/guard/GuardSectionDetail';
-import { GuardTotalsStrip } from '@/components/guard/GuardTotalsStrip';
-import { GuardSurfaceChip } from '@/components/guard/GuardSurfaceChip';
 import { useGuardView } from '@/hooks/useGuardView';
 import {
   GUARD_NEEDS_SETUP_NEXT,
@@ -43,15 +40,6 @@ import { guardStatusMeta } from '@/lib/guard-status';
 import { tallyNeedsSetup } from '@/lib/guard-report';
 
 afterEach(cleanup);
-
-const emptyTotals = (over: Partial<Record<GuardSectionCoverageStatus, number>>) =>
-  ({
-    fail: 0, error: 0, stale: 0, orphaned: 0, pass: 0, guarded: 0,
-    'needs-setup': 0, 'blocked-on': 0, unrealizable: 0, 'no-interface': 0,
-    web: 0, tui: 0, library: 0, desktop: 0, mobile: 0,
-    untestable: 0, 'no-claim': 0, dismissed: 0, unguarded: 0,
-    ...over,
-  }) as Record<GuardSectionCoverageStatus, number>;
 
 const NEEDS_SETUP_GAP: GuardFlowGap = {
   kind: 'blocked-on',
@@ -79,28 +67,29 @@ const section = (over: Partial<GuardSectionCoverage> = {}): GuardSectionCoverage
 // ---------------------------------------------------------------------------
 
 describe('needs-setup vocabulary and paint', () => {
-  it('wears its OWN word — never the blocked one it was promoted out of', () => {
-    expect(guardStatusWord('needs-setup')).toBe('Needs setup');
-    expect(guardStatusLabel('needs-setup')).toBe('Needs setup');
+  it('wears the shared blocked word — the SERVICE is what tells it apart', () => {
+    expect(guardStatusWord('needs-setup')).toBe('Blocked');
+    expect(guardStatusLabel('needs-setup')).toBe('Blocked');
     expect(guardStatusWord('blocked-on')).toBe('Blocked');
   });
 
-  it('is orange in BOTH themes — not fail red, not the gaps’ grey, not stale amber', () => {
+  it('is the Blocked amber in BOTH themes — not fail red, not the gaps’ grey', () => {
     const meta = guardStatusMeta('needs-setup');
-    expect(meta.badge).toContain('orange');
-    expect(meta.badge).toContain('dark:text-orange-400');
-    expect(meta.band).toContain('orange');
-    expect(meta.dot).toBe('bg-orange-500');
+    expect(meta.badge).toContain('amber');
+    expect(meta.badge).toContain('dark:text-amber-400');
+    expect(meta.band).toContain('amber');
+    expect(meta.dot).toBe('bg-amber-500');
     expect(guardStatusMeta('fail').badge).toContain('red');
-    expect(guardStatusMeta('blocked-on').badge).not.toContain('orange');
-    expect(guardStatusMeta('stale').badge).not.toContain('orange');
+    expect(guardStatusMeta('stale').badge).toContain('muted');
+    // The blue belongs to what nobody is asked to act on.
+    expect(guardStatusMeta('never-run').dot).toBe('bg-sky-500');
   });
 
   it('names the SERVICE in the surface chip instead of a generic need', () => {
     expect(guardGapNeed(NEEDS_SETUP_GAP)).toBe('needs setup: open-meteo');
     expect(
       guardGapNeed({ ...NEEDS_SETUP_GAP, needsSetup: { services: [], provided: ['open-meteo'] } }),
-    ).toBe('open-meteo is set up — re-run guard generate to author these flows');
+    ).toBe('open-meteo is set up, re-run Flow generation to author these flows');
     // Two outstanding services read as one English phrase.
     expect(
       guardGapNeed({ ...NEEDS_SETUP_GAP, needsSetup: { services: ['open-meteo', 'stripe'], provided: [] } }),
@@ -117,27 +106,27 @@ describe('needs-setup vocabulary and paint', () => {
    */
   it('has a full-sentence headline for the banner, and keeps the compact phrase for chips', () => {
     expect(guardNeedsSetupHeadline({ services: ['open-meteo'], provided: [] })).toBe(
-      'Not testable yet — open-meteo is an external service that needs an account before guard can test against it.',
+      'Not testable yet, open-meteo is an external service that needs an account before guard can test against it.',
     );
     expect(guardNeedsSetupHeadline({ services: ['apple', 'googleapis'], provided: [] })).toBe(
-      'Not testable yet — apple and googleapis are external services that need accounts before guard can test against them.',
+      'Not testable yet, apple and googleapis are external services that need accounts before guard can test against them.',
     );
     // Seed data is not a third party anyone signs up for — it never reads as one.
     // An OUTSTANDING seed noun only exists when a seed already fed the last
     // generate, so the sentence is the generator's verdict, not a setup ask.
     expect(guardNeedsSetupHeadline({ services: [MISSING_DATA_NOUN], provided: [] })).toBe(
-      'Not testable yet — the seed script ran, but doesn’t create the data this flow needs.',
+      'Not testable yet, the seed script ran, but doesn’t create the data this flow needs.',
     );
     expect(guardNeedsSetupHeadline({ services: ['apple', MISSING_DATA_NOUN], provided: [] })).toBe(
-      'Not testable yet — apple is an external service that needs an account before guard can test against it.' +
+      'Not testable yet, apple is an external service that needs an account before guard can test against it.' +
         ' It also needs data the seed script doesn’t create yet.',
     );
     // The done sub-state states the FACT; the command beneath it is the action.
     expect(guardNeedsSetupHeadline({ services: [], provided: ['open-meteo'] })).toBe(
-      'open-meteo is already set up — these tests just haven’t been authored since.',
+      'open-meteo is already set up, these tests just haven’t been authored since.',
     );
     expect(guardNeedsSetupHeadline({ services: [], provided: ['apple', 'googleapis'] })).toBe(
-      'apple and googleapis are already set up — these tests just haven’t been authored since.',
+      'apple and googleapis are already set up, these tests just haven’t been authored since.',
     );
     // The one-line contexts (chips, journey needs, section flow rows) are untouched.
     expect(guardNeedsSetupNeed({ services: ['apple', 'googleapis'], provided: [] })).toBe(
@@ -154,7 +143,7 @@ describe('needs-setup vocabulary and paint', () => {
 
   it('the follow-up line adds what the headline leaves out, and never restates it', () => {
     expect(GUARD_NEEDS_SETUP_NEXT).toBe(
-      'A real or sandbox account both work — provide one, then re-run `truecourse guard generate` to author these tests.',
+      'A real or sandbox account both work, provide one, then re-run Flow generation to author these tests.',
     );
   });
 
@@ -171,93 +160,12 @@ describe('needs-setup vocabulary and paint', () => {
       'Extend the seed script',
     );
   });
-
-  it('paints the surface chip orange and says the service on it', () => {
-    render(<GuardSurfaceChip data={{ surface: 'api', status: 'needs-setup', gap: NEEDS_SETUP_GAP }} />);
-    const chip = screen.getByText(/API · needs setup: open-meteo/);
-    expect(chip.className).toContain('orange');
-  });
 });
 
-// ---------------------------------------------------------------------------
-// The totals strip — the blocked chip, split.
-// ---------------------------------------------------------------------------
-
-describe('GuardTotalsStrip — needs setup is its own chip', () => {
-  const renderStrip = (
-    over: Partial<Parameters<typeof GuardTotalsStrip>[0]> = {},
-    onOpenExternals?: () => void,
-  ) =>
-    render(
-      <GuardTotalsStrip
-        totals={emptyTotals({ 'needs-setup': 3, 'blocked-on': 2, pass: 1 })}
-        activeFilter={null}
-        onFilter={() => {}}
-        filterMode="blur"
-        onFilterModeChange={() => {}}
-        needsSetupServices={[{ service: 'open-meteo', count: 3, provided: false }]}
-        {...(onOpenExternals ? { onOpenExternals } : {})}
-        {...over}
-      />,
-    );
-
-  it('splits the blocked count into two chips — attention first, wall second', () => {
-    renderStrip();
-    const strip = screen.getByRole('group', { name: 'Coverage totals' });
-    const chips = within(strip)
-      .getAllByRole('button')
-      .map((b) => b.textContent);
-    expect(chips).toContain('3Needs setup');
-    expect(chips).toContain('2Blocked');
-    expect(chips.indexOf('3Needs setup')).toBeLessThan(chips.indexOf('2Blocked'));
-  });
-
-  it('expands into per-service rows when it is the active filter', () => {
-    renderStrip({ activeFilter: 'needs-setup' });
-    const expansion = screen.getByRole('group', { name: 'Needs setup' });
-    const row = within(expansion).getByRole('button');
-    expect(row).toHaveTextContent('open-meteo');
-    expect(row).toHaveTextContent('3 sections');
-    expect(row.className).toContain('orange');
-    expect(
-      within(expansion).getByText(/Provide these on the External APIs page/),
-    ).toBeInTheDocument();
-  });
-
-  it('each service row is the CTA — it opens the External APIs page', async () => {
-    const onOpenExternals = vi.fn();
-    renderStrip({ activeFilter: 'needs-setup' }, onOpenExternals);
-    await userEvent.click(
-      within(screen.getByRole('group', { name: 'Needs setup' })).getByRole('button'),
-    );
-    expect(onOpenExternals).toHaveBeenCalledTimes(1);
-  });
-
-  it('the ALREADY-PROVIDED sub-state says re-generate, not "provide"', () => {
-    renderStrip({
-      activeFilter: 'needs-setup',
-      needsSetupServices: [{ service: 'open-meteo', count: 2, provided: true }],
-    });
-    const expansion = screen.getByRole('group', { name: 'Needs setup' });
-    expect(within(expansion).getByText('· re-generate')).toBeInTheDocument();
-    expect(
-      within(expansion).getByText(/run `truecourse guard generate` to author these flows/),
-    ).toBeInTheDocument();
-    expect(within(expansion).queryByText(/Provide these/)).not.toBeInTheDocument();
-  });
-
-  it('shows no expansion for the blocked chip’s own filter', () => {
-    renderStrip({ activeFilter: 'blocked-on' });
-    expect(screen.queryByRole('group', { name: 'Needs setup' })).not.toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The section detail — the inline CTA.
 // ---------------------------------------------------------------------------
 
 describe('GuardSectionDetail — the needs-setup CTA', () => {
-  it('leads with the service and a link to the External APIs page', async () => {
+  it('leads with the service and a link to the Dependencies page', async () => {
     const onOpenExternals = vi.fn();
     render(
       <GuardSectionDetail
@@ -269,9 +177,11 @@ describe('GuardSectionDetail — the needs-setup CTA', () => {
     );
     expect(screen.getByText(guardNeedsSetupHeadline(section().needsSetup!))).toBeInTheDocument();
     const cta = screen.getByRole('button', { name: /Provide open-meteo/ });
-    expect(cta).toHaveTextContent('External APIs');
-    expect(cta.className).toContain('orange');
-    expect(cta.className).toContain('dark:text-orange-300');
+    expect(cta).toHaveTextContent('Dependencies');
+    // The colour is the STATUS's job: the block wears the Blocked word and its
+    // amber dot, and the call to action stays ordinary ink so the one amber
+    // mark a reader scans for is the status itself.
+    expect(cta.className).not.toContain('amber');
     await userEvent.click(cta);
     expect(onOpenExternals).toHaveBeenCalledWith('open-meteo');
   });
@@ -303,7 +213,7 @@ describe('GuardSectionDetail — the needs-setup CTA', () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.getByText('truecourse guard generate')).toBeInTheDocument();
+    expect(screen.getByText(/Flow generation authors them/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Provide/ })).not.toBeInTheDocument();
   });
 
@@ -373,18 +283,18 @@ describe('GuardFlowDetail — the needs-setup why-no-test row', () => {
   it('carries the service, the explainer and the link — not a bare three-word label', () => {
     const needsSetup = { services: ['open-meteo'], provided: [] };
     renderDetail(needsSetup);
-    const row = within(screen.getByRole('list', { name: 'Tests' })).getAllByRole('listitem')[0];
+    const row = screen.getByRole('group', { name: 'Why there is no test yet' });
     // The full sentence, not the chip's compact phrase.
     expect(within(row).getByText(guardNeedsSetupHeadline(needsSetup))).toBeInTheDocument();
     expect(within(row).queryByText(guardNeedsSetupNeed(needsSetup))).not.toBeInTheDocument();
     // …and the one line it leaves out, which never restates it.
     expect(within(row).getByText(GUARD_NEEDS_SETUP_NEXT)).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: /Provide open-meteo/ })).toHaveTextContent(
-      'External APIs',
+      'Dependencies',
     );
-    // It stays visually apart from a real test row, and never says the same thing
-    // twice — the CTA's own sentence replaces the why-no-test line.
-    expect(row.className).toContain('orange');
+    // It stays visually apart from a real test row, and never says the same
+    // thing twice — the CTA's own sentence replaces the why-no-test line.
+    expect(row.className).toContain('bg-muted');
     expect(
       within(row).queryByText(guardWhyNoTest(NEEDS_SETUP_GAP)),
     ).not.toBeInTheDocument();
@@ -405,11 +315,11 @@ describe('GuardFlowDetail — the needs-setup why-no-test row', () => {
   it('gives every outstanding service its OWN link', async () => {
     const onOpenExternals = vi.fn();
     renderDetail({ services: ['open-meteo', 'stripe'], provided: [] }, onOpenExternals);
-    const row = within(screen.getByRole('list', { name: 'Tests' })).getAllByRole('listitem')[0];
+    const row = screen.getByRole('group', { name: 'Why there is no test yet' });
     const links = within(row).getAllByRole('button', { name: /Provide/ });
     expect(links.map((b) => b.textContent)).toEqual([
-      'Provide open-meteo→ External APIs',
-      'Provide stripe→ External APIs',
+      'Provide open-meteo→ Dependencies',
+      'Provide stripe→ Dependencies',
     ]);
     // The sentence above still reads as ONE phrase — only the ACTION splits.
     expect(
@@ -434,7 +344,7 @@ describe('GuardFlowDetail — the needs-setup why-no-test row', () => {
 
   it('the provided sub-state offers the command, and no explainer that contradicts it', () => {
     renderDetail({ services: [], provided: ['open-meteo'] });
-    expect(screen.getByText('truecourse guard generate')).toBeInTheDocument();
+    expect(screen.getByText(/Flow generation authors them/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Provide/ })).not.toBeInTheDocument();
     expect(screen.queryByText(GUARD_NEEDS_SETUP_NEXT)).not.toBeInTheDocument();
   });
@@ -458,7 +368,7 @@ function ExternalsJumpHarness({ service }: { service?: string }) {
 }
 
 describe('the CTA target', () => {
-  const jump = (service?: string, entry = '/repos/r?section=guard&tab=coverage&gflow=f1') => {
+  const jump = (service?: string, entry = '/repos/r?section=guard&tab=coverage&flow=f1') => {
     render(
       <MemoryRouter initialEntries={[entry]}>
         <ExternalsJumpHarness {...(service ? { service } : {})} />
@@ -467,28 +377,28 @@ describe('the CTA target', () => {
     return userEvent.click(screen.getByRole('button', { name: 'go' }));
   };
 
-  it('lands the Guard section’s External APIs tab, carrying no stale selection', async () => {
+  it('lands the Guard section’s Dependencies tab, carrying no stale selection', async () => {
     await jump();
     const search = screen.getByTestId('search').textContent ?? '';
     expect(search).toContain('section=guard');
     expect(search).toContain('tab=externals');
-    expect(search).not.toContain('gflow=');
+    expect(search).not.toContain('flow=');
     // No service named ⇒ no selection: the page is the whole card list.
-    expect(search).not.toContain('gext=');
+    expect(search).not.toContain('dependency=');
   });
 
-  it('carries the named service as `gext`, so the page opens that card', async () => {
+  it('carries the named service as `dependency`, so the page opens that card', async () => {
     await jump('open-meteo');
-    expect(screen.getByTestId('search').textContent).toContain('gext=open-meteo');
+    expect(screen.getByTestId('search').textContent).toContain('dependency=open-meteo');
   });
 
-  it('drops a stale `gext` like every other guard selection', async () => {
-    await jump(undefined, '/repos/r?section=guard&tab=externals&gext=stripe');
-    expect(screen.getByTestId('search').textContent).not.toContain('gext=');
+  it('drops a stale `dependency` like every other guard selection', async () => {
+    await jump(undefined, '/repos/r?section=guard&tab=externals&dependency=stripe');
+    expect(screen.getByTestId('search').textContent).not.toContain('dependency=');
   });
 });
 
-describe('tallyNeedsSetup — the per-service breakdown behind the chip', () => {
+describe('tallyNeedsSetup — the per-service breakdown', () => {
   it('counts one per section, still-to-provide first, then by count and name', () => {
     expect(
       tallyNeedsSetup([

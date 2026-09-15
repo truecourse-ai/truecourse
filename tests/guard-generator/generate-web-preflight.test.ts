@@ -1,5 +1,5 @@
 /**
- * THE BROWSER PREFLIGHT (plan item 139): a missing Chromium is judged ONCE,
+ * THE BROWSER PREFLIGHT: a missing Chromium is judged ONCE,
  * before any worker session or web build is paid for — not discovered inside
  * every web worker (documenso 2026-08-27: 130 web sessions each probed their
  * way to the same missing binary and retired 117 flows). The affected flows

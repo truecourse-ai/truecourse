@@ -1,8 +1,8 @@
 /**
  * SINGLE-STEP MODE — `generateGuards({ only })` plus
- * `createGuardGenerateSessionSeams({ only })`, the two halves behind the CLI's
- * `--only-extract | --only-flows | --only-worker` flags (the `spec scan`
- * template, SPEC_GUARD_PLAN item 110).
+ * `createGuardGenerateSessionSeams({ only })`, the two halves behind
+ * single-step generation (`only: extract | flows | worker`), on the
+ * `spec scan` template.
  *
  * The rules under test:
  * - each step runs ONLY its own sessions: the ENGINE returns before the next
@@ -30,7 +30,7 @@ let sessionScript: StubScript = () => {
 vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
   SESSION_MODEL_CLAUDE_CODE: 'opus',
   assertSessionBackendReady: async () => {},
-  createConfiguredSessionDriver: () => {
+  createClaudeCodeSessionDriver: () => {
     constructions++
     const { driver } = stubDriver((call) => sessionScript(call))
     return { driver, mode: 'claude-code', attribution: driver.attribution }
@@ -73,6 +73,8 @@ import {
   writeDoc,
   writeRecipe,
 } from '../guard-generator/helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
 
 // ---------------------------------------------------------------------------
 // fixture — one doc with one cli-testable section, the standard guard universe
@@ -88,19 +90,18 @@ const CONTENT = [
 ].join('\n')
 
 const repos: string[] = []
-let home = ''
 
 beforeEach(() => {
   constructions = 0
   sessionScript = () => {
     throw new Error('no session script installed for this case')
   }
-  home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gg-steps-home-'))
-  process.env.TRUECOURSE_HOME = home
+  installMemoryKvCache()
+  installMemorySessionRuns()
 })
 afterEach(() => {
-  delete process.env.TRUECOURSE_HOME
-  fs.rmSync(home, { recursive: true, force: true })
+  resetKvCacheStore()
+  resetSessionRuns()
   while (repos.length) rmrf(repos.pop()!)
 })
 
@@ -135,7 +136,7 @@ function wroteNothing(r: string): void {
 // the engine: where each step stops, and what it is allowed to write
 // ---------------------------------------------------------------------------
 
-describe('--only-extract', () => {
+describe('only: extract', () => {
   it('runs extraction and returns before synthesis — nothing downstream starts, nothing is written', async () => {
     const r = docRepo()
     const seen: string[] = []
@@ -144,7 +145,7 @@ describe('--only-extract', () => {
       only: 'extract',
       extractSession: extractSessionBy({}, (doc) => seen.push(doc)),
       flowsAreaSession: () => {
-        throw new Error('flow synthesis belongs to --only-flows')
+        throw new Error('flow synthesis belongs to only: flows')
       },
       flowsEpicSession: noEpicSessions,
       flowWorkerSession: noWorkerSessions,
@@ -160,7 +161,7 @@ describe('--only-extract', () => {
   })
 })
 
-describe('--only-flows', () => {
+describe('only: flows', () => {
   it('synthesizes flows, returns before the workers, and leaves flows.json unwritten', async () => {
     const r = docRepo()
     const res = await runGenerate({
@@ -177,13 +178,13 @@ describe('--only-flows', () => {
     expect(res.stoppedAfter).toBe('flows')
     // The step's work really happened — the flows exist in the result…
     expect(res.flows.total).toBeGreaterThan(0)
-    // …and only in the result: the committable corpus is untouched.
+    // …and only in the result: the stored corpus is untouched.
     expect(readFlowsFile(r)).toBeNull()
     wroteNothing(r)
   })
 })
 
-describe('--only-worker', () => {
+describe('only: worker', () => {
   it('is the ONLY step that writes: flows.json, the manifest and the scenario files all land', async () => {
     const r = docRepo()
     const res = await runGenerate({
@@ -263,7 +264,7 @@ function areaOf(docs: GuardDoc[]): FlowSynthesisArea {
 }
 
 describe('a prior step not yet run', () => {
-  it('--only-flows on a cold extraction cache throws, naming the step and its misses', async () => {
+  it('only: flows on a cold extraction cache throws, naming the step and its misses', async () => {
     const r = docRepo()
     const [doc] = docsOf(r)
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, only: 'flows' })
@@ -272,13 +273,13 @@ describe('a prior step not yet run', () => {
     expect(error).toBeInstanceOf(GenerateStepNotReadyError)
     expect((error as GenerateStepNotReadyError).step).toBe('extract')
     expect((error as GenerateStepNotReadyError).missing).toHaveLength(1)
-    expect((error as GenerateStepNotReadyError).message).toContain('--only-extract')
+    expect((error as GenerateStepNotReadyError).message).toContain('extract step')
     // A refusal to replay must not even build a driver, let alone spend.
     expect(constructions).toBe(0)
     expect(seams.runId()).toBeUndefined()
   })
 
-  it('--only-worker on a cold flows cache throws for the FLOWS step, extraction having replayed clean', async () => {
+  it('only: worker on a cold flows cache throws for the FLOWS step, extraction having replayed clean', async () => {
     const r = docRepo()
     const [doc] = docsOf(r)
     await warmExtractCache(r, doc)
@@ -299,7 +300,7 @@ describe('a prior step not yet run', () => {
     expect(constructions).toBe(built)
   })
 
-  it('--only-worker refuses the EPIC session too — it belongs to the flows step', async () => {
+  it('only: worker refuses the EPIC session too — it belongs to the flows step', async () => {
     const r = docRepo()
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, only: 'worker' })
     const error = await seams
@@ -315,7 +316,7 @@ describe('a prior step not yet run', () => {
     expect(constructions).toBe(0)
   })
 
-  it('the chosen step itself is never cache-only — --only-extract spends on a cold cache', async () => {
+  it('the chosen step itself is never cache-only — only: extract spends on a cold cache', async () => {
     const r = docRepo()
     const [doc] = docsOf(r)
     await warmExtractCache(r, doc)

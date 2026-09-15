@@ -1,14 +1,15 @@
 /**
- * The Flows tab's main-pane tab set — one {@link useGuardTabs} reducer bound to
- * `?gflow=<flowId>` (Manual pseudo-flow ids ride as-is).
+ * The Flows tab's main-pane tab set, one {@link useGuardTabs} reducer bound to
+ * `?flow=<flowId>` (Manual pseudo-flow ids ride as-is).
  *
- * Only flows open here. A TEST is not a tab on this tab: it has exactly one home
- * (`?gtest=` on the Tests tab), reached from a flow's test row — see
- * `useGuardTestTabs`. Tab ids stay self-describing (`flow:…`) so a second kind
- * could join later without re-keying the ones already in the URL.
+ * A flow is the ONLY thing that opens here, because a flow and its test are one
+ * entity now: there is no test address at all.
+ *
+ * Tab ids stay self-describing (`flow:…`) so a second kind could join later
+ * without re-keying the ones already in the URL.
  */
 
-import { useGuardTabs, type GuardTabsParam, type GuardTabsState } from './useGuardTabs';
+import { useGuardTabs, type GuardTabsParam, type GuardTabsState } from '@/hooks/useGuardTabs';
 
 const FLOW = 'flow:';
 
@@ -24,13 +25,13 @@ export function tabFlowId(tabId: string | null): string | null {
 
 const flowTabsParam: GuardTabsParam = {
   read: (params) => {
-    const flow = params.get('gflow');
+    const flow = params.get('flow');
     return flow ? flowTabId(flow) : null;
   },
   write: (next, id) => {
     const flow = tabFlowId(id);
-    if (flow) next.set('gflow', flow);
-    else next.delete('gflow');
+    if (flow) next.set('flow', flow);
+    else next.delete('flow');
   },
 };
 

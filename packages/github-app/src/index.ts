@@ -1,9 +1,9 @@
 /**
  * GitHub App connection layer: everything needed to install the App, receive its
  * webhooks and connect repositories to a workspace. What a connected repo is then
- * USED for (the PR gate, baselines, guard runs) lives in its own package and rides
- * the seams declared here — `onRepoLinked` on the connect router and the handler
- * hooks on the webhook router.
+ * USED for (baselines, guard runs) lives in its own package and rides the seams
+ * declared here — `onRepoLinked` on the connect router and the handler hooks on
+ * the webhook router.
  */
 
 export { loadGithubAppConfig, type GithubAppConfig } from './config.js';
@@ -22,24 +22,8 @@ export {
   appOctokit,
   fetchInstallationAccount,
   splitRepo,
-  listPrFiles,
-  getFileContent,
-  findComment,
-  getActorPermission,
-  createComment,
-  updateComment,
-  findActiveCheck,
-  startCheck,
-  postCheck,
-  listReviewComments,
-  createReviewComment,
-  listOpenPrs,
-  listPrsForCommit,
-  getPullRequest,
   type OctokitClient,
   type RepoCoords,
-  type CheckConclusion,
-  type CheckAnnotation,
 } from './octokit.js';
 export {
   NOTIFICATION_KEYS,
@@ -51,8 +35,6 @@ export {
   type WebhookDeps,
   type BaselineTrigger,
   type SourcePushTrigger,
-  type PullRequestPayload,
-  type IssueCommentPayload,
 } from './webhook.js';
 export {
   createConnectRouter,
@@ -60,13 +42,6 @@ export {
   type OnRepoLinked,
   type OnRepoUnlinked,
 } from './connect.js';
-export type {
-  GateStore,
-  InstallationRecord,
-  RepoLinkRecord,
-  BaselineRecord,
-  PrState,
-  PrRecord,
-  GateRunRecord,
-} from './store/types.js';
-export { PostgresGateStore, type GateDb } from './store/pg-store.js';
+export { GITHUB_PROVIDER, installationOf } from './provider.js';
+export type { InstallationStore, InstallationRecord } from './store/types.js';
+export { PostgresInstallationStore, type InstallationDb } from './store/pg-store.js';

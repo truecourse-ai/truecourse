@@ -4,8 +4,8 @@
  * "this file talks to something external" the layer detector needs.
  *
  * Shared (not under `guard/`) because the shape is an ANALYSIS fact: the detector
- * lives in `@truecourse/analyzer` (it reads the import-pattern registry), while
- * `guard-generator` — which cannot see the analyzer — consumes it through this
+ * lives in `@truecourse/source-facts` (it reads the import-pattern registry), while
+ * `guard-generator` — which cannot see the mapper — consumes it through this
  * type, and `guard/report.ts` snapshots it. One shape, three packages.
  *
  * Detection has TWO sources (see {@link ExternalServiceSourceSchema}): an SDK import

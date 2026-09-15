@@ -15,9 +15,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
 import {
   resetContextStore,
@@ -25,11 +22,7 @@ import {
   type ContextStore,
 } from '@truecourse/core/lib/context-store';
 import { resetSpecStore, setSpecStore, loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
-import {
-  listSessionRuns,
-  resetSessionsRootResolver,
-  setSessionsRootResolver,
-} from '@truecourse/core/lib/sessions-store';
+import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import {
   discoverFacts,
   workspaceContextScanInProcess,
@@ -39,6 +32,7 @@ import {
 import type { CuratedCorpus, DecisionsFile } from '@truecourse/spec-consolidator';
 import { memoryContextStore } from '../helpers/memory-context-store';
 import { memorySpecStore } from '../helpers/memory-spec-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { outcome, stubDriver, type StubCall } from './spec-scan-session-stub';
 
 const ORG = 'org_A';
@@ -46,28 +40,22 @@ const REPO_SOURCE = 'repo-acme-widgets';
 const SITE_SOURCE = 'stripe-docs';
 
 let context: ContextStore;
-let home: string;
-let tmpDirs: string[] = [];
 
 beforeEach(() => {
   resetKvCacheStore();
   context = memoryContextStore();
   setContextStore(context);
   setSpecStore(memorySpecStore());
-  home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-ws-home-'));
-  tmpDirs.push(home);
-  // The hosted sessions layout: a workspace's runs live under the global dir,
-  // keyed by the workspace, not inside any tree.
-  setSessionsRootResolver(() => path.join(home, 'sessions'));
+  // A workspace's runs are rows keyed by the workspace, not by any repository
+  // and not inside any tree.
+  installMemorySessionRuns();
 });
 
 afterEach(() => {
   resetKvCacheStore();
   resetContextStore();
   resetSpecStore();
-  resetSessionsRootResolver();
-  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
-  tmpDirs = [];
+  resetSessionRuns();
 });
 
 /** A workspace with two sources: a repository's own markdown, and a site. */
@@ -266,7 +254,7 @@ describe('the workspace Document scan', () => {
     });
 
     // The run belongs to the workspace — no repository has it.
-    const runs = listSessionRuns(workspaceSessionsKey(ORG), 'spec-scan');
+    const runs = await listStoredSessionRuns(workspaceSessionsKey(ORG), 'spec-scan');
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({ status: 'completed' });
     // "Discovering docs" says which source yielded how many documents, one

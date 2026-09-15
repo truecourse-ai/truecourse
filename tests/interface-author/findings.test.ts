@@ -1,6 +1,6 @@
 /**
- * THE FINDINGS LEDGER — `guard/interfaces.findings.md`, the doc-bug feed
- * (item 13). What is under test is the property the file exists for: it
+ * THE FINDINGS LEDGER — `guard/interfaces.findings.md`, the doc-bug feed.
+ * What is under test is the property the file exists for: it
  * ACCUMULATES. A run adds its section and touches nothing above it, so the
  * answer to "has anybody fixed this doc" is the file's own history rather than
  * whatever the last run happened to see.

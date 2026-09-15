@@ -1,7 +1,7 @@
 /**
  * THE WORKSPACE DOCUMENT SCAN — one curation over every source a workspace has.
  *
- * Documentation belongs to the workspace, not to a repository (plan §1), so the
+ * Documentation belongs to the workspace, not to a repository, so the
  * scan no longer clones anything: it MATERIALIZES the context store's documents
  * into a scratch tree under `context/<sourceId>/<docPath>` (the one ref grammar,
  * `lib/context-ref`), writes the workspace's decisions beside them, and runs the
@@ -83,7 +83,8 @@ export interface WorkspaceContextScanResult {
   sources: WorkspaceScanSourceFact[];
   /** Documents materialized into the tree (kept or not). */
   documents: number;
-  /** The sessions-store run dir this scan's transcripts landed in. */
+  /** The sessions-store scratch dir this scan's run used; its transcripts are
+   * rows on the run's journal. */
   sessionsRunDir: string;
   /** Zero fresh sessions and zero losses — nothing changed for the LLM to judge. */
   noChanges: boolean;
@@ -91,13 +92,12 @@ export interface WorkspaceContextScanResult {
 
 export interface WorkspaceContextScanOptions {
   workspaceOrgId: string;
-  /** The workspace's own name, when the server knows one (plan §4). */
+  /** The workspace's own name, when the server knows one. */
   workspaceName?: string;
   /** The connected repositories, `owner/repo` — the identity block's subjects. */
   repositories?: readonly string[];
   /** Seams the caller threads in: progress, cancellation, the run's driver. */
   tracker?: CurateInProcessOptions['tracker'];
-  source?: CurateInProcessOptions['source'];
   driver?: CurateInProcessOptions['driver'];
   transportMode?: CurateInProcessOptions['transportMode'];
   signal?: AbortSignal;
@@ -109,8 +109,8 @@ export interface WorkspaceContextScanOptions {
 
 /**
  * Run the workspace Document scan and persist what it produced. Every read goes
- * through the context-store seam, so a workspace with no store installed (file
- * mode) fails there, loudly, rather than scanning an invented empty workspace.
+ * through the context-store seam, so a process that never ran `installDbStores`
+ * fails there, loudly, rather than scanning an invented empty workspace.
  */
 export async function workspaceContextScanInProcess(
   options: WorkspaceContextScanOptions,
@@ -151,7 +151,6 @@ export async function workspaceContextScanInProcess(
         docOrigins: materialized.origins,
         deferRunCompletion: true,
         ...(options.tracker ? { tracker: options.tracker } : {}),
-        ...(options.source ? { source: options.source } : {}),
         ...(options.driver ? { driver: options.driver } : {}),
         ...(options.transportMode ? { transportMode: options.transportMode } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
@@ -163,7 +162,7 @@ export async function workspaceContextScanInProcess(
       });
 
       // The stamp is the artifact's own record of where a document came from,
-      // so nothing downstream has to re-derive it from a ref (plan §8).
+      // so nothing downstream has to re-derive it from a ref.
       const corpus = stampCorpusSources(curate.corpus, sources);
       await saveWorkspaceSpec(ref, 'corpus', corpus);
       await saveWorkspaceSpec(ref, 'decisions', curate.decisions);
@@ -220,7 +219,7 @@ async function closeRun(
   }
 }
 
-/** The identity the curator attributes every document against (plan §4). */
+/** The identity the curator attributes every document against. */
 export function workspaceIdentity(options: {
   workspaceName?: string;
   repositories?: readonly string[];

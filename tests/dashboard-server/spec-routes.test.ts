@@ -1,34 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
 import request from 'supertest';
 import { type Express } from 'express';
-
-/** The corpus routes want a git repo (like analyze) — init the fixture so the route guard passes. */
-function gitInit(dir: string): void {
-  execSync('git init -q', { cwd: dir });
-  execSync('git config user.email t@t.co', { cwd: dir });
-  execSync('git config user.name test', { cwd: dir });
-  execSync('git commit -q --allow-empty -m init', { cwd: dir });
-}
 
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
   return {
     ...actual,
-    emitAnalysisProgress: vi.fn(),
-    emitAnalysisComplete: vi.fn(),
-    emitViolationsReady: vi.fn(),
-    emitFilesChanged: vi.fn(),
-    emitAnalysisCanceled: vi.fn(),
     emitSpecProgress: vi.fn(),
     emitSpecComplete: vi.fn(),
-    createSocketTracker: () => ({ start() {}, done() {}, error() {}, detail() {} }),
     createSocketSpecTracker: () => ({ start() {}, done() {}, error() {}, detail() {} }),
-    createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
     createSocketSpecEstimateHandler: () => () => Promise.resolve(true),
-    createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
   };
 });
 
@@ -48,88 +31,50 @@ import { memoryContextStore } from '../helpers/memory-context-store';
 import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
 import {
-  setBackgroundTaskRunner,
-  type BackgroundTask,
-} from '@truecourse/core/lib/background-tasks';
-import {
-  setGuardStore,
-  resetGuardStore,
-  type GuardStore,
-} from '@truecourse/core/lib/guard-store';
-import {
   setSpecStore,
   resetSpecStore,
+  saveWorkspaceSpec,
   type SpecStore,
-  type RepoRef,
   type SpecArtifact,
   type WorkspaceRef,
 } from '@truecourse/core/lib/spec-store';
-import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import { writeLatest } from '@truecourse/core/lib/analysis-store';
+import { setContextBindings } from '@truecourse/core/lib/context-store';
 import {
-  sourceDirPath,
-  sourcesDirPath,
-  sourcesFilePath,
-} from '../../packages/spec-consolidator/src/index.js';
-import { seedSource } from '../spec-consolidator/sources-fixture.js';
-import type { GuardGenerateReport } from '@truecourse/shared';
+  addWorkspaceManualExclude,
+  addWorkspaceManualInclude,
+} from '@truecourse/core/commands/spec-in-process';
+import { installMemorySpecStore } from '../helpers/memory-spec-store';
+import { installWorkTreeDocReader, resetRepoDocReader } from '../helpers/work-tree-doc-reader';
 import {
   setupTestFixture,
   teardownTestFixture,
   type TestFixture,
-} from '../helpers/test-db';
+} from '../helpers/test-fixture';
+
+
+
+
 
 /**
  * Spec route tests assert the HTTP shape of the corpus routes. The
- * curate/generate engine has its own suite under tests/spec-consolidator/ and
- * tests/contract-extractor/.
+ * curate/generate engine has its own suite under tests/spec-consolidator/.
  */
 
 /**
- * A minimal in-memory hosted `SpecStore` — the shape EE actually installs
- * (`materializesInPlace: false`, Postgres-backed). Map-backed round-trip for
- * decisions writes / corpus reads so the EE route paths (which read/write through
- * the ACTIVE spec store) work without a real database. Workspace scope is a
- * third map — the hosted corpus and decisions are the WORKSPACE's now.
+ * A minimal in-memory `SpecStore` — the shape boot actually installs, Map-backed
+ * so the route paths (which read through the ACTIVE spec store) work without a
+ * real database. Everything in it is the WORKSPACE's: the corpus, the decisions
+ * and the documents a scan kept.
  */
 function makeMemSpecStore(): SpecStore {
-  const byRef = new Map<string, unknown>(); // (repoKey, commitSha, artifact) → json
-  const latest = new Map<string, unknown>(); // (repoKey, artifact) → json
   const workspace = new Map<string, unknown>(); // (org, artifact) → json
   const workspaceDocs = new Map<string, string>(); // (org, ref) → body
-  const rk = (ref: RepoRef, a: SpecArtifact) => `${ref.repoKey}\x00${ref.commitSha}\x00${a}`;
-  const lk = (repoKey: string, a: SpecArtifact) => `${repoKey}\x00${a}`;
   return {
-    materializesInPlace: false,
-    async saveSpec(ref, artifact, json) {
-      byRef.set(rk(ref, artifact), json);
-      latest.set(lk(ref.repoKey, artifact), json);
-    },
-    async loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact) {
-      return (byRef.get(rk(ref, artifact)) as T) ?? null;
-    },
-    async deleteSpec(ref, artifact) {
-      byRef.delete(rk(ref, artifact));
-    },
-    async loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact) {
-      return (latest.get(lk(repoKey, artifact)) as T) ?? null;
-    },
-    async latestCommit() {
-      return null;
-    },
     async saveWorkspaceSpec(ref, artifact, json) {
       workspace.set(`${ref.workspaceOrgId}\x00${artifact}`, json);
     },
     async loadWorkspaceSpec<T = unknown>(ref: WorkspaceRef, artifact: SpecArtifact) {
       return (workspace.get(`${ref.workspaceOrgId}\x00${artifact}`) as T) ?? null;
-    },
-    async saveSpecDocs(ref, files) {
-      for (const [docRef, body] of Object.entries(files)) {
-        workspaceDocs.set(`${ref.repoKey}\x00${docRef}`, body);
-      }
-    },
-    async loadSpecDoc(repoKey: string, docRef: string) {
-      return workspaceDocs.get(`${repoKey}\x00${docRef}`) ?? null;
     },
     async saveWorkspaceSpecDocs(ref, files) {
       for (const [docRef, body] of Object.entries(files)) {
@@ -197,11 +142,15 @@ describe('GET /api/repos/:id/spec/decisions', () => {
   let fixture: TestFixture;
 
   beforeEach(async () => {
+    installMemorySpecStore();
+    setContextStore(memoryContextStore());
     fixture = await setupTestFixture();
     app = createTestApp();
   });
 
   afterEach(async () => {
+    resetSpecStore();
+    resetContextStore();
     await teardownTestFixture(fixture.project.slug);
   });
 
@@ -213,29 +162,35 @@ describe('GET /api/repos/:id/spec/decisions', () => {
   });
 });
 
+/** The one Context source the workspace holds, and the repository reads. */
+const SOURCE = 'repo-fixture';
+
 describe('corpus routes (spec-scan redesign)', () => {
   let app: Express;
   let fixture: TestFixture;
 
-  const seedCorpus = (overlaps: Array<{ docs: [string, string]; note: string }>): void => {
-    const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
-    fs.mkdirSync(specs, { recursive: true });
-    fs.writeFileSync(
-      path.join(specs, 'corpus.json'),
-      JSON.stringify({
-        version: 3,
-        generatedAt: '2026-01-01T00:00:00Z',
-        docs: [
-          { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'] },
-          { ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'] },
-        ],
-        areas: [
-          { id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v1.md', 'docs/v2.md'], overlaps },
-        ],
-        relations: [],
-        skippedDocs: [{ ref: 'docs/archived.md', reason: 'archived directory' }],
-      }),
-    );
+  /**
+   * The WORKSPACE corpus, and the repository's link to the source it came from.
+   * A repository's corpus is that slice, so there is nothing repo-scoped to seed;
+   * the document bodies are files because the doc route reads them as such.
+   */
+  const seedCorpus = async (
+    overlaps: Array<{ docs: [string, string]; note: string }>,
+    generatedAt = '2026-01-01T00:00:00Z',
+  ): Promise<void> => {
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
+      version: 3,
+      generatedAt,
+      docs: [
+        { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: SOURCE },
+        { ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: SOURCE },
+      ],
+      areas: [
+        { id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v1.md', 'docs/v2.md'], overlaps },
+      ],
+      relations: [],
+      skippedDocs: [{ ref: `context/${SOURCE}/archived.md`, reason: 'archived directory' }],
+    });
     const docs = path.join(fixture.repoPath, 'docs');
     fs.mkdirSync(docs, { recursive: true });
     fs.writeFileSync(path.join(docs, 'v1.md'), '# Booking v1\nCancel up to 24h before.');
@@ -243,13 +198,18 @@ describe('corpus routes (spec-scan redesign)', () => {
   };
 
   beforeEach(async () => {
+    installMemorySpecStore();
+    installWorkTreeDocReader();
     fixture = await setupTestFixture();
-    gitInit(fixture.repoPath); // include/exclude re-curate → route guards require git
+    setContextStore(memoryContextStore());
+    await setContextBindings(TEST_ORG, fixture.repoPath, [SOURCE]);
     vi.mocked(curateInProcess).mockClear();
     app = createTestApp();
   });
   afterEach(async () => {
-    setBackgroundTaskRunner(null);
+    resetSpecStore();
+    resetContextStore();
+    resetRepoDocReader();
     await teardownTestFixture(fixture.project.slug);
   });
 
@@ -258,21 +218,21 @@ describe('corpus routes (spec-scan redesign)', () => {
   });
 
   it('GET /spec/corpus → the corpus', async () => {
-    seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
+    await seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
     const res = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(200);
     expect(res.body.corpus.areas).toHaveLength(1);
     expect(res.body.corpus.areas[0].overlaps).toHaveLength(1);
   });
 
   it('GET /spec/doc → the markdown content; rejects traversal', async () => {
-    seedCorpus([]);
+    await seedCorpus([]);
     const ok = await request(app).get(`/api/repos/${fixture.project.slug}/spec/doc`).query({ ref: 'docs/v2.md' }).expect(200);
     expect(ok.body.content).toContain('48h');
     await request(app).get(`/api/repos/${fixture.project.slug}/spec/doc`).query({ ref: '../../etc/passwd' }).expect(400);
   });
 
   it('has no /spec/relations routes — unknown spec mutations 404', async () => {
-    seedCorpus([]);
+    await seedCorpus([]);
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/relations`)
       .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md' })
@@ -283,370 +243,66 @@ describe('corpus routes (spec-scan redesign)', () => {
       .expect(404);
   });
 
-  // OSS batches decisions: an include/exclude persists to decisions.json and returns
-  // the decision lists (no corpus) WITHOUT re-curating. One later Scan materializes
-  // the batch. (The old per-click re-curate re-ran the set-level LLM stages each time.)
-  it('POST then DELETE /spec/includes records the decision without re-curating (OSS)', async () => {
-    seedCorpus([]);
-    const add = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/includes`)
-      .send({ ref: 'docs/v1.md' })
-      .expect(200);
-    expect(add.body.manualIncludes).toContain('docs/v1.md');
-    // No corpus in the ack — the client keeps its optimistic row move until the next Scan.
-    expect(add.body.corpus).toBeUndefined();
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
+  // Every decision here is the WORKSPACE's — the repository routes refuse an
+  // unscoped one (see "no repository decision routes"),
+  // and the reads below fold the workspace ledger they are written to.
+  it('GET /spec/staleness pends a WORKSPACE decision the corpus has not absorbed', async () => {
+    await seedCorpus([]);
+    const staleness = () =>
+      request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
 
-    const del = await request(app)
-      .delete(`/api/repos/${fixture.project.slug}/spec/includes`)
-      .send({ ref: 'docs/v1.md' })
-      .expect(200);
-    expect(del.body.manualIncludes).toEqual([]);
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
-  });
-
-  it('POST then DELETE /spec/excludes records the decision without re-curating (OSS)', async () => {
-    seedCorpus([]);
-    const add = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
-      .expect(200);
-    expect(add.body.manualExcludes).toContain('docs/v2.md');
-    expect(add.body.corpus).toBeUndefined();
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
-
-    const del = await request(app)
-      .delete(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
-      .expect(200);
-    expect(del.body.manualExcludes).toEqual([]);
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
-  });
-
-  it('GET /spec/staleness → decisionsPending true after a decision, false after a fresh scan', async () => {
-    seedCorpus([]); // corpus generatedAt = 2026-01-01
     // No decisions yet → nothing pending.
-    const before = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
-    expect(before.body.decisionsPending).toBe(false);
+    expect((await staleness()).body.decisionsPending).toBe(false);
 
-    // Recording a decision writes decisions.json (now) → newer than the corpus.
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
-      .expect(200);
-    const pending = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
-    expect(pending.body.decisionsPending).toBe(true);
+    // A workspace exclude of a doc the corpus still keeps.
+    await addWorkspaceManualExclude(TEST_ORG, 'docs/v2.md');
+    expect((await staleness()).body.decisionsPending).toBe(true);
 
-    // A fresh scan re-curates with a newer generatedAt → the pending signal clears.
-    const corpusFile = path.join(fixture.repoPath, '.truecourse', 'specs', 'corpus.json');
-    const corpus = JSON.parse(fs.readFileSync(corpusFile, 'utf8'));
-    corpus.generatedAt = '2099-01-01T00:00:00Z';
-    fs.writeFileSync(corpusFile, JSON.stringify(corpus));
-    const cleared = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
-    expect(cleared.body.decisionsPending).toBe(false);
+    // A fresh scan drops the excluded doc → the pending signal clears.
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
+      version: 3,
+      generatedAt: '2099-01-01T00:00:00Z',
+      docs: [
+        { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: SOURCE },
+      ],
+      areas: [
+        { id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v1.md'], overlaps: [] },
+      ],
+      relations: [],
+      skippedDocs: [{ ref: `context/${SOURCE}/archived.md`, reason: 'archived directory' }],
+    });
+    expect((await staleness()).body.decisionsPending).toBe(false);
   });
 
-  it('force-exclude clears a force-include for the same doc (mutually exclusive)', async () => {
-    seedCorpus([]);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/includes`)
-      .send({ ref: 'docs/v1.md' })
-      .expect(200);
-    const res = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v1.md' })
-      .expect(200);
-    expect(res.body.manualExcludes).toContain('docs/v1.md');
-    expect(res.body.manualIncludes ?? []).not.toContain('docs/v1.md');
-  });
-
-  it('GET /spec/corpus exposes manualIncludes + skippedDocs', async () => {
-    seedCorpus([]);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/includes`)
-      .send({ ref: 'docs/v1.md' })
-      .expect(200);
+  it('GET /spec/corpus exposes the WORKSPACE manualIncludes + skippedDocs', async () => {
+    await seedCorpus([]);
+    await addWorkspaceManualInclude(TEST_ORG, 'docs/v1.md');
     const res = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(200);
     expect(res.body.manualIncludes).toContain('docs/v1.md');
-    expect(res.body.corpus.skippedDocs).toContainEqual({ ref: 'docs/archived.md', reason: 'archived directory' });
+    expect(res.body.corpus.skippedDocs).toContainEqual({ ref: `context/${SOURCE}/archived.md`, reason: 'archived directory' });
   });
 
 });
 
-// DB mode (hosted): repo.path is a repoKey, the corpus lives in the store, and
-// there is no local git tree. The decision routes must NOT gate on git and must
-// NOT re-curate (a decision is not a corpus change); only when a decision leaves
-// the stored corpus conflict-free do they unblock a stalled guard generate.
-//
-// This mirrors LIVE EE wiring: a hosted SPEC store is installed (decisions writes +
-// corpus reads flow through it) and NO contract store, so the file-default contract
-// flag stays TRUE. The spec routes therefore key their edition check on the SPEC
-// store — the store EE actually installs.
+// Hosted: repo.path is a repoKey and the corpus lives in the store,
+// with no local working tree to read. What a repository still answers over that
+// stored state is its staleness — the decisions it is read against are the
+// WORKSPACE's, written through the workspace routes.
 describe('corpus routes — EE (stored corpus, no live tree)', () => {
   let app: Express;
   let fixture: TestFixture;
   let memSpec: SpecStore;
 
-  // Seed the hosted spec store's current corpus (the store the DB-mode routes read
-  // through), not the working tree — a hosted repo has no live `corpus.json`.
-  // `conflict` flags a v1/v2 disagreement so the repo has ONE open conflict.
-  const seedCorpus = (opts: { conflict?: boolean } = {}): void => {
-    void memSpec.saveSpec(
-      { repoKey: fixture.repoPath, commitSha: 'seed' },
-      'corpus',
-      {
-        version: 3,
-        generatedAt: '2026-01-01T00:00:00Z',
-        docs: [
-          { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'] },
-          { ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'] },
-        ],
-        areas: [
-          {
-            id: 'booking/appointments',
-            product: 'booking',
-            concern: 'appointments',
-            docRefs: ['docs/v1.md', 'docs/v2.md'],
-            overlaps: opts.conflict
-              ? [
-                  {
-                    docs: ['docs/v1.md', 'docs/v2.md'],
-                    note: '24h vs 48h',
-                    sections: [
-                      { doc: 'docs/v1.md', heading: 'Cancellation' },
-                      { doc: 'docs/v2.md', heading: 'Cancellation policy' },
-                    ],
-                  },
-                ]
-              : [],
-          },
-        ],
-        relations: [],
-        skippedDocs: [{ ref: 'docs/dropped.md', reason: 'changelog' }],
-      },
-    );
-  };
-
-  // The verdict that resolves the seeded v1/v2 dispute.
-  const VERDICT = {
-    docA: 'docs/v1.md',
-    anchorA: 'Cancellation',
-    docB: 'docs/v2.md',
-    anchorB: 'Cancellation policy',
-    verdict: 'b',
-  };
-
-  // A guard store whose generate report is `status`. `open-conflicts` = a generate
-  // that stalled BLOCKED before authoring scenarios (the unblock trigger); anything
-  // else = a healthy report that must NOT re-trigger. `null` = no report at all.
-  const stubGuardReport = (status: GuardGenerateReport['status'] | null): void => {
-    setGuardStore({
-      materializesInPlace: false,
-      readGuardResult: async () =>
-        status === null ? null : ({ status } as unknown as GuardGenerateReport),
-    } as unknown as GuardStore);
-  };
-
-  // Anchor the hosted repo's baseline (the analyze LATEST commit) at `commit` —
-  // the anchor the repo-level guard-report read resolves, never "newest".
-  const seedAnalyzeBaseline = (commit: string): Promise<void> =>
-    writeLatest(fixture.repoPath, {
-      head: 'run.json',
-      analysis: {
-        id: 'r1',
-        createdAt: '2026-07-01T00:00:00.000Z',
-        branch: 'main',
-        commitHash: commit,
-        architecture: 'monolith',
-        metadata: { isDiffAnalysis: false },
-        status: 'completed',
-      },
-      graph: {
-        services: [],
-        serviceDependencies: [],
-        layers: [],
-        modules: [],
-        methods: [],
-        moduleDeps: [],
-        methodDeps: [],
-        databases: [],
-        databaseConnections: [],
-        flows: [],
-      },
-      violations: [],
-    });
-
   beforeEach(async () => {
-    fixture = await setupTestFixture(); // deliberately NOT git-initialized
-    // Live DB-mode wiring: a hosted SPEC store installed, NO contract store (the
-    // file-default contract flag stays TRUE). The spec routes must key their
-    // edition check on the spec store — mirroring what boot actually installs.
+    fixture = await setupTestFixture();
     memSpec = makeMemSpecStore();
     setSpecStore(memSpec);
-    vi.mocked(curateInProcess).mockClear();
     app = createTestApp();
   });
   afterEach(async () => {
     resetSpecStore();
     resetContextStore();
-    resetGuardStore();
-    setGuardGenerateEnqueue(null);
-    setBackgroundTaskRunner(null);
     await teardownTestFixture(fixture.project.slug);
-  });
-
-  it('POST /spec/excludes persists the decision without a git gate, a re-curate or a repo-scope job', async () => {
-    const tasks: BackgroundTask[] = [];
-    setBackgroundTaskRunner(async (t) => {
-      tasks.push(t);
-    });
-    seedCorpus();
-    const res = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
-      .expect(200); // was 400 "not a git repository" before the fix
-    expect(res.body.manualExcludes).toContain('docs/v2.md');
-    expect(res.body).not.toHaveProperty('corpus'); // the ack, not a re-curated corpus
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
-    expect(tasks).toEqual([]);
-  });
-
-  it('DELETE /spec/excludes restores the doc', async () => {
-    seedCorpus();
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
-      .expect(200);
-    const del = await request(app)
-      .delete(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
-      .expect(200);
-    expect(del.body.manualExcludes ?? []).not.toContain('docs/v2.md');
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
-  });
-
-  it('a conflict verdict acks the persisted verdicts and never runs a scan', async () => {
-    seedCorpus({ conflict: true });
-    const res = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send(VERDICT)
-      .expect(200);
-    expect(res.body.conflictResolutions).toHaveLength(1);
-    expect(res.body.conflictResolutions[0]).toMatchObject({ docA: 'docs/v1.md', docB: 'docs/v2.md', verdict: 'b' });
-    expect(res.body).not.toHaveProperty('corpus');
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
-  });
-
-  // A decision clearing the last conflict must unblock a guard generate that
-  // stalled on that conflict: when the repo's current generate report is
-  // `open-conflicts`, the installed guard-generate seam fires with the repoKey.
-  it('a verdict clearing the last conflict with a BLOCKED (open-conflicts) report enqueues a guard generate', async () => {
-    const enqueued: string[] = [];
-    setGuardGenerateEnqueue(async (repoKey) => {
-      enqueued.push(repoKey);
-    });
-    seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
-    stubGuardReport('open-conflicts');
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send(VERDICT)
-      .expect(200);
-    expect(enqueued).toEqual([fixture.repoPath]);
-  });
-
-  it('an exclude that removes one side of the last conflict enqueues the guard generate too', async () => {
-    const enqueued: string[] = [];
-    setGuardGenerateEnqueue(async (repoKey) => {
-      enqueued.push(repoKey);
-    });
-    seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
-    stubGuardReport('open-conflicts');
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
-      .expect(200);
-    expect(enqueued).toEqual([fixture.repoPath]);
-  });
-
-  it("a newer PR-head 'ok' report never masks the baseline's BLOCKED report — generate still fires", async () => {
-    const enqueued: string[] = [];
-    setGuardGenerateEnqueue(async (repoKey) => {
-      enqueued.push(repoKey);
-    });
-    seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
-    // Commit-aware guard stub: the BASELINE row is the blocked open-conflicts
-    // report; any commit-less ("newest by createdAt") read sees a PR regen's ok
-    // report instead — which would wrongly skip the unblock generate forever.
-    setGuardStore({
-      materializesInPlace: false,
-      readGuardResult: async (_repoKey: string, commitSha?: string) =>
-        ({
-          status: commitSha === 'basesha1111' ? 'open-conflicts' : 'ok',
-        }) as unknown as GuardGenerateReport,
-    } as unknown as GuardStore);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send(VERDICT)
-      .expect(200);
-    expect(enqueued).toEqual([fixture.repoPath]);
-  });
-
-  it('does NOT enqueue a guard generate when the report is healthy (not open-conflicts)', async () => {
-    const enqueued: string[] = [];
-    setGuardGenerateEnqueue(async (repoKey) => {
-      enqueued.push(repoKey);
-    });
-    seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
-    stubGuardReport('ok');
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send(VERDICT)
-      .expect(200);
-    expect(enqueued).toEqual([]);
-  });
-
-  it('does NOT enqueue a guard generate while conflicts remain (guard report never consulted)', async () => {
-    const enqueued: string[] = [];
-    setGuardGenerateEnqueue(async (repoKey) => {
-      enqueued.push(repoKey);
-    });
-    let guardRead = false;
-    setGuardStore({
-      materializesInPlace: false,
-      readGuardResult: async () => {
-        guardRead = true;
-        return { status: 'open-conflicts' } as unknown as GuardGenerateReport;
-      },
-    } as unknown as GuardStore);
-    seedCorpus({ conflict: true });
-    // Excluding a doc outside the dispute leaves the v1/v2 conflict open.
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/other.md' })
-      .expect(200);
-    expect(enqueued).toEqual([]);
-    expect(guardRead).toBe(false); // hot path stays cheap — the store is never read
-  });
-
-  it('a BLOCKED report with no guard-generate seam installed is a no-op, not an error', async () => {
-    // No setGuardGenerateEnqueue → getGuardGenerateEnqueue() is null; the route must
-    // simply skip it and still answer 200.
-    const tasks: BackgroundTask[] = [];
-    setBackgroundTaskRunner(async (t) => {
-      tasks.push(t);
-    });
-    seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
-    stubGuardReport('open-conflicts');
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send(VERDICT)
-      .expect(200);
-    expect(tasks).toEqual([]);
   });
 
   // The Rescan dot: an include/exclude the stored corpus has not absorbed pends
@@ -674,320 +330,104 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Doc-content staleness (docsChanged) — the "fix the doc itself"
-// resolution path: an external edit bumps the kept doc's mtime past the corpus
-// `generatedAt` and lights the Rescan dot. (There is no in-app doc editor.)
+// Doc-content staleness (docsChanged). There is no tree to stat: what can move
+// under the stored corpus is the workspace's CONTEXT — a source synced, a link
+// made or dropped, a source removed — and the workspace stamps every one of
+// those. A stamp later than the corpus lights the Rescan dot.
 // ---------------------------------------------------------------------------
 
 describe('spec docs-content staleness', () => {
   let app: Express;
   let fixture: TestFixture;
 
-  const specsDir = () => path.join(fixture.repoPath, '.truecourse', 'specs');
-  const DOC = 'docs/spec.md';
-  const DOC_BODY = '## rm\nrm archives the task.\n\n## keep\nkeep does nothing.\n';
+  const DOC = `context/${SOURCE}/spec.md`;
 
-  // Seed a one-doc corpus whose `generatedAt` is AFTER the doc's (back-dated) mtime,
-  // so the docs-content signal starts clean and only flips when the doc is edited.
-  const seed = (generatedAt = '2026-06-01T00:00:00Z'): void => {
-    fs.mkdirSync(specsDir(), { recursive: true });
-    fs.writeFileSync(
-      path.join(specsDir(), 'corpus.json'),
-      JSON.stringify({
-        version: 3,
-        generatedAt,
-        docs: [{ ref: DOC, kind: 'spec', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/persistence'] }],
-        areas: [{ id: 'core/persistence', product: 'core', concern: 'persistence', docRefs: [DOC], overlaps: [] }],
-        relations: [],
-        skippedDocs: [],
-      }),
-    );
-    fs.mkdirSync(path.join(fixture.repoPath, 'docs'), { recursive: true });
-    fs.writeFileSync(path.join(fixture.repoPath, DOC), DOC_BODY);
-    const old = new Date('2026-01-01T00:00:00Z');
-    fs.utimesSync(path.join(fixture.repoPath, DOC), old, old);
-  };
+  /** A one-doc workspace corpus curated at `generatedAt`. */
+  const seed = (generatedAt: string): Promise<void> =>
+    saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
+      version: 3,
+      generatedAt,
+      docs: [{ ref: DOC, kind: 'spec', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/persistence'], sourceId: SOURCE }],
+      areas: [{ id: 'core/persistence', product: 'core', concern: 'persistence', docRefs: [DOC], overlaps: [] }],
+      relations: [],
+      skippedDocs: [],
+    });
+
+  const staleness = () =>
+    request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+
+  /** The workspace's clock, so "the context moved after the corpus" is exact. */
+  let now: string;
 
   beforeEach(async () => {
+    installMemorySpecStore();
+    now = '2026-06-01T00:00:00.000Z';
+    setContextStore(memoryContextStore(() => now));
     fixture = await setupTestFixture();
-    gitInit(fixture.repoPath);
     app = createTestApp();
+    // The link the repository reads the source through — and the first thing to
+    // move the workspace's stamp.
+    await setContextBindings(TEST_ORG, fixture.repoPath, [SOURCE]);
   });
   afterEach(async () => {
-    setBackgroundTaskRunner(null);
+    resetSpecStore();
+    resetContextStore();
     await teardownTestFixture(fixture.project.slug);
   });
 
-  it('staleness docsChanged is false with a fresh corpus, true after a kept doc is edited on disk', async () => {
-    seed();
-    const before = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+  it('docsChanged is false for a corpus curated after the last context change, true after the next one', async () => {
+    // Curated AFTER the link that moved the stamp.
+    await seed('2026-06-02T00:00:00.000Z');
+    const before = await staleness();
     expect(before.body.docsChanged).toBe(false);
     expect(before.body.decisionsPending).toBe(false);
 
-    // Edit the doc in the working tree (user's own editor) — mtime bumps to now.
-    fs.writeFileSync(
-      path.join(fixture.repoPath, DOC),
-      DOC_BODY.replace('rm archives the task.', 'rm permanently deletes the task.'),
-    );
+    // The workspace's context moves again — the last scan never saw this.
+    now = '2026-06-03T00:00:00.000Z';
+    await setContextBindings(TEST_ORG, fixture.repoPath, [SOURCE, 'another-source']);
 
-    const after = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    const after = await staleness();
     expect(after.body.docsChanged).toBe(true);
-  });
-
-  // A web source's pages are not in the corpus's doc list until the scan that
-  // follows the add, so the kept-doc loop alone can never see one arrive.
-  describe('web sources', () => {
-    const staleness = async (): Promise<{ docsChanged: boolean }> =>
-      (await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200)).body;
-
-    /** Age the snapshot the way a checkout the last scan already read would be. */
-    const ageSnapshot = (): void => {
-      const old = new Date('2026-01-01T00:00:00Z');
-      const walk = (dir: string): void => {
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          const full = path.join(dir, entry.name);
-          if (entry.isDirectory()) walk(full);
-          fs.utimesSync(full, old, old);
-        }
-        fs.utimesSync(dir, old, old);
-      };
-      walk(sourcesDirPath(fixture.repoPath));
-      fs.utimesSync(sourcesFilePath(fixture.repoPath), old, old);
-    };
-
-    it('an added/refreshed source lights docsChanged, and the next scan clears it', async () => {
-      seed();
-      seedSource(fixture.repoPath);
-      ageSnapshot();
-      expect((await staleness()).docsChanged).toBe(false);
-
-      // `spec source refresh` rewrites the pages it fetched and the registry.
-      seedSource(fixture.repoPath);
-      expect((await staleness()).docsChanged).toBe(true);
-
-      // The scan that follows stamps `generatedAt` after reading the snapshot.
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      seed(new Date().toISOString());
-      expect((await staleness()).docsChanged).toBe(false);
-    });
-
-    it('a page removed from the snapshot tree lights docsChanged', async () => {
-      seed();
-      const source = seedSource(fixture.repoPath);
-      ageSnapshot();
-      expect((await staleness()).docsChanged).toBe(false);
-
-      // `spec source remove` (or a refresh that unlists a page) deletes files —
-      // nothing newer is left behind, only the directory's own mtime moves.
-      fs.rmSync(path.join(sourceDirPath(fixture.repoPath, source.id), source.docs[0].path));
-
-      expect((await staleness()).docsChanged).toBe(true);
-    });
   });
 });
 
 // ---------------------------------------------------------------------------
-// Section-scoped conflict verdicts — POST/DELETE /spec/conflict-resolution
+// The repository decision routes are gone: a repository reads its SLICE of the
+// workspace corpus folded with the WORKSPACE decisions, so there is nothing
+// repository-scoped to decide, and the writes live at `/api/context/*`.
 // ---------------------------------------------------------------------------
 
-describe('conflict-resolution routes', () => {
+describe('no repository decision routes', () => {
   let app: Express;
   let fixture: TestFixture;
 
-  const seedCorpus = (): void => {
-    const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
-    fs.mkdirSync(specs, { recursive: true });
-    fs.writeFileSync(
-      path.join(specs, 'corpus.json'),
-      JSON.stringify({
-        version: 3,
-        generatedAt: '2026-01-01T00:00:00Z',
-        docs: [
-          { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'] },
-          { ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'] },
-        ],
-        areas: [
-          {
-            id: 'booking/appointments',
-            product: 'booking',
-            concern: 'appointments',
-            docRefs: ['docs/v1.md', 'docs/v2.md'],
-            overlaps: [
-              {
-                docs: ['docs/v1.md', 'docs/v2.md'],
-                note: '24h vs 48h',
-                sections: [
-                  { doc: 'docs/v1.md', heading: 'Cancellation' },
-                  { doc: 'docs/v2.md', heading: 'Cancellation policy' },
-                ],
-              },
-            ],
-          },
-        ],
-        relations: [],
-        skippedDocs: [],
-      }),
-    );
-  };
-
-  const verdict = {
-    docA: 'docs/v1.md',
-    anchorA: 'Cancellation',
-    docB: 'docs/v2.md',
-    anchorB: 'Cancellation policy',
-    verdict: 'a' as const,
-  };
+  const DECISIONS: Array<{ method: 'post' | 'delete'; path: string }> = [
+    { method: 'post', path: 'includes' },
+    { method: 'delete', path: 'includes' },
+    { method: 'post', path: 'excludes' },
+    { method: 'delete', path: 'excludes' },
+    { method: 'post', path: 'conflict-resolution' },
+    { method: 'delete', path: 'conflict-resolution' },
+  ];
 
   beforeEach(async () => {
+    installMemorySpecStore();
+    setContextStore(memoryContextStore());
     fixture = await setupTestFixture();
-    gitInit(fixture.repoPath);
     vi.mocked(curateInProcess).mockClear();
     app = createTestApp();
   });
   afterEach(async () => {
-    setBackgroundTaskRunner(null);
+    resetSpecStore();
+    resetContextStore();
     await teardownTestFixture(fixture.project.slug);
   });
 
-  it('POST records a verdict without re-curating (OSS ack), and GET /spec/corpus exposes it', async () => {
-    seedCorpus();
-    const res = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send(verdict)
-      .expect(200);
-    // OSS ack: the persisted verdicts only (no corpus), and no re-curate.
-    expect(res.body.conflictResolutions).toHaveLength(1);
-    expect(res.body.conflictResolutions[0]).toMatchObject({ docA: 'docs/v1.md', verdict: 'a' });
-    expect(res.body.conflictResolutions[0].resolvedAt).toBeTruthy();
-    expect(res.body.corpus).toBeUndefined();
+  it.each(DECISIONS)('$method /spec/$path answers 404', async ({ method, path }) => {
+    await request(app)
+      [method](`/api/repos/${fixture.project.slug}/spec/${path}`)
+      .send({ ref: 'docs/v1.md' })
+      .expect(404);
     expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
-
-    // The corpus payload now carries the verdict so the client re-derives resolution.
-    const corpus = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(200);
-    expect(corpus.body.conflictResolutions).toHaveLength(1);
-  });
-
-  it('DELETE removes the verdict by dispute identity (OSS ack)', async () => {
-    seedCorpus();
-    await request(app).post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`).send(verdict).expect(200);
-    const del = await request(app)
-      .delete(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send({ docA: 'docs/v1.md', anchorA: 'Cancellation', docB: 'docs/v2.md', anchorB: 'Cancellation policy' })
-      .expect(200);
-    expect(del.body.conflictResolutions).toEqual([]);
-  });
-
-  it('recording a verdict lights the decisionsPending staleness signal', async () => {
-    seedCorpus();
-    const before = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
-    expect(before.body.decisionsPending).toBe(false);
-    await request(app).post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`).send(verdict).expect(200);
-    const after = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
-    expect(after.body.decisionsPending).toBe(true);
-  });
-
-  it('400s on a missing/equal doc pair or a bad verdict', async () => {
-    seedCorpus();
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send({ docA: 'docs/v1.md', anchorA: null, docB: 'docs/v1.md', anchorB: null, verdict: 'a' })
-      .expect(400);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send({ docA: 'docs/v1.md', anchorA: null, docB: 'docs/v2.md', anchorB: null, verdict: 'bogus' })
-      .expect(400);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Web spec source docs in the corpus (CLI / file mode).
-//
-// The hosted per-repository source routes are gone — documentation is the
-// workspace's — but `truecourse spec source add` still snapshots an llms.txt
-// site into a working tree, so the corpus payload still has to make those
-// pages readable: the site they came from and the page they mirror. Repo-local
-// docs must come back untouched.
-// ---------------------------------------------------------------------------
-
-describe('web source corpus enrichment', () => {
-  let app: Express;
-  let fixture: TestFixture;
-
-  const api = (path: string): string => `/api/repos/${fixture.project.slug}${path}`;
-
-  beforeEach(async () => {
-    fixture = await setupTestFixture();
-    app = createTestApp();
-  });
-  afterEach(async () => {
-    await teardownTestFixture(fixture.project.slug);
-  });
-
-  const seedCorpusWithSource = (source: { id: string }): void => {
-    const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
-    fs.mkdirSync(specs, { recursive: true });
-    fs.writeFileSync(
-      path.join(specs, 'corpus.json'),
-      JSON.stringify({
-        version: 3,
-        generatedAt: '2026-01-01T00:00:00Z',
-        docs: [
-          { ref: 'docs/booking.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'] },
-          {
-            ref: `.truecourse/specs/sources/${source.id}/cms/installation.md`,
-            kind: 'guide',
-            lastTouched: '2026-01-01T00:00:00Z',
-            areaTags: ['cms/install'],
-          },
-        ],
-        areas: [],
-        skippedDocs: [
-          { ref: `.truecourse/specs/sources/${source.id}/cms/api/rest.md`, reason: 'not about this repo' },
-        ],
-      }),
-    );
-  };
-
-  it('tags web-source docs with their source + original page URL', async () => {
-    const source = seedSource(fixture.repoPath);
-    seedCorpusWithSource(source);
-
-    const res = await request(app).get(api('/spec/corpus')).expect(200);
-    const [repoDoc, webDoc] = res.body.corpus.docs;
-    expect(repoDoc).toEqual({
-      ref: 'docs/booking.md',
-      kind: 'prd',
-      lastTouched: '2026-01-01T00:00:00Z',
-      areaTags: ['booking/appointments'],
-    });
-    expect(webDoc.origin).toBe('web');
-    expect(webDoc.sourceId).toBe(source.id);
-    expect(webDoc.sourceTitle).toBe('Strapi Docs');
-    expect(webDoc.url).toBe(`https://${source.id}/cms/installation.md`);
-    // A dropped page is shown in the same list, so it is enriched too.
-    expect(res.body.corpus.skippedDocs[0].origin).toBe('web');
-    expect(res.body.corpus.skippedDocs[0].sourceTitle).toBe('Strapi Docs');
-  });
-
-  it('still tags a page whose source is gone, from the ref alone', async () => {
-    const source = seedSource(fixture.repoPath);
-    seedCorpusWithSource(source);
-    // `truecourse spec source remove` took the registry entry with it.
-    fs.rmSync(sourcesFilePath(fixture.repoPath));
-
-    const res = await request(app).get(api('/spec/corpus')).expect(200);
-    const webDoc = res.body.corpus.docs[1];
-    expect(webDoc.origin).toBe('web');
-    expect(webDoc.sourceId).toBe(source.id);
-    expect(webDoc.sourceTitle).toBeUndefined();
-  });
-
-  it('GET /spec/doc serves a snapshot ref (it is a real file in the tree)', async () => {
-    const source = seedSource(fixture.repoPath);
-    const res = await request(app)
-      .get(api('/spec/doc'))
-      .query({ ref: `.truecourse/specs/sources/${source.id}/cms/installation.md` })
-      .expect(200);
-    expect(res.body.content).toContain('# Installation');
   });
 });

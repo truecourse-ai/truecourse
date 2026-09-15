@@ -12,6 +12,7 @@
  *   GET    /api/context/sources/:id/documents its ledger
  *   GET    /api/context/doc?ref=              one document's body, by its corpus ref
  *   GET    /api/context/documents             the rows of the Documents view, status folded
+ *                                             and inclusion said, corpus or not
  *   POST   /api/context/scan                  the workspace Document scan; 202 { jobId }
  *   GET    /api/context/staleness             has the context moved since the corpus?
  *   GET    /api/context/corpus                the workspace corpus + its decisions
@@ -43,6 +44,7 @@ import {
   listContextDocuments,
   listContextSources,
   listContextSyncs,
+  markContextChanged,
   readContextDocByRef,
   removeContextSource,
   setContextBindings,
@@ -86,6 +88,7 @@ import {
   contextIsStale,
   recordFailedWorkspaceScanRun,
 } from '../services/context-scan.service.js';
+import { unblockWorkspaceGenerates } from '../services/guard-unblock.service.js';
 import {
   CONTEXT_SOURCE_KINDS,
   type ContextSource,
@@ -93,6 +96,7 @@ import {
   type ContextSourceConfig,
   type ContextSourceKind,
   type ContextSourceView,
+  type RepositoryProviderId,
   type RepositorySourceConfig,
   type SiteSourceConfig,
 } from '@truecourse/shared';
@@ -123,7 +127,7 @@ export interface ContextGithubAccess {
 
 export interface ContextRouterDeps {
   /** Present when the server has a GitHub App configured; null otherwise. */
-  githubLinks?: RepoOwnershipLookup | null;
+  repoLinks?: RepoOwnershipLookup | null;
   /** The same connection's installation access. Absent when GitHub is unconfigured. */
   github?: ContextGithubAccess | null;
 }
@@ -224,6 +228,21 @@ function queryValues(raw: unknown): string[] {
 const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
 
 /**
+ * Write one workspace decision, then start the Flow generation it unblocked in
+ * every repository whose conflicts it settled. Every decision goes through here:
+ * whether one clears the last conflict of a repository's slice is what the
+ * derivation answers, not something a route can tell from the verb it served.
+ */
+async function settled(
+  org: string,
+  write: () => Promise<DecisionsFile>,
+): Promise<DecisionsFile> {
+  const decisions = await write();
+  await unblockWorkspaceGenerates(org);
+  return decisions;
+}
+
+/**
  * Start the workspace Document scan after a change to WHICH documents the
  * corpus should hold (a source removed). Returns the job id, or null when a
  * scan is already running — which is not a failure: the running scan's settle
@@ -263,8 +282,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
    */
   async function linkableRepos(req: Request): Promise<Map<string, RegistryEntry>> {
     const byName = new Map<string, RegistryEntry>();
-    for (const entry of await readRegistry()) {
-      if (!(await isVisibleTo(deps.githubLinks, req, entry))) continue;
+    for (const entry of await readRegistry(orgOf(req))) {
+      if (!(await isVisibleTo(deps.repoLinks, req, entry))) continue;
       byName.set(entry.slug, entry);
       byName.set(entry.name, entry);
     }
@@ -392,7 +411,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   });
 
   /**
-   * THE Documents view (plan §5): one row per document of the workspace
+   * THE Documents view: one row per document of the workspace
    * corpus, composed here rather than in the browser — the row's status is a
    * join over every repository that reads it, and no client may be asked to
    * fan that out.
@@ -403,8 +422,13 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
    * repositories read it. A document no repository reads is answered without
    * reading its body at all.
    *
-   * `?area=&status=&source=&repo=` narrow the answer, repeatable, AND across
-   * dimensions and OR within one — the same reading the page's filter row has.
+   * The rows are every document Context knows, not only the kept ones: the
+   * decisions ride in, so a document the scan skipped and a document a reader
+   * excluded each get a row saying where it stands and why.
+   *
+   * `?area=&status=&source=&repo=&inclusion=` narrow the answer, repeatable,
+   * AND across dimensions and OR within one — the same reading the page's
+   * filter row has.
    */
   router.get('/documents', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -414,10 +438,11 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         res.json({ documents: [], corpusAt: null });
         return;
       }
-      const [sources, documents, bindings] = await Promise.all([
+      const [sources, documents, bindings, decisions] = await Promise.all([
         listContextSources(org),
         listContextDocuments(org),
         listContextBindings(org),
+        getWorkspaceDecisions(org),
       ]);
 
       // The repositories a row may name: the ones this caller can see, by the
@@ -475,6 +500,10 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         bindings,
         coverage,
         visibleRepos: new Set(visible.keys()),
+        decisions: {
+          manualIncludes: decisions.manualIncludes ?? [],
+          manualExcludes: decisions.manualExcludes ?? [],
+        },
       });
       res.json({
         documents: filterContextDocumentRows(rows, {
@@ -482,6 +511,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
           status: req.query.status === undefined ? [] : queryValues(req.query.status),
           source: req.query.source === undefined ? [] : queryValues(req.query.source),
           repo: req.query.repo === undefined ? [] : queryValues(req.query.repo),
+          inclusion: req.query.inclusion === undefined ? [] : queryValues(req.query.inclusion),
         }),
         corpusAt: corpus.generatedAt ?? null,
       });
@@ -511,8 +541,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   // --- Scan ----------------------------------------------------------------
 
   // The workspace Document scan. The asking workspace's provider is proved
-  // BEFORE anything is queued, exactly as the repository scan route did it: an
-  // unconfigured provider is a setting to fill in, not a job that dies later.
+  // BEFORE anything is queued: an unconfigured provider is a setting to fill
+  // in, not a job that dies later.
   router.post('/scan', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
@@ -550,6 +580,10 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   // and a conflict verdict are settled ONCE here rather than per repository.
   // Each write persists the decisions artifact and acks it; the corpus itself
   // is unchanged until the next scan, which is what the staleness dot says.
+  //
+  // What a decision DOES move right away is a Flow generation that stopped on
+  // an open conflict, in every repository the decision left with none —
+  // `settled` is that pass (see guard-unblock.service).
 
   const includeAck = (decisions: DecisionsFile): Record<string, unknown> => ({
     manualIncludes: decisions.manualIncludes ?? [],
@@ -563,10 +597,26 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     return ref.trim();
   }
 
+  /**
+   * An INCLUSION decision, on top of {@link settled}: it changes which
+   * documents the corpus should hold, and only a scan can apply it. So the
+   * workspace's changed-at stamp moves and the change is announced — which is
+   * what lights the amber dot on Scan and says a scan is what is missing.
+   *
+   * A conflict verdict is not one of these: it is applied at Flow generation,
+   * so it leaves the corpus's own document set alone.
+   */
+  async function decided(org: string, write: () => Promise<DecisionsFile>): Promise<DecisionsFile> {
+    const decisions = await settled(org, write);
+    await markContextChanged(org);
+    await emitContextChanged(org, { change: 'documents' });
+    return decisions;
+  }
+
   router.post('/includes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await addWorkspaceManualInclude(org, readRef(req))));
+      res.json(includeAck(await decided(org, () => addWorkspaceManualInclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -575,7 +625,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.delete('/includes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await removeWorkspaceManualInclude(org, readRef(req))));
+      res.json(includeAck(await decided(org, () => removeWorkspaceManualInclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -584,7 +634,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/excludes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await addWorkspaceManualExclude(org, readRef(req))));
+      res.json(includeAck(await decided(org, () => addWorkspaceManualExclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -593,7 +643,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.delete('/excludes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await removeWorkspaceManualExclude(org, readRef(req))));
+      res.json(includeAck(await decided(org, () => removeWorkspaceManualExclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -603,25 +653,28 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     try {
       const org = orgOf(req);
       const body = (req.body ?? {}) as Partial<ConflictResolution>;
-      if (!body.docA || !body.docB || body.docA === body.docB) {
+      const { docA, docB, verdict } = body;
+      if (!docA || !docB || docA === docB) {
         res.status(400).json({ error: 'docA and docB are required and must differ.' });
         return;
       }
-      if (!body.verdict || !CONFLICT_VERDICTS.includes(body.verdict)) {
+      if (!verdict || !CONFLICT_VERDICTS.includes(verdict)) {
         res.status(400).json({ error: `verdict must be one of ${CONFLICT_VERDICTS.join(', ')}.` });
         return;
       }
-      const decisions = await addWorkspaceConflictResolution(org, {
-        docA: body.docA,
-        anchorA: body.anchorA ?? null,
-        quoteA: body.quoteA,
-        docB: body.docB,
-        anchorB: body.anchorB ?? null,
-        quoteB: body.quoteB,
-        verdict: body.verdict,
-        resolvedAt: new Date().toISOString(),
-        note: body.note,
-      });
+      const decisions = await settled(org, () =>
+        addWorkspaceConflictResolution(org, {
+          docA,
+          anchorA: body.anchorA ?? null,
+          quoteA: body.quoteA,
+          docB,
+          anchorB: body.anchorB ?? null,
+          quoteB: body.quoteB,
+          verdict,
+          resolvedAt: new Date().toISOString(),
+          note: body.note,
+        }),
+      );
       res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
     } catch (e) {
       respond(res, next, e);
@@ -641,12 +694,15 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         res.status(400).json({ error: 'docA and docB are required.' });
         return;
       }
-      const decisions = await removeWorkspaceConflictResolution(org, {
-        docA: body.docA,
-        anchorA: body.anchorA ?? null,
-        docB: body.docB,
-        anchorB: body.anchorB ?? null,
-      });
+      const { docA, docB } = body;
+      const decisions = await settled(org, () =>
+        removeWorkspaceConflictResolution(org, {
+          docA,
+          docB,
+          anchorA: body.anchorA ?? null,
+          anchorB: body.anchorB ?? null,
+        }),
+      );
       res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
     } catch (e) {
       respond(res, next, e);
@@ -686,8 +742,23 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     req: Request,
     repoFullName: string,
     asked: unknown,
-  ): Promise<{ installationId?: number; defaultBranch?: string }> {
+  ): Promise<{
+    provider?: RepositoryProviderId;
+    path?: string;
+    installationId?: number;
+    defaultBranch?: string;
+  }> {
     const access = deps.github ?? null;
+    // A folder on this machine answers for itself: there is no account to name
+    // and nothing to reach over the network, only the path it was connected
+    // from. It must be one this workspace connected — the only way a path
+    // becomes a repository here.
+    if (await isLinkable(req, repoFullName)) {
+      const connected = await deps.repoLinks?.getRepo(repoFullName);
+      if (connected?.provider === 'local' && connected.location) {
+        return { provider: 'local', path: connected.location };
+      }
+    }
     if (asked === undefined || asked === null) {
       // The link is only read for a repository this workspace can see, so
       // naming another workspace's repository resolves nothing.
@@ -729,6 +800,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     const branch = typeof raw.branch === 'string' ? raw.branch.trim() : '';
     return normalizeConfig('repository', {
       ...raw,
+      ...(resolved.provider === undefined ? {} : { provider: resolved.provider }),
+      ...(resolved.path === undefined ? {} : { path: resolved.path }),
       ...(resolved.installationId === undefined ? {} : { installationId: resolved.installationId }),
       branch: branch || resolved.defaultBranch || '',
     });
@@ -841,11 +914,13 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         `A repository source always reads ${stored}; its repository cannot be changed.`,
       );
     }
-    // The repository and the installation that reads it are what the source was
-    // created with; an edit replaces the branch and the patterns around them.
+    // The repository and how it is read are what the source was created with;
+    // an edit replaces the branch and the patterns around them.
     return normalizeConfig('repository', {
       ...asked,
       repoFullName: stored,
+      ...(current.provider === undefined ? {} : { provider: current.provider }),
+      ...(current.path === undefined ? {} : { path: current.path }),
       installationId: current.installationId,
     });
   }
@@ -1022,7 +1097,7 @@ export function createContextBindingsRouter(): Router {
   router.get('/:id/context/bindings', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      const entry = await getProjectBySlug(req.params.id as string);
+      const entry = await getProjectBySlug(org, req.params.id as string);
       if (!entry) throw createAppError('Project not found', 404);
       res.json({ repoFullName: entry.name, sourceIds: await contextBindings(org, entry.name) });
     } catch (e) {
@@ -1035,7 +1110,7 @@ export function createContextBindingsRouter(): Router {
   router.put('/:id/context/bindings', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      const entry = await getProjectBySlug(req.params.id as string);
+      const entry = await getProjectBySlug(org, req.params.id as string);
       if (!entry) throw createAppError('Project not found', 404);
       const body = (req.body ?? {}) as { sourceIds?: unknown };
       if (!Array.isArray(body.sourceIds)) {
@@ -1053,7 +1128,7 @@ export function createContextBindingsRouter(): Router {
         if (!wanted.includes(sourceId)) wanted.push(sourceId);
       }
       // Only a set that actually DIFFERS is a change: saving the toggles
-      // untouched must not re-scan the workspace.
+      // untouched must start nothing.
       const before = await contextBindings(org, entry.name);
       const differs =
         before.length !== wanted.length || wanted.some((id) => !before.includes(id));

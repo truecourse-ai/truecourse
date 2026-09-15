@@ -917,7 +917,7 @@ export async function runApiScenario(
             const expected = `the bound server "${ctx.server.name}"${boundApp} to serve ${request.method} ${request.path}`
             const actual =
               `404 — ${request.path} is served by ${unserved.servedBy ?? 'another workspace app'}, which this recipe declares no server for. ` +
-              'Declare it under api.servers in .truecourse/scenarios/recipe.json and re-run `guard generate`.'
+              'Declare it under api.servers in scenarios/recipe.json and re-run Flow generation.'
             const logs = await settledLogs()
             const evidencePath = writeApiEvidence({
               repoRoot: ctx.repoRoot,

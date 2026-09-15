@@ -9,14 +9,19 @@
 
 // --- Jobs -----------------------------------------------------------
 
-/** `cancelled` is a deliberate stop (a disconnect, a superseding request), not a
- *  failure: no error is recorded and no notification is posted. */
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+/**
+ * `cancelled` is a deliberate stop (a disconnect, a superseding request), not a
+ * failure: no error is recorded and no notification is posted. `interrupted` is
+ * what a job and its run BOTH become when the process running them died — the
+ * boot sweep settles the pair with one word, so a restart never reads as the
+ * work having failed.
+ */
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
 
-/** Open job-type vocabulary — `knowledge.sync` first; analyze/verify/gate later. */
+/** Open job-type vocabulary — `context.sync`, `context.scan`, `repo.guard-*` today. */
 export type JobType = string;
 
-/** A single phase in a job's stepped checklist (mirrors the OSS analyze popup). */
+/** A single phase in a job's stepped checklist. */
 export type JobStepStatus = 'pending' | 'active' | 'done' | 'error';
 export interface JobStep {
   key: string;
@@ -51,7 +56,7 @@ export interface JobView {
    * load / reconnect) omit it, and the client falls back to its own label map.
    */
   title?: string;
-  /** Single-flight / UI-mapping key, e.g. `knowledge.sync:confluence`. */
+  /** Single-flight / UI-mapping key, e.g. `context.sync:<sourceId>`. */
   key: string | null;
   status: JobStatus;
   progress: JobProgress;
@@ -88,7 +93,7 @@ export interface NotificationView {
   createdAt: string;
 }
 
-// --- SSE event stream (`GET /api/ee/events`) ------------------------
+// --- SSE event stream (`GET /api/events`) ------------------------
 
 /** Live progress for an in-flight job — ephemeral, drives a live toast. */
 export interface JobProgressEvent {

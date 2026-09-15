@@ -1,7 +1,7 @@
 /**
- * Human "time ago" formatting, shared by the OSS dashboard client and the EE
- * client — previously copy-pasted (as `timeAgo` / `formatRelativeTime`) across
- * several components. The canonical superset of the plain relative-time
+ * Human "time ago" formatting, shared by every client surface — previously
+ * copy-pasted (as `timeAgo` / `formatRelativeTime`) across several
+ * components. The canonical superset of the plain relative-time
  * variants:
  *   - null / undefined / empty → "never"
  *   - an unparseable date → "—"

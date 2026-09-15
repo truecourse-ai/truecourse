@@ -1,24 +1,30 @@
 /**
  * Home, composed. The one answer behind the product owner's dashboard.
  *
- * Home counts SECTIONS: today's tally, the trend across the baseline runs, each
- * area's composition, what is waiting on a person, and which documents moved.
- * Every one of those is a fold of stored things, so everything here is PURE:
- * the caller does the store reads (once per repository, as the Documents view
- * does) and hands the results in.
+ * TWO UNITS, each in its own words. The headline and the trend count FLOWS,
+ * because a flow is what the engine proves and what can be proved on its own;
+ * sections are folded worst-first, so one blocked scenario erases every proof
+ * beside it and a section tally can only ever read zero on a workspace with
+ * real gaps. The Areas widget and Recently changed stay on SECTIONS and
+ * DOCUMENTS, which is what an area and a document are made of.
  *
- * Two rules run through it:
+ * Three rules run through it:
  *
- *   - The WORDS and the fold are the Documents view's ({@link
- *     CONTEXT_DOCUMENT_STATUS_OF_COVERAGE}, {@link worstContextStatus}): a
- *     section means the same thing here, there, and in a run's stored history.
+ *   - A flow wears the ENGINE's five words ({@link guardFlowPlainStatus}'s), so
+ *     Home's number is the Flows page's number. A section wears the Documents
+ *     view's ({@link CONTEXT_DOCUMENT_STATUS_OF_COVERAGE}, {@link
+ *     worstContextStatus}), so an area reads the way its documents do.
+ *   - Everything here is PURE: the caller does the store reads (once per
+ *     repository, as the Documents view does) and hands the results in.
  *   - Only what is stored is counted. A repository with no run yet contributes
- *     nothing to a point of the trend, a document nobody reads is off Home
- *     entirely, and no row is invented to fill a widget.
+ *     nothing to a point of the trend, a run stored before flows were recorded
+ *     contributes nothing to the flow trend, a document nobody reads is off
+ *     Home entirely, and no row is invented to fill a widget.
  */
 
 import {
   CONTEXT_DOCUMENT_STATUS_OF_COVERAGE,
+  HOME_FLOW_STATUS_ORDER,
   HOME_STATUS_ORDER,
   HOME_STATUS_WORD,
   guardSectionRefDoc,
@@ -26,10 +32,13 @@ import {
   type ContextDocumentRow,
   type ContextDocumentStatus,
   type GuardCoveragePlainStatus,
+  type GuardRunFlowSummary,
   type GuardRunSectionSummary,
   type HomeAreaRow,
   type HomeAttentionRow,
   type HomeChangeRow,
+  type HomeFlowStatus,
+  type HomeFlowTally,
   type HomePeriod,
   type HomeResponse,
   type HomeStatus,
@@ -38,14 +47,17 @@ import {
 } from '@truecourse/shared';
 import { worstContextStatus } from '../context/documents.js';
 
-/** Where the client mounts its pages. Every href Home hands out starts here. */
-export const HOME_ROUTE_BASE = '/preview';
-
-/** One run of a repository's section history, as Home reads it. */
+/** One run of a repository's coverage history, as Home reads it. */
 export interface HomeHistoryRun {
   runId: string;
   ranAt: string;
   sections: GuardRunSectionSummary;
+  /**
+   * Every flow of the repository as the word it wore then. Absent on a run
+   * stored before flows were recorded, which is simply not a point of the flow
+   * trend — never a moment where the workspace had none.
+   */
+  flows?: GuardRunFlowSummary | null;
 }
 
 /** What ONE repository says, today and over time. */
@@ -54,6 +66,11 @@ export interface HomeRepoView {
   repository: string;
   /** Every section this repository reads, as the word it wears today. */
   sections: ReadonlyMap<string, GuardCoveragePlainStatus>;
+  /**
+   * This repository's flows today, as the words they wear on the Flows page.
+   * Statuses only: Home counts them and names none.
+   */
+  flows: readonly HomeFlowStatus[];
   /** Per document, the reasons its blocked sections give, in document order. */
   blockedReasons?: ReadonlyMap<string, readonly string[]>;
   /** The repository's baseline runs that carry a summary, oldest first. */
@@ -117,11 +134,33 @@ function zero(): Record<HomeStatus, number> {
   return Object.fromEntries(HOME_STATUS_ORDER.map((s) => [s, 0])) as Record<HomeStatus, number>;
 }
 
-/** A tally over section statuses, in the five words. */
+/** A tally over section statuses, in the Documents view's five words. */
 function tally(statuses: Iterable<HomeStatus>): HomeTally {
   const byStatus = zero();
   let total = 0;
   for (const status of statuses) {
+    byStatus[status]++;
+    total++;
+  }
+  return { total, byStatus };
+}
+
+function zeroFlows(): Record<HomeFlowStatus, number> {
+  return Object.fromEntries(HOME_FLOW_STATUS_ORDER.map((s) => [s, 0])) as Record<
+    HomeFlowStatus,
+    number
+  >;
+}
+
+/**
+ * A tally over flow statuses, in the engine's five words. A status this build
+ * never learned is dropped rather than counted under a word it does not wear.
+ */
+function flowTally(statuses: Iterable<HomeFlowStatus>): HomeFlowTally {
+  const byStatus = zeroFlows();
+  let total = 0;
+  for (const status of statuses) {
+    if (!(status in byStatus)) continue;
     byStatus[status]++;
     total++;
   }
@@ -176,7 +215,7 @@ function foldDocuments(sections: ReadonlyMap<string, HomeStatus>): Map<string, H
 
 /** One document, by its corpus ref. */
 export function homeDocHref(ref: string): string {
-  return `${HOME_ROUTE_BASE}/context/doc/${encodeURIComponent(ref)}`;
+  return `/context/doc/${encodeURIComponent(ref)}`;
 }
 
 /** The file name of a ref, the honest last resort for a title. */
@@ -186,11 +225,13 @@ function fileNameOf(ref: string): string {
 }
 
 /**
- * Today's sections and the areas they fall in. Only the documents at least one
- * repository reads are counted: an unlinked document is nobody's promise.
+ * Today: the workspace's FLOWS as the headline, and the areas its SECTIONS fall
+ * in. Only the documents at least one repository reads are counted into an
+ * area: an unlinked document is nobody's promise. The sections come back too,
+ * because the attention rows are made of them.
  */
 export function composeHomeToday(input: Pick<HomeInput, 'documents' | 'repos'>): {
-  today: HomeTally;
+  today: HomeFlowTally;
   areas: HomeAreaRow[];
   sections: Map<string, HomeStatus>;
 } {
@@ -223,21 +264,29 @@ export function composeHomeToday(input: Pick<HomeInput, 'documents' | 'repos'>):
       );
     });
 
-  return { today: tally(sections.values()), areas, sections };
+  return {
+    today: flowTally(input.repos.flatMap((repo) => [...repo.flows])),
+    areas,
+    sections,
+  };
 }
 
 /**
  * The trend and the changes, from the repositories' stored runs.
  *
- * One point per baseline run of any repository, its value the fold across every
+ * One point per baseline run of any repository, its value the FLOWS of every
  * repository's LATEST run at that moment, so a repository that had not run yet
  * contributes nothing, and a repository whose last run is older keeps saying
- * what it said. The points are cut to the period; the FOLD is not, because what
- * a repository said before the window is still what it says inside it.
+ * what it said. A run stored before flows were recorded updates nothing, and a
+ * moment where no repository has yet said anything about flows is not a point
+ * at all — a trend that draws zero for a workspace whose flows were simply not
+ * recorded would be a lie. The points are cut to the period; the FOLD is not,
+ * because what a repository said before the window is still what it says
+ * inside it.
  *
- * A change is a document whose folded status differs from the moment before,
- * the first moment a document is covered at all reads First read. Changes are
- * detected over the whole history and then cut to the period, so a document
+ * A change is a DOCUMENT whose folded status differs from the moment before,
+ * and the first moment a document is covered at all reads First read. Changes
+ * are detected over the whole history and then cut to the period, so a document
  * that has been proved for months does not read as new on every window.
  */
 export function composeHomeTrend(
@@ -255,14 +304,21 @@ export function composeHomeTrend(
 
   const trend: HomeTrendPoint[] = [];
   const changed: HomeChangeRow[] = [];
-  const current = new Map<string, GuardRunSectionSummary>();
+  const currentSections = new Map<string, GuardRunSectionSummary>();
+  const currentFlows = new Map<string, GuardRunFlowSummary>();
   let previousDocs = new Map<string, HomeStatus>();
 
   for (const moment of moments) {
-    current.set(moment.repository, moment.run.sections);
-    const sections = foldSections(current.values());
+    currentSections.set(moment.repository, moment.run.sections);
+    if (moment.run.flows) currentFlows.set(moment.repository, moment.run.flows);
+    const sections = foldSections(currentSections.values());
     const inPeriod = start === null || Date.parse(moment.run.ranAt) >= start;
-    if (inPeriod) trend.push({ at: moment.run.ranAt, byStatus: tally(sections.values()).byStatus });
+    if (inPeriod && currentFlows.size > 0) {
+      const flows = [...currentFlows.values()].flatMap(
+        (summary) => Object.values(summary) as HomeFlowStatus[],
+      );
+      trend.push({ at: moment.run.ranAt, byStatus: flowTally(flows).byStatus });
+    }
 
     const docs = foldDocuments(sections);
     for (const [ref, status] of docs) {
@@ -316,7 +372,7 @@ export function composeHomeAttention(
       status: run.status === 'failed' ? 'Failed' : 'Interrupted',
       fact: [run.repository, run.message].filter(Boolean).join(', '),
       at: run.at,
-      href: `${HOME_ROUTE_BASE}/agent/${encodeURIComponent(run.runId)}`,
+      href: `/agent/${encodeURIComponent(run.runId)}`,
     });
   }
 
@@ -328,7 +384,7 @@ export function composeHomeAttention(
       status: 'Conflict',
       fact: conflict.area,
       at: null,
-      href: `${HOME_ROUTE_BASE}/context/conflicts/${encodeURIComponent(conflict.id)}`,
+      href: `/context/conflicts/${encodeURIComponent(conflict.id)}`,
     });
   }
 
@@ -367,7 +423,7 @@ export function composeHomeAttention(
       status: 'Sync failed',
       fact: source.statusNote ?? '',
       at: source.lastSyncAt,
-      href: `${HOME_ROUTE_BASE}/context/sources/${encodeURIComponent(source.id)}`,
+      href: `/context/sources/${encodeURIComponent(source.id)}`,
     });
   }
 
@@ -379,7 +435,7 @@ export function composeHomeAttention(
       status: 'Needs setup',
       fact: 'Nothing can run until this workspace names a provider',
       at: null,
-      href: `${HOME_ROUTE_BASE}/settings/models`,
+      href: '/settings/models',
     });
   }
 

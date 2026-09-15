@@ -1,5 +1,5 @@
 /**
- * THE FINDINGS REPORT (plan 05 step 24) — `guard/findings.md`, the pure render
+ * THE FINDINGS REPORT — `guard/findings.md`, the pure render
  * of the board's `bug` / `drift` verdicts.
  *
  * Two properties earn the file its own module. NUMBERING IS STABLE: `F7` in an
@@ -9,10 +9,9 @@
  * a section edited since the scenario bound it says so instead of quoting text
  * the verdict never read.
  *
- * The report is regenerated WHOLE each `--report`; its sibling
+ * The report is regenerated WHOLE on every render; its sibling
  * `guard/adjudicate.findings.md` is the opposite — an append-only per-run
- * ledger. Both are committable, and that is asserted against the real gitignore
- * template rather than trusted.
+ * ledger.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -39,7 +38,7 @@ import {
 } from '../../packages/core/src/services/guard-adjudicate/findings-report'
 import { appendFindingsLedger } from '../../packages/core/src/services/agent/findings-ledger'
 import { writeGuardAdjudicationReport } from '../../packages/core/src/commands/guard-adjudicate'
-import { ensureRepoTruecourseDir } from '../../packages/core/src/config/paths'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 let repo: string
 
@@ -70,10 +69,12 @@ function writeDoc(content: string): void {
 }
 
 beforeEach(() => {
+  installWorkTreeGuardStore()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-findings-report-'))
   writeDoc(DOC_CONTENT)
 })
 afterEach(() => {
+  resetGuardStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -279,40 +280,12 @@ describe('writeGuardFindingsReport — when a file is written at all', () => {
     // The two files are siblings, never the same file.
     expect(fs.readFileSync(ledgerPath, 'utf-8')).toBe(ledger)
   })
-
-  it('lands both markdown files where git TRACKS them', () => {
-    ensureRepoTruecourseDir(repo)
-    execFileSync('git', ['init', '-q'], { cwd: repo })
-    writeGuardFindingsReport(repo, board([row('scn-a', verdict('bug'))]))
-    appendFindingsLedger({
-      repoRoot: repo,
-      ledgerPath: guardAdjudicateFindingsPath(repo),
-      runId: 'run-1',
-      findings: [{ workItem: 'scn-a', lines: ['a finding'] }],
-    })
-
-    // `git check-ignore --quiet` exits 0 for an ignored path and 1 (a throw here)
-    // for one git would track.
-    const isIgnored = (rel: string): boolean => {
-      try {
-        execFileSync('git', ['check-ignore', '--quiet', '--', rel], { cwd: repo, stdio: 'pipe' })
-        return true
-      } catch {
-        return false
-      }
-    }
-    expect(isIgnored('.truecourse/guard/findings.md')).toBe(false)
-    expect(isIgnored('.truecourse/guard/adjudicate.findings.md')).toBe(false)
-    // The control: the run store next to them IS ignored, so the template is live.
-    expect(isIgnored('.truecourse/guard/runs/r1.json')).toBe(true)
-    expect(isIgnored('.truecourse/guard/result.json')).toBe(true)
-  })
 })
 
 /**
- * The `--report` path reads the CURRENT board off the store rather than being
- * handed one — the CLI's two outcomes ("Nothing to report." vs `report N
- * finding(s) → …`) are exactly this function's `null` and its result.
+ * The report path reads the CURRENT board off the store rather than being
+ * handed one — the two outcomes a caller has to tell apart are exactly this
+ * function's `null` and its result.
  */
 describe('writeGuardAdjudicationReport — the --report entry point', () => {
   it('reports nothing on a board with no bug/drift verdict', async () => {

@@ -35,7 +35,7 @@
  * one bad group never costs the run its good ones. And the rewrite is held to
  * the catalog's own schema before it is returned: `InterfacesFileSchema` over
  * the MERGED catalog, which is what makes a dangling `startingState` a rejection
- * of the whole reconciliation rather than a corrupted committed file.
+ * of the whole reconciliation rather than a corrupted catalog file.
  *
  * There is deliberately NO alias table. Idempotence comes from re-running: the
  * pass runs at the end of every authoring run, so a state a later session mints

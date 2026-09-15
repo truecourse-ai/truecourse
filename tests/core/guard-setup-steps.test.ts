@@ -1,18 +1,18 @@
 import type { GuardSetupPreparationSession } from '@truecourse/guard-generator';
 /**
- * SINGLE-STEP MODE — `guard setup --only-<step>`, driven through the core
- * adapter (`guardSetupInProcess({ only })`) because the merge of
- * `guard/setup.json` and the pre-flight estimate are its half of the feature.
+ * SINGLE-STEP MODE — `guardSetupInProcess({ only })`, driven through the core
+ * adapter because the merge of `guard/setup.json` and the pre-flight estimate
+ * are its half of the feature.
  *
  * The rules under test:
- * - each flag runs ONLY its own step: steps before it replay from what they
+ * - each step runs ONLY its own work: steps before it replay from what they
  *   left on disk (the recipe from `recipe.json` — no discovery, no live
  *   endpoint probe), steps after it never start;
  * - a prior step nothing ever ran fails loud (`SetupStepNotReadyError`, naming
- *   the flag to run first) instead of quietly spending it here;
+ *   the step to run first) instead of quietly spending it here;
  * - `detect` always runs, so the detection snapshot is always this run's;
  * - the persisted report MERGES: the steps that did not run keep the previous
- *   report's rows, which is what keeps `guard status`, the externals view and
+ *   report's rows, which is what keeps the setup report, the externals view and
  *   skip-when-settled whole;
  * - the estimate gate prices only the chosen step.
  *
@@ -27,7 +27,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recipePath, readGuardSetup, writeGuardSetup, computeRecipeFingerprint, computePreparationFingerprint } from '@truecourse/guard-runner';
-import { setDefaultTransport } from '@truecourse/shared/llm';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import type {
   GuardSetupAuthStep,
   GuardSetupCatalogSession,
@@ -44,22 +44,20 @@ import { StepTracker, type AnalysisStep } from '../../packages/core/src/progress
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
 
-// Setup reads (and would write) the user-level LLM config; these run against a
-// throwaway TRUECOURSE_HOME rather than the developer's real one.
+// Setup writes into the runtime directory; these run against a throwaway one
+// rather than the developer's real one.
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-setup-steps-home-'));
 beforeAll(() => {
-  process.env.TRUECOURSE_HOME = HOME;
+  process.env.TRUECOURSE_RUNTIME_DIR = HOME;
 });
 afterAll(() => {
-  delete process.env.TRUECOURSE_HOME;
+  delete process.env.TRUECOURSE_RUNTIME_DIR;
   fs.rmSync(HOME, { recursive: true, force: true });
 });
 
 const repos: string[] = [];
-beforeEach(() => setDefaultTransport(async () => 'ok'));
 afterEach(() => {
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
-  setDefaultTransport(undefined);
 });
 
 const DOC = 'docs/orgs.md';
@@ -126,6 +124,7 @@ const neverCalled = async (): Promise<never> => {
 /** Every session seam, recording which ones a run actually reached. */
 function seams(): {
   reached: string[];
+  transport: LlmTransport;
   catalogSession: GuardSetupCatalogSession;
   authorInterfaces: GuardSetupInterfacesStep;
   seedSession: GuardSetupSeedSession;
@@ -135,6 +134,7 @@ function seams(): {
   const reached: string[] = [];
   return {
     reached,
+    transport: async () => 'ok',
     catalogSession: async () => {
       reached.push('catalog');
       return { status: 'ok', added: [], findings: [] };
@@ -173,10 +173,10 @@ function factTracker(): { tracker: StepTracker; facts: (key: string) => string[]
 }
 
 // ---------------------------------------------------------------------------
-// --only-recipe
+// only: recipe
 // ---------------------------------------------------------------------------
 
-describe('--only-recipe', () => {
+describe('only: recipe', () => {
   it('runs the recipe step, keeps the free detect pass, and starts nothing after it', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -202,10 +202,10 @@ describe('--only-recipe', () => {
 });
 
 // ---------------------------------------------------------------------------
-// --only-catalog — the recipe replays from recipe.json
+// only: catalog — the recipe replays from recipe.json
 // ---------------------------------------------------------------------------
 
-describe('--only-catalog', () => {
+describe('only: catalog', () => {
   it('replays the recipe from disk — no discovery, no live probe — and stops after the catalog', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -227,7 +227,7 @@ describe('--only-catalog', () => {
     expect(stepKeys(r)).toEqual(['detect', 'catalog']);
   }, 120_000);
 
-  it('refuses when there is no recipe at all, naming --only-recipe', async () => {
+  it('refuses when there is no recipe at all, naming only: recipe', async () => {
     const r = fixtureRepo();
     const s = seams();
 
@@ -240,7 +240,7 @@ describe('--only-catalog', () => {
 
     expect(error).toBeInstanceOf(SetupStepNotReadyError);
     expect((error as SetupStepNotReadyError).step).toBe('recipe');
-    expect((error as SetupStepNotReadyError).message).toContain('--only-recipe');
+    expect((error as SetupStepNotReadyError).message).toContain('recipe step');
     // Nothing was spent, and no half-written record was left behind.
     expect(s.reached).toEqual([]);
     expect(readGuardSetup(r)).toBeNull();
@@ -252,7 +252,7 @@ describe('--only-catalog', () => {
 // ---------------------------------------------------------------------------
 
 describe('a prior step not yet run', () => {
-  it('--only-seed before any catalog run throws for the catalog step', async () => {
+  it('only: seed before any catalog run throws for the catalog step', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
     const s = seams();
@@ -266,7 +266,7 @@ describe('a prior step not yet run', () => {
 
     expect(error).toBeInstanceOf(SetupStepNotReadyError);
     expect((error as SetupStepNotReadyError).step).toBe('catalog');
-    expect((error as SetupStepNotReadyError).message).toContain('--only-catalog');
+    expect((error as SetupStepNotReadyError).message).toContain('catalog step');
     expect(s.reached).toEqual([]);
   }, 120_000);
 });
@@ -356,7 +356,7 @@ describe('estimateGuardSetupCost({ only })', () => {
   });
 });
 
-describe('--only-preparations', () => {
+describe('only: preparations', () => {
   it('fails the run and checklist, preserves other setup results, and retries the failed preparation', async () => {
     const r = fixtureRepo(); writeRecipe(r);
     await guardSetupInProcess(r, { interfaces: interfaces(), recipeRunner: neverCalled, ...seams() });

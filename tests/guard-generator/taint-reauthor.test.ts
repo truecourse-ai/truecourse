@@ -1,5 +1,5 @@
 /**
- * The flow taint on the WORKER path (plan 04 step 17). A flow whose test was
+ * The flow taint on the WORKER path. A flow whose test was
  * rejected last run must never be served the byte-identical rejected scenario
  * from the `guard/generate` cache again: the engine hands the worker task a
  * `taint` (core skips the cache read on it — pinned in

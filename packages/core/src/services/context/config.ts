@@ -37,6 +37,20 @@ export function repositoryConfig(config: ContextSourceConfig): RepositorySourceC
   if (repoFullName === '' || /\s/.test(repoFullName)) {
     throw new ContextConfigError('A repository source needs the repository it reads (repoFullName).');
   }
+  const scope = {
+    include: globs(raw.include, DEFAULT_REPOSITORY_INCLUDE),
+    exclude: globs(raw.exclude, DEFAULT_REPOSITORY_EXCLUDE),
+    branch: typeof raw.branch === 'string' ? raw.branch.trim() : '',
+  };
+  // A folder on this machine is read by its path: there is no account behind it
+  // and no branch the provider tracks, so the path is what must be here.
+  if (raw.provider === 'local') {
+    const folder = typeof raw.path === 'string' ? raw.path.trim() : '';
+    if (!folder) {
+      throw new ContextConfigError('A folder source needs the folder it reads (path).');
+    }
+    return { repoFullName, provider: 'local', path: folder, ...scope };
+  }
   // The installation is WHICH App install the clone is minted through. Which
   // installations a caller may name is the route's check (they must belong to
   // this workspace, and reach this repository); all that is read here is a
@@ -45,13 +59,7 @@ export function repositoryConfig(config: ContextSourceConfig): RepositorySourceC
   if (typeof installationId !== 'number' || !Number.isInteger(installationId) || installationId <= 0) {
     throw new ContextConfigError('A repository source needs the installation it reads through (installationId).');
   }
-  return {
-    repoFullName,
-    installationId,
-    include: globs(raw.include, DEFAULT_REPOSITORY_INCLUDE),
-    exclude: globs(raw.exclude, DEFAULT_REPOSITORY_EXCLUDE),
-    branch: typeof raw.branch === 'string' ? raw.branch.trim() : '',
-  };
+  return { repoFullName, installationId, ...scope };
 }
 
 /** The scope of a site source: the llms.txt URL, validated and normalized. */
@@ -59,8 +67,7 @@ export function siteConfig(config: ContextSourceConfig): SiteSourceConfig {
   const raw = (config ?? {}) as Partial<SiteSourceConfig>;
   const url = typeof raw.llmsTxtUrl === 'string' ? raw.llmsTxtUrl.trim() : '';
   if (!url) throw new ContextConfigError("A documentation site needs its llms.txt URL.");
-  // Throws InvalidSourceUrlError for anything that is not an llms.txt URL —
-  // the same gate `spec source add` applies.
+  // Throws InvalidSourceUrlError for anything that is not an llms.txt URL.
   return { llmsTxtUrl: assertLlmsTxtUrl(url) };
 }
 

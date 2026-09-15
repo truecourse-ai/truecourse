@@ -4,7 +4,7 @@
  * prior extraction (reused through the seam), leaves every flow unchanged, and
  * re-stamps the manifest so the following generate is a genuine no-op.
  */
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { planGuardWork, type ReuseExtractionSeam, type PriorExtraction } from '@truecourse/guard-generator'
 import { readManifest, writeManifest } from '@truecourse/guard-runner'
 import {
@@ -19,9 +19,14 @@ import {
   submitWorkerSessions,
   PASSING_STEPS,
 } from './helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
+beforeEach(() => {
+  installMemoryKvCache()
+})
 afterEach(() => {
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 

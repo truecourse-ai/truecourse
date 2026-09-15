@@ -1,9 +1,8 @@
 /**
- * The guard-generate session kinds (plan 04): claim extraction (step 15) and
- * flow synthesis (step 16) as agent sessions, plus the seam factory the
- * command adapter injects into `generateGuards`. The key builders and prompt
- * fingerprints are exported for the step-20 estimate rework, which must probe
- * the REAL keys.
+ * The guard-generate session kinds: claim extraction and flow synthesis as agent
+ * sessions, plus the seam factory the command adapter injects into
+ * `generateGuards`. The key builders and prompt fingerprints are exported for
+ * the estimate, which must probe the REAL keys.
  */
 
 export {
@@ -80,7 +79,7 @@ export {
 
 export {
   createGuardGenerateSessionSeams,
-  // Single-step mode (`--only-<step>`): the loud refusal a cache-only replay of
+  // Single-step mode (`only`): the loud refusal a cache-only replay of
   // a prior step raises instead of spending that step's sessions.
   GenerateStepNotReadyError,
   type GuardGenerateSessionSeams,

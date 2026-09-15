@@ -15,10 +15,6 @@ export interface GithubAppConfig {
   webhookSecret: string;
   /** App slug, used to build the install URL (github.com/apps/<slug>). */
   appSlug: string;
-  /** Resend API key for email notifications; null when unset. */
-  resendApiKey: string | null;
-  /** From address for notification emails (a Resend-verified sender). */
-  emailFrom: string;
   /** Postgres connection string; when set, the hosted Postgres store is used. */
   databaseUrl: string | null;
 }
@@ -52,8 +48,6 @@ export function loadGithubAppConfig(): GithubAppConfig | null {
     privateKey: decodePrivateKey(privateKeyRaw),
     webhookSecret,
     appSlug,
-    resendApiKey: process.env.RESEND_API_KEY ?? null,
-    emailFrom: process.env.RESEND_FROM ?? 'TrueCourse <noreply@truecourse.dev>',
     databaseUrl: process.env.DATABASE_URL ?? null,
   };
 }

@@ -1,5 +1,5 @@
 /**
- * THE ADJUDICATION SESSION'S TOOLS (plan 05 step 21, items 3–4) — the two that
+ * THE ADJUDICATION SESSION'S TOOLS — the two that
  * hold a boundary a prompt cannot: `rerun_scoped`'s hard cap on re-executions,
  * and `read_evidence`'s containment to THIS failure's bundle.
  *
@@ -9,12 +9,14 @@
  * board) as if it were evidence of the failure under adjudication.
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ToolContext } from '../../packages/agent-loop/src/index'
 import { evidenceRelPath, type GuardExecInput, type GuardExecReport } from '@truecourse/guard-runner'
 import type { GuardScenarioResult } from '@truecourse/shared'
+import { noProviderTransport, type LlmRequest, type LlmTransport } from '@truecourse/shared/llm'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 import {
   buildAdjudicationTools,
   newSessionState,
@@ -22,9 +24,16 @@ import {
 } from '../../packages/core/src/services/guard-adjudicate/tools'
 import type { AdjudicationExecution } from '../../packages/core/src/services/guard-adjudicate/execute'
 import { board, failRow, item, makeRepo, rmrf, RUN_ID, scenarioDoc } from './guard-adjudicate-helpers'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 const repos: string[] = []
+beforeEach(() => {
+  installWorkTreeGuardStore()
+  installMemoryKvCache()
+})
 afterEach(() => {
+  resetGuardStore()
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {
@@ -83,6 +92,7 @@ function toolsFor(input: {
   repoRoot: string
   exec: AdjudicationExecution
   itemOver?: Parameters<typeof item>[0]
+  transport?: LlmTransport
 }) {
   const state = newSessionState()
   const tools = buildAdjudicationTools({
@@ -90,6 +100,7 @@ function toolsFor(input: {
     item: item({ scenario: scenarioDoc('scn.a'), ...input.itemOver }),
     exec: input.exec,
     state,
+    transport: input.transport ?? noProviderTransport,
   })
   const call = (name: string, args: unknown) => tools.find((t) => t.name === name)!.execute(args, CTX)
   return { tools, state, call }
@@ -246,6 +257,28 @@ describe('read_evidence', () => {
 
     expect(result.isError).toBe(true)
     expect(result.content).toContain('visual_judge')
+  })
+
+  it('`visual_judge` asks through the transport the session was handed', async () => {
+    const { r, evidenceDir } = withBundles()
+    const mine = path.join(r, '.truecourse', 'guard', 'evidence', RUN_ID, 'scn.a')
+    fs.writeFileSync(
+      path.join(mine, 'invocation.json'),
+      JSON.stringify({ steps: [{ index: 1, web: { screenshot: 'step-1.png', expectation: 'a red banner' } }] }),
+    )
+    fs.writeFileSync(path.join(mine, 'step-1.png'), Buffer.from('89504e470d0a1a0a', 'hex'))
+    const seen: LlmRequest[] = []
+    const transport: LlmTransport = async (req) => {
+      seen.push(req)
+      return JSON.stringify({ expectedVisible: 'no', screenSummary: 'A blank page.', rationale: 'No banner is drawn.' })
+    }
+    const { call } = toolsFor({ repoRoot: r, exec: noExec, itemOver: { evidenceDir }, transport })
+
+    const result = await call('visual_judge', { step: 1 })
+
+    expect(result.isError).toBeUndefined()
+    expect(result.content).toContain('expected visible on screen: no')
+    expect(seen.map((req) => req.stage)).toEqual(['guard.visualJudge'])
   })
 
   it('says so when the row carries no bundle at all', async () => {

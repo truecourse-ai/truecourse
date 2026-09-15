@@ -20,7 +20,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type { LlmConfigUpdate } from '@truecourse/shared';
-import type { GlobalApiLlmConfig } from '@truecourse/core/config/global-config';
+import type { LlmApiConfig } from '@truecourse/core/services/llm/provider-config';
 import { log } from '@truecourse/core/lib/logger';
 import {
   OPERATOR_PROVIDER,
@@ -50,10 +50,10 @@ const configSchema = z.object({
  */
 function buildCandidate(
   input: LlmConfigUpdate,
-  stored: GlobalApiLlmConfig | null,
-): GlobalApiLlmConfig {
+  stored: LlmApiConfig | null,
+): LlmApiConfig {
   const sameProvider = stored?.provider === input.provider;
-  const candidate: GlobalApiLlmConfig = {
+  const candidate: LlmApiConfig = {
     provider: input.provider,
     model: input.model,
     ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),

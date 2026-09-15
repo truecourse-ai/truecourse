@@ -1,14 +1,13 @@
 /**
- * Background jobs + notifications for the hosted edition.
+ * Background jobs + notifications.
  *
- * Long-running work (connector sync today; analyze/verify/gate later) is enqueued
- * to a Postgres-backed queue (graphile-worker) and tracked here in `jobs` — a
- * UI-facing status row (graphile-worker's own tables aren't meant for app
- * queries). `notifications` is the durable feed shown in the bell/notifications
+ * Long-running work is enqueued to a Postgres-backed queue (graphile-worker)
+ * and tracked here in `jobs` — a UI-facing status row (graphile-worker's own
+ * tables aren't meant for app queries). `notifications` is the durable feed shown in the bell/notifications
  * page; it is the source of truth for history (SSE/NOTIFY is only the live push).
  *
  * Both are workspace-scoped by `workspace_org_id` (the WorkOS organization id,
- * the same convention as `gh_repos`/`knowledge_documents`).
+ * the same convention as `repositories`).
  *
  * Single-flight: at most ONE active (`queued`|`running`) job per (org, key) is
  * enforced by a PARTIAL UNIQUE INDEX, so a concurrent sync fails fast instead of
@@ -20,8 +19,6 @@ import {
   pgTable,
   text,
   integer,
-  bigint,
-  boolean,
   jsonb,
   timestamp,
   index,
@@ -36,21 +33,20 @@ export const jobs = pgTable(
   {
     id: text('id').primaryKey(),
     workspaceOrgId: text('workspace_org_id').notNull(),
-    /** Open vocabulary, e.g. 'knowledge.sync'. */
+    /** Open vocabulary, e.g. 'context.sync'. */
     type: text('type').notNull(),
-    /** Single-flight / UI-mapping key, e.g. 'knowledge.sync:confluence'. Null ⇒ no single-flight. */
+    /** Single-flight / UI-mapping key, e.g. 'context.sync:<sourceId>'. Null ⇒ no single-flight. */
     key: text('key'),
-    /** 'queued' | 'running' | 'succeeded' | 'failed'. */
+    /** 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'. */
     status: text('status').notNull(),
     progressCurrent: integer('progress_current').notNull().default(0),
     progressTotal: integer('progress_total').notNull().default(0),
     progressMessage: text('progress_message'),
     /**
      * The enqueue request the job was created with (no `jobId` — that's the row
-     * id). Persisted so boot recovery can settle side effects a crashed run left
-     * dangling — e.g. complete a reaped `guard.gate`'s in-progress PR Check,
-     * which needs the payload's installation/checkRun ids. Null for jobs whose
-     * creators don't pass one (nothing to settle).
+     * id). Persisted so boot recovery can settle side effects a crashed run
+     * left dangling. Null for jobs whose creators don't pass one (nothing to
+     * settle).
      */
     payload: jsonb('payload').$type<Record<string, unknown>>(),
     /** Type-specific success payload, e.g. `{ synced: 4 }`. */
@@ -70,54 +66,14 @@ export const jobs = pgTable(
   ],
 );
 
-// Coalesced follow-up baseline requests. `enqueueBaseline` single-flights one
-// scan per repo; a default-branch push whose enqueue loses that race is recorded
-// here (latest commit wins — one row per repo) instead of being dropped, then
-// replayed when the running scan settles (or at next boot after a crash). Holds
-// the full enqueue request so the replay reconstructs it verbatim.
-export const pendingBaselines = pgTable('pending_baselines', {
-  repoFullName: text('repo_full_name').primaryKey(),
-  installationId: bigint('installation_id', { mode: 'number' }).notNull(),
-  defaultBranch: text('default_branch').notNull(),
-  commitSha: text('commit_sha').notNull(),
-  workspaceOrgId: text('workspace_org_id').notNull(),
-  force: boolean('force').notNull().default(false),
-  quiet: boolean('quiet').notNull().default(false),
-  updatedAt: ts('updated_at').notNull(),
-});
-
-// Coalesced follow-up guard-baseline refreshes — the guard analogue of
-// `pending_baselines`. `enqueueGuardBaseline` single-flights one baseline run per
-// repo; a refresh whose enqueue loses that race (a rapid second merge, or the
-// generate→baseline chain racing a merge) is recorded here (latest commit wins —
-// one row per repo) instead of being dropped, then replayed when the running
-// baseline settles (or at next boot after a crash). Holds the full enqueue request.
-export const pendingGuardBaselines = pgTable('pending_guard_baselines', {
-  repoFullName: text('repo_full_name').primaryKey(),
-  installationId: bigint('installation_id', { mode: 'number' }).notNull(),
-  defaultBranch: text('default_branch').notNull(),
-  commitSha: text('commit_sha').notNull(),
-  workspaceOrgId: text('workspace_org_id').notNull(),
-  updatedAt: ts('updated_at').notNull(),
-});
-
-// Deploy-time guard backfill marker. The one-time backfill (generate + baseline
-// for every already-connected repo) persists one row per repo it has processed,
-// so a subsequent deploy skips it entirely — a repo with no spec docs never
-// produces guard state, so a state-only check would re-enqueue every deploy.
-export const guardBackfillMarkers = pgTable('guard_backfill_markers', {
-  repoFullName: text('repo_full_name').primaryKey(),
-  markedAt: ts('marked_at').notNull(),
-});
-
 export const notifications = pgTable(
   'notifications',
   {
     id: text('id').primaryKey(),
     workspaceOrgId: text('workspace_org_id').notNull(),
-    /** Free-form category, e.g. 'knowledge.sync'. */
+    /** Free-form category, e.g. 'context.sync'. */
     kind: text('kind').notNull(),
-    /** 'info' | 'success' | 'error'. */
+    /** 'started' | 'info' | 'success' | 'warning' | 'error'. */
     level: text('level').notNull(),
     title: text('title').notNull(),
     body: text('body'),

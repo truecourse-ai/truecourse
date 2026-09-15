@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
@@ -58,9 +58,14 @@ import {
   FAILING_STEPS,
   writeScenarioFile,
 } from './helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
+beforeEach(() => {
+  installMemoryKvCache()
+})
 afterEach(() => {
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {
@@ -535,7 +540,7 @@ describe('generateGuards — change detection', () => {
     // two counters prove.
     expect([matchCalls, workerTasks]).toEqual([0, 0])
     expect([extractCalls, flowCalls]).toEqual([1, 1])
-    // The flow is skipped, not re-settled: its committed scenario stands.
+    // The flow is skipped, not re-settled: its stored scenario stands.
     expect(res2.flows).toMatchObject({ total: 1, skipped: 1, settled: 1, unsettled: 0 })
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
   }, 60_000)
@@ -702,7 +707,7 @@ describe('generateGuards — birth validation', () => {
               expected: 'the bound server "web" (apps/web) to serve GET /v2/bookings',
               actual:
                 '404 — /v2/bookings is served by apps/api/v2, which this recipe declares no server for. ' +
-                'Declare it under api.servers in .truecourse/scenarios/recipe.json and re-run `guard generate`.',
+                'Declare it under api.servers in scenarios/recipe.json and re-run Flow generation.',
             },
           })),
         },
@@ -853,10 +858,10 @@ describe('generateGuards — birth validation', () => {
     // The worker's own confirmed prediction IS the adjudication — no triage stage.
     expect(result.expectedRed).toMatchObject({ step: 1, verdict: 'code-drift' })
 
-    // A committed red test is a decision, not pending work: the flow SETTLED, so the
+    // A stored red test is a decision, not pending work: the flow SETTLED, so the
     // manifest records its inputs hash and the status the test carries — plus the
-    // DIAGNOSIS it commits with, the durable record the report's committed
-    // finding row re-derives from.
+    // DIAGNOSIS it carries, the durable record the report's finding row
+    // re-derives from.
     const committed = flowEntry(r, 'version')!.scenarios
     expect(committed).toMatchObject([{ id: 'version', drivers: ['cli'], status: 'failing' }])
     expect(committed[0].diagnosis).toMatchObject({
@@ -891,7 +896,7 @@ describe('generateGuards — birth validation', () => {
     expect(workers).toBe(1) // unchanged inputs → no second worker session
     expect(second.noChanges).toBe(true)
     expect(second.flows.skipped).toBe(1)
-    // The committed red test — its status AND its diagnosis — stand.
+    // The stored red test — its status AND its diagnosis — stand.
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
     expect(flowEntry(r, 'version')?.scenarios).toMatchObject([
       { id: 'version', drivers: ['cli'], status: 'failing', diagnosis: { title: 'always broken' } },
@@ -1011,8 +1016,8 @@ describe('generateGuards — failure output excerpts', () => {
 })
 
 // `retryCacheKey` and its evidence-sensitivity cases are RETIRED with the
-// birth-retry round (plan 04 step 20): the worker revises in-loop, on the tool
-// result the case above pins, so there is no second-round cache key.
+// birth-retry round: the worker revises in-loop, on the tool result the case
+// above pins, so there is no second-round cache key.
 
 describe('generateGuards — dismissals (decisions.json)', () => {
   // Two cli claims in ONE section, composed into one flow: dismissing one changes
@@ -1078,7 +1083,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
         flowWorkerSession: submitWorkerSessions(() => ({ red: raw('always broken', FAILING_STEPS) })),
       })
 
-    // The disagreement is committed as a red test — the user's decision surface.
+    // The disagreement is recorded as a red test — the user's decision surface.
     const first = await run()
     expect(first.written).toMatchObject([{ id: 'version', status: 'failing' }])
     const file = path.join(r, first.written[0].file)
@@ -1178,8 +1183,8 @@ describe('generateGuards — dismissals (decisions.json)', () => {
 describe('generateGuards — capability/materialization errors', () => {
   // A scenario declaring a git commit of a file it never seeded via `setup.files`
   // fails materialization with a precise provider message. The retry ROUND is gone
-  // (plan 04 step 20) — the message now comes back as the worker's tool error and
-  // the session revises in-loop.
+  // — the message now comes back as the worker's tool error and the session
+  // revises in-loop.
   const UNSEEDED_GIT = { git: { commits: [{ files: ['README.md'] }] } }
 
   it('hands the capability message to the worker as a tool error, and the fix persists', async () => {
@@ -1437,7 +1442,7 @@ describe('generateGuards — manifest + orphans', () => {
     // that no longer exists is the bare row the dogfood store surfaced.
     expect(readManifest(r)!.flows.flatMap((f) => f.gaps)).toEqual([])
     expect(manifestSections(r).map((s) => s.doc)).not.toContain('docs/gone.md')
-    // A prune rewrites a committed file, so the run is not a no-op…
+    // A prune rewrites a stored file, so the run is not a no-op…
     expect(res.noChanges).toBe(false)
     // …and the orphan count, which means "orphans whose coverage was kept", never
     // counts a pruned ghost (nor goes negative on one carried by an earlier run).
@@ -1479,7 +1484,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     const r = repo()
     const res = await generateGuards({ repoRoot: r, ...flowStageSeams(r) })
     expect(res.status).toBe('no-docs')
-    expect(res.reason).toMatch(/spec scan/)
+    expect(res.reason).toMatch(/Document scan/)
   })
 
   it('the corpus is the only doc authority — committed scenarios do not create a universe', async () => {
@@ -1495,11 +1500,11 @@ describe('generateGuards — universe + recipe discovery', () => {
     })
     const res = await generateGuards({ repoRoot: r, ...flowStageSeams(r) })
     expect(res.status).toBe('no-docs')
-    expect(res.reason).toMatch(/spec scan/)
+    expect(res.reason).toMatch(/Document scan/)
   })
 
   // The hard no-derivation gate, on the WORKING-TREE path: derivation lives in
-  // `truecourse guard setup` now, and generate refuses rather than paying to
+  // guard setup now, and generate refuses rather than paying to
   // rediscover something whose fix would re-author everything it just authored.
   it('refuses to derive a recipe when the caller requires an existing one', async () => {
     const r = repo()
@@ -1516,11 +1521,10 @@ describe('generateGuards — universe + recipe discovery', () => {
     })
 
     expect(res.status).toBe('recipe-failed')
-    expect(res.reason).toMatch(/truecourse guard setup/)
+    expect(res.reason).toMatch(/Flow setup/)
   })
 
-  // …and the hosted/EE path (an ephemeral checkout nobody has a terminal in) keeps
-  // deriving exactly as it always has.
+  // …and a run on an ephemeral checkout keeps deriving exactly as it always has.
   it('discovers, verifies, and writes a recipe when none exists', async () => {
     const r = repo()
     // No recipe.json — discovery must propose one and the engine verifies it.
@@ -1747,7 +1751,7 @@ describe('generateGuards — live progress', () => {
 
     expect(res.written.map((w) => w.status).sort()).toEqual(['failing', 'passing'])
     // The denominator is announced before the first slow phase, then each flow ticks
-    // as it settles — including the one whose test was committed red, since a red
+    // as it settles — including the one whose test was recorded red, since a red
     // test IS a settled record.
     expect(ticks).toEqual([
       [0, 2],
@@ -1863,7 +1867,7 @@ describe('generateGuards — grounded authoring', () => {
   }, 60_000)
 })
 
-describe('generateGuards — matching runs concurrently (item 134)', () => {
+describe('generateGuards — matching runs concurrently', () => {
   /**
    * Matching is an LLM CALL per (flow, surface) that carries the whole surface
    * catalog, so it is the slowest deterministic-looking stage in generate. It was
@@ -2019,8 +2023,8 @@ describe('generateGuards — the per-flow pipeline', () => {
   })
 })
 
-// `spawnGenerateRunner` and its `guard.retry` stage attribution are RETIRED
-// (plan 04 step 20): authoring is a session, so there is no per-stage transport
+// `spawnGenerateRunner` and its `guard.retry` stage attribution are RETIRED:
+// authoring is a session, so there is no per-stage transport
 // request and no retry stage to attribute. The one-model rule for session stages
 // is pinned in `tests/core/llm-transport-models.test.ts`.
 
@@ -2070,7 +2074,7 @@ describe('generateGuards: the step facts', () => {
     expect(fresh.filter((line) => line.includes('from cache'))).toEqual([])
 
     // Nothing moved since: the plan says so, the match verdict comes back
-    // cached, the committed scenarios stand, and no worker runs at all.
+    // cached, the stored scenarios stand, and no worker runs at all.
     const cached: string[] = []
     await runGenerate({ ...opts, onFact: (step, line) => cached.push(`${step} | ${line}`) })
 

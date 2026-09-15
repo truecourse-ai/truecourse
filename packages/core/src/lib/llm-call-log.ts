@@ -1,22 +1,21 @@
 /**
- * Local LLM call logger — the OSS, on-disk analog of the EE trace store
- * (`LlmTraceRecorder` → Postgres/blob). It captures every `claude -p`
- * invocation the cli transport makes and writes:
+ * Local LLM call logger — the per-run record of the one-shot calls a run makes,
+ * whichever transport makes them. It captures every call and writes:
  *
  *   - `.truecourse/logs/llm-<label>-<runId>.jsonl`     one metrics line per call
  *   - `.truecourse/logs/llm-<label>-<runId>.summary.json`  the rolled-up summary
  *   - `.truecourse/logs/llm-<label>-<runId>.io/<n>.json`   full system/user/output
  *                                                          (only with LLM_DUMP)
  *
- * Unlike the EE recorder, this is cli-native: cache tokens, $ cost, num_turns and
- * the spawn-overhead timing breakdown are first-class, because the `claude -p`
- * envelope exposes them and they're the signals a perf investigation needs.
+ * Cache tokens, $ cost, num_turns and the timing breakdown are first-class,
+ * because the transports' result envelopes expose them and they're the signals a
+ * perf investigation needs.
  *
  * The metrics + summary files are written on EVERY run: a long LLM pipeline that
  * dies at a timeout is only diagnosable from a record that already exists, and
  * asking an operator to reproduce a 40-minute generate under an env var is not a
- * diagnosis path. They are small, per-repo, and gitignored with the rest of
- * `logs/`. Opt out with `TRUECOURSE_LLM_LOG=0`. The full prompt/response dump is
+ * diagnosis path. They are small, and they live in the run's own work tree with
+ * the rest of `logs/`. Opt out with `TRUECOURSE_LLM_LOG=0`. The full prompt/response dump is
  * heavy and stays opt-in: `TRUECOURSE_LLM_DUMP=1` (default on under
  * `TRUECOURSE_DEV`).
  */
@@ -24,6 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { workTreeLogsDir } from '@truecourse/shared/work-tree';
 import type { LlmCallRecord } from '@truecourse/shared/llm';
 
 /**
@@ -59,14 +59,14 @@ function sanitize(id: string): string {
 }
 
 /**
- * Create a logger. Metrics + summary default ON for every run (CLI and
- * dashboard alike — both enter through the in-process drivers); full I/O dumps
- * default ON only in dev (`pnpm dev` sets `TRUECOURSE_DEV=1`). Returns null only
+ * Create a logger. Metrics + summary default ON for every run (they all enter
+ * through the in-process drivers); full I/O dumps default ON only in dev
+ * (`pnpm dev` sets `TRUECOURSE_DEV=1`). Returns null only
  * when BOTH are explicitly disabled (`TRUECOURSE_LLM_LOG=0`), so the caller
  * installs no sink and pays nothing.
  *
- * Writing is silent by default — the run's own output is unchanged, matching how
- * the per-repo analyze logs are written. The stderr summary prints only when the
+ * Writing is silent by default — the run's own output is unchanged. The stderr
+ * summary prints only when the
  * operator asked for logging explicitly (`TRUECOURSE_LLM_LOG` / `_DUMP`) or is
  * in dev.
  */
@@ -78,7 +78,7 @@ export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLo
   const announce =
     dev || truthyEnv(process.env.TRUECOURSE_LLM_LOG) || truthyEnv(process.env.TRUECOURSE_LLM_DUMP);
 
-  const logDir = path.join(repoRoot, '.truecourse', 'logs');
+  const logDir = workTreeLogsDir(repoRoot);
   // Diagnostics must never cost a run: a repo we cannot write to (read-only
   // checkout, permissions) yields NO logger rather than a thrown generate.
   try {
@@ -98,7 +98,6 @@ export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLo
     }
   }
 
-  const createdAt = Date.now();
   const records: LlmCallMetrics[] = [];
   let seq = 0;
   let finished = false;
@@ -155,14 +154,14 @@ export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLo
     }
   };
 
-  const signalHandlers: Array<[NodeJS.Signals, () => void]> = [];
-
-  // Idempotent finalize: close the file, write + print the summary. Safe to call
-  // from both the normal `finally` and a signal handler — runs exactly once.
+  // Idempotent finalize: close the file, write + print the summary. Runs
+  // exactly once, from the run's own settle path. The logger installs no
+  // process signal handler: it lives inside the dashboard server, whose
+  // shutdown aborts the in-flight run and settles it, which is what flushes
+  // the summary of whatever completed.
   const finishOnce = (elapsedMs: number): void => {
     if (finished) return;
     finished = true;
-    for (const [sig, h] of signalHandlers) process.removeListener(sig, h);
     if (fd !== null) {
       try {
         fs.closeSync(fd);
@@ -178,19 +177,6 @@ export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLo
     }
     if (announce) printSummary(summary, callsPath, ioDir);
   };
-
-  // Ctrl-C / kill mid-run should still flush the summary of whatever completed
-  // — this logger only exists when the operator opted in (env-gated), so adding
-  // a signal handler here never affects normal runs. Default SIGINT behavior is
-  // to exit; once we attach a listener we must re-exit ourselves.
-  for (const sig of ['SIGINT', 'SIGTERM'] as NodeJS.Signals[]) {
-    const h = (): void => {
-      finishOnce(Date.now() - createdAt);
-      process.exit(sig === 'SIGINT' ? 130 : 143);
-    };
-    signalHandlers.push([sig, h]);
-    process.on(sig, h);
-  }
 
   return { sink, finish: finishOnce, callsPath };
 }
@@ -343,7 +329,7 @@ function padL(s: string, w: number): string {
   return s.length >= w ? s : ' '.repeat(w - s.length) + s;
 }
 
-/** Compact per-stage table on stderr (won't corrupt --json stdout). */
+/** Compact per-stage table on stderr. */
 function printSummary(s: LlmCallSummary, callsPath: string, ioDir: string | null): void {
   const w = (line: string): void => {
     process.stderr.write(`[llm-log] ${line}\n`);

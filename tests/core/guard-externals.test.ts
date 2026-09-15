@@ -5,8 +5,8 @@
  * (`recipe.json`), resolution (the overlay + the host env) — plus the per-service
  * blocked-flow count parsed back out of the last generate's gaps.
  *
- * The WRITE is the secrecy split: declarations to the committed recipe, values to
- * the gitignored overlay, both byte-stable and both no-ops when nothing changed.
+ * The WRITE is the secrecy split: declarations to the recipe, values to the
+ * instance overlay, both byte-stable and both no-ops when nothing changed.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -19,7 +19,6 @@ import {
   writeGuardExternals,
   GuardExternalsWriteError,
 } from '../../packages/core/src/commands/guard-externals';
-import { GITIGNORE_CONTENTS, ensureRepoTruecourseDir } from '../../packages/core/src/config/paths';
 import { computeRecipeFingerprint } from '../../packages/guard-runner/src/index';
 import { deriveNeedsSetup } from '../../packages/shared/src/index';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
@@ -413,7 +412,8 @@ describe('writeGuardExternals', () => {
       baseUrlEnv: 'GEOCODING_BASE_URL',
       baseUrl: 'https://sandbox.test',
       mode: 'sandbox',
-      // The secret's variable is DECLARED, its value is not committed.
+      // The secret's variable is DECLARED here; its value is only registered in
+      // the overlay.
       env: { GEO_ACCOUNT: { valueFromEnv: 'HOST_GEO_ACCOUNT' }, GEO_KEY: {} },
       description: 'team sandbox',
     });
@@ -505,7 +505,7 @@ describe('writeGuardExternals', () => {
     expect(JSON.parse(fs.readFileSync(localFile(r), 'utf-8')).svc.env).toEqual({ KEEP: 'k' });
   });
 
-  // Extra base URLs are committed declarations, and the view reports them.
+  // Extra base URLs are declarations, and the view reports them.
   it('writes extra base URLs to the recipe as `endpoints`, and keeps overlay overrides', () => {
     const r = repo();
     writeJson(recipeFile(r), baseRecipe());
@@ -524,7 +524,8 @@ describe('writeGuardExternals', () => {
     expect(recipe.api.externals['open-meteo'].endpoints).toEqual({
       GEOCODING_BASE_URL: 'https://geo.open-meteo.test',
     });
-    // An origin is not a secret: it is committed, never written to the overlay.
+    // An origin is not a secret: it is declared in the recipe, never written to
+    // the overlay.
     const overlay = JSON.parse(fs.readFileSync(localFile(r), 'utf-8'));
     expect(overlay['open-meteo'].endpoints).toBeUndefined();
     const service = view.services.find((s) => s.service === 'open-meteo')!;
@@ -637,7 +638,7 @@ describe('external services without an api block (the dependency catalog)', () =
     expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8')).api).toBeUndefined();
     const catalog = JSON.parse(fs.readFileSync(catalogFile(r), 'utf-8'));
     expect(catalog.dependencies[0]).toMatchObject({ name: 'stripe', class: 'supplied', services: ['stripe'] });
-    // The committed half declares NAMES only; the values live in the gitignored overlay.
+    // The declared half carries NAMES only; the values live in the instance overlay.
     expect(fs.readFileSync(catalogFile(r), 'utf-8')).not.toContain('sk-secret');
     expect(JSON.parse(fs.readFileSync(catalogLocalFile(r), 'utf-8'))).toEqual({
       stripe: { env: { STRIPE_BASE: 'https://sandbox.test', STRIPE_KEY: 'sk-secret' } },
@@ -745,33 +746,3 @@ describe('external services without an api block (the dependency catalog)', () =
   });
 });
 
-describe('the .truecourse/.gitignore template', () => {
-  it('ignores the externals overlay — the secrets must never be committable', () => {
-    expect(GITIGNORE_CONTENTS.split('\n')).toContain('scenarios/externals.local.json');
-    // Same split for the dependency catalog: the INSTANCES are per-machine secrets.
-    expect(GITIGNORE_CONTENTS.split('\n')).toContain('scenarios/dependencies.local.json');
-    // The declarations themselves stay committable.
-    expect(GITIGNORE_CONTENTS).not.toContain('scenarios/recipe.json');
-    expect(GITIGNORE_CONTENTS.split('\n')).not.toContain('scenarios/dependencies.json');
-  });
-
-  // The template grows secret-bearing entries over time; a repo initialized before
-  // one existed must be upgraded in place, or `git add` can stage a registered key.
-  it('appends missing template lines to an EXISTING .gitignore, keeping user lines', () => {
-    const r = repo();
-    const gitignore = path.join(r, '.truecourse', '.gitignore');
-    fs.mkdirSync(path.dirname(gitignore), { recursive: true });
-    fs.writeFileSync(gitignore, 'analyses/\nmy-own-entry/\n');
-
-    ensureRepoTruecourseDir(r);
-    const lines = fs.readFileSync(gitignore, 'utf-8').split('\n');
-    expect(lines).toContain('my-own-entry/');
-    expect(lines).toContain('scenarios/dependencies.local.json');
-    expect(lines.filter((l) => l === 'analyses/')).toHaveLength(1);
-
-    // Idempotent: a second ensure rewrites nothing.
-    const upgraded = fs.readFileSync(gitignore, 'utf-8');
-    ensureRepoTruecourseDir(r);
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(upgraded);
-  });
-});

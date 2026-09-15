@@ -1,28 +1,23 @@
 /**
- * SpecDocViewer — right-pane viewer for one corpus source doc, rendered as
- * markdown. Opened from the Spec tab's left nav (preview on click, pinned on
- * double-click) the same way spec/contract files open, URL-synced as
- * `?spec=<docRef>`; the Sources page renders it in place for a fetched page,
- * passing its own header `actions`.
+ * SpecDocViewer, right-pane viewer for one corpus source doc, rendered as
+ * markdown. Opened from the conflict resolver and the Context document pane, by
+ * the corpus ref it is handed; the Sources page renders it in place for a
+ * fetched page, passing its own header `actions`.
  */
 
 import { headingMatchKey } from '@/lib/heading-match';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Loader2, AlertCircle, EyeOff, ExternalLink } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { HoverPopover } from '@/components/ui/hover-popover';
-import { webDocLabel } from '@/lib/spec-web-source';
-import { DocMarkdown } from './DocMarkdown';
-import { createRepoSpecSource, useSpecSource } from './spec-source';
-import { WebSourceBadge } from './WebSourceBadge';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
+import { DocMarkdown } from '@/components/spec/DocMarkdown';
+import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
 
 export function SpecDocViewer({
   repoId,
   docRef,
   title,
-  sourceTitle,
   url,
-  commit,
   badge,
   scrollTo,
   highlight,
@@ -35,43 +30,34 @@ export function SpecDocViewer({
   docRef: string;
   /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
   title?: string;
-  /** Web sources: the site this page was fetched from — heads the display label. */
-  sourceTitle?: string;
   /** Deep link to the original doc: the ledger's (workspace) or the fetched page's (web). */
   url?: string | null;
-  /** EE PR view: read the doc's markdown at this commit (the PR head). */
-  commit?: string;
   /** Optional role label shown before the doc name (e.g. "Older" / "Newer"). */
   badge?: string;
-  /** Scroll the rendered doc to the heading whose text matches this — re-applied
+  /** Scroll the rendered doc to the heading whose text matches this, re-applied
    *  when `nonce` changes so re-clicking the same heading scrolls again. */
   scrollTo?: { heading: string; nonce: number };
   /** Headings to mark in-place as conflicting (amber band + "conflict" tag). */
   highlight?: string[];
   /** Band the doc's lead (content before the first heading, else the opening
-   *  heading's own section) — for null-heading preamble conflicts. */
+   *  heading's own section), for null-heading preamble conflicts. */
   highlightPreamble?: boolean;
-  /** The doc's area tags — shown in full in the header (the list caps them). */
+  /** The doc's area tags, shown in full in the header (the list caps them). */
   tags?: string[];
-  /** When set, this doc was dropped by the relevance filter — show why, above the content. */
+  /** When set, this doc was dropped by the relevance filter, show why, above the content. */
   notIncludedReason?: string;
-  /** Header controls at the trailing edge (close, jump-outs) — the in-place preview's. */
+  /** Header controls at the trailing edge (close, jump-outs), the in-place preview's. */
   actions?: ReactNode;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // A web-source page reads as `<site> / <page>`, never its raw snapshot ref.
-  const webLabel = webDocLabel(docRef, sourceTitle);
 
-  // A provided (workspace) source wins; otherwise the repo default reading at the
-  // given commit (EE PR view). Workspace docs re-fetch transiently from their source.
+  // A provided (workspace) source wins; otherwise the repo default. Workspace
+  // docs re-fetch transiently from their source.
   const ctxSource = useSpecSource();
-  const repoSource = useMemo(
-    () => createRepoSpecSource(repoId, commit ? { ref: commit } : undefined),
-    [repoId, commit],
-  );
+  const repoSource = useMemo(() => createRepoSpecSource(repoId), [repoId]);
   const source = ctxSource ?? repoSource;
 
   useEffect(() => {
@@ -110,12 +96,11 @@ export function SpecDocViewer({
             </span>
           )}
           <span className="truncate text-xs font-medium text-foreground">
-            {webLabel ?? title ?? docRef}
+            {title ?? docRef}
           </span>
-          {webLabel && <WebSourceBadge />}
           {url && (
             // The header sits at the top-right of the pane, inside an
-            // `overflow-hidden` column — anchor the tooltip below-and-left so it
+            // `overflow-hidden` column, anchor the tooltip below-and-left so it
             // isn't clipped by the pane top or the viewport right edge.
             <HoverPopover content="Open source" side="bottom" align="end">
               <a
@@ -145,7 +130,7 @@ export function SpecDocViewer({
         <div className="flex items-start gap-2 border-b border-amber-500/30 bg-amber-500/5 px-4 py-2 text-[12px] text-amber-800 dark:text-amber-200">
           <EyeOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            <span className="font-medium">Not included in the corpus.</span> {notIncludedReason} — use{' '}
+            <span className="font-medium">Not included in the corpus.</span> {notIncludedReason}, use{' '}
             <span className="font-medium">include</span> in the list to pull it in.
           </span>
         </div>

@@ -181,7 +181,7 @@ export async function startExternalProxies(
       `setup.externals references "${service}", but no external service named "${service}" is declared in the recipe's api.externals AND provided on this machine` +
         (provided.size > 0
           ? ` (provided: ${[...provided.keys()].join(', ')})`
-          : ' (no external service is provided — run `truecourse guard externals` to supply an account, or stub it with setup.http)'),
+          : ' (no external service is provided — supply an account on the Dependencies page, or stub it with setup.http)'),
     )
   }
 

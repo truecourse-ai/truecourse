@@ -15,14 +15,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
-import {
-  jobs,
-  notifications,
-  pendingBaselines,
-  pendingGuardBaselines,
-  guardBackfillMarkers,
-  type Db,
-} from '@truecourse/db';
+import { jobs, notifications, type Db } from '@truecourse/db';
 import type { JobView, JobStatus, NotificationLevel, NotificationView } from '@truecourse/shared';
 
 /** Thrown by `JobStore.create` when an active job already holds the (org, key). */
@@ -38,9 +31,9 @@ export class ActiveJobExistsError extends Error {
 type JobRow = typeof jobs.$inferSelect;
 
 /**
- * A reaped in-flight job, as returned by {@link JobStore.failOrphaned}: enough
- * for boot recovery to settle side effects the dead run left dangling (e.g.
- * complete a `guard.gate`'s stranded PR Check from the stored `payload`).
+ * A reaped in-flight job, as returned by {@link JobStore.interruptOrphaned}: enough
+ * for boot recovery to settle what the dead run left dangling (the chain link
+ * it was about to enqueue, from the stored `payload`).
  */
 export interface OrphanedJob {
   id: string;
@@ -228,15 +221,16 @@ export class JobStore {
 
   /**
    * Boot recovery: the in-process worker means a restart abandons any in-flight
-   * job. Mark every `queued|running` row `failed` so the unique key is freed and
-   * a stale "Syncing…" button clears. Returns the reaped jobs (id, type, stored
-   * payload) so the caller can settle what the dead runs left dangling.
+   * job. Mark every `queued|running` row `interrupted` — the same word its run
+   * record gets — so the unique key is freed and a stale "Syncing…" button
+   * clears. Returns the reaped jobs (id, type, stored payload) so the caller can
+   * settle what the dead runs left dangling.
    */
-  async failOrphaned(): Promise<OrphanedJob[]> {
+  async interruptOrphaned(): Promise<OrphanedJob[]> {
     const now = new Date().toISOString();
     return this.db
       .update(jobs)
-      .set({ status: 'failed', error: 'interrupted by server restart', finishedAt: now })
+      .set({ status: 'interrupted', error: 'interrupted by a server restart', finishedAt: now })
       .where(inArray(jobs.status, ['queued', 'running']))
       .returning({
         id: jobs.id,
@@ -245,204 +239,6 @@ export class JobStore {
         key: jobs.key,
         payload: jobs.payload,
       });
-  }
-}
-
-/** A deferred baseline enqueue (the full request, minus the added job id). */
-export interface PendingBaselineInput {
-  repoFullName: string;
-  installationId: number;
-  defaultBranch: string;
-  commitSha: string;
-  workspaceOrgId: string;
-  force?: boolean;
-  quiet?: boolean;
-}
-
-/** A stored pending row — the request as recorded, plus when it was last set. */
-export interface PendingBaselineView {
-  repoFullName: string;
-  installationId: number;
-  defaultBranch: string;
-  commitSha: string;
-  workspaceOrgId: string;
-  force: boolean;
-  quiet: boolean;
-  updatedAt: string;
-}
-
-type PendingBaselineRow = typeof pendingBaselines.$inferSelect;
-
-function toPendingView(r: PendingBaselineRow): PendingBaselineView {
-  return {
-    repoFullName: r.repoFullName,
-    installationId: r.installationId,
-    defaultBranch: r.defaultBranch,
-    commitSha: r.commitSha,
-    workspaceOrgId: r.workspaceOrgId,
-    force: r.force,
-    quiet: r.quiet,
-    updatedAt: r.updatedAt,
-  };
-}
-
-/**
- * The coalesce-then-rerun buffer behind `enqueueBaseline`. One row per repo (the
- * PK): when a scan is already in flight, the follow-up push is recorded here and
- * replayed when the running scan settles — so a second quick merge is never lost.
- * `upsert` = latest wins; `take`/`drain` are read-and-delete (replay is one-shot).
- */
-export class PendingBaselineStore {
-  constructor(private readonly db: Db) {}
-
-  /** Record (or replace) the repo's pending follow-up baseline — latest wins. */
-  async upsert(input: PendingBaselineInput): Promise<void> {
-    const row = {
-      repoFullName: input.repoFullName,
-      installationId: input.installationId,
-      defaultBranch: input.defaultBranch,
-      commitSha: input.commitSha,
-      workspaceOrgId: input.workspaceOrgId,
-      force: input.force ?? false,
-      quiet: input.quiet ?? false,
-      updatedAt: new Date().toISOString(),
-    };
-    await this.db
-      .insert(pendingBaselines)
-      .values(row)
-      .onConflictDoUpdate({
-        target: pendingBaselines.repoFullName,
-        set: {
-          installationId: row.installationId,
-          defaultBranch: row.defaultBranch,
-          commitSha: row.commitSha,
-          workspaceOrgId: row.workspaceOrgId,
-          force: row.force,
-          quiet: row.quiet,
-          updatedAt: row.updatedAt,
-        },
-      });
-  }
-
-  /** Read-and-delete the repo's pending row (atomic), or null if none. */
-  async take(repoFullName: string): Promise<PendingBaselineView | null> {
-    const [row] = await this.db
-      .delete(pendingBaselines)
-      .where(eq(pendingBaselines.repoFullName, repoFullName))
-      .returning();
-    return row ? toPendingView(row) : null;
-  }
-
-  /** Read-and-delete every pending row — boot recovery after a crash. */
-  async drain(): Promise<PendingBaselineView[]> {
-    const rows = await this.db.delete(pendingBaselines).returning();
-    return rows.map(toPendingView);
-  }
-}
-
-/** A deferred guard-baseline enqueue (the full request, minus the added job id). */
-export interface PendingGuardBaselineInput {
-  repoFullName: string;
-  installationId: number;
-  defaultBranch: string;
-  commitSha: string;
-  workspaceOrgId: string;
-}
-
-/** A stored pending guard-baseline row — the request plus when it was last set. */
-export interface PendingGuardBaselineView extends PendingGuardBaselineInput {
-  updatedAt: string;
-}
-
-type PendingGuardBaselineRow = typeof pendingGuardBaselines.$inferSelect;
-
-function toPendingGuardView(r: PendingGuardBaselineRow): PendingGuardBaselineView {
-  return {
-    repoFullName: r.repoFullName,
-    installationId: r.installationId,
-    defaultBranch: r.defaultBranch,
-    commitSha: r.commitSha,
-    workspaceOrgId: r.workspaceOrgId,
-    updatedAt: r.updatedAt,
-  };
-}
-
-/**
- * The coalesce-then-rerun buffer behind `enqueueGuardBaseline` — the guard
- * analogue of {@link PendingBaselineStore}. One row per repo (the PK): when a
- * baseline run is already in flight, the follow-up refresh is recorded here and
- * replayed when the running run settles, so a rapid second merge is never lost.
- * `upsert` = latest wins; `take`/`drain` are read-and-delete (replay is one-shot).
- */
-export class PendingGuardBaselineStore {
-  constructor(private readonly db: Db) {}
-
-  /** Record (or replace) the repo's pending follow-up guard baseline — latest wins. */
-  async upsert(input: PendingGuardBaselineInput): Promise<void> {
-    const row = {
-      repoFullName: input.repoFullName,
-      installationId: input.installationId,
-      defaultBranch: input.defaultBranch,
-      commitSha: input.commitSha,
-      workspaceOrgId: input.workspaceOrgId,
-      updatedAt: new Date().toISOString(),
-    };
-    await this.db
-      .insert(pendingGuardBaselines)
-      .values(row)
-      .onConflictDoUpdate({
-        target: pendingGuardBaselines.repoFullName,
-        set: {
-          installationId: row.installationId,
-          defaultBranch: row.defaultBranch,
-          commitSha: row.commitSha,
-          workspaceOrgId: row.workspaceOrgId,
-          updatedAt: row.updatedAt,
-        },
-      });
-  }
-
-  /** Read-and-delete the repo's pending row (atomic), or null if none. */
-  async take(repoFullName: string): Promise<PendingGuardBaselineView | null> {
-    const [row] = await this.db
-      .delete(pendingGuardBaselines)
-      .where(eq(pendingGuardBaselines.repoFullName, repoFullName))
-      .returning();
-    return row ? toPendingGuardView(row) : null;
-  }
-
-  /** Read-and-delete every pending row — boot recovery after a crash. */
-  async drain(): Promise<PendingGuardBaselineView[]> {
-    const rows = await this.db.delete(pendingGuardBaselines).returning();
-    return rows.map(toPendingGuardView);
-  }
-}
-
-/**
- * The deploy-time guard-backfill marker store (one row per repo the backfill has
- * processed). `mark` is idempotent (`onConflictDoNothing`); `isMarked` gates the
- * one-time enqueue so a re-deploy skips an already-backfilled repo entirely — the
- * durable analogue of a run-once flag that survives restarts.
- */
-export class GuardBackfillMarkerStore {
-  constructor(private readonly db: Db) {}
-
-  /** Whether the repo was already processed by a prior backfill. */
-  async isMarked(repoFullName: string): Promise<boolean> {
-    const [row] = await this.db
-      .select({ repoFullName: guardBackfillMarkers.repoFullName })
-      .from(guardBackfillMarkers)
-      .where(eq(guardBackfillMarkers.repoFullName, repoFullName))
-      .limit(1);
-    return !!row;
-  }
-
-  /** Record the repo as backfilled — idempotent (a re-mark is a no-op). */
-  async mark(repoFullName: string): Promise<void> {
-    await this.db
-      .insert(guardBackfillMarkers)
-      .values({ repoFullName, markedAt: new Date().toISOString() })
-      .onConflictDoNothing({ target: guardBackfillMarkers.repoFullName });
   }
 }
 

@@ -2,7 +2,7 @@
  * The shell's account is the SIGNED-IN one: the user in the menu, and the name
  * of the workspace they are actually in.
  *
- * `usePreviewUser` maps the auth context's `AuthUser` into the shape the shell
+ * `useDashboardUser` maps the auth context's `AuthUser` into the shape the shell
  * draws, and answers null when there is no session — nobody is invented to fill
  * the gap, so the surfaces that draw a user simply draw none. The workspace
  * follows the same rule: it is the signed-in organization, or nothing.
@@ -12,9 +12,9 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '@truecourse/shared';
-import { AuthProvider } from '@/ee/AuthContext';
-import { toPreviewUser, usePreviewUser } from '@/preview/shell/use-preview-user';
-import { PreviewStateProvider, usePreviewState } from '@/preview/shell/preview-state';
+import { AuthProvider } from '@/auth/AuthContext';
+import { toDashboardUser, useDashboardUser } from '@/dashboard/shell/use-dashboard-user';
+import { DashboardStateProvider, useDashboardState } from '@/dashboard/shell/dashboard-state';
 
 // The shell holds a socket for the repositories' runs; none of these cases
 // is about that, so it is a stub that answers nothing.
@@ -46,58 +46,51 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('toPreviewUser', () => {
+describe('toDashboardUser', () => {
   const base: AuthUser = { id: 'user_1', email: 'dana@acme.dev' };
 
   it('names the user by first + last, and takes the initial from that name', () => {
-    expect(toPreviewUser({ ...base, firstName: 'Dana', lastName: 'Rees' })).toEqual({
+    expect(toDashboardUser({ ...base, firstName: 'Dana', lastName: 'Rees' })).toEqual({
       name: 'Dana Rees',
       email: 'dana@acme.dev',
       initial: 'D',
-      isOperator: false,
     });
   });
 
   it('falls back to the email when there is no name, initial included', () => {
-    expect(toPreviewUser(base)).toMatchObject({ name: 'dana@acme.dev', initial: 'D' });
-    expect(toPreviewUser({ ...base, firstName: null, lastName: null })).toMatchObject({
+    expect(toDashboardUser(base)).toMatchObject({ name: 'dana@acme.dev', initial: 'D' });
+    expect(toDashboardUser({ ...base, firstName: null, lastName: null })).toMatchObject({
       name: 'dana@acme.dev',
     });
   });
 
   it('uses whichever half of the name it has', () => {
-    expect(toPreviewUser({ ...base, firstName: 'Dana' })).toMatchObject({ name: 'Dana' });
-    expect(toPreviewUser({ ...base, lastName: 'Rees' })).toMatchObject({
+    expect(toDashboardUser({ ...base, firstName: 'Dana' })).toMatchObject({ name: 'Dana' });
+    expect(toDashboardUser({ ...base, lastName: 'Rees' })).toMatchObject({
       name: 'Rees',
       initial: 'R',
     });
   });
-
-  it('passes the operator flag through', () => {
-    expect(toPreviewUser({ ...base, isOperator: true }).isOperator).toBe(true);
-  });
 });
 
-describe('usePreviewUser', () => {
+describe('useDashboardUser', () => {
   it('is the signed-in user once the session probe answers', async () => {
     stubMe({
       id: 'user_1',
       email: 'dana@acme.dev',
       firstName: 'Dana',
       lastName: 'Rees',
-      isOperator: true,
     });
 
-    const { result } = renderHook(() => usePreviewUser(), { wrapper: AuthProvider });
+    const { result } = renderHook(() => useDashboardUser(), { wrapper: AuthProvider });
 
     await waitFor(() => expect(result.current?.name).toBe('Dana Rees'));
     expect(result.current?.email).toBe('dana@acme.dev');
     expect(result.current?.initial).toBe('D');
-    expect(result.current?.isOperator).toBe(true);
   });
 
   it('is nobody with no provider above it, rather than a stand-in', () => {
-    const { result } = renderHook(() => usePreviewUser());
+    const { result } = renderHook(() => useDashboardUser());
     expect(result.current).toBeNull();
   });
 });
@@ -105,7 +98,7 @@ describe('usePreviewUser', () => {
 describe('the active workspace', () => {
   const withAuth = ({ children }: { children: ReactNode }) => (
     <AuthProvider>
-      <PreviewStateProvider>{children}</PreviewStateProvider>
+      <DashboardStateProvider>{children}</DashboardStateProvider>
     </AuthProvider>
   );
 
@@ -117,7 +110,7 @@ describe('the active workspace', () => {
       organizationName: 'Northwind Labs',
     });
 
-    const { result } = renderHook(() => usePreviewState(), { wrapper: withAuth });
+    const { result } = renderHook(() => useDashboardState(), { wrapper: withAuth });
 
     await waitFor(() => expect(result.current.workspace?.name).toBe('Northwind Labs'));
     expect(result.current.workspace?.initial).toBe('N');
@@ -125,8 +118,8 @@ describe('the active workspace', () => {
   });
 
   it('is no workspace at all with no session', () => {
-    const { result } = renderHook(() => usePreviewState(), {
-      wrapper: PreviewStateProvider,
+    const { result } = renderHook(() => useDashboardState(), {
+      wrapper: DashboardStateProvider,
     });
     expect(result.current.workspace).toBeNull();
     expect(result.current.repos).toEqual([]);

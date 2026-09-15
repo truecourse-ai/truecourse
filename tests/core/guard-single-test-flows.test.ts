@@ -2,15 +2,17 @@ import { writeGuardRun, readGuardRun, writeGuardEvidence, readGuardEvidence } fr
 import { readGuardRunFlows } from '../../packages/core/src/commands/guard-read.js'
 import fs from 'node:fs'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { loadScenarios, readManifest } from '@truecourse/guard-runner'
 import { readFlowsFile, completeRealization, type FlowClaimInput } from '@truecourse/guard-generator'
 import { scenarioFullFlowDefect, type GuardFlow } from '@truecourse/shared'
 import { acceptedSha, extractSessionBy, faithfulJudge, flowsAreaSessionOf, flowOfAllSession, flowWorkerSessionOf,
   makeTempRepo, raw, rmrf, runGenerate, scenarioYaml, writeCorpus, writeDoc, writeRecipe } from '../guard-generator/helpers.js'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store.js'
 
 const repos: string[] = []
-afterEach(() => { while (repos.length) rmrf(repos.pop()!) })
+beforeEach(() => { installWorkTreeGuardStore() })
+afterEach(() => { resetGuardStore(); while (repos.length) rmrf(repos.pop()!) })
 const cases = [
   { id: 'details', claim: 'Open expense details' },
   { id: 'cancel', claim: 'Cancel editing without changing the expense' },

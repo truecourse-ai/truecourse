@@ -104,7 +104,7 @@ export interface AuthorRunOptions {
   context?: ReadonlyMap<string, WebPlaceContext>
   signal?: AbortSignal
   onProgress?: (event: AuthorProgress) => void
-  /** Every transcript event, as it is persisted — the CLI's live line. */
+  /** Every transcript event, as it is persisted — the caller's live view. */
   onSessionEvent?: (placeId: string, event: SessionEvent) => void
   mintSessionId?: () => string
   now?: () => string
@@ -228,12 +228,13 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
 
   const all = planWorkItems(derived, authored)
 
-  // THE STALE-PLACE RULE (01 step 2h) — a WORK-LIST rule, never a merge rule.
+  // THE STALE-PLACE RULE — a WORK-LIST rule, never a merge rule.
   // An authored screen the derivation no longer produces (in a repo whose
   // derived web half is non-empty) is an address nobody can stand at any more —
   // the measured case is a route module that now only redirects — and a session
-  // spent on it is a session wasted, on every `--replace` run, forever. It stays
-  // in the merged catalog (a fresh clone has no derived half at all, and the
+  // spent on it is a session wasted, on every `replace` run, forever. It stays
+  // in the merged catalog (a repo whose derivation never ran has no derived half
+  // at all, and the
   // empty-derived-half escape hatch below rests on exactly that), but it earns
   // no session: excluded here, reported as a named diagnostic on the result.
   const diagnostics = staleAuthoredPlaceDiagnostics(derived, authored)
@@ -244,7 +245,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     const unknown = [...named].filter((id) => !all.some((item) => item.place.id === id))
     if (unknown.length > 0) {
       throw new Error(
-        `no such place: ${unknown.join(', ')}. \`truecourse guard interfaces\` lists the places this repository has.`,
+        `no such place: ${unknown.join(', ')}. The interface catalog lists the places this repository has.`,
       )
     }
     const staleNamed = [...named].filter((id) => stale.has(id))
@@ -321,7 +322,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     serialKey: (item) => clusterOf.get(item.place.id)!.id,
     sharedPrefix: (item) => packOf(item.place.id).prefix,
     session: (item) => {
-      // An explicit `--replace` re-author may replace THIS place's own tasks and
+      // An explicit `replace` re-author may replace THIS place's own tasks and
       // nothing else: every other authored entry is somebody else's work.
       const replaceable = new Set(opts.replace ? item.existing : [])
       briefed.set(item.place.id, authored)
@@ -438,8 +439,8 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
 }
 
 /**
- * How many clusters run at once by default — the pool's own default, kept under
- * the name the CLI has always imported. See {@link defaultPoolConcurrency} for
+ * How many clusters run at once by default — the pool's own default, re-exported
+ * under this module's name. See {@link defaultPoolConcurrency} for
  * why it is small and which knob (`TRUECOURSE_MAX_CONCURRENCY`) moves it.
  */
 export { defaultPoolConcurrency as defaultAuthorConcurrency }

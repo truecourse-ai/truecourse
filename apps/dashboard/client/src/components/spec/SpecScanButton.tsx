@@ -1,15 +1,15 @@
 /**
- * The Spec / Guard-Coverage header action: Scan (first curate) or Rescan (re-curate
- * the docs into the corpus). Mirrors the other section header actions
- * (ContractsHeaderActions / GuardHeaderActions) — same outline variant — and carries
- * an amber staleness dot when there is queued work: include/exclude/conflict
- * decisions recorded since the last scan (`decisionsPending`) OR a kept doc edited
- * since it (`docsChanged`), so one Rescan applies the batch.
+ * The coverage header action: Scan (first curate) or Rescan (re-curate the docs
+ * into the corpus). Mirrors the other page header actions, same outline variant,
+ * and carries an amber staleness dot when there is queued work:
+ * include/exclude/conflict decisions recorded since the last scan
+ * (`decisionsPending`) OR a kept doc changed since it (`docsChanged`), so one
+ * Rescan applies the batch.
  */
 
 import { Loader2, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { HoverPopover } from '@/components/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 
 interface SpecScanButtonProps {
   /** A corpus exists → the label reads "Rescan"; otherwise "Scan". */
@@ -25,9 +25,9 @@ interface SpecScanButtonProps {
 /** Dot copy covering either or both staleness causes. */
 function staleReason(decisionsPending: boolean, docsChanged: boolean): string {
   if (decisionsPending && docsChanged)
-    return 'Docs edited and decisions recorded since the last scan — rescan to apply them.';
-  if (docsChanged) return 'Docs changed since the last scan — rescan to pick them up.';
-  return 'Decisions recorded since the last scan — rescan to apply them.';
+    return 'Docs edited and decisions recorded since the last scan, rescan to apply them.';
+  if (docsChanged) return 'Docs changed since the last scan, rescan to pick them up.';
+  return 'Decisions recorded since the last scan, rescan to apply them.';
 }
 
 export function SpecScanButton({ hasCorpus, scanning, decisionsPending, docsChanged, onClick }: SpecScanButtonProps) {

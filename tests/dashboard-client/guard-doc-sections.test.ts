@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import type { GuardSectionCoverage, GuardSectionCoverageStatus } from '@truecourse/shared';
 import { alignSections, buildAnchorTargets, splitDocBlocks, stripDocAnchors } from '@/lib/guard-doc-sections';
-import { GUARD_STATUS_ORDER, guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
+import { GUARD_STATUS_META, guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
 
 function section(headingText: string, level: number, status: GuardSectionCoverageStatus): GuardSectionCoverage {
   return { anchor: headingText.toLowerCase().replace(/\s+/g, '-'), headingText, level, fingerprint: 'sha256:x', status, scenarioIds: [], scenarios: [] };
@@ -125,33 +125,47 @@ describe('buildAnchorTargets', () => {
 });
 
 describe('guard status treatments', () => {
-  it('gives every status a label and a band (except unguarded, which is unmarked)', () => {
-    for (const status of GUARD_STATUS_ORDER) {
+  const statuses = Object.keys(GUARD_STATUS_META) as GuardSectionCoverageStatus[];
+
+  it('gives every status a label and a band', () => {
+    for (const status of statuses) {
       expect(guardStatusMeta(status).label).toBeTruthy();
+      expect(guardStatusMeta(status).band).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded + needs-setup +
-    // tui/library/desktop/mobile + blocked/never-run + blocked-on/untestable/no-claim/
-    // no-interface/unrealizable/dismissed + authoring-error + unguarded (api and web
-    // are runnable — no awaiting row of their own).
-    expect(GUARD_STATUS_ORDER).toHaveLength(21);
   });
 
-  it('maps each status group to its own colour treatment', () => {
-    expect(guardBandClasses('pass')).toContain('emerald');
+  it('maps each status to one of the four colours', () => {
+    // Something is wrong and someone must fix it.
     expect(guardBandClasses('fail')).toContain('red');
     expect(guardBandClasses('error')).toContain('red');
-    expect(guardBandClasses('stale')).toContain('amber');
-    expect(guardBandClasses('orphaned')).toContain('amber');
-    expect(guardBandClasses('guarded')).toContain('sky');
-    expect(guardBandClasses('blocked-on')).toContain('muted');
-    expect(guardBandClasses('untestable')).toContain('muted');
-    expect(guardBandClasses('no-claim')).toContain('muted');
-        expect(guardBandClasses('tui')).toContain('dashed');
     // Generate tried and failed: red like a problem, but its own label — never the
-    // run outcome `Error`, and never the blank `unguarded` band.
+    // run outcome `Error`.
     expect(guardBandClasses('authoring-error')).toContain('red');
     expect(guardStatusMeta('authoring-error').label).toBe('Authoring error');
     expect(guardStatusMeta('error').label).toBe('Error');
-    expect(guardBandClasses('unguarded')).toBe('');
+    // Proven.
+    expect(guardBandClasses('pass')).toContain('emerald');
+    // Not yet, and someone can move it.
+    expect(guardBandClasses('guarded')).toContain('sky');
+    // Blocked: someone has to act, and it wears the same amber wherever it
+    // appears, guard's surfaces and Context's alike.
+    expect(guardBandClasses('blocked-on')).toContain('amber');
+    expect(guardBandClasses('unguarded')).toContain('amber');
+    // Nothing to act on: the settled non-testables and the two unknowns.
+    expect(guardBandClasses('stale')).toContain('muted');
+    expect(guardBandClasses('orphaned')).toContain('muted');
+    expect(guardBandClasses('untestable')).toContain('muted');
+    expect(guardBandClasses('no-claim')).toContain('muted');
+    expect(guardBandClasses('tui')).toContain('dashed');
+  });
+
+  it('spends amber on the blocked states and nothing else', () => {
+    const blocked = new Set(['blocked', 'needs-setup', 'blocked-on', 'no-interface', 'unguarded']);
+    for (const status of statuses) {
+      const meta = guardStatusMeta(status);
+      const paint = `${meta.band} ${meta.dot} ${meta.badge}`;
+      if (blocked.has(status)) expect(paint).toMatch(/amber/);
+      else expect(paint).not.toMatch(/amber|orange/);
+    }
   });
 });

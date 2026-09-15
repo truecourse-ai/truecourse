@@ -1,9 +1,9 @@
 /**
  * Guard dashboard read routes over a HOSTED store (PgGuardStore + PgSpecStore).
- * The same OSS Express routes, but with the enterprise stores installed and an
- * injected repo-doc reader — so the guard tabs render Pg-backed data with NO local
- * filesystem access, scope to the PR head via `?ref=`, and surface an explicit
- * pending/empty envelope (never baseline data) when no run is stored at that head.
+ * The same Express routes, over the Postgres stores and an injected repo-doc
+ * reader — so the guard tabs render Pg-backed data with NO local
+ * filesystem access, scope to a commit via `?ref=`, and answer an empty envelope
+ * (never baseline data) when no run is stored at that commit.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -15,19 +15,21 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
-import { PgGuardStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
+import { PgGuardStore, PgSpecStore } from '../../packages/data-store/src/index';
+import { PgGuardOverlayStore } from '../../packages/data-store/src/index';
 // Import the store setters from the PACKAGE (dist) specifiers — the SAME module
 // instances the dashboard route uses, so setGuardStore actually swaps the store
 // the route reads (source and dist are distinct singletons).
 import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
+import { setGuardOverlayStore, resetGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
-import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { createTestApp } from '../helpers/test-app';
-import { writeLatest } from '@truecourse/core/lib/analysis-store';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import type { GuardLatest } from '../../packages/shared/src/index';
+
+
 
 const DOC = 'docs/spec.md';
 const DOC_CONTENT = '# Alpha\nbody a\n# Beta\nbody b\n';
@@ -94,9 +96,9 @@ const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suff
 beforeEach(async () => {
   fixture = await setupTestFixture();
   app = createTestApp();
-  // The hosted store keys by the SAME canonical path the route resolves (the Pg
-  // store matches keys by exact string, unlike the FS store's symlink-following).
-  repoKey = (await resolveProjectForRequest(fixture.project.slug)).path;
+  // The hosted store keys by the SAME canonical path the route resolves: the Pg
+  // store matches keys by exact string, so the key has to be that path.
+  repoKey = (await resolveProjectForRequest(TEST_ORG, fixture.project.slug)).path;
   client = new PGlite();
   db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
@@ -104,19 +106,22 @@ beforeEach(async () => {
   setGuardStore(guardStore);
   specStore = new PgSpecStore(db);
   setSpecStore(specStore);
+  // Every guard read that composes a scratch tree materializes the repository's
+  // overlays into it, so the row store must be there even with nothing registered.
+  setGuardOverlayStore(new PgGuardOverlayStore(db, 'master-secret-at-least-32-chars-long!!'));
   setRepoDocReader(async (_repoKey, docPath) => (docPath === DOC ? DOC_CONTENT : null));
 });
 
 afterEach(async () => {
   resetGuardStore();
   resetSpecStore();
+  resetGuardOverlayStore();
   setRepoDocReader(async () => null);
-  setGuardGatePendingLookup(null);
   await client.close();
   await teardownTestFixture(fixture.project.slug);
 });
 
-describe('Guard routes — hosted, PR-scoped', () => {
+describe('Guard routes — hosted, commit-scoped', () => {
   it('scenarios?ref= returns the PR head set with headings joined via the doc reader (no FS)', async () => {
     await saveSet(HEAD, [['a1', 'alpha']]);
     await saveSet(OTHER, [['z9', 'beta']]);
@@ -125,27 +130,18 @@ describe('Guard routes — hosted, PR-scoped', () => {
     expect(res.body.scenarios[0].headingText).toBe('Alpha');
   });
 
-  it('latest?ref= returns the run stored at that head', async () => {
+  it('latest?ref= returns the run stored at that commit', async () => {
     await guardStore.writeGuardRun(repoKey, runAt(HEAD, 'a1', 'fail'));
     const res = await request(app).get(url(`latest?ref=${HEAD}`)).expect(200);
-    expect(res.body.pending).toBeNull();
     expect(res.body.latest.run.commit).toBe(HEAD);
     expect(res.body.latest.scenarios[0].outcome).toBe('fail');
   });
 
-  it('latest?ref= with no run at the head returns an empty envelope, NOT the baseline', async () => {
-    // A baseline run exists — it must not leak into a PR-head view.
+  it('latest?ref= with no run at that commit returns an empty envelope, NOT the baseline', async () => {
+    // A baseline run exists — it must not leak into another commit's view.
     await guardStore.writeGuardLatest(repoKey, runAt('baselinesha', 'a1', 'pass'));
     const res = await request(app).get(url(`latest?ref=${HEAD}`)).expect(200);
-    expect(res.body).toEqual({ latest: null, pending: null });
-  });
-
-  it('latest?ref= labels an in-flight gate via the pending lookup', async () => {
-    setGuardGatePendingLookup(async (_repo, headSha) =>
-      headSha === HEAD ? { status: 'running', jobId: 'job_abc' } : null,
-    );
-    const res = await request(app).get(url(`latest?ref=${HEAD}`)).expect(200);
-    expect(res.body).toEqual({ latest: null, pending: { status: 'running', jobId: 'job_abc' } });
+    expect(res.body).toEqual({ latest: null });
   });
 
   it('staleness?ref= reflects Pg state (scenarios present, never run → runStale)', async () => {
@@ -155,32 +151,26 @@ describe('Guard routes — hosted, PR-scoped', () => {
   });
 
   it('status without ref reads the baseline set — a newer PR regen never shadows the repo view', async () => {
-    // Anchor the repo baseline (the analyze LATEST commit) at `baselinesha`.
-    await writeLatest(repoKey, {
-      head: 'run.json',
-      analysis: {
-        id: 'r1',
-        createdAt: '2026-07-01T00:00:00.000Z',
-        branch: 'main',
-        commitHash: 'baselinesha',
-        architecture: 'monolith',
-        metadata: { isDiffAnalysis: false },
-        status: 'completed',
+    // Anchor the repo baseline at `baselinesha` — the baseline-flagged generate
+    // the hosted job writes on the default branch.
+    await guardStore.writeGuardResult(
+      { repoKey, commitSha: 'baselinesha' },
+      {
+        generatedAt: '2026-07-01T00:00:00.000Z',
+        status: 'ok',
+        sectionsTotal: 1,
+        sectionsChanged: 1,
+        skippedUnchanged: 0,
+        noChanges: false,
+        written: [],
+        coverageGaps: [],
+        birthFindings: [],
+        errors: [],
+        extractionFailures: [],
+        orphaned: [],
       },
-      graph: {
-        services: [],
-        serviceDependencies: [],
-        layers: [],
-        modules: [],
-        methods: [],
-        moduleDeps: [],
-        methodDeps: [],
-        databases: [],
-        databaseConnections: [],
-        flows: [],
-      },
-      violations: [],
-    });
+      { baseline: true },
+    );
     await saveSet('baselinesha', [['a1', 'alpha']]);
     await new Promise((r) => setTimeout(r, 5)); // strictly newer createdAt for the PR row
     // A PR regen persisted a NEWER, larger set + a report at its head.
@@ -206,12 +196,11 @@ describe('Guard routes — hosted, PR-scoped', () => {
     const res = await request(app).get(url('status')).expect(200);
     // The baseline manifest (1 section), not the PR head's newer 2-section set.
     expect(res.body.coverage).toMatchObject({ totalSections: 1 });
-    // No generate report exists at the baseline — the PR head's must not leak.
-    expect(res.body.lastGenerate).toBeNull();
+    // The baseline's own report, never the PR head's newer one.
+    expect(res.body.lastGenerate).toMatchObject({ generatedAt: '2026-07-01T00:00:00.000Z' });
   });
 
-  it('status counts sections of every corpus doc from the stored corpus, not only the docs with scenarios', async () => {
-    const OTHER_DOC = 'docs/other.md';
+  it('status counts the sections of every doc the guard stores name', async () => {
     // The baseline generate report anchors the repo view's commit, as the hosted job writes it.
     await guardStore.writeGuardResult(
       { repoKey, commitSha: 'baselinesha' },
@@ -232,23 +221,11 @@ describe('Guard routes — hosted, PR-scoped', () => {
       { baseline: true },
     );
     await saveSet('baselinesha', [['a1', 'alpha']]);
-    // The scan's corpus lives in the spec store; a hosted repo has no corpus.json.
-    await specStore.saveSpec({ repoKey, commitSha: 'baselinesha' }, 'corpus', {
-      version: 3,
-      generatedAt: '2026-01-01T00:00:00Z',
-      docs: [
-        { ref: DOC, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] },
-        { ref: OTHER_DOC, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] },
-      ],
-      areas: [{ id: 'cli', product: 'cli', concern: 'cli', docRefs: [DOC, OTHER_DOC], overlaps: [] }],
-    });
-    setRepoDocReader(async (_repoKey, docPath) =>
-      docPath === DOC ? DOC_CONTENT : docPath === OTHER_DOC ? '# Gamma\nbody c\n' : null,
-    );
+    setRepoDocReader(async (_repoKey, docPath) => (docPath === DOC ? DOC_CONTENT : null));
     const res = await request(app).get(url('status')).expect(200);
-    // Alpha (proven) + Beta from the doc the scenarios bind, Gamma from the doc
-    // nothing binds yet; the two without a scenario read as blocked.
-    expect(res.body.sections).toMatchObject({ total: 3, byStatus: { succeeded: 1, blocked: 2 } });
+    // Alpha (proven) + Beta, both sections of the doc the scenarios bind; the
+    // one without a scenario reads as blocked.
+    expect(res.body.sections).toMatchObject({ total: 2, byStatus: { succeeded: 1, blocked: 1 } });
   });
 
   it('coverage?ref= paints sections from the PR head run (not the baseline)', async () => {

@@ -14,12 +14,12 @@
  * stage as unadjudicated. Losing SOME work keeps every stage's fail-soft
  * behaviour and reports the counts; a run that loses nothing is healthy.
  *
- * WHAT MOVED (plan 04): extraction, flow synthesis, authoring and fidelity are
+ * WHAT MOVED: extraction, flow synthesis, authoring and fidelity are
  * agent SESSIONS now, and a session never touches the one-shot transport — so
  * their losses arrive as `GuardSessionSummary` fields on the seam's answer, and
  * are tallied under the SESSION KIND (`guard-generate.extract`, …) rather than
  * a stage id. Only `guard.match` and `guard.recipe` still lose CALLS. The
- * TRIAGE stage is gone entirely (step 20), so its cases went with it.
+ * TRIAGE stage is gone entirely, so its cases went with it.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
@@ -303,7 +303,7 @@ describe('the flow workers losing every session abort before persist', () => {
 })
 
 describe('fidelity ships unadjudicated on a systemic loss, never aborts', () => {
-  // The carve-out (plan item 88). Adjudication is the LAST thing a generate
+  // The carve-out. Adjudication is the LAST thing a generate
   // does: extract, flows, match and the worker's own runs have all been paid
   // for by the time the fidelity child is dispatched. Aborting there throws
   // away a whole run's spend over verdicts ABOUT content already birth-

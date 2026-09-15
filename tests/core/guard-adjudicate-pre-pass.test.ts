@@ -1,5 +1,5 @@
 /**
- * THE DETERMINISTIC PRE-PASS (plan 05 step 21, item 1) — the failures that
+ * THE DETERMINISTIC PRE-PASS — the failures that
  * explain themselves off facts the stores already hold, settled with the
  * machine as the author and ZERO sessions.
  *
@@ -9,7 +9,8 @@
  * drives the real command and asserts the sessions store was never created.
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
+import { noProviderTransport } from '@truecourse/shared/llm'
 import fs from 'node:fs'
 import path from 'node:path'
 import { CAPABILITY_SETUP_EXPECTED, writeGuardLatest, writeManifest } from '@truecourse/guard-runner'
@@ -19,9 +20,14 @@ import {
 } from '../../packages/core/src/services/guard-adjudicate/pre-pass'
 import { runGuardAdjudication } from '../../packages/core/src/commands/guard-adjudicate'
 import { board, failRow, item, makeRepo, manifestWith, rmrf, RUN_ID } from './guard-adjudicate-helpers'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 const repos: string[] = []
+beforeEach(() => {
+  installWorkTreeGuardStore()
+})
 afterEach(() => {
+  resetGuardStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {
@@ -129,7 +135,7 @@ describe('runGuardAdjudication — a pre-passed board opens no session run', () 
     writeGuardLatest(r, board([failRow('scn.a')]))
     writeManifest(r, manifestWith([{ scenarioId: 'scn.a', flowId: 'flow.a', expectedRed: EXPECTED_RED }]))
 
-    const run = await runGuardAdjudication({ repoRoot: r })
+    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
 
     expect(run.scenarios).toHaveLength(1)
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'pre-pass' })

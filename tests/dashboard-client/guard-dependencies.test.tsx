@@ -1,19 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import * as api from '@/preview/vendor/lib/api';
-import { useGuardDependencies } from '@/preview/vendor/hooks/useGuardDependencies';
-import { DependenciesTab } from '@/preview/repo/DependenciesTab';
-import type { GuardDependenciesView, GuardDependencyRow } from '@/preview/vendor/types/guard-dependencies';
-import type { Repo } from '@/preview/data/types';
+import * as api from '@/lib/api';
+import { useGuardDependencies } from '@/hooks/useGuardDependencies';
+import { DependenciesTab } from '@/dashboard/repo/DependenciesTab';
+import type { GuardDependenciesView, GuardDependencyRow } from '@/types/guard-dependencies';
+import type { Repo } from '@/dashboard/data/types';
 
-vi.mock('@/preview/vendor/lib/api', () => ({
+vi.mock('@/lib/api', () => ({
   getGuardDependencies: vi.fn(),
   saveGuardDependency: vi.fn(),
   ApiError: class extends Error {},
 }));
-vi.mock('@/preview/repo/tab-jump', () => ({ useGuardTabJump: () => {} }));
-vi.mock('@/preview/repo/use-guard-refresh', () => ({ useGuardRefresh: () => 0 }));
+vi.mock('@/dashboard/repo/tab-jump', () => ({ useGuardTabJump: () => {} }));
+vi.mock('@/dashboard/repo/use-guard-refresh', () => ({ useGuardRefresh: () => 0 }));
 
 const row = (name: string, klass: GuardDependencyRow['class']): GuardDependencyRow => ({
   name, class: klass, summary: name, requirement: '', needs: [],
@@ -47,7 +47,9 @@ describe('user-facing dependencies', () => {
     vi.mocked(api.getGuardDependencies).mockResolvedValue(view(internal));
     render(<MemoryRouter><DependenciesTab repo={{ id: 'repo' } as Repo} /></MemoryRouter>);
     expect(await screen.findByText('No dependencies to configure.')).toBeInTheDocument();
-    expect(screen.getByText('0')).toBeInTheDocument();
+    // The count never rides beside the title: an empty list says so in its one
+    // line, and the tally names no word no row wears.
+    expect(screen.queryByText('0')).not.toBeInTheDocument();
     expect(screen.queryByText('expense')).not.toBeInTheDocument();
     expect(screen.queryByText('sample-data')).not.toBeInTheDocument();
   });

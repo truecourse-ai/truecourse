@@ -2,15 +2,11 @@
  * The claim-diff gate's extract-cache seam (`createGuardGenerateSessionSeams().reuseExtraction`):
  * `lookup` finds the outcome cached under a document's PRIOR content hash, and
  * `reuse` copies it under the document's CURRENT key so the extraction pool hits
- * without a session. Proven over the real on-disk cache, driverless (`transport:
- * 'api'` under an empty TRUECOURSE_HOME makes driver construction throw, so a
- * surviving call built none).
+ * without a session. Proven over a real cache, driverless: the seam's driver
+ * thunk is a spy that throws, so a surviving call is a call that acquired none.
  */
 
-import { describe, it, expect, afterEach, beforeEach } from 'vitest'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { collectWorkDocs, planGuardWork, type GuardDoc } from '@truecourse/guard-generator'
 import type { ExtractOutcome } from '@truecourse/shared'
@@ -23,6 +19,7 @@ import {
   extractSessionCacheKeyForContentHash,
 } from '../../packages/core/src/services/guard-generate/index'
 import { makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe } from '../guard-generator/helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 
 const repos: string[] = []
 afterEach(() => {
@@ -60,15 +57,18 @@ const OUTCOME: ExtractOutcome = {
 }
 
 describe('the reuse-extraction seam', () => {
-  let home = ''
   beforeEach(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-reuse-home-'))
-    process.env.TRUECOURSE_HOME = home
+    installMemoryKvCache()
   })
   afterEach(() => {
-    delete process.env.TRUECOURSE_HOME
-    fs.rmSync(home, { recursive: true, force: true })
+    resetKvCacheStore()
   })
+
+  /** A driver thunk the cache path must never reach. */
+  const spyDriver = () =>
+    vi.fn(async (): Promise<never> => {
+      throw new Error('the reuse path must not acquire a driver')
+    })
 
   it('the content-hash key recipe is the doc key recipe', () => {
     const r = docRepo(CONTENT)
@@ -86,10 +86,11 @@ describe('the reuse-extraction seam', () => {
 
     writeDoc(r, DOC, EDITED)
     const after = docOf(r)
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
+    const driver = spyDriver()
+    const seams = createGuardGenerateSessionSeams({ repoRoot: r, driver })
     expect(await seams.reuseExtraction.lookup(after, priorHash)).toEqual(OUTCOME)
     expect(await seams.reuseExtraction.lookup(after, extractDocContentHash(after.content))).toBeNull()
-    expect(seams.runId()).toBeUndefined()
+    expect(driver).not.toHaveBeenCalled()
   })
 
   it('reuse copies the prior outcome under the current key, so the pool hits without a session', async () => {
@@ -102,7 +103,8 @@ describe('the reuse-extraction seam', () => {
     const after = docOf(r)
     expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(after))).toBeNull()
 
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
+    const driver = spyDriver()
+    const seams = createGuardGenerateSessionSeams({ repoRoot: r, driver })
     await seams.reuseExtraction.reuse(after, priorHash)
     expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(after))).toEqual(OUTCOME)
 
@@ -112,33 +114,34 @@ describe('the reuse-extraction seam', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.claims.map((c) => c.sectionAnchor)).toEqual(['tasks/creating-tasks'])
+    expect(driver).not.toHaveBeenCalled()
   })
 
   it('reuse with no cached prior writes nothing', async () => {
     const r = docRepo(EDITED)
     const doc = docOf(r)
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
+    const seams = createGuardGenerateSessionSeams({ repoRoot: r, driver: spyDriver() })
     await seams.reuseExtraction.reuse(doc, 'deadbeef')
     expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc))).toBeNull()
   })
-})
 
-it('keeps prior-content reuse in the current declaration context and rejects invalid cached prerequisites', async () => {
-  const r = docRepo(CONTENT), before = docOf(r)
-  const targets = [{ name: 'vendor', aliases: ['Vendor'], state: 'unprovided' as const, credentialEnv: ['KEY'], registerIn: 'local', providers: [{ service: 'vendor', baseUrlEnvs: ['BASE'] }] }]
-  const priorHash = extractDocContentHash(before.content)
-  await setCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(before, targets), OUTCOME)
-  writeDoc(r, DOC, EDITED)
-  const after = docOf(r), seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
-  expect(await seams.reuseExtraction.lookup(after, priorHash, targets)).toEqual(OUTCOME)
-  const renamed = [{ ...targets[0], name: 'new-vendor' }]
-  expect(await seams.reuseExtraction.lookup(after, priorHash, renamed)).toBeNull()
-  await seams.reuseExtraction.reuse(after, priorHash, renamed)
-  expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(after, renamed))).toBeNull()
-  await seams.reuseExtraction.reuse(after, priorHash, targets)
-  expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(after, targets))).toEqual(OUTCOME)
-  const invalid = structuredClone(OUTCOME)
-  invalid.claims[0].verification = { method: 'behavior', observable: 'supplied data', cases: [{ id: 'value', claim: 'read value', method: 'behavior', requires: ['http'], conditions: [], prerequisites: [{ dependency: 'removed', mode: 'provided' }] }] }
-  await setCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(before, targets), invalid)
-  expect(await seams.reuseExtraction.lookup(after, priorHash, targets)).toBeNull()
+  it('keeps prior-content reuse in the current declaration context and rejects invalid cached prerequisites', async () => {
+    const r = docRepo(CONTENT), before = docOf(r)
+    const targets = [{ name: 'vendor', aliases: ['Vendor'], state: 'unprovided' as const, credentialEnv: ['KEY'], registerIn: 'local', providers: [{ service: 'vendor', baseUrlEnvs: ['BASE'] }] }]
+    const priorHash = extractDocContentHash(before.content)
+    await setCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(before, targets), OUTCOME)
+    writeDoc(r, DOC, EDITED)
+    const after = docOf(r), seams = createGuardGenerateSessionSeams({ repoRoot: r, driver: spyDriver() })
+    expect(await seams.reuseExtraction.lookup(after, priorHash, targets)).toEqual(OUTCOME)
+    const renamed = [{ ...targets[0], name: 'new-vendor' }]
+    expect(await seams.reuseExtraction.lookup(after, priorHash, renamed)).toBeNull()
+    await seams.reuseExtraction.reuse(after, priorHash, renamed)
+    expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(after, renamed))).toBeNull()
+    await seams.reuseExtraction.reuse(after, priorHash, targets)
+    expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(after, targets))).toEqual(OUTCOME)
+    const invalid = structuredClone(OUTCOME)
+    invalid.claims[0].verification = { method: 'behavior', observable: 'supplied data', cases: [{ id: 'value', claim: 'read value', method: 'behavior', requires: ['http'], conditions: [], prerequisites: [{ dependency: 'removed', mode: 'provided' }] }] }
+    await setCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(before, targets), invalid)
+    expect(await seams.reuseExtraction.lookup(after, priorHash, targets)).toBeNull()
+  })
 })

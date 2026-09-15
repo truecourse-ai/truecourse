@@ -1,33 +1,39 @@
 /**
  * The injectable LLM runners for the guard-generator stages that are still
- * ONE-SHOTS: recipe discovery (deliberately kept — see plan section 03) and
- * realization matching. Everything else (extraction, flow synthesis, the
- * flow-worker author/adjudicate loop and its fidelity child) runs as agent
- * sessions injected through the session seams (plan 04); their runners were
- * retired by step 20.
+ * ONE-SHOTS: recipe discovery (deliberately kept) and realization matching.
+ * Everything else (extraction, flow synthesis, the flow-worker
+ * author/adjudicate loop and its fidelity child) runs as agent sessions
+ * injected through the session seams; their runners were retired with the
+ * one-shot stages.
  *
- * Production spawns the model through the shared `LlmTransport` seam (cli by
- * default, agent mailbox in EE, or the direct-API transport); tests inject
- * stubs. Each runner is output-only: it returns the model's raw parsed JSON
+ * Production spawns the model through the shared `LlmTransport` seam (the Agent
+ * SDK one-shot in claude-code mode, the direct-API transport in api mode);
+ * tests inject stubs. Each runner is output-only: it returns the model's raw parsed JSON
  * (`unknown`) and never writes files or runs commands.
  *
  * Every request carries its stage's response schema, rendered from the SAME Zod
  * definition the engine validates the reply with (and the same one the prompt
  * embeds as its canonical output contract — one source, never two wordings). The
- * API transport submits it as provider-side STRUCTURED OUTPUT; the cli and agent
- * backends treat it as informational. The recipe stage carries a schema strict
+ * API transport submits it as provider-side STRUCTURED OUTPUT; the claude-code
+ * backend treats it as informational. The recipe stage carries a schema strict
  * output cannot express (a typed record); it says so with `enforceSchema: false`
  * and a comment naming the construct, never a silent degrade — the gate in
  * `tests/llm-api/stage-schemas.test.ts` pins the list.
  *
- * Enforcement never replaces the engine's own validation: the cli transport
- * enforces nothing, so the engine Zod-validates every reply and re-asks ONCE with
- * the invalid output quoted back (via each stage's `correction` context) before it
+ * Enforcement never replaces the engine's own validation: the claude-code
+ * transport enforces nothing, so the engine Zod-validates every reply and
+ * re-asks ONCE with the invalid output quoted back (via each stage's `correction` context) before it
  * records a fail-soft failure.
  */
 
-import { cliTransport, extractJsonValue, jsonSchemaHint, type LlmTransport } from '@truecourse/shared/llm'
+import { noProviderTransport, extractJsonValue, jsonSchemaHint, type LlmTransport } from '@truecourse/shared/llm'
 import { ClaimDiffSchema, RealizationMatchSchema, RecipeProposalSchema, WorldClassifySchema } from './schemas.js'
+
+/** The transport a one-shot stage calls through: the caller's, else the sentinel
+ *  that fails with the no-provider message. */
+function requireTransport(opts: { transport?: LlmTransport }): LlmTransport {
+  return opts.transport ?? noProviderTransport
+}
 import {
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
@@ -64,7 +70,7 @@ interface SpawnOptions {
 
 /** Realization matching — one call per (flow, surface with a non-empty catalog). */
 export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
-  const transport = opts.transport ?? cliTransport()
+  const transport = requireTransport(opts)
   const timeoutMs = opts.timeoutMs ?? 300_000
   return async (ctx) => {
     const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
@@ -86,7 +92,7 @@ export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
 /** World classification — ONE batched call per generate over the changed flows,
  *  deciding which workers the pool schedules into the mutator tail. */
 export function spawnWorldClassifyRunner(opts: SpawnOptions = {}): WorldClassifyRunner {
-  const transport = opts.transport ?? cliTransport()
+  const transport = requireTransport(opts)
   const timeoutMs = opts.timeoutMs ?? 300_000
   return async (flows) => {
     const raw = await transport({
@@ -107,7 +113,7 @@ export function spawnWorldClassifyRunner(opts: SpawnOptions = {}): WorldClassify
 /** Claim-diff gate — one call per EDITED section whose doc has a prior
  *  extraction, deciding whether the edit changed any obligation. */
 export function spawnClaimDiffRunner(opts: SpawnOptions = {}): ClaimDiffRunner {
-  const transport = opts.transport ?? cliTransport()
+  const transport = requireTransport(opts)
   const timeoutMs = opts.timeoutMs ?? 120_000
   return async (section) => {
     const raw = await transport({
@@ -125,13 +131,13 @@ export function spawnClaimDiffRunner(opts: SpawnOptions = {}): ClaimDiffRunner {
   }
 }
 
-// The one-shot seed runner (`spawnSeedRunner`) is GONE (plan 03 retirement):
-// the seed is authored by the `guard-setup.seed` agent session in
-// `@truecourse/core`, which reuses this package's SEED_SYSTEM_PROMPT doctrine
-// and `buildSeedUserPrompt` grounding directly.
+// The one-shot seed runner (`spawnSeedRunner`) is GONE: the seed is authored by
+// the `guard-setup.seed` agent session in `@truecourse/core`, which reuses this
+// package's SEED_SYSTEM_PROMPT doctrine and `buildSeedUserPrompt` grounding
+// directly.
 
 export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
-  const transport = opts.transport ?? cliTransport()
+  const transport = requireTransport(opts)
   const timeoutMs = opts.timeoutMs ?? 120_000
   return async (input) => {
     const raw = await transport({

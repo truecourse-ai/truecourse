@@ -14,6 +14,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import { nodeRefContext } from '@truecourse/shared/openapi-node'
 import { buildDocSectionIndex, type DocSectionIndex } from './section-index.js'
+import { corpusFilePath } from '@truecourse/shared/work-tree'
 
 // The single node-side RefResolutionContext factory (symlink-safe, pre-cap guarded)
 // lives in @truecourse/shared/openapi-node so guard-runner and spec-consolidator
@@ -33,7 +34,7 @@ const CorpusShape = z
   .passthrough()
 
 export function corpusKeptDocs(repoRoot: string): string[] {
-  const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json')
+  const file = corpusFilePath(repoRoot)
   if (!fs.existsSync(file)) return []
   try {
     const parsed = CorpusShape.safeParse(JSON.parse(fs.readFileSync(file, 'utf-8')))

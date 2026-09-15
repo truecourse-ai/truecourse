@@ -41,13 +41,13 @@ vi.mock('@/components/sessions/RunConversationPage', () => ({
   RunElapsed: () => <span />,
 }));
 
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 import {
   startContextScan,
   startGuardGenerate,
   startGuardSetup,
-} from '@/preview/data/scan';
-import { triggerFor } from '@/preview/data/run-triggers';
+} from '@/dashboard/data/scan';
+import { triggerFor } from '@/dashboard/data/run-triggers';
 import type { PublicSessionRun } from '@/lib/api';
 
 if (!Element.prototype.scrollTo) {
@@ -60,7 +60,7 @@ const REAL = {
   id: 'linkwarden',
   name: 'linkwarden/linkwarden',
   path: '/clones/linkwarden__linkwarden',
-  remoteUrl: 'https://github.com/linkwarden/linkwarden',
+  provider: 'github',
 };
 
 function json(body: unknown, status = 200): Response {
@@ -130,7 +130,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
       <Toaster />
     </MemoryRouter>,
@@ -138,16 +138,16 @@ function renderAt(path: string) {
 }
 
 /** Where the Document scan is started from: Context's documents, and nowhere else. */
-const CONTEXT = '/preview/context/documents';
+const CONTEXT = '/context/documents';
 
 /** A console tab, for the things the console itself says. */
-const CONSOLE = `/preview/repos/${REAL.id}/runs`;
+const CONSOLE = `/repos/${REAL.id}/runs`;
 
 /** One conversation, where another go at it is offered. */
-const conversation = (runId: string) => `/preview/agent/${encodeURIComponent(runId)}`;
+const conversation = (runId: string) => `/agent/${encodeURIComponent(runId)}`;
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -316,7 +316,7 @@ describe('a workspace with no provider', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Set one in Settings' })).toHaveAttribute(
       'href',
-      '/preview/settings/models',
+      '/settings/models',
     );
   });
 

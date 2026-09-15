@@ -1,7 +1,7 @@
 /**
  * THE SESSION POOL — one agent session per work item, `concurrency` at a time,
- * with a strictly serial fold (01 step 2), plus the throttle governor and the
- * transient re-queue (01 step 2i).
+ * with a strictly serial fold, plus the throttle governor and the transient
+ * re-queue.
  *
  * Everything here drives the REAL `runAgentLoop` through a scripted fake
  * driver, so what is under test is the pool's own policy — the permit
@@ -515,7 +515,7 @@ describe('defaultPoolConcurrency', () => {
 })
 
 // ---------------------------------------------------------------------------
-// the throttle governor (01 step 2i)
+// the throttle governor
 // ---------------------------------------------------------------------------
 
 describe('session pool throttle governor', () => {
@@ -619,7 +619,7 @@ describe('session pool throttle governor', () => {
 })
 
 // ---------------------------------------------------------------------------
-// the transient re-queue (01 step 2i)
+// the transient re-queue
 // ---------------------------------------------------------------------------
 
 describe('session pool transient re-queue', () => {

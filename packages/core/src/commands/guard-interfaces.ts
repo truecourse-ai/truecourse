@@ -10,9 +10,9 @@
  * package everything it needs, exactly as `guard-externals.ts` adapts the
  * externals engine.
  *
- * Standalone authoring uses `sessions/guard-interfaces/<runId>/`, with a
- * run record and one transcript per session. Setup supplies its own run so
- * authoring remains part of the setup activity and lifecycle.
+ * Standalone authoring opens its own run record, with one transcript per session
+ * appended to its journal. Setup supplies its own run so authoring remains part
+ * of the setup activity and lifecycle.
  *
  * One stage here is NOT a session: the state reconciliation that closes a run
  * is a single schema-bearing completion, so it resolves the ordinary
@@ -33,28 +33,17 @@ import {
 } from '../services/interface-author/index.js';
 import { readAuthoredInterfaceCatalog, readInterfaceCatalog } from '@truecourse/guard-runner';
 import {
-  cliTransport,
   extractJsonValue,
-  getDefaultTransport,
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import type { SessionDriver, SessionEvent } from '@truecourse/agent-loop';
 import path from 'node:path';
 import { createStoredSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
-import {
-  createConfiguredApiTransport,
-  installConfiguredLlmTransport,
-  createClaudeCodeTransport,
-} from '../services/llm/install-transport.js';
-import { createConfiguredSessionDriver } from '../services/llm/session-driver.js';
+import { createClaudeCodeSessionDriver } from '../services/llm/session-driver.js';
 import { deriveWebAuthoringContext } from '../services/web-context.service.js';
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
-import {
-  effectiveLlmMode,
-  type LlmTransportFlag,
-  type LlmTransportMode,
-} from '../config/global-config.js';
+import type { LlmTransportMode } from '../services/llm/provider-config.js';
 
 export interface GuardInterfacePlaceView {
   id: string;
@@ -116,16 +105,20 @@ export interface RunGuardInterfaceAuthorOptions {
   limit?: number;
   /** How many sessions run at once; the authoring default answers otherwise. */
   concurrency?: number;
-  /** Per-run transport flag; the saved selection answers otherwise. */
-  transport?: LlmTransportFlag;
   /**
-   * Run the SESSIONS on THIS driver instead of the configured one. Passing it
-   * means passing `transportMode` too — the driver states what it calls, not
-   * which mode selected it.
+   * Run the SESSIONS on THIS driver instead of this process's Claude Code.
+   * Passing it means passing `transportMode` too — the driver states what it
+   * calls, not which mode selected it.
    */
   driver?: SessionDriver;
   /** The mode an explicit `driver` runs in — the run record's attribution. */
   transportMode?: LlmTransportMode;
+  /**
+   * The transport the closing state reconciliation asks through: one
+   * schema-bearing completion, the run's own provider, never a process-wide
+   * default.
+   */
+  transport: LlmTransport;
   /**
    * Where the run record and transcripts are keyed — the repo IDENTITY when
    * `repoRoot` is an ephemeral clone deleted after the run. Defaults to
@@ -139,14 +132,14 @@ export interface RunGuardInterfaceAuthorOptions {
   onSessionEvent?: (placeId: string, event: SessionEvent) => void;
   /** What the run is doing before the first session starts — the context pass. */
   onStatus?: (message: string) => void;
-  /** The sessions-store run record was just created — the CLI prints the
-   *  dashboard "watch live" deep link from it. */
+  /** The sessions-store run record was just created — the caller learns the
+   *  run's id from it. */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
 }
 
 export interface GuardInterfaceAuthorRun extends AuthorRunResult {
   runId: string;
-  /** Directory containing the run's transcripts, including when owned by setup. */
+  /** The run's scratch directory, including when the run is owned by setup. */
   runDir: string;
   /** Which backend ran the sessions, and on whose model — the same record the
    *  run.json carries and every transcript's `session-start` stamps. */
@@ -154,9 +147,10 @@ export interface GuardInterfaceAuthorRun extends AuthorRunResult {
   /** The context pass: how much grounding the sessions were given. */
   context: { places: number; files: number; seconds: number };
   /**
-   * The append to `guard/interfaces.findings.md` this run made — the committed
-   * doc-bug feed, and how many bullets landed in it (the run's findings with the
-   * duplicates of one discrepancy collapsed). Absent when no session found one.
+   * The append to `guard/interfaces.findings.md` this run made — the doc-bug
+   * feed the setup bundle carries, and how many bullets landed in it (the run's
+   * findings with the duplicates of one discrepancy collapsed). Absent when no
+   * session found one.
    */
   findingsLedger?: { path: string; appended: number };
   /**
@@ -168,7 +162,7 @@ export interface GuardInterfaceAuthorRun extends AuthorRunResult {
 }
 
 /**
- * Run the authoring. Every session's transcript lands in the run directory
+ * Run the authoring. Every session's transcript lands on the run's journal
  * whatever the outcome. Standalone authoring closes its own run record:
  * `completed` when every session reached an outcome, `failed` when none did,
  * `interrupted` when the caller aborted.
@@ -177,25 +171,25 @@ export async function runGuardInterfaceAuthoring(
   opts: RunGuardInterfaceAuthorOptions,
 ): Promise<GuardInterfaceAuthorRun> {
   const { repoRoot } = opts;
-  const ownedRun = opts.sessionRun ? undefined : await createStoredSessionRun(opts.sessionsKey ?? repoRoot, {
-    command: 'guard-interfaces',
-    gitRef: await resolveCommitSha(repoRoot),
-    activityStream: !!opts.sessionsKey,
-  });
+  const ownedRun = opts.sessionRun
+    ? undefined
+    : await createStoredSessionRun(opts.sessionsKey ?? repoRoot, {
+        command: 'guard-interfaces',
+        gitRef: await resolveCommitSha(repoRoot),
+      });
   // Exactly one exists: the caller's run or the standalone run created above.
   const run = opts.sessionRun ?? ownedRun!;
   try {
     if (ownedRun) opts.onRunStarted?.({ command: 'guard-interfaces', runId: run.runId, dir: run.dir });
-    // A hosted caller hands over the workspace's own driver; a checkout resolves
-    // one from the saved config.
+    // A caller hands over the workspace's own driver; otherwise the run is on
+    // this process's Claude Code.
     const { driver, mode, attribution } = opts.driver
       ? {
           driver: opts.driver,
-          mode: opts.transportMode ?? effectiveLlmMode(opts.transport),
+          mode: opts.transportMode ?? ('claude-code' as LlmTransportMode),
           attribution: opts.driver.attribution,
         }
-      : createConfiguredSessionDriver({
-          ...(opts.transport ? { transport: opts.transport } : {}),
+      : createClaudeCodeSessionDriver({
           cwd: repoRoot,
           providerStateDir: path.join(run.dir, 'provider'),
         });
@@ -254,7 +248,7 @@ export async function runGuardInterfaceAuthoring(
       opts.onStatus?.('reconciling the state registry');
       reconcile = await reconcileAuthoredStates({
         repoRoot,
-        complete: stateReconcileComplete(repoRoot, opts.transport),
+        complete: stateReconcileComplete(opts.transport),
       });
     }
 
@@ -276,8 +270,8 @@ export async function runGuardInterfaceAuthoring(
 
 export interface RunGuardInterfaceReconcileOptions {
   repoRoot: string;
-  /** Per-run transport flag; the saved selection answers otherwise. */
-  transport?: LlmTransportFlag;
+  /** The transport the one reconciliation call goes through. */
+  transport: LlmTransport;
 }
 
 /**
@@ -291,7 +285,7 @@ export async function runGuardInterfaceReconcile(
 ): Promise<StateReconciliation> {
   return reconcileAuthoredStates({
     repoRoot: opts.repoRoot,
-    complete: stateReconcileComplete(opts.repoRoot, opts.transport),
+    complete: stateReconcileComplete(opts.transport),
   });
 }
 
@@ -299,14 +293,11 @@ export async function runGuardInterfaceReconcile(
  * The one-shot model call the reconciliation asks through. It is NOT the session
  * driver: this is a single schema-bearing completion with no tools and no
  * transcript, so it goes through the ordinary `LlmTransport` seam every other
- * one-shot stage uses — api mode's direct transport when that is configured, an
- * EE-injected default when one is installed, and `claude -p` otherwise.
+ * one-shot stage uses — the run's own transport, handed in by the caller.
  */
-function stateReconcileComplete(repoRoot: string, flag?: LlmTransportFlag): ReconcileComplete {
-  const mode = effectiveLlmMode(flag);
-  const transport = oneShotTransport(flag);
-  const model = resolveModel(STATE_RECONCILE_STAGE, undefined, repoRoot, mode);
-  const fallbackModel = resolveFallbackModel(repoRoot, mode);
+function stateReconcileComplete(transport: LlmTransport): ReconcileComplete {
+  const model = resolveModel(STATE_RECONCILE_STAGE);
+  const fallbackModel = resolveFallbackModel();
   return async (prompt, schema) => {
     const raw = await transport({
       id: STATE_RECONCILE_STAGE,
@@ -323,14 +314,6 @@ function stateReconcileComplete(repoRoot: string, flag?: LlmTransportFlag): Reco
     });
     return JSON.parse(extractJsonValue(raw));
   };
-}
-
-/** The transport a one-shot stage of this command resolves to. */
-function oneShotTransport(flag?: LlmTransportFlag): LlmTransport {
-  if (flag === 'api') return createConfiguredApiTransport();
-  if (flag === 'cli') return cliTransport();
-  installConfiguredLlmTransport();
-  return getDefaultTransport() ?? createClaudeCodeTransport();
 }
 
 /** Every session reached an outcome ⇒ completed; none did ⇒ failed. */

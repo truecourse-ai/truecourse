@@ -12,9 +12,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resetKvCacheStore } from '@truecourse/llm'
 import { LlmStageFailureError } from '@truecourse/shared/llm'
 import { ScanAbortedError, runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
+import { listStoredSessionRuns } from '../../packages/core/src/lib/sessions-store'
+import {
+  installMemoryKvCache,
+  resetKvCacheStore,
+  type MemoryKvCacheStore,
+} from '../helpers/memory-kv-cache'
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
 import {
   CURATE_DOC_SESSION_KIND,
   CURATE_DOC_SYSTEM_PROMPT,
@@ -42,14 +48,18 @@ import {
 import type { DriverResult } from '../../packages/agent-loop/src/index'
 
 let repo: string
+/** The stage cache these cases read back — a scan's cheapness is its subject. */
+let cache: MemoryKvCacheStore
 
 beforeEach(() => {
-  resetKvCacheStore()
+  cache = installMemoryKvCache()
+  installMemorySessionRuns()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-curate-'))
 })
 
 afterEach(() => {
   resetKvCacheStore()
+  resetSessionRuns()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -197,7 +207,7 @@ describe('the curate-doc prompt and briefing', () => {
   })
 
   it('the briefing states the doc PATH and the repo identity', () => {
-    const fixturePath = 'tests/fixtures/sample-js-project-il/reference/specs/modules/orders/data.md'
+    const fixturePath = 'docs/specs/modules/orders/data.md'
     const doc = docCandidate(fixturePath, '# Orders\nThe order entity has an id.\n')
     const briefing = curateDocBriefing(doc, IDENTITY)
     expect(briefing).toMatch(/PATH \(repo-relative\)/)
@@ -241,10 +251,12 @@ describe('spec-scan.curate-doc — the per-doc session cache', () => {
     const cold = await runScan({ decisions, driver: async () => first.driver })
     expect(curatedDocs(first.calls).sort()).toEqual(['docs/auth.md', 'docs/users.md'])
     expect(cold.noChanges).toBe(false)
-
-    // One cache entry per curated doc, under the NEW name.
-    const cacheDir = path.join(repo, '.truecourse', '.cache', 'consolidator', 'curate-doc')
-    expect(fs.readdirSync(cacheDir).filter((f) => f.endsWith('.json'))).toHaveLength(2)
+    // Every doc was judged by a session of its own, and each was cached under
+    // its own key — which the warm run below reads back one per doc.
+    expect(cold.sessions.find((s) => s.kind === CURATE_DOC_SESSION_KIND)).toMatchObject({
+      ran: 2,
+      fromCache: 0,
+    })
 
     // The second run must not even resolve a driver: every doc is a hit.
     const warm = await runScan({
@@ -617,13 +629,6 @@ describe('spec-scan.curate-doc — failures', () => {
 // ---------------------------------------------------------------------------
 
 describe('curateInProcess — the scan command over the session run', () => {
-  it('refuses the `agent` mailbox transport, which cannot carry a session', async () => {
-    twoDocs()
-    await expect(curateInProcess(repo, { llm: 'agent', skipGit: true })).rejects.toThrow(
-      /agent.*mailbox transport cannot carry them/i,
-    )
-  })
-
   it('a systemic loss closes the run record `failed` and writes no corpus', async () => {
     twoDocs()
     const stub = stubDriver(() => transportFailure())
@@ -638,13 +643,9 @@ describe('curateInProcess — the scan command over the session run', () => {
     ).rejects.toBeInstanceOf(LlmStageFailureError)
 
     expect(readCorpus(repo)).toBeNull()
-    const runsDir = path.join(repo, '.truecourse', 'sessions', 'spec-scan')
-    const runIds = fs.readdirSync(runsDir)
-    expect(runIds).toHaveLength(1)
-    const record = JSON.parse(
-      fs.readFileSync(path.join(runsDir, runIds[0], 'run.json'), 'utf-8'),
-    ) as { status: string }
-    expect(record.status).toBe('failed')
+    const runs = await listStoredSessionRuns(repo, 'spec-scan')
+    expect(runs).toHaveLength(1)
+    expect(runs[0].status).toBe('failed')
   })
 
   it('a cancelled scan writes no corpus, caches only what completed, and closes the run `interrupted`', async () => {
@@ -678,18 +679,13 @@ describe('curateInProcess — the scan command over the session run', () => {
     // The corpus the cancelled run would have written is exactly the degenerate
     // one — every unfinished doc folded open — so it must not exist at all.
     expect(readCorpus(repo)).toBeNull()
-    const runsDir = path.join(repo, '.truecourse', 'sessions', 'spec-scan')
-    const runIds = fs.readdirSync(runsDir)
-    expect(runIds).toHaveLength(1)
-    const record = JSON.parse(
-      fs.readFileSync(path.join(runsDir, runIds[0], 'run.json'), 'utf-8'),
-    ) as { status: string }
-    expect(record.status).toBe('interrupted')
+    const runs = await listStoredSessionRuns(repo, 'spec-scan')
+    expect(runs).toHaveLength(1)
+    expect(runs[0].status).toBe('interrupted')
 
     // The completed session is cached (real work, valid output); the aborted
     // one is a failure, and a failure is never cached.
-    const cacheDir = path.join(repo, '.truecourse', '.cache', 'consolidator', 'curate-doc')
-    expect(fs.existsSync(cacheDir) ? fs.readdirSync(cacheDir) : []).toHaveLength(1)
+    expect(cache.size).toBe(1)
   })
 
   it('curates the docs into corpus.json through the driver seam', async () => {

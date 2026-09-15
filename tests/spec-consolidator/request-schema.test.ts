@@ -159,7 +159,7 @@ describe('spec-scan.overlap', () => {
 });
 
 describe('spec-scan.orchestrate', () => {
-  const def = orchestrateSessionDef(buildScanScopeUniverse(UNIVERSE, []));
+  const def = orchestrateSessionDef(buildScanScopeUniverse(UNIVERSE));
 
   it('declares the scope schema, the prompt constant and its read tools', () => {
     expect(def.kind).toBe(SPEC_SCAN_ORCHESTRATE_SESSION_KIND);

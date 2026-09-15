@@ -29,17 +29,3 @@ export function atomicWriteText(targetPath: string, text: string): void {
   fs.writeFileSync(tmp, text);
   fs.renameSync(tmp, targetPath);
 }
-
-// The analyze lock moved to `./analyze-lock.ts` (it became a pluggable seam so
-// the enterprise edition can use a Postgres advisory lock). Re-exported here for
-// back-compat with existing import sites.
-export {
-  AnalyzeLockError,
-  acquireAnalyzeLock,
-  releaseAnalyzeLock,
-  type AnalyzeLock,
-  getAnalyzeLock,
-  setAnalyzeLock,
-  resetAnalyzeLock,
-} from './analyze-lock.js';
-

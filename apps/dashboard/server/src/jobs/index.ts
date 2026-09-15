@@ -13,7 +13,7 @@
  * the same `owner/repo` and the durable stores it writes have no workspace
  * column. Either way the answer is `busy`, and nothing is enqueued.
  *
- * AND THE HEAVY JOBS RUN ONE AT A TIME PER WORKSPACE. Test setup, generation
+ * AND THE HEAVY JOBS RUN ONE AT A TIME PER WORKSPACE. Flow setup, generation
  * and the run each clone the repository, install and build it, map its
  * interfaces and spend the model's sessions; several of them side by side
  * starve the process that is also serving HTTP. So all three are enqueued into
@@ -102,7 +102,7 @@ export interface JobsMount extends Jobs {
   /**
    * A repository's links changed, so its slice moved without the corpus
    * moving: start what the ripple would start for it — nothing while its setup
-   * is in flight, Test generation once set up, Test setup before — under the
+   * is in flight, Flow generation once set up, Flow setup before — under the
    * ripple's gates. Null when nothing was started.
    */
   startForLinks(request: LinksChangedRequest): Promise<RippleStart | null>;
@@ -267,7 +267,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     createRepoGuardRunTask(opts.guardRun),
     createContextSyncTask({
       ...opts.contextSync,
-      // A repository's FIRST sync is the rest of its onboarding: Test setup
+      // A repository's FIRST sync is the rest of its onboarding: Flow setup
       // needs no documents, so it starts whatever the sync reconciled — a
       // repository with no markdown at all still gets set up. Started here, the
       // scan's ripple finds it working rather than racing it.
@@ -284,7 +284,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
           source: 'chain',
         });
         if (outcome.status === 'busy') {
-          log.info(`[jobs] test setup for ${repo.repoFullName} is already in flight`);
+          log.info(`[jobs] flow setup for ${repo.repoFullName} is already in flight`);
         }
       },
       // A sync that reconciled nothing changed no document, so there is nothing

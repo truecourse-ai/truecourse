@@ -1,7 +1,7 @@
 /**
- * In-process driver for `truecourse guard generate` — the spec-side analogue of
- * `curateInProcess`. Shared by the CLI and the dashboard so the estimate gate,
- * model resolution, transport selection, and progress wiring live in one place.
+ * In-process driver for Flow generation — the spec-side analogue of
+ * `curateInProcess`: the estimate gate, model resolution, transport selection
+ * and progress wiring live in one place.
  *
  * Steps: index (deterministic section plan) → extract (claim-extraction
  * sessions) → interfaces → flows (synthesis sessions) → match (one-shot) →
@@ -9,9 +9,8 @@
  * findings are NOT a failure — the driver surfaces them as work to review; only a
  * hard error (no docs, recipe discovery failed) is a non-success outcome.
  *
- * It also drives `truecourse guard recipe` — the recipe VIEW, and nothing more.
- * Standalone discovery moved to `truecourse guard setup`: derivation now
- * exists in exactly one place, so nothing can prepare a repo behind the gate's back.
+ * It also drives the recipe VIEW, and nothing more. Standalone discovery moved
+ * to Flow setup: derivation now exists in exactly one place.
  */
 
 import {
@@ -57,26 +56,17 @@ import { GenerateStepNotReadyError } from '../services/guard-generate/run.js';
 import type { RunError, SessionDriver, SessionLlm } from '@truecourse/agent-loop';
 import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
-import { guardsMaterializeInPlace } from '../lib/guard-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
-import { createSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../lib/sessions-store.js';
+import { createStoredSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../lib/sessions-store.js';
 import {
-  agentTransport,
-  cliTransport,
-  getDefaultTransport,
   getStageUsage,
   resetStageUsage,
   setLlmCallSink,
   type LlmTransport,
 } from '@truecourse/shared/llm';
-import {
-  createConfiguredApiTransport,
-  createClaudeCodeTransport,
-} from '../services/llm/install-transport.js';
-import { createGuardVisualJudge, guardVisualJudgeEnabled } from '../services/llm/guard-visual-judge.js';
 import type { GuardVisualJudge } from '@truecourse/guard-runner';
-import { effectiveLlmMode, readApiLlmConfig, type LlmTransportMode } from '../config/global-config.js';
-import { createConfiguredSessionDriver } from '../services/llm/session-driver.js';
+import type { LlmTransportMode } from '../services/llm/provider-config.js';
+import { createClaudeCodeSessionDriver } from '../services/llm/session-driver.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
@@ -95,7 +85,7 @@ export { GENERATE_SESSION_STEPS, type GenerateStep } from '@truecourse/guard-gen
 export { assertGuardGenerateResumeCommit, guardGenerateResume, GuardGenerateResumeError, type GuardGenerateResume } from '../services/guard-generate/resume.js';
 import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
-import type { LlmEstimate } from './analyze-core.js';
+import type { LlmEstimate } from '../services/llm/token-estimator.js';
 import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../progress.js';
 
@@ -104,8 +94,8 @@ export { EstimateDeclined } from './spec-in-process.js';
 /**
  * The corpus has unresolved within-area overlaps — thrown by the guard-generate
  * gate before any LLM/build work. Carries the full open-conflict list (never
- * truncated) so the CLI can print it and the dashboard can return it; `message`
- * is the assembled multi-line text both surfaces reuse.
+ * truncated) so the dashboard can return it; `message` is the assembled
+ * multi-line text.
  */
 export class OpenConflictsError extends Error {
   constructor(public readonly conflicts: CorpusConflict[]) {
@@ -129,7 +119,7 @@ export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string 
   }
   lines.push('');
   lines.push(
-    'Resolve them with `truecourse spec conflicts list` (or the dashboard Conflicts group), then re-run `truecourse guard generate`.',
+    'Resolve them in the Conflicts group, then re-run Flow generation.',
   );
   return lines.join('\n');
 }
@@ -141,12 +131,12 @@ export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string 
  * work (and before the estimate) when any overlap is still open. No corpus at all
  * is NOT a conflict — the downstream no-docs path reports that.
  *
- * Reads the ON-DISK `.truecourse/specs/{corpus,decisions}.json` the generator
- * itself reads (via the spec-consolidator file readers) — NOT the active spec
- * store. OSS is byte-identical (the store was these files). EE materializes both
- * artifacts into the checkout before generate, so the gate and the generator see
- * the same corpus + resolutions; a store keyed by `owner/repo` would miss under
- * the ephemeral checkout path and silently skip the gate.
+ * Reads the corpus + decisions out of the run's work tree — the ones the
+ * generator itself reads (via the spec-consolidator file readers) — NOT the
+ * active spec store. The job materializes both into the clone before generate,
+ * so the gate and the generator see the same corpus + resolutions; a store keyed
+ * by `owner/repo` would miss under the ephemeral clone path and silently skip
+ * the gate.
  */
 function assertNoOpenConflicts(repoRoot: string): void {
   const corpus = readCorpus(repoRoot);
@@ -156,7 +146,7 @@ function assertNoOpenConflicts(repoRoot: string): void {
   if (open.length > 0) throw new OpenConflictsError(open);
 }
 
-/** Stable step taxonomy for the guard generate progress UI (CLI + dashboard). */
+/** Stable step taxonomy for the guard generate progress UI. */
 export const GUARD_GENERATE_STEPS = [
   { key: 'index', label: 'Indexing sections' },
   { key: 'extract', label: 'Extracting claims' },
@@ -213,20 +203,13 @@ export interface GuardGenerateInProcessOptions {
   /** Restore this interrupted run's completed stages without repeating their LLM work. */
   resume?: GuardGenerateResume;
   /**
-   * LLM transport: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or
-   * `api` (the provider configured in `~/.truecourse/config.json`). Unset
-   * follows the saved selection.
+   * The transport the ONE-SHOT stages (recipe discovery, realization matching)
+   * run on: the one the dashboard server built from the asking workspace's
+   * stored provider config, or the operator's Claude Code. Credentials travel
+   * with the run, not through a process-wide default. The session stages ride
+   * `driver`; a hosted caller passes both.
    */
-  llm?: 'cli' | 'agent' | 'api';
-  io?: string;
-  /**
-   * Run the ONE-SHOT stages (recipe discovery, realization matching) on THIS
-   * transport instead of resolving one. The dashboard server passes the
-   * transport it built from the asking workspace's stored provider config —
-   * credentials travel with the run, not through a process-wide default. The
-   * session stages ride `driver`; a hosted caller passes both.
-   */
-  transport?: LlmTransport;
+  transport: LlmTransport;
   /**
    * Run the SESSION stages (extraction, flow synthesis, the flow workers) on
    * THIS driver instead of the configured one. Ignored when every session seam
@@ -235,10 +218,9 @@ export interface GuardGenerateInProcessOptions {
    */
   driver?: SessionDriver;
   /**
-   * The mode an explicit `transport` runs in, which decides the stage models:
-   * `claude-code` keeps the tier aliases `claude -p` understands, `api` (the
-   * default) substitutes the one configured API model. Ignored without
-   * `transport`.
+   * The mode `transport` runs in, which decides the stage models: `claude-code`
+   * keeps the tier aliases the Agent SDK understands, `api` (the default)
+   * substitutes the one configured API model.
    */
   transportMode?: LlmTransportMode;
   /**
@@ -249,8 +231,8 @@ export interface GuardGenerateInProcessOptions {
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   /**
    * Progress surface for the estimate itself (it runs before the first pipeline
-   * step, so the tracker can't carry it). The CLI resolves a spinner line above
-   * the estimate panel; the dashboard passes `estimateStepPhase(tracker)`.
+   * step, so the tracker can't carry it). The dashboard passes
+   * `estimateStepPhase(tracker)`.
    */
   onEstimatePhase?: EstimatePhase;
   /**
@@ -267,7 +249,7 @@ export interface GuardGenerateInProcessOptions {
    */
   attribution?: SessionLlm;
   /** The run record just came into being — before the gates, so a generate the
-   *  gates stop is on record too. The CLI prints its "watch live" link from it. */
+   *  gates stop is on record too. The caller learns the run's id from it. */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
    * Stop the run. The generator has no abort seam of its own, so this is honored
@@ -279,8 +261,9 @@ export interface GuardGenerateInProcessOptions {
   signal?: AbortSignal;
   /**
    * Refuse to derive a recipe: generate loads what `guard setup` left and stops
-   * without one. Defaults to "where a user could have run setup" — the in-place
-   * file store. A hosted job materializes setup's bundle first and passes true.
+   * without one. Defaults to false — a bare checkout with no setup bundle still
+   * derives its own recipe. The job materializes setup's bundle first and passes
+   * true.
    */
   requireExistingRecipe?: boolean;
   // --- test seams for the two remaining one-shot stages (production injects
@@ -288,10 +271,9 @@ export interface GuardGenerateInProcessOptions {
   recipeRunner?: RecipeRunner;
   matchRunner?: MatchRunner;
   /**
-   * Session-seam overrides (plan 04) — tests inject stubs here. Unset,
-   * production wires `createGuardGenerateSessionSeams`. The seams are REQUIRED
-   * by the engine since the one-shot retirement (step 20), which is why
-   * `--llm agent` (the mailbox transport, which has no session driver) is
+   * Session-seam overrides — tests inject stubs here. Unset, production wires
+   * `createGuardGenerateSessionSeams`. The seams are REQUIRED by the engine
+   * since the one-shot retirement, which is why a run with no session driver is
    * refused up front unless every seam is injected.
    */
   extractSession?: ExtractSessionSeam;
@@ -302,7 +284,7 @@ export interface GuardGenerateInProcessOptions {
   flowsAreaSession?: FlowsAreaSessionSeam;
   flowsEpicSession?: FlowsEpicSessionSeam;
   flowWorkerSession?: FlowWorkerSessionSeam;
-  /** Interface mapping seam — defaults to the deterministic analyzer-backed mapper. */
+  /** Interface mapping seam — defaults to the deterministic source-facts mapper. */
   interfaces?: InterfaceProvider;
   /**
    * INTERNAL test seam: stop the pipeline after flow synthesis. Never exposed as a
@@ -311,7 +293,7 @@ export interface GuardGenerateInProcessOptions {
    */
   stopAfterFlows?: boolean;
   /**
-   * Single-step mode (the CLI's `--only-<step>` flags): run only this session
+   * Single-step mode (`only`): run only this session
    * step's sessions — prior steps replay from their outcome caches (a miss
    * throws {@link GenerateStepNotReadyError}), later steps never start, and
    * nothing durable is written unless the FINAL step (`worker`) runs: no
@@ -319,102 +301,70 @@ export interface GuardGenerateInProcessOptions {
    * The estimate gate prices only the chosen step.
    */
   only?: GenerateStep;
-  /** Re-author changed flows from scratch instead of editing their committed scenarios. */
+  /** Re-author changed flows from scratch instead of editing their stored scenarios. */
   fromScratch?: boolean;
 }
 
 /**
  * The pre-flight guard estimate the dashboard renders — the SAME
- * `estimateGuardTokens(repoRoot, prices)` the CLI prompt and the driver's own gate
- * use (deterministic token math + ceiling cost, cache-aware, "N of M sections
+ * `estimateGuardTokens(repoRoot, prices)` the driver's own gate
+ * uses (deterministic token math + ceiling cost, cache-aware, "N of M sections
  * changed"). Exposed so the dashboard estimate route re-derives nothing.
  */
 export async function estimateGuard(
   repoRoot: string,
-  mode?: LlmTransportMode,
+  sessionModel?: string,
 ): Promise<LlmEstimate> {
-  return estimateGuardTokens(repoRoot, await getModelPrices(), { mode });
+  return estimateGuardTokens(repoRoot, await getModelPrices(), { ...(sessionModel ? { sessionModel } : {}) });
 }
 
 /**
  * The models of the two remaining ONE-SHOT stages. Every session stage
  * (extraction, flow synthesis, the flow workers, the fidelity children) runs on
- * the ONE configured session model (§3.4) inside
+ * the ONE configured session model inside
  * `createGuardGenerateSessionSeams` — there is no per-stage tier for them.
  */
-function resolveGuardModels(repoRoot: string, mode: LlmTransportMode): GuardGenerateModels {
+function resolveGuardModels(): GuardGenerateModels {
   return {
-    match: resolveModel('guard.match', undefined, repoRoot, mode),
-    recipe: resolveModel('guard.recipe', undefined, repoRoot, mode),
-    fallback: resolveFallbackModel(repoRoot, mode) ?? undefined,
+    match: resolveModel('guard.match'),
+    recipe: resolveModel('guard.recipe'),
+    fallback: resolveFallbackModel() ?? undefined,
   };
-}
-
-/**
- * Build the LLM transport for a run — an explicit per-run override of the saved
- * selection. `agent` → the filesystem mailbox under `options.io`; `api` → the
- * direct-API transport from the user's global config (throws when it isn't
- * configured); `cli` → `claude -p`, forcing Claude Code even when an API
- * transport is the installed default; unset → the installed default, else
- * `undefined` so each runner falls back to its built-in cli transport. An
- * explicit `transport` instance short-circuits all of it — it already carries
- * the credentials its caller chose.
- *
- * {@link effectiveLlmMode} moves the STAGE MODELS the same way, so a `cli` flag
- * never hands an api-configured model to `claude -p`.
- */
-function resolveTransport(options: {
-  llm?: 'cli' | 'agent' | 'api';
-  io?: string;
-  transport?: LlmTransport;
-}): LlmTransport {
-  // An explicit instance is the whole answer — it already carries the
-  // credentials the caller chose for this run.
-  if (options.transport) return options.transport;
-  if (options.llm === 'agent') {
-    if (!options.io) {
-      throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
-    }
-    return agentTransport(options.io);
-  }
-  if (options.llm === 'api') return createConfiguredApiTransport();
-  if (options.llm === 'cli') return cliTransport();
-  return getDefaultTransport() ?? createClaudeCodeTransport();
 }
 
 export interface GuardGenerateInProcessResult {
   guard: GuardGenerateResult;
   /**
-   * The sessions-store run dir (`.truecourse/sessions/guard-generate/<runId>/`)
-   * this run's transcripts landed in — what a stepwise run is inspected
-   * through. The record exists from the first gate on, so it is always set.
+   * The sessions-store scratch dir this run used, under the runtime directory —
+   * what a stepwise run is inspected through. The record exists from the first
+   * gate on, so it is always set.
    */
   sessionsRunDir?: string;
 }
 
 export async function guardGenerateInProcess(
   repoRoot: string,
-  options: GuardGenerateInProcessOptions = {},
+  options: GuardGenerateInProcessOptions,
 ): Promise<GuardGenerateInProcessResult> {
   const { tracker } = options;
   const restored = new Set(options.resume?.completedSteps ?? []);
-  // The transport this run actually uses decides the models — never the saved
-  // selection a `--llm-transport` flag just overrode. An explicit transport IS
-  // the selection, and its caller says which mode it runs in (a stored
-  // provider block is api mode whatever the local config file says; the
-  // operator's Claude Code keeps the tier aliases).
-  const mode = options.transport ? (options.transportMode ?? 'api') : effectiveLlmMode(options.llm);
-  const models = resolveGuardModels(repoRoot, mode);
+  // The transport this run uses decides the models, and its caller says which
+  // mode it runs in (a stored provider block is api mode; the operator's Claude
+  // Code keeps the tier aliases).
+  const mode: LlmTransportMode = options.transportMode ?? 'api';
+  const models = resolveGuardModels();
 
-  // The run record: `sessions/guard-generate/<runId>/` — the step checklist,
-  // what it ran on, how it ended, and every session's transcript. Created
+  // The run record — the step checklist, what it ran on, how it ended, and
+  // every session's transcript, appended to its journal. Created
   // FIRST: a generate that started and was stopped by a gate — a blocked
   // corpus, a declined estimate, an unusable provider config — is still a
   // generate that started, and Activity must say so and why.
-  const run = options.sessionRun ?? createSessionRun(options.sessionsKey ?? repoRoot, {
-    command: 'guard-generate',
-    gitRef: await resolveCommitSha(repoRoot),
-  });
+  const run =
+    options.sessionRun ??
+    (await createStoredSessionRun(options.sessionsKey ?? repoRoot, {
+      command: 'guard-generate',
+      gitRef: await resolveCommitSha(repoRoot),
+    }));
   run.setLlm({ mode, ...(options.attribution ?? defaultAttribution(mode)) });
   options.onRunStarted?.({ command: 'guard-generate', runId: run.runId, dir: run.dir });
   const untap = tracker?.tap((progress) => {
@@ -444,7 +394,10 @@ export async function guardGenerateInProcess(
     if (options.onLlmEstimate) {
       const prices = await getModelPrices();
       const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-        estimateGuardTokens(repoRoot, prices, { mode, ...(options.only ? { only: options.only } : {}) }),
+        estimateGuardTokens(repoRoot, prices, {
+          ...(options.attribution?.model ? { sessionModel: options.attribution.model } : {}),
+          ...(options.only ? { only: options.only } : {}),
+        }),
       );
       if ((estimate.stages?.length ?? 0) > 0) {
         const proceed = await options.onLlmEstimate(estimate);
@@ -452,7 +405,7 @@ export async function guardGenerateInProcess(
       }
     }
 
-    transport = resolveTransport(options);
+    transport = options.transport;
     if (options.resume) {
       assertGuardGenerateResumeCommit(options.resume, await resolveCommitSha(repoRoot));
       const liveTransport = transport;
@@ -563,19 +516,9 @@ export async function guardGenerateInProcess(
     tracker?.detail('validate', parts.join(' · '));
   };
 
-  // The generate session seams (plan 04): extraction, flow synthesis and the
-  // flow workers run as agent sessions — THE paths since the one-shot
-  // retirement (step 20). Lazy by construction: a fully-cached run creates no
-  // run record and no driver. The `agent` mailbox transport has no session
-  // driver, so it cannot drive a generate any more — refused up front (before
-  // the estimate already ran above) unless a test injected every seam.
-  const seamsInjected =
-    options.extractSession && options.flowsAreaSession && options.flowsEpicSession && options.flowWorkerSession;
-  if (options.llm === 'agent' && !seamsInjected) {
-    throw new Error(
-      'guard generate runs its LLM stages as agent sessions, and the `agent` mailbox transport has no session driver — use `--llm-transport cli` or `--llm-transport api`.',
-    );
-  }
+  // The generate session seams: extraction, flow synthesis and the flow workers
+  // run as agent sessions — THE paths since the one-shot retirement. Lazy by
+  // construction: a fully-cached run creates no run record and no driver.
   // The sessions run on the command's OWN run record (created above, before
   // the gates), so the seams are handed its driver and persistence and create
   // none of their own. The driver is built LAZILY: a fully-cached run resolves
@@ -589,34 +532,30 @@ export async function guardGenerateInProcess(
         if (!options.attribution) run.setLlm({ mode, ...options.driver.attribution });
         return { driver: options.driver, persistence: run.persistence };
       }
-      const configured = createConfiguredSessionDriver({
-        ...(options.llm === 'cli' || options.llm === 'api' ? { transport: options.llm } : {}),
+      const configured = createClaudeCodeSessionDriver({
         cwd: repoRoot,
         providerStateDir: path.join(run.dir, 'provider'),
       });
       if (!options.attribution) run.setLlm({ mode: configured.mode, ...configured.attribution });
       return { driver: configured.driver, persistence: run.persistence };
     })().catch((e) => ((sessionContext = null), Promise.reject(e))));
-  const sessionSeams =
-    options.llm === 'agent'
-      ? null
-      : createGuardGenerateSessionSeams({
-          repoRoot,
-          driver: acquireSessionContext,
-          // Single-step mode: the seams enforce the cache-only replay of every
-          // step before the chosen one (the engine enforces the stop after it).
-          ...(options.only ? { only: options.only } : {}),
-          ...(options.resume ? { replaySteps: (['extract', 'flows'] as const).filter(step => restored.has(step)) } : {}),
-        });
-  const extractSession = options.extractSession ?? sessionSeams!.extractSession;
+  const sessionSeams = createGuardGenerateSessionSeams({
+    repoRoot,
+    driver: acquireSessionContext,
+    // Single-step mode: the seams enforce the cache-only replay of every step
+    // before the chosen one (the engine enforces the stop after it).
+    ...(options.only ? { only: options.only } : {}),
+    ...(options.resume ? { replaySteps: (['extract', 'flows'] as const).filter(step => restored.has(step)) } : {}),
+  });
+  const extractSession = options.extractSession ?? sessionSeams.extractSession;
   // An injected extraction seam owns no cache, so the production reuse seam
   // would address entries the injected seam never wrote: the gate only rides
   // with the seam it was injected beside, or with production extraction.
   const reuseExtraction =
     options.reuseExtraction ?? (options.extractSession ? undefined : sessionSeams?.reuseExtraction);
-  const flowsAreaSession = options.flowsAreaSession ?? sessionSeams!.flowsAreaSession;
-  const flowsEpicSession = options.flowsEpicSession ?? sessionSeams!.flowsEpicSession;
-  const flowWorkerSession = options.flowWorkerSession ?? sessionSeams!.flowWorkerSession;
+  const flowsAreaSession = options.flowsAreaSession ?? sessionSeams.flowsAreaSession;
+  const flowsEpicSession = options.flowsEpicSession ?? sessionSeams.flowsEpicSession;
+  const flowWorkerSession = options.flowWorkerSession ?? sessionSeams.flowWorkerSession;
 
   if (options.resume) {
     for (const key of restored) tracker?.done(key, `Restoring completed work from ${options.resume.runId}`);
@@ -634,8 +573,8 @@ export async function guardGenerateInProcess(
       executor: getGuardExecutor(),
       // The require-a-recipe gate — where a user could have run `guard setup`, or
       // where the caller materialized setup's bundle itself (the hosted job). A
-      // gate generate over a bare checkout keeps deriving its own recipe.
-      requireExistingRecipe: options.requireExistingRecipe ?? guardsMaterializeInPlace(),
+      // generate over a bare checkout keeps deriving its own recipe.
+      requireExistingRecipe: options.requireExistingRecipe ?? false,
       recipeRunner: options.recipeRunner,
       matchRunner: options.matchRunner,
       extractSession,
@@ -653,7 +592,7 @@ export async function guardGenerateInProcess(
           return {
             interfaces: mapped.catalog.interfaces,
             // The resource registry rides the same seam — the mapper forms the
-            // cli and api places itself now (plan item 102), and a hand-authored
+            // cli and api places itself now, and a hand-authored
             // web registry arrives the same way.
             ...(mapped.catalog.resources ? { resources: mapped.catalog.resources } : {}),
             externalServices: mapped.externalServices,
@@ -769,7 +708,7 @@ export async function guardGenerateInProcess(
       // Single-step mode, before the final step: the same write gate as a clean
       // stop. This run could never have produced a whole generate's report, so
       // persisting one would overwrite the LAST FULL generate's `result.json`
-      // (what `guard status` and the dashboard read) with a partial abort. The
+      // (what the dashboard reads) with a partial abort. The
       // caller still gets the failure — loudly, and non-zero.
       if (!options.only || options.only === 'worker') persistGuardReport(repoRoot, guard);
       finishRun('failed', {
@@ -779,8 +718,8 @@ export async function guardGenerateInProcess(
     }
 
     // A single-step run stopped BEFORE the final step: close only the step that
-    // actually opened (the CLI hands the tracker a reduced checklist, so the
-    // later keys don't exist — and StepTracker no-ops on unknown keys anyway),
+    // actually opened (a caller may hand the tracker a reduced checklist, so
+    // the later keys don't exist — and StepTracker no-ops on unknown keys anyway),
     // and persist NOTHING. `guard/result.json` describes a completed generate;
     // a partial run's counts would read as a whole one's.
     if (guard.stoppedAfter) {
@@ -795,7 +734,7 @@ export async function guardGenerateInProcess(
       tracker?.done('validate', 'nothing changed');
     } else {
       tracker?.done('author', `${guard.written.length} test${guard.written.length === 1 ? '' : 's'} written`);
-      // Every authored test is committed, so the validate line reports the split:
+      // Every authored test is stored, so the validate line reports the split:
       // how many landed green vs. red at the worker's confirmation run.
       const failing = guard.written.filter((w) => w.status === 'failing').length;
       const failingTag = failing ? ` · ${failing} failing` : '';
@@ -840,14 +779,13 @@ export class GuardGenerateAborted extends Error {
 }
 
 /**
- * What the run record says before its session driver exists: the saved API
- * provider (or the operator's Claude Code) and no model yet. The driver's own
- * attribution replaces it the moment a session is acquired; a fully-cached run
- * that acquires none keeps this. Never credentials.
+ * What the run record says before its session driver exists: how it will reach
+ * the model, and no model yet. The driver's own attribution replaces it the
+ * moment a session is acquired; a fully-cached run that acquires none keeps
+ * this. Never credentials.
  */
 function defaultAttribution(mode: LlmTransportMode): SessionLlm {
-  const provider = mode === 'api' ? (readApiLlmConfig()?.provider ?? 'api') : 'claude-code';
-  return { provider, model: 'default' };
+  return { provider: mode === 'api' ? 'api' : 'claude-code', model: 'default' };
 }
 
 /** The first line of a (possibly multi-line, guided) abort reason — a step detail
@@ -860,15 +798,15 @@ function firstLine(reason: string | undefined): string | undefined {
  * The guard LLM stages whose usage the report totals — the two remaining
  * ONE-SHOT transport stages. The session stages (extraction, flows, workers,
  * fidelity children) never reach the stage-usage sink: their spend lives in the
- * sessions store (`sessions/guard-generate/<runId>/`), so the persisted
+ * sessions store, on the run's own record, so the persisted
  * `usage` row deliberately covers the transport half only.
  */
 const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.match'] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`
- * when no real call landed (a noChanges no-op, cache-only run, or the `agent`
- * transport which records nothing) so the report stays a clean superset.
+ * when no real call landed (a noChanges no-op or a cache-only run) so the
+ * report stays a clean superset.
  */
 function sumGuardUsage(): GuardGenerateUsage | undefined {
   const usage = getStageUsage();
@@ -889,7 +827,7 @@ function sumGuardUsage(): GuardGenerateUsage | undefined {
 
 /**
  * Persist the generate report, carrying forward the PRIOR report's birth findings
- * for committed failing tests this generate did not re-execute (see
+ * for stored failing tests this generate did not re-execute (see
  * `carryForwardBirthFindings`) — without it, a cached/no-op regenerate wipes the
  * only record of what those red tests actually saw (expected/actual/evidence)
  * while the manifest still marks them failing. The prior report is read BEFORE
@@ -920,9 +858,9 @@ export function buildGuardReport(
  * The blocked report an unresolved-conflict generate persists: `status:
  * 'open-conflicts'` with the error's formatted multi-line message as `reason`,
  * and every list field empty (nothing generated). The conflict list is NOT
- * snapshotted — surfaces render it live from the corpus. Used by EE onboarding to
- * record a needs-attention outcome without saving a scenario set; OSS never
- * persists it (the CLI throws the error and writes no report).
+ * snapshotted — surfaces render it live from the corpus. Used by the hosted
+ * generate job to record a needs-attention outcome without saving a scenario
+ * set.
  */
 export function buildOpenConflictsReport(
   error: OpenConflictsError,
@@ -949,7 +887,7 @@ export function buildOpenConflictsReport(
 // guard run — the deterministic, LLM-free verification pass.
 // ---------------------------------------------------------------------------
 
-/** Stable step taxonomy for the guard run progress UI (CLI + dashboard). */
+/** Stable step taxonomy for the guard run progress UI. */
 export const GUARD_RUN_STEPS = [
   { key: 'build', label: 'Building via recipe' },
   { key: 'run', label: 'Running scenarios' },
@@ -957,36 +895,37 @@ export const GUARD_RUN_STEPS = [
 
 export interface GuardRunInProcessOptions {
   tracker?: StepTracker;
-  /** Restrict the run to a single scenario id (`--scenario`). */
+  /** Restrict the run to a single scenario id. */
   scenario?: string;
-  /** Fires with each scenario's result as it settles — the CLI streams non-pass lines from it. */
+  /** Fires with each scenario's result as it settles. */
   onScenarioResult?: (result: GuardScenarioResult) => void;
   /**
-   * Override the visual judge for a failing web step. An injected judge always
-   * wins (a test that must never reach a model passes its own, or one that
-   * returns `null`). Unset, production gets {@link createGuardVisualJudge} — but
-   * only when {@link guardVisualJudgeEnabled} says so: the judge is parked
-   * (off by default) until its cost/value is settled.
+   * The visual judge for a failing web step, when the run has one: the hosted
+   * run job builds it on the workspace's transport (`createGuardVisualJudge`)
+   * only when `guardVisualJudgeEnabled` says so — the judge is parked (off by
+   * default) until its cost/value is settled. A test that must never reach a
+   * model passes one that returns `null`. Unset, the run has no judge.
    */
   visualJudge?: GuardVisualJudge;
 }
 
 /**
- * In-process driver for `truecourse guard run` — the guard analogue of the
- * curate/generate drivers. Resolves the repo ref, runs the committed scenarios
+ * In-process driver for a Flow run — the guard analogue of the
+ * curate/generate drivers. Resolves the repo ref, runs the stored scenarios
  * through the guard-runner, and drives a tracker through GUARD_RUN_STEPS (build →
- * run, with a live per-scenario counter) so the CLI terminal and the dashboard
- * popup show the same stream. Returns the runner's discriminated result untouched
+ * run, with a live per-scenario counter) so every surface watching the run sees
+ * the same stream. Returns the runner's discriminated result untouched
  * — the caller decides how to present each status.
  *
- * Deterministic, with ONE opt-in annotation: when {@link guardVisualJudgeEnabled}
- * (off by default — the judge is parked), a failing WEB step's screenshot is shown
- * to a vision model, whose verdict is recorded beside the failure (see
- * {@link createGuardVisualJudge}). It cannot move an outcome and it never fires on
+ * Deterministic, with ONE opt-in annotation: when the caller hands in a visual
+ * judge (the hosted run job does, on the workspace's transport, only while
+ * `guardVisualJudgeEnabled` says so — the judge is parked, off by default), a
+ * failing WEB step's screenshot is shown to a vision model, whose verdict is
+ * recorded beside the failure. It cannot move an outcome and it never fires on
  * a green run, so a passing run is exactly as LLM-free as it always was. THIS is
  * the boundary the judge is wired at — the guard-runner takes it as an optional
- * callback, so every caller that does not come through here (birth validation, the
- * test suite, a hosted executor) runs with no judge and no model at all.
+ * callback, so every caller that passes none (birth validation, the test suite,
+ * a hosted executor) runs with no judge and no model at all.
  */
 export async function guardRunInProcess(
   repoRoot: string,
@@ -1005,16 +944,14 @@ export async function guardRunInProcess(
   const { loaded, selected, corpusIds, loadErrors } = sourced;
 
   // Failure-only, fail-soft, and unable to change a verdict — see the doc above.
-  // An injected judge always wins; the built one is gated on the opt-in flag.
-  const visualJudge =
-    options.visualJudge ?? (guardVisualJudgeEnabled() ? createGuardVisualJudge(repoRoot) : undefined);
+  const { visualJudge } = options;
 
   const result = mergeLoadErrors(
     await getGuardExecutor()({
       checkoutDir: repoRoot,
       recipe: loaded.recipe,
       scenarios: selected,
-      // The `--scenario` filter was applied HERE, so the run has to be told what it
+      // The `scenario` filter was applied HERE, so the run has to be told what it
       // filtered out: a scoped run merges into the recorded board, and only the ids
       // that left the corpus may drop off it.
       corpusIds,
@@ -1094,14 +1031,14 @@ async function resolveGuardRepoRef(repoRoot: string): Promise<{ branch: string |
 // ---------------------------------------------------------------------------
 
 /**
- * What `truecourse guard recipe` renders: the recipe as the runner loads it, plus
+ * What the recipe VIEW renders: the recipe as the runner loads it, plus
  * the staleness the dashboard card already computes. `recipe` and `invalidReason`
  * are mutually exclusive and both null when no `recipe.json` exists;
- * `fingerprint`/`stale` come from {@link readGuardRecipeCard}, so the terminal and
- * the Scenarios tab can never disagree about whether the recipe drifted.
+ * `fingerprint`/`stale` come from {@link readGuardRecipeCard}, so no two surfaces
+ * can disagree about whether the recipe drifted.
  */
 export interface GuardRecipeView {
-  /** Absolute path to `recipe.json` — printed whether or not the file exists. */
+  /** Absolute path to `recipe.json`, whether or not the file exists. */
   path: string;
   /** The loaded recipe; null when absent OR unparseable (see `invalidReason`). */
   recipe: Recipe | null;
@@ -1109,11 +1046,12 @@ export interface GuardRecipeView {
   invalidReason: string | null;
   /** `sha256:…` over the discovery inputs; null when there is no valid recipe. */
   fingerprint: string | null;
-  /** True when the inputs moved since the last run's fingerprint; null with no run. */
+  /** Always null: there is no working tree to fingerprint, so staleness is
+   *  unknowable — the recipe-card read never claims otherwise. */
   stale: boolean | null;
   /**
-   * The credential `satisfies` verdict against the corpus's OpenAPI schemes (item
-   * 56) — the SAME check `guard generate` fails on, surfaced while showing the
+   * The credential `satisfies` verdict against the corpus's OpenAPI schemes — the
+   * SAME check `guard generate` fails on, surfaced while showing the
    * recipe so the defect is visible before a generate is paid for. Both lists are
    * empty when there is no recipe (nothing to validate).
    */

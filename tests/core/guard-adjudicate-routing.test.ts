@@ -1,5 +1,5 @@
 /**
- * THE VERDICT ROUTING (plan 05 step 23) — what a class does BESIDES landing on
+ * THE VERDICT ROUTING — what a class does BESIDES landing on
  * the row. `authoring-defect` blames the scenario, so it taints the flow in the
  * durable auto-resolutions ledger (source `adjudicate`, the same
  * escalate-after-2 budget every other auto behavior spends) and, at high
@@ -23,15 +23,18 @@ import {
 } from '@truecourse/shared'
 import { claimIdentity, persistAdjudication } from '../../packages/core/src/services/guard-adjudicate/fold'
 import type { AdjudicationItem } from '../../packages/core/src/services/guard-adjudicate/pre-pass'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 let repo: string
 
 beforeEach(() => {
+  installWorkTreeGuardStore()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-adjudicate-routing-'))
   // A board holding the row, so the persist half has something to patch.
   writeGuardLatest(repo, board())
 })
 afterEach(() => {
+  resetGuardStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -164,7 +167,7 @@ describe('the ledger — an authoring-defect taints its flow under source `adjud
   // The fold PATCHES the ledger it reads (the store's read-patch-write idiom), so
   // a reader that handed out one shared empty object would carry this repo's
   // counts and taints into the next ledgerless repo of the same process — the
-  // dashboard server and any two-repo CLI run being the real cases.
+  // dashboard server, one process over many repositories, being the real case.
   it('keeps two repos of one process apart when neither has a ledger file yet', async () => {
     const other = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-adjudicate-routing-other-'))
     try {

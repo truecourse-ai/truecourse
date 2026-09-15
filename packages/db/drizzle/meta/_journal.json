@@ -141,6 +141,48 @@
       "when": 1789174251555,
       "tag": "0019_drop_spec_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789338943549,
+      "tag": "0020_drop_analyze_era",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789356796572,
+      "tag": "0021_drop_ee_era",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789356896572,
+      "tag": "0022_provider_repositories",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789456896572,
+      "tag": "0023_drop_pull_request_gate",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789556896572,
+      "tag": "0024_drop_guard_pr_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789656896572,
+      "tag": "0025_guard_run_flows",
+      "breakpoints": true
     }
   ]
 }

@@ -24,12 +24,12 @@
  * tagline — never inferred by an LLM.
  *
  * Split in two on purpose:
- *   - {@link readRepoIdentityInput} — the filesystem half. OSS only; EE's scan
- *     runs on an ephemeral shallow clone in a temp dir where the basename is
- *     `tc-gate-scan-XXXX` and there is nothing worth reading.
- *   - {@link resolveRepoIdentity} — pure. EE calls it directly with the
- *     authoritative `repoFullName` it already has, and it unit-tests without
- *     fixture repos.
+ *   - {@link readRepoIdentityInput} — the filesystem half, for a caller that has
+ *     a checkout worth reading. A run works in an ephemeral clone whose
+ *     directory name says nothing, so it does not use this half.
+ *   - {@link resolveRepoIdentity} — pure. A caller with the authoritative
+ *     `repoFullName` already in hand calls it directly, and it unit-tests
+ *     without fixture repos.
  */
 
 import fs from 'node:fs';
@@ -40,7 +40,7 @@ import { hasMarkdownExtension } from '@truecourse/shared';
 import { docBody, type DocCandidate } from './discovery.js';
 
 export interface RepoIdentityInput {
-  /** EE: `req.repoFullName` (`owner/repo`). Authoritative — skips the fs entirely. */
+  /** `owner/repo`, when the caller already knows it. Authoritative — skips the fs entirely. */
   repoFullName?: string;
   /** `origin`'s URL, ssh or https. */
   gitRemoteUrl?: string;
@@ -361,7 +361,7 @@ function collectSeeds(input: RepoIdentityInput): Seed[] {
     if (v) seeds.push({ value: v, source });
   };
 
-  // `owner/repo` — EE hands this over directly and it is authoritative.
+  // `owner/repo` — a caller that knows it hands it over, and it is authoritative.
   if (input.repoFullName) push(repoPart(input.repoFullName), 'repo-full-name');
   else push(repoFromRemote(input.gitRemoteUrl), 'git-remote');
 
@@ -381,8 +381,8 @@ function collectSeeds(input: RepoIdentityInput): Seed[] {
  * READMEs decorate their H1 with badges and logo links, and plenty open with a
  * sentence ("Welcome to the Wekan developer documentation wiki") that would
  * otherwise become a junk alias — so decoration is stripped and anything past a
- * few words is rejected. Lives here rather than in the fs reader so EE gets the
- * same treatment when it supplies an H1 directly.
+ * few words is rejected. Lives here rather than in the fs reader so a caller
+ * supplying an H1 directly gets the same treatment.
  */
 const MAX_README_H1_WORDS = 3;
 
@@ -717,7 +717,7 @@ export function resolveWorkspaceIdentity(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Filesystem half (OSS)
+// Filesystem half
 // ---------------------------------------------------------------------------
 
 /**
@@ -847,8 +847,8 @@ function tomlValue(repoRoot: string, file: string, keyPath: string[]): unknown {
 /**
  * The README's raw text. Both README-derived seeds are read out of it by the
  * pure half — the title (`titleFromH1`) and the product tagline
- * (`taglineFromReadme`) — so EE gets the same treatment when it supplies the
- * text directly.
+ * (`taglineFromReadme`) — so a caller supplying the text directly gets the same
+ * treatment.
  */
 function readReadmeText(repoRoot: string): string | undefined {
   let entries: string[];

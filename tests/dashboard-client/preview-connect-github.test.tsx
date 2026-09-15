@@ -1,11 +1,10 @@
 /**
  * Connecting a repository through the GitHub App, from the one-product shell.
  *
- * Everything else in the preview is fake, so this file is about the seam: the
- * dialog reads the real `/api/github/status`, lists what an installation can
- * see, posts one `/api/github/repos/link` per picked repository, and the shell
- * re-reads the real `/api/repos`. A repository that came back that way renders
- * on Code with none of the fixture coverage the mock repositories have.
+ * This file is about the seam: the dialog reads the real `/api/github/status`,
+ * lists what an installation can see, posts one `/api/github/repos/link` per
+ * picked repository, and the shell re-reads the real `/api/repos`. A repository
+ * that came back that way renders on Code with no stored coverage behind it.
  *
  * The CONTEXT STEP is the second real seam: the workspace's EXISTING sources
  * come from `/api/context/sources` (connecting creates none, sources are made
@@ -14,8 +13,8 @@
  * `PUT /api/repos/:id/context/bindings` once the link landed.
  *
  * The seam widened with the agent's own page: its conversations are the real
- * ones (`/api/sessions/runs`, over every connected repository), and a fixture
- * repository contributes none — the last describe here.
+ * ones (`/api/sessions/runs`, over every connected repository), and the page
+ * reads that route rather than a repository's — the last describe here.
  *
  * `window.fetch` is replaced wholesale rather than routed around the preview's
  * own shim: the shim is installed once when the preview chunk loads (it never
@@ -33,8 +32,8 @@ import type {
   GithubRepoSummary,
 } from '@truecourse/shared';
 import type { ContextSourceView } from '@truecourse/shared';
-import PreviewApp from '@/preview/PreviewApp';
-import { parseRemote, toPreviewRepo } from '@/preview/data/real-repos';
+import DashboardApp from '@/dashboard/DashboardApp';
+import { toDashboardRepo } from '@/dashboard/data/real-repos';
 
 // The real sessions view opens a socket for its live tail; jsdom has no server
 // to reach, and the tail is not what this file is about.
@@ -57,7 +56,7 @@ interface RegistryEntry {
   id: string;
   name: string;
   path: string;
-  remoteUrl?: string | null;
+  provider: string;
   defaultBranch?: string;
 }
 
@@ -183,7 +182,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
       <Toaster />
     </MemoryRouter>,
@@ -195,44 +194,27 @@ function renderAt(path: string) {
  * connected instances and the whole row is the button.
  */
 async function openGithubRepos() {
-  renderAt('/preview/code?connect=1');
+  renderAt('/code?connect=1');
   const dialog = await screen.findByRole('dialog');
   await userEvent.click(await within(dialog).findByRole('button', { name: /linkwarden/ }));
   return dialog;
 }
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
   window.fetch = realFetch;
 });
 
-describe('a remote URL as a preview repository', () => {
-  it('reads owner/repo and the provider off the host', () => {
-    expect(parseRemote('https://github.com/acme/orders-api.git')).toEqual({
-      fullName: 'acme/orders-api',
-      provider: 'github',
-    });
-    expect(parseRemote('https://gitlab.com/group/sub/thing')).toEqual({
-      fullName: 'sub/thing',
-      provider: 'gitlab',
-    });
-    expect(parseRemote('https://dev.azure.com/acme/billing')).toEqual({
-      fullName: 'acme/billing',
-      provider: 'azure',
-    });
-    // No fourth icon in the preview: an unfamiliar host reads as github.
-    expect(parseRemote('https://git.sr.ht/~user/thing').provider).toBe('github');
-  });
-
+describe('a registry entry as a preview repository', () => {
   it('maps a registry entry to a repository with no history behind it', () => {
-    const repo = toPreviewRepo({
+    const repo = toDashboardRepo({
       id: 'orders-api',
       name: 'acme/orders-api',
       path: '/clones/acme__orders-api',
-      remoteUrl: 'https://github.com/acme/orders-api',
+      provider: 'github',
       defaultBranch: 'trunk',
     });
     expect(repo).toMatchObject({
@@ -255,19 +237,17 @@ describe('connecting a repository through the GitHub App', () => {
   it('lists a connected repository on Code with no coverage yet', async () => {
     serve({
       registry: [
-        // A path-registered repo of the developer's own: never the product's business.
-        { id: 'local-thing', name: 'local-thing', path: '/home/dev/local-thing' },
         {
           id: 'linkwarden',
           name: 'linkwarden/linkwarden',
           path: '/clones/linkwarden__linkwarden',
-          remoteUrl: 'https://github.com/linkwarden/linkwarden',
+          provider: 'github',
+          defaultBranch: 'main',
         },
       ],
     });
-    renderAt('/preview/code');
+    renderAt('/code');
     const name = await screen.findByText('linkwarden/linkwarden');
-    expect(screen.queryByText('local-thing')).toBeNull();
     // Wait for the stored summary before asserting the empty state.
     const row = name.closest('tr')!;
     expect(await within(row).findByText('no corpus yet')).toBeInTheDocument();
@@ -290,7 +270,7 @@ describe('connecting a repository through the GitHub App', () => {
           id: String(body.repoFullName).split('/')[1]!,
           name: String(body.repoFullName),
           path: `/clones/${String(body.repoFullName).replace('/', '__')}`,
-          remoteUrl: `https://github.com/${String(body.repoFullName)}`,
+          provider: 'github',
           defaultBranch: body.defaultBranch,
         });
         return json({ ok: true }, 201);
@@ -369,7 +349,7 @@ describe('connecting a repository through the GitHub App', () => {
       installationRepos: { 42: [] },
     });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     const list = await within(dialog).findByRole('list', { name: 'Connected providers' });
     const row = await within(list).findByRole('button', { name: /linkwarden/ });
@@ -388,12 +368,12 @@ describe('connecting a repository through the GitHub App', () => {
   it('ends step one with the one link to Settings, and closes on the way', async () => {
     serve({ installationRepos: { 42: [] } });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     const link = await within(dialog).findByRole('link', {
       name: 'Connect another provider in Settings',
     });
-    expect(link).toHaveAttribute('href', '/preview/settings/repositories?from=code-connect');
+    expect(link).toHaveAttribute('href', '/settings/repositories?from=code-connect');
     // Installing the App is Settings' business, not a control inside a step.
     expect(within(dialog).queryByRole('link', { name: 'Install' })).toBeNull();
     expect(within(dialog).queryByText('Add another')).toBeNull();
@@ -415,7 +395,7 @@ describe('connecting a repository through the GitHub App', () => {
       installationRepos: { 42: [] },
     });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText('#42')).toBeInTheDocument();
   });
@@ -426,7 +406,7 @@ describe('connecting a repository through the GitHub App', () => {
       'GITHUB_APP_WEBHOOK_SECRET and GITHUB_APP_SLUG, then restart it.';
     serve({ status: () => json({ error: missing }, 503) });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(missing)).toBeInTheDocument();
     // Nothing to pick: the fix is on the server. The only way on is Settings.
@@ -438,7 +418,7 @@ describe('connecting a repository through the GitHub App', () => {
   it('says nothing is connected yet when the App is installed nowhere', async () => {
     serve({ status: () => json(status({ installations: [] })) });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText('No provider connected yet.')).toBeInTheDocument();
     const list = within(dialog).getByRole('list', { name: 'Connected providers' });
@@ -522,7 +502,7 @@ describe('connecting a repository through the GitHub App', () => {
     expect(within(items[1]!).getByRole('checkbox')).not.toBeChecked();
     expect(within(dialog).getByRole('link', { name: 'Add context' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
   });
 
@@ -584,7 +564,7 @@ describe('connecting a repository through the GitHub App', () => {
           id: String(body.repoFullName).split('/')[1]!,
           name: String(body.repoFullName),
           path: `/clones/${String(body.repoFullName).replace('/', '__')}`,
-          remoteUrl: `https://github.com/${String(body.repoFullName)}`,
+          provider: 'github',
           defaultBranch: body.defaultBranch,
         });
         return json({ ok: true }, 201);
@@ -617,7 +597,7 @@ describe('connecting a repository through the GitHub App', () => {
     window.fetch = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
-    renderAt('/preview/code');
+    renderAt('/code');
     expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
   });
 });
@@ -627,7 +607,7 @@ describe('the agent page reads the workspace route', () => {
     id: 'linkwarden',
     name: 'linkwarden/linkwarden',
     path: '/clones/linkwarden__linkwarden',
-    remoteUrl: 'https://github.com/linkwarden/linkwarden',
+    provider: 'github',
   };
 
   it('reads the workspace route and shows its empty line', async () => {
@@ -642,7 +622,7 @@ describe('the agent page reads the workspace route', () => {
       return json({ error: 'not found' }, 404);
     });
 
-    renderAt('/preview/agent');
+    renderAt('/agent');
 
     expect(
       await screen.findByText("Nothing yet. A repository's first scan starts the agent."),
@@ -660,7 +640,7 @@ describe('the agent page reads the workspace route', () => {
 
   it('gives a connected repository no Activity tab of its own', async () => {
     serve({ registry: [CONNECTED] });
-    renderAt(`/preview/repos/${CONNECTED.id}/runs`);
+    renderAt(`/repos/${CONNECTED.id}/runs`);
 
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();

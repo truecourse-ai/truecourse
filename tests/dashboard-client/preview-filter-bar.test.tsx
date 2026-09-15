@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { FilterBar } from '@/preview/ui/filter-bar';
+import { FilterBar } from '@/dashboard/ui/filter-bar';
 
 const options = Array.from({ length: 13 }, (_, i) => ({ key: `area-${i}`, label: `Area ${i}`, count: i + 1 }));
 

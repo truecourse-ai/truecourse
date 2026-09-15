@@ -24,12 +24,15 @@ import type {
   Capability,
   CapabilitiesResponse,
   Edition,
+  ServerMode,
 } from '@truecourse/shared';
-import { COMMUNITY_CAPABILITIES } from '@truecourse/shared';
+import { COMMUNITY_CAPABILITIES, DEFAULT_SERVER_MODE } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
 export interface CapabilityContextValue {
   edition: Edition;
+  /** How the server runs: hosted behind a sign-in, or local on this machine. */
+  mode: ServerMode;
   capabilities: ReadonlySet<Capability>;
   /** True while the initial fetch is in flight. */
   isLoading: boolean;
@@ -39,6 +42,9 @@ export interface CapabilityContextValue {
 
 const DEFAULT_VALUE: CapabilityContextValue = {
   edition: 'community',
+  // Hosted until the server says otherwise: the local surfaces are the ones
+  // that assume a shared filesystem, so an unanswered probe must not show them.
+  mode: DEFAULT_SERVER_MODE,
   capabilities: new Set<Capability>(COMMUNITY_CAPABILITIES),
   isLoading: true,
   error: null,
@@ -60,6 +66,7 @@ export function AppProvider({ children, initial }: AppProviderProps) {
     if (initial) {
       return {
         edition: initial.edition,
+        mode: initial.mode ?? DEFAULT_SERVER_MODE,
         capabilities: new Set(initial.capabilities),
         isLoading: false,
         error: null,
@@ -77,6 +84,7 @@ export function AppProvider({ children, initial }: AppProviderProps) {
         if (cancelled) return;
         setState({
           edition: resp.edition,
+          mode: resp.mode ?? DEFAULT_SERVER_MODE,
           capabilities: new Set(resp.capabilities),
           isLoading: false,
           error: null,
@@ -87,6 +95,7 @@ export function AppProvider({ children, initial }: AppProviderProps) {
         // hidden if the endpoint is unreachable.
         setState({
           edition: 'community',
+          mode: DEFAULT_SERVER_MODE,
           capabilities: new Set(COMMUNITY_CAPABILITIES),
           isLoading: false,
           error: err instanceof Error ? err : new Error(String(err)),
@@ -110,6 +119,14 @@ export function AppProvider({ children, initial }: AppProviderProps) {
 /** Current edition (`community` or `enterprise`). */
 export function useEdition(): Edition {
   return useContext(CapabilityContext).edition;
+}
+
+/**
+ * How the server runs. `local` means this machine: there is no sign-in to
+ * offer and folders on it can be connected as repositories.
+ */
+export function useServerMode(): ServerMode {
+  return useContext(CapabilityContext).mode;
 }
 
 /** True iff `cap` is currently turned on. Defaults to false while loading. */

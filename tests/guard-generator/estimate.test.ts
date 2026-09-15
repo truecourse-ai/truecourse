@@ -1,6 +1,6 @@
 /**
- * The pre-flight estimate for `guard generate` after the session cut-over (plan
- * 04 step 20). Every LLM stage but realization matching and recipe discovery is
+ * The pre-flight estimate for `guard generate` after the session cut-over.
+ * Every LLM stage but realization matching and recipe discovery is
  * an agent SESSION, so the estimate is session math: per kind, `items` × the
  * kind's expected turns, floored at one turn per item and ceilinged at the
  * budget's hard limit — and `items` is probed against the SAME caches with the
@@ -9,7 +9,7 @@
  * directions (work promised that never runs, spend that was never quoted).
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -56,9 +56,14 @@ import {
   writeInterfaceSnapshot,
   PASSING_STEPS,
 } from './helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
+beforeEach(() => {
+  installMemoryKvCache()
+})
 afterEach(() => {
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {

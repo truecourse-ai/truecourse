@@ -13,8 +13,9 @@ import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
  *
  * The server composes these from the store files (`scenarios/flows.json`,
  * `scenarios/manifest.json`, `guard/LATEST.json`, `guard/result.json`,
- * `guard/interfaces.json`) plus the live spec doc; the client consumes them as the
- * wire types for the Guard tabs (Coverage, Flows, Interfaces, Runs).
+ * `guard/interfaces.json`) plus the live spec doc; the client consumes them as
+ * the wire types the repository's Runs / Pipeline / Interfaces views and the
+ * workspace's Flows and Context pages read.
  */
 
 import { z } from 'zod'
@@ -175,8 +176,7 @@ export function worstCoverageStatus(
 
 /**
  * What a reader is told about coverage: a doc section, a flow, an overview
- * counter, a filter and a chip each wear exactly ONE of these five, everywhere,
- * on the CLI and in the dashboard alike.
+ * counter, a filter and a chip each wear exactly ONE of these five, everywhere.
  *
  *  - `succeeded` — the claims' scenarios passed;
  *  - `failed` — a scenario contradicted the spec (drift), or could not complete;
@@ -328,7 +328,7 @@ export interface GuardSectionScenario {
 
 /**
  * Why a flow has no scenario on one surface — the manifest/report gap, with the
- * label both the CLI and the dashboard render (see `guardGapLabel`).
+ * label every surface renders (see `guardGapLabel`).
  */
 export const GuardFlowGapSchema = z
   .object({
@@ -452,7 +452,7 @@ export interface GuardSectionCoverage {
   /**
    * The providable external services behind a `needs-setup` status — present iff
    * `status === 'needs-setup'`. The CTA the coverage view renders
-   * ("Provide open-meteo → External APIs") is built from this.
+   * ("Provide open-meteo → Dependencies") is built from this.
    */
   needsSetup?: GuardNeedsSetup
   /**
@@ -508,46 +508,25 @@ export interface GuardDocCoverage {
 }
 
 /**
- * The two amber-dot signals for the Guard tab, mtime-based (the guard analogue of
- * the spec/verify staleness probe):
- *  - `generateStale` — the spec corpus is newer than the last `guard generate`
- *    (generate would author new scenarios), or the corpus exists and nothing was
- *    ever generated.
+ * The amber-dot signal the Pipeline view and Context's Scan button read, and
+ * the pipeline-stage flags beside it:
  *  - `runStale` — the scenarios are newer than the last `guard run` (a re-run would
  *    re-test), or scenarios exist and nothing was ever run.
  */
 export interface GuardStaleness {
-  generateStale: boolean
   runStale: boolean
-  hasCorpus: boolean
   hasScenarios: boolean
   hasGenerated: boolean
   hasRun: boolean
 }
 
 /**
- * An in-flight hosted guard gate for a PR head — surfaced by the PR-scoped
- * `/guard/latest?ref=` when no run is stored at that commit yet, so the view can
- * say "queued/running" instead of showing baseline data under a PR header. EE-only
- * (an active `guard.gate` job); OSS always resolves this to null.
- */
-export interface GuardGatePending {
-  /** The job's lifecycle: enqueued (`queued`) or executing (`running`). */
-  status: 'queued' | 'running'
-  /** The background job id, so the view can subscribe to its progress popup. */
-  jobId: string
-}
-
-/**
- * The PR-scoped `/guard/latest?ref=<headSha>` response. `latest` is the run stored
- * at that exact commit (never the baseline — a PR must not show baseline data);
- * `null` with `pending` set means the gate is still running for this head, `null`
- * with `pending` null means no run and no in-flight gate (a plain empty state).
+ * The ref-scoped `/guard/latest?ref=<commit>` response: the run stored at that
+ * exact commit, never the baseline. `null` when the store holds no run there.
  */
 export interface GuardLatestResponse {
   /** The run, with its flow join ({@link GuardLatestWithRunFlows}) when served. */
   latest: GuardLatestWithRunFlows | null
-  pending: GuardGatePending | null
 }
 
 /**
@@ -596,8 +575,8 @@ export interface GuardLatestWithRunFlows extends GuardLatest {
  * them (the View mode's primary rendering) and the raw YAML behind them (the YAML
  * mode). `steps` is empty when the file doesn't parse — the detail then shows the
  * source alone rather than a half-rendered guess. The step list is derived
- * SERVER-SIDE from the parsed file, so the dashboard and the CLI read one source,
- * and each row names its own driver ({@link GuardScenarioStepView.kind}).
+ * SERVER-SIDE from the parsed file, so the parse happens in one place, and each
+ * row names its own driver ({@link GuardScenarioStepView.kind}).
  */
 export interface GuardScenarioSource {
   id: string
@@ -633,11 +612,11 @@ export interface GuardArtifactSource {
 }
 
 /**
- * One row in the Scenarios-tab inventory — every committed scenario, generated
- * OR hand-written, joined from the loaded corpus and the manifest. The last-run
+ * One row in the Tests inventory — every committed scenario, generated OR
+ * hand-written, joined from the loaded corpus and the manifest. The last-run
  * outcome and any orphaned flag are joined client-side from the run store, so
- * they are NOT part of this row (which stays run-independent — a fresh clone
- * lists its committed guards before any local run).
+ * they are NOT part of this row (which stays run-independent — the inventory
+ * renders from the stored set before any run).
  */
 export interface GuardScenarioListItem {
   id: string
@@ -671,7 +650,7 @@ export interface GuardScenarioListItem {
    * The status the last generate COMMITTED the test with — `failing` for a test
    * that failed its birth execution (committed anyway: the doc and the code
    * disagree), else `passing`. It makes the inventory renderable without a run:
-   * a fresh clone lists its red tests as red. A `guard run` outcome, joined
+   * the stored set lists its red tests as red. A run outcome, joined
    * client-side, always wins over it. Absent for hand-written work (no manifest
    * row names it) and for manifests written before failing tests were committed.
    */
@@ -757,19 +736,16 @@ export interface GuardRecipeCard {
 }
 
 /**
- * The Scenarios-tab payload — the recipe card plus the committed-scenario
- * inventory. One envelope so the tab has a single read (the recipe rides the
- * scenarios response rather than a separate endpoint).
+ * The Tests payload — the recipe card plus the committed-scenario inventory.
+ * One envelope so the surface has a single read (the recipe rides the scenarios
+ * response rather than a separate endpoint).
  */
 export interface GuardScenarioInventory {
   recipe: GuardRecipeCard | null
   scenarios: GuardScenarioListItem[]
   /**
-   * The commit the inventory was read at (hosted only; absent on the OSS live
-   * store and on an empty hosted scope). Under a PR ref this can be the BASELINE
-   * commit — a PR-gate run executes the baseline set against the head without
-   * re-persisting it, so a head miss falls back (the `corpusCommit` convention);
-   * the client compares it to the viewed ref to label the fallback.
+   * The commit the inventory was read at; absent when the repo has no stored
+   * set.
    */
   scenariosCommit?: string
 }
@@ -778,7 +754,7 @@ export interface GuardScenarioInventory {
 // Flows tab — the inventory drill-down (replaces the flat Scenarios list).
 // ---------------------------------------------------------------------------
 
-/** A flow's coverage bucket, the same one `guard status` counts by. */
+/** A flow's coverage bucket, the same one the Flows list counts by. */
 export const GuardFlowBucketSchema = z.enum(['guarded', 'partial', 'blocked', 'ungenerated'])
 export type GuardFlowBucket = z.infer<typeof GuardFlowBucketSchema>
 
@@ -862,9 +838,8 @@ export const GuardFlowListItemSchema = z
 export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
 
 /**
- * A flow's coverage status in the five words — the ONE derivation the CLI list and
- * the dashboard list both read, so `guard flows` and the Flows tab can never
- * disagree about a flow.
+ * A flow's coverage status in the five words — the ONE derivation every flow
+ * list reads, so no two of them can disagree about a flow.
  *
  * FAILED means a test ran and was contradicted (at birth or in a run): guard
  * commits failing tests, so a birth failure reaches the list as a `fail` surface
@@ -920,8 +895,8 @@ export const GuardFlowsViewCoreSchema = z
   .strict()
 
 /**
- * The Flows-tab payload — the flow inventory plus the preparation-recipe card the
- * tab inherited from the Scenarios tab. ONE read per tab (the recipe rides along,
+ * The Flows payload — the flow inventory plus the preparation-recipe card the
+ * page inherited from the Tests inventory. ONE read per surface (the recipe rides along,
  * the same convention `GuardScenarioInventory` follows). The findings block and
  * dismissed chips come from `/guard/report` and `/guard/decisions` as before.
  */
@@ -948,6 +923,23 @@ export const GuardFlowMilestoneViewSchema = z
     currentFingerprint: z.string().optional(),
     /** True when bound and live fingerprints disagree (the section drifted). */
     drifted: z.boolean(),
+    /**
+     * The milestone's CASES — the situations that would prove it, each as the
+     * sentence it states. No per-case state: a flow's cases stand or fall
+     * together, and the flow's own verdict says which. Absent on a milestone
+     * that declares none (the legacy shape).
+     */
+    cases: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            /** The case's own sentence, never its machine id. */
+            claim: z.string().min(1),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict()
 export type GuardFlowMilestoneView = z.infer<typeof GuardFlowMilestoneViewSchema>
@@ -1001,15 +993,14 @@ export const GuardFlowScenarioRowSchema = z
      * actually is, in one word plus a plain-words brief and the concrete unblock.
      * Birth stage only: the verdict was reached about that birth failure, and a
      * later run's failure is a different event with no verdict of its own. Read
-     * from the last generate's finding, else from the diagnosis the manifest
-     * committed with the test (which survives a fresh clone, where `result.json`
-     * — gitignored — does not).
+     * from the last generate's finding, else from the diagnosis stored with the
+     * test in the scenario set (which outlives any one generate report).
      */
     triage: GuardTriageSchema.optional(),
     /**
      * True when the run recorded an evidence bundle for this row (so the detail can
-     * render the transcript open). `guard/evidence/` is gitignored, so a fresh clone
-     * can still 404 the fetch — the flag says "the run wrote one", not "it is here".
+     * render the transcript open). The flag says "the run wrote one", not "it is
+     * still stored" — the fetch can still 404.
      */
     hasEvidence: z.boolean(),
     /** Interface ids this scenario grounds on (its realization path, in order). */
@@ -1416,6 +1407,15 @@ export type GuardClaimsView = z.infer<typeof GuardClaimsViewSchema>
  * afterwards. A run without one is simply absent from the trend.
  */
 export type GuardRunSectionSummary = Record<string, GuardCoveragePlainStatus>
+
+/**
+ * ONE run's FLOW SUMMARY: every flow of the repository as the word it wore at
+ * that moment, keyed by flow id. The flow twin of {@link GuardRunSectionSummary},
+ * written beside it and for the same reason — a run snapshot says which
+ * SCENARIOS passed, and turning that back into flows needs the manifest and the
+ * corpus as they were. It is what Home's trend counts.
+ */
+export type GuardRunFlowSummary = Record<string, GuardCoveragePlainStatus>
 
 /** The address of ONE section of ONE document: `<docRef>#<anchor>`. */
 export function guardSectionRef(doc: string, anchor: string): string {

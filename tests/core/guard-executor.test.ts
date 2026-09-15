@@ -110,7 +110,7 @@ describe('guardRunInProcess through the executor seam', () => {
   // the whole test suite) free of a model it never asked for. The judge is
   // PARKED: the built one is wired only under the opt-in flag, an injected judge
   // always wins, and the day-to-day default is no judge at all.
-  it('wires the built visual judge only under the opt-in flag, and an injected one wins', async () => {
+  it('hands the executor the visual judge it was given, and none otherwise', async () => {
     const r = repo()
     writeRecipe(r)
     writeVersionScenario(r, 'ver')
@@ -121,13 +121,12 @@ describe('guardRunInProcess through the executor seam', () => {
       return cannedReport(emptyLatest())
     })
 
-    await guardRunInProcess(r)
-    expect(seen!.visualJudge).toBeUndefined()
-
+    // The judge is the caller's to build (the run job does, on the workspace's
+    // transport): a run handed none runs with none, whatever the env says.
     process.env.TRUECOURSE_GUARD_VISUAL_JUDGE = '1'
     try {
       await guardRunInProcess(r)
-      expect(typeof seen!.visualJudge).toBe('function')
+      expect(seen!.visualJudge).toBeUndefined()
     } finally {
       delete process.env.TRUECOURSE_GUARD_VISUAL_JUDGE
     }

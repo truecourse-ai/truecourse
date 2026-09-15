@@ -1,13 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { initParsers } from '../packages/analyzer/src/parser'
-
-// Never emit usage telemetry from the test suite — analyze and the
-// spec→verify track all call trackEvent when given a `source`, and we don't
-// want tests hitting PostHog. (`spec-telemetry.test.ts` mocks trackEvent
-// directly to assert it's called.)
-process.env.TRUECOURSE_TELEMETRY = '0'
+import { initParsers } from '../packages/source-facts/src/parser'
 
 // Never fetch live model prices from OpenRouter in tests — the pre-flight cost
 // estimate falls back to bundled list prices. (`model-prices.test.ts` deletes
@@ -29,23 +23,17 @@ process.env.CLAUDE_CODE_BINARY = '/nonexistent/claude-test-tripwire'
 process.env.GIT_CONFIG_GLOBAL = os.devNull
 process.env.GIT_CONFIG_NOSYSTEM = '1'
 
-// Make the USER-level store hermetic for the same reason git is: `~/.truecourse/
-// config.json` holds the developer's LLM transport selection, and any test that
-// renders a model name reads it. On a machine configured for the `api` transport
-// that leaks the configured model into assertions expecting the `claude-code`
-// defaults (`expected 'gpt-5.5-2' to be 'opus'`), so the suite passes in CI and
-// fails locally. An empty per-process dir gives every test the same cold-start
-// defaults CI has. Tests that exercise global config point this at their own temp
-// dir and restore it; those that `delete` it fall back to the real home, which is
-// exactly what they did before this pin existed.
-const testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-test-home-'))
-process.env.TRUECOURSE_HOME = testHome
+// The server's RUNTIME DIRECTORY gets its own per-process temp dir: a run's
+// scratch (its session journal, its clone, the log) must never land in the
+// developer's home, and two test files must never share one.
+const testRuntimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-test-runtime-'))
+process.env.TRUECOURSE_RUNTIME_DIR = testRuntimeDir
 process.on('exit', () => {
-  fs.rmSync(testHome, { recursive: true, force: true })
+  fs.rmSync(testRuntimeDir, { recursive: true, force: true })
 })
 
-// The env override of that selection gets the same pin. The code under test
-// loads the developer's repo-root `.env` (core's env loader), where
+// The transport selection gets its own pin. The code under test loads the
+// developer's repo-root `.env` (core's env loader), where
 // `TRUECOURSE_LLM_TRANSPORT=claude-code` is how a self-hosted dashboard runs on
 // its operator's Claude Code — and that flips every dashboard route test into
 // operator mode. dotenv never overwrites a key that already exists, so an EMPTY

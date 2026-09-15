@@ -144,7 +144,7 @@ describe('interface schemas', () => {
    * `apiEffects` is a reference like any other id in the file, and it went
    * unchecked. Measured on the first authoring pilot: 14 tasks carried the
    * field, 11 of them named api ids the catalog never defined, and all 11
-   * landed in the committed file. The field's own contract says a fact it
+   * landed in the authored file. The field's own contract says a fact it
    * cannot settle is "never guessed" — this is what makes that enforceable.
    */
   it('an api effect names an api entry this catalog defines', () => {
@@ -800,7 +800,7 @@ const OPERATION: InterfaceContract = {
       ],
     },
     consumes: {
-      env: [{ var: 'TRUECOURSE_HOME' }],
+      env: [{ var: 'TRUECOURSE_RUNTIME_DIR' }],
       reads: [{ path: '~/.truecourse/registry.json' }],
     },
     produces: {
@@ -978,8 +978,8 @@ describe('the catalog version', () => {
 
   it('is 2, and a v1 file is refused rather than half-read', () => {
     expect(InterfacesFileSchema.parse({ ...base, version: 2 }).version).toBe(2)
-    // The designed recovery: the snapshot is gitignored and derived, so a v1 file
-    // fails parse, reads as "no catalog", and the next map re-derives it.
+    // The designed recovery: the snapshot is derived, so a v1 file fails parse,
+    // reads as "no catalog", and the next map re-derives it.
     expect(() => InterfacesFileSchema.parse({ ...base, version: 1 })).toThrow()
     expect(() => InterfacesFileSchema.parse({ ...base, version: 3 })).toThrow()
   })

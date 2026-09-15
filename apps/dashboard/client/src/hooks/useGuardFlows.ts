@@ -1,5 +1,5 @@
 /**
- * The Flows-tab inventory (`guard/flows`) — every flow with its per-surface
+ * The Flows-tab inventory (`guard/flows`), every flow with its per-surface
  * status, buckets, and the recipe card that rides the same envelope. Hoisted at
  * page level (like the scenario inventory before it) so the left panel and the
  * main pane read ONE fetch and the guard reload key refreshes both. Read-only.

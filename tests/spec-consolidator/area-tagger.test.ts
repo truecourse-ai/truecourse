@@ -1,6 +1,6 @@
 /**
- * The deterministic half of the area tagger, AFTER the move to sessions (plan
- * 02 step 3): `tagDocs` — the one-shot stage — is retired, and its judgment now
+ * The deterministic half of the area tagger, AFTER the move to sessions:
+ * `tagDocs` — the one-shot stage — is retired, and its judgment now
  * belongs to the `spec-scan.curate-doc` session (see
  * `tests/core/spec-scan-curate.test.ts`, which carries the per-doc cache, the
  * fail-open-to-empty-tags degradation, and the status precedence).

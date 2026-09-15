@@ -586,8 +586,8 @@ export const FlowSynthesisSchema = z
 export type FlowSynthesis = z.infer<typeof FlowSynthesisSchema>
 
 /**
- * The flow-synthesis SESSION outcome (`guard-generate.flows`, plan 04 step 16) —
- * the same {flows, noFlowClaims} pair as {@link FlowSynthesisSchema}, but
+ * The flow-synthesis SESSION outcome (`guard-generate.flows`) — the same
+ * {flows, noFlowClaims} pair as {@link FlowSynthesisSchema}, but
  * `.strict()` with BOTH arrays required: the agent loop's outcome gate re-asks
  * on a malformed reply, so the one-shot schema's omission tolerance would only
  * hide a drifting model. It doubles as the `check_flows` tool's input schema —

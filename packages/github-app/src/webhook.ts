@@ -8,15 +8,17 @@
 
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
+import type { RepositoryRecord, RepositoryStore } from '@truecourse/shared';
 import { verifyWebhookSignature } from './signature.js';
-import type { GateStore, RepoLinkRecord } from './store/types.js';
+import { GITHUB_PROVIDER, installationOf } from './provider.js';
+import type { InstallationStore } from './store/types.js';
 
 export interface BaselineTrigger {
   repoFullName: string;
   installationId: number;
   defaultBranch: string;
   commitSha: string;
-  /** The repo's workspace org (from the gate link) — scopes the scan job + notifications. */
+  /** The repo's workspace org (from its connection row) — scopes the scan job + notifications. */
   workspaceOrgId: string;
 }
 
@@ -37,7 +39,9 @@ export interface SourcePushTrigger {
 
 export interface WebhookDeps {
   secret: string;
-  store: GateStore;
+  store: InstallationStore;
+  /** The connected repositories, whichever provider brought them. */
+  repos: RepositoryStore;
   /** Kick a baseline run for a connected repo (fire-and-forget). */
   onBaseline: (trigger: BaselineTrigger) => void;
   /**
@@ -56,11 +60,7 @@ export interface WebhookDeps {
    * already-cleaned repos are no longer linked, so the retry only re-attempts
    * what actually failed.
    */
-  onRepoRemoved?: (link: RepoLinkRecord) => Promise<void>;
-  /** Handle a pull_request event (offer scan in Phase 2, gate in Phase 4). */
-  onPullRequest?: (payload: PullRequestPayload) => void;
-  /** Handle an issue_comment event (the scan checkbox); fire-and-forget. */
-  onCommentEdited?: (payload: IssueCommentPayload) => void;
+  onRepoRemoved?: (link: RepositoryRecord) => Promise<void>;
 }
 
 interface InstallationPayload {
@@ -78,41 +78,6 @@ interface PushPayload {
   ref: string;
   after: string;
   repository: { full_name: string; default_branch: string };
-  installation?: { id: number };
-}
-
-export interface PullRequestPayload {
-  action: string;
-  number: number;
-  pull_request: {
-    /** PR title (present on every pull_request payload). */
-    title?: string;
-    head: {
-      sha: string;
-      ref: string;
-      /** Present on the webhook payload; absent → assume same-repo. */
-      repo?: { full_name: string; fork: boolean } | null;
-    };
-    base: { sha: string; ref: string };
-    /** Set on a `closed` event: whether the PR merged (vs. closed unmerged). */
-    merged?: boolean;
-  };
-  repository: { full_name: string; default_branch: string };
-  installation?: { id: number };
-}
-
-export interface IssueCommentPayload {
-  action: string;
-  comment: {
-    id: number;
-    body: string;
-    /** The comment author (our App bot for the scan comment). */
-    user?: { type: string; login: string };
-  };
-  /** The actor who performed the event (used to authorize the scan trigger). */
-  sender?: { login: string; type: string };
-  issue: { number: number; pull_request?: unknown };
-  repository: { full_name: string };
   installation?: { id: number };
 }
 
@@ -139,8 +104,8 @@ export function createWebhookRouter(deps: WebhookDeps): Router {
       return;
     }
 
-    // Dispatch is lightweight (store writes + triggers); the heavy clone+verify
-    // work is fire-and-forget inside `onBaseline`. Awaiting here keeps the ack
+    // Dispatch is lightweight (store writes + triggers); the work itself is a
+    // background job the handler enqueues. Awaiting here keeps the ack
     // fast while making handling deterministic. A handler error returns 500 so
     // GitHub retries (handlers are idempotent).
     try {
@@ -175,12 +140,6 @@ async function dispatch(
     case 'push':
       await handlePush(deps, payload as PushPayload);
       break;
-    case 'pull_request':
-      deps.onPullRequest?.(payload as PullRequestPayload);
-      break;
-    case 'issue_comment':
-      deps.onCommentEdited?.(payload as IssueCommentPayload);
-      break;
     default:
       // Unhandled event — ignore.
       break;
@@ -197,9 +156,12 @@ async function handleInstallation(
     // per-repo cleanup an explicit unlink runs (cancel the running scan, drop
     // the repo's server state) BEFORE the rows go — the cascade below deletes
     // the link rows, and cleanup must not run on repos nobody owns anymore.
-    for (const link of await deps.store.listReposForInstallation(installation.id)) {
+    for (const link of await deps.repos.listReposForAccount(
+      GITHUB_PROVIDER,
+      String(installation.id),
+    )) {
       await deps.onRepoRemoved?.(link);
-      await deps.store.unlinkRepo(link.repoFullName);
+      await deps.repos.unlinkRepo(link.repoFullName);
       log.info(`[github-app] ${link.repoFullName} disconnected (app uninstalled)`);
     }
     await deps.store.removeInstallation(installation.id);
@@ -235,10 +197,10 @@ async function handleInstallationRepositories(
 ): Promise<void> {
   if (payload.action !== 'removed') return;
   for (const repo of payload.repositories_removed ?? []) {
-    const link = await deps.store.getRepo(repo.full_name);
-    if (!link || link.installationId !== payload.installation.id) continue;
+    const link = await deps.repos.getRepo(repo.full_name);
+    if (!link || installationOf(link) !== payload.installation.id) continue;
     await deps.onRepoRemoved?.(link);
-    await deps.store.unlinkRepo(link.repoFullName);
+    await deps.repos.unlinkRepo(link.repoFullName);
     log.info(
       `[github-app] ${link.repoFullName} disconnected (removed from installation ${payload.installation.id})`,
     );
@@ -253,8 +215,8 @@ async function handlePush(
   if (payload.ref !== defaultRef) return;
   if (!payload.installation) return;
 
-  // Only re-baseline repos that are connected to the gate.
-  const link = await deps.store.getRepo(payload.repository.full_name);
+  // Only act for repositories Code has connected.
+  const link = await deps.repos.getRepo(payload.repository.full_name);
   if (!link || !link.enabled) {
     // Not connected in Code, so nothing is baselined. The workspace this
     // installation belongs to may still read the repository as a context

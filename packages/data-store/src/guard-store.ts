@@ -3,7 +3,8 @@
  *
  *   - RUN STATE (`guard_runs`, one row per repo+commit):
  *     `writeGuardLatest` marks the default-branch baseline, `writeGuardRun` writes
- *     a (PR-head) snapshot without marking it, `readGuardLatest` is the newest
+ *     a snapshot without marking it baseline (the adjudication fold re-writes a
+ *     run this way), `readGuardLatest` is the newest
  *     baseline row, and the run history is every baseline row. `readGuardRun(runId)`
  *     stays LIVE (the `(repo, run_id)` index). The commit key comes from the payload
  *     (`latest.run.commit`), falling
@@ -13,7 +14,8 @@
  *     `readGuardRun` (the row's `run_id` is overwritten), and its evidence
  *     manifest resets to `{}` so the old transcripts are never served under the
  *     new runId (the blobs remain in `content`, unreferenced). Deliberate: one row
- *     per commit, unlike the OSS append-only `history.json`.
+ *     per commit, and the trend is derived from the baseline rows rather than
+ *     appended to.
  *
  *   - EVIDENCE — per-run transcripts, content-addressed in `content` (scope
  *     `guard-evidence:<repo>`); the run row's `evidence` jsonb is the
@@ -23,11 +25,11 @@
  *     falls back to it when the evidence path's runId matches no run row.
  *
  *   - SCENARIO CORPUS (`guard_scenario_sets`) — content-addressed and keyed
- *     per (repo, commit): the committable `scenarios/` tree (yaml +
+ *     per (repo, commit): the `scenarios/` tree (yaml +
  *     recipe.json + manifest.json) is deduped into `content` (scope `guard:<repo>`)
  *     with a per-(repo, commit) `{ relPath: sha }` manifest row. `saveScenarios`
  *     takes a `RepoRef` and rejects an empty commit; `loadScenarios(ref)` is that
- *     commit's set (exact — no fallback, like `loadContracts`), materialized into
+ *     commit's set (exact — no latest fallback), materialized into
  *     a temp dir the unchanged guard-runner loader reads; the browse reads take an
  *     optional commit and fall back to the newest stored set. The generate report
  *     (`guard_results`) is keyed the same way.
@@ -41,13 +43,10 @@
  *     result under its commit after.
  *
  *   - DECISIONS — the mutable `dismissedClaims` ledger reuses the generic
- *     `decisions` table under a `guard:<repo>` scope (`#pr/<n>` for a PR overlay),
- *     mirroring how `PgSpecStore` routes its decisions scopes. An absent row reads
- *     as `EMPTY_GUARD_DECISIONS` (never null) — core's overlay promotion keys the
- *     "no overlay" signal on `dismissedClaims.length === 0`.
+ *     `decisions` table under a `guard:<repo>` scope, one row per repository. An
+ *     absent row reads as `EMPTY_GUARD_DECISIONS`, never null.
  *
- * In EE the `repoPath` argument carries the stable repo key (as in the other EE
- * stores), not an on-disk path — `materializesInPlace` is false.
+ * The `repoPath` argument is the stable repo key, never an on-disk path.
  */
 
 import os from 'node:os';
@@ -65,7 +64,7 @@ import {
 import { guardEvidenceVisual } from '@truecourse/shared';
 import type {
   GuardHistoryReadOptions,
-  GuardRunSections,
+  GuardRunCoverage,
   GuardStore,
   RepoRef,
   SaveScenariosResult,
@@ -81,6 +80,7 @@ import {
   type GuardHistoryEntry,
   type GuardLatest,
   type GuardManifest,
+  type GuardRunFlowSummary,
   type GuardRunSectionSummary,
 } from '@truecourse/shared';
 import {
@@ -92,13 +92,14 @@ import {
 } from '@truecourse/guard-runner';
 import { ContentStore, contentScope } from './content-store.js';
 import { assertSafeRel, mapLimit, safeJoin, sha256, sortKeys } from './pack.js';
+import { WORK_TREE_DIR, scenariosDir } from '@truecourse/shared/work-tree';
 
 const OBJECT_CONCURRENCY = 16;
 
-/** Reject an empty commit on the per-commit writes (mirrors `assertCommit`). */
+/** Reject an empty commit on the per-commit writes. */
 function requireCommit(ref: RepoRef, what: string): string {
   if (!ref.commitSha) {
-    throw new Error(`[ee-data-store] ${what} requires a non-empty commit SHA`);
+    throw new Error(`[data-store] ${what} requires a non-empty commit SHA`);
   }
   return ref.commitSha;
 }
@@ -115,7 +116,7 @@ interface Manifest {
 }
 
 /** Evidence pointer prefix (`evidenceRelPath` shape): `.truecourse/guard/evidence/`. */
-const EVIDENCE_PREFIX_SEGMENTS = ['.truecourse', 'guard', 'evidence'];
+const EVIDENCE_PREFIX_SEGMENTS = [WORK_TREE_DIR, 'guard', 'evidence'];
 
 /**
  * A repo-relative evidence dir (`.truecourse/guard/evidence/<runId>/<scenarioSeg>`)
@@ -133,8 +134,10 @@ function parseEvidenceDir(evidenceDir: string): { runId: string; scenarioSeg: st
   return { runId, scenarioSeg };
 }
 
+/** The repository's row in the generic `decisions` table. */
+const decisionsScope = (repoKey: string): string => `guard:${repoKey}`;
+
 export class PgGuardStore implements GuardStore {
-  readonly materializesInPlace = false;
   private readonly content: ContentStore;
 
   constructor(private readonly db: Db) {
@@ -173,7 +176,7 @@ export class PgGuardStore implements GuardStore {
     return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
   }
 
-  /** The `(repoKey, commitSha)` row's snapshot (PK lookup) — baseline or PR-head. */
+  /** The `(repoKey, commitSha)` row's snapshot (PK lookup) — baseline or not. */
   async readGuardRunForCommit(repoKey: string, commitSha: string): Promise<GuardLatest | null> {
     const rows = await this.db
       .select({ snapshot: guardRuns.snapshot })
@@ -185,8 +188,8 @@ export class PgGuardStore implements GuardStore {
 
   /**
    * The run trend: every baseline run for the repo, oldest-first. With `all`,
-   * every stored run — the pull-request head runs the gate wrote included —
-   * each entry carrying the envelope's provenance (`pullRequest`, `origin`).
+   * every stored run, not just the baselines — each entry carrying the
+   * envelope's provenance (`origin`, `pullRequest`).
    */
   async readGuardHistory(repoKey: string, opts: GuardHistoryReadOptions = {}): Promise<GuardHistory> {
     const rows = await this.db
@@ -205,25 +208,26 @@ export class PgGuardStore implements GuardStore {
   // History is derived from the baseline rows — nothing to append.
   async appendGuardHistory(): Promise<void> {}
 
-  /** Record a run's section summary on its own row, addressed by run id. */
-  async writeGuardRunSections(repoKey: string, run: GuardRunSections): Promise<void> {
+  /** Record a run's section and flow summaries on its own row, by run id. */
+  async writeGuardRunCoverage(repoKey: string, run: GuardRunCoverage): Promise<void> {
     if (!SAFE_SEGMENT.test(run.runId)) {
       throw new Error(`[data-store] unsafe guard run id: ${run.runId}`);
     }
     await this.db
       .update(guardRuns)
-      .set({ sections: run.sections })
+      .set({ sections: run.sections, flows: run.flows })
       .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, run.runId)));
   }
 
   /** Every baseline run carrying a section summary, oldest first. */
-  async readGuardRunSections(repoKey: string): Promise<GuardRunSections[]> {
+  async readGuardRunCoverage(repoKey: string): Promise<GuardRunCoverage[]> {
     const rows = await this.db
       .select({
         runId: guardRuns.runId,
         ranAt: guardRuns.ranAt,
         commitSha: guardRuns.commitSha,
         sections: guardRuns.sections,
+        flows: guardRuns.flows,
       })
       .from(guardRuns)
       .where(
@@ -239,6 +243,7 @@ export class PgGuardStore implements GuardStore {
       ranAt: r.ranAt,
       commit: r.commitSha,
       sections: r.sections as GuardRunSectionSummary,
+      flows: (r.flows as GuardRunFlowSummary | null) ?? null,
     }));
   }
 
@@ -343,7 +348,7 @@ export class PgGuardStore implements GuardStore {
     files: Record<string, string | Buffer>,
   ): Promise<string> {
     if (!SAFE_SEGMENT.test(runId)) {
-      throw new Error(`[ee-data-store] unsafe guard run id: ${runId}`);
+      throw new Error(`[data-store] unsafe guard run id: ${runId}`);
     }
     const entries = await this.putEvidenceFiles(repoKey, sanitizeSegment(scenarioId), files);
 
@@ -359,7 +364,7 @@ export class PgGuardStore implements GuardStore {
       .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, runId)))
       .returning({ runId: guardRuns.runId });
     if (updated.length === 0) {
-      throw new Error(`[ee-data-store] no guard run ${runId} to attach evidence to`);
+      throw new Error(`[data-store] no guard run ${runId} to attach evidence to`);
     }
 
     return evidenceRelPath(runId, scenarioId);
@@ -380,7 +385,7 @@ export class PgGuardStore implements GuardStore {
     const entries: Record<string, string> = {};
     for (const [file, body] of Object.entries(files)) {
       if (!SAFE_SEGMENT.test(file)) {
-        throw new Error(`[ee-data-store] unsafe evidence file name: ${file}`);
+        throw new Error(`[data-store] unsafe evidence file name: ${file}`);
       }
       const sha = Buffer.isBuffer(body)
         ? await this.content.putBytes(scope, body)
@@ -409,7 +414,7 @@ export class PgGuardStore implements GuardStore {
       .returning({ repoKey: guardResults.repoKey });
     if (updated.length === 0) {
       throw new Error(
-        `[ee-data-store] no guard result for ${ref.repoKey}@${commitSha} to attach evidence to`,
+        `[data-store] no guard result for ${ref.repoKey}@${commitSha} to attach evidence to`,
       );
     }
   }
@@ -583,7 +588,7 @@ export class PgGuardStore implements GuardStore {
     return { fileCount: files.length };
   }
 
-  /** Exactly that commit's set (no latest fallback — mirrors `loadContracts`). */
+  /** Exactly that commit's set (no latest fallback). */
   async loadScenarios(ref: RepoRef): Promise<LoadedScenarios> {
     const manifest = await this.commitManifest(ref);
     if (!manifest) return { scenarios: [], errors: [] };
@@ -591,13 +596,13 @@ export class PgGuardStore implements GuardStore {
     const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'tc-guard-scenarios-'));
     try {
       const scope = contentScope.guard(ref.repoKey);
-      const scenariosRoot = path.join(root, '.truecourse', 'scenarios');
+      const scenariosRoot = scenariosDir(root);
       await mapLimit(Object.entries(manifest.files ?? {}), OBJECT_CONCURRENCY, async ([rel, sha]) => {
         const dest = safeJoin(scenariosRoot, rel);
         const body = await this.content.get(scope, sha);
         if (body == null) {
           throw new Error(
-            `[ee-data-store] missing guard object ${sha} for ${rel} (${ref.repoKey}@${ref.commitSha})`,
+            `[data-store] missing guard object ${sha} for ${rel} (${ref.repoKey}@${ref.commitSha})`,
           );
         }
         await fsp.mkdir(path.dirname(dest), { recursive: true });
@@ -767,34 +772,20 @@ export class PgGuardStore implements GuardStore {
 
   // --- Decisions ------------------------------------------------------------
 
-  async readGuardDecisions(repoKey: string, scope?: string): Promise<GuardDecisions> {
+  async readGuardDecisions(repoKey: string): Promise<GuardDecisions> {
     const rows = await this.db
       .select({ payload: decisions.payload })
       .from(decisions)
-      .where(eq(decisions.scope, this.decisionsScope(repoKey, scope)))
+      .where(eq(decisions.scope, decisionsScope(repoKey)))
       .limit(1);
     return rows[0] ? (rows[0].payload as GuardDecisions) : EMPTY_GUARD_DECISIONS;
   }
 
-  async writeGuardDecisions(
-    repoKey: string,
-    guardDecisions: GuardDecisions,
-    scope?: string,
-  ): Promise<void> {
+  async writeGuardDecisions(repoKey: string, guardDecisions: GuardDecisions): Promise<void> {
     const now = new Date().toISOString();
     await this.db
       .insert(decisions)
-      .values({ scope: this.decisionsScope(repoKey, scope), payload: guardDecisions, updatedAt: now })
+      .values({ scope: decisionsScope(repoKey), payload: guardDecisions, updatedAt: now })
       .onConflictDoUpdate({ target: [decisions.scope], set: { payload: guardDecisions, updatedAt: now } });
-  }
-
-  async deleteGuardDecisions(repoKey: string, scope?: string): Promise<void> {
-    await this.db.delete(decisions).where(eq(decisions.scope, this.decisionsScope(repoKey, scope)));
-  }
-
-  /** `guard:<repo>` for the repo row; `guard:<repo>#pr/<n>` for the `_pr/<n>` overlay. */
-  private decisionsScope(repoKey: string, scope?: string): string {
-    const m = /^_pr\/(\d+)$/.exec(scope ?? '');
-    return m ? `guard:${repoKey}#pr/${m[1]}` : `guard:${repoKey}`;
   }
 }

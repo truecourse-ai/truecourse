@@ -1,7 +1,6 @@
 /**
- * Pure, LLM-free composition for the guard read surfaces (`guard status`,
- * `guard drifts`, the dashboard). ONE copy, imported by core, the CLI, and the
- * client alike — no mirrored twins. No I/O here: the caller reads
+ * Pure, LLM-free composition for the guard read surfaces. ONE copy, imported by
+ * core and the client alike — no mirrored twins. No I/O here: the caller reads
  * `scenarios/manifest.json`, `guard/LATEST.json`, and `guard/result.json`; these
  * functions only shape the parsed structures.
  *
@@ -48,7 +47,7 @@ import type {
 
 /**
  * Flow-coverage rollup from the flow-keyed manifest — the FLOW is the generation
- * unit, so this is the headline count the `guard status` flows line renders.
+ * unit, so this is the headline count the Flows surfaces render.
  * `guarded` + `partial` + `blocked` = `total`.
  */
 export interface GuardFlowsCoverageSummary {
@@ -220,10 +219,9 @@ function emptyClassification(): GuardCoverageSummary['classification'] {
 }
 
 /**
- * One line naming a gap, the SINGLE copy the CLI (`guard flows`, the generate
- * summary, `guard status`) and the dashboard both render: an `awaiting-driver`
- * gap names the driver it waits on, every other kind reads as its own kind with
- * the hyphens spelled out (`no-interface` → `no interface`).
+ * One line naming a gap, the SINGLE copy every surface renders: an
+ * `awaiting-driver` gap names the driver it waits on, every other kind reads as
+ * its own kind with the hyphens spelled out (`no-interface` → `no interface`).
  */
 export function guardGapLabel(kind: GuardCoverageGapKind, driver?: GuardDriverId): string {
   if (kind === 'awaiting-driver') return driver ? `awaiting ${driver} driver` : 'awaiting driver'
@@ -238,9 +236,9 @@ export function guardGapDisplayLabel(kind: GuardGapDisplayKind): string {
 
 /**
  * What shipped without the verdicts of an adjudication stage that lost EVERY call
- * — ONE copy, rendered verbatim by the CLI generate summary and the dashboard
- * generate overview. Two surfaces wording this independently is exactly how an
- * unreviewed corpus starts reading as a reviewed one on one of them.
+ * — ONE copy, rendered verbatim by the dashboard's generate overview. Wording
+ * this in more than one place is exactly how an unreviewed corpus starts
+ * reading as a reviewed one.
  */
 export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string {
   const tests = `${entry.affected} test${entry.affected === 1 ? '' : 's'}`
@@ -256,7 +254,7 @@ export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string
  * so an unchanged corpus re-adjudicates without paying for authoring again.
  */
 export const GUARD_UNADJUDICATED_REMEDY =
-  'The tests are committed and their flows were left unsettled, so re-running `truecourse guard generate` once the model is reachable adjudicates them — authoring is cached, so the re-run pays for the verdicts, not for writing the tests again.'
+  'The tests are committed and their flows were left unsettled, so re-running Flow generation once the model is reachable adjudicates them — authoring is cached, so the re-run pays for the verdicts, not for writing the tests again.'
 
 /** What a section's flows say about the driver it would be tested on. */
 interface SectionSurfaces {

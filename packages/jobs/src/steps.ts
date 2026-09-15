@@ -1,6 +1,6 @@
 /**
  * Worker-side stepped-progress tracker — the job-queue analogue of core's
- * `StepTracker` (packages/core/src/progress.ts) that drives the analyze popup.
+ * `StepTracker` (packages/core/src/progress.ts).
  *
  * A job task constructs one with its phase list and an async `emit`, then calls
  * `advance(key)` as each phase starts (earlier phases auto-complete), `detail()`

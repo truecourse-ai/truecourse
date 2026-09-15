@@ -1,9 +1,13 @@
 /**
- * A stored run's SECTION SUMMARY, the history Home's trend is drawn from.
+ * A stored run's COVERAGE SUMMARIES, the history Home is drawn from: its
+ * SECTIONS, which the changes widget follows, and its FLOWS, which the trend
+ * counts.
  *
- * Two things are pinned here: the summary is written when a run is persisted,
- * and the rule that keeps history honest. A run whose summary cannot be derived
- * is logged and left without one, never guessed.
+ * Three things are pinned here: both summaries are written when a run is
+ * persisted, and the two rules that keep history honest. A run whose section
+ * summary cannot be derived is logged and left out of history entirely; one
+ * whose FLOW summary cannot be derived is still recorded, and is simply not a
+ * point of the flow trend. Neither is ever guessed.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -11,11 +15,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { manifestPath } from '@truecourse/guard-runner';
 import type { GuardLatest } from '@truecourse/shared';
-import { readGuardRunSections } from '@truecourse/core/lib/guard-store';
+import { readGuardRunCoverage } from '@truecourse/core/lib/guard-store';
 import { log } from '@truecourse/core/lib/logger';
-import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
+import { clearTestRegistry } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
+import { installWorkTreeDocReader, resetRepoDocReader } from '../helpers/work-tree-doc-reader';
 import { persistGuardRun } from '../../apps/dashboard/server/src/jobs/materialize-guard';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 
 const DOC = 'context/site-docs-acme/refunds.md';
 const BODY = '# Refunds\n\nA refund settles within two business days.\n\n# Timing\n\nWithin two days.\n';
@@ -68,20 +75,26 @@ function run(runId: string, ranAt: string): GuardLatest {
 }
 
 beforeEach(async () => {
-  for (const entry of await readRegistry()) await unregisterProject(entry.slug);
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
+  installWorkTreeDocReader();
+  clearTestRegistry();
   repo = await setupTestFixture();
   fs.mkdirSync(path.join(repo.repoPath, path.dirname(DOC)), { recursive: true });
   fs.writeFileSync(path.join(repo.repoPath, DOC), BODY);
 });
 
 afterEach(async () => {
-  await unregisterProject(repo.project.slug);
+  clearTestRegistry();
+  resetGuardStore();
+  resetGuardOverlayStore();
+  resetRepoDocReader();
   await teardownTestFixture();
   vi.restoreAllMocks();
 });
 
-describe('a run’s section summary', () => {
-  it('is written when the run is persisted', async () => {
+describe('a run’s coverage summaries', () => {
+  it('are written when the run is persisted', async () => {
     writeManifest(repo.repoPath);
 
     await persistGuardRun(
@@ -90,7 +103,7 @@ describe('a run’s section summary', () => {
       run('run-1', '2026-09-01T10:00:00.000Z'),
     );
 
-    const [stored, ...rest] = await readGuardRunSections(repo.repoPath);
+    const [stored, ...rest] = await readGuardRunCoverage(repo.repoPath);
     expect(rest).toHaveLength(0);
     expect(stored).toMatchObject({ runId: 'run-1', ranAt: '2026-09-01T10:00:00.000Z' });
     // Both sections of the document the scenario set covers, in the five words:
@@ -99,9 +112,24 @@ describe('a run’s section summary', () => {
       [`${DOC}#refunds`]: 'failed',
       [`${DOC}#timing`]: 'blocked',
     });
+    // The flow the failing scenario belongs to, in the Flows page's words.
+    expect(stored!.flows).toEqual({ f1: 'failed' });
   });
 
-  it('leaves a run whose summary cannot be derived without one, and says so', async () => {
+  it('gives a scenario that belongs to no flow its Manual pseudo-flow, as the Flows page does', async () => {
+    // No manifest: the run's scenario belongs to no synthesized flow, and the
+    // flow list shows it under a Manual pseudo-flow rather than not at all.
+    await persistGuardRun(
+      { repoKey: repo.repoPath, commitSha: 'abcdef1234567890' },
+      repo.repoPath,
+      run('run-3', '2026-09-03T10:00:00.000Z'),
+    );
+
+    const [stored] = await readGuardRunCoverage(repo.repoPath);
+    expect(stored!.flows).toEqual({ 'manual:s1': 'failed' });
+  });
+
+  it('leaves a run whose sections cannot be derived without either, and says so', async () => {
     // No scenario set, and the document the run names is not readable: there is
     // nothing to derive a section from.
     fs.rmSync(path.join(repo.repoPath, DOC));
@@ -113,7 +141,7 @@ describe('a run’s section summary', () => {
       run('run-2', '2026-09-02T10:00:00.000Z'),
     );
 
-    expect(await readGuardRunSections(repo.repoPath)).toEqual([]);
+    expect(await readGuardRunCoverage(repo.repoPath)).toEqual([]);
     expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain('run-2');
   });
 });

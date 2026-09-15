@@ -19,7 +19,7 @@ import {
   buildRootCliInterface,
   type CliInterfaceSeed,
 } from '../../packages/interface-mapper/src/cli-interfaces'
-import { analyzeFileContent } from '../../packages/analyzer/src/file-analyzer'
+import { analyzeFileContent } from '../../packages/source-facts/src/file-analyzer'
 
 /** Interfaces as one derivation would have produced them. */
 const from = (...seeds: CliInterfaceSeed[]) => buildCliInterfaces(seeds)

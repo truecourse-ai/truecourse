@@ -1,5 +1,5 @@
 /**
- * THE ADJUDICATION SESSION'S TOOLS (plan 05 step 21) — every one read-only
+ * THE ADJUDICATION SESSION'S TOOLS — every one read-only
  * against repo and store state; the one that spawns anything
  * (`rerun_scoped`) runs `persist: false` in a disposable world. All writes
  * happen in the fold, strictly serial, after the outcome.
@@ -11,13 +11,13 @@
  *  - `read_file` / `search_repo` — the repo at arm's length (the interface
  *    authoring tools, reused verbatim): the mechanism hunt that ends in a
  *    `file:line`.
- *  - `rerun_scoped`   — the committed scenario re-executed VERBATIM, fresh
+ *  - `rerun_scoped`   — the stored scenario re-executed VERBATIM, fresh
  *    sandbox/server lane, persist-nothing: the flake discriminator. Hard cap
  *    {@link RERUN_MAX} per session.
  *  - `visual_judge`   — the existing cached vision judge over one step's
  *    screenshot; how a session "looks at" a PNG without pulling bytes into
  *    its context.
- *  - `verify_bug`     — dispatches the CONTROL CHILD (step 22) and stashes the
+ *  - `verify_bug`     — dispatches the CONTROL CHILD and stashes the
  *    engine's record of its conclusion under an engine-minted reference; a
  *    `bug` outcome at ≥ medium confidence must cite a stashed ref (the fold
  *    refuses one the engine never ran).
@@ -27,15 +27,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import { evidenceScenarioDir } from '@truecourse/guard-runner';
 import { readGuardEvidenceAt } from '../../lib/guard-store.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { resolveModel, resolveFallbackModel } from '../../config/llm-models.js';
-import {
-  runVisualJudge,
-  spawnVisualJudgeRunner,
-  resolveVisualJudgeTransport,
-} from '../llm/guard-visual-judge.js';
+import { runVisualJudge, spawnVisualJudgeRunner } from '../llm/guard-visual-judge.js';
 import { describeSessionFailure } from '../guard-setup/session-context.js';
 import { readInvocation } from './evidence.js';
 import { executeOneScenario, type AdjudicationExecution } from './execute.js';
@@ -79,6 +76,8 @@ export interface AdjudicationToolsInput {
   item: AdjudicationItem;
   exec: AdjudicationExecution;
   state: AdjudicationSessionState;
+  /** The run's transport, which `visual_judge`'s one vision call goes through. */
+  transport: LlmTransport;
 }
 
 export function buildAdjudicationTools(input: AdjudicationToolsInput): SessionTool[] {
@@ -200,9 +199,9 @@ function visualJudgeTool(input: AdjudicationToolsInput): SessionTool {
       let runner;
       try {
         runner = spawnVisualJudgeRunner({
-          transport: resolveVisualJudgeTransport(),
-          model: resolveModel('guard.visualJudge', undefined, repoRoot),
-          fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
+          transport: input.transport,
+          model: resolveModel('guard.visualJudge'),
+          fallbackModel: resolveFallbackModel() ?? undefined,
         });
       } catch (e) {
         return { content: `no usable vision transport: ${e instanceof Error ? e.message : String(e)}`, isError: true };

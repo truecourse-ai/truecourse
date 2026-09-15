@@ -1,8 +1,8 @@
 /**
- * Client-side guard drift shaping — the read-only labels/formatters the drifts
+ * Client-side guard drift shaping, the read-only labels/formatters the drifts
  * view uses. The ordering composition itself (`orderGuardDrifts`, `GUARD_DRIFT_ORDER`)
- * lives ONCE in `@truecourse/shared` and is re-exported here so the dashboard and
- * `truecourse guard drifts` can never diverge — no mirrored copy.
+ * lives ONCE in `@truecourse/shared` and is re-exported here so the drifts view
+ * can never diverge from it, no mirrored copy.
  */
 
 import type { GuardOutcome, GuardRunEnvelope } from '@truecourse/shared';
@@ -10,11 +10,21 @@ import type { GuardOutcome, GuardRunEnvelope } from '@truecourse/shared';
 export { GUARD_DRIFT_ORDER, orderGuardDrifts } from '@truecourse/shared';
 
 /**
- * Every run outcome in tally display order (pass first, then the drift tiers) —
+ * Every run outcome in tally display order (pass first, then the drift tiers) -
  * the single ordering the left run-summary aside and the main-pane run overview
  * both read, so their tallies never diverge.
  */
-export const GUARD_OUTCOMES: readonly GuardOutcome[] = ['pass', 'fail', 'error', 'blocked', 'stale', 'orphaned'];
+export const GUARD_OUTCOMES: readonly GuardOutcome[] = [
+  'pass',
+  'fail',
+  'error',
+  'stale',
+  'orphaned',
+  // Last, next to the other non-executed states: a scenario held back on an
+  // unregistered supplied dependency. It is a tally row, never a drift row -
+  // `orderGuardDrifts` excludes it, because there is no comparison to inspect.
+  'blocked',
+];
 
 /** A run envelope's `branch @ commit8` reference line, empty when neither is set. */
 export function guardRunRef(env: GuardRunEnvelope): string {

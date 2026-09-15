@@ -1,8 +1,8 @@
 /**
  * PER-WORKER EXECUTION AND MULTI-FLOW ATTRIBUTION.
  *
- * The BATCHED birth-validation layer this file used to cover is gone (plan 04
- * step 17): a worker runs exactly one scenario per `run_scenario` /
+ * The BATCHED birth-validation layer this file used to cover is gone: a
+ * worker runs exactly one scenario per `run_scenario` /
  * `submit_scenario` call, in its own fresh sandbox. That also removes the
  * isolated RE-CONFIRMATION layer and its `isolationCap` — batch pollution is
  * unconstructible when every batch is size 1, so there is nothing to

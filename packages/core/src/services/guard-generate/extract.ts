@@ -1,6 +1,6 @@
 /**
- * THE CLAIM-EXTRACTION SESSION — `guard-generate.extract`, one per spec doc
- * (plan 04 step 15). It replaces the per-view extract ONE-SHOTS with one
+ * THE CLAIM-EXTRACTION SESSION — `guard-generate.extract`, one per spec doc.
+ * It replaces the per-view extract ONE-SHOTS with one
  * session that pages its own document: the briefing carries the outline and
  * the first chunk, and the session opens the rest (`read_chunk` /
  * `read_section`) instead of the engine fanning a call per slice.
@@ -54,7 +54,7 @@ export const EXTRACT_SESSION_KIND = 'guard-generate.extract'
 export const EXTRACT_SESSION_CACHE_NAME = 'guard/extract-session'
 
 /**
- * The three numbers (§3.3). A doc is one briefed chunk plus a few pages or a
+ * The three numbers. A doc is one briefed chunk plus a few pages or a
  * reference lookup, a `check_claims` round, and the outcome — ten turns covers
  * a big doc with a correction loop. ONE resume grant: a huge doc legitimately
  * needs the tour, and re-buying its read costs more than granting it.
@@ -203,7 +203,7 @@ One object: { "claims": [ { "claim", "driver", "alternativeDrivers"?, "verificat
 export const EXTRACT_SESSION_PROMPT_FINGERPRINT = promptFingerprint(EXTRACT_SESSION_SYSTEM_PROMPT)
 
 /**
- * The per-doc cache key (plan 04 step 15): prompt fingerprint :: the doc's
+ * The per-doc cache key: prompt fingerprint :: the doc's
  * content hash [:: its suppression key, appended ONLY when quotes are
  * suppressed — so an unsuppressed doc keys off its text alone and a resolved
  * conflict re-keys exactly the losing doc]. Coarser than the legacy per-view
@@ -416,7 +416,7 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
     // terminal validation errors to the session before losing the whole doc.
     outcomeSchemaRepairs: 2,
     budget: EXTRACT_SESSION_BUDGET,
-    // The structural half of "run check_claims before you finish" (01 step 2k):
+    // The structural half of "run check_claims before you finish":
     // the shell refuses the first outcome of a session that never snapped its
     // anchors, once, at the cost of one turn.
     outcomePrecondition: {

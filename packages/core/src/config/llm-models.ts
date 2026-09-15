@@ -1,44 +1,20 @@
 /**
- * Per-stage LLM model configuration.
+ * The per-stage model TIER — what a one-shot stage asks the transport for.
  *
- * Every pipeline stage that shells out to the Claude CLI has a stable
- * stage ID (e.g. `spec.overlap`, `contract.extract`). Defaults are
- * baked into each runner; users override on a per-stage basis via
- * env vars or `.truecourse/config.json`.
- *
- * Resolution order (highest precedence first):
+ * Every stage has a stable id (`spec.overlap`, `guard.match`) and an in-code
+ * default tier picked for its task. A workspace on an API provider names ONE
+ * model and its transport ignores the request, so these tiers are what an
+ * operator-mode instance's `claude` login runs on, plus the environment
+ * override an operator reaches for:
  *
  *   1. Per-stage env var: `TRUECOURSE_MODEL_<STAGE_ID_UPPER_WITH_UNDERSCORES>`
  *   2. Global env var:    `TRUECOURSE_MODEL`
- *   3. Per-stage value in config.json under `llm.stages.<stageId>`
- *   4. The API-mode model (`~/.truecourse/config.json#llm.api.model`)
- *   5. In-code default supplied by the caller
+ *   3. The in-code default
  *
- * Step 4 only applies when the RUN is in API mode, where the in-code defaults —
- * Claude CLI tier aliases like `opus` — mean nothing to a provider API: the user's
- * one configured model runs every stage they didn't explicitly override. A command
- * that overrode the transport for this run (`--llm-transport`) passes its effective
- * mode in, so an api-configured model never reaches a `claude` argv.
- *
- * Fallback model (used by the CLI's `--fallback-model` flag when the
- * primary is overloaded) resolves the same way against
- * `TRUECOURSE_FALLBACK_MODEL` / `llm.fallbackModel`.
- *
- * Legacy `CLAUDE_CODE_MODEL` is honored as an alias for
- * `TRUECOURSE_MODEL` with a one-time deprecation log on first read.
- *
- * Stage IDs are intentionally stable strings — renaming a runner file
- * doesn't change the ID, so user config doesn't break.
+ * Stage ids are deliberately stable strings — renaming a runner file does not
+ * change the id, so an override outlives a refactor. Legacy `CLAUDE_CODE_MODEL`
+ * is honored as an alias for `TRUECOURSE_MODEL`, with one deprecation line.
  */
-
-import fs from 'node:fs';
-import {
-  apiModeFallbackModel,
-  apiModeModel,
-  getConfiguredLlmMode,
-  type LlmTransportMode,
-} from './global-config.js';
-import { getRepoConfigPath, resolveRepoDir } from './paths.js';
 
 export type StageId =
   // --- spec scan (corpus path) ---
@@ -56,8 +32,8 @@ export type StageId =
   // --- guard generate (scenario tests) ---
   // Only the two remaining ONE-SHOT stages are configurable here. The retired
   // per-stage ids (`guard.extract`, `guard.flows`, `guard.generate`,
-  // `guard.retry`, `guard.fidelity`, `guard.triage`) became agent SESSIONS
-  // (plan 04), which all run on the one configured session model (§3.4) —
+  // `guard.retry`, `guard.fidelity`, `guard.triage`) became agent SESSIONS,
+  // which all run on the one configured session model —
   // there is no per-stage tier for them, so declaring the ids would advertise
   // overrides nothing reads.
   | 'guard.match'
@@ -130,24 +106,6 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   'rules.violationGen': 'opus',
 };
 
-export interface LlmConfigBlock {
-  /**
-   * Per-stage overrides keyed by stage ID. Parsing stays TOLERANT of retired
-   * ids: a committed config.json still naming a session-era guard stage
-   * (`guard.extract`, `guard.flows`, `guard.generate`, `guard.retry`,
-   * `guard.fidelity`, `guard.triage`) loads fine — `readConfigSync` is a plain
-   * JSON.parse and resolution only ever queries live ids, so a stale key is
-   * inert, never a load failure.
-   */
-  stages?: Partial<Record<StageId, string>>;
-  /** Model to retry with when the primary is overloaded. */
-  fallbackModel?: string;
-}
-
-interface ConfigWithLlm {
-  llm?: LlmConfigBlock;
-}
-
 // One-time deprecation banner — avoid spamming on every resolution.
 let warnedLegacyClaudeCodeModel = false;
 function maybeWarnLegacy(): void {
@@ -171,154 +129,23 @@ function stageEnvVar(stageId: StageId): string {
   return `TRUECOURSE_MODEL_${upper}`;
 }
 
-function readConfigSync(repoDir: string): ConfigWithLlm {
-  const file = getRepoConfigPath(repoDir);
-  if (!fs.existsSync(file)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as ConfigWithLlm;
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Resolve the model name for a stage. Falls back to the supplied
- * `defaultModel` (typically pulled from STAGE_DEFAULTS by the caller)
- * if no env or config override applies.
- *
- * `repoDir` is the working repo root; pass `null` to skip config-file
- * lookup (useful in subprocesses that don't know the project path).
- *
- * `mode` is the run's effective transport mode — pass it whenever a per-run
- * `--llm-transport` flag may have overridden the saved selection. It defaults to
- * the saved selection.
- */
+/** The model a stage asks for: its env override, else its in-code default. */
 export function resolveModel(
   stageId: StageId,
   defaultModel: string = STAGE_DEFAULTS[stageId],
-  repoDir: string | null = resolveRepoDir(process.cwd()),
-  mode: LlmTransportMode = getConfiguredLlmMode(),
 ): string {
-  // 1. Per-stage env var
   const stageEnv = process.env[stageEnvVar(stageId)];
   if (stageEnv && stageEnv.trim()) return stageEnv.trim();
 
-  // 2. Global env var (TRUECOURSE_MODEL or legacy CLAUDE_CODE_MODEL)
   maybeWarnLegacy();
   const globalEnv = process.env.TRUECOURSE_MODEL || process.env.CLAUDE_CODE_MODEL;
   if (globalEnv && globalEnv.trim()) return globalEnv.trim();
 
-  // 3. Per-stage value in config.json
-  if (repoDir) {
-    const cfg = readConfigSync(repoDir);
-    const stageCfg = cfg.llm?.stages?.[stageId];
-    if (stageCfg && stageCfg.trim()) return stageCfg.trim();
-  }
-
-  // 4. The one model API mode runs everything on
-  const apiModel = apiModeModel(mode);
-  if (apiModel) return apiModel;
-
-  // 5. In-code default
   return defaultModel;
 }
 
-/**
- * Resolve the fallback model — what `--fallback-model` should pass
- * when the primary is overloaded. Returns null when no fallback is
- * configured (the CLI then fails loudly on overload).
- */
-export function resolveFallbackModel(
-  repoDir: string | null = resolveRepoDir(process.cwd()),
-  mode: LlmTransportMode = getConfiguredLlmMode(),
-): string | null {
+/** What to retry with when the primary is overloaded, or null when unset. */
+export function resolveFallbackModel(): string | null {
   const env = process.env.TRUECOURSE_FALLBACK_MODEL;
-  if (env && env.trim()) return env.trim();
-  if (repoDir) {
-    const cfg = readConfigSync(repoDir);
-    if (cfg.llm?.fallbackModel) return cfg.llm.fallbackModel.trim();
-  }
-  return apiModeFallbackModel(mode);
-}
-
-/**
- * Convenience for spawning code: returns the `--model X` (and
- * `--fallback-model Y` if configured) args to append to a `claude -p`
- * invocation. Returns `[]` when the caller wants the CLI default —
- * effectively "no flag, use whatever Claude Code picks." Today every
- * stage has a defined default in STAGE_DEFAULTS, so this is rarely
- * empty in practice.
- */
-export function modelArgsForStage(
-  stageId: StageId,
-  defaultModel: string = STAGE_DEFAULTS[stageId],
-  repoDir: string | null = resolveRepoDir(process.cwd()),
-  mode: LlmTransportMode = getConfiguredLlmMode(),
-): string[] {
-  const args: string[] = [];
-  const model = resolveModel(stageId, defaultModel, repoDir, mode);
-  if (model) {
-    args.push('--model', model);
-  }
-  const fallback = resolveFallbackModel(repoDir, mode);
-  if (fallback) {
-    args.push('--fallback-model', fallback);
-  }
-  return args;
-}
-
-/**
- * Returns the effective model for every stage, plus where the value
- * came from (`env-stage` | `env-global` | `env-legacy` | `config` |
- * `api-config` | `default`). Used by `truecourse config llm --show`.
- */
-export interface StageResolution {
-  stageId: StageId;
-  effectiveModel: string;
-  source: 'env-stage' | 'env-global' | 'env-legacy' | 'config' | 'api-config' | 'default';
-  envVar?: string;
-}
-
-export function describeStageResolutions(
-  repoDir: string | null = resolveRepoDir(process.cwd()),
-  mode: LlmTransportMode = getConfiguredLlmMode(),
-): { stages: StageResolution[]; fallbackModel: string | null } {
-  const cfg = repoDir ? readConfigSync(repoDir) : ({} as ConfigWithLlm);
-  const apiModel = apiModeModel(mode);
-  const stages = (Object.keys(STAGE_DEFAULTS) as StageId[]).map((stageId): StageResolution => {
-    const envName = stageEnvVar(stageId);
-    if (process.env[envName]?.trim()) {
-      return {
-        stageId,
-        effectiveModel: process.env[envName]!.trim(),
-        source: 'env-stage',
-        envVar: envName,
-      };
-    }
-    if (process.env.TRUECOURSE_MODEL?.trim()) {
-      return {
-        stageId,
-        effectiveModel: process.env.TRUECOURSE_MODEL!.trim(),
-        source: 'env-global',
-        envVar: 'TRUECOURSE_MODEL',
-      };
-    }
-    if (process.env.CLAUDE_CODE_MODEL?.trim()) {
-      return {
-        stageId,
-        effectiveModel: process.env.CLAUDE_CODE_MODEL!.trim(),
-        source: 'env-legacy',
-        envVar: 'CLAUDE_CODE_MODEL',
-      };
-    }
-    const cfgValue = cfg.llm?.stages?.[stageId];
-    if (cfgValue && cfgValue.trim()) {
-      return { stageId, effectiveModel: cfgValue.trim(), source: 'config' };
-    }
-    if (apiModel) {
-      return { stageId, effectiveModel: apiModel, source: 'api-config' };
-    }
-    return { stageId, effectiveModel: STAGE_DEFAULTS[stageId], source: 'default' };
-  });
-  return { stages, fallbackModel: resolveFallbackModel(repoDir, mode) };
+  return env && env.trim() ? env.trim() : null;
 }

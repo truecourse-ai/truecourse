@@ -6,9 +6,9 @@ import {
   createWebhookRouter,
   type BaselineTrigger,
   type SourcePushTrigger,
-  type RepoLinkRecord,
 } from '../../packages/github-app/src/index';
-import { MemoryGateStore } from './memory-store';
+import type { RepositoryRecord } from '@truecourse/shared';
+import { MemoryInstallationStore } from './memory-store';
 
 const SECRET = 'whsec';
 
@@ -16,20 +16,16 @@ function sign(body: string, secret = SECRET): string {
   return 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
 }
 
-let store: MemoryGateStore;
+let store: MemoryInstallationStore;
 let baselineCalls: BaselineTrigger[];
 let sourcePushCalls: SourcePushTrigger[];
-let prCalls: unknown[];
-let commentCalls: unknown[];
-let removedCalls: RepoLinkRecord[];
+let removedCalls: RepositoryRecord[];
 let app: Express;
 
 beforeEach(() => {
-  store = new MemoryGateStore();
+  store = new MemoryInstallationStore();
   baselineCalls = [];
   sourcePushCalls = [];
-  prCalls = [];
-  commentCalls = [];
   removedCalls = [];
   app = express();
   app.use(
@@ -44,21 +40,21 @@ beforeEach(() => {
     createWebhookRouter({
       secret: SECRET,
       store,
+      repos: store,
       onBaseline: (t) => baselineCalls.push(t),
       onSourcePush: (t) => sourcePushCalls.push(t),
       onRepoRemoved: async (link) => {
         removedCalls.push(link);
       },
-      onPullRequest: (p) => prCalls.push(p),
-      onCommentEdited: (p) => commentCalls.push(p),
     }),
   );
 });
 
-function repoLink(repoFullName: string, installationId: number): RepoLinkRecord {
+function repoLink(repoFullName: string, installationId: number): RepositoryRecord {
   return {
     repoFullName,
-    installationId,
+    provider: 'github',
+    accountId: String(installationId),
     workspaceOrgId: 'org_A',
     defaultBranch: 'main',
     blocking: true,
@@ -145,7 +141,8 @@ describe('webhook router', () => {
   it('triggers a baseline on push to the default branch of a connected repo', async () => {
     await store.linkRepo({
       repoFullName: 'acme/api',
-      installationId: 5,
+      provider: 'github',
+      accountId: '5',
       workspaceOrgId: 'org_A',
       defaultBranch: 'main',
       blocking: true,
@@ -173,7 +170,8 @@ describe('webhook router', () => {
   it('ignores a push to a non-default branch', async () => {
     await store.linkRepo({
       repoFullName: 'acme/api',
-      installationId: 5,
+      provider: 'github',
+      accountId: '5',
       workspaceOrgId: 'org_A',
       defaultBranch: 'main',
       blocking: true,
@@ -236,17 +234,25 @@ describe('webhook router', () => {
     ]);
   });
 
-  it('routes pull_request to onPullRequest', async () => {
+  // The pull request flow is an epic of its own, not yet built. Until it is,
+  // a pull_request delivery is authenticated, acknowledged and dropped: nothing
+  // is baselined, no source is synced, and no repository is disconnected.
+  it('receives a pull_request event and ignores it', async () => {
+    await store.linkRepo(repoLink('acme/api', 5));
     await post('pull_request', {
       action: 'opened',
       number: 3,
+      pull_request: { head: { sha: 'head1', ref: 'feature' }, base: { sha: 'base1', ref: 'main' } },
       repository: { full_name: 'acme/api', default_branch: 'main' },
       installation: { id: 5 },
     }).expect(202);
-    expect(prCalls).toHaveLength(1);
+    expect(baselineCalls).toEqual([]);
+    expect(sourcePushCalls).toEqual([]);
+    expect(removedCalls).toEqual([]);
+    expect(await store.getRepo('acme/api')).not.toBeNull();
   });
 
-  it('routes issue_comment to onCommentEdited', async () => {
+  it('receives an issue_comment event and ignores it', async () => {
     await post('issue_comment', {
       action: 'edited',
       comment: { id: 1, body: 'hi', user: { type: 'Bot', login: 'tc[bot]' } },
@@ -254,6 +260,7 @@ describe('webhook router', () => {
       repository: { full_name: 'acme/api' },
       installation: { id: 5 },
     }).expect(202);
-    expect(commentCalls).toHaveLength(1);
+    expect(baselineCalls).toEqual([]);
+    expect(sourcePushCalls).toEqual([]);
   });
 });

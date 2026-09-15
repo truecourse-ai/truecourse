@@ -21,10 +21,10 @@
  * A repository whose slice is EMPTY — the workspace has never been scanned, or
  * it is linked to no source that yielded a document — still gets a corpus
  * written, holding nothing. That is the honest artifact (this repository reads
- * no documents) and it is what lets Test setup run at all: setup derives a
+ * no documents) and it is what lets Flow setup run at all: setup derives a
  * recipe, its dependencies and its interfaces from the CODE, and needs no
- * documents (product-owner plan §6). The count comes back so the caller can
- * decide what an empty slice means for it — setup runs, generate does not.
+ * documents. The count comes back so the caller can decide what an empty slice
+ * means for it — setup runs, generate does not.
  */
 
 import fs from 'node:fs';
@@ -34,7 +34,7 @@ import { loadWorkspaceSpec, loadWorkspaceSpecDoc } from '@truecourse/core/lib/sp
 import { contextBindings, readContextDocByRef } from '@truecourse/core/lib/context-store';
 import { sliceCorpus } from '@truecourse/core/services/context';
 import { assertSafeRel, safeJoin } from '@truecourse/core/lib/safe-path';
-import type { RepoRef } from '@truecourse/core/lib/contract-store';
+import type { RepoRef } from '@truecourse/core/lib/repo-ref';
 
 function writeJson(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -79,7 +79,7 @@ export async function materializeStoredSpec(
   // The resolutions travel with the corpus they resolve: without them a
   // conflict the user already settled reads as open again in this clone. They
   // are the WORKSPACE's — a conflict is a property of its documents, resolved
-  // once (plan §2).
+  // once.
   const decisions = await loadWorkspaceSpec<DecisionsFile>({ workspaceOrgId }, 'decisions');
   if (decisions != null) writeJson(decisionsPath(treeDir), decisions);
 
@@ -91,7 +91,7 @@ export async function materializeStoredSpec(
  * How many documents the repository reads RIGHT NOW, straight from the store —
  * no clone, no tree. A job that materialized its slice minutes ago asks this
  * again when it settles, because the Document scan it was started beside may
- * have finished in between: on a connect, Test setup and the first scan run
+ * have finished in between: on a connect, Flow setup and the first scan run
  * side by side, and what the setup's clone held is not what the repository
  * reads by the time it is over.
  */

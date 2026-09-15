@@ -1,8 +1,8 @@
 import { verificationGroup, verificationBoundaryProblems } from '@truecourse/shared'
 /**
  * Flow SYNTHESIS — the spec-side generation unit, run as `guard-generate.flows`
- * agent sessions (plan 04 step 16; the per-area one-shots + their corrective
- * re-ask were retired by step 20). One session per AREA composes that area's
+ * agent sessions (the per-area one-shots and their corrective re-ask were
+ * retired). One session per AREA composes that area's
  * already-extracted claims into user-goal paths (flows); one epic session,
  * after the area pool, chains the results into cross-area epics. The output is
  * `.truecourse/scenarios/flows.json`, the committable flow corpus scenarios
@@ -85,8 +85,8 @@ export interface FlowClaimInput {
   alternativeDrivers?: GuardDriverId[]
   verification?: GuardVerification
   /**
-   * The extraction session's structured needs for this claim (plan 04 step 15),
-   * read by flow synthesis (and its `check_flows` needs-vs-catalog binding).
+   * The extraction session's structured needs for this claim, read by flow
+   * synthesis (and its `check_flows` needs-vs-catalog binding).
    * Advisory — they steer composition, never gate it.
    */
   needs?: ClaimNeed[]
@@ -105,8 +105,8 @@ export interface FlowSynthesisArea {
   claims: FlowClaimInput[]
   docs: FlowDocInput[]
   /**
-   * 0-based shard index when the area was too big for one session (item 133),
-   * absent when it was not. The AREA identity does not change — only the work is
+   * 0-based shard index when the area was too big for one session, absent when
+   * it was not. The AREA identity does not change — only the work is
    * split — so area accounting downstream is untouched, and an unsharded area
    * keys byte-identically to before this existed.
    */
@@ -122,7 +122,7 @@ export interface FlowAreaDocInput extends FlowDocInput {
 
 /**
  * The identity of one SYNTHESIS UNIT — the area, plus its chunk when the area
- * was sharded (item 133). Two chunks share an `areaId`, so anything that pairs a
+ * was sharded. Two chunks share an `areaId`, so anything that pairs a
  * session RESULT back to the work that produced it must key on this, never on
  * `areaId` alone: keying on the area silently folds one chunk's flows against
  * another chunk's claim inventory.
@@ -149,7 +149,7 @@ export function flowAreaIdForDoc(doc: string, areaTags: readonly string[]): stri
 /** Group per-document extractions into the areas synthesis calls on, in stable
  *  (area id) order with each area's docs in the order they were given. */
 /**
- * The most claims one flow-synthesis session is briefed with (item 133).
+ * The most claims one flow-synthesis session is briefed with.
  *
  * The session's contract is TOTAL — every claim it is handed must come back as a
  * milestone or as a `noFlowClaims` entry, copied verbatim — so the accounting it
@@ -170,7 +170,7 @@ export const FLOW_AREA_CLAIM_CEILING = 200
  * Docs are packed greedily in their existing (corpus) order, so the shard is
  * deterministic and a doc's neighbours stay together. A single doc that alone
  * exceeds the ceiling gets its own chunk — the alternative is splitting it, and
- * an oversized doc is a curation problem (item 131), not a sharding one.
+ * an oversized doc is a curation problem, not a sharding one.
  */
 function shardArea(area: FlowSynthesisArea): FlowSynthesisArea[] {
   if (area.claims.length <= FLOW_AREA_CLAIM_CEILING) return [area]
@@ -484,7 +484,7 @@ function validateAreaSynthesis(
 }
 
 // ---------------------------------------------------------------------------
-// The session CHECKER (plan 04 step 16) — the det post-passes as one callable.
+// The session CHECKER — the det post-passes as one callable.
 // The `guard-generate.flows` session's `check_flows` tool runs it live (defects
 // come back as observations instead of silent drops), and the fold re-runs the
 // refusal half through `validateAreaSynthesis` — never trust the transcript.
@@ -767,10 +767,10 @@ function freeId(base: string, taken: ReadonlySet<string>): string {
 }
 
 // ---------------------------------------------------------------------------
-// The flow-synthesis SESSION seams (plan 04 step 16) — typed here because the
-// engine cannot depend on `@truecourse/core`, which owns the sessions; the
-// command adapter injects the implementations (same pattern as plan 03's
-// guard-setup seams and the extract seam above).
+// The flow-synthesis SESSION seams — typed here because the engine cannot
+// depend on `@truecourse/core`, which owns the sessions; the command adapter
+// injects the implementations (same pattern as the guard-setup seams and the
+// extract seam above).
 // ---------------------------------------------------------------------------
 
 /**
@@ -830,9 +830,9 @@ export interface SynthesizeFlowsOptions {
   /** The areas to synthesize — every area whose claim inventory the run knows. */
   areas: readonly FlowSynthesisArea[]
   /**
-   * The per-area SESSION seam (plan 04 step 16) — THE synthesis path since the
-   * one-shot retirement (step 20). The fold below re-validates every session
-   * value against the live claim inventory regardless.
+   * The per-area SESSION seam — THE synthesis path since the one-shots
+   * retired. The fold below re-validates every session value against the live
+   * claim inventory regardless.
    */
   areaSession: FlowsAreaSessionSeam
   /** The epic SESSION seam — one session over the digests, after the area pool. */

@@ -1,28 +1,25 @@
 /**
  * The direct-API LLM transport: implements `@truecourse/shared/llm`'s
  * `LlmTransport` on top of the Vercel AI SDK, so TrueCourse talks to
- * Anthropic / OpenAI / Bedrock / Copilot over their APIs instead of spawning a
- * `claude` binary. Both editions install one process-wide via
- * `setDefaultTransport` — the OSS CLI from the user's global config, `ee-server`
- * from the active stored provider config.
+ * Anthropic / OpenAI / Bedrock / Copilot over their APIs instead of running on
+ * the machine's own `claude` login. The dashboard server builds one per run
+ * from the asking workspace's stored provider config and threads it into the
+ * run.
  *
- * Like the cli backend, it is content-agnostic: it returns the model's RAW
- * assistant text and the caller (each runner) strips fences + parses + Zod-
+ * Like the claude-code backend, it is content-agnostic: it returns the model's
+ * RAW assistant text and the caller (each runner) strips fences + parses + Zod-
  * validates. The provider config fixes the model(s); the request's
  * `model`/`fallbackModel` hints are ignored unless `honorRequestModel` is set
- * (the OSS CLI sets it, so per-stage model overrides keep working).
+ * (the default in `createApiTransportFor`, so per-stage model overrides keep
+ * working).
  *
  * ACCOUNTING: every successful call reports its tokens to the shared per-stage
  * usage table, with a cost from the optional `pricing` hook — the same
- * ` · model · tokens · $cost` tags the cli backend produces.
+ * ` · model · tokens · $cost` tags the claude-code backend produces.
  *
- * OBSERVABILITY: when a `recorder` is supplied (EE only — OSS passes none),
- * every call (success or failure) is captured as one trace — the prompt/output
- * the SDK already has, plus token usage/latency/finish reason, tagged with the
- * ambient `currentTrace()` (org / job / repo). Recording NEVER breaks the call:
- * a recorder error is swallowed. The AI SDK's native OpenTelemetry emission is
- * also enabled (`experimental_telemetry`), so the same calls stay OTel-standard
- * for a future exporter.
+ * OBSERVABILITY: the AI SDK's native OpenTelemetry emission is enabled
+ * (`experimental_telemetry`), tagged with the ambient `currentTrace()` (org /
+ * job / repo), so every call stays OTel-standard for a future exporter.
  */
 
 import { generateText, generateObject, jsonSchema, type LanguageModel, type ModelMessage } from 'ai';
@@ -32,7 +29,6 @@ import {
   type LlmRequest,
   type LlmTransport,
 } from '@truecourse/shared/llm';
-import type { LlmTraceInput, LlmTraceRecorder, TraceStatus } from '@truecourse/shared';
 import { buildModel } from './model.js';
 import {
   isObjectRootedSchema,
@@ -43,7 +39,7 @@ import {
 import { currentTrace, type TraceContext } from './trace-context.js';
 import type { ProviderConfig } from './types.js';
 
-/** One call's token counts, in the same buckets the cli backend reports. */
+/** One call's token counts, in the same buckets the claude-code backend reports. */
 export interface CallUsage {
   inputTokens: number;
   outputTokens: number;
@@ -52,22 +48,20 @@ export interface CallUsage {
 }
 
 export interface ApiTransportOptions {
-  /** Trace sink. Omit (e.g. OSS, or the config-probe call) to record nothing. */
-  recorder?: LlmTraceRecorder;
   /**
-   * Cost for one call's usage, in USD. Omit (EE, the config probe) and calls are
+   * Cost for one call's usage, in USD. Omit (the config probe) and calls are
    * recorded with a zero cost — tokens are still counted.
    */
   pricing?: (modelId: string, usage: CallUsage) => number;
   /**
    * Run each request on its own `model`/`fallbackModel` when it carries one,
-   * falling back to the config's. Off by default: EE fixes the model in the
-   * stored provider config and its requests carry cli tier aliases.
+   * falling back to the config's. Off by default: the stored provider config
+   * fixes the model, and a stage's request carries a tier alias, not a model id.
    */
   honorRequestModel?: boolean;
 }
 
-/** Former name of {@link ApiTransportOptions}, kept for EE consumers. */
+/** Former name of {@link ApiTransportOptions}, kept for callers still on it. */
 export type AiSdkTransportOptions = ApiTransportOptions;
 
 /** The subset of the AI SDK result we capture (structurally satisfied by GenerateTextResult). */
@@ -159,12 +153,6 @@ function promptInputOf(req: LlmRequest): PromptInput {
 }
 
 /** The granular unit id the call processed, parsed from `LlmRequest.id`. */
-function sliceIdOf(id: string | undefined): string | null {
-  if (!id) return null;
-  const i = id.indexOf(':');
-  return i >= 0 ? id.slice(i + 1) : null;
-}
-
 /** Per-call metadata for the AI SDK's OTel emission (attributes must be scalars). */
 function telemetryMeta(req: LlmRequest, ctx: TraceContext | undefined): Record<string, string> {
   const m: Record<string, string> = {};
@@ -177,83 +165,7 @@ function telemetryMeta(req: LlmRequest, ctx: TraceContext | undefined): Record<s
 }
 
 /** Non-null context tags that belong in the trace's free-form `metadata`. */
-function traceMetadata(ctx: TraceContext | undefined, provider: string): Record<string, unknown> {
-  const m: Record<string, unknown> = { provider };
-  if (ctx?.jobId) m.jobId = ctx.jobId;
-  if (ctx?.repoFullName) m.repoFullName = ctx.repoFullName;
-  if (ctx?.commitSha) m.commitSha = ctx.commitSha;
-  return m;
-}
-
 /** Fields common to the ok/error trace; the outcome fills the rest. */
-function baseTrace(
-  req: LlmRequest,
-  ctx: TraceContext | undefined,
-  cfg: ProviderConfig,
-  model: string,
-  usedFallback: boolean,
-  startedAt: number,
-): Omit<
-  LlmTraceInput,
-  | 'status'
-  | 'errorMessage'
-  | 'finishReason'
-  | 'promptTokens'
-  | 'completionTokens'
-  | 'totalTokens'
-  | 'reasoningTokens'
-  | 'output'
-  | 'reasoning'
-> {
-  return {
-    workspaceOrgId: ctx?.org ?? null,
-    traceId: ctx?.traceId ?? null,
-    parentId: ctx?.parentId ?? null,
-    stage: req.stage ?? null,
-    callId: req.id ?? null,
-    sliceId: sliceIdOf(req.id),
-    module: null,
-    topic: null,
-    model,
-    usedFallback,
-    latencyMs: Date.now() - startedAt,
-    system: req.system,
-    user: req.user,
-    metadata: traceMetadata(ctx, cfg.provider),
-  };
-}
-
-function okTrace(base: ReturnType<typeof baseTrace>, result: CapturedResult): LlmTraceInput {
-  const u = result.usage;
-  return {
-    ...base,
-    status: 'ok',
-    errorMessage: null,
-    finishReason: result.finishReason ?? null,
-    promptTokens: u?.inputTokens ?? null,
-    completionTokens: u?.outputTokens ?? null,
-    totalTokens: u?.totalTokens ?? null,
-    reasoningTokens: u?.reasoningTokens ?? null,
-    output: result.text,
-    reasoning: result.reasoningText ?? null,
-  };
-}
-
-function errorTrace(base: ReturnType<typeof baseTrace>, err: unknown): LlmTraceInput {
-  return {
-    ...base,
-    status: 'error' as TraceStatus,
-    errorMessage: (err as Error)?.message ?? String(err),
-    finishReason: null,
-    promptTokens: null,
-    completionTokens: null,
-    totalTokens: null,
-    reasoningTokens: null,
-    output: null,
-    reasoning: null,
-  };
-}
-
 /** Report one successful call's tokens + cost to the shared per-stage table. */
 function recordUsage(
   req: LlmRequest,
@@ -275,15 +187,6 @@ function recordUsage(
 }
 
 /** Record without ever breaking the call: the store's failure must not throw out. */
-async function safeRecord(recorder: LlmTraceRecorder | undefined, input: LlmTraceInput): Promise<void> {
-  if (!recorder) return;
-  try {
-    await recorder.record(input);
-  } catch (err) {
-    console.warn(`[llm-api] trace record failed: ${(err as Error).message}`);
-  }
-}
-
 /**
  * Build an `LlmTransport` for `cfg`. Runs on the primary model; on a non-abort
  * error, retries once on the fallback (never after the signal aborts).
@@ -302,7 +205,6 @@ export function createApiTransport(
     models.set(id, built);
     return built;
   };
-  const recorder = opts.recorder;
   const requested = (id: string | undefined): string | undefined =>
     opts.honorRequestModel ? id?.trim() || undefined : undefined;
 
@@ -334,7 +236,6 @@ export function createApiTransport(
     const primary = modelFor(modelId);
     const fallback = fallbackId ? modelFor(fallbackId) : undefined;
     const ctx = currentTrace();
-    const startedAt = Date.now();
     // Omit an empty/whitespace system prompt — the AI SDK would otherwise send it
     // as an empty text block, which the Anthropic API rejects ("text content blocks
     // must be non-empty"). Callers that pack everything into `user` legitimately
@@ -395,24 +296,12 @@ export function createApiTransport(
       try {
         result = await run(primary);
       } catch (err) {
-        if (!fallback || signal?.aborted) {
-          await safeRecord(recorder, errorTrace(baseTrace(req, ctx, cfg, modelId, false, startedAt), err));
-          throw err;
-        }
+        if (!fallback || signal?.aborted) throw err;
         usedFallback = true;
-        try {
-          result = await run(fallback);
-        } catch (err2) {
-          await safeRecord(
-            recorder,
-            errorTrace(baseTrace(req, ctx, cfg, fallbackModelId, true, startedAt), err2),
-          );
-          throw err2;
-        }
+        result = await run(fallback);
       }
       const model = usedFallback ? fallbackModelId : modelId;
       recordUsage(req, model, result, opts.pricing);
-      await safeRecord(recorder, okTrace(baseTrace(req, ctx, cfg, model, usedFallback, startedAt), result));
       return result.text;
     } finally {
       cleanup();
@@ -420,5 +309,5 @@ export function createApiTransport(
   };
 }
 
-/** Former name of {@link createApiTransport}, kept for EE consumers. */
+/** Former name of {@link createApiTransport}, kept for callers still on it. */
 export const createAiSdkTransport = createApiTransport;

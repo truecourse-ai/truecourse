@@ -1,253 +1,90 @@
 /**
- * Spec store — the curated spec JSON documents (`corpus.json`,
- * `decisions.json`). File-backed by default (raw JSON under
- * `<repo>/.truecourse/specs/`, where the IL `spec-consolidator` writes them);
- * the enterprise edition injects a Postgres-backed impl via `setSpecStore`.
+ * The spec store — the curated spec documents (the corpus and the decisions
+ * ledger) and the snapshot of every document body a scan kept.
  *
- * Unlike contracts (a `.tc` tree), specs are two small JSON files queried whole,
- * so the seam is document-oriented (named artifact → JSON) and the EE impl keeps
- * them inline as `jsonb` (no blob).
+ * All of it is the WORKSPACE's: one current set per organization, no commit
+ * dimension. A repository reads a SLICE of the corpus, derived at read time,
+ * and resolves its conflicts in the workspace's one ledger.
+ *
+ * They are small JSON documents queried whole, so the seam is
+ * document-oriented (named artifact → JSON) and the store keeps them inline as
+ * `jsonb`. The seam exists because `@truecourse/core` cannot depend on
+ * `@truecourse/data-store`; boot installs the Postgres store over it.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import type { RepoRef, WorkspaceRef } from './contract-store.js';
+import type { WorkspaceRef } from './repo-ref.js';
 
-export type { RepoRef, WorkspaceRef } from './contract-store.js';
+export type { WorkspaceRef } from './repo-ref.js';
 
 /**
- * Per-(repo, commit) JSON artifacts. `corpus`/`decisions` are the curated spec
+ * A workspace's JSON artifacts. `corpus`/`decisions` are the curated spec
  * (areas + relations + overlaps, and the user's curation intent).
  */
 export type SpecArtifact =
-  // The curated doc corpus (areas + relations + overlaps). File impl reads/writes
-  // `specs/corpus.json`.
+  // The curated doc corpus (areas + relations + overlaps).
   | 'corpus'
   | 'decisions'
-  // Structured inferred decisions (kind/identity/loc/reason/contractPath) — the
-  // dashboard's Inferred tab reads this; written by `inferInProcess` for both OSS
-  // (file) and EE (Postgres).
-  | 'inferredDecisions'
   // The DOCUMENT SNAPSHOT of a scan: `{ v, files: { <doc ref>: <content sha> } }`
-  // over the kept documents' bodies, so a hosted repository — which has no
-  // working tree — can show a document exactly as the scan read it. Written
-  // through `saveSpecDocs`, read through `loadSpecDoc`; the file impl needs
-  // neither (the tree IS the snapshot).
+  // over the kept documents' bodies, so a document can still be read exactly as
+  // the scan read it after its source dropped or rewrote it.
+  // Written through `saveWorkspaceSpecDocs`, read through `loadWorkspaceSpecDoc`.
   | 'docs';
 
-/** Pluggable spec store. File-backed by default; EE injects Postgres. */
+/** Where a workspace's curated specs are kept. */
 export interface SpecStore {
-  /** Persist one spec JSON artifact for `(ref)`. Overwrites prior content. */
-  saveSpec(ref: RepoRef, artifact: SpecArtifact, json: unknown): Promise<void>;
-  /** Read one spec JSON artifact at a specific `ref`, or `null` when absent. */
-  loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null>;
   /**
-   * Delete one spec JSON artifact for `(ref)`. Idempotent — a no-op when absent.
-   * Used to drop a PR-scoped `decisions` overlay row on merge/close; the file
-   * default throws for a PR-scoped decisions ref (OSS has no overlays).
-   */
-  deleteSpec(ref: RepoRef, artifact: SpecArtifact): Promise<void>;
-  /** Read the repo's CURRENT artifact (the latest stored, for the dashboard), or `null`. */
-  loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact): Promise<T | null>;
-  /**
-   * The repo's latest stored commit SHA (the one `loadLatest` reads from), or
-   * `null` when nothing is stored. EE-only — the file impl materializes in place
-   * and has no commit dimension, so it returns null.
-   */
-  latestCommit(repoKey: string): Promise<string | null>;
-  /**
-   * Persist one spec JSON artifact under WORKSPACE scope (enterprise only).
-   * Always-latest: one current row per `(workspaceOrgId, artifact)`, no commit.
-   * The file default throws — OSS/local has no workspace concept.
+   * Persist one spec JSON artifact under WORKSPACE scope. Always-latest: one
+   * current row per `(workspaceOrgId, artifact)`, no commit.
    */
   saveWorkspaceSpec(ref: WorkspaceRef, artifact: SpecArtifact, json: unknown): Promise<void>;
-  /**
-   * Read one workspace spec artifact, or `null`. The file default returns
-   * `null` (so a future effective-spec read degrades to repo-only in OSS).
-   */
+  /** Read one workspace spec artifact, or `null`. */
   loadWorkspaceSpec<T = unknown>(ref: WorkspaceRef, artifact: SpecArtifact): Promise<T | null>;
   /**
    * Snapshot the workspace scan's kept documents — `{ contextRef: body }` — so
    * a document can still be read exactly as the scan read it after its source
    * dropped or rewrote it (the context ledger keeps only what a source yields
    * NOW, and sweeps the bodies it stops naming). Bodies are content-addressed
-   * under the workspace's spec scope; the file default throws, like every other
-   * workspace write.
+   * under the workspace's spec scope.
    */
   saveWorkspaceSpecDocs(ref: WorkspaceRef, files: Record<string, string>): Promise<void>;
   /** One snapshotted workspace document's body, or `null` when it is not in it. */
   loadWorkspaceSpecDoc(workspaceOrgId: string, docRef: string): Promise<string | null>;
-  /**
-   * Snapshot the kept documents' bodies for `ref` — `{ repoRelativeRef: body }`,
-   * source refs (`.truecourse/specs/sources/…`) included. The hosted store
-   * content-addresses the bodies and writes the `docs` manifest; the file impl
-   * is a no-op, since the tree already holds every document.
-   */
-  saveSpecDocs(ref: RepoRef, files: Record<string, string>): Promise<void>;
-  /**
-   * One document's body as the scan read it: the snapshot at `commitSha` when
-   * given, else the newest snapshot's. `null` when the document is not in it.
-   * The file impl reads the live tree (confined to the repo root).
-   */
-  loadSpecDoc(repoKey: string, docRef: string, commitSha?: string): Promise<string | null>;
-  /** `true` when load returns the live repo file (file impl). */
-  readonly materializesInPlace: boolean;
-}
-
-/**
- * On-disk location per artifact — `corpus.json` / `decisions.json` /
- * `inferredDecisions.json` under `specs/`, exactly where the IL writers put
- * them, so the file impl is byte-identical.
- */
-function specPath(repoKey: string, artifact: SpecArtifact): string {
-  return path.join(repoKey, '.truecourse', 'specs', `${artifact}.json`);
-}
-
-/**
- * The core's PR-overlay sentinel commit for the `decisions` artifact
- * (`_pr/<number>`, alongside the repo `_repo`). PR-scoped decisions live only in
- * the enterprise store, so the file default fails loud if one reaches it.
- */
-function isPrDecisionsRef(commitSha: string | undefined): boolean {
-  return /^_pr\/\d+$/.test(commitSha ?? '');
-}
-const PR_DECISIONS_FILE_ERROR =
-  '[spec-store] PR-scoped decisions require the enterprise store';
-
-// ---------------------------------------------------------------------------
-// File-backed default (OSS) — raw JSON at the same paths the IL writers use,
-// so save/load round-trip the exact on-disk document.
-// ---------------------------------------------------------------------------
-
-class FileSpecStore implements SpecStore {
-  readonly materializesInPlace = true;
-
-  async saveSpec(ref: RepoRef, artifact: SpecArtifact, json: unknown): Promise<void> {
-    if (artifact === 'decisions' && isPrDecisionsRef(ref.commitSha)) {
-      throw new Error(PR_DECISIONS_FILE_ERROR);
-    }
-    const file = specPath(ref.repoKey, artifact);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n', 'utf-8');
-  }
-
-  async loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null> {
-    if (artifact === 'decisions' && isPrDecisionsRef(ref.commitSha)) {
-      throw new Error(PR_DECISIONS_FILE_ERROR);
-    }
-    const file = specPath(ref.repoKey, artifact);
-    if (!fs.existsSync(file)) return null;
-    try {
-      return JSON.parse(fs.readFileSync(file, 'utf-8')) as T;
-    } catch {
-      return null;
-    }
-  }
-
-  async deleteSpec(ref: RepoRef, artifact: SpecArtifact): Promise<void> {
-    if (artifact === 'decisions' && isPrDecisionsRef(ref.commitSha)) {
-      throw new Error(PR_DECISIONS_FILE_ERROR);
-    }
-    const file = specPath(ref.repoKey, artifact);
-    if (fs.existsSync(file)) fs.rmSync(file);
-  }
-
-  // The file impl is single-document-per-repo, so "latest" === read the file.
-  async loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact): Promise<T | null> {
-    return this.loadSpec<T>({ repoKey, commitSha: '' }, artifact);
-  }
-
-  // No commit dimension in the file edition.
-  async latestCommit(): Promise<string | null> {
-    return null;
-  }
-
-  async saveSpecDocs(): Promise<void> {
-    // The working tree holds every document the corpus references.
-  }
-
-  async loadSpecDoc(repoKey: string, docRef: string): Promise<string | null> {
-    const root = path.resolve(repoKey);
-    const full = path.resolve(root, docRef);
-    if (full !== root && !full.startsWith(root + path.sep)) return null;
-    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
-    return fs.readFileSync(full, 'utf-8');
-  }
-
-  // OSS/local has no workspace concept. Writing throws (fail loud — a caller
-  // that reached here is mis-wired); reading is empty so an effective-spec read
-  // degrades cleanly to repo-only without special-casing the file edition.
-  async saveWorkspaceSpec(): Promise<void> {
-    throw new Error('[spec-store] workspace-scoped specs require the enterprise store');
-  }
-
-  async loadWorkspaceSpec<T = unknown>(): Promise<T | null> {
-    return null;
-  }
-
-  async saveWorkspaceSpecDocs(): Promise<void> {
-    throw new Error('[spec-store] workspace-scoped specs require the enterprise store');
-  }
-
-  async loadWorkspaceSpecDoc(): Promise<string | null> {
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------------------
-// Active store registry + delegators.
+// The installed store + its delegators.
 // ---------------------------------------------------------------------------
 
-let active: SpecStore = new FileSpecStore();
+let installed: SpecStore | null = null;
 
-/** The active spec store (file-backed unless EE installed a Postgres one). */
+/** The active spec store. */
 export function getSpecStore(): SpecStore {
-  return active;
+  if (!installed) throw new Error('No spec store installed (boot did not run installDbStores).');
+  return installed;
 }
-/** Install a spec store (e.g. the enterprise Postgres impl). */
+/** Install the spec store (boot: the Postgres one). */
 export function setSpecStore(store: SpecStore): void {
-  active = store;
+  installed = store;
 }
-/** Restore the file-backed default (tests). */
+/** Forget the installed store (tests). */
 export function resetSpecStore(): void {
-  active = new FileSpecStore();
+  installed = null;
 }
 
-export const saveSpec = (ref: RepoRef, artifact: SpecArtifact, json: unknown): Promise<void> =>
-  active.saveSpec(ref, artifact, json);
-export const loadSpec = <T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null> =>
-  active.loadSpec<T>(ref, artifact);
-export const deleteSpec = (ref: RepoRef, artifact: SpecArtifact): Promise<void> =>
-  active.deleteSpec(ref, artifact);
-export const loadLatestSpec = <T = unknown>(
-  repoKey: string,
-  artifact: SpecArtifact,
-): Promise<T | null> => active.loadLatest<T>(repoKey, artifact);
-export const latestSpecCommit = (repoKey: string): Promise<string | null> =>
-  active.latestCommit(repoKey);
-export const saveSpecDocs = (ref: RepoRef, files: Record<string, string>): Promise<void> =>
-  active.saveSpecDocs(ref, files);
-export const loadSpecDoc = (
-  repoKey: string,
-  docRef: string,
-  commitSha?: string,
-): Promise<string | null> => active.loadSpecDoc(repoKey, docRef, commitSha);
 export const saveWorkspaceSpec = (
   ref: WorkspaceRef,
   artifact: SpecArtifact,
   json: unknown,
-): Promise<void> => active.saveWorkspaceSpec(ref, artifact, json);
+): Promise<void> => getSpecStore().saveWorkspaceSpec(ref, artifact, json);
 export const loadWorkspaceSpec = <T = unknown>(
   ref: WorkspaceRef,
   artifact: SpecArtifact,
-): Promise<T | null> => active.loadWorkspaceSpec<T>(ref, artifact);
+): Promise<T | null> => getSpecStore().loadWorkspaceSpec<T>(ref, artifact);
 export const saveWorkspaceSpecDocs = (
   ref: WorkspaceRef,
   files: Record<string, string>,
-): Promise<void> => active.saveWorkspaceSpecDocs(ref, files);
+): Promise<void> => getSpecStore().saveWorkspaceSpecDocs(ref, files);
 export const loadWorkspaceSpecDoc = (
   workspaceOrgId: string,
   docRef: string,
-): Promise<string | null> => active.loadWorkspaceSpecDoc(workspaceOrgId, docRef);
-/** Whether the active spec store reads/writes the live repo files (file) or Postgres (EE). */
-export const specsMaterializeInPlace = (): boolean => active.materializesInPlace;
+): Promise<string | null> => getSpecStore().loadWorkspaceSpecDoc(workspaceOrgId, docRef);

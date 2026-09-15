@@ -6,7 +6,9 @@ import { type Express } from 'express';
 import { createTestApp } from '../helpers/test-app';
 import { GuardClaimsViewSchema } from '../../packages/shared/src/index';
 import { claimContentHash } from '../../packages/shared/src/guard/claims';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installWorkTreeDocReader, resetRepoDocReader } from '../helpers/work-tree-doc-reader';
 
 /**
  * The Claims read surface: the extracted claim corpus with the trace from a claim
@@ -168,12 +170,16 @@ describe('GET /guard/claims', () => {
   }
 
   beforeEach(async () => {
+    installWorkTreeGuardStore();
+    installWorkTreeDocReader();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createTestApp();
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+    resetGuardStore();
+    resetRepoDocReader();
   });
 
   it('answers 200 with the empty view when nothing has been extracted', async () => {

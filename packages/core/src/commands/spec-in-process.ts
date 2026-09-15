@@ -1,23 +1,21 @@
 /**
- * Shared in-process entry points for the BL Drift / Spec Consolidation
- * commands. Both the CLI and the dashboard server import these so
- * progress wiring, decision-file writes, and IL-extraction chaining
- * live in exactly one place.
+ * Shared in-process entry points for the document scan. The dashboard server
+ * imports these so progress wiring and the decisions read-modify-writes live in
+ * exactly one place.
  *
- * Same shape as `analyze-in-process.ts` — the caller passes a
- * `StepTracker` and we drive it through the high-level phases:
+ * The caller passes a `StepTracker` and we drive it through the high-level
+ * phases:
  *
  *   curate         discover → tag areas → group → flag overlaps → corpus.json
  *
- * Step keys + labels are stable across CLI/dashboard so the progress
- * UI is identical on both surfaces. Implementations of the actual
- * pipelines come from `@truecourse/spec-consolidator`; this module
- * just orchestrates them and reports progress.
+ * Step keys + labels are a stable taxonomy the progress UI keys on.
+ * Implementations of the actual pipelines come from
+ * `@truecourse/spec-consolidator`; this module just orchestrates them
+ * and reports progress.
  */
 
 import {
   classifyDoc,
-  readDecisions,
   writeDecisions,
   type CuratedCorpus,
   type CurateResult,
@@ -26,8 +24,7 @@ import {
   type DocCandidate,
   type RepoIdentity,
 } from '@truecourse/spec-consolidator';
-import type { CoverageGap, ValidationIssue } from '@truecourse/contract-extractor';
-import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
+import type { LlmTransportMode } from '../services/llm/provider-config.js';
 import { resolveModel, type StageId } from '../config/llm-models.js';
 import { openConflicts } from '@truecourse/shared';
 
@@ -58,19 +55,19 @@ import {
 import { SETTLE_AREAS_SESSION_KIND } from '../services/spec-scan/settle-areas.js';
 import { OVERLAP_SESSION_KIND } from '../services/spec-scan/overlap.js';
 import { createStoredSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
-import { resolveCommitSha } from '../lib/repo-ref.js';
+import { resolveCommitSha, type WorkspaceRef } from '../lib/repo-ref.js';
 import {
-  createConfiguredSessionDriver,
+  createClaudeCodeSessionDriver,
   type ConfiguredSessionDriver,
 } from '../services/llm/session-driver.js';
-import type { LlmEstimate } from './analyze-core.js';
+import type { LlmEstimate } from '../services/llm/token-estimator.js';
 import { estimateScanTokens } from '../services/llm/spec-estimate.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 
 /**
- * Thrown when the user declines the pre-flight LLM cost estimate. Scan/generate
- * are entirely LLM-driven, so a decline aborts the run (unlike analyze, which
- * falls back to deterministic-only). Callers catch this to exit cleanly.
+ * Thrown when the user declines the pre-flight LLM cost estimate. Scan and
+ * generate are entirely LLM-driven, so a decline aborts the run. Callers catch
+ * this to exit cleanly.
  */
 export class EstimateDeclined extends Error {
   constructor(public readonly kind: 'scan' | 'guard' | 'guard setup') {
@@ -100,49 +97,13 @@ async function raceAbort<T>(confirm: Promise<T>, signal?: AbortSignal): Promise<
   }
 }
 
-import {
-  infer,
-  writeInferred,
-  renderDecision,
-  type InferResult,
-} from '@truecourse/contract-verifier';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import {
-  saveContracts,
-  loadContracts,
-  type RepoRef,
-  type WorkspaceRef,
-} from '../lib/contract-store.js';
-import {
-  saveSpec,
-  loadSpec,
-  deleteSpec,
-  loadLatestSpec,
-  saveWorkspaceSpec,
-  loadWorkspaceSpec,
-  specsMaterializeInPlace,
-} from '../lib/spec-store.js';
+import { saveWorkspaceSpec, loadWorkspaceSpec } from '../lib/spec-store.js';
 import { readRepoDoc } from '../lib/repo-doc-reader.js';
-import { getSpecInheritanceHook } from '../lib/spec-inheritance-hook.js';
-import {
-  reapplyPromoted,
-  applyInferredActions,
-  diffDecisions,
-  type InferredDecisionSummary,
-  type InferDiff,
-} from '../lib/inferred-decisions.js';
-import { listInferredActions } from '../lib/inferred-action-store.js';
-import { readLatest } from '../lib/analysis-store.js';
 import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../progress.js';
-import {
-  trackEvent,
-  bucketFileCount,
-  bucketDuration,
-  type TelemetrySource,
-} from '../services/telemetry.service.js';
 
 // ---------------------------------------------------------------------------
 // Step taxonomies — exported so callers can pre-build the tracker.
@@ -169,12 +130,6 @@ const CURATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   verify: [],
 };
 
-export const INFER_STEPS = [
-  { key: 'load', label: 'Loading authored contracts' },
-  { key: 'scan', label: 'Reverse-engineering decisions from code' },
-  { key: 'write', label: 'Writing inferred contracts' },
-] as const;
-
 // ---------------------------------------------------------------------------
 // Live per-step usage tag (` · <model> · <tok> tok · $<cost>`)
 // ---------------------------------------------------------------------------
@@ -187,24 +142,22 @@ function humanTokens(n: number): string {
 
 /**
  * Whether progress may fall back to the per-stage *resolved* model when no real
- * usage was recorded. OSS honors per-stage model tiers (CLI `--model`), so the
- * fallback is accurate there. EE runs ONE model for every stage (the AI-SDK
- * transport ignores the per-stage hint) and records no per-stage usage, so the
- * fallback would show a misleading OSS tier — EE turns this off at boot
+ * usage was recorded. The product runs ONE model for every stage (the transport
+ * ignores the per-stage hint) and records no per-stage usage, so the fallback
+ * would show a misleading name — the dashboard server turns it off at boot
  * ({@link setShowResolvedStageModel}), and progress then shows no model name.
  */
 let showResolvedStageModel = true;
 
-/** EE calls this at boot (`false`) so progress doesn't show OSS per-stage tiers. */
+/** The dashboard server calls this at boot (`false`). */
 export function setShowResolvedStageModel(show: boolean): void {
   showResolvedStageModel = show;
 }
 
 /**
  * Whether a step's progress detail carries its model, tokens and cost at all.
- * The CLI's checklist wants them beside each step; the dashboard server turns
- * them off at boot — the product shows a step's count only, and spend has its
- * own place.
+ * On by default; the dashboard server turns them off at boot — the product
+ * shows a step's count only, and spend has its own place.
  */
 let showStageUsage = true;
 
@@ -215,7 +168,7 @@ export function setShowStageUsage(show: boolean): void {
 /**
  * ` · <model> · <tok> tok · $<cost>` suffix for an explicit stage set — the core
  * of {@link stepUsageTag}, exported so other steppers (guard generate) render the
- * SAME live tag from their own stage mapping, sharing the EE model-name toggle.
+ * SAME live tag from their own stage mapping, sharing the model-name toggle.
  *
  * `mode` is the run's effective transport mode, so the pre-call fallback names the
  * model the run will really use — not the one the saved selection would have.
@@ -240,7 +193,7 @@ export function stageUsageTag(
   }
   let model = [...models].join(', ');
   if (!model && showResolvedStageModel) {
-    model = [...new Set(stages.map((s) => resolveModel(s, undefined, repoRoot, mode)))].join(', ');
+    model = [...new Set(stages.map((s) => resolveModel(s)))].join(', ');
   }
   const parts: string[] = [];
   if (model) parts.push(model);
@@ -251,109 +204,14 @@ export function stageUsageTag(
   return parts.length ? ` · ${parts.join(' · ')}` : '';
 }
 
-// ---------------------------------------------------------------------------
-// Results
-// ---------------------------------------------------------------------------
-
-export interface InferInProcessResult {
-  /** Inference output — the undocumented decisions found in code. */
-  infer: InferResult;
-  /** Files written under `_inferred/` (empty on a dry run). */
-  written: string[];
-  /** Files that would be written, on a dry run. */
-  proposed: string[];
-  /**
-   * The `.tc` rel path (relative to the `_inferred/` root, e.g. `order/x.tc` —
-   * which is also the path in the `contracts_inferred` set) for each decision,
-   * PARALLEL to `infer.decisions`. Lets the gate promote a decision by reading its
-   * `.tc` from `contracts_inferred` and writing it into authored `contracts`.
-   */
-  decisionPaths: string[];
-  /** The structured summaries the dashboard reads (built even on a dry run). */
-  summaries: InferredDecisionSummary[];
-}
 
 // ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-/**
- * The last `contracts generate` run's result + staleness marker. Lives in
- * `contracts/`, next to the `.tc` output it describes — NOT under `.cache/`
- * (that's for safe-to-delete re-run caches) and not top-level (that's the analyze
- * store). It's run-output metadata the dashboard reads back (written count, gaps,
- * validation issues); gitignored even though the rest of `contracts/` is tracked.
- * The dashboard's `/spec/staleness` endpoint reads its mtime against `corpus.json`
- * (was the scan run after the last generate?) and against the verifier state (has
- * verify run since?). Both CLI and dashboard drive the same in-process helper.
- */
-const GENERATED_MARKER_REL = path.join('.truecourse', 'contracts', 'result.json');
-
-export function generatedMarkerPath(repoRoot: string): string {
-  return path.join(repoRoot, GENERATED_MARKER_REL);
-}
-
-/**
- * The last `contracts generate` run's outcome — persisted alongside the staleness
- * marker so the dashboard can show what was written / what's still wrong AFTER a
- * page reload (the run result itself is otherwise transient). Derived/gitignored.
- */
-export interface GeneratedSummary {
-  generatedAt: string;
-  /** Number of `.tc` files written. */
-  written: number;
-  /** Enumerated targets that never got a contract. */
-  gaps: CoverageGap[];
-  /** Structural validation diagnostics (hard = dropped, soft = kept). */
-  validationIssues: ValidationIssue[];
-  /** Areas whose enumeration failed (e.g. LLM timeout) — contracts may be incomplete; re-run. */
-  enumerateFailures: string[];
-}
-
-export function stampGeneratedMarker(
-  repoRoot: string,
-  summary?: {
-    written: number;
-    gaps: CoverageGap[];
-    validationIssues: ValidationIssue[];
-    enumerateFailures?: string[];
-  },
-): void {
-  const file = generatedMarkerPath(repoRoot);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const body: GeneratedSummary = {
-    generatedAt: new Date().toISOString(),
-    written: summary?.written ?? 0,
-    gaps: summary?.gaps ?? [],
-    validationIssues: summary?.validationIssues ?? [],
-    enumerateFailures: summary?.enumerateFailures ?? [],
-  };
-  fs.writeFileSync(file, JSON.stringify(body, null, 2) + '\n');
-}
-
-/** Read the last generate run's summary (written count + gaps + issues), or null. */
-export function readGeneratedSummary(repoRoot: string): GeneratedSummary | null {
-  try {
-    const raw = JSON.parse(fs.readFileSync(generatedMarkerPath(repoRoot), 'utf-8'));
-    return {
-      generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : '',
-      written: typeof raw.written === 'number' ? raw.written : 0,
-      gaps: Array.isArray(raw.gaps) ? raw.gaps : [],
-      validationIssues: Array.isArray(raw.validationIssues) ? raw.validationIssues : [],
-      enumerateFailures: Array.isArray(raw.enumerateFailures) ? raw.enumerateFailures : [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Corpus path driver — shared by the CLI (`spec scan`) and the dashboard
-// routes. `curateInProcess` builds corpus.json via the SESSION-based scan run
+// Corpus path driver — the entry point the dashboard routes call.
+// `curateInProcess` builds corpus.json via the SESSION-based scan run
 // (`services/spec-scan/run.ts`): one `spec-scan.curate-doc`
 // session per doc, at most one `spec-scan.settle-areas` session, one
 // `spec-scan.overlap` session per area. The four CURATE_STEPS keys are kept so
-// both surfaces' progress UIs render unchanged.
+// the progress UI renders unchanged.
 // ---------------------------------------------------------------------------
 
 export interface SpecCurateInProcessResult {
@@ -362,7 +220,7 @@ export interface SpecCurateInProcessResult {
   noChanges: boolean;
   /**
    * Questions the interactive scope orchestrator left unanswered. A
-   * non-interactive run never blocks on them; the CLI/dashboard summary must
+   * non-interactive run never blocks on them; the dashboard summary must
    * surface them LOUDLY.
    */
   pendingQuestions: UserInputQuestion[];
@@ -374,8 +232,8 @@ export interface SpecCurateInProcessResult {
    * `only: 'overlap'`, which runs through the corpus write).
    */
   stoppedAfter?: ScanStep;
-  /** The sessions-store run dir (`.truecourse/sessions/spec-scan/<runId>/`) —
-   *  where this run's transcripts landed, for stepwise inspection. */
+  /** The sessions-store scratch dir this run used, under the runtime directory —
+   *  for stepwise inspection. */
   sessionsRunDir: string;
 }
 
@@ -383,38 +241,26 @@ export interface CurateInProcessOptions {
   /** The dashboard finishes only after its server-side corpus persistence succeeds. */
   deferRunCompletion?: boolean;
   tracker?: StepTracker;
-  source?: TelemetrySource;
-  /**
-   * LLM transport mode for the scan SESSIONS (`cli` = the claude-code driver,
-   * `api` = the per-turn API driver). The `agent` mailbox transport has no
-   * session driver and is refused — sessions are multi-turn, tool-calling
-   * conversations the one-shot mailbox cannot carry.
-   */
-  llm?: 'cli' | 'agent' | 'api';
-  /** Retired with the `agent` transport; accepted for caller compatibility. */
-  io?: string;
   skipGit?: boolean;
   /** Compute the corpus without overwriting corpus.json — for read-only callers. */
   skipCorpusWrite?: boolean;
   /**
    * User resolutions (manual areas / includes / conflict verdicts) to fold into
-   * the scan. EE MUST pass the stored decisions here: its re-scan runs on a
-   * fresh clone with no `.truecourse/specs/decisions.json` (resolutions live in
-   * Postgres), so without this the re-scan re-detects already-resolved
-   * conflicts. Omit in OSS — the run reads them from the repo tree.
+   * the scan. The caller MUST pass the stored decisions: a scan runs on a fresh
+   * working tree that holds no resolutions of its own, so without this it
+   * re-detects already-resolved conflicts.
    */
   decisions?: DecisionsFile;
   /**
-   * Inject the doc set instead of walking the filesystem. Editions with no live
-   * working tree (EE) source docs through the repo-doc seam (`readRepoDoc`); OSS
-   * omits it and the run discovers from disk.
+   * Inject the doc set instead of walking the working tree — the workspace scan
+   * sources its documents through the repo-doc seam (`readRepoDoc`).
    */
   docSource?: () => DocCandidate[] | Promise<DocCandidate[]>;
   /**
-   * Who this repository is, for the curation session's IDENTITY block.
-   * Omit and the run resolves it from the repo tree (OSS). EE passes it
-   * explicitly — including explicit `null` — because its scan runs on an
-   * ephemeral shallow clone whose directory is named `tc-gate-scan-XXXX`.
+   * Who this repository is, for the curation session's IDENTITY block. Passed
+   * explicitly — including explicit `null` — because a scan runs on an
+   * ephemeral clone whose directory name says nothing. Omit and the run
+   * resolves it from the tree.
    */
   repoIdentity?: RepoIdentity | null;
   /**
@@ -425,8 +271,8 @@ export interface CurateInProcessOptions {
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   /**
    * Progress surface for the estimate itself (it runs before the first pipeline
-   * step, so the tracker can't carry it). The CLI resolves a spinner line above
-   * the estimate panel; the dashboard passes `estimateStepPhase(tracker)`.
+   * step, so the tracker can't carry it). The dashboard passes
+   * `estimateStepPhase(tracker)`.
    */
   onEstimatePhase?: EstimatePhase;
   /** Ceiling on concurrent sessions (the pool's governor may run fewer). */
@@ -440,7 +286,7 @@ export interface CurateInProcessOptions {
    */
   signal?: AbortSignal;
   /**
-   * Single-step mode (the CLI's `--only-<step>` flags): run only this step's
+   * Single-step mode (`only`): run only this step's
    * sessions — prior steps replay from their durable artifacts (a missing one
    * throws {@link ScanStepNotReadyError}), later steps never start, and
    * corpus.json is written only by the final step (`overlap`). The estimate
@@ -473,15 +319,13 @@ export interface CurateInProcessOptions {
   discoverDetail?: (docs: number, toCurate: number) => string;
   /**
    * A `question-asked` event from a scan session (the interactive scope
-   * orchestrator), as it happens. The CLI prints the dashboard deep
-   * link; nothing ever blocks on it — an unanswered question lands in the
-   * result's `pendingQuestions`.
+   * orchestrator), as it happens. Nothing ever blocks on it — an unanswered
+   * question lands in the result's `pendingQuestions`.
    */
   onQuestion?: (workItem: string, question: UserInputQuestion) => void;
   /**
    * The sessions-store run record was just created (post-estimate-confirm,
-   * before any session runs). The CLI prints the dashboard "watch live" deep
-   * link from it.
+   * before any session runs). The caller learns the run's id from it.
    */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
@@ -510,8 +354,8 @@ export interface CurateInProcessOptions {
  * CURATE_STEPS. Writes `.truecourse/specs/corpus.json` (the run does).
  * Idempotent: unchanged docs hit the per-doc session cache and cost nothing.
  *
- * The four step keys survive from the one-shot pipeline so both surfaces'
- * progress UIs render unchanged; what each covers moved: `discover` =
+ * The four step keys survive from the one-shot pipeline so the progress UI
+ * renders unchanged; what each covers moved: `discover` =
  * discovery + prefilter, `tag` = the curate-doc pool + the settle session,
  * `overlap` = the per-area overlap sessions, `verify` = the deterministic
  * fold (pointer re-anchoring, cross-area dedup, confidence auto-apply).
@@ -521,15 +365,7 @@ export async function curateInProcess(
   options: CurateInProcessOptions = {},
 ): Promise<SpecCurateInProcessResult> {
   const { tracker } = options;
-  if (options.llm === 'agent') {
-    throw new Error(
-      'spec scan now runs agent sessions; the `agent` mailbox transport cannot carry them — use `--llm api` or `--llm cli`.',
-    );
-  }
-  // The transport this run actually uses decides what the estimate names —
-  // never the saved selection a `--llm-transport` flag just overrode.
-  const mode = effectiveLlmMode(options.llm);
-  const startedAt = Date.now();
+  const mode: LlmTransportMode = options.transportMode ?? 'claude-code';
 
   // Pre-flight cost estimate + confirm, before any LLM work. Skip the prompt
   // when there's nothing to spend (a warmed cache yields an empty estimate).
@@ -544,7 +380,11 @@ export async function curateInProcess(
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
     const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity, mode, only: options.only }),
+      estimateScanTokens(repoRoot, prices, {
+        identity: options.repoIdentity,
+        ...(options.driver?.attribution.model ? { sessionModel: options.driver.attribution.model } : {}),
+        only: options.only,
+      }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await raceAbort(options.onLlmEstimate(estimate), options.signal);
@@ -552,17 +392,14 @@ export async function curateInProcess(
     }
   }
 
-  // The sessions run + transcript store: `sessions/spec-scan/<runId>/`.
+  // The run record every session's transcript is appended to.
   // Created after the estimate gate, so a declined scan leaves no run record.
   const gitRef = await resolveCommitSha(repoRoot);
-  const run = await createStoredSessionRun(options.sessionsKey ?? repoRoot, {
-    command: 'spec-scan', gitRef, activityStream: options.source === 'dashboard',
-  });
+  const run = await createStoredSessionRun(options.sessionsKey ?? repoRoot, { command: 'spec-scan', gitRef });
   options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
   // Mirror the step checklist into the run record as the run's own display:
-  // the CLI renders the tracker locally, but the dashboard can only see what
-  // run.json carries, and the early phases (discover/tag) have no sessions to
-  // show progress through.
+  // the dashboard can only see what run.json carries, and the early phases
+  // (discover/tag) have no sessions to show progress through.
   const untap = tracker?.tap((p) => {
     if (!p.steps) return;
     run.setChecklist(
@@ -595,8 +432,7 @@ export async function curateInProcess(
       return options.driver;
     }
     if (!configured) {
-      configured = createConfiguredSessionDriver({
-        ...(options.llm && options.llm !== 'agent' ? { transport: options.llm } : {}),
+      configured = createClaudeCodeSessionDriver({
         cwd: repoRoot,
         providerStateDir: path.join(run.dir, 'provider'),
       });
@@ -712,9 +548,9 @@ export async function curateInProcess(
     }
 
     if (result.stoppedAfter) {
-      // Single-step run: close only the steps that actually opened. The CLI
-      // hands the tracker a reduced checklist, so the later keys don't exist
-      // (and StepTracker no-ops on unknown keys anyway).
+      // Single-step run: close only the steps that actually opened. A caller
+      // may hand the tracker a reduced checklist, so the later keys don't
+      // exist (and StepTracker no-ops on unknown keys anyway).
       const note = `stopped after ${result.stoppedAfter}`;
       if (tagStarted) tracker?.done('tag', note);
       else tracker?.done('discover', note);
@@ -737,18 +573,6 @@ export async function curateInProcess(
       );
     }
     if (!options.deferRunCompletion) run.finish('completed');
-
-    // A partial (single-step) run never reports telemetry — its counts would
-    // read as a whole scan's.
-    if (options.source && !result.stoppedAfter) {
-      await trackEvent('spec_scan', {
-        source: options.source,
-        docsScannedRange: bucketFileCount(result.stats.docsScanned),
-        claimsRange: bucketFileCount(result.stats.docsKept),
-        openConflicts: result.stats.overlapFlags,
-        durationRange: bucketDuration(Date.now() - startedAt),
-      });
-    }
 
     // "Nothing changed" = the scan ran zero fresh sessions (every kind was a
     // cache hit) and lost none. Computed by the run itself — sessions never
@@ -813,8 +637,6 @@ export async function syncWorkspaceCorpusInProcess(options: {
    */
   decisions?: DecisionsFile;
   tracker?: StepTracker;
-  llm?: 'cli' | 'agent' | 'api';
-  io?: string;
   // --- test seams (mirror curateInProcess(); production passes none) --------
   driver?: CurateInProcessOptions['driver'];
   disableOverlapDetection?: boolean;
@@ -828,15 +650,13 @@ export async function syncWorkspaceCorpusInProcess(options: {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, doc.markdown, 'utf-8');
     }
-    // Materialize the decisions BEFORE curate so it reads them from the tree, the
-    // same channel a repo uses (curate reads `.truecourse/specs/decisions.json`).
+    // Materialize the decisions BEFORE curate so it reads them from the tree,
+    // the same channel every scan uses.
     if (options.decisions) writeDecisions(tmp, options.decisions);
 
     const { curate: curateResult } = await curateInProcess(tmp, {
       tracker: options.tracker,
       skipGit: true,
-      llm: options.llm,
-      io: options.io,
       driver: options.driver,
       disableOverlapDetection: options.disableOverlapDetection,
       // The scratch tree is transient — a scope session here would re-spend on
@@ -849,57 +669,6 @@ export async function syncWorkspaceCorpusInProcess(options: {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
-}
-
-// ---------------------------------------------------------------------------
-// Workspace inheritance (enterprise) — a connected repo folds its workspace
-// Knowledge corpus into its own spec before curate/generate.
-//
-// Inheritance is a materialization problem, not a connector one: the workspace
-// layer is a set of STORED doc bodies (namespaced `knowledge/<kind>/<id>.md`) plus
-// the workspace decisions. `materializeWorkspaceInheritance` writes those bodies
-// into a checkout and folds the workspace decisions UNDER the repo's own (repo
-// wins), so the repo's curate sees one doc universe with the workspace layer
-// pre-resolved. The doc bodies are resolved through the `spec-inheritance-hook`
-// seam (EE installs it; OSS/tests leave it unset → the repo curates alone).
-// ---------------------------------------------------------------------------
-
-/**
- * Fold the workspace decisions layer UNDER a repo's own — the decisions analog of
- * workspace doc-body inheritance. Pure. The repo overlay wins per identity on every
- * dimension (the same {@link mergeDecisions} keying `buildCorpusConflicts` uses): a
- * workspace-resolved conflict arrives pre-resolved, and a repo verdict on a
- * cross-layer conflict — written at repo scope — supersedes it.
- */
-export function mergeInheritedDecisions(workspace: DecisionsFile, repo: DecisionsFile): DecisionsFile {
-  return mergeDecisions(workspace, repo);
-}
-
-/**
- * Materialize the workspace Knowledge layer into `repoRoot` before curate/generate:
- * write every workspace doc body at its namespaced `knowledge/<kind>/<id>.md` path
- * (the same paths the workspace ledger stores, so the repo's curate hits the caches
- * the workspace already paid for) and return the effective decisions to curate with
- * — the workspace decisions folded under `repoDecisions` (repo wins). Inert when no
- * inheritance seam is installed (OSS) or the repo inherits nothing: the passed
- * `repoDecisions` are returned unchanged and `inherited` is false. Best-effort reads
- * only — never mutates repo state.
- */
-export async function materializeWorkspaceInheritance(
-  repoRoot: string,
-  repoKey: string,
-  repoDecisions: DecisionsFile,
-): Promise<{ decisions: DecisionsFile; inherited: boolean }> {
-  const hook = getSpecInheritanceHook();
-  if (!hook) return { decisions: repoDecisions, inherited: false };
-  const layer = await hook(repoKey);
-  if (!layer) return { decisions: repoDecisions, inherited: false };
-  for (const doc of layer.docs) {
-    const dest = path.join(repoRoot, doc.docPath);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, doc.markdown, 'utf-8');
-  }
-  return { decisions: mergeInheritedDecisions(layer.decisions, repoDecisions), inherited: true };
 }
 
 /**
@@ -920,212 +689,12 @@ export function corpusContentSha(corpus: CuratedCorpus | null): string {
   return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
 }
 
-export interface InferInProcessOptions {
-  tracker?: StepTracker;
-  /** Where authored contracts live (the coverage baseline). Defaults to
-   *  `<repoRoot>/.truecourse/contracts`. `_inferred/` is always excluded. */
-  contractsDir?: string;
-  /** Where the implementation code lives. Defaults to the auto-detected
-   *  code dir (the `code/` subdir when present, else the repo root). */
-  codeDir?: string;
-  /** When true, don't write — just report what would be written. */
-  dryRun?: boolean;
-  /** Adapter that triggered this run; auto-emitted in the `infer` telemetry payload. */
-  source?: TelemetrySource;
-  /** Explicit store identity (EE). When omitted, derived from `repoRoot`'s HEAD. */
-  ref?: RepoRef;
-  /**
-   * Fallback contracts source when `ref` has no authored contracts of its own. In
-   * the gate's warm path (a PR that changed no spec) the head commit stores no
-   * `contracts` — the head's code was verified against the BASELINE's contracts —
-   * so coverage must subtract those. Pass the baseline ref here; `ref` (the head)
-   * is still tried first (the cold path, where the PR generated its own contracts).
-   */
-  contractsRef?: RepoRef;
-  /** Override the commit SHA when `ref` is omitted. */
-  commitOverride?: string;
-  /**
-   * Re-apply promoted decisions into authored `contracts` (default true). Set false
-   * for a transient PR-head infer, where it would write a partial `contracts`
-   * manifest at the head and pollute the contracts tree/diff.
-   */
-  reapplyPromotions?: boolean;
-}
-
-/**
- * Reverse-engineer undocumented decisions from `codeDir` and write them as
- * `inferred` `.tc` artifacts under `<contractsDir>/_inferred/`. Instead of
- * checking code against the spec, it surfaces what the code decided that the
- * spec never recorded. Coverage is computed from authored contracts only, so a
- * decision drops out once it's documented.
- */
-export async function inferInProcess(
-  repoRoot: string,
-  options: InferInProcessOptions = {},
-): Promise<InferInProcessResult> {
-  const startedAt = Date.now();
-  const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
-
-  // Resolve the authored-contract coverage dir (also where the inferred `.tc` output
-  // is written). EE runs on an ephemeral clone with no committed `.truecourse/contracts`
-  // — its contracts live in the store — so when a `ref` is set we materialize them from
-  // the store, the same source `verify` reads. Reading the clone's disk would see zero
-  // contracts and re-infer everything already documented. OSS (no `ref`) uses the
-  // working-tree dir; an explicit `contractsDir` overrides both.
-  let contractsDir = options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
-  let releaseContracts: () => Promise<void> = async () => {};
-  if (!options.contractsDir && options.ref) {
-    // Prefer the head ref's own authored contracts (the cold path — the PR changed
-    // the spec and the gate generated contracts at the head). When the head has none
-    // (the warm path), fall back to `contractsRef` (the baseline) so coverage matches
-    // the contracts the gate verified against — otherwise infer sees nothing and
-    // re-offers everything already documented.
-    const mat =
-      (await loadContracts(options.ref, 'contracts')) ??
-      (options.contractsRef ? await loadContracts(options.contractsRef, 'contracts') : null);
-    if (mat) {
-      contractsDir = mat.dir;
-      releaseContracts = mat.cleanup;
-    }
-  }
-
-  try {
-    return await persistInferred(repoRoot, options, contractsDir, codeDir, startedAt);
-  } finally {
-    await releaseContracts();
-  }
-}
-
-/**
- * Run inference against the resolved `contractsDir` and persist the results. Split
- * from {@link inferInProcess} only so a store-materialized `contractsDir` can be
- * released in a `finally`.
- */
-async function persistInferred(
-  repoRoot: string,
-  options: InferInProcessOptions,
-  contractsDir: string,
-  codeDir: string,
-  startedAt: number,
-): Promise<InferInProcessResult> {
-  const { tracker } = options;
-
-  tracker?.start('load');
-  let result: InferResult;
-  try {
-    result = await infer({ contractsDir, codeDir });
-  } catch (e) {
-    tracker?.error('load', (e as Error).message);
-    throw e;
-  }
-  const covered = Object.values(result.coveredCounts).reduce((a, b) => a + b, 0);
-  tracker?.done('load', `${covered} authored artifact${covered === 1 ? '' : 's'}`);
-
-  tracker?.start('scan');
-  tracker?.done(
-    'scan',
-    `${result.decisions.length} undocumented decision${result.decisions.length === 1 ? '' : 's'}`,
-  );
-
-  tracker?.start('write');
-  const { written, proposed } = writeInferred(contractsDir, result.decisions, {
-    dryRun: options.dryRun,
-  });
-  tracker?.done(
-    'write',
-    options.dryRun
-      ? `${proposed.length} would be written`
-      : `${written.length} written`,
-  );
-
-  if (options.source) {
-    await trackEvent('infer', {
-      source: options.source,
-      decisionsRange: bucketFileCount(result.decisions.length),
-      dryRun: !!options.dryRun,
-      durationRange: bucketDuration(Date.now() - startedAt),
-    });
-  }
-
-  // Ingest the inferred `.tc` subtree into the active store as the split kind,
-  // when the caller passes an explicit `ref` (EE). OSS omits `ref` → no ingest.
-  if (!options.dryRun && options.ref) {
-    await saveContracts(options.ref, 'contracts_inferred', path.join(contractsDir, '_inferred'));
-  }
-
-  // Render each decision once — its `.tc` rel path keys the contracts_inferred set
-  // (so the gate/promote can locate it) and its source is the detail-view body.
-  const rendered = result.decisions.map((d) => renderDecision(d));
-  const decisionPaths = rendered.map((r) => r.relPath);
-
-  // The structured summaries the dashboard's Inferred tab reads — built regardless
-  // of dryRun so the OSS diff run (dryRun: true) can compute the working-tree set
-  // without overwriting the committed baseline.
-  const summaries: InferredDecisionSummary[] = result.decisions.map((d, i) => ({
-    kind: d.kind,
-    identity: d.identity,
-    path: d.codeLoc?.path,
-    line: d.codeLoc?.lines?.[0],
-    reason: d.reason,
-    confidence: d.confidence,
-    contractPath: decisionPaths[i],
-    tc: rendered[i].tcSource,
-  }));
-
-  // Persist them — OSS (file under `specs/`) and EE (Postgres) alike. The store ref
-  // is the PR head / baseline commit in EE; in OSS the repo tree (commit unused).
-  if (!options.dryRun) {
-    const specRef = options.ref ?? { repoKey: repoRoot, commitSha: options.commitOverride ?? '' };
-    await saveSpec(specRef, 'inferredDecisions', summaries);
-    // Re-apply user promotions: writing the `.tc` files regenerated the inferred
-    // tree, so each promoted decision's `.tc` is rewritten into authored contracts.
-    // Skipped for a transient PR-head infer (`reapplyPromotions: false`) — there it
-    // would write a PARTIAL `contracts` manifest at the head (just the promotions),
-    // polluting the contracts tree/diff into showing the whole base as removed.
-    if (options.reapplyPromotions ?? true) await reapplyPromoted(specRef, summaries);
-  }
-
-  return { infer: result, written, proposed, decisionPaths, summaries };
-}
-
-/**
- * OSS Git-Diff: the inferred decisions the WORKING TREE adds/changes vs the
- * committed baseline (`specs/inferredDecisions.json`, committed like the analyze
- * `LATEST.json`). Re-runs inference on the working tree with `dryRun` so the
- * baseline file is untouched, then diffs against it.
- * EE uses the per-commit `/inferred/diff?ref=` route instead.
- */
-export async function inferDiffInProcess(
-  repoRoot: string,
-  options: InferInProcessOptions = {},
-): Promise<InferDiff> {
-  const { summaries: current } = await inferInProcess(repoRoot, { ...options, dryRun: true });
-  const baseRaw = await loadLatestSpec<InferredDecisionSummary[]>(repoRoot, 'inferredDecisions');
-  const actions = await listInferredActions(repoRoot);
-  const head = applyInferredActions(current, actions);
-  const base = baseRaw ? applyInferredActions(baseRaw, actions) : null;
-  return diffDecisions(head, base);
-}
-
-/**
- * Try to find the project's code root. Most real projects keep code
- * at the repo root; the fixture nests it under `code/`. We prefer
- * the explicit subdir when present; otherwise fall back to repoRoot.
- */
-function autodetectCodeDir(repoRoot: string): string {
-  const codeSubdir = path.join(repoRoot, 'code');
-  if (fs.existsSync(codeSubdir) && fs.statSync(codeSubdir).isDirectory()) {
-    return codeSubdir;
-  }
-  return repoRoot;
-}
-
 // ---------------------------------------------------------------------------
 // Decisions, routed through the SpecStore seam.
 //
-// OSS: the on-disk files via the IL (byte-identical). EE: Postgres `spec_sets`.
-// Decisions are the user's accumulated resolutions — a single per-repo "current"
-// document, not a per-commit snapshot. The dashboard read/edit routes use these.
+// The user's accumulated resolutions — a single always-latest document per
+// WORKSPACE, since the documents they resolve belong to the workspace and every
+// repository reads a slice of them.
 // ---------------------------------------------------------------------------
 
 /** An empty decisions document (all lists empty) — the "no resolutions yet" base. */
@@ -1138,64 +707,8 @@ export const EMPTY_DECISIONS: DecisionsFile = {
   scopeVerdicts: [],
   instructions: [],
 };
-/** Sentinel commit for the per-repo "current" decisions document in EE. */
-const DECISIONS_REF = '_repo';
-/** Sentinel commit for a PR-scoped decisions overlay in EE (`_pr/<number>`). */
-const prDecisionsRef = (pr: number): string => `_pr/${pr}`;
-/** The sentinel commit addressing the repo row or a PR overlay. */
-const decisionsRef = (pr?: number): string =>
-  pr === undefined ? DECISIONS_REF : prDecisionsRef(pr);
-
-/** PR-scoped decisions live only in EE — a live-tree (OSS) store can't hold them. */
-function assertNoPrInPlace(pr?: number): void {
-  if (pr !== undefined && specsMaterializeInPlace()) {
-    throw new Error('[spec] PR-scoped decisions require the enterprise store');
-  }
-}
-
-async function loadDecisions(repoKey: string, opts?: { pr?: number }): Promise<DecisionsFile> {
-  assertNoPrInPlace(opts?.pr);
-  if (specsMaterializeInPlace()) return readDecisions(repoKey);
-  return (
-    (await loadSpec<DecisionsFile>(
-      { repoKey, commitSha: decisionsRef(opts?.pr) },
-      'decisions',
-    )) ?? EMPTY_DECISIONS
-  );
-}
-
-async function storeDecisions(
-  repoKey: string,
-  next: DecisionsFile,
-  opts?: { pr?: number },
-): Promise<void> {
-  assertNoPrInPlace(opts?.pr);
-  if (specsMaterializeInPlace()) {
-    writeDecisions(repoKey, next);
-    return;
-  }
-  await saveSpec({ repoKey, commitSha: decisionsRef(opts?.pr) }, 'decisions', next);
-}
-
 /**
- * The repo's current decisions (dashboard read) — file in OSS, Postgres in EE.
- * With `pr`, returns the effective decisions for that PR: the repo row merged
- * with the PR's overlay (the overlay wins — see {@link mergeDecisions}).
- */
-export async function getDecisions(
-  repoKey: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  if (opts?.pr === undefined) return loadDecisions(repoKey);
-  const [base, overlay] = await Promise.all([
-    loadDecisions(repoKey),
-    loadDecisions(repoKey, { pr: opts.pr }),
-  ]);
-  return mergeDecisions(base, overlay);
-}
-
-/**
- * Merge a PR's decisions overlay over the repo row. Pure. The overlay wins on
+ * Merge one decisions layer over another. Pure. The overlay wins on
  * every dimension:
  *   - manualIncludes / manualExcludes: union by path, but the overlay's verb wins
  *     per path — a path the overlay excludes is dropped from includes and vice
@@ -1254,175 +767,17 @@ function uniqueStrings(items: string[]): string[] {
   return [...new Set(items)];
 }
 
-/**
- * Promote a PR's decisions overlay onto the repo row on merge. Idempotent: when
- * no overlay exists returns false and does nothing (the merge flow may call this
- * twice — closed handler + baseline). Otherwise merges the overlay onto the repo
- * row, persists it, drops the overlay row, and returns true.
- */
-export async function promoteDecisionsOverlay(repoKey: string, pr: number): Promise<boolean> {
-  const overlay = await loadSpec<DecisionsFile>(
-    { repoKey, commitSha: prDecisionsRef(pr) },
-    'decisions',
-  );
-  if (!overlay) return false;
-  const merged = mergeDecisions(await loadDecisions(repoKey), overlay);
-  await storeDecisions(repoKey, merged);
-  await deleteSpec({ repoKey, commitSha: prDecisionsRef(pr) }, 'decisions');
-  return true;
-}
-
-/** Discard a PR's decisions overlay (unmerged close). Idempotent. */
-export async function discardDecisionsOverlay(repoKey: string, pr: number): Promise<void> {
-  await deleteSpec({ repoKey, commitSha: prDecisionsRef(pr) }, 'decisions');
-}
-
-/**
- * The repo's current curated corpus (dashboard read), or null when no scan has
- * run. Corpus-path analog of {@link getScanState}. OSS reads
- * `specs/corpus.json`; EE reads the store (Phase 6).
- */
-export function getCorpus(repoKey: string): Promise<CuratedCorpus | null> {
-  return loadLatestSpec<CuratedCorpus>(repoKey, 'corpus');
-}
-
-/**
- * Build a curate `docSource` from the store, for editions with no live working
- * tree (EE). The doc universe is the corpus's own known docs (kept + relevance-
- * dropped) plus the decision toggles — a force include/exclude never introduces a
- * NEW file, so there's nothing to re-discover. Each doc's body is fetched through
- * the repo-doc seam (`readRepoDoc` → GitHub in EE), and the `contentHash` is
- * computed exactly as `discoverDocs` does (`sha256` of the utf-8 body) so the
- * per-doc stage caches HIT: an unchanged doc re-derives its tags from cache
- * instead of calling the LLM — which is what makes a restore cheap.
- */
-export function buildStoredDocSource(
-  repoKey: string,
-  corpus: CuratedCorpus,
-  decisions: DecisionsFile,
-  commit?: string,
-): () => Promise<DocCandidate[]> {
-  const lastTouchedByRef = new Map(corpus.docs.map((d) => [d.ref, d.lastTouched]));
-  const refs = new Set<string>();
-  for (const d of corpus.docs) refs.add(d.ref);
-  for (const s of corpus.skippedDocs ?? []) refs.add(s.ref);
-  for (const p of decisions.manualExcludes ?? []) refs.add(p);
-  for (const p of decisions.manualIncludes ?? []) refs.add(p);
-  const readOpts = commit ? { commit } : undefined;
-  return async () => {
-    const docs: DocCandidate[] = [];
-    for (const ref of refs) {
-      const content = await readRepoDoc(repoKey, ref, readOpts);
-      if (content == null) continue; // deleted upstream — drop it from the set
-      docs.push({
-        path: ref,
-        absPath: '',
-        content,
-        kind: classifyDoc(ref, content),
-        preview: content.split(/\r?\n/).slice(0, 200).join('\n'),
-        lastTouched: lastTouchedByRef.get(ref) ?? '',
-        contentHash: createHash('sha256').update(content).digest('hex'),
-        size: Buffer.byteLength(content, 'utf-8'),
-      });
-    }
-    return docs;
-  };
-}
-
-/**
- * Re-curate the stored corpus after a decision change (force include/exclude),
- * for editions with no live working tree (EE). Runs the SAME `curate` the OSS path
- * runs — differing only in transport: docs come through {@link buildStoredDocSource}
- * (the repo-doc seam) instead of the filesystem, and the corpus is persisted to the
- * store instead of `corpus.json`. Unchanged docs hit the per-doc caches (the EE
- * Postgres KV store), so this is cheap and a RESTORE re-derives an excluded doc's
- * tags from cache. Contracts are NOT regenerated here — that stays a separate step,
- * exactly as in OSS. Returns the fresh corpus plus its open-conflict count (the
- * caller uses `openConflicts === 0` to decide whether to regenerate contracts), or
- * null when there is no corpus yet.
- */
-export async function recurateStoredCorpus(
-  repoKey: string,
-): Promise<{ corpus: CuratedCorpus; openConflicts: number } | null> {
-  const corpus = await getCorpus(repoKey);
-  if (!corpus) return null;
-  const decisions = await loadDecisions(repoKey);
-  const { curate: result } = await curateInProcess(repoKey, {
-    docSource: buildStoredDocSource(repoKey, corpus, decisions),
-    decisions,
-    skipGit: true,
-    skipCorpusWrite: true,
-  });
-  // Save at the baseline commit — the repo-scope corpus the base view reads —
-  // never `latestSpecCommit`, which a PR-head scan can leave pointing at a PR.
-  const commitSha = await baselineSpecCommit(repoKey);
-  if (commitSha) await saveSpec({ repoKey, commitSha }, 'corpus', result.corpus);
-  // Open = the SAME shared derivation the gate uses (verdicts/dismissals/excludes
-  // resolve; a flagged-but-verdicted dispute must not block regeneration).
-  return { corpus: result.corpus, openConflicts: openConflicts(result.corpus, decisions).length };
-}
-
-/**
- * The default-branch baseline commit for PR-scoped corpus reads. The EE gate's
- * baseline job analyzes the default-branch head and persists it as the repo's
- * LATEST analysis; PR-head analyses are stateless (diff-only) so they never move
- * it. That commit is the base repo view + repo-scope corpus anchor. `null` before
- * any baseline. The base is derived from the analyze store, not the working tree,
- * so this resolves for editions with no live checkout (EE).
- */
-async function baselineSpecCommit(repoKey: string): Promise<string | null> {
-  return (await readLatest(repoKey))?.analysis.commitHash ?? null;
-}
-
-/** The corpus stored at the baseline commit, or null when none is stored yet. */
-async function loadBaselineCorpus(repoKey: string): Promise<CuratedCorpus | null> {
-  const commitSha = await baselineSpecCommit(repoKey);
-  if (!commitSha) return null;
-  return loadSpec<CuratedCorpus>({ repoKey, commitSha }, 'corpus');
-}
-
-/**
- * Re-curate a PR's corpus after a PR-scoped decision edit (EE only). Mirrors
- * {@link recurateStoredCorpus}, but scoped to one PR: the doc universe is the
- * corpus scanned at the PR head (falling back to the baseline corpus for a
- * code-only PR that never scanned specs), doc bodies are read at the PR head, the
- * effective decisions fold the PR overlay ({@link getDecisions} with `pr`), and
- * the result is saved at the PR head — so it never touches the base repo view or
- * another PR. Returns the fresh corpus + open-conflict count, or null when the
- * repo has no corpus at all yet.
- */
-export async function recuratePrCorpus(
-  repoKey: string,
-  prHeadSha: string,
-  prNumber: number,
-): Promise<{ corpus: CuratedCorpus; openConflicts: number } | null> {
-  const corpus =
-    (await loadSpec<CuratedCorpus>({ repoKey, commitSha: prHeadSha }, 'corpus')) ??
-    (await loadBaselineCorpus(repoKey));
-  if (!corpus) return null;
-  const decisions = await getDecisions(repoKey, { pr: prNumber });
-  const { curate: result } = await curateInProcess(repoKey, {
-    docSource: buildStoredDocSource(repoKey, corpus, decisions, prHeadSha),
-    decisions,
-    skipGit: true,
-    skipCorpusWrite: true,
-  });
-  await saveSpec({ repoKey, commitSha: prHeadSha }, 'corpus', result.corpus);
-  return { corpus: result.corpus, openConflicts: openConflicts(result.corpus, decisions).length };
-}
-
 // ---------------------------------------------------------------------------
 // Decisions-file mutations
 //
-// Pure read-modify-write helpers around decisions. The dashboard server routes
-// and the CLI both call these so the two surfaces agree on update semantics.
-// None of these re-curate the corpus.
+// Pure read-modify-write helpers around decisions, called by the dashboard
+// server routes. None of these re-curate the corpus.
 // ---------------------------------------------------------------------------
 
-// Pure DecisionsFile transforms — the read-modify-write core, shared verbatim by
-// the repo (file/Postgres) and workspace (Postgres) helpers so both surfaces
-// agree on update semantics. An `apply*` that makes no change returns the SAME
-// object reference, letting callers skip a redundant store.
+// Pure DecisionsFile transforms — the read-modify-write core, shared by the
+// workspace helpers below so every surface agrees on update semantics. An
+// `apply*` that makes no change returns the SAME object reference, letting
+// callers skip a redundant store.
 
 /**
  * Dispute-identity key for a section-scoped conflict verdict: the
@@ -1443,7 +798,7 @@ const conflictResolutionKey = (r: ConflictResolution): string => {
 
 /**
  * The v2 fields every rebuild carries through untouched — a mutation of one
- * dimension must never drop another's rows (an EE row stored before v2 may
+ * dimension must never drop another's rows (a row stored before v2 may
  * genuinely lack them, hence the `?? []`).
  */
 function carriedV2Fields(existing: DecisionsFile): Pick<DecisionsFile, 'scopeVerdicts' | 'instructions'> {
@@ -1538,99 +893,10 @@ function applyRemoveConflictResolution(
   };
 }
 
-/**
- * Force-include a doc the relevance filter skipped. Idempotent.
- */
-export async function addManualInclude(
-  repoRoot: string,
-  docPath: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const existing = await loadDecisions(repoRoot, opts);
-  const next = applyAddManualInclude(existing, docPath);
-  if (next !== existing) await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Remove a force-include override. Idempotent.
- */
-export async function removeManualInclude(
-  repoRoot: string,
-  docPath: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyRemoveManualInclude(await loadDecisions(repoRoot, opts), docPath);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Force-exclude a doc the relevance filter would keep — drops it from the corpus
- * on the next curate. Clears any force-include for the same path. Idempotent.
- */
-export async function addManualExclude(
-  repoRoot: string,
-  docPath: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const existing = await loadDecisions(repoRoot, opts);
-  const next = applyAddManualExclude(existing, docPath);
-  if (next !== existing) await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Remove a force-exclude override (restore the doc). Idempotent.
- */
-export async function removeManualExclude(
-  repoRoot: string,
-  docPath: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyRemoveManualExclude(await loadDecisions(repoRoot, opts), docPath);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Record a SECTION-scoped conflict verdict — pick-a-side ('a'/'b') or
- * dismissal — for one flagged dispute. Replaces any prior verdict for the same
- * dispute identity. This does NOT re-curate: the
- * corpus is unchanged (the overlap stays flagged), and the shared resolved-
- * derivation reads the verdict live, so a single later scan applies any batch.
- * Self-pairs are rejected.
- */
-export async function addConflictResolution(
-  repoRoot: string,
-  input: ConflictResolution,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyAddConflictResolution(await loadDecisions(repoRoot, opts), input);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Remove a conflict verdict by dispute identity (unordered doc pair + section
- * anchors). Idempotent.
- */
-export async function removeConflictResolution(
-  repoRoot: string,
-  input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyRemoveConflictResolution(await loadDecisions(repoRoot, opts), input);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
 // ---------------------------------------------------------------------------
-// Workspace decisions (enterprise) — the org-scoped analog of the repo decision
-// mutations above. Same pure DecisionsFile transforms, persisted under WORKSPACE
-// scope (the `workspace_spec_sets` `decisions` artifact, keyed by org, no commit).
-// The EE Knowledge page's decision endpoints call these; a workspace has no PR
-// overlay dimension, so there is no `pr` opt. Each write is followed (by the
+// Workspace decisions — the pure DecisionsFile transforms above, persisted
+// under WORKSPACE scope (the `decisions` artifact, keyed by org, no commit).
+// Context's decision endpoints call these; each write is followed (by the
 // caller) with a re-process so the corpus reflects the decision.
 // ---------------------------------------------------------------------------
 
@@ -1642,7 +908,7 @@ async function storeWorkspaceDecisions(org: string, next: DecisionsFile): Promis
   await saveWorkspaceSpec({ workspaceOrgId: org }, 'decisions', next);
 }
 
-/** The workspace's current decisions (the Knowledge page read), or empty when none. */
+/** The workspace's current decisions (Context's read), or empty when none. */
 export function getWorkspaceDecisions(org: string): Promise<DecisionsFile> {
   return loadWorkspaceDecisions(org);
 }

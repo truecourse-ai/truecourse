@@ -1,244 +1,71 @@
 /**
- * Project registry — the dashboard's list of known projects. File-backed by
- * default (global `~/.truecourse/registry.json`); the enterprise edition injects
- * a Postgres-backed impl via `setRegistryStore` (the registry collapses into the
- * server-side `repos` table for hosted, multi-instance deploys). Async so a DB
- * impl is possible; the file impl wraps synchronous `fs`.
+ * The repository registry — how a `:id` slug in a route resolves to a
+ * repository. It is a VIEW of the connected repositories, not a table of its
+ * own, so it can neither drift nor orphan: the slug is a column of the
+ * repository's row, minted once when it was connected.
  *
- * The whole public API is on the interface (not just read/write): several
- * methods are filesystem-coupled today (`path.resolve`, `ensureRepoTruecourseDir`,
- * a `.truecourse/`-exists liveness check) and the EE impl must replace that logic
- * with row operations.
+ * Every read is scoped to a workspace. A slug is unique within its workspace
+ * and nowhere else, so a lookup takes the workspace it runs in and another
+ * workspace's repository is unreachable through it rather than fetched and
+ * then rejected.
+ *
+ * The seam exists because `@truecourse/core` cannot depend on
+ * `@truecourse/data-store` (the dependency runs the other way): boot installs
+ * the Postgres-backed view over it. Nothing is installed only in a process that
+ * never booted the server, and every read then fails loud rather than
+ * inventing an empty registry.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { ensureRepoTruecourseDir, getGlobalDir, getRegistryPath, getRepoTruecourseDir } from './paths.js';
-
 export interface RegistryEntry {
-  /** Stable URL-safe identifier derived from the project name. */
+  /** The URL-safe identifier the routes address it by; unique within its workspace. */
   slug: string;
-  /** Display name (defaults to the directory basename). */
+  /** Display name. */
   name: string;
-  /** Absolute path to the repo root that contains `.truecourse/`. */
+  /** The opaque repository identity (`owner/repo`) every per-repo store keys by. */
   path: string;
-  /**
-   * ISO timestamp of the last dashboard interaction (add / open / any
-   * project-scoped request). Used purely for "recent projects" UX — never
-   * surfaced as an analysis timestamp.
-   */
-  lastOpened?: string;
-  /**
-   * ISO timestamp of the last SUCCESSFUL analysis completion. Written only
-   * by `analyzeInProcess` at the end of a completed run. `null`/undefined
-   * means "never analyzed".
-   */
-  lastAnalyzed?: string;
-  /**
-   * Default branch (e.g. `main`). Set by registries that track it without a
-   * local checkout — the hosted `gh_repos`-derived registry. OSS leaves it
-   * unset, and the repo route reads the branch from the on-disk git repo.
-   */
+  /** The provider it was connected through (`github`, `local`): the row's own column. */
+  provider: string;
+  /** Default branch (e.g. `main`) — a hosted repository has no checkout to read it from. */
   defaultBranch?: string;
-  /**
-   * The https git URL this project was connected from, set when it was connected
-   * through a provider rather than registered by local path. `path` then points
-   * at a clone the dashboard manages, and disconnecting deletes that clone.
-   * Absent for repos the user registered by path — their source is never touched.
-   */
-  remoteUrl?: string;
 }
 
-interface RegistryFile {
-  projects: RegistryEntry[];
-}
-
-/** Extra fields to stamp on the entry when registering. */
-export interface RegisterProjectOptions {
-  /** See `RegistryEntry.remoteUrl`. Only set when connecting through a provider. */
-  remoteUrl?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Store interface
-// ---------------------------------------------------------------------------
-
-/** Pluggable project registry. File-backed by default; EE injects Postgres. */
+/** The connected repositories of one workspace, as the routes read them. */
 export interface RegistryStore {
-  readRegistry(): Promise<RegistryEntry[]>;
-  pruneStaleProjects(): Promise<RegistryEntry[]>;
-  getProjectBySlug(slug: string): Promise<RegistryEntry | null>;
-  getProjectByPath(repoPath: string): Promise<RegistryEntry | null>;
-  /** `options` is additive — impls that ignore it stay valid (fewer params is assignable). */
-  registerProject(
-    repoPath: string,
-    displayName?: string,
-    options?: RegisterProjectOptions,
-  ): Promise<RegistryEntry>;
-  unregisterProject(slug: string): Promise<boolean>;
-  touchProject(slug: string): Promise<void>;
-  setLastAnalyzed(slug: string, isoTimestamp: string): Promise<void>;
+  readRegistry(workspaceOrgId: string): Promise<RegistryEntry[]>;
+  getProjectBySlug(workspaceOrgId: string, slug: string): Promise<RegistryEntry | null>;
+  getProjectByPath(workspaceOrgId: string, repoPath: string): Promise<RegistryEntry | null>;
 }
 
-// ---------------------------------------------------------------------------
-// File-backed default impl (OSS) — synchronous fs under an async surface.
-// ---------------------------------------------------------------------------
+let active: RegistryStore | null = null;
 
-class FileRegistryStore implements RegistryStore {
-  private loadRaw(): RegistryFile {
-    const file = getRegistryPath();
-    if (!fs.existsSync(file)) return { projects: [] };
-    try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as Partial<RegistryFile>;
-      return { projects: parsed.projects ?? [] };
-    } catch {
-      return { projects: [] };
-    }
-  }
-
-  private persist(file: RegistryFile): void {
-    fs.mkdirSync(getGlobalDir(), { recursive: true });
-    fs.writeFileSync(getRegistryPath(), JSON.stringify(file, null, 2), 'utf-8');
-  }
-
-  async readRegistry(): Promise<RegistryEntry[]> {
-    return this.loadRaw().projects;
-  }
-
-  async pruneStaleProjects(): Promise<RegistryEntry[]> {
-    const file = this.loadRaw();
-    const alive = file.projects.filter((entry) => fs.existsSync(getRepoTruecourseDir(entry.path)));
-    if (alive.length !== file.projects.length) {
-      this.persist({ projects: alive });
-    }
-    return alive;
-  }
-
-  async getProjectBySlug(slug: string): Promise<RegistryEntry | null> {
-    return this.loadRaw().projects.find((p) => p.slug === slug) ?? null;
-  }
-
-  async getProjectByPath(repoPath: string): Promise<RegistryEntry | null> {
-    const normalized = path.resolve(repoPath);
-    return this.loadRaw().projects.find((p) => p.path === normalized) ?? null;
-  }
-
-  async registerProject(
-    repoPath: string,
-    displayName?: string,
-    options?: RegisterProjectOptions,
-  ): Promise<RegistryEntry> {
-    const normalized = path.resolve(repoPath);
-    ensureRepoTruecourseDir(normalized);
-    const file = this.loadRaw();
-    const name = displayName || path.basename(normalized);
-    const existing = file.projects.find((p) => p.path === normalized);
-
-    if (existing) {
-      existing.name = name;
-      existing.lastOpened = new Date().toISOString();
-      // Only ever set, never cleared — re-registering a connected repo by path
-      // must not turn it back into a plain local repo.
-      if (options?.remoteUrl) existing.remoteUrl = options.remoteUrl;
-      this.persist(file);
-      return existing;
-    }
-
-    const entry: RegistryEntry = {
-      slug: slugify(name, file.projects.map((p) => p.slug)),
-      name,
-      path: normalized,
-      lastOpened: new Date().toISOString(),
-      ...(options?.remoteUrl ? { remoteUrl: options.remoteUrl } : {}),
-    };
-    file.projects.push(entry);
-    this.persist(file);
-    return entry;
-  }
-
-  async unregisterProject(slug: string): Promise<boolean> {
-    const file = this.loadRaw();
-    const before = file.projects.length;
-    file.projects = file.projects.filter((p) => p.slug !== slug);
-    if (file.projects.length === before) return false;
-    this.persist(file);
-    return true;
-  }
-
-  async touchProject(slug: string): Promise<void> {
-    const file = this.loadRaw();
-    const entry = file.projects.find((p) => p.slug === slug);
-    if (!entry) return;
-    entry.lastOpened = new Date().toISOString();
-    this.persist(file);
-  }
-
-  async setLastAnalyzed(slug: string, isoTimestamp: string): Promise<void> {
-    const file = this.loadRaw();
-    const entry = file.projects.find((p) => p.slug === slug);
-    if (!entry) return;
-    entry.lastAnalyzed = isoTimestamp;
-    this.persist(file);
-  }
-}
-
-let active: RegistryStore = new FileRegistryStore();
-
-/** The active project registry (file-backed unless EE installed a Postgres one). */
-export function getRegistryStore(): RegistryStore {
-  return active;
-}
-/** Install a project registry (e.g. the enterprise Postgres impl). */
+/** Install the registry view (boot, and the tests that stand a server up). */
 export function setRegistryStore(store: RegistryStore): void {
   active = store;
 }
-/** Restore the file-backed default (tests). */
+
+/** Forget the installed view (tests). */
 export function resetRegistryStore(): void {
-  active = new FileRegistryStore();
+  active = null;
 }
 
-// ---------------------------------------------------------------------------
-// Public API (delegators)
-// ---------------------------------------------------------------------------
+function store(): RegistryStore {
+  if (!active) throw new Error('No repository registry installed (boot did not run installDbStores).');
+  return active;
+}
 
-/** Return all registered projects. */
-export const readRegistry = (): Promise<RegistryEntry[]> => active.readRegistry();
+/** The active registry view. */
+export function getRegistryStore(): RegistryStore {
+  return store();
+}
 
-/** Drop entries whose `.truecourse/` directory no longer exists. Returns the pruned list. */
-export const pruneStaleProjects = (): Promise<RegistryEntry[]> => active.pruneStaleProjects();
+export const readRegistry = (workspaceOrgId: string): Promise<RegistryEntry[]> =>
+  store().readRegistry(workspaceOrgId);
 
-export const getProjectBySlug = (slug: string): Promise<RegistryEntry | null> =>
-  active.getProjectBySlug(slug);
+export const getProjectBySlug = (workspaceOrgId: string, slug: string): Promise<RegistryEntry | null> =>
+  store().getProjectBySlug(workspaceOrgId, slug);
 
-export const getProjectByPath = (repoPath: string): Promise<RegistryEntry | null> =>
-  active.getProjectByPath(repoPath);
-
-/**
- * Add (or update) an entry for `repoPath`. Returns the resulting entry.
- * Existing entries keep their slug; lastOpened is refreshed.
- */
-export const registerProject = (
-  repoPath: string,
-  displayName?: string,
-  options?: RegisterProjectOptions,
-): Promise<RegistryEntry> => active.registerProject(repoPath, displayName, options);
-
-export const unregisterProject = (slug: string): Promise<boolean> =>
-  active.unregisterProject(slug);
-
-export const touchProject = (slug: string): Promise<void> => active.touchProject(slug);
-
-/**
- * Record a successful analysis completion for `slug`. Called once per
- * analyze run from `analyzeInProcess`. This is the ONLY write path for
- * `lastAnalyzed` — everything else treats it as read-only.
- */
-export const setLastAnalyzed = (slug: string, isoTimestamp: string): Promise<void> =>
-  active.setLastAnalyzed(slug, isoTimestamp);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+export const getProjectByPath = (workspaceOrgId: string, repoPath: string): Promise<RegistryEntry | null> =>
+  store().getProjectByPath(workspaceOrgId, repoPath);
 
 /** Derive a unique URL-safe slug from a display name, avoiding `taken`. */
 export function slugify(name: string, taken: string[]): string {

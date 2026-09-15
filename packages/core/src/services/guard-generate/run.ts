@@ -1,8 +1,8 @@
 import { log } from '../../lib/logger.js'
 /**
  * THE GUARD-GENERATE SESSION SEAMS — the implementations `@truecourse/core`
- * injects into `generateGuards` for plan 04 steps 15 (claim extraction) and 16
- * (flow synthesis). The engine (`@truecourse/guard-generator`) declares the
+ * injects into `generateGuards` for claim extraction and flow synthesis. The
+ * engine (`@truecourse/guard-generator`) declares the
  * seam TYPES and keeps the deterministic spine; this module owns everything
  * session-shaped: the pool, the cache, the run record, the driver.
  *
@@ -19,8 +19,8 @@ import { log } from '../../lib/logger.js'
  *   a crashed generate);
  * - tools never write repo/store state; every write stays in `generateGuards`.
  *
- * SINGLE-STEP MODE (`only` / the CLI's `--only-<step>` flags, SPEC_GUARD_PLAN
- * item 110): run one step's sessions in isolation. Prior steps REPLAY from
+ * SINGLE-STEP MODE (`only`): run one step's sessions in isolation. Prior steps
+ * REPLAY from
  * their outcome caches — a miss throws {@link GenerateStepNotReadyError}
  * instead of spending sessions that belong to that step's own flag — and the
  * engine stops before the next one, writing nothing durable until the final
@@ -69,10 +69,10 @@ import {
   flowAreaKey,
   AUTHOR_INITIAL_BYTES,
 } from '@truecourse/guard-generator'
-import { createSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../../lib/sessions-store.js'
+import { createStoredSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../../lib/sessions-store.js'
 import { resolveCommitSha } from '../../lib/repo-ref.js'
-import { createConfiguredSessionDriver } from '../llm/session-driver.js'
-import type { LlmTransportFlag } from '../../config/global-config.js'
+import { createClaudeCodeSessionDriver } from '../llm/session-driver.js'
+
 import { cachedSessionOutcome } from '../agent/session-cache.js'
 import { runSessionPool } from '../agent/session-pool.js'
 import { describeSessionFailure } from '../guard-setup/session-context.js'
@@ -119,7 +119,7 @@ import { FIDELITY_SESSION_KIND, emptyFidelityTally, judgeWorkerFidelity } from '
 // (`services/guard-setup/session-context.ts`) rather than a reuse: that one
 // hardcodes its command + report accounting, and this run's adapter only needs
 // acquire/finish. ONE run record covers every session of the generate
-// invocation (`sessions/guard-generate/<runId>/`).
+// invocation, with each session's transcript appended to that run's journal.
 // ---------------------------------------------------------------------------
 
 export interface AcquiredContext {
@@ -128,15 +128,15 @@ export interface AcquiredContext {
 }
 
 // ---------------------------------------------------------------------------
-// Single-step mode (`--only-<step>`)
+// Single-step mode (`only`)
 // ---------------------------------------------------------------------------
 
 /**
  * A single-step run (`only`) found a PRIOR step's artifact missing: that step's
  * outcome cache has no entry for `missing`, so replaying it would spend
- * sessions that belong to that step's own flag. Deliberately loud — a silent
+ * sessions that belong to that step's own run. Deliberately loud — a silent
  * re-run here would mask exactly the cache-key drift a stepwise run exists to
- * expose. The fix is always `truecourse guard generate --only-<step>`.
+ * expose. The fix is always a generate with `only` set to that step.
  */
 export class GenerateStepNotReadyError extends Error {
   constructor(
@@ -144,7 +144,7 @@ export class GenerateStepNotReadyError extends Error {
     readonly missing: string[],
   ) {
     super(
-      `the ${step} step has ${missing.length} uncached item${missing.length === 1 ? '' : 's'} — run \`truecourse guard generate --only-${step}\` first`,
+      `the ${step} step has ${missing.length} uncached item${missing.length === 1 ? '' : 's'} — run it without \`only\` first`,
     )
     this.name = 'GenerateStepNotReadyError'
   }
@@ -156,15 +156,14 @@ export interface GuardGenerateSessionSeams {
   reuseExtraction: ReuseExtractionSeam
   flowsAreaSession: FlowsAreaSessionSeam
   flowsEpicSession: FlowsEpicSessionSeam
-  /** The flow-worker pool (plan 04 steps 17 + 18) — waves, cache, fidelity children. */
+  /** The flow-worker pool — waves, cache, fidelity children. */
   flowWorkerSession: FlowWorkerSessionSeam
   /** The run id, once a session has run; undefined on a fully-cached run. */
   runId(): string | undefined
   /**
-   * The sessions-store run dir (`.truecourse/sessions/guard-generate/<runId>/`)
-   * where this run's transcripts landed — what a stepwise run is inspected
-   * through. Undefined until a session actually runs (and on the injected-driver
-   * test seam, which owns its own run record).
+   * The sessions-store scratch dir this run used, under the runtime directory —
+   * what a stepwise run is inspected through. Undefined until a session actually
+   * runs (and on the injected-driver test seam, which owns its own run record).
    */
   runDir(): string | undefined
   /** Close the run record (when one was created). `failed` only when every
@@ -174,15 +173,13 @@ export interface GuardGenerateSessionSeams {
 
 export interface CreateGuardGenerateSeamsOptions {
   repoRoot: string
-  /** A per-run `--llm-transport` flag; the saved selection answers otherwise. */
-  transport?: LlmTransportFlag
   /** Ceiling on concurrent sessions per pool (the governor may run fewer). */
   concurrency?: number
-  /** Every transcript event as it is persisted — the CLI's live line. */
+  /** Every transcript event as it is persisted — the caller's live view. */
   onSessionEvent?: (workItem: string, event: SessionEvent) => void
   /** The (lazily created) sessions-store run record just came into being —
-   *  fired on first session acquire; never on a fully-cached run. The CLI
-   *  prints the dashboard "watch live" deep link from it. */
+   *  fired on first session acquire; never on a fully-cached run. The caller
+   *  learns the run's id from it. */
   onRunStarted?: (info: SessionRunStartedInfo) => void
   /**
    * Single-step mode: the ONE step whose sessions may run. Every PRIOR step's
@@ -196,7 +193,7 @@ export interface CreateGuardGenerateSeamsOptions {
   replaySteps?: readonly GenerateStep[]
   /**
    * Test seam: a lazy thunk overriding the internal
-   * `createConfiguredSessionDriver` path — the spec-scan analog's shape, plus
+   * `createClaudeCodeSessionDriver` path — the spec-scan analog's shape, plus
    * persistence, because production ties persistence to the run record. When
    * injected, NO sessions-store run record is created (the spec-scan
    * precedent: whoever owns the driver owns the run record — there the
@@ -241,7 +238,7 @@ interface CachedPoolOptions<TItem, TOutcome> {
    * Single-step mode, replaying a PRIOR step: serve every item from cache and
    * throw {@link GenerateStepNotReadyError} (naming this step) on any miss
    * instead of running a session — the misses belong to this step's own
-   * `--only` flag.
+   * `only` run.
    */
   cacheOnly?: GenerateStep
 }
@@ -416,9 +413,8 @@ export function createGuardGenerateSessionSeams(
 
   const build = async (): Promise<{ run: SessionRunStore; driver: SessionDriver }> => {
     const gitRef = await resolveCommitSha(opts.repoRoot)
-    const store = createSessionRun(opts.repoRoot, { command: 'guard-generate', gitRef })
-    const { driver, mode, attribution } = createConfiguredSessionDriver({
-      ...(opts.transport ? { transport: opts.transport } : {}),
+    const store = await createStoredSessionRun(opts.repoRoot, { command: 'guard-generate', gitRef })
+    const { driver, mode, attribution } = createClaudeCodeSessionDriver({
       cwd: opts.repoRoot,
       providerStateDir: path.join(store.dir, 'provider'),
     })
@@ -587,7 +583,7 @@ export function createGuardGenerateSessionSeams(
     return { result, summary }
   }
 
-  // The flow-worker pool (plan 04 steps 17 + 18). Not `runCachedGuardPool`:
+  // The flow-worker pool. Not `runCachedGuardPool`:
   // the worker cache holds MORE than the outcome (the settled yaml), a cached
   // `settled` must survive a fresh confirmation run before it counts as a hit,
   // and the two WAVES (non-epic, then epic — a true barrier, so an epic's

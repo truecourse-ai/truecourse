@@ -36,9 +36,9 @@ import {
   readGuardOverlays,
   writeGuardOverlays,
 } from '@truecourse/core/lib/guard-overlays';
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 
 const SECRET = 'master-secret-at-least-32-chars-long!!';
 
@@ -189,7 +189,7 @@ describe('Guard dependencies routes — hosted', () => {
       },
       externals: {},
     });
-    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'guard-externals');
+    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(TEST_ORG, fixture.project.slug, 'guard-externals');
 
     // A later write layers over the stored row — the untouched variable survives.
     await request(app).put(url()).send({ name: 'anthropic', env: { ANTHROPIC_API_KEY: 'sk-rotated' } }).expect(200);

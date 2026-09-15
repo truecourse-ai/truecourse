@@ -6,14 +6,6 @@ import path from 'node:path';
 import { errorHandler } from './middleware/error.js';
 import { createProjectResolver } from './middleware/project.js';
 import { createReposRouter } from './routes/repos.js';
-import analysesRouter from './routes/analyses.js';
-import graphRouter from './routes/graph.js';
-import filesRouter from './routes/files.js';
-import violationsRouter from './routes/violations.js';
-import databasesRouter from './routes/databases.js';
-import rulesRouter from './routes/rules.js';
-import flowsRouter from './routes/flows.js';
-import analyticsRouter from './routes/analytics.js';
 import specRouter from './routes/spec.js';
 import { createContextRouter, createContextBindingsRouter } from './routes/context.js';
 import { createHomeRouter } from './routes/home.js';
@@ -24,7 +16,9 @@ import capabilitiesRouter from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
 import { createAuthGate } from './middleware/auth.js';
 import type { GithubMount } from './github/index.js';
+import type { RepoLinkStore } from './routes/repos.js';
 import type { JobsMount } from './jobs/index.js';
+import type { ServerRouterMount } from './features.js';
 import { setCurrentJobs } from './jobs/current.js';
 import type { AuthVerifier } from '@truecourse/shared';
 
@@ -55,6 +49,19 @@ export interface CreateAppOptions {
    */
   workspaceRouter?: express.Router;
   /**
+   * The connected repositories, whichever provider brought them — what scopes
+   * every repository route to the caller's workspace. REQUIRED for the same
+   * reason as `authVerifier`: a server that resolved repositories from nowhere
+   * would show every workspace's. `null` (tests pass their own double) means
+   * no repository is visible to anyone.
+   */
+  repoLinks: RepoLinkStore | null;
+  /**
+   * Folders on this machine, as repositories. Present only in local mode;
+   * mounts behind the gate beside the other workspace-scoped routers.
+   */
+  localRouter?: express.Router | null;
+  /**
    * The GitHub App connection. REQUIRED for the same reason as `authVerifier`:
    * whether this server can connect repositories is a deployment decision, not
    * a default. `null` means the App isn't configured — /api/github then answers
@@ -67,6 +74,11 @@ export interface CreateAppOptions {
    * pass it) makes the three job routes answer 503.
    */
   jobs: JobsMount | null;
+  /**
+   * Routers this edition adds, already built (see `features.ts`). The open
+   * edition has none; the enterprise bundle registers its own before boot.
+   */
+  featureRouters?: ServerRouterMount[];
 }
 
 export function createApp(opts: CreateAppOptions): express.Express {
@@ -96,6 +108,11 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // Auth endpoints (login / callback / logout / me) must be reachable
   // without a session, so they mount before the gate.
   if (opts.authRouter) app.use('/api/auth', opts.authRouter);
+
+  const featureRouters = opts.featureRouters ?? [];
+  for (const mount of featureRouters) {
+    if (mount.public) app.use(mount.path, mount.router);
+  }
 
   // Capabilities + health stay public so the client can discover the
   // feature gates and liveness before authenticating.
@@ -152,12 +169,20 @@ export function createApp(opts: CreateAppOptions): express.Express {
 
   // Which workspace owns a connected repository — the one thing every
   // slug-resolving route needs, so another workspace's repo reads as absent.
-  const githubLinks = opts.github?.store ?? null;
+  const repoLinks = opts.repoLinks;
 
   // The workspace's people: its WorkOS organization's memberships and the
   // invitations standing against it. Scoped to the session's organization, so
   // it needs the gate above it and nothing else.
   if (opts.workspaceRouter) app.use('/api/workspace', opts.workspaceRouter);
+
+  // Folders on this machine, as repositories (local mode only).
+  if (opts.localRouter) app.use('/api/local', opts.localRouter);
+
+  // This edition's own routers, with the session already resolved.
+  for (const mount of featureRouters) {
+    if (!mount.public) app.use(mount.path, mount.router);
+  }
 
   // The workspace's Models settings — workspace-scoped, not repo-scoped, so it
   // sits beside the registry routes rather than behind the project resolver.
@@ -180,35 +205,27 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // The workspace's CONTEXT: its documentation sources and what they yielded.
   // A source belongs to the workspace, not to a repository, so this mounts
   // above the repository routers and behind the gate alone — no slug to resolve.
-  app.use('/api/context', createContextRouter({ githubLinks, github: opts.github?.access ?? null }));
+  app.use('/api/context', createContextRouter({ repoLinks, github: opts.github?.access ?? null }));
 
   // Home: the workspace's sections today and over time, what waits on a person
   // and what changed. Workspace-scoped like Context, and read-only.
-  app.use('/api/home', createHomeRouter({ githubLinks }));
+  app.use('/api/home', createHomeRouter({ repoLinks }));
 
   // Home page / registry routes run without a project.
-  app.use('/api/repos', createReposRouter({ githubLinks }));
+  app.use('/api/repos', createReposRouter({ repoLinks }));
   // The workspace's agent runs across every repository it connected, scoped by
   // the same link store, so it needs no project resolver.
-  app.use('/api/sessions', createWorkspaceSessionsRouter({ githubLinks }));
+  app.use('/api/sessions', createWorkspaceSessionsRouter({ repoLinks }));
   // Project-scoped routes. Each router's patterns declare their own `:id`
-  // (e.g. `/:id/violations`), so we mount at `/api/repos` — the router
-  // matches the `:id` segment itself. The resolver validates the slug, scopes
-  // it to the caller's workspace, and touches `lastAccessed`.
-  const projectResolver = createProjectResolver(githubLinks);
-  app.use('/api/repos', projectResolver, analysesRouter);
-  app.use('/api/repos', projectResolver, graphRouter);
-  app.use('/api/repos', projectResolver, filesRouter);
-  app.use('/api/repos', projectResolver, violationsRouter);
-  app.use('/api/repos', projectResolver, databasesRouter);
-  app.use('/api/repos', projectResolver, flowsRouter);
-  app.use('/api/repos', projectResolver, analyticsRouter);
+  // (e.g. `/:id/guard`), so we mount at `/api/repos` — the router
+  // matches the `:id` segment itself. The resolver validates the slug and
+  // scopes it to the caller's workspace.
+  const projectResolver = createProjectResolver(repoLinks);
   app.use('/api/repos', projectResolver, specRouter);
   app.use('/api/repos', projectResolver, createContextBindingsRouter());
   app.use('/api/repos', projectResolver, guardRouter);
   app.use('/api/repos', projectResolver, guardActionsRouter);
   app.use('/api/repos', projectResolver, sessionsRouter);
-  app.use('/api/rules', rulesRouter);
 
   app.use(errorHandler);
 

@@ -415,7 +415,7 @@ async function runClaudeAgentSession(
         }
         case 'system': {
           const system = message as SdkSystemMessage;
-          // The harness owns this retry; we own the RECORD of it (item 11).
+          // The harness owns this retry; we own the RECORD of it.
           // Budget-inert — a retry is not a turn — but a session that sits
           // silent for minutes is otherwise indistinguishable from a hang.
           if (system.subtype === 'api_retry') {
@@ -542,8 +542,7 @@ async function runClaudeAgentSession(
 }
 
 /**
- * What the session is told to open with. A cluster's shared prefix (item 8)
- * leads it, JOINED to the first initial message rather than queued ahead of it:
+ * What the session is told to open with. A cluster's shared prefix leads it, JOINED to the first initial message rather than queued ahead of it:
  * streaming input makes every queued message a turn of its own, and this
  * backend caches on its own terms — so a prefix of its own would buy no cache
  * and cost the session a turn spent answering it alone. A resume carries the

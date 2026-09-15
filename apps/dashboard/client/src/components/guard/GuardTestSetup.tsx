@@ -1,24 +1,24 @@
 /**
- * The world a test STARTS in — the scenario's `setup:` block, read above its
+ * The world a test STARTS in, the scenario's `setup:` block, read above its
  * steps. The steps say what the test DOES; this says what was already true when
  * the first one ran, which is otherwise only visible by opening the YAML.
  *
  * Three kinds of starting fact, each a section of one card and each present only
  * when the file declares it: the SEEDED FILES (path as the toggle, content one
- * click away — a seed can be a whole config file, and a wall of them would bury
+ * click away, a seed can be a whole config file, and a wall of them would bury
  * the steps below), the GIT world as one line per fact, and the ENV overlay.
  *
  * A file's content is long data, so it goes through the same block as every other
- * long value on the page ({@link GuardLongText}): clamped vertically, scrolled
- * horizontally, never re-wrapped.
+ * long value on the page ({@link GuardLongText}): clamped vertically and wrapped
+ * in place, never behind a horizontal scrollbar.
  */
 
 import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { GuardScenarioSetupView } from '@truecourse/shared';
-import { GuardLongText } from './GuardLongText';
+import { GuardLongText } from '@/components/guard/GuardLongText';
 
-/** A section heading inside the card — the same bar the step groups are headed with. */
+/** A section heading inside the card, the same bar the step groups are headed with. */
 const SECTION = 'bg-muted/40 px-3 py-1.5 text-[11px] font-medium leading-snug text-foreground';
 const CODE = 'rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground break-all';
 

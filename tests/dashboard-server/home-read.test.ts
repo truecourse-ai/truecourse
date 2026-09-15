@@ -2,10 +2,11 @@
  * `GET /api/home`, the product owner's dashboard in one answer.
  *
  * Everything here is a fold of stored things, so what is pinned is the folding:
- * today's sections across the repositories that read a document, the trend
- * across the baseline runs (and what a repository that had not run yet
- * contributes, which is nothing), the areas' order, the five kinds of attention
- * row, the changes a run made and the period the whole page is read through.
+ * today's FLOWS across every repository, the flow trend across the baseline
+ * runs (and what a repository that had not run yet contributes, which is
+ * nothing), the SECTIONS the areas are composed of and their order, the five
+ * kinds of attention row, the changes a run made and the period the whole page
+ * is read through.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -28,7 +29,7 @@ import { manifestPath, writeGuardLatest } from '@truecourse/guard-runner';
 import type { HomeResponse } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { createTestApp, stubJobs, TEST_ORG } from '../helpers/test-app';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import { memoryContextStore } from '../helpers/memory-context-store';
 import { memorySpecStore } from '../helpers/memory-spec-store';
 import {
@@ -38,13 +39,16 @@ import {
   type ContextStore,
 } from '@truecourse/core/lib/context-store';
 import { resetSpecStore, saveWorkspaceSpec, setSpecStore } from '@truecourse/core/lib/spec-store';
-import { writeGuardRunSections } from '@truecourse/core/lib/guard-store';
-import { createSessionRun } from '@truecourse/core/lib/sessions-store';
+import { writeGuardRunCoverage } from '@truecourse/core/lib/guard-store';
+import { createStoredSessionRun } from '@truecourse/core/lib/sessions-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import {
   setWorkspaceLlmConfigStore,
   workspaceLlmConfigStore,
 } from '../../apps/dashboard/server/src/services/workspace-llm.service';
-import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
+import { clearTestRegistry } from '../helpers/test-fixture';
 
 const SITE = 'site-docs-acme';
 const ref = (name: string): string => `context/${SITE}/${name}`;
@@ -198,7 +202,10 @@ function withProvider(): void {
 }
 
 beforeEach(async () => {
-  for (const entry of await readRegistry()) await unregisterProject(entry.slug);
+  installMemorySessionRuns();
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
+  clearTestRegistry();
   repoA = await setupTestFixture();
   repoB = await setupTestFixture();
   context = memoryContextStore();
@@ -211,8 +218,10 @@ beforeEach(async () => {
 afterEach(async () => {
   resetContextStore();
   resetSpecStore();
-  await unregisterProject(repoA.project.slug);
-  await unregisterProject(repoB.project.slug);
+  resetSessionRuns();
+  resetGuardStore();
+  resetGuardOverlayStore();
+  clearTestRegistry();
   await teardownTestFixture();
   vi.restoreAllMocks();
 });
@@ -225,14 +234,42 @@ describe('GET /api/home', () => {
     expect(page.period).toBe('30d');
     expect(page.today).toEqual({
       total: 0,
-      byStatus: { proved: 0, failed: 0, blocked: 0, 'not-testable': 0, 'not-run': 0 },
+      byStatus: { succeeded: 0, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
     });
     expect(page.trend).toEqual([]);
     expect(page.areas).toEqual([]);
     expect(page.changed).toEqual([]);
   });
 
-  it('counts the sections of linked documents, folded across every repository that reads them', async () => {
+  it('counts every repository’s flows, in the Flows page’s words', async () => {
+    // Nothing has been generated: there is no flow to count, and the headline
+    // says zero of zero rather than nothing at all.
+    expect((await home()).today.total).toBe(0);
+
+    await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
+    storedRun(repoA.repoPath);
+
+    // The two flows of the one repository that has run: the failing scenario's
+    // and the passing one's. The other repository has generated nothing and so
+    // contributes nothing, rather than a row of never-run guesses.
+    expect((await home()).today).toEqual({
+      total: 2,
+      byStatus: { succeeded: 1, failed: 1, blocked: 0, 'not-testable': 0, 'never-run': 0 },
+    });
+  });
+
+  it('counts a flow whether or not its repository reads a document', async () => {
+    // The headline is the workspace's proving, so an unlinked repository's
+    // flows still count — unlike its sections, which are nobody's promise.
+    storedRun(repoA.repoPath);
+
+    const page = await home();
+
+    expect(page.today.total).toBe(2);
+    expect(page.areas).toEqual([]);
+  });
+
+  it('composes the areas out of the sections of linked documents, folded across every repository that reads them', async () => {
     await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
     await setContextBindings(TEST_ORG, repoB.project.name, [SITE]);
     storedRun(repoA.repoPath);
@@ -241,23 +278,26 @@ describe('GET /api/home', () => {
 
     // Two sections, two repositories. A failed one outranks the other
     // repository's silence; a passed one does not, because the repository that
-    // ran nothing has nothing proven.
-    expect(page.today).toEqual({
-      total: 2,
-      byStatus: { proved: 0, failed: 1, blocked: 1, 'not-testable': 0, 'not-run': 0 },
+    // ran nothing has nothing proven. The areas keep the Documents view's words.
+    expect(
+      Object.fromEntries(page.areas.map((area) => [area.area, area.byStatus])),
+    ).toEqual({
+      'acme/payments': { proved: 0, failed: 1, blocked: 0, 'not-testable': 0, 'not-run': 0 },
+      'acme/logistics': { proved: 0, failed: 0, blocked: 1, 'not-testable': 0, 'not-run': 0 },
     });
   });
 
-  it('counts only the documents a repository reads', async () => {
+  it('counts only the documents a repository reads into an area', async () => {
     // Nothing is linked: every document is somebody's to link, nobody's promise.
-    expect((await home()).today.total).toBe(0);
+    expect((await home()).areas).toEqual([]);
 
     await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
     storedRun(repoA.repoPath);
-    expect((await home()).today).toEqual({
-      total: 2,
-      byStatus: { proved: 1, failed: 1, blocked: 0, 'not-testable': 0, 'not-run': 0 },
-    });
+    expect(
+      Object.fromEntries(
+        (await home()).areas.map((area) => [area.area, area.total]),
+      ),
+    ).toEqual({ 'acme/payments': 1, 'acme/logistics': 1 });
   });
 
   it('sorts the areas by the share of failed and blocked', async () => {
@@ -279,37 +319,63 @@ describe('GET /api/home', () => {
     beforeEach(async () => {
       await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
       await setContextBindings(TEST_ORG, repoB.project.name, [SITE]);
-      await writeGuardRunSections(repoA.repoPath, {
+      await writeGuardRunCoverage(repoA.repoPath, {
         runId: 'a-1',
         ranAt: daysAgo(40),
         commit: 'aaa',
         sections: { [`${REFUNDS}#refunds`]: 'failed' },
+        flows: { f1: 'failed' },
       });
-      await writeGuardRunSections(repoB.repoPath, {
+      await writeGuardRunCoverage(repoB.repoPath, {
         runId: 'b-1',
         ranAt: daysAgo(20),
         commit: 'bbb',
         sections: { [`${REFUNDS}#refunds`]: 'succeeded' },
+        flows: { g1: 'succeeded' },
       });
-      await writeGuardRunSections(repoA.repoPath, {
+      await writeGuardRunCoverage(repoA.repoPath, {
         runId: 'a-2',
         ranAt: daysAgo(2),
         commit: 'aab',
         sections: { [`${REFUNDS}#refunds`]: 'succeeded' },
+        flows: { f1: 'succeeded' },
       });
     });
 
-    it('draws one point per baseline run, folded across the runs standing at that moment', async () => {
+    it('draws one point per baseline run, over the flows standing at that moment', async () => {
       const page = await home('?period=all');
 
       expect(page.trend).toHaveLength(3);
       // The first moment: only one repository has ever run, and the other
       // contributes nothing rather than a guess.
-      expect(page.trend[0]!.byStatus).toMatchObject({ failed: 1, proved: 0 });
-      // The second: the other repository proves it, but the failure stands.
-      expect(page.trend[1]!.byStatus).toMatchObject({ failed: 1, proved: 0 });
-      // The third: the failure is gone, so the section is proved.
-      expect(page.trend[2]!.byStatus).toMatchObject({ failed: 0, proved: 1 });
+      expect(page.trend[0]!.byStatus).toMatchObject({ failed: 1, succeeded: 0 });
+      // The second: the other repository's flow succeeds beside the failure —
+      // flows are counted, not folded, so both stand.
+      expect(page.trend[1]!.byStatus).toMatchObject({ failed: 1, succeeded: 1 });
+      // The third: the failing flow is fixed, so both succeed.
+      expect(page.trend[2]!.byStatus).toMatchObject({ failed: 0, succeeded: 2 });
+    });
+
+    it('draws no point before any run has recorded its flows, and still reports its changes', async () => {
+      const older = await setupTestFixture();
+      await setContextBindings(TEST_ORG, older.project.name, [SITE]);
+      await writeGuardRunCoverage(older.repoPath, {
+        runId: 'c-1',
+        ranAt: daysAgo(50),
+        commit: 'ccc',
+        sections: { [`${SHIPPING}#shipping`]: 'succeeded' },
+        flows: null,
+      });
+
+      const page = await home('?period=all');
+
+      // Four runs are stored, but the oldest recorded no flows and nothing had
+      // recorded any yet, so it is not a moment the trend can draw: a zero
+      // there would read as a workspace that had no flows, not one whose flows
+      // were never written down.
+      expect(page.trend).toHaveLength(3);
+      // Its sections still moved a document, which the changes widget reports.
+      expect(page.changed.some((row) => row.ref === SHIPPING)).toBe(true);
     });
 
     it('reads the period asked for, and 30d when none is', async () => {
@@ -326,7 +392,7 @@ describe('GET /api/home', () => {
       expect(page.changed[0]).toMatchObject({
         ref: REFUNDS,
         title: 'Refunds',
-        href: `/preview/context/doc/${encodeURIComponent(REFUNDS)}`,
+        href: `/context/doc/${encodeURIComponent(REFUNDS)}`,
       });
       // The middle run changed nothing about the document: the failure stood.
       expect(page.changed).toHaveLength(2);
@@ -343,19 +409,19 @@ describe('GET /api/home', () => {
       // Runs of one repository never share a start time: the lane serializes
       // them. The clock here says so, where back-to-back creation would not.
       const at = (minute: number) => () => new Date(`2026-09-11T10:${String(minute).padStart(2, '0')}:00.000Z`);
-      createSessionRun(repoA.repoPath, { command: 'spec-scan', gitRef: 'abc', now: at(1) }).finish('failed', {
+      (await createStoredSessionRun(repoA.repoPath, { command: 'spec-scan', gitRef: 'abc', now: at(1) })).finish('failed', {
         error: { message: 'the provider refused' },
       });
       // A later success on the same kind clears an older failure.
-      createSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(2) }).finish('failed');
-      createSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(3) }).finish('completed');
+      (await createStoredSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(2) })).finish('failed');
+      (await createStoredSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(3) })).finish('completed');
 
       const rows = (await home()).attention.filter((row) => row.kind === 'conversation');
 
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ title: 'Document scan', status: 'Failed' });
       expect(rows[0]!.fact).toContain('the provider refused');
-      expect(rows[0]!.href).toMatch(/^\/preview\/agent\//);
+      expect(rows[0]!.href).toMatch(/^\/agent\//);
     });
 
     it('names every open conflict of the workspace corpus', async () => {
@@ -366,7 +432,7 @@ describe('GET /api/home', () => {
 
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ title: 'refund window disagrees', status: 'Conflict' });
-      expect(rows[0]!.href).toMatch(/^\/preview\/context\/conflicts\//);
+      expect(rows[0]!.href).toMatch(/^\/context\/conflicts\//);
     });
 
     it('names every linked document nothing can prove, with its blocked count', async () => {
@@ -377,7 +443,7 @@ describe('GET /api/home', () => {
 
       expect(rows.map((row) => row.title).sort()).toEqual(['Refunds', 'Shipping']);
       expect(rows[0]).toMatchObject({ status: 'Blocked', fact: '1 section blocked' });
-      expect(rows[0]!.href).toMatch(/^\/preview\/context\/doc\//);
+      expect(rows[0]!.href).toMatch(/^\/context\/doc\//);
     });
 
     it('names a source whose last sync failed', async () => {
@@ -395,14 +461,14 @@ describe('GET /api/home', () => {
         title: 'docs.acme.com',
         status: 'Sync failed',
         fact: 'the site answered 404',
-        href: `/preview/context/sources/${SITE}`,
+        href: `/context/sources/${SITE}`,
       });
     });
 
     it('names the missing provider once, and says nothing when one is set', async () => {
       const missing = (await home()).attention.filter((row) => row.kind === 'provider');
       expect(missing).toHaveLength(1);
-      expect(missing[0]).toMatchObject({ status: 'Needs setup', href: '/preview/settings/models' });
+      expect(missing[0]).toMatchObject({ status: 'Needs setup', href: '/settings/models' });
 
       withProvider();
       expect((await home()).attention.filter((row) => row.kind === 'provider')).toEqual([]);

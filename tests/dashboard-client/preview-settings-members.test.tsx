@@ -13,8 +13,8 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { WorkspaceInvitation, WorkspaceMember } from '@truecourse/shared';
-import { AuthProvider } from '@/ee/AuthContext';
-import PreviewApp from '@/preview/PreviewApp';
+import { AuthProvider } from '@/auth/AuthContext';
+import DashboardApp from '@/dashboard/DashboardApp';
 
 vi.mock('@/lib/socket', () => {
   const socket = { connected: false, on: vi.fn(), off: vi.fn(), emit: vi.fn(), connect: vi.fn() };
@@ -150,12 +150,12 @@ function serve(over: Partial<World> = {}) {
 }
 
 function renderMembers() {
-  window.history.replaceState({}, '', '/preview/settings/members');
+  window.history.replaceState({}, '', '/settings/members');
   render(
-    <MemoryRouter initialEntries={['/preview/settings/members']}>
+    <MemoryRouter initialEntries={['/settings/members']}>
       <AuthProvider>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,
@@ -331,11 +331,11 @@ describe('Settings › Members', () => {
   });
 
   it('asks nobody about members with no session, and lists none', async () => {
-    window.history.replaceState({}, '', '/preview/settings/members');
+    window.history.replaceState({}, '', '/settings/members');
     render(
-      <MemoryRouter initialEntries={['/preview/settings/members']}>
+      <MemoryRouter initialEntries={['/settings/members']}>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </MemoryRouter>,
     );

@@ -2,13 +2,12 @@
  * Types for the **curated doc corpus** — the spec-scan pipeline's unit of
  * curation. The corpus never disassembles a
  * doc into claims; it annotates each doc with the AREAS it covers, groups docs
- * by area, and flags within-area OVERLAPS. The only structured artifact
- * downstream is the contract, produced later at generate time.
+ * by area, and flags within-area OVERLAPS. Downstream, generate turns the kept
+ * docs into claims, flows and scenarios.
  *
  * Storage principle: the corpus stores NO prose — it references each doc by a
- * `DocRef` (where the .md lives). In OSS a DocRef is a repo-relative path; in EE
- * it is a content-addressed blob id. All downstream stages read content through
- * the ref, blind to file-vs-blob.
+ * `DocRef`, `context/<sourceId>/<docPath>`. All downstream stages read content
+ * through the ref, blind to where the body is held.
  */
 
 import { z } from 'zod';
@@ -19,9 +18,8 @@ import { DocKindSchema, StatusSchema } from './types.js';
 // ---------------------------------------------------------------------------
 
 /**
- * A reference to a doc's markdown. A bare string for forward-compatibility
- * with EE blob ids; in OSS it is the repo-relative path (forward slashes).
- * The reader resolves it to content (file in OSS, blob in EE).
+ * A reference to a doc's markdown. A bare string: `context/<sourceId>/<docPath>`,
+ * which the reader resolves to the document's stored body.
  */
 export const DocRefSchema = z.string().min(1);
 export type DocRef = z.infer<typeof DocRefSchema>;
@@ -229,7 +227,7 @@ export const CorpusDocSchema = z.object({
   kind: DocKindSchema,
   /** Lifecycle status parsed from the doc's H1 header, when present. */
   status: StatusSchema.optional(),
-  /** ISO timestamp of the last change to the doc (git mtime in OSS). */
+  /** ISO timestamp of the last change to the doc at its source. */
   lastTouched: z.string(),
   /** Canonical area ids (`product/concern`) this doc covers. May be many. */
   areaTags: z.array(z.string()),
@@ -246,7 +244,7 @@ export type CorpusDoc = z.infer<typeof CorpusDocSchema>;
 
 /**
  * A flagged within-area overlap — two docs in the same area that MAY disagree.
- * Carries refs only; the CLI/UI derive the prose passages at display time. The
+ * Carries refs only; the UI derives the prose passages at display time. The
  * user resolves it with a section-scoped conflict verdict (pick-a-side or
  * dismissal) or a force-exclude.
  */
@@ -338,7 +336,7 @@ export const CandidateSectionRefSchema = z.object({
 export type CandidateSectionRef = z.infer<typeof CandidateSectionRefSchema>;
 
 /**
- * A candidate collision the deterministic pairing nominated (item 119): two
+ * A candidate collision the deterministic pairing nominated: two
  * sections in different docs sharing rare claim tokens or the same canonical
  * heading. Lands in the corpus only when NOT examined (`Area.uncheckedPairs`),
  * so a coverage gap is data — the exact pairs nobody compared — never an
@@ -389,9 +387,9 @@ export const AreaSchema = z.object({
 export type Area = z.infer<typeof AreaSchema>;
 
 /**
- * The curated corpus — `.truecourse/specs/corpus.json`. Committable (expensive
- * to regenerate, not purely deterministic), inherited from git like LATEST.json.
- * Holds docs + area tags + within-area overlap flags.
+ * The curated corpus — `.truecourse/specs/corpus.json`. Stored as the
+ * workspace's spec set and materialized into a run's work tree. Holds docs +
+ * area tags + within-area overlap flags.
  */
 /** A doc the relevance filter dropped, with the reason — surfaced so the user can force-include it. */
 export const SkippedDocSchema = z.object({

@@ -23,7 +23,7 @@ import { resolvePrerequisites, loadRecipe } from '@truecourse/guard-runner';
  *   - the ROLLED-UP REQUIREMENT and the flow that contributed each part of it, so
  *     an expectation is never anonymous (and a dismissed flow's is gone);
  *   - WHEN the dependency applies — the condition sentence, absent ⇒ always;
- *   - which flows it BLOCKS right now: the committed tests that bind it and cannot
+ *   - which flows it BLOCKS right now: the stored tests that bind it and cannot
  *     run, plus the flows the last generate could not even author for want of it;
  *   - what registering an instance must supply, per field, with the reason each
  *     unresolved one is unresolved.
@@ -117,7 +117,7 @@ export interface GuardDependencyBlockedFlow {
   /** Absent for a claim-level generate gap, which belongs to no flow. */
   flowId?: string;
   title: string;
-  /** How it is held back: a committed test that cannot run, or a test never written. */
+  /** How it is held back: a stored test that cannot run, or a test never written. */
   kind: 'test-blocked' | 'not-authored';
 }
 
@@ -192,21 +192,21 @@ export interface GuardDependencyRowView {
   blocks: GuardDependencyBlockedFlow[];
   /**
    * How many flows RELY on it: the ones that contributed a need, plus the ones whose
-   * committed scenarios bind it. A fact about the dependency, not a state — it counts
+   * stored scenarios bind it. A fact about the dependency, not a state — it counts
    * the same whether or not an instance is registered, and a dismissed flow is gone
    * from it like it is gone from the requirement.
    */
   usedBy: number;
   service?: GuardDependencyServiceView;
-  /** True when the committed catalog declares this row. */
+  /** True when the stored catalog declares this row. */
   inCatalog: boolean;
 }
 
 /** The whole dependencies page in one read. */
 export interface GuardDependenciesView {
-  /** Absolute path of the committed catalog — shown whether or not it exists. */
+  /** Absolute path of the stored catalog — shown whether or not it exists. */
   catalogPath: string;
-  /** Absolute path of the gitignored instance overlay. */
+  /** Absolute path of the instance overlay. */
   localPath: string;
   /** Absolute path of `recipe.json` — where a service's declaration lives. */
   recipePath: string;
@@ -499,7 +499,7 @@ function blocksFor(
 
 /**
  * How many flows rely on the row: the flows that CONTRIBUTED a need to it, plus the
- * flows whose committed scenarios BIND it. Both halves are real usage and neither
+ * flows whose stored scenarios BIND it. Both halves are real usage and neither
  * implies the other — a flow can want a dependency before a test exists, and a test
  * can bind one its flow never described.
  *
@@ -521,14 +521,14 @@ function usedByFlows(
   return flows.size;
 }
 
-/** flowId → title, from the committed flow corpus. */
+/** flowId → title, from the stored flow corpus. */
 function readFlowTitles(repoRoot: string): Map<string, string> {
   const flows = readGuardFlowsCorpus(repoRoot);
   return new Map((flows?.flows ?? []).map((f) => [f.id, f.title]));
 }
 
 /**
- * Dependency name → what it holds back, from BOTH honest sources: the committed
+ * Dependency name → what it holds back, from BOTH honest sources: the stored
  * scenarios that BIND it (a test that exists and cannot run) and the last
  * generate's `blocked-on` gaps naming it (a test that was never written). Neither
  * alone is the answer — a repo can have both, and a reader clearing the
@@ -580,9 +580,10 @@ export class GuardDependencyWriteError extends Error {}
 
 /**
  * One dependency's registration, as a caller asks for it to be stored. Every
- * field is the INSTANCE half: it lands in the gitignored overlay, never in git —
- * except `baseUrl` / `mode` on a recipe-declared service, which are that
- * declaration's own fields and go where the declaration is.
+ * field is the INSTANCE half: it lands in the overlay, which is stored encrypted
+ * and never travels in the setup bundle — except `baseUrl` / `mode` on a
+ * recipe-declared service, which are that declaration's own fields and go where
+ * the declaration is.
  */
 export interface GuardDependencyPatch {
   /** Values for the declared env vars; `null` (or blank) drops one. */
@@ -605,13 +606,13 @@ export interface GuardDependencyPatch {
  * Register (or clear) ONE dependency's instance and answer with the fresh view.
  *
  * A catalog entry's instance goes to `scenarios/dependencies.local.json` — the
- * gitignored overlay, keyed by the entry name, merged over the declaration per
- * field at load time. Only the fields the committed registration DECLARES are
+ * instance overlay, keyed by the entry name, merged over the declaration per
+ * field at load time. Only the fields the stored registration DECLARES are
  * accepted: an overlay that could introduce a variable teammates cannot see would
  * make the catalog a lie about what the program needs.
  *
  * A service the catalog does not declare is the api-era shape, and it keeps its
- * own writer ({@link writeGuardExternals}) so the committed/secret split of a
+ * own writer ({@link writeGuardExternals}) so the declaration/secret split of a
  * recipe declaration stays in exactly one place.
  */
 export function writeGuardDependency(
@@ -694,7 +695,7 @@ export function writeGuardDependency(
  * What a HOSTED registration cannot do, in one sentence — or null. There is no
  * developer machine behind the tree, so a path has nothing to point at; and the
  * recipe is not edited from the dashboard, so a write may only fill in what the
- * committed declaration already names: an origin and the variables it declares,
+ * stored declaration already names: an origin and the variables it declares,
  * never a new variable, a new base-URL variable or an account mode.
  */
 function hostlessRefusal(row: GuardDependencyRowView, patch: GuardDependencyPatch): string | null {

@@ -17,7 +17,7 @@
  * re-fetch never reads as an edit.
  *
  * The settle hook is where onboarding continues: a repository's FIRST sync
- * starts its Test setup whatever it reconciled (setup needs no documents), and
+ * starts its Flow setup whatever it reconciled (setup needs no documents), and
  * a sync that reconciled something chains the workspace Document scan.
  */
 
@@ -73,7 +73,7 @@ export interface ContextSyncTaskDeps {
    */
   chainScan?: (request: ContextSyncJobRequest, result: ContextSyncJobResult) => Promise<void>;
   /**
-   * Start the repository's Test setup after its FIRST sync — whatever that sync
+   * Start the repository's Flow setup after its FIRST sync — whatever that sync
    * reconciled, zero included. A connected repository always onboards: setup
    * derives its recipe, dependencies and interfaces from the code and needs no
    * documents at all, so a repository whose markdown is empty must not be left
@@ -225,7 +225,7 @@ export function createContextSyncTask(
         await deps.chainSetup?.(ctx.payload, settled);
       } catch (err) {
         log.warn(
-          `[context] could not start ${ctx.payload.sourceId}'s test setup: ${(err as Error).message}`,
+          `[context] could not start ${ctx.payload.sourceId}'s flow setup: ${(err as Error).message}`,
         );
       }
       if (!deps.chainScan) return;

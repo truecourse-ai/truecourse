@@ -1,45 +1,80 @@
 /**
  * The one way a run gets a working tree. Repos are opaque identities
- * (`owner/repo`) with no persistent checkout, so anything that needs real
- * files, such as a context source's sync or a guard run, acquires an ephemeral
- * clone through this seam and disposes it when the run settles.
+ * (`owner/repo`, `local/<folder>`) with no persistent checkout, so anything
+ * that needs real files, such as a context source's sync or a guard run,
+ * acquires an ephemeral tree through this seam and disposes it when the run
+ * settles.
  *
- * WHICH INSTALLATION mints the clone has two answers. A guard run asks by name
- * alone: the repository is connected in Code, and its link says which
- * installation and which branch. A context source may read a repository Code
- * has not connected, so it asks through `via`, which carries the installation
- * it recorded, its workspace and its branch, and no link is looked up at all.
+ * WHICH PROVIDER makes that tree is the repository's own: the GitHub App clones
+ * through an installation, the local provider copies a folder. The provider is
+ * resolved from the connected repository, except where the caller already knows
+ * it — a context source may read a repository Code has not connected, and it
+ * carries what it recorded (the provider, its installation or its path) in
+ * `via`, so no row is looked up at all.
  *
- * The GitHub connection installs the real provider at boot (installation
- * token + `createRunClone`); tests install a fixture-tree provider. With no
- * provider installed (GITHUB_APP_* unset) acquiring answers 503, mirroring
- * what /api/github itself tells an unconfigured server's callers.
+ * Each provider installs its own maker at boot; tests install a fixture one.
+ * With none installed for the provider a repository needs, acquiring answers
+ * 503 rather than inventing a tree.
  */
 
 import { createAppError } from '@truecourse/core/lib/errors';
+import type { RepositoryProviderId } from '@truecourse/shared';
 import type { RunClone } from './run-clone.service.js';
 
-/** The installation a caller already knows, so no link is read to find one. */
+/** What the caller already knows, so no repository row is read to find it. */
 export interface WorkTreeVia {
-  installationId: number;
-  /** The workspace whose run-clones dir the checkout lands under. */
+  /** The provider it reads through. Absent means the repository's own. */
+  provider?: RepositoryProviderId;
+  /** The GitHub App installation, for a repository read through one. */
+  installationId?: number;
+  /** The workspace whose run-clones dir the tree lands under. */
   workspaceOrgId: string;
   /** The branch to clone. Absent means the repository's default branch. */
   defaultBranch?: string;
+  /** Where the provider finds it when the name is not enough: a folder's path. */
+  location?: string;
 }
 
 export type WorkTreeProvider = (repoKey: string, via?: WorkTreeVia) => Promise<RunClone>;
 
-let provider: WorkTreeProvider | null = null;
+/** How a repository key resolves to the provider that has its files. */
+export type RepoProviderLookup = (repoKey: string) => Promise<RepositoryProviderId | null>;
 
-export function setWorkTreeProvider(next: WorkTreeProvider | null): void {
-  provider = next;
+/**
+ * The provider a repository nobody connected is assumed to come through. Only
+ * the GitHub App can reach a repository by name alone, which is what a context
+ * source over an unconnected repository does.
+ */
+const UNCONNECTED_PROVIDER: RepositoryProviderId = 'github';
+
+const providers = new Map<RepositoryProviderId, WorkTreeProvider>();
+let lookup: RepoProviderLookup | null = null;
+
+/** Install how one provider makes a work tree. `null` removes it. */
+export function setWorkTreeProvider(
+  provider: RepositoryProviderId,
+  make: WorkTreeProvider | null,
+): void {
+  if (make) providers.set(provider, make);
+  else providers.delete(provider);
 }
 
-/** Clone `repoKey` into a per-run tree, through `via` when one is given. Caller disposes. */
+/** Install how a repository key resolves to its provider (boot: the link store). */
+export function setRepoProviderLookup(next: RepoProviderLookup | null): void {
+  lookup = next;
+}
+
+/** Acquire `repoKey`'s files in a per-run tree, through `via` when one is given. Caller disposes. */
 export async function acquireWorkTree(repoKey: string, via?: WorkTreeVia): Promise<RunClone> {
-  if (!provider) {
-    throw createAppError('GitHub is not configured on this server, so repositories cannot be cloned for runs.', 503);
+  const id = via?.provider ?? (await lookup?.(repoKey)) ?? UNCONNECTED_PROVIDER;
+  const make = providers.get(id);
+  if (!make) {
+    throw createAppError(
+      id === 'github'
+        ? 'GitHub is not configured on this server, so repositories cannot be cloned for runs.'
+        : `This server has no ${id} repository provider, so ${repoKey} cannot be read for a run.`,
+      503,
+    );
   }
-  return provider(repoKey, via);
+  return make(repoKey, via);
 }

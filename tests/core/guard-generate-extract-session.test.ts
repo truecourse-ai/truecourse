@@ -1,5 +1,5 @@
 /**
- * THE CLAIM-EXTRACTION SESSION — `guard-generate.extract` (plan 04 step 15).
+ * THE CLAIM-EXTRACTION SESSION — `guard-generate.extract`.
  *
  * Three layers, deliberately separated:
  *  - the SESSION DEF through the real `runAgentLoop` with a scripted driver
@@ -9,18 +9,19 @@
  *  - the ENGINE (`generateGuards`) with a stubbed seam, for the fail-open and
  *    systemic-abort routing extraction feeds.
  *
- * The seam builds its driver through `createConfiguredSessionDriver`, which has
- * no injection point, so "no driver was constructed" is proved the only way the
- * product allows: `transport: 'api'` under an EMPTY `TRUECOURSE_HOME` makes
- * construction throw, so a run that survives is a run that never built one.
+ * The seam's driver is INJECTED (`driver`, the thunk the command adapter hands
+ * it in production), so "no driver was constructed" is proved directly: the
+ * thunk is a spy that was never called, and a thunk that rejects is how an
+ * unbuildable driver reaches the fold.
  */
 
-import { describe, it, expect, afterEach, beforeEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { setCacheEntry } from '@truecourse/llm'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 import {
   collectWorkDocs,
   generateGuards,
@@ -536,28 +537,35 @@ async function primeExtractCache(r: string, doc: GuardDoc, value: ExtractOutcome
 }
 
 describe('the extract seam', () => {
-  let home = ''
   beforeEach(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-extract-home-'))
-    process.env.TRUECOURSE_HOME = home
+    installMemoryKvCache()
   })
   afterEach(() => {
-    delete process.env.TRUECOURSE_HOME
-    fs.rmSync(home, { recursive: true, force: true })
+    resetKvCacheStore()
   })
+
+  /** A driver thunk a warm cache must never reach. */
+  const spyDriver = () =>
+    vi.fn(async (): Promise<never> => {
+      throw new Error('a cache hit must not acquire a driver')
+    })
+  /** What an unbuildable driver says — the seam must carry it verbatim. */
+  const UNBUILDABLE = 'the api provider has no key configured'
+  const unbuildableDriver = async (): Promise<never> => {
+    throw new Error(UNBUILDABLE)
+  }
 
   it('a cache hit spends no session and builds no driver', async () => {
     const r = docRepo()
     const [doc] = docsOf(r)
     await primeExtractCache(r, doc, { claims: [claim(CREATING)], untestable: [] })
 
-    // `transport: 'api'` with an empty TRUECOURSE_HOME makes driver
-    // construction throw — so surviving the call proves none was built.
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
+    const driver = spyDriver()
+    const seams = createGuardGenerateSessionSeams({ repoRoot: r, driver })
     const { byDoc, summary } = await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS })
 
     expect(summary).toMatchObject({ kind: EXTRACT_SESSION_KIND, ran: 0, fromCache: 1, failed: 0 })
-    expect(seams.runId()).toBeUndefined()
+    expect(driver).not.toHaveBeenCalled()
     const result = byDoc.get(doc.doc)!
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -573,7 +581,7 @@ describe('the extract seam', () => {
       claims: [claim('Creating Tasks'), claim('a-section-that-was-deleted', { claim: 'ghost claim' })],
       untestable: [{ sectionAnchor: 'Listing Tasks', reason: 'no observable behavior' }],
     })
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
+    const seams = createGuardGenerateSessionSeams({ repoRoot: r, driver: spyDriver() })
     const { byDoc } = await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS })
     const result = byDoc.get(doc.doc)!
     expect(result.ok).toBe(true)
@@ -589,7 +597,7 @@ describe('the extract seam', () => {
       claims: [claim(CREATING, { alternativeDrivers: ['web'], needs: [{ kind: 'credential', name: 'github-token' }] })],
       untestable: [],
     })
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
+    const seams = createGuardGenerateSessionSeams({ repoRoot: r, driver: spyDriver() })
     const { byDoc } = await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS })
     const result = byDoc.get(doc.doc)!
     expect(result.ok).toBe(true)
@@ -603,7 +611,7 @@ describe('the extract seam', () => {
     const [doc] = docsOf(r)
     await primeExtractCache(r, doc, { claims: [claim(CREATING)], untestable: [] })
     const ticks: [number, number][] = []
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
+    const seams = createGuardGenerateSessionSeams({ repoRoot: r, driver: spyDriver() })
     await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS, onDoc: (done, total) => ticks.push([done, total]) })
     expect(ticks).toEqual([
       [0, 1],
@@ -618,13 +626,13 @@ describe('the extract seam', () => {
   it('folds an unconstructible driver as a transport-class failure per pending doc', async () => {
     const r = docRepo()
     const [doc] = docsOf(r)
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
+    const seams = createGuardGenerateSessionSeams({ repoRoot: r, driver: unbuildableDriver })
     const { byDoc, summary } = await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS })
 
     expect(summary).toMatchObject({ kind: EXTRACT_SESSION_KIND, ran: 1, fromCache: 0, failed: 1, allTransport: true })
     // The tally names the ACTUAL config problem, not a generic driver error.
     expect(summary.firstError).toContain('the session driver could not be constructed')
-    expect(summary.firstError).toMatch(/API transport/i)
+    expect(summary.firstError).toContain(UNBUILDABLE)
     const result = byDoc.get(doc.doc)!
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -639,7 +647,7 @@ describe('the extract seam', () => {
     const res = await generateGuards({
       repoRoot: r,
       interfaces: DEFAULT_INTERFACES(r),
-      extractSession: createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' }).extractSession,
+      extractSession: createGuardGenerateSessionSeams({ repoRoot: r, driver: unbuildableDriver }).extractSession,
       flowsAreaSession: flowsAreaSessionOf(() => {
         throw new Error('synthesis must not run after a systemic extraction loss')
       }),

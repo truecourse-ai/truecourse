@@ -1,9 +1,9 @@
 /**
  * Client-side shaping of the last-generate report (`guard/result.json`) for the
- * report view. Pure functions that recompute exactly what the CLI summary
- * (`printGuardGenerateSummary`) and `composeGuardStatus` derive, so the dashboard
- * and `truecourse guard status` never tell different stories — the client can't
- * import core, so this mirrors that composition and is unit-tested.
+ * report view. Pure functions that recompute exactly what `composeGuardStatus`
+ * derives, so the report view and the status summary never tell different
+ * stories, the client can't import core, so this mirrors that composition and
+ * is unit-tested.
  */
 
 import {
@@ -20,7 +20,7 @@ import type {
   GuardNeedsSetup,
 } from '@truecourse/shared';
 
-/** Changed sections split the way the CLI reports them. */
+/** Changed sections split the way the generate report counts them. */
 export interface GuardSettledCounts {
   /** Sections whose spec content changed since the last generate. */
   changed: number;
@@ -33,13 +33,13 @@ export interface GuardSettledCounts {
 }
 
 /**
- * Settled / unsettled split — identical to `printGuardGenerateSummary`.
+ * Settled / unsettled split, identical to `composeGuardStatus`.
  *
  * A COMMITTED failing test settles its section: guard commits every test it
- * authors, so the section has its measurement and the measurement is red — there
+ * authors, so the section has its measurement and the measurement is red, there
  * is nothing to re-attempt. Only work that left NOTHING behind is unsettled: a
  * fidelity rejection (judged an invalid measurement, never committed), an
- * authoring error, and — on reports written before failing tests were committed —
+ * authoring error, and, on reports written before failing tests were committed -
  * a birth failure that withheld its scenario (no `committed` flag).
  */
 export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
@@ -57,28 +57,8 @@ export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
   };
 }
 
-/**
- * How many flows the last generate actually WORKED — the total minus the ones it
- * skipped because their inputs hadn't changed. The honest subject of the
- * one-line "last generate" read: the rest of the corpus stood as committed.
- * Null for a report written before flow-keyed generation, which has no such unit.
- */
-export function changedFlowCount(report: GuardGenerateReport): number | null {
-  return report.flows ? Math.max(0, report.flows.total - report.flows.skipped) : null;
-}
-
-/**
- * How much work re-attempts on the next generate — the ONE housekeeping line the
- * overview keeps. Generate works per FLOW, so the flow-keyed count is the honest
- * unit when the report carries one; older reports fall back to the distinct
- * sections their authoring errors deferred.
- */
-export function retryPendingCount(report: GuardGenerateReport): number {
-  return report.flows ? report.flows.unsettled : deferredSectionCount(report.errors);
-}
-
 /** Display order: blocked-on first, then the awaiting drivers (registry-derived),
- *  then the residual kinds (dismissed — a user choice — last). A new driver slots
+ *  then the residual kinds (dismissed, a user choice, last). A new driver slots
  *  in without touching this list. */
 const GAP_KINDS: readonly GuardGapDisplayKind[] = ['blocked-on', ...awaitingDriverIds, 'untestable', 'no-claim', 'dismissed'];
 
@@ -105,8 +85,8 @@ export interface BlockedOnEntry {
 }
 
 /**
- * Tally capability nouns across many blocked-on sections — one increment per
- * (section, capability) — descending by count then name. The single tally used by
+ * Tally capability nouns across many blocked-on sections, one increment per
+ * (section, capability), descending by count then name. The single tally used by
  * both the Coverage totals strip (over the doc's blocked-on sections) and the
  * gaps-based {@link blockedOnTally} (over the generate report), so there is one
  * implementation, not two.
@@ -135,12 +115,12 @@ export function blockedOnTally(gaps: readonly GuardCoverageGap[]): BlockedOnEntr
 export interface NeedsSetupEntry {
   service: string;
   count: number;
-  /** True when the account is ALREADY provided — the gap is stale, re-generate. */
+  /** True when the account is ALREADY provided, the gap is stale, re-generate. */
   provided: boolean;
 }
 
 /**
- * Tally the SERVICES behind a doc's `needs-setup` sections — one increment per
+ * Tally the SERVICES behind a doc's `needs-setup` sections, one increment per
  * (section, service), still-to-provide first, then descending by count and name.
  * `provided` marks the "setup done" sub-state: nothing to fill in, the flows just
  * need the next `guard generate`. A service that appears in both readings counts
@@ -171,27 +151,6 @@ export function tallyNeedsSetup(
   );
 }
 
-/** A section (doc + anchor) whose authoring deferred it to the next generate. */
-export interface GuardErrorSectionRef {
-  doc: string;
-  anchor: string;
-}
-
-/**
- * Authoring errors that share a message shape. Unlike findings, these are
- * self-healing — the section stays unsettled and re-attempts next generate — so
- * the group carries a full (untruncated) representative message for diagnosis and
- * the distinct sections it affected, not a raw error count or bare slug list.
- */
-export interface GuardErrorGroup {
-  /** The normalized message pattern (quoted spans and numbers folded out). */
-  pattern: string;
-  /** A representative FULL error message for the pattern — shown verbatim, never truncated. */
-  message: string;
-  /** The distinct sections that hit this pattern. */
-  sections: GuardErrorSectionRef[];
-}
-
 /** Fold a raw error message to a coarse pattern so near-identical ones group. */
 function errorPattern(message: string): string {
   const collapsed = message.replace(/\s+/g, ' ').trim();
@@ -200,22 +159,13 @@ function errorPattern(message: string): string {
 }
 
 /**
- * The number of DISTINCT sections (doc + anchor) deferred by authoring errors —
- * the honest unit for the "N sections deferred" line (a section that errors under
- * two patterns still counts once).
- */
-export function deferredSectionCount(errors: readonly GuardGenerateError[]): number {
-  return new Set(errors.map((e) => `${e.doc}\0${e.anchor}`)).size;
-}
-
-/**
- * One flow's authoring errors, deduped with an attempt count — the detail read.
+ * One flow's authoring errors, deduped with an attempt count, the detail read.
  * Authoring re-asks, and a flow authored on two surfaces errors once per surface,
  * so the raw list is N near-identical entries; folding them by message pattern
  * turns that into "what went wrong" plus "how many times it was tried".
  */
 export interface GuardAuthoringAttempts {
-  /** A representative FULL message for the pattern — verbatim, never truncated. */
+  /** A representative FULL message for the pattern, verbatim, never truncated. */
   message: string;
   /** How many error entries folded into it. */
   attempts: number;
@@ -223,7 +173,7 @@ export interface GuardAuthoringAttempts {
 
 /**
  * A flow's authoring errors for one surface, deduped by message pattern in
- * first-seen order. Run refusals and birth errors are excluded — neither means
+ * first-seen order. Run refusals and birth errors are excluded, neither means
  * "no test could be written". `surface` narrows to the errors recorded for it,
  * keeping the un-surfaced ones (older reports recorded none) so nothing is lost.
  */
@@ -241,21 +191,4 @@ export function collapseAuthoringAttempts(
     else groups.set(key, { message: e.message, attempts: 1 });
   }
   return [...groups.values()];
-}
-
-/** Authoring errors grouped by message pattern, most-affected first. */
-export function groupErrorsByPattern(errors: readonly GuardGenerateError[]): GuardErrorGroup[] {
-  const groups = new Map<string, { message: string; sections: Map<string, GuardErrorSectionRef> }>();
-  for (const e of errors) {
-    const key = errorPattern(e.message);
-    let g = groups.get(key);
-    if (!g) {
-      g = { message: e.message, sections: new Map() };
-      groups.set(key, g);
-    }
-    g.sections.set(`${e.doc}\0${e.anchor}`, { doc: e.doc, anchor: e.anchor });
-  }
-  return [...groups.entries()]
-    .map(([pattern, g]) => ({ pattern, message: g.message, sections: [...g.sections.values()] }))
-    .sort((a, b) => b.sections.length - a.sections.length || a.pattern.localeCompare(b.pattern));
 }

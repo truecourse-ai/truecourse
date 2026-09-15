@@ -1,13 +1,13 @@
 /**
- * `truecourse guard setup` — the CHEAP preparation stage that runs between
- * `spec scan` and `guard generate`.
+ * Flow setup — the CHEAP preparation stage that runs between the Document scan
+ * and Flow generation.
  *
  * Every environment fact guard needs used to be discovered as a byproduct of the most
  * expensive stage in the product, and FIXING any of them edits `recipe.json`, which
  * moves the recipe fingerprint, which re-authors sections that were already good.
  * Setup makes all of it knowable and fixable before the first extraction call.
  *
- * The steps, in order (the §7.6 taxonomy), and what each may do to the run:
+ * The steps, in order, and what each may do to the run:
  *   0    an LLM provider must be configured        — the CALLER's check (config lives
  *                                                    above this package); the adapter
  *                                                    fails before calling in.
@@ -40,10 +40,10 @@
  * recipe and a seed reports and no-ops, and the report's `steps` spine records a
  * per-step input fingerprint so an unchanged step is SKIPPED on the next run
  * (`skipped`/`unchanged`). `refresh` forces every step; refreshing the SEED
- * additionally needs `confirmSeedReplace` to answer true, and the CLI's non-TTY path
- * answers false — a hand-edited seed script is never clobbered by a flag.
+ * additionally needs `confirmSeedReplace` to answer true, and a caller that cannot
+ * ask answers false — a hand-edited seed script is never clobbered by an option.
  *
- * SINGLE-STEP MODE (`only` / the CLI's `--only-<step>` flags): run one LLM-bearing
+ * SINGLE-STEP MODE (`only`): run one LLM-bearing
  * step in isolation — prior steps replay from what they left on disk (never a
  * session, never the live probe; a step nobody ever ran fails loud with
  * {@link SetupStepNotReadyError}), later steps never start, and `guard/setup.json`
@@ -125,12 +125,12 @@ const MAX_SPEC_EXCERPTS = 6
 const SPEC_EXCERPT_CHARS = 1500
 
 // ---------------------------------------------------------------------------
-// Single-step mode (`--only-<step>`)
+// Single-step mode (`only`)
 // ---------------------------------------------------------------------------
 
 /**
- * The setup steps that may spend an LLM session, in spine order — the five the
- * `--only-<step>` flags select from. `detect` is NOT one of them: it is one
+ * The setup steps that may spend an LLM session, in spine order — the ones
+ * `only` selects from. `detect` is NOT one of them: it is one
  * deterministic `mapInterfaces` pass whose in-memory output every later step
  * reads, so it always runs and the detection snapshot is always this run's.
  */
@@ -140,9 +140,9 @@ export type GuardSetupOnlyStep = (typeof GUARD_SETUP_ONLY_STEPS)[number]
 /**
  * A single-step run found a PRIOR step's evidence missing: replaying it would
  * mean spending the sessions (or the boot, or the probe) that belong to that
- * step's OWN flag. Deliberately loud — silently running it is exactly the
- * blurring a stepwise run exists to prevent. The fix is always
- * `truecourse guard setup --only-<step>`.
+ * step's OWN turn. Deliberately loud — silently running it is exactly the
+ * blurring a stepwise run exists to prevent. The fix is always a setup run
+ * with `only` set to that step.
  */
 export class SetupStepNotReadyError extends Error {
   constructor(
@@ -151,7 +151,7 @@ export class SetupStepNotReadyError extends Error {
     readonly missing: string,
   ) {
     super(
-      `the ${step} step has not run (${missing}) — run \`truecourse guard setup --only-${step}\` first`,
+      `the ${step} step has not run (${missing}) — run it without \`only\` first`,
     )
     this.name = 'SetupStepNotReadyError'
   }
@@ -178,16 +178,17 @@ export interface GuardSetupOptions {
    * AFTER it never start, `detect` always runs, and the persisted report merges
    * over the previous one so the untouched steps keep their record.
    *
-   * The exception to the merge is a recipe failure in `--only-recipe`:
+   * The exception to the merge is a recipe failure in `only: 'recipe'`:
    * a failed run reports the rows it reached and nothing else, exactly as a
    * whole run does — a recipe that no longer holds is no basis for calling the
    * steps that were computed against it settled.
    */
   only?: GuardSetupOnlyStep
   /**
-   * Asked ONCE, and only when a refresh would REPLACE an existing `api.seed`. A seed
-   * script is a committed, human-reviewed file: `--refresh` alone is not consent, and
-   * a non-TTY caller answers false so a flag can never clobber a hand-edited script.
+   * Asked ONCE, and only when a refresh would REPLACE an existing `api.seed`. A
+   * seed script is a human-reviewed artifact of the repo's setup bundle:
+   * `refresh` alone is not consent, and a caller that cannot ask answers false,
+   * so an option can never clobber a hand-edited script.
    */
   confirmSeedReplace?: () => Promise<boolean>
   signal?: AbortSignal
@@ -210,7 +211,7 @@ export interface GuardSetupOptions {
    * instead of a session or a computation.
    */
   onStepFact?: (step: GuardSetupStepKey, line: string) => void
-  // --- the session seams (plan 03) ---
+  // --- the session seams ---
   /**
    * The recipe-repair session (step 9), passed through to `discoverRecipe`.
    * Absent ⇒ the legacy one-shot `recipeRunner` fallback runs instead.
@@ -224,21 +225,21 @@ export interface GuardSetupOptions {
    */
   catalogSession?: GuardSetupCatalogSession
   /**
-   * The interfaces step body (plan 03 steps 11 + 12): the cli reconcile
-   * session over the mapping's diagnostics, then the web-task authoring run.
+   * The interfaces step body: the cli reconcile session over the mapping's
+   * diagnostics, then the web-task authoring run.
    * Absent ⇒ the step reports a `skipped` placeholder row.
    */
   authorInterfaces?: GuardSetupInterfacesStep
   /**
-   * The seed authoring session (plan 03 step 13). Replaces the one-shot
+   * The seed authoring session. Replaces the one-shot
    * `draftSeed`; absent ⇒ the seed step reports a `skipped` placeholder row
    * (the gate and the replace-confirmation still run first, here).
    */
   seedSession?: GuardSetupSeedSession
   preparationSession?: GuardSetupPreparationSession
   /**
-   * The auth-proof session over the catalog's supplied entries (plan 03 step
-   * 14). Absent ⇒ the step reports a `skipped` placeholder row. Its result may
+   * The auth-proof session over the catalog's supplied entries. Absent ⇒ the
+   * step reports a `skipped` placeholder row. Its result may
    * be `blocked` — the one step allowed to end that way without failing setup.
    */
   verifyAuth?: GuardSetupAuthStep
@@ -247,8 +248,8 @@ export interface GuardSetupOptions {
   probe?: typeof probeApiServers
 }
 
-/** Stable step taxonomy, shared by the CLI tracker and the dashboard —
- *  the §7.6 spine: recipe → detect → catalog → interfaces → seed → auth
+/** Stable step taxonomy for the progress tracker —
+ *  recipe → detect → catalog → interfaces → seed → auth
  *  (the old externals step folded INTO catalog). */
 export const GUARD_SETUP_STEPS = [
   { key: 'recipe', label: 'Deriving the recipe' },
@@ -267,7 +268,7 @@ export type GuardSetupStepKey = (typeof GUARD_SETUP_STEPS)[number]['key']
 // which owns the sessions), injected by the command adapter.
 // ---------------------------------------------------------------------------
 
-/** What the dependency-catalog session is briefed on (plan 03 step 10). */
+/** What the dependency-catalog session is briefed on. */
 export interface GuardSetupCatalogSessionInput {
   repoRoot: string
   /** The verified recipe as it stands AFTER the externals skeleton write. */
@@ -293,7 +294,7 @@ export type GuardSetupCatalogSession = (
 /**
  * The provider the setup engine maps the tree with — generate's
  * {@link InterfaceProvider} shape plus the mapping's run DIAGNOSTICS (the cli
- * union's tree-vs-probe disputes, plan 03 step 12). Structural and optional,
+ * union's tree-vs-probe disputes). Structural and optional,
  * so every existing provider (which simply omits the field) still fits, and
  * the field never enters the snapshot — it is run reporting the interfaces
  * step consumes.
@@ -302,12 +303,12 @@ export type GuardSetupInterfaceProvider = () => Promise<
   Awaited<ReturnType<InterfaceProvider>> & { diagnostics?: MapperDiagnostic[] }
 >
 
-/** The interfaces step's seam (plan 03 steps 11 + 12): reconcile, then author. */
+/** The interfaces step's seam: reconcile, then author. */
 export interface GuardSetupInterfacesStepInput {
   repoRoot: string
   fingerprint: string
   refresh: boolean
-  /** Re-author places that already carry authored tasks (`--replace`). */
+  /** Re-author places that already carry authored tasks (the `replace` option). */
   replace: boolean
   /** The recipe as it stands on disk when the step runs. */
   recipe: Recipe
@@ -337,7 +338,7 @@ export type GuardSetupInterfacesStep = (
   input: GuardSetupInterfacesStepInput,
 ) => Promise<GuardSetupInterfacesStepResult>
 
-/** What the seed authoring session is briefed on (plan 03 step 13) — today's
+/** What the seed authoring session is briefed on — today's
  *  draftSeed inputs, gathered by the engine so the session module stays free
  *  of the corpus readers. */
 export interface GuardSetupSeedSessionInput {
@@ -411,7 +412,7 @@ export type GuardSetupSeedSession = (
   input: GuardSetupSeedSessionInput,
 ) => Promise<GuardSetupSeedSessionResult>
 
-/** The auth-proof step's seam (plan 03 step 14). */
+/** The auth-proof step's seam. */
 export interface GuardSetupAuthStepInput {
   repoRoot: string
   recipe: Recipe
@@ -442,12 +443,12 @@ export interface GuardSetupResult {
  * recipe/preparation failures come back as `status: 'failed'` with a reason, and every soft step
  * records its own outcome without demoting the run.
  *
- * SKIP-WHEN-SETTLED (plan 03 step 8): every taxonomy step records an input
+ * SKIP-WHEN-SETTLED: every taxonomy step records an input
  * fingerprint in the report's `steps` spine, computed over the tree AS THE STEP
  * LEFT IT (a step that writes — the skeleton, the seed — would otherwise never
  * match itself again). On a re-run, a step whose prior row settled (`ok`, or an
  * earlier `skipped`/`unchanged` carry-forward) with the same fingerprint is
- * skipped whole; `--refresh` forces every step to run.
+ * skipped whole; `refresh` forces every step to run.
  */
 export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetupResult> {
   const { repoRoot } = opts
@@ -457,7 +458,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // and half-completing would leave a recipe that no spec ever justified.
   if (!hasGuardUniverse(repoRoot)) {
     return failed(
-      'No corpus found. `truecourse guard setup` runs after the spec scan — run `truecourse spec scan` first.',
+      'No corpus found. Flow setup runs after the Document scan, which has not curated anything yet.',
     )
   }
 
@@ -509,7 +510,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   if (replayed('recipe')) {
     // Single-step mode, a later step: the recipe on disk IS the artifact every
     // step downstream reads. Neither discovery nor the repair session nor the
-    // live probe runs — they belong to `--only-recipe` — and no row is pushed,
+    // live probe runs — they belong to `only: 'recipe'` — and no row is pushed,
     // so the merge below keeps the one the run that really verified it wrote.
     if (!preexisting) {
       throw new SetupStepNotReadyError('recipe', `no readable recipe at ${recipePath(repoRoot)}`)
@@ -520,7 +521,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     opts.onStepDone?.('recipe', 'replayed from recipe.json — not re-derived, not probed')
   } else if (preexisting && settled('recipe') === recipeInputFp) {
     // Settled: the subject is byte-identical to what the last run verified, so
-    // neither discovery nor the live probe re-runs. `--refresh` bypasses this.
+    // neither discovery nor the live probe re-runs. `refresh` bypasses this.
     recipe = preexisting
     recipeStep = { status: 'ok', outcome: 'exists' }
     steps.push({ key: 'recipe', status: 'skipped', reason: 'unchanged', inputFingerprint: recipeInputFp })
@@ -696,17 +697,15 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // classified is a reported step, never a failed setup.
   const catalogFpOf = (): string =>
     catalogFingerprint(detectionSnapshotJson, computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
-  // The session's COMMITTABLE settle gate. The legacy `settled('catalog')` gate
-  // lives in gitignored guard/setup.json, so a fresh checkout re-runs the
-  // session every time — and the session's additions are LLM-nondeterministic,
-  // so each fresh run can grow the catalog, which moves the recipe fingerprint,
-  // which re-authors every flow. This fingerprint deliberately excludes the
-  // committed catalog (feeding the session's OUTPUT back into its gate is what
-  // made the churn self-sustaining) and the full recipe fingerprint (which
-  // folds the catalog too): it hashes only what the session derives FROM —
-  // detection, the recipe's own text, and the seed script. While it holds, the
-  // committed catalog stands byte-for-byte; the add-only fold already protects
-  // curated entries whenever the session does run.
+  // The session's own settle gate. Its additions are LLM-nondeterministic, so
+  // a re-run can grow the catalog, which moves the recipe fingerprint, which
+  // re-authors every flow. This fingerprint deliberately excludes the catalog
+  // it produces (feeding the session's OUTPUT back into its gate is what made
+  // the churn self-sustaining) and the full recipe fingerprint (which folds the
+  // catalog too): it hashes only what the session derives FROM — detection, the
+  // recipe's own text, and the seed script. While it holds, the stored catalog
+  // stands byte-for-byte; the add-only fold already protects curated entries
+  // whenever the session does run.
   // Detection IDENTITY without evidence: the evidence entries carry absolute
   // file paths, which differ between two checkouts of identical content (a
   // base worktree vs a head worktree), so a settle gate that folds them can
@@ -746,9 +745,9 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     const catalogSessionFp = catalogSessionFpOf()
     const settledSession = opts.refresh === true ? null : readCatalogSettle(repoRoot)
     const catalogOnDisk = fs.existsSync(dependenciesPath(repoRoot))
-    // A committed catalog with no settle record predates this gate: adopt it as
-    // settled rather than re-classifying — it is a curated, committed file, and
-    // `--refresh` remains the explicit way to re-derive it.
+    // A catalog with no settle record predates this gate: adopt it as settled
+    // rather than re-classifying — it is a curated artifact of the stored
+    // bundle, and `refresh` remains the explicit way to re-derive it.
     const settleSkip =
       catalogOnDisk && (settledSession === catalogSessionFp || (settledSession === null && opts.refresh !== true))
     if (replayed('catalog')) {
@@ -851,9 +850,9 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // SOFT: an authoring failure fails the STEP, never setup — the derived half of
   // the catalog is already on disk, and generate runs on whatever authored half
   // exists. Skip-when-settled needs BOTH halves settled: an unchanged place set
-  // with the authored file missing (deleted, or a fresh clone that never
-  // authored) is work, not a skip; `--replace` is an explicit re-author and
-  // never skips either.
+  // with the authored file missing (deleted, or a clone that never authored) is
+  // work, not a skip; `replace` is an explicit re-author and never skips
+  // either.
   if (enter('interfaces')) {
     const interfacesFp = interfacesFingerprint(repoRoot)
     const authoredExists = fs.existsSync(guardAuthoredInterfacesPath(repoRoot))
@@ -862,8 +861,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     for (const line of derivedInterfaceFacts(repoRoot, mapped.interfaces)) fact('interfaces', line)
     if (replayed('interfaces')) {
       // Prior step: the merged catalog on disk — the derived half detect just
-      // re-wrote, plus whatever authored half is committed — is what the later
-      // steps read. No reconcile session, no authoring run.
+      // re-wrote, plus whatever authored half the bundle carried in — is what
+      // the later steps read. No reconcile session, no authoring run.
       if (!ranBefore('interfaces')) {
         throw new SetupStepNotReadyError('interfaces', 'no interfaces row in guard/setup.json')
       }
@@ -891,7 +890,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         inputFingerprint: interfacesFingerprint(repoRoot),
         ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
         // The step row is where run reporting lands (diagnostics are NEVER
-        // stored in the catalog, and 01-D left the CLI/dashboard silent on them).
+        // stored in the catalog, and 01-D left the dashboard silent on them).
         ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
         ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
         ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
@@ -914,7 +913,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         key: 'interfaces',
         status: 'skipped',
         reason:
-          'interface authoring is not wired into this run — run `truecourse guard interfaces author`, or inject the `authorInterfaces` seam (production does)',
+          'interface authoring is not wired into this run — inject the `authorInterfaces` seam (production does)',
         inputFingerprint: interfacesFp,
       })
       fact('interfaces', 'interface authoring is not wired into this run; the derived catalog stands alone')
@@ -1104,13 +1103,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 }
 
 // ---------------------------------------------------------------------------
-// Skip-when-settled: the step fingerprints (plan 03 step 8)
+// Skip-when-settled: the step fingerprints
 // ---------------------------------------------------------------------------
 
 /**
  * The spine a SINGLE-STEP run persists: this run's rows, plus the previous
  * report's row for every step it did not touch, in taxonomy order. Without the
- * carry-forward a `--only-seed` run would leave a one-row spine, and the next
+ * carry-forward a `only: 'seed'` run would leave a one-row spine, and the next
  * bare setup would re-derive the recipe and re-classify the catalog for nothing.
  */
 function mergeStepSpine(
@@ -1175,10 +1174,10 @@ function catalogFingerprint(detectionJson: string, recipeFingerprint: string, de
 }
 
 /**
- * The catalog session's COMMITTABLE settle record — `scenarios/dependencies.settle.json`,
- * a sibling of the catalog it settles. Committed (and carried by any seedstore
- * that carries `scenarios/`) so a fresh checkout inherits the verdict "these
- * session inputs were already classified" instead of re-running the session.
+ * The catalog session's settle record — `scenarios/dependencies.settle.json`, a
+ * sibling of the catalog it settles. Carried in the setup bundle so the next
+ * clone inherits the verdict "these session inputs were already classified"
+ * instead of re-running the session.
  * Deliberately folded into NO other fingerprint: it is bookkeeping about the
  * catalog, not part of it.
  */
@@ -1461,7 +1460,8 @@ function authoredBlocks(recipe: Recipe | null): AuthoredBlocks | null {
  * Merge the captured blocks back into the freshly written recipe, re-validating the
  * WHOLE result. Returns the merged recipe, or `null` when the merge could not be
  * applied — in which case the caller keeps the derived recipe and the run carries on
- * (a refresh that cannot restore is a visible loss in `git diff`, never a crash).
+ * (a refresh that cannot restore loses the authored blocks visibly in the setup
+ * report, never crashes the run).
  */
 function restoreAuthoredBlocks(repoRoot: string, blocks: AuthoredBlocks): Recipe | null {
   const file = recipePath(repoRoot)
@@ -1631,8 +1631,8 @@ async function runSeedStep(args: {
 
   let replaceExisting = false
   if (existing) {
-    // `--refresh` is not consent to overwrite a hand-edited script; the caller is
-    // asked, and a non-TTY caller answers false.
+    // `refresh` is not consent to overwrite a hand-edited script; the caller is
+    // asked, and a caller that cannot ask answers false.
     replaceExisting = (await opts.confirmSeedReplace?.()) ?? false
     if (!replaceExisting) {
       return {
@@ -1660,7 +1660,7 @@ async function runSeedStep(args: {
   // Narrowed by the gate; restated for the type checker.
   if (!database) return { step: { status: 'skipped', reason: 'gate' } }
 
-  // THE SEED SESSION (plan 03 step 13) — the one-shot `draftSeed` retired into
+  // THE SEED SESSION — the one-shot `draftSeed` retired into
   // an agent session that PROVES its draft by execution. The seam owns the
   // whole lifecycle (services up, the session, the fold's fresh-world gate);
   // this step gathers the briefing inputs, which are exactly the old draft's.
@@ -1838,7 +1838,7 @@ function stepPhases(opts: GuardSetupOptions): {
   }
 }
 
-/** Discovery's phases, in the words a reader of the terminal needs. */
+/** Discovery's phases, in the words a reader of the progress line needs. */
 function recipePhase(phase: RecipeDiscoveryPhase): StepPhase {
   if (phase.kind === 'proposing') {
     return phase.after

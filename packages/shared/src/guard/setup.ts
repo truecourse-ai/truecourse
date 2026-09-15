@@ -1,17 +1,17 @@
 /**
- * `guard/setup.json` — the persisted record of the last `truecourse guard setup`.
- * GITIGNORED and derived: every fact in it is re-derivable from the
- * working tree, and the durable artifacts setup produces (`recipe.json`, the seed
- * script, `scenarios/externals.local.json`) live where they always did.
+ * `guard/setup.json` — the persisted record of the last Flow setup, carried per
+ * (repo, commit) in the setup bundle so the settle spine survives the ephemeral
+ * clone. The recipe, the seed script and the dependency catalog travel with it;
+ * the secrets overlays never do.
  *
  * It exists for two reasons only:
  *  1. DETECTION IS EXPENSIVE-ISH AND SHARED. The externals view used to read the
  *     detected third-party list out of `guard/result.json` — i.e. it could only
  *     answer "what does this repo talk to" AFTER a full generate. Setup detects the
  *     same list for free (one interface-mapping pass) and records it here, so the
- *     External APIs surfaces work before the first generate. `result.json` stays
+ *     Dependencies surfaces work before the first generate. `result.json` stays
  *     generate's own artifact.
- *  2. `guard status` needs a first-class setup row — what ran, what passed, and what
+ *  2. the setup view needs a first-class setup row — what ran, what passed, and what
  *     is still to do — without re-booting the app to find out.
  */
 
@@ -49,7 +49,7 @@ export type GuardSetupTaxonomyKey = z.infer<typeof GuardSetupTaxonomyKeySchema>
  * ONE row of the `steps` spine: what the step did this run, and the input
  * fingerprint it settled on. Skip-when-settled reads the fingerprint: a re-run
  * whose freshly computed fingerprint matches a settled row's skips the step
- * (`status: 'skipped'`, `reason: 'unchanged'`); `--refresh` forces every step.
+ * (`status: 'skipped'`, `reason: 'unchanged'`); `refresh` forces every step.
  *
  * `blocked` is legal ONLY on `auth` (a supplied credential waiting on a user
  * registration) — loud, actionable, and never a reason to fail setup.

@@ -1,5 +1,5 @@
 /**
- * THE FOLD (plan 05 step 23) — strictly serial, and the ONLY place adjudication
+ * THE FOLD — strictly serial, and the ONLY place adjudication
  * writes anything. Two halves:
  *
  *  - the VALIDATION a fresh (or cached) verdict must pass — the structural
@@ -16,8 +16,8 @@
  *    escalate-after-{@link DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER}); a
  *    high-confidence claim-level one auto-dismisses the claim through the
  *    existing auto tier; `bug` / `drift` stand red and feed the findings
- *    report; `infrastructure` / `seed-defect` are recorded and surfaced by
- *    `guard status`.
+ *    report; `infrastructure` / `seed-defect` are recorded and surfaced on the
+ *    run's board.
  */
 
 import {

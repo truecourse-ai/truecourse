@@ -130,30 +130,6 @@ describe('repository driver — scope', () => {
     expect(paths(result.documents)).toContain('docs/openapi.yaml');
   });
 
-  it('is the walk alone: a committed llms.txt registry and its snapshots are not the repository\'s files', async () => {
-    write(
-      '.truecourse/specs/sources.json',
-      JSON.stringify({
-        version: 1,
-        sources: [
-          {
-            id: 'docs-acme',
-            llmsTxtUrl: 'https://docs.acme.test/llms.txt',
-            title: 'Acme docs',
-            fetchedAt: '2026-09-01T00:00:00.000Z',
-            docs: [{ url: 'https://docs.acme.test/start', path: 'start.md', title: 'Start', contentHash: 'abc' }],
-            skipped: [],
-          },
-        ],
-      }),
-    );
-    write('.truecourse/specs/sources/docs-acme/start.md', '# Start\n');
-    commit('register a site');
-    const result = await driver().sync(config(), []);
-    expect(result.documents.some((doc) => doc.docPath.includes('sources/docs-acme'))).toBe(false);
-    expect(paths(result.documents)).toEqual(['README.md', 'docs/api/rest.md', 'docs/guide.md']);
-  });
-
   it('is scoped by its own patterns, not the repository\'s spec.include', async () => {
     write('.truecourse/config.json', JSON.stringify({ spec: { include: ['docs/api/**'] } }));
     commit('narrow the repository scan');

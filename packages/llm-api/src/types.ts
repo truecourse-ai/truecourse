@@ -3,9 +3,9 @@ import type { LlmProviderKind } from '@truecourse/shared';
 export type { LlmProviderKind };
 
 /**
- * A resolved provider configuration. Built from the user's global CLI config
- * (OSS) or from the stored, decrypted provider config row (EE) — then handed
- * to the transport. No secrets are logged or serialized back out.
+ * A resolved provider configuration. Built from the stored, decrypted provider
+ * config row — then handed to the transport. No secrets are logged or
+ * serialized back out.
  */
 export interface ProviderConfig {
   provider: LlmProviderKind;

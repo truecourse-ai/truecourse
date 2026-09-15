@@ -45,6 +45,7 @@ import {
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
 import type { DatastoreUrlRef, Interface } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
+import { WORK_TREE_DIR, corpusFilePath } from '@truecourse/shared/work-tree'
 
 /** One operation of the derived api surface — all the health ranking needs. */
 export interface ApiRouteRef {
@@ -85,7 +86,7 @@ export type ProposeRecipeOutcome =
       ok: true
       recipe: Recipe
       ecosystem: RecipeEcosystem
-      /** Human fill-ins the CLI prints — credential env vars, unmappable schemes. */
+      /** Human fill-ins the setup report carries — credential env vars, unmappable schemes. */
       todos: string[]
       /**
        * The datastore compose file this proposal REQUIRES to exist, when
@@ -187,7 +188,7 @@ export function proposeRecipe(repoRoot: string, inputs: ProposeRecipeInputs = {}
  * operation-rooted interface. Lets a caller that already mapped interfaces hand the
  * surface over without a second analysis pass.
  *
- * RPC-derived operations are left out (item 12): they are the same procedure
+ * RPC-derived operations are left out: they are the same procedure
  * behind one adapter address, so probing them says nothing a probe of the app's
  * own routes does not, and they are excluded from scenario generation this round
  * anyway.
@@ -351,8 +352,8 @@ interface WorkspaceMemberServe {
 }
 
 /** Dirs that ship alongside the product without BEING it — a routed app under
- *  one of these is a demo, never the server under test (the item-107 rule,
- *  applied to recipes: cal.com's `example-apps/credential-sync` is routed and
+ *  one of these is a demo, never the server under test (the same rule the
+ *  route manifest applies, here for recipes: cal.com's `example-apps/credential-sync` is routed and
  *  must still lose to `apps/api/v2`). */
 const EXAMPLE_DIR = /(^|\/)(examples?|example-apps|demos?|fixtures?|samples?|e2e|__tests?__|tests?)(\/|$)/
 
@@ -685,7 +686,7 @@ function detectDotnet(repoRoot: string): RecipeSignals | { ok: false; reason: st
 
 /** Every `.csproj` under the repo root, depth-limited and skipping build output. */
 function findCsprojFiles(repoRoot: string, maxDepth = 3): string[] {
-  const skip = new Set(['bin', 'obj', 'node_modules', '.git', '.truecourse', 'dist', 'build', 'target'])
+  const skip = new Set(['bin', 'obj', 'node_modules', '.git', WORK_TREE_DIR, 'dist', 'build', 'target'])
   const found: string[] = []
   const walk = (dir: string, depth: number) => {
     let entries: fs.Dirent[]
@@ -901,7 +902,7 @@ export function credentialEnvName(schemeKey: string): string {
 /** The security schemes declared by the corpus's OpenAPI docs, merged. Missing or
  *  unreadable corpus → no schemes, never a failure. */
 function readCorpusSecuritySchemes(repoRoot: string): Record<string, SecurityScheme> {
-  const corpus = readJson(path.join(repoRoot, '.truecourse', 'specs', 'corpus.json'))
+  const corpus = readJson(corpusFilePath(repoRoot))
   const docs = Array.isArray(corpus?.docs) ? corpus.docs : []
   const schemes: Record<string, SecurityScheme> = {}
   for (const entry of docs) {

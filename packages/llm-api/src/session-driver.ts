@@ -8,7 +8,7 @@
  * fallback-model retry.
  *
  * The driver owns MECHANICS only. The policy shell (`runAgentLoop` in
- * `@truecourse/shared/llm`) counts budgets from the events emitted here and
+ * `@truecourse/agent-loop`) counts budgets from the events emitted here and
  * enforces them through `interrupt()`; tool argument validation lives in the
  * shell's tool wrapper, whose `SessionToolArgsError` this driver maps into
  * the re-ask path.
@@ -63,7 +63,7 @@ const BEGIN_MESSAGE = 'Begin.';
 const CONTINUE_NUDGE = `Continue. When you have reached the final result, call the \`${OUTCOME_TOOL_NAME}\` tool.`;
 
 /**
- * How this driver answers a provider failure (item 11). The AI SDK's own
+ * How this driver answers a provider failure. The AI SDK's own
  * retry has no observation hook, so `maxRetries: 0` hands the loop to us and
  * every wait becomes a `provider-retry` transcript event. Attempts are per
  * TURN and per MODEL: the primary gets `attempts` tries, then the fallback
@@ -91,7 +91,7 @@ export const DEFAULT_API_RETRY: ApiRetryPolicy = {
 export const RETRY_JITTER = 0.25;
 
 /**
- * The wait before one retry (`attempt` is 1-based). Three rules (01 step 2i):
+ * The wait before one retry (`attempt` is 1-based). Three rules:
  *
  * - The exponential ladder (`baseDelayMs · 2^(attempt-1)`) FLOORS a provider's
  *   `Retry-After`: the header is advice about a world that does not include
@@ -131,7 +131,7 @@ export interface ApiSessionDriverOptions {
    * separate sessions never collide. Ignored by anthropic and bedrock, which
    * key their cache by the prefix content itself.
    *
-   * A run that declares a `sharedPrefix` per session (item 8) names its cluster
+   * A run that declares a `sharedPrefix` per session names its cluster
    * there instead, and that key wins: it is the one the shared prefix is
    * actually shared under.
    */
@@ -217,7 +217,7 @@ interface SessionRuntime {
   fallback?: { model: LanguageModel; modelId: string };
   pricing?: ApiSessionDriverOptions['pricing'];
   retry: ApiRetryPolicy;
-  /** The configured provider's cache + tool-call strategy (item 7). */
+  /** The configured provider's cache + tool-call strategy. */
   tuning: ProviderTuning;
   /** Resolved once per session — the cluster the request-keyed providers cache under. */
   cacheKey: string;
@@ -465,7 +465,7 @@ async function callModel(
   const sharedEnd = rt.sharedPrefix - 1;
   // The system prompt rides the SDK's `system` option, never `messages`: a
   // system role inside `messages` earns an "…can be a security risk…" warning
-  // on stderr for every call, which garbles the CLI's progress output. As a
+  // on stderr for every call, which floods the run's logs. As a
   // `SystemModelMessage` (not a bare string) it still carries its cache
   // breakpoint, and the SDK prepends it as the first message of the provider
   // prompt — so the request on the wire is unchanged. Resume changes nothing
@@ -491,8 +491,7 @@ async function callModel(
       maxRetries: 0,
       // A failed call is reported by this driver — as the `provider-retry`
       // event of the wait it causes, or as the session's failure. The SDK's
-      // default handler dumps the same error to stderr on top of that, across
-      // whatever the CLI is drawing.
+      // default handler dumps the same error to stderr on top of that.
       onError: () => {},
       // Carries the prompt-cache cluster key and, because the transcript
       // event models ONE tool call per turn, this provider's way of asking

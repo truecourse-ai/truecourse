@@ -1,6 +1,6 @@
 import express, { type Express, type Request } from 'express';
 import request from 'supertest';
-import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
+import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
@@ -9,17 +9,11 @@ import type {
 import { createConnectRouter } from '../../packages/github-app/src/index';
 import type { ConnectDeps } from '../../packages/github-app/src/connect';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
-import { MemoryGateStore } from './memory-store';
-// Shared via the bare specifier so this overrides the singleton `connect.ts` uses.
-import {
-  setRegistryStore,
-  resetRegistryStore,
-  type RegistryStore,
-} from '@truecourse/core/config/registry';
+import { MemoryInstallationStore } from './memory-store';
 
 type AccountLookup = NonNullable<ConnectDeps['lookupInstallationAccount']>;
 
-let store: MemoryGateStore;
+let store: MemoryInstallationStore;
 let app: Express;
 let currentOrg: string | null;
 // The App-level account lookup the host injects. A row that already carries a
@@ -32,21 +26,8 @@ const stubOctokit = {
   paginate: async () => installRepos,
 } as unknown as OctokitClient;
 
-// The repo overview resolves each repo's dashboard slug; stub the registry so the
-// test never reads (or writes) the developer's real project list.
-const stubRegistry: RegistryStore = {
-  readRegistry: async () => [],
-  pruneStaleProjects: async () => [],
-  getProjectBySlug: async () => null,
-  getProjectByPath: async () => null,
-  registerProject: async (p, name) => ({ slug: 'stub', name: name ?? p, path: p }),
-  unregisterProject: async () => false,
-  touchProject: async () => {},
-  setLastAnalyzed: async () => {},
-};
-
 beforeEach(() => {
-  store = new MemoryGateStore();
+  store = new MemoryInstallationStore();
   currentOrg = 'org_A';
   installRepos = [
     { full_name: 'acme/api', default_branch: 'main', private: true },
@@ -71,22 +52,18 @@ beforeEach(() => {
     '/api/ee/github',
     createConnectRouter({
       store,
+      repos: store,
       appSlug: 'tc-gate',
       appUrl: 'http://localhost:3000',
-      setupRedirectPath: '/preview?connect=1',
+      setupRedirectPath: '/code?connect=1',
       setupRedirectPaths: {
-        'context-add': '/preview/context?add=repository',
-        'code-connect': '/preview/code?connect=1',
+        'context-add': '/context?add=repository',
+        'code-connect': '/code?connect=1',
       },
       octokitFor: () => stubOctokit,
       lookupInstallationAccount: lookupAccount,
     }),
   );
-  setRegistryStore(stubRegistry);
-});
-
-afterEach(() => {
-  resetRegistryStore();
 });
 
 async function seedInstallation(org: string | null = 'org_A') {
@@ -152,7 +129,7 @@ describe('connect router', () => {
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_A' })
       .expect(302)
-      .expect('location', 'http://localhost:3000/preview?connect=1');
+      .expect('location', 'http://localhost:3000/code?connect=1');
     // Ownership is unchanged.
     expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_OTHER');
   });
@@ -170,7 +147,8 @@ describe('connect router', () => {
     await seedInstallation('org_A'); // org_A owns installation 100
     await store.linkRepo({
       repoFullName: 'acme/api',
-      installationId: 200,
+      provider: 'github',
+      accountId: '200',
       workspaceOrgId: 'org_OTHER', // already owned by another workspace
       defaultBranch: 'main',
       blocking: true,
@@ -213,9 +191,32 @@ describe('connect router', () => {
     expect((res.body as GithubConnectStatusResponse).repos).toEqual([]);
   });
 
+  it('refuses to disconnect a repository another provider connected, leaving its row', async () => {
+    await store.linkRepo({
+      repoFullName: 'local/my-folder',
+      provider: 'local',
+      accountId: null,
+      workspaceOrgId: 'org_A',
+      defaultBranch: null,
+      location: '/Users/dev/my-folder',
+      blocking: true,
+      enabled: true,
+      notifyEmails: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    await request(app)
+      .delete('/api/ee/github/repos/link')
+      .query({ repoFullName: 'local/my-folder' })
+      .expect(404);
+
+    expect(await store.getRepo('local/my-folder')).not.toBeNull();
+  });
+
   it('lands the setup callback on the path its host declared', async () => {
     await seedInstallation(null);
-    // A second host, whose SPA has no /preview at all.
+    // A second host, declaring a different landing path.
     const eeApp = express();
     eeApp.use(express.json());
     eeApp.use((req, _res, next) => {
@@ -230,6 +231,7 @@ describe('connect router', () => {
       '/api/ee/github',
       createConnectRouter({
         store,
+        repos: store,
         appSlug: 'tc-gate',
         appUrl: 'https://app.truecourse.test',
         setupRedirectPath: '/repositories?connect=1',
@@ -245,7 +247,7 @@ describe('connect router', () => {
   });
 
   it('issues an install link that remembers where it was started, and returns there', async () => {
-    const status = await request(app).get('/api/ee/github/status').query({ slim: '1', from: 'context-add' }).expect(200);
+    const status = await request(app).get('/api/ee/github/status').query({ from: 'context-add' }).expect(200);
     expect(status.body.installUrl).toContain(`state=${encodeURIComponent('org_A:context-add')}`);
 
     await seedInstallation(null);
@@ -253,12 +255,12 @@ describe('connect router', () => {
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_A:context-add' })
       .expect(302)
-      .expect('location', 'http://localhost:3000/preview/context?add=repository');
+      .expect('location', 'http://localhost:3000/context?add=repository');
     expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_A');
   });
 
   it('ignores an origin it does not know and a state for another workspace', async () => {
-    const status = await request(app).get('/api/ee/github/status').query({ slim: '1', from: 'elsewhere' }).expect(200);
+    const status = await request(app).get('/api/ee/github/status').query({ from: 'elsewhere' }).expect(200);
     expect(status.body.installUrl).toContain('state=org_A');
     expect(status.body.installUrl).not.toContain('elsewhere');
 
@@ -267,7 +269,7 @@ describe('connect router', () => {
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_A:elsewhere' })
       .expect(302)
-      .expect('location', 'http://localhost:3000/preview?connect=1');
+      .expect('location', 'http://localhost:3000/code?connect=1');
     await request(app)
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_B:context-add' })
@@ -275,32 +277,18 @@ describe('connect router', () => {
     expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_A');
   });
 
-  it('skips the per-repo spec reads on ?slim=1', async () => {
+  it('answers each connected repo with the slug it was given on link', async () => {
     await seedInstallation('org_A');
     await request(app)
       .post('/api/ee/github/repos/link')
       .send({ repoFullName: 'acme/api', installationId: 100, defaultBranch: 'main' })
       .expect(201);
 
-    const getBaseline = vi.spyOn(store, 'getBaseline');
-
-    const slim = await request(app)
-      .get('/api/ee/github/status')
-      .query({ slim: '1' })
-      .expect(200);
-    const body = slim.body as GithubConnectStatusResponse;
-    // Everything the connect dialog reads is still there.
+    const status = await request(app).get('/api/ee/github/status').expect(200);
+    const body = status.body as GithubConnectStatusResponse;
     expect(body.installUrl).toContain('state=org_A');
     expect(body.installations.map((i) => i.installationId)).toEqual([100]);
-    expect(body.repos.map((r) => r.repoFullName)).toEqual(['acme/api']);
-    // The enrichment did not run: no baseline read, so no corpus read either.
-    expect(getBaseline).not.toHaveBeenCalled();
-    expect(body.repos[0]!.slug).toBeNull();
-    expect(body.repos[0]!.openConflicts).toBe(0);
-
-    // The full read still enriches.
-    await request(app).get('/api/ee/github/status').expect(200);
-    expect(getBaseline).toHaveBeenCalledWith('acme/api');
+    expect(body.repos.map((r) => [r.repoFullName, r.slug])).toEqual([['acme/api', 'acme-api']]);
   });
 
   it('rejects an invalid link payload with 400', async () => {
@@ -368,8 +356,7 @@ describe('the account behind an installation', () => {
 
     const first = await request(app)
       .get('/api/ee/github/status')
-      .query({ slim: '1' })
-      .expect(200);
+            .expect(200);
     expect((first.body as GithubConnectStatusResponse).installations).toEqual([
       { installationId: 157207108, accountLogin: 'octo-org', accountType: 'Organization' },
     ]);
@@ -381,8 +368,7 @@ describe('the account behind an installation', () => {
 
     const second = await request(app)
       .get('/api/ee/github/status')
-      .query({ slim: '1' })
-      .expect(200);
+            .expect(200);
     expect((second.body as GithubConnectStatusResponse).installations[0]!.accountLogin).toBe(
       'octo-org',
     );
@@ -406,8 +392,7 @@ describe('the account behind an installation', () => {
 
     const res = await request(app)
       .get('/api/ee/github/status')
-      .query({ slim: '1' })
-      .expect(200);
+            .expect(200);
     // The dialog falls back to `#<id>` on an empty login — nothing 502s.
     expect((res.body as GithubConnectStatusResponse).installations[0]!.accountLogin).toBe('');
     expect(await store.getInstallation(157207108)).toMatchObject({ accountLogin: '' });

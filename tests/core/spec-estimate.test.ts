@@ -15,10 +15,10 @@ import {
 import { estimateScanTokens } from '../../packages/core/src/services/llm/spec-estimate.js';
 import { curateInProcess } from '../../packages/core/src/commands/spec-in-process.js';
 import { priceForModel, type PriceTable } from '../../packages/core/src/services/llm/model-prices.js';
-import { discoverDocs, sourceDocRef, writeDecisions } from '../../packages/spec-consolidator/src/index.js';
+import { discoverDocs, writeDecisions } from '../../packages/spec-consolidator/src/index.js';
 import type { DecisionsFile, RepoIdentity, ScopeVerdict } from '../../packages/spec-consolidator/src/index.js';
-import { seedSource } from '../spec-consolidator/sources-fixture.js';
-import { resetKvCacheStore } from '@truecourse/llm';
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run.js';
 import {
   CURATE_DOC_BUDGET,
@@ -33,7 +33,6 @@ import {
   OVERLAP_SESSION_KIND,
 } from '../../packages/core/src/services/spec-scan/overlap.js';
 import { SPEC_SCAN_ORCHESTRATE_SESSION_KIND } from '../../packages/core/src/services/spec-scan/orchestrate.js';
-import { writeGlobalConfig } from '../../packages/core/src/config/global-config.js';
 import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index.js';
 import type {
   DriverResult,
@@ -67,7 +66,6 @@ describe('estimateStageTokens', () => {
     );
     // per-call adds PROMPT_OVERHEAD_TOKENS (500): relevance 620×10, extract 2000×5
     expect(est.totalEstimatedTokens).toBe(620 * 10 + 2000 * 5);
-    expect(est.tiers).toEqual([]); // token-only: no rule tiers
     expect(est.subjectLabel).toBe('10 docs');
     const extract = est.stages!.find((s) => s.stage === 'extract')!;
     expect(extract.estimatedTokens).toBe(2000 * 5);
@@ -314,10 +312,13 @@ describe('estimateScanTokens — sessions, not calls', () => {
   const SESSION_DOC = '# Session\n\n## Tokens\n\nAccess tokens expire after 60 minutes.\n';
 
   beforeEach(() => {
-    resetKvCacheStore();
+    installMemoryKvCache();
+    installMemorySessionRuns();
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-estimate-'));
   });
   afterEach(() => {
+    resetKvCacheStore();
+    resetSessionRuns();
     fs.rmSync(repo, { recursive: true, force: true });
   });
 
@@ -418,26 +419,10 @@ describe('estimateScanTokens — sessions, not calls', () => {
     expect([...models]).toEqual(['opus']);
   });
 
-  it('follows the run transport: an api-mode estimate quotes the configured model', async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-estimate-home-'));
-    const saved = process.env.TRUECOURSE_HOME;
-    process.env.TRUECOURSE_HOME = home;
-    try {
-      writeGlobalConfig({
-        llm: { transport: 'api', api: { provider: 'openai', model: 'gpt-5.5', apiKey: 'sk-test' } },
-      });
-      writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
-      const est = await estimateScanTokens(repo, undefined, { mode: 'api' });
-      const models = new Set((est.stages ?? []).map((s) => s.model));
-      expect([...models]).toEqual(['gpt-5.5']);
-      // …and a run forced onto `cli` still quotes the pinned session tier.
-      const cli = await estimateScanTokens(repo, undefined, { mode: 'claude-code' });
-      expect([...new Set((cli.stages ?? []).map((s) => s.model))]).toEqual(['opus']);
-    } finally {
-      if (saved === undefined) delete process.env.TRUECOURSE_HOME;
-      else process.env.TRUECOURSE_HOME = saved;
-      fs.rmSync(home, { recursive: true, force: true });
-    }
+  it('quotes the model the run\u2019s own driver names', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    const est = await estimateScanTokens(repo, undefined, { sessionModel: 'gpt-5.5' });
+    expect([...new Set((est.stages ?? []).map((s) => s.model))]).toEqual(['gpt-5.5']);
   });
 
   // -- the honesty of the bounds --------------------------------------------
@@ -485,42 +470,18 @@ describe('estimateScanTokens — sessions, not calls', () => {
     expect(est.subjectLabel).toBe('1 doc');
   });
 
-  it('agrees with discovery under spec.include', async () => {
+  it('agrees with discovery on the documents a scope verdict keeps', async () => {
     writeDocs({
       'docs/a.md': AUTH,
       'docs/b.md': SESSION_DOC,
       'reference/out.md': '# Out\nignored\n',
-      '.truecourse/config.json': JSON.stringify({ spec: { include: ['docs/**'] } }),
+      '.truecourseignore': 'reference/\n',
     });
     writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('docs')] }));
     expect(discoverDocs(repo).map((d) => d.path).sort()).toEqual(['docs/a.md', 'docs/b.md']);
     const est = await estimateScanTokens(repo);
     expect(items(est, CURATE_DOC_SESSION_KIND)).toBe(2);
     expect(est.subjectLabel).toBe('2 docs');
-  });
-
-  it('prices a registered web source exactly as the run discovers it', async () => {
-    writeDocs({ 'docs/a.md': AUTH });
-    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
-    const repoOnly = await estimateScanTokens(repo, undefined, { identity: null });
-    expect(items(repoOnly, CURATE_DOC_SESSION_KIND)).toBe(1);
-
-    const source = seedSource(repo);
-    const discovered = discoverDocs(repo, { skipGit: true });
-    expect(discovered.map((d) => d.path)).toEqual([
-      'docs/a.md',
-      ...source.docs.map((d) => sourceDocRef(source.id, d.path)).sort(),
-    ]);
-    // The source is a NEW subtree, so scope re-opens; cover it and the snapshots
-    // are priced exactly like repo docs.
-    writeDecisions(
-      repo,
-      decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs'), verdictRow(source.id)] }),
-    );
-    const est = await estimateScanTokens(repo, undefined, { identity: null });
-    expect(items(est, CURATE_DOC_SESSION_KIND)).toBe(discovered.length);
-    expect(est.subjectLabel).toBe(`${discovered.length} docs`);
-    expect(est.totalEstimatedTokens).toBeGreaterThan(repoOnly.totalEstimatedTokens);
   });
 
   /**
@@ -562,7 +523,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
     expect(kinds.filter((k) => k === CURATE_DOC_SESSION_KIND)).toHaveLength(1);
   });
 
-  // -- the no-changes contract the CLI/dashboard gate on ---------------------
+  // -- the no-changes contract the dashboard gates on ------------------------
 
   it('curateInProcess skips the confirm prompt (and every session) on a fully warmed repo', async () => {
     writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
@@ -600,13 +561,16 @@ describe('estimateScanTokens — sessions, not calls', () => {
 describe('scan estimate — identity is part of the cache key', () => {
   let repo: string;
   beforeEach(() => {
-    resetKvCacheStore();
+    installMemoryKvCache();
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-est-identity-'));
     fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
     fs.writeFileSync(path.join(repo, 'docs', 'api.md'), '# API\n' + 'Endpoint requires auth. '.repeat(50));
     writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
   });
-  afterEach(() => fs.rmSync(repo, { recursive: true, force: true }));
+  afterEach(() => {
+    resetKvCacheStore();
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
 
   const IDENTITY_A: RepoIdentity = { name: 'alpha', aliases: ['Alpha'], sources: ['git-remote'] };
   const IDENTITY_B: RepoIdentity = { name: 'beta', aliases: ['Betaa'], sources: ['git-remote'] };

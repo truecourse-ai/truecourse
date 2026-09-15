@@ -1,7 +1,7 @@
 /**
  * `mapInterfaces` — the core wrapper that analyzes the working tree, derives the
  * interface catalog, and snapshots it to `.truecourse/guard/interfaces.json`. Free and
- * deterministic: no LLM, no analyze store, no prior `truecourse analyze` run.
+ * deterministic: no LLM and no prior run of anything.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -9,7 +9,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { seedDraftGate } from '@truecourse/guard-generator';
 import { mapInterfaces, interfaceTypeFingerprints } from '../../packages/core/src/services/interface.service';
-import { ensureRepoTruecourseDir } from '../../packages/core/src/config/paths';
 import { interfaceFingerprint } from '../../packages/shared/src/interfaces';
 import type { InterfacesFile } from '../../packages/shared/src/index';
 
@@ -211,7 +210,7 @@ describe('mapInterfaces', () => {
 
   it('maps caller-supplied analyses without re-analyzing the tree', async () => {
     writeRepo({ 'package.json': JSON.stringify({ name: 'shipit' }) });
-    const { analyzeFileContent } = await import('../../packages/analyzer/src/file-analyzer');
+    const { analyzeFileContent } = await import('../../packages/source-facts/src/file-analyzer');
 
     const result = await mapInterfaces(repo, {
       fileAnalyses: [analyzeFileContent('src/cli.ts', COMMANDER_CLI, 'typescript')],
@@ -540,7 +539,7 @@ describe('external service source locations', () => {
 describe('mapInterfaces — guard-fixture-api acceptance', () => {
   it('derives the api catalog from the fixture OpenAPI doc alone, nothing marked specOnly', async () => {
     // The fixture server is framework-free node:http — the route extractors see
-    // nothing, so the whole surface comes from the committed OpenAPI doc and the
+    // nothing, so the whole surface comes from the OpenAPI doc in the tree and the
     // specOnly cross-check must stay silent (no code-side routes to cross-check).
     fs.cpSync(path.join(__dirname, '../fixtures/guard-fixture-api'), repo, { recursive: true });
     writeRepo({
@@ -567,18 +566,6 @@ describe('mapInterfaces — guard-fixture-api acceptance', () => {
       'updateTodo',
     ]);
     expect(result.fingerprints.api).toMatch(/^sha256:[0-9a-f]{64}$/);
-  });
-});
-
-describe('the interface snapshot is gitignored', () => {
-  it('lists guard/interfaces.json in the store .gitignore', () => {
-    writeRepo({ 'package.json': '{}' });
-    const dir = ensureRepoTruecourseDir(repo);
-    const ignored = fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8').split('\n');
-    expect(ignored).toContain('guard/interfaces.json');
-    // …and its authored sibling is NOT: hand-authored surfaces travel with the
-    // repo, or a fresh clone maps itself back down to cli + api.
-    expect(ignored).not.toContain('guard/interfaces.authored.json');
   });
 });
 

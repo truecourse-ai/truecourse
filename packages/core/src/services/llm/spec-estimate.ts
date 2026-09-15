@@ -3,16 +3,15 @@ import { completeRealization } from '@truecourse/guard-generator';
 /**
  * Pre-flight TOKEN estimates for `spec scan` (curate) and `guard generate` /
  * `guard setup`. Lives in core (the leaf packages would be circular). All feed
- * the shared {@link estimateStageTokens}, so the calculation lives in one place
- * and the CLI + dashboard render identical numbers.
+ * the shared {@link estimateStageTokens}, so the calculation lives in one place.
  *
- * Deterministic, no LLM, no transport. SCAN models SESSIONS (plan 02 step 7):
- * per session kind the estimate counts cache-MISSING work items by probing the
+ * Deterministic, no LLM, no transport. SCAN models SESSIONS: per session kind
+ * the estimate counts cache-MISSING work items by probing the
  * SAME caches with the SAME exported key builders the run uses (instructions
  * fingerprint included), then turns items into calls with per-kind expected
  * turn counts — `minCalls` = items (one turn each), `maxCalls` = items ×
  * (maxResumes+1) × turns (the budget ceiling), expected = items ×
- * EXPECTED_TURNS. One model runs every session (§3.4), so the scan estimate
+ * EXPECTED_TURNS. One model runs every session, so the scan estimate
  * carries no per-stage tier labels.
  *
  * Per-kind system prompts and briefing builders are the REAL ones (imported
@@ -25,7 +24,6 @@ import {
   prefilterDocs,
   readCorpusDecisions,
   readRepoIdentityInput,
-  readSourcesFile,
   resolveRepoIdentity,
   groupByArea,
   type AreaTag,
@@ -82,7 +80,6 @@ import {
 import { buildScanUniverse, instructionsFingerprint } from '../spec-scan/tools.js';
 import type { ScanStep } from '../spec-scan/run.js';
 import { SESSION_MODEL_CLAUDE_CODE } from './session-driver.js';
-import { apiModeModel } from '../../config/global-config.js';
 import {
   planGuardWork,
   bindClaimPrerequisites,
@@ -149,7 +146,6 @@ import {
   FIDELITY_SESSION_SYSTEM_PROMPT,
 } from '../guard-generate/index.js';
 import {
-  loadSpecScope,
   driverRecipeKey,
   isRunnableDriver,
   flowDriversToMatch,
@@ -205,8 +201,7 @@ import {
   planWorkItems,
 } from '../interface-author/index.js';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
-import type { LlmEstimate } from '../../commands/analyze-core.js';
-import type { LlmTransportMode } from '../../config/global-config.js';
+import type { LlmEstimate } from './token-estimator.js';
 import { resolveModel } from '../../config/llm-models.js';
 import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './token-estimator.js';
 import type { PriceTable } from './model-prices.js';
@@ -217,12 +212,12 @@ const AVG_AREA_SIZE = 4; // docs per area (sizes the changed-docs share of overl
 
 // Human-readable labels for the confirm UI — users don't know the internal stage ids.
 const STAGE_LABELS: Record<string, string> = {
-  // scan (session kinds — plan 02)
+  // scan (session kinds)
   [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 'Settling scan scope',
   [CURATE_DOC_SESSION_KIND]: 'Curating docs',
   [SETTLE_AREAS_SESSION_KIND]: 'Settling areas',
   [OVERLAP_SESSION_KIND]: 'Flagging overlaps',
-  // guard setup (session kinds — plan 03)
+  // guard setup (session kinds)
   [RECIPE_REPAIR_SESSION_KIND]: 'Repairing the recipe',
   [DEPENDENCY_CATALOG_SESSION_KIND]: 'Classifying dependencies',
   [RECONCILE_INTERFACES_SESSION_KIND]: 'Reconciling cli interfaces',
@@ -231,7 +226,7 @@ const STAGE_LABELS: Record<string, string> = {
   [AUTH_PROOF_SESSION_KIND]: 'Verifying supplied auth',
   'guard-setup.preparation-observations': 'Reviewing baseline observation scope',
   [PREPARATION_SESSION_KIND]: 'Preparing private test data',
-  // guard generate (session kinds — plan 04; recipe + match are still one-shots)
+  // guard generate (session kinds; recipe + match are still one-shots)
   guardRecipe: 'Discovering recipe',
   guardMatch: 'Matching flows',
   [EXTRACT_SESSION_KIND]: 'Extracting claims',
@@ -242,7 +237,7 @@ const STAGE_LABELS: Record<string, string> = {
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
 
-// --- Session-kind modeling constants (plan 02 step 7) ------------------------
+// --- Session-kind modeling constants -----------------------------------------
 // PROVISIONAL expected turn counts per session kind, to be re-grounded on real
 // transcript data once a few scans have run. They drive the EXPECTED cost only;
 // the ceiling is always the budget's hard limit.
@@ -251,7 +246,7 @@ const EXPECTED_TURNS: Record<string, number> = {
   [CURATE_DOC_SESSION_KIND]: 2,
   [SETTLE_AREAS_SESSION_KIND]: 4,
   [OVERLAP_SESSION_KIND]: 8,
-  // guard setup (plan 03) — provisional, to re-ground on transcript data.
+  // guard setup — provisional, to re-ground on transcript data.
   [RECIPE_REPAIR_SESSION_KIND]: 8,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 6,
   [RECONCILE_INTERFACES_SESSION_KIND]: 5,
@@ -260,7 +255,7 @@ const EXPECTED_TURNS: Record<string, number> = {
   [AUTH_PROOF_SESSION_KIND]: 3,
   'guard-setup.preparation-observations': 10,
   [PREPARATION_SESSION_KIND]: 12,
-  // guard generate (plan 04 step 20) — PROVISIONAL, to re-ground on transcript
+  // guard generate — PROVISIONAL, to re-ground on transcript
   // data once a few session-era generates have run.
   [EXTRACT_SESSION_KIND]: 3,
   [FLOWS_SESSION_KIND]: 4,
@@ -278,7 +273,7 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [CURATE_DOC_SESSION_KIND]: 120,
   [SETTLE_AREAS_SESSION_KIND]: 250,
   [OVERLAP_SESSION_KIND]: 400,
-  // guard setup (plan 03) — provisional.
+  // guard setup — provisional.
   [RECIPE_REPAIR_SESSION_KIND]: 300,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 500,
   [RECONCILE_INTERFACES_SESSION_KIND]: 300,
@@ -287,7 +282,7 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [AUTH_PROOF_SESSION_KIND]: 150,
   'guard-setup.preparation-observations': 2_000,
   [PREPARATION_SESSION_KIND]: 5_000, // Multiple seed/verification scripts form the final outcome.
-  // guard generate (plan 04 step 20) — provisional.
+  // guard generate — provisional.
   [EXTRACT_SESSION_KIND]: 1500, // the outcome carries a doc's whole claim set
   [FLOWS_SESSION_KIND]: 1200, // an area's flows + no-flow reasons
   [FLOW_WORKER_SESSION_KIND]: 700, // ~one scenario YAML per run/submit turn
@@ -297,10 +292,10 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
 const OVERLAP_BRIEFING_FALLBACK_CHARS = 8_000;
 
 /** One session kind's work, rolled into the `StageCallEstimate` shape the
- *  CLI/dashboard already render. `calls` = expected TURNS (items × expected
+ *  dashboard already renders. `calls` = expected TURNS (items × expected
  *  turns per session); `minCalls` = items (one turn each); `maxCalls` = the
  *  budget's hard limit (items × ((maxResumes+1) × turns + the shell's
- *  wrap-up window) — §3.3, 2026-08-21). */
+ *  wrap-up window)). */
 function sessionKindStage(input: {
   kind: string;
   model: string;
@@ -345,10 +340,10 @@ async function probeSessionCache<T>(
   return parsed.success ? parsed.data : null;
 }
 
-/** The one model every scan session runs on (§3.4): the configured api-mode
- *  flagship, or claude-code mode's pinned tier. No per-stage tiers. */
-function sessionModel(mode?: LlmTransportMode): string {
-  return (mode !== undefined ? apiModeModel(mode) : apiModeModel()) ?? SESSION_MODEL_CLAUDE_CODE;
+/** The one model every session of a run runs on: the model the run's own
+ *  driver names, else claude-code mode's pinned tier. No per-stage tiers. */
+function sessionModel(named?: string): string {
+  return named?.trim() || SESSION_MODEL_CLAUDE_CODE;
 }
 
 const mean = (ns: number[]): number =>
@@ -356,7 +351,7 @@ const mean = (ns: number[]): number =>
 
 /**
  * Pre-flight token estimate for `spec scan`. Pass `prices` to add a ceiling
- * cost. Models SESSIONS (plan 02 step 7): per kind, `items` = cache-missing
+ * cost. Models SESSIONS: per kind, `items` = cache-missing
  * work items, probed against the run's own cache names + key builders — the
  * instructions fingerprint included, so editing a standing instruction shows
  * up here as the full re-scan it really is. A warmed cache yields an EMPTY
@@ -369,9 +364,9 @@ const mean = (ns: number[]): number =>
 export async function estimateScanTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { identity?: RepoIdentity | null; mode?: LlmTransportMode; only?: ScanStep } = {},
+  opts: { identity?: RepoIdentity | null; sessionModel?: string; only?: ScanStep } = {},
 ): Promise<LlmEstimate> {
-  const model = sessionModel(opts.mode);
+  const model = sessionModel(opts.sessionModel);
 
   // Load the user's decisions so the estimate probes the SAME doc set the run
   // classifies (manual includes/excludes, scope verdicts, instructions — all of
@@ -383,12 +378,12 @@ export async function estimateScanTokens(
 
   // Discovery, scope-aware and gitless, exactly as before (`lastTouched` feeds
   // no estimate input and costs one `git log` per doc).
-  const docsAll = discoverDocs(repoRoot, { skipGit: true, scope: loadSpecScope(repoRoot) });
+  const docsAll = discoverDocs(repoRoot, { skipGit: true });
 
   // The orchestrator pre-pass, mirrored: a covered universe spends no session;
   // an uncovered one spends exactly one (no cache for that kind — the pre-pass
   // IS its cheap path).
-  const scanScope = buildScanScopeUniverse(buildScanUniverse(docsAll), readSourcesFile(repoRoot).sources);
+  const scanScope = buildScanScopeUniverse(buildScanUniverse(docsAll));
   const coverage = scopeCoverage(scanScope, decisions.scopeVerdicts ?? []);
   const orchestrateItems = coverage.covered ? 0 : 1;
 
@@ -396,8 +391,8 @@ export async function estimateScanTokens(
   const docs = applyScopeVerdicts(docsAll, decisions.scopeVerdicts ?? [], scanScope.sources, manualIncludes);
 
   // Identity AFTER discovery + scope, as the run resolves it; it enters every
-  // curate-doc cache key, so estimate and run must agree. Explicit null (EE)
-  // is honored.
+  // curate-doc cache key, so estimate and run must agree. Explicit null (the
+  // workspace scan) is honored.
   const identity =
     opts.identity !== undefined
       ? opts.identity
@@ -639,8 +634,8 @@ interface GuardSessionWorkPlan {
 }
 
 /**
- * Plan the extract + flows SESSION stages (plan 04 steps 15/16, estimate per
- * step 20). Extraction is exact by construction: one session per doc, probed
+ * Plan the extract + flows SESSION stages. Extraction is exact by
+ * construction: one session per doc, probed
  * against the run's own `guard/extract-session` cache with the run's own key
  * builder. Flow synthesis is exact whenever EVERY doc's extraction is cached:
  * the claim inventory is then known offline, so this reconstructs the SAME
@@ -975,7 +970,7 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
     recipe = derived.recipe;
   }
   const prepared = recipe;
-  // Same registry-driven check generate authors by (item 132) — an estimate that
+  // Same registry-driven check generate authors by — an estimate that
   // priced a surface generate refuses (or skipped one it authors) is a lie.
   return runnableDriverIds.filter((id) => {
     if (!isRunnableDriver(id)) return false;
@@ -984,7 +979,7 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
   });
 }
 
-// --- guard setup session-modeling constants (plan 03 retirement) -------------
+// --- guard setup session-modeling constants ----------------------------------
 // PROVISIONAL prompt/briefing sizes per setup session kind. Deliberately
 // constants rather than imports: most of these kinds keep their system prompts
 // module-private, and the estimate only needs an order-of-magnitude input size.
@@ -1001,8 +996,8 @@ const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
 };
 
 /**
- * Pre-flight estimate for `truecourse guard setup` — SESSION math (plan 03,
- * mirroring the scan estimate's rework): per session kind, `items` counts the
+ * Pre-flight estimate for Flow setup — SESSION math (mirroring the scan
+ * estimate's own): per session kind, `items` counts the
  * work a run would actually start, probed with the run's own machinery
  * wherever it is knowable OFFLINE:
  *
@@ -1020,10 +1015,10 @@ const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
  *    catalog halves, stale places excluded — exactly the selection the step
  *    makes.
  *
- * ONE MODEL for every session (§3.4); expected turns are the provisional
+ * ONE MODEL for every session; expected turns are the provisional
  * per-kind constants, the ceiling is always the budget's hard limit.
  *
- * `only` (the `--only-<step>` flags) prices ONLY that step's kinds: prior steps
+ * `only` prices ONLY that step's kinds: prior steps
  * replay from disk and later ones never start, so quoting them would ask the
  * user to approve a bill this run cannot produce.
  */
@@ -1033,11 +1028,11 @@ export async function estimateGuardSetup(
   opts: {
     refresh?: boolean;
     replace?: boolean;
-    mode?: LlmTransportMode;
+    sessionModel?: string;
     only?: GuardSetupOnlyStep;
   } = {},
 ): Promise<LlmEstimate> {
-  const model = sessionModel(opts.mode);
+  const model = sessionModel(opts.sessionModel);
   const refresh = opts.refresh === true;
   const replace = opts.replace === true;
   let recipe: Recipe | undefined;
@@ -1229,8 +1224,8 @@ export async function estimateGuardSetup(
  * cost. Same convention as scan/generate: cache-aware, "N of M sections changed",
  * no stages ⇒ confirm skipped.
  *
- * Every stage reads the SAME planner the run does (plan 04 — the LLM stages are
- * agent SESSIONS now, `guard.match` and recipe discovery the two remaining
+ * Every stage reads the SAME planner the run does (the LLM stages are agent
+ * SESSIONS now, `guard.match` and recipe discovery the two remaining
  * one-shots), so the estimate can never promise work the run skips (or hide
  * work it pays for):
  *  - EXTRACTION is exact — one session per doc whose `guard/extract-session`
@@ -1256,9 +1251,9 @@ export async function estimateGuardSetup(
 export async function estimateGuardTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { mode?: LlmTransportMode; only?: GenerateStep } = {},
+  opts: { sessionModel?: string; only?: GenerateStep } = {},
 ): Promise<LlmEstimate> {
-  const model = sessionModel(opts.mode);
+  const model = sessionModel(opts.sessionModel);
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
 
@@ -1281,7 +1276,7 @@ export async function estimateGuardTokens(
   const stages: StageCallEstimate[] = [
     {
       stage: 'guardRecipe',
-      model: resolveModel('guard.recipe', undefined, repoRoot, opts.mode),
+      model: resolveModel('guard.recipe'),
       // One discovery call only when no recipe.json exists yet.
       calls: plan.recipeMissing ? 1 : 0,
       avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
@@ -1320,7 +1315,7 @@ export async function estimateGuardTokens(
       // snapshot exists — it probes the same match cache the run reads;
       // otherwise the claim-derived ceiling.
       stage: 'guardMatch',
-      model: resolveModel('guard.match', undefined, repoRoot, opts.mode),
+      model: resolveModel('guard.match'),
       calls: realization.matchCalls,
       minCalls: 0,
       maxCalls: realization.maxPairs,
@@ -1370,14 +1365,14 @@ export async function estimateGuardTokens(
   // pre-stage with a bill, it runs nowhere else (both earlier steps return
   // before it), and quoting the worker step without it would under-price the
   // run. `guardRecipe` rides nothing: generate refuses to start without the
-  // recipe `guard setup` committed, so a stepwise run never discovers one.
+  // recipe Flow setup stored, so a stepwise run never discovers one.
   const included = opts.only
     ? stages.filter((s) => GENERATE_STEP_STAGES[opts.only!].includes(s.stage))
     : stages;
   return estimateStageTokens(withLabels(included), changedSubject(plan.sections.length, work.length, 'section'), prices);
 }
 
-/** Which priced stages each `--only-<step>` flag actually runs. */
+/** Which priced stages each `only` step actually runs. */
 const GENERATE_STEP_STAGES: Record<GenerateStep, readonly string[]> = {
   extract: [EXTRACT_SESSION_KIND],
   flows: [FLOWS_SESSION_KIND],

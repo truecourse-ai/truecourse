@@ -1,13 +1,14 @@
 /**
  * Content-addressed store over the `content` table — the single dedup pool for
- * immutable bodies in the hosted edition: immutable spec artifacts (corpus,
- * decisions) and LLM trace payloads. One row per (scope, sha): identical content
- * under a scope is written once; manifests / refs elsewhere point in by sha.
+ * immutable bodies: the workspace's spec artifacts and documents, and a
+ * repository's guard tree and evidence. One row per (scope, sha): identical
+ * content under a scope is written once; manifests / refs elsewhere point in by
+ * sha.
  *
  * `scope` is the dedup + tenant-isolation namespace. We prefix by data TYPE so
- * each type's GC stays independent (`spec:`, `trace:`), and by the owning key
- * (a repo key, or `ws:<org>` for workspace-shared, or an org for traces). There
- * is no cross-scope dedup.
+ * each type's GC stays independent (`spec:`, `guard:`), and by the owning key
+ * (a repo key, or `ws:<org>` for workspace-shared). There is no cross-scope
+ * dedup.
  */
 
 import { and, eq, inArray } from 'drizzle-orm';
@@ -16,16 +17,13 @@ import { sha256 } from './pack.js';
 
 /** Scope builders — keep the namespacing in one place. */
 export const contentScope = {
-  spec: (repoKey: string): string => `spec:${repoKey}`,
   workspaceSpec: (org: string): string => `spec:ws:${org}`,
-  /** Synced source-doc bodies for workspace Knowledge (sha = the ledger's contentHash). */
-  knowledge: (org: string): string => `knowledge:ws:${org}`,
   /** Document bodies of the workspace's Context sources (sha = `sha256-<ledger contentHash>`). */
   context: (org: string): string => `context:ws:${org}`,
   trace: (org: string): string => `trace:${org}`,
-  /** Committable guard scenario-tree bodies (yaml / recipe.json / manifest.json). */
+  /** Guard scenario-tree bodies (yaml / recipe.json / manifest.json). */
   guard: (repoKey: string): string => `guard:${repoKey}`,
-  /** Per-run guard evidence transcripts (gitignored in OSS). */
+  /** Per-run guard evidence — transcripts as text, a browser run's screenshots and video as bytes. */
   guardEvidence: (repoKey: string): string => `guard-evidence:${repoKey}`,
 };
 

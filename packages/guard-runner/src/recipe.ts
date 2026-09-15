@@ -685,9 +685,8 @@ export const RecipeSchema = z
      * a git hook, a Makefile, another tool's plugin — silently runs whatever copy
      * of the program the machine happens to have (a published release, a stale
      * global install), and every verdict it reaches is about that copy instead of
-     * this working tree. That is not a hypothetical: TrueCourse's own pre-commit
-     * hook shells out to `truecourse`, so the hook scenarios were grading a
-     * published build until this existed.
+     * this working tree — a git hook or a Makefile that invokes the program by
+     * name is exactly the case this exists for.
      *
      * A string value is a path to a built entry (resolved like `entry`); an array
      * is full argv. Both are recipe-owned, so neither is interpolated. No global
@@ -1038,7 +1037,7 @@ export interface LoadedRecipe {
  * deliberately NOT here: they are the repo's, they move for reasons that have
  * nothing to do with guard, and a recipe that names one already folds that name.
  *
- * Exported for `guard setup`'s recipe-step fingerprint (plan 03 step 8), which
+ * Exported for Flow setup's recipe-step fingerprint, which
  * hashes this exact list (the recipe file itself is folded separately below) —
  * one source, so the two can never drift.
  */
@@ -1214,9 +1213,8 @@ export function secretBullets(value: string): string {
 /**
  * ONE inline secret as it may be shown: bullets to the value's length (capped),
  * labelled so it can never be mistaken for the value itself. The single spelling
- * behind every reading of a recipe — the terminal's (`truecourse guard recipe`)
- * and the dashboard's raw JSON — so neither can drift into printing more than
- * the other.
+ * behind every reading of a recipe — the recipe card and the raw JSON beside
+ * it — so neither can drift into showing more than the other.
  */
 export function maskRecipeSecret(value: string): string {
   return `${secretBullets(value)} (inline value, masked)`
@@ -1224,9 +1222,9 @@ export function maskRecipeSecret(value: string): string {
 
 /**
  * A stored recipe as a READER may see it: the file's own JSON, pretty-printed,
- * with every inline secret replaced by {@link maskRecipeSecret}. Exactly what the
- * terminal prints — an env-var NAME is a capability and stays, an inline `value`
- * IS the secret and never leaves the file.
+ * with every inline secret replaced by {@link maskRecipeSecret} — an env-var NAME
+ * is a capability and stays, an inline `value` IS the secret and never leaves
+ * the file.
  *
  * Everything else is the file's own: key order, and any field no schema knows
  * about (unlike {@link hashableRecipeText}, which canonicalizes for hashing). This

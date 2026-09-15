@@ -1,5 +1,5 @@
 /**
- * THE RPC DERIVATION (SPEC_GUARD_PLAN item 12) — a tRPC router tree composed into
+ * THE RPC DERIVATION — a tRPC router tree composed into
  * the HTTP operations an adapter actually serves.
  *
  * Like the api-tree tests, the fixtures run real source through the real
@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest'
-import { analyzeFileContent } from '../../packages/analyzer/src/file-analyzer'
+import { analyzeFileContent } from '../../packages/source-facts/src/file-analyzer'
 import { deriveRpcOperations } from '../../packages/interface-mapper/src/rpc-interfaces'
 import { deriveApiInterfacesFromTree } from '../../packages/interface-mapper/src/api-tree'
 import type { FileAnalysis } from '../../packages/shared/src/index'
@@ -339,7 +339,7 @@ describe('deriveRpcOperations — the root', () => {
   })
 })
 
-describe('deriveRpcOperations — many mounts (item 12, the cal.com shape)', () => {
+describe('deriveRpcOperations — many mounts (the cal.com shape)', () => {
   it('derives every (mount, root) pair, each procedure relative to its OWN root', () => {
     // cal.com ships 29 `pages/api/trpc/<router>/[trpc].ts` files, each serving a
     // DIFFERENT sub-tree. The served name is what the server answers at that

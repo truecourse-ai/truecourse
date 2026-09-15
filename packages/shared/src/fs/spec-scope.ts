@@ -1,9 +1,8 @@
 /**
- * `spec.include` — an OPT-IN scope for spec-doc discovery, the inverse of
- * `.truecourseignore`. Configured per-repo in `.truecourse/config.json` under
- * `spec.include` (an array of gitignore-style globs). When present and non-empty,
- * only markdown files matching at least one glob enter the scan universe; when
- * absent or empty, discovery looks at everything (the default, today's behavior).
+ * An OPT-IN scope for document discovery, the inverse of `.truecourseignore`: a
+ * list of gitignore-style globs, of which a path must match at least one to
+ * enter the universe. An empty list is INACTIVE — discovery looks at
+ * everything. A repository context source's include list is built from here.
  *
  * `.truecourseignore` is ALWAYS applied on top — the ignore file SUBTRACTS after
  * the include selects, so an include glob can never resurrect an ignored path.
@@ -11,11 +10,10 @@
  * the include scope?".)
  *
  * The glob engine is the same `ignore` package `.truecourseignore` uses, so both
- * scopes share one consistent gitignore-glob semantics. Read the config once
- * (`loadSpecScope`) and reuse the matcher across the whole walk.
+ * scopes share one consistent gitignore-glob semantics. Build the matcher once
+ * and reuse it across the whole walk.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import ignore, { type Ignore } from 'ignore';
 
@@ -34,7 +32,7 @@ export interface SpecScope {
   includes(relPath: string): boolean;
 }
 
-/** Coerce an untrusted `spec.include` value into a clean glob list (drop non-strings / blanks). */
+/** Coerce an untrusted include-glob list into a clean one (drop non-strings / blanks). */
 function normalizeGlobs(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -45,7 +43,7 @@ function normalizeGlobs(value: unknown): string[] {
 /**
  * Build a scope matcher from a list of include globs. An empty/absent list (or
  * one that is all blanks) yields an INACTIVE scope — everything is in scope,
- * exactly as if no `spec.include` were configured.
+ * exactly as if the source configured no include globs.
  */
 export function buildSpecScope(globs: unknown): SpecScope {
   const clean = normalizeGlobs(globs);
@@ -63,19 +61,4 @@ export function buildSpecScope(globs: unknown): SpecScope {
       return ig.ignores(rel);
     },
   };
-}
-
-/**
- * Read `spec.include` from `<rootDir>/.truecourse/config.json` and build the
- * scope. A missing / unreadable / malformed config, or one without a non-empty
- * `spec.include`, yields an inactive scope (discovery looks at everything).
- */
-export function loadSpecScope(rootDir: string): SpecScope {
-  try {
-    const file = path.join(rootDir, '.truecourse', 'config.json');
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as { spec?: { include?: unknown } };
-    return buildSpecScope(parsed?.spec?.include);
-  } catch {
-    return buildSpecScope(undefined);
-  }
 }

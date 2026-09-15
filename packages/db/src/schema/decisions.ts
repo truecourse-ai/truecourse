@@ -1,8 +1,8 @@
 /**
- * The mutable resolution ledger — one current row per scope (a repo_key, or a
- * workspace org). Decisions are per-scope and always-latest (edited one at a time
- * as conflicts are resolved), NOT per-commit — so they live here, inline, rather
- * than in the per-commit content-addressed `spec_sets` manifest.
+ * The mutable resolution ledger — one current row per scope: a workspace org
+ * (`ws:<org>`, the curation decisions) or a repository's guard decisions
+ * (`guard:<owner/repo>`). Always-latest, edited one at a time as conflicts are
+ * resolved, so the payload lives here inline rather than content-addressed.
  */
 
 import { pgTable, text, jsonb, timestamp } from 'drizzle-orm/pg-core';

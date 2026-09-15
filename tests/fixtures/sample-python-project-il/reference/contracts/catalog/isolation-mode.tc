@@ -1,4 +1,0 @@
-enum IsolationMode {
-  origin "reference/specs/modules/catalog/transaction.md" "IsolationMode" 1..10
-  values [OPTIMISTIC, SERIALIZABLE]
-}

@@ -12,10 +12,9 @@ import { createAppError } from './errors.js';
 
 /**
  * Single-sourced message for the "this isn't a git repo" guard. TrueCourse
- * requires a git repository for analyze and the spec → contracts → verify
- * track (commit-anchored baselines, diff, stashing committed state). Reused by
- * `getGit`, the CLI command guards, and the dashboard route guards so the copy
- * stays identical everywhere.
+ * requires a git repository: every stored set is anchored to a commit. Reused
+ * by `getGit` and the dashboard route guards so the copy stays identical
+ * everywhere.
  */
 export const NOT_A_GIT_REPO_MESSAGE =
   'The selected folder is not a git repository. Please select a folder that has been initialized with git.';

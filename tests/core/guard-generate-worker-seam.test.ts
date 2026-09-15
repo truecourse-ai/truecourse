@@ -1,6 +1,6 @@
 import { createAuthorCatalog } from '../../packages/guard-generator/src/author-catalog.js'
 /**
- * THE FLOW-WORKER SEAM AND THE FIDELITY CHILD (plan 04 steps 17 + 18) — core's
+ * THE FLOW-WORKER SEAM AND THE FIDELITY CHILD — core's
  * half: the session def, the `guard/generate` cache (kept name, session prompt
  * fingerprint), the two-wave pool, the settled-sha reject, and the depth-1
  * fidelity child with its `guard/fidelity` cache.
@@ -9,7 +9,7 @@ import { createAuthorCatalog } from '../../packages/guard-generator/src/author-c
  * `tests/guard-generator/flow-worker.test.ts`; here the {@link FlowWorkerTask}s
  * are hand-built with scripted closures, so every assertion is about the seam.
  *
- * The production driver path (`createConfiguredSessionDriver`) is mocked with a
+ * The production driver path (`createClaudeCodeSessionDriver`) is mocked with a
  * counter — a cached task must build NO driver — and each case scripts it.
  */
 
@@ -27,7 +27,7 @@ let sessionScript: StubScript = () => {
 vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
   SESSION_MODEL_CLAUDE_CODE: 'opus',
   assertSessionBackendReady: async () => {},
-  createConfiguredSessionDriver: () => {
+  createClaudeCodeSessionDriver: () => {
     constructions++
     const { driver } = stubDriver((call) => sessionScript(call))
     return { driver, mode: 'claude-code', attribution: driver.attribution }
@@ -69,24 +69,25 @@ import {
 } from '../../packages/core/src/services/guard-generate/index'
 import { memoryPersistence, outcome, stubDriver, type StubCall, type StubScript } from './spec-scan-session-stub'
 import { makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe } from '../guard-generator/helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
 
 const DOC = 'docs/tasks.md'
 const CONTENT = ['# Tasks', '', '## Creating tasks', '', '`relkit add <title>` creates a task.'].join('\n')
 
 const repos: string[] = []
-let home = ''
 
 beforeEach(() => {
   constructions = 0
   sessionScript = () => {
     throw new Error('no session script installed for this case')
   }
-  home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gg-worker-home-'))
-  process.env.TRUECOURSE_HOME = home
+  installMemoryKvCache()
+  installMemorySessionRuns()
 })
 afterEach(() => {
-  delete process.env.TRUECOURSE_HOME
-  fs.rmSync(home, { recursive: true, force: true })
+  resetKvCacheStore()
+  resetSessionRuns()
   while (repos.length) rmrf(repos.pop()!)
 })
 
@@ -240,12 +241,12 @@ describe('flowWorkerSessionDef', () => {
   })
 
   it('holds the cli and api prompt fingerprints bit-for-bit — the corpus-roll tripwire', () => {
-    // These literals are the author-cache keys of every committed cli/api corpus.
+    // These literals are the author-cache keys of every stored cli/api corpus.
     // A prompt edit that moves one re-authors EVERY such flow; fail here first,
     // loudly, so the roll is a decision rather than an accident. The web arm was
     // added with both unchanged; both then moved ONCE, deliberately, with the
     // blast-radius cut: the canonical scenario schema gained `world` and the
-    // doctrine gained the shared-world/self-mint contract (a committed
+    // doctrine gained the shared-world/self-mint contract (a stored
     // delete-account scenario had deleted the seeded principal mid-run).
     // Moved again for incremental authoring: the addendum gained the edit
     // contract (`replaces`, `drop_scenario`, multi-scenario settled). Only a
@@ -622,7 +623,6 @@ describe('the flow-worker pool’s cache', () => {
     })
     // The cache lives under the KEPT one-shot name.
     expect(FLOW_WORKER_CACHE_NAME).toBe('guard/generate')
-    expect(fs.existsSync(path.join(r, '.truecourse', '.cache', 'guard', 'generate'))).toBe(true)
   })
 
   it('a settled outcome naming a sha the engine never accepted becomes MALFORMED and is not cached', async () => {

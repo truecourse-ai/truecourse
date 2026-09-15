@@ -1,5 +1,5 @@
 /**
- * What the one-shot RETIREMENT (plan 04 step 20) left behind, pinned on the
+ * What the one-shot RETIREMENT left behind, pinned on the
  * three things a refactor could quietly break:
  *
  *  - the four session seams are REQUIRED options — a caller that forgets one
