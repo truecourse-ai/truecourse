@@ -25,7 +25,7 @@ import {
   subscribeSessionRunWrites,
   workspaceOfRepo,
 } from './stores.js';
-import { PgRepositoryStore } from '@truecourse/data-store';
+import { PgInviteLinkStore, PgRepositoryStore } from '@truecourse/data-store';
 import { setRepoProviderLookup } from './services/work-tree.service.js';
 import { startRunChangeRelay } from './services/run-events.service.js';
 import { setContextEventPublisher } from './services/context.service.js';
@@ -100,7 +100,10 @@ export async function startServer(): Promise<void> {
   // 3. Session auth. Hosted: WorkOS, throwing if the WORKOS_* env is
   //    incomplete — the server boots authenticated or not at all. Local: the
   //    one implicit session, with no identity provider at all.
-  const auth = createAuth(mode);
+  const auth = createAuth(mode, {
+    inviteLinks: new PgInviteLinkStore(getDb()),
+    manyWorkspaces: registeredServerFeatures().some((f) => f.manyWorkspaces === true),
+  });
   log.info(`[Server] ${mode} mode`);
 
   // The connected repositories, whichever provider brought them. Built before

@@ -19,6 +19,10 @@ import { resetRegistryStore, setRegistryStore, type RegistryStore } from '@truec
 import { createApp } from '../../apps/dashboard/server/src/app';
 import { createAuth, LOCAL_ORG_ID } from '../../apps/dashboard/server/src/auth/index';
 import { serverMode, isLocalMode } from '../../apps/dashboard/server/src/mode';
+import { MemoryInviteLinkStore } from '../helpers/memory-invite-links';
+
+/** Local mode issues no invite links; the store is handed over and never read. */
+const deps = { inviteLinks: new MemoryInviteLinkStore(), manyWorkspaces: false };
 
 const WORKOS_ENV = [
   'WORKOS_API_KEY',
@@ -89,13 +93,13 @@ describe('the hosted gate', () => {
   });
 
   it('is built from WorkOS, and refuses to boot without it', () => {
-    expect(() => createAuth('hosted')).toThrow(/WORKOS_/);
+    expect(() => createAuth('hosted', deps)).toThrow(/WORKOS_/);
   });
 });
 
 describe('the local gate', () => {
   it('answers the machine’s own session, with no identity provider at all', async () => {
-    const auth = createAuth('local');
+    const auth = createAuth('local', deps);
     expect(auth.mode).toBe('local');
     // Nothing to move a session between: one workspace, no provider.
     expect(auth.workspaceSession).toBeNull();
@@ -106,7 +110,7 @@ describe('the local gate', () => {
   });
 
   it('lets every request through the gate, scoped to the one workspace', async () => {
-    const auth = createAuth('local');
+    const auth = createAuth('local', deps);
     const seen: string[] = [];
     const app = createApp({
       serveStatic: false,
@@ -130,7 +134,7 @@ describe('the local gate', () => {
   });
 
   it('says who is here, and offers no sign-in and no sign-out', async () => {
-    const auth = createAuth('local');
+    const auth = createAuth('local', deps);
     const app = createApp({
       serveStatic: false,
       authVerifier: auth.verify,
@@ -152,7 +156,7 @@ describe('the local gate', () => {
   });
 
   it('has one member, and no invitations to send', async () => {
-    const auth = createAuth('local');
+    const auth = createAuth('local', deps);
     const app = createApp({
       serveStatic: false,
       authVerifier: auth.verify,
@@ -166,6 +170,7 @@ describe('the local gate', () => {
     expect(res.body.members).toHaveLength(1);
     expect(res.body.members[0]).toMatchObject({ isSelf: true });
     expect(res.body.invitations).toEqual([]);
+    expect(res.body.inviteLinks).toEqual([]);
   });
 });
 

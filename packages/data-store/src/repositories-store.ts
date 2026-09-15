@@ -13,11 +13,11 @@ import type {
   RepositoryStore,
 } from '@truecourse/shared';
 import { repositories, type Db } from '@truecourse/db';
+import { iso } from './iso.js';
 import { slugify } from '@truecourse/core/config/registry';
 
 type Row = typeof repositories.$inferSelect;
 
-const toIso = (v: string): string => new Date(v).toISOString();
 
 function toRecord(r: Row): RepositoryRecord {
   return {
@@ -32,8 +32,8 @@ function toRecord(r: Row): RepositoryRecord {
     enabled: r.enabled,
     notifyEmails: r.notifyEmails,
     notifications: (r.notifications as unknown as RepositoryRecord['notifications']) ?? undefined,
-    createdAt: toIso(r.createdAt),
-    updatedAt: toIso(r.updatedAt),
+    createdAt: iso(r.createdAt),
+    updatedAt: iso(r.updatedAt),
   };
 }
 

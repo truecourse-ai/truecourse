@@ -33,7 +33,10 @@ import type {
   HomeResponse,
   JobsResponse,
   NotificationsResponse,
+  AuthUser,
+  InviteLinkPreview,
   WorkspaceInvitation,
+  WorkspaceInviteLink,
   WorkspaceMembersResponse,
 } from '@truecourse/shared';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
@@ -46,6 +49,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** The refusal's JSON body as parsed, for a caller that reads more than `error`; null when there was none. */
+    public body: unknown = null,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -71,13 +76,15 @@ export async function fetchApi<T>(
 
   if (!res.ok) {
     let message = 'Unknown error';
+    let body: unknown = null;
     try {
-      const body = await res.json();
-      message = body.error || JSON.stringify(body);
+      body = await res.json();
+      const error = (body as { error?: unknown } | null)?.error;
+      message = typeof error === 'string' && error ? error : JSON.stringify(body);
     } catch {
       message = await res.text().catch(() => 'Unknown error');
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
 
   if (res.status === 204) return undefined as T;
@@ -1054,6 +1061,34 @@ export function inviteWorkspaceMember(
 export function revokeWorkspaceInvitation(id: string): Promise<void> {
   return fetchApi<void>(`/api/workspace/invitations/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+  });
+}
+
+/** Mint an invite link that stands for `expiresInDays`; nothing is mailed. */
+export function createWorkspaceInviteLink(
+  expiresInDays: number,
+): Promise<{ link: WorkspaceInviteLink }> {
+  return fetchApi<{ link: WorkspaceInviteLink }>('/api/workspace/invite-links', {
+    method: 'POST',
+    body: JSON.stringify({ expiresInDays }),
+  });
+}
+
+export function revokeWorkspaceInviteLink(id: string): Promise<void> {
+  return fetchApi<void>(`/api/workspace/invite-links/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** What an invite link opens onto, before the visitor decides. Public. */
+export function previewInviteLink(token: string): Promise<InviteLinkPreview> {
+  return fetchApi<InviteLinkPreview>(`/api/auth/invite/${encodeURIComponent(token)}`);
+}
+
+/** Join the workspace behind an invite link as the signed-in visitor. Public, cookie-verified. */
+export function acceptInviteLink(token: string): Promise<{ user: AuthUser }> {
+  return fetchApi<{ user: AuthUser }>(`/api/auth/invite/${encodeURIComponent(token)}/accept`, {
+    method: 'POST',
   });
 }
 

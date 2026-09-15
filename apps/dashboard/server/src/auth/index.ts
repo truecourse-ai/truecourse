@@ -15,9 +15,10 @@
  */
 
 import { WorkOS } from '@workos-inc/node';
-import type { Router } from 'express';
-import type { AuthVerifier, ServerMode } from '@truecourse/shared';
+import { Router } from 'express';
+import type { AuthVerifier, ServerMode, WorkspaceInviteLinkStore } from '@truecourse/shared';
 import { loadWorkosConfig } from './config.js';
+import { createInviteLinkRouter } from './invite-links.js';
 import {
   createAuthRouter,
   createSessionVerifier,
@@ -71,7 +72,14 @@ export interface Auth {
   workspaceSession: WorkspaceSessionTools | null;
 }
 
-export function createAuth(mode: ServerMode): Auth {
+export interface AuthDeps {
+  /** Where the hosted edition keeps its invite links; local mode issues none. */
+  inviteLinks: WorkspaceInviteLinkStore;
+  /** Whether this edition lets one person be in more than one workspace. */
+  manyWorkspaces: boolean;
+}
+
+export function createAuth(mode: ServerMode, deps: AuthDeps): Auth {
   if (mode === 'local') {
     return {
       mode,
@@ -84,11 +92,21 @@ export function createAuth(mode: ServerMode): Auth {
   const config = loadWorkosConfig();
   const workos = new WorkOS(config.apiKey, { clientId: config.clientId });
   const verify = createSessionVerifier(workos, config);
+  const workspaceSession = createWorkspaceSessionTools(workos, config);
   return {
     mode,
     verify,
-    router: createAuthRouter(workos, config, verify),
-    members: createWorkspaceMembersRouter(workos),
-    workspaceSession: createWorkspaceSessionTools(workos, config),
+    router: Router()
+      .use(createAuthRouter(workos, config, verify))
+      .use(
+        createInviteLinkRouter({
+          verify,
+          tools: workspaceSession,
+          inviteLinks: deps.inviteLinks,
+          manyWorkspaces: deps.manyWorkspaces,
+        }),
+      ),
+    members: createWorkspaceMembersRouter(workos, config, deps.inviteLinks),
+    workspaceSession,
   };
 }

@@ -32,7 +32,8 @@ interface AuthValue {
   status: AuthStatus;
   user: AuthUser | null;
   signIn: () => void;
-  signOut: () => Promise<void>;
+  /** End the session; `returnTo` is the path on this app to land on afterwards, the root by default. */
+  signOut: (returnTo?: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthValue>({
@@ -80,11 +81,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = `${getServerUrl()}${AUTH_BASE}/login?next=${next}`;
   }, []);
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async (returnTo?: string) => {
     try {
       const res = await fetch(`${getServerUrl()}${AUTH_BASE}/logout`, {
         method: 'POST',
         credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(returnTo ? { returnTo } : {}),
       });
       const body = (await res.json().catch(() => ({}))) as {
         logoutUrl?: string;

@@ -55,6 +55,7 @@ import type {
   ContextStore,
 } from '@truecourse/core/lib/context-store';
 import { ContentStore, contentScope } from './content-store.js';
+import { iso } from './iso.js';
 
 /**
  * Move a workspace's staleness stamp forward — the ONE write behind
@@ -121,18 +122,6 @@ export async function listDueContextSources(db: Db, before: string): Promise<Due
     )
     .orderBy(asc(contextSources.workspaceOrgId), asc(contextSources.id));
   return rows;
-}
-
-/** Postgres's rendering of a timestamptz → ISO-8601 with a `Z`. */
-function iso(stamp: string): string;
-function iso(stamp: string | null): string | null;
-function iso(stamp: string | null): string | null {
-  if (stamp === null) return null;
-  // `2026-09-10 12:00:00+00` — a space for the `T`, and a two-digit offset the
-  // Date parser does not accept without its minutes.
-  const dated = stamp.includes('T') ? stamp : stamp.replace(' ', 'T');
-  const parsed = new Date(/[+-]\d{2}$/.test(dated) ? `${dated}:00` : dated);
-  return Number.isNaN(parsed.getTime()) ? stamp : parsed.toISOString();
 }
 
 type SourceRow = typeof contextSources.$inferSelect;

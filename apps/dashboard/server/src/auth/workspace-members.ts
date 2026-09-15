@@ -1,34 +1,51 @@
 /**
  * The workspace's people: Settings › Members, read live from WorkOS.
  *
- *   GET    /api/workspace/members              the memberships and the open invitations
+ *   GET    /api/workspace/members              the memberships, the open invitations, the open invite links
  *   POST   /api/workspace/invitations          { email } and the invitation WorkOS mails
  *   DELETE /api/workspace/invitations/:id      revoke one
+ *   POST   /api/workspace/invite-links         { expiresInDays } and the link to share
+ *   DELETE /api/workspace/invite-links/:id     revoke one
  *   DELETE /api/workspace/members/:id          remove one
  *
  * There is no roster of our own: the members ARE the WorkOS organization's
  * active memberships and the invitations ARE its standing ones, so nothing here
- * can drift from what the identity provider holds. Every route is scoped to the
- * session's organization, which the auth gate put on the request, and a session
- * with no organization has no members to read.
+ * can drift from what the identity provider holds. The one thing stored here is
+ * the invite LINKS, which WorkOS has no shape for: an invitation with no email,
+ * redeemed by whoever opens it (`workos-auth.ts` has the redeeming routes).
+ * Every route is scoped to the session's organization, which the auth gate put
+ * on the request, and a session with no organization has no members to read.
  */
 
 import { Router, type Request, type Response } from 'express';
 import type { Invitation, OrganizationMembership, User, WorkOS } from '@workos-inc/node';
 import { log } from '@truecourse/core/lib/logger';
-import type {
-  WorkspaceInvitation,
-  WorkspaceMember,
-  WorkspaceMembersResponse,
+import {
+  INVITE_LINK_DAYS,
+  type InviteLinkDays,
+  type WorkspaceInvitation,
+  type WorkspaceInviteLink,
+  type WorkspaceInviteLinkRecord,
+  type WorkspaceInviteLinkStore,
+  type WorkspaceMember,
+  type WorkspaceMembersResponse,
 } from '@truecourse/shared';
+import type { WorkosConfig } from './config.js';
 
-/** How long an invitation stands before it expires. */
+/** How long an invitation stands before it expires; a link's lifetime is the inviter's pick. */
 const INVITATION_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** First + last, or null when the user has neither. */
+function fullName(
+  user: { firstName?: string | null; lastName?: string | null } | undefined,
+): string | null {
+  return [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || null;
+}
 
 /** First + last, else the email: the only two things a WorkOS user always has. */
 function displayName(user: User | undefined, email: string): string {
-  const full = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
-  return full || email;
+  return fullName(user) ?? email;
 }
 
 /**
@@ -68,18 +85,46 @@ function isOpen(invitation: Invitation): boolean {
   return invitation.state === 'pending' || invitation.state === 'expired';
 }
 
-export function createWorkspaceMembersRouter(workos: WorkOS): Router {
+/** The invite page's address for a token: the link the inviter shares. */
+export function inviteLinkUrl(appUrl: string, token: string): string {
+  return `${appUrl}/invite/${encodeURIComponent(token)}`;
+}
+
+/** An invite link as one row: the same reading of expiry an invitation gets. */
+function toInviteLink(link: WorkspaceInviteLinkRecord, appUrl: string): WorkspaceInviteLink {
+  return {
+    id: link.id,
+    url: inviteLinkUrl(appUrl, link.token),
+    state: Date.parse(link.expiresAt) <= Date.now() ? 'expired' : 'pending',
+    expiresAt: link.expiresAt,
+    createdAt: link.createdAt,
+  };
+}
+
+/** One of the lifetimes the dialog offers, else null. */
+function linkDays(raw: unknown): InviteLinkDays | null {
+  return INVITE_LINK_DAYS.find((d) => d === raw) ?? null;
+}
+
+export function createWorkspaceMembersRouter(
+  workos: WorkOS,
+  cfg: Pick<WorkosConfig, 'appUrl'>,
+  inviteLinks: WorkspaceInviteLinkStore,
+): Router {
   const router = Router();
 
   /** The caller and their organization, or null once the 401 has been sent. */
-  function scope(req: Request, res: Response): { userId: string; org: string } | null {
+  function scope(
+    req: Request,
+    res: Response,
+  ): { userId: string; name: string | null; org: string } | null {
     const user = req.user;
     const org = user?.organizationId;
     if (!user || !org) {
       res.status(401).json({ error: 'This session has no workspace.' });
       return null;
     }
-    return { userId: user.id, org };
+    return { userId: user.id, name: fullName(user), org };
   }
 
   /** A refused WorkOS call is the workspace's answer, said in WorkOS's words. */
@@ -108,10 +153,11 @@ export function createWorkspaceMembersRouter(workos: WorkOS): Router {
     const caller = scope(req, res);
     if (!caller) return;
     try {
-      const [memberships, usersPage, invitations] = await Promise.all([
+      const [memberships, usersPage, invitations, links] = await Promise.all([
         activeMemberships(caller.org),
         workos.userManagement.listUsers({ organizationId: caller.org }),
         openInvitations(caller.org),
+        inviteLinks.listOpen(caller.org),
       ]);
       const users = new Map<string, User>();
       for (const user of await usersPage.autoPagination()) users.set(user.id, user);
@@ -138,6 +184,9 @@ export function createWorkspaceMembersRouter(workos: WorkOS): Router {
         invitations: [...invitations].sort(
           (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
         ),
+        inviteLinks: links
+          .map((link) => toInviteLink(link, cfg.appUrl))
+          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
       };
       res.json(body);
     } catch (err) {
@@ -202,6 +251,50 @@ export function createWorkspaceMembersRouter(workos: WorkOS): Router {
       res.status(204).end();
     } catch (err) {
       upstreamFailed(res, `revoking invitation ${id}`, err);
+    }
+  });
+
+  // Mint an invite link. Nothing leaves this server: the inviter copies the
+  // address and shares it however they like.
+  router.post('/invite-links', async (req: Request, res: Response) => {
+    const caller = scope(req, res);
+    if (!caller) return;
+    const days = linkDays((req.body as { expiresInDays?: unknown })?.expiresInDays);
+    if (days === null) {
+      res.status(400).json({
+        error: `The link must last ${INVITE_LINK_DAYS.join(', ')} days.`,
+      });
+      return;
+    }
+    try {
+      // The sender's name travels on the row, so the invite page never has to
+      // ask WorkOS who they were.
+      const link = await inviteLinks.create({
+        workspaceOrgId: caller.org,
+        inviterUserId: caller.userId,
+        inviterName: caller.name,
+        expiresAt: new Date(Date.now() + days * DAY_MS).toISOString(),
+      });
+      res.status(201).json({ link: toInviteLink(link, cfg.appUrl) });
+    } catch (err) {
+      upstreamFailed(res, `creating an invite link for ${caller.org}`, err);
+    }
+  });
+
+  // Revoke an invite link. The store only deletes this workspace's, so an id
+  // from elsewhere is absent rather than someone else's to withdraw.
+  router.delete('/invite-links/:id', async (req: Request, res: Response) => {
+    const caller = scope(req, res);
+    if (!caller) return;
+    const id = req.params.id as string;
+    try {
+      if (!(await inviteLinks.delete(caller.org, id))) {
+        res.status(404).json({ error: 'No such invite link.' });
+        return;
+      }
+      res.status(204).end();
+    } catch (err) {
+      upstreamFailed(res, `revoking invite link ${id}`, err);
     }
   });
 

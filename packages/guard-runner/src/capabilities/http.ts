@@ -32,6 +32,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { GuardHttpStub, GuardHttpStubRoute, GuardSetup } from '@truecourse/shared'
 import { CapabilityError } from './index.js'
+import { listenEphemeral } from '../ports.js'
 import { lookupJsonPath, JSON_PATH_MISS } from '../api/vars.js'
 import { jsonEquals } from '../api/expect.js'
 import { sendScriptedResponse } from './scripted-response.js'
@@ -151,7 +152,7 @@ export async function startHttpStubs(
       })
     })
     try {
-      await listen(server)
+      await listenEphemeral(server)
     } catch (e) {
       servers.push({ name, server, origin: '' })
       await closeAll()
@@ -196,17 +197,6 @@ export async function startHttpStubs(
     },
     stop: closeAll,
   }
-}
-
-/** Bind one stub server to an ephemeral loopback port. */
-function listen(server: http.Server): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => {
-      server.removeListener('error', reject)
-      resolve()
-    })
-  })
 }
 
 interface HandleParams {

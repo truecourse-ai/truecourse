@@ -51,7 +51,7 @@ vi.mock('@/lib/socket', () => {
 
 import DashboardApp from '@/dashboard/DashboardApp';
 import { AuthProvider } from '@/auth/AuthContext';
-import { relativeTime, repoRunState, toJobChain } from '@/dashboard/shell/real-runs';
+import { expiresIn, relativeTime, repoRunState, toJobChain } from '@/dashboard/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 function fireSocket(event: string, payload: unknown): void {
@@ -209,6 +209,15 @@ describe('a run record as the shell reads it', () => {
     expect(relativeTime('2026-08-25T11:58:00Z', now)).toBe('2 minutes ago');
     expect(relativeTime('2026-08-25T09:00:00Z', now)).toBe('3 hours ago');
     expect(relativeTime(undefined, now)).toBe('just now');
+  });
+
+  it('says when a date lapses in calendar days, so tonight is today and tomorrow morning is tomorrow', () => {
+    const now = new Date(2026, 7, 25, 22, 0).getTime();
+    expect(expiresIn(new Date(2026, 7, 25, 23, 30).toISOString(), now)).toBe('today');
+    expect(expiresIn(new Date(2026, 7, 26, 6, 0).toISOString(), now)).toBe('tomorrow');
+    expect(expiresIn(new Date(2026, 7, 26, 22, 0).toISOString(), now)).toBe('tomorrow');
+    expect(expiresIn(new Date(2026, 7, 28, 22, 0).toISOString(), now)).toBe('in 3 days');
+    expect(expiresIn(new Date(2026, 7, 25, 21, 0).toISOString(), now)).toBe('expired');
   });
 });
 

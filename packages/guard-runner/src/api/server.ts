@@ -21,13 +21,13 @@
  * never re-plans.
  */
 
-import net from 'node:net'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { trackProcessGroup } from '../child-kill.js'
+import { allocateFreePort, releasePort } from '../ports.js'
 
 /** Poll interval while waiting for the health endpoint. */
 const HEALTH_POLL_INTERVAL_MS = 100
@@ -141,25 +141,6 @@ export function substitutePortInSpawn(
   return { serve: serve.map((arg) => substitutePort(arg, port)), env: substituted }
 }
 
-/** Allocate a free localhost port by binding to 0 and reading the assignment. */
-export function allocateFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer()
-    srv.unref()
-    srv.on('error', reject)
-    srv.listen(0, '127.0.0.1', () => {
-      const address = srv.address()
-      if (address === null || typeof address === 'string') {
-        srv.close()
-        reject(new Error('could not allocate a port'))
-        return
-      }
-      const { port } = address
-      srv.close(() => resolve(port))
-    })
-  })
-}
-
 /** Everything written to `fd` since the last pass, decoded across read boundaries. */
 function readForward(fd: number, decoder: StringDecoder, buffer: Buffer): string {
   let text = ''
@@ -237,6 +218,7 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
     // ever existed to own this capture — and nothing else in the process remembers
     // these paths, so without this the dir and its two files stay in tmp forever.
     fs.rmSync(logDir, { recursive: true, force: true })
+    releasePort(port)
     throw e
   } finally {
     // The child holds its own descriptors from here; ours would only leak.
@@ -305,6 +287,9 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
       resolve()
     })
   })
+  // The port is the child's for as long as it lives; the moment it is gone the
+  // number may go to the next boot.
+  void closed.then(() => releasePort(port))
 
   const drain = async (): Promise<void> => {
     pull()

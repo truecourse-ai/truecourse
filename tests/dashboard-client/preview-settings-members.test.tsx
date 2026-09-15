@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { WorkspaceInvitation, WorkspaceMember } from '@truecourse/shared';
+import type { WorkspaceInvitation, WorkspaceInviteLink, WorkspaceMember } from '@truecourse/shared';
 import { AuthProvider } from '@/auth/AuthContext';
 import DashboardApp from '@/dashboard/DashboardApp';
 
@@ -76,6 +76,14 @@ const LAPSED: WorkspaceInvitation = {
   acceptUrl: 'https://workos.test/invite/inv_2',
 };
 
+const OPEN_LINK: WorkspaceInviteLink = {
+  id: 'link_1',
+  url: 'http://localhost:3000/invite/tok_1',
+  state: 'pending',
+  expiresAt: '2099-01-01T00:00:00.000Z',
+  createdAt: '2026-04-02T00:00:00.000Z',
+};
+
 const realFetch = window.fetch;
 
 function json(body: unknown, status = 200): Response {
@@ -86,9 +94,12 @@ function json(body: unknown, status = 200): Response {
 interface World {
   members: WorkspaceMember[];
   invitations: WorkspaceInvitation[];
+  inviteLinks: WorkspaceInviteLink[];
   /** The answer to POST /invitations; the default one accepts. */
   invite: (email: string) => Response;
   posted: string[];
+  /** The lifetimes asked of POST /invite-links. */
+  linkDays: number[];
   deleted: string[];
 }
 
@@ -110,7 +121,9 @@ function serve(over: Partial<World> = {}) {
       world.invitations = [invitation, ...world.invitations];
       return json({ invitation }, 201);
     },
+    inviteLinks: [],
     posted: [],
+    linkDays: [],
     deleted: [],
     ...over,
   };
@@ -122,7 +135,30 @@ function serve(over: Partial<World> = {}) {
 
     if (pathname === '/api/auth/me') return json({ user: USER });
     if (pathname === '/api/workspace/members' && method === 'GET') {
-      return json({ members: world.members, invitations: world.invitations });
+      return json({
+        members: world.members,
+        invitations: world.invitations,
+        inviteLinks: world.inviteLinks,
+      });
+    }
+    if (pathname === '/api/workspace/invite-links' && method === 'POST') {
+      const days = (JSON.parse(String(init?.body)) as { expiresInDays: number }).expiresInDays;
+      world.linkDays.push(days);
+      const link: WorkspaceInviteLink = {
+        id: 'link_new',
+        url: 'http://localhost:3000/invite/tok_new',
+        state: 'pending',
+        expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+        createdAt: '2026-05-02T00:00:00.000Z',
+      };
+      world.inviteLinks = [link, ...world.inviteLinks];
+      return json({ link }, 201);
+    }
+    if (pathname.startsWith('/api/workspace/invite-links/') && method === 'DELETE') {
+      const id = pathname.slice('/api/workspace/invite-links/'.length);
+      world.deleted.push(id);
+      world.inviteLinks = world.inviteLinks.filter((l) => l.id !== id);
+      return new Response(null, { status: 204 });
     }
     if (pathname === '/api/workspace/invitations' && method === 'POST') {
       const email = (JSON.parse(String(init?.body)) as { email: string }).email;
@@ -345,5 +381,50 @@ describe('Settings › Members', () => {
       (call) => String(call[0]).includes('/api/workspace/members'),
     );
     expect(reads).toEqual([]);
+  });
+  it('lists an invite link after the invitations, with Copy link and Revoke', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    serve({ inviteLinks: [OPEN_LINK] });
+    renderMembers();
+
+    const row = await rowFor('Invite link');
+    expect(within(row).getByText('Link')).toBeInTheDocument();
+    await user.click(within(row).getByRole('button', { name: 'Copy link' }));
+    expect(writeText).toHaveBeenCalledWith('http://localhost:3000/invite/tok_1');
+
+    await user.click(within(row).getByRole('button', { name: 'Revoke' }));
+    expect(world.deleted).toEqual(['link_1']);
+    await waitFor(() => expect(screen.queryByText('Invite link')).toBeNull());
+  });
+
+  it('invites by link: the dialog asks for the lifetime, mints the link and offers it to copy', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    renderMembers();
+    await waitFor(async () => expect(await rows()).toHaveLength(4));
+
+    await user.click(screen.getByRole('button', { name: 'Invite by link' }));
+    expect(await screen.findByText('Invite by link', { selector: 'h2' })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Link expires in'), '3');
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
+
+    expect(world.linkDays).toEqual([3]);
+    expect(await screen.findByLabelText('Invite link')).toHaveValue('http://localhost:3000/invite/tok_new');
+    await user.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(writeText).toHaveBeenCalledWith('http://localhost:3000/invite/tok_new');
+
+    // Closing the dialog uncovers the list, re-read with the new row in it.
+    await user.keyboard('{Escape}');
+    await waitFor(async () => expect(await rows()).toHaveLength(5));
+    expect(await rowFor('Invite link')).toBeTruthy();
   });
 });

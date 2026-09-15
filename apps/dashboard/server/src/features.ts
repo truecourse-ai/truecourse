@@ -47,6 +47,12 @@ export interface ServerRouterMount {
 export interface ServerFeature {
   /** What it is, for the boot log. */
   name: string;
+  /**
+   * True of the feature that lets one person be in more than one workspace.
+   * Without it a session is in one, and an invite to another is refused
+   * rather than moving the session somewhere it cannot come back from.
+   */
+  manyWorkspaces?: boolean;
   mount(context: ServerFeatureContext): ServerRouterMount[];
 }
 
