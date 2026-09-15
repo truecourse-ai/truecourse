@@ -288,7 +288,9 @@ describe('the Runs tab of a connected repository', () => {
     renderAt(`/repos/${REAL.id}/runs`);
 
     const table = await screen.findByRole('table', { name: 'Runs' });
+    // The job and the stored runs arrive on separate reads; wait for both.
     await within(table).findByText('Running');
+    await within(table).findByText('a1b2c3d');
     const rows = within(table).getAllByRole('row').slice(1);
     // First row, above every stored run.
     expect(rows).toHaveLength(3);
