@@ -1,8 +1,8 @@
 # Pull request flow: an epic of its own
 
-Decided 2026-09-14 with the product owner, after the one-app migration (PR #902)
-and the deletion of the old gate. Nothing is built from this yet. Untracked,
-never committed.
+The pull request flow's spec: the decision of 2026-09-14 with the product
+owner, after the one-app migration (PR #902) and the deletion of the old gate.
+Nothing is built from it yet.
 
 ## 1. The decision
 
