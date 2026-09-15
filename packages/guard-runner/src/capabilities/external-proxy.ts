@@ -40,6 +40,7 @@ import type { Socket } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import type { GuardExternal, GuardExternalFault, GuardSetup } from '@truecourse/shared'
 import { CapabilityError } from './index.js'
+import { listenEphemeral } from '../ports.js'
 import { pathMatches, evaluateStubExpect } from './http.js'
 import { sendScriptedResponse, waitForReply } from './scripted-response.js'
 import type { ExternalProxyTarget } from '../externals.js'
@@ -238,7 +239,7 @@ export async function startExternalProxies(
       const entry: EndpointServer = { server, sockets }
       servers.push(entry)
       try {
-        await listen(server)
+        await listenEphemeral(server)
       } catch (e) {
         await closeAll()
         throw new CapabilityError(
@@ -276,17 +277,6 @@ export async function startExternalProxies(
     },
     stop: closeAll,
   }
-}
-
-/** Bind one proxy server to an ephemeral loopback port. */
-function listen(server: http.Server): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => {
-      server.removeListener('error', reject)
-      resolve()
-    })
-  })
 }
 
 interface ProxyParams {

@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { startApiServer, spawnApiProcess, allocateFreePort, constructChildEnv } from '@truecourse/guard-runner'
+import {
+  startApiServer,
+  spawnApiProcess,
+  allocateFreePort,
+  releasePort,
+  isPortHeld,
+  constructChildEnv,
+} from '@truecourse/guard-runner'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -13,9 +20,31 @@ function tempCwd(): string {
 const ENV = constructChildEnv({ sandbox: { home: tempCwd(), tmp: tempCwd() } })
 
 describe('allocateFreePort', () => {
-  it('returns a bindable localhost port', async () => {
+  it('returns a bindable localhost port, held until released', async () => {
     const port = await allocateFreePort()
     expect(port).toBeGreaterThan(0)
+    expect(isPortHeld(port)).toBe(true)
+    releasePort(port)
+    expect(isPortHeld(port)).toBe(false)
+  })
+
+  it('never hands out a port it is still holding', async () => {
+    const ports = await Promise.all(Array.from({ length: 32 }, () => allocateFreePort()))
+    expect(new Set(ports).size).toBe(ports.length)
+    for (const port of ports) releasePort(port)
+  })
+
+  it('releases a child’s port once the child is gone', async () => {
+    const { server } = await spawnApiProcess({
+      resolvedServe: [process.execPath, FIXTURE_API_CRASH],
+      cwd: tempCwd(),
+      env: ENV,
+      healthPath: '/health',
+    })
+    expect(isPortHeld(server.port)).toBe(true)
+    await server.waitForExit(10_000)
+    await new Promise((r) => setImmediate(r))
+    expect(isPortHeld(server.port)).toBe(false)
   })
 })
 
