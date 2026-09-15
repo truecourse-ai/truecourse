@@ -15,8 +15,8 @@
   <a href="https://discord.gg/TanxB63arz"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
-TrueCourse reads the documentation a team already writes — PRDs, ADRs, READMEs,
-a documentation site — and turns it into tests that run.
+TrueCourse reads the documentation a team already writes (PRDs, ADRs, READMEs,
+a documentation site) and turns it into tests that run.
 
 It curates those documents into a corpus of **claims**, works out the **flows** a
 user takes through the product, writes a test for each one against the real
@@ -25,7 +25,7 @@ disagree, and it names which section.
 
 **[docs.truecourse.dev](https://docs.truecourse.dev)** has the guides: connecting
 documentation and a repository, how flows and claims fit together, the drivers,
-self-hosting, and the API.
+and self-hosting.
 
 ## Run it locally
 
@@ -37,8 +37,22 @@ TRUECOURSE_MODE=local pnpm dev          # http://localhost:3000
 
 `TRUECOURSE_MODE=local` is one machine: no sign-in, one implicit person in one
 implicit workspace, and folders on this machine can be connected as repositories.
-It needs `DATABASE_URL` and `TRUECOURSE_SECRET_KEY` — the compose defaults are in
+It needs `DATABASE_URL` and `TRUECOURSE_SECRET_KEY`; the compose defaults are in
 `.env.example`.
+
+## Run it on Claude Code
+
+To run on your own Claude Code login instead of an API key:
+
+```bash
+docker compose up -d
+pnpm install
+TRUECOURSE_MODE=local TRUECOURSE_LLM_TRANSPORT=claude-code pnpm dev
+```
+
+This needs the `claude` binary on your PATH and signed in. Every run then uses
+that login and the Models page is read-only; leave the variable out to save a
+provider and key on that page instead.
 
 ## Contributing
 
@@ -52,7 +66,7 @@ share feedback, and follow what's shipping.
 
 ## Contact
 
-Questions, feedback, or security reports: **Mushegh Gevorgyan** —
+Questions, feedback, or security reports: **Mushegh Gevorgyan**,
 [mushegh@truecourse.dev](mailto:mushegh@truecourse.dev).
 
 ## License
