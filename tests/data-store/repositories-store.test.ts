@@ -132,7 +132,7 @@ describe('PgRepositoryStore', () => {
 });
 
 describe('the registry derived from them', () => {
-  it('names each repository, carries its provider, and serves a folder by its path', async () => {
+  it('names each repository and carries its provider', async () => {
     await store.linkRepo(githubRepo('acme/api'));
     await store.linkRepo(folder('local/orders', '/Users/dev/code/orders'));
     const registry = new RepositoriesRegistryStore(db);
@@ -144,13 +144,8 @@ describe('the registry derived from them', () => {
       path: 'acme/api',
       provider: 'github',
       defaultBranch: 'main',
-      remoteUrl: 'https://github.com/acme/api',
     });
-    expect(entries[1]).toMatchObject({
-      name: 'local/orders',
-      provider: 'local',
-      remoteUrl: '/Users/dev/code/orders',
-    });
+    expect(entries[1]).toMatchObject({ name: 'local/orders', provider: 'local' });
     expect(entries[1]?.defaultBranch).toBeUndefined();
 
     expect((await registry.getProjectBySlug('org_A', 'local-orders'))?.path).toBe('local/orders');

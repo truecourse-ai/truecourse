@@ -92,9 +92,7 @@ export type RepoResponse = {
   name: string;
   path: string;
   /** The provider it was connected through (`github`, `local`). */
-  provider?: string | null;
-  /** Where the provider serves it: a remote URL, or a folder's path on this machine. */
-  remoteUrl?: string | null;
+  provider: string;
   /** Most recent lifecycle event across features (home-page card), or null. */
   latestEvent?: { kind: LatestEventKind; at: string } | null;
   branches?: string[];

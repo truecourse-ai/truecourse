@@ -6,10 +6,8 @@
  * A repository exists by being connected on the server, so this list is the
  * whole of Code. A row just connected carries no coverage, no runs and no
  * corpus until something has run on it, and every surface reads that state
- * from the server rather than assuming it.
- *
- * Only repos with a `remoteUrl` are shown. A developer's own path-registered
- * repos are their local dashboard's business, not this product's.
+ * from the server rather than assuming it. Its identity is the row's: the
+ * provider it came through and its name, nothing is read out of a URL.
  *
  * The GitHub App is how one gets there: the status read says which installations
  * this workspace has and which repositories are already linked, an installation
@@ -29,8 +27,7 @@ import type {
   GithubInstallationReposResponse,
   GithubInstallOrigin,
 } from '@truecourse/shared';
-import { providerOfHost } from './providers';
-import type { ProviderId, Repo } from './types';
+import type { Repo } from './types';
 
 /**
  * The App's installations on this workspace, the repositories already linked,
@@ -65,32 +62,12 @@ export async function linkGithubRepo(link: {
   });
 }
 
-/** `https://github.com/acme/orders-api.git` reads as `acme/orders-api` on github. */
-export function parseRemote(remoteUrl: string): { fullName: string; provider: ProviderId } {
-  let parsed: URL;
-  try {
-    parsed = new URL(remoteUrl);
-  } catch {
-    return { fullName: remoteUrl, provider: 'github' };
-  }
-  const segments = parsed.pathname
-    .replace(/\.git$/, '')
-    .split('/')
-    .filter(Boolean)
-    .map((s) => decodeURIComponent(s));
-  const fullName = segments.length >= 2 ? segments.slice(-2).join('/') : (segments[0] ?? remoteUrl);
-  return { fullName, provider: providerOfHost(parsed.hostname) };
-}
-
 /** A registry entry as a shell `Repo`: connected, with nothing run on it yet. */
 export function toPreviewRepo(entry: RepoResponse): Repo {
-  const remote = parseRemote(entry.remoteUrl ?? '');
-  // A provider the server named wins: a folder on this machine has a path
-  // where a remote would be, and nothing about it can be read out of a URL.
   return {
     id: entry.id,
-    fullName: entry.provider ? entry.name : remote.fullName,
-    provider: entry.provider ?? remote.provider,
+    fullName: entry.name,
+    provider: entry.provider,
     // A provider that tracks a branch says which; a folder on this machine
     // tracks none — a run reads whatever is checked out — so nothing is drawn
     // rather than a branch it might not be on.
@@ -109,7 +86,7 @@ export function toPreviewRepo(entry: RepoResponse): Repo {
 export async function fetchRealRepos(): Promise<Repo[]> {
   try {
     const entries = await getRepos();
-    return entries.filter((e) => Boolean(e.remoteUrl)).map(toPreviewRepo);
+    return entries.map(toPreviewRepo);
   } catch {
     return [];
   }

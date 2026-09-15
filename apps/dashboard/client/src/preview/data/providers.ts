@@ -18,13 +18,7 @@ import gitlab from '@/preview/ui/logos/gitlab.svg';
 /** The three the open edition knows. */
 const OPEN_PROVIDERS: readonly RepositoryProvider[] = [
   { id: 'github', name: 'GitHub', logo: github },
-  {
-    id: 'gitlab',
-    name: 'GitLab',
-    logo: gitlab,
-    comingSoon: true,
-    matchesHost: (host) => host.includes('gitlab'),
-  },
+  { id: 'gitlab', name: 'GitLab', logo: gitlab, comingSoon: true },
   localFolder,
 ];
 
@@ -46,10 +40,4 @@ export function offeredRepositoryProviders(mode: ServerMode): RepositoryProvider
 
 export function repositoryProvider(id: string): RepositoryProvider | undefined {
   return repositoryProviders().find((provider) => provider.id === id);
-}
-
-/** The provider a remote's host belongs to. An unknown host reads as GitHub. */
-export function providerOfHost(host: string): string {
-  const lower = host.toLowerCase();
-  return repositoryProviders().find((provider) => provider.matchesHost?.(lower))?.id ?? 'github';
 }

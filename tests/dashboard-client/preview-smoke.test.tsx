@@ -44,7 +44,7 @@ const REPO = {
   id: 'linkwarden',
   name: 'linkwarden/linkwarden',
   path: '/clones/linkwarden__linkwarden',
-  remoteUrl: 'https://github.com/linkwarden/linkwarden',
+  provider: 'github',
 };
 
 const USER = {

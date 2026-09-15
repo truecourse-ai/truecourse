@@ -50,7 +50,7 @@ const REAL = {
   id: 'filecli',
   name: 'spiderhands/filecli',
   path: 'spiderhands/filecli',
-  remoteUrl: 'https://github.com/spiderhands/filecli',
+  provider: 'github',
 };
 
 function json(body: unknown, status = 200): Response {

@@ -30,7 +30,7 @@ vi.mock('@/lib/socket', () => ({
   }),
 }));
 
-const repo = toPreviewRepo({ id: 'expense-tracker', name: 'expenses', path: '/expenses', remoteUrl: 'https://github.com/spiderhands/expense-tracker' });
+const repo = toPreviewRepo({ id: 'expense-tracker', name: 'expenses', path: '/expenses', provider: 'github', defaultBranch: 'main' });
 const corpus = { corpus: { version: 3, generatedAt: new Date().toISOString(), docs: [], areas: [] } };
 const empty: GuardStatusSummary = { sections: null, coverage: null, lastRun: null, lastGenerate: null };
 const counts = { failed: 1, blocked: 1, 'never-run': 1, succeeded: 3, 'not-testable': 0 };

@@ -45,8 +45,8 @@ if (!Element.prototype.scrollIntoView) {
 
 const realFetch = window.fetch;
 
-const REPO_A = { id: 'web', name: 'acme/web', path: 'acme/web', remoteUrl: 'https://github.com/acme/web' };
-const REPO_B = { id: 'api', name: 'acme/api', path: 'acme/api', remoteUrl: 'https://github.com/acme/api' };
+const REPO_A = { id: 'web', name: 'acme/web', path: 'acme/web', provider: 'github' };
+const REPO_B = { id: 'api', name: 'acme/api', path: 'acme/api', provider: 'github' };
 
 const REFUNDS_REF = 'context/site-docs-acme/refunds.md';
 const PAYOUTS_REF = 'context/site-docs-acme/payouts.md';

@@ -23,8 +23,7 @@ export async function getInstallationToken(
   return result.token;
 }
 
-/** The repository's page on github.com — what a UI links to, and the identity a
- * registered project carries as its `remoteUrl`. */
+/** The repository's page on github.com, which the clone URL is built from. */
 export function repoWebUrl(repoFullName: string): string {
   return `https://github.com/${repoFullName}`;
 }

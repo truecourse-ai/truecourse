@@ -23,12 +23,10 @@ export interface RegistryEntry {
   name: string;
   /** The opaque repository identity (`owner/repo`) every per-repo store keys by. */
   path: string;
-  /** The provider it was connected through (`github`, `local`). */
-  provider?: string;
+  /** The provider it was connected through (`github`, `local`): the row's own column. */
+  provider: string;
   /** Default branch (e.g. `main`) — a hosted repository has no checkout to read it from. */
   defaultBranch?: string;
-  /** The https git URL the repository was connected from. */
-  remoteUrl?: string;
 }
 
 /** The connected repositories of one workspace, as the routes read them. */

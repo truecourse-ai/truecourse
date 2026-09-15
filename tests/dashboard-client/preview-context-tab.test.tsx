@@ -42,7 +42,7 @@ if (!Element.prototype.scrollTo) {
 
 const realFetch = window.fetch;
 
-const REPO = { id: 'web', name: 'acme/web', path: 'acme/web', remoteUrl: 'https://github.com/acme/web' };
+const REPO = { id: 'web', name: 'acme/web', path: 'acme/web', provider: 'github' };
 
 const OWN: ContextSourceView = {
   id: 'repo-acme-web',

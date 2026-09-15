@@ -11,5 +11,4 @@ export const azureDevOps: RepositoryProvider = {
   name: 'Azure DevOps',
   logo: azure,
   comingSoon: true,
-  matchesHost: (host) => host === 'dev.azure.com' || host.endsWith('.visualstudio.com'),
 };

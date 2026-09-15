@@ -56,14 +56,14 @@ const CLI = {
   id: 'filecli',
   name: 'spiderhands/filecli',
   path: 'spiderhands/filecli',
-  remoteUrl: 'https://github.com/spiderhands/filecli',
+  provider: 'github',
 };
 
 const WEB = {
   id: 'web',
   name: 'acme/web',
   path: 'acme/web',
-  remoteUrl: 'https://github.com/acme/web',
+  provider: 'github',
 };
 
 function json(body: unknown, status = 200): Response {

@@ -47,13 +47,13 @@ const REPO_A = {
   id: 'web',
   name: 'acme/web',
   path: 'acme/web',
-  remoteUrl: 'https://github.com/acme/web',
+  provider: 'github',
 };
 const REPO_B = {
   id: 'api',
   name: 'acme/api',
   path: 'acme/api',
-  remoteUrl: 'https://github.com/acme/api',
+  provider: 'github',
 };
 
 /** One source of the workspace, as the server hands it over. */
