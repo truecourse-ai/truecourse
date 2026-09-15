@@ -397,6 +397,12 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     }
     const existing = await deps.repos.getRepo(repoFullName);
     if (existing && existing.workspaceOrgId === orgId) {
+      // This door is the App's: a repository another provider connected is not
+      // one of its, however the request names it.
+      if (existing.provider !== GITHUB_PROVIDER) {
+        res.status(404).json({ error: `${repoFullName} is not a GitHub repository` });
+        return;
+      }
       // Cleanup FIRST, link row second. The row is what scopes the repo to this
       // workspace, so removing it ahead of a cleanup that then fails would leave
       // the clone and its registry entry visible to every workspace, with no way

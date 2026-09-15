@@ -191,6 +191,29 @@ describe('connect router', () => {
     expect((res.body as GithubConnectStatusResponse).repos).toEqual([]);
   });
 
+  it('refuses to disconnect a repository another provider connected, leaving its row', async () => {
+    await store.linkRepo({
+      repoFullName: 'local/my-folder',
+      provider: 'local',
+      accountId: null,
+      workspaceOrgId: 'org_A',
+      defaultBranch: null,
+      location: '/Users/dev/my-folder',
+      blocking: true,
+      enabled: true,
+      notifyEmails: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    await request(app)
+      .delete('/api/ee/github/repos/link')
+      .query({ repoFullName: 'local/my-folder' })
+      .expect(404);
+
+    expect(await store.getRepo('local/my-folder')).not.toBeNull();
+  });
+
   it('lands the setup callback on the path its host declared', async () => {
     await seedInstallation(null);
     // A second host, declaring a different landing path.

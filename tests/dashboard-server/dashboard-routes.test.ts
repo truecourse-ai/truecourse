@@ -13,6 +13,9 @@ import {
 import { getProjectBySlug } from '../../packages/core/src/config/registry';
 import { guardLatestPath, workTreeDir } from '@truecourse/shared/work-tree';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { resetContextStore, setContextBindings, setContextStore } from '@truecourse/core/lib/context-store';
+import { setContextEventPublisher } from '../../apps/dashboard/server/src/services/context.service';
+import { memoryContextStore } from '../helpers/memory-context-store';
 
 describe('repository routes', () => {
   let fixture: TestFixture;
@@ -81,5 +84,32 @@ describe('repository routes', () => {
     // own tree is not the server's to delete — durable state lives in the DB.
     expect(await getProjectBySlug(TEST_ORG, fixture.project.slug)).toBeNull();
     expect(fs.existsSync(tcDir)).toBe(true);
+  });
+
+  it('DELETE /api/repos/:id clears the repository’s Context bindings and says they moved', async () => {
+    const store = memoryContextStore();
+    setContextStore(store);
+    const changes: { change: string; repoFullName?: string }[] = [];
+    setContextEventPublisher((_org, event) => {
+      if (event.type === 'context.changed') changes.push({ change: event.change, repoFullName: event.repoFullName });
+    });
+    try {
+      await store.createSource(TEST_ORG, {
+        id: 'site-docs',
+        kind: 'site',
+        title: 'Docs',
+        config: { url: 'https://docs.example.com/llms.txt' },
+      });
+      await setContextBindings(TEST_ORG, fixture.project.name, ['site-docs']);
+      changes.length = 0;
+
+      await request(app).delete(`/api/repos/${fixture.project.slug}`).expect(204);
+
+      expect(await store.bindings(TEST_ORG, fixture.project.name)).toEqual([]);
+      expect(changes).toEqual([{ change: 'bindings', repoFullName: fixture.project.name }]);
+    } finally {
+      setContextEventPublisher(null);
+      resetContextStore();
+    }
   });
 });
