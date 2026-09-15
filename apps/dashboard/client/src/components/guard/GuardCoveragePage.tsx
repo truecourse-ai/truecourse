@@ -14,10 +14,10 @@
  * conflict's resolution detail. Claims live HERE and nowhere else: a section says
  * what it promises, and one of those promises drills into the claim itself -
  * both traces included, without leaving the document.
- * A conflict tab renders the full-pane SpecOverlapDetail (the
- * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
- * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`, and the
- * claim read inside it `?gclaim`.
+ * A conflict tab renders the full-pane SpecOverlapDetail (the same five-option
+ * resolver Context's conflicts use). Doc/conflict selection mirrors
+ * `?doc`/`?conflict`; the within-doc section detail is `?section`, and the
+ * claim read inside it `?claim`.
  */
 
 import { headingMatchKey } from '@/lib/heading-match';
@@ -64,7 +64,7 @@ export function GuardCoveragePage({
   staleLoaded: boolean;
   /** The claim corpus, read inside the section that states each claim. */
   claims?: GuardClaimsView | null;
-  /** The refused statements with the ids `?gclaim` addresses them by. */
+  /** The refused statements with the ids `?claim` addresses them by. */
   untestable?: GuardUntestableEntry[];
   /** Read the guard state pinned at this commit. Undefined reads the baseline. */
   prRef?: string;

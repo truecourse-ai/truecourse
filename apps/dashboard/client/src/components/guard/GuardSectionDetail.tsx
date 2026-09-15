@@ -146,7 +146,7 @@ export function GuardSectionDetail({
   claims?: readonly GuardClaimRow[];
   /** The refused statements with the ids this panel addresses them by. */
   untestable?: readonly GuardUntestableEntry[];
-  /** The claim being read (`?gclaim`), or null for the section itself. */
+  /** The claim being read (`?claim`), or null for the section itself. */
   activeClaimId?: string | null;
   /** Select (or clear, with null) the claim this panel drills into. */
   onSelectClaim?: (claimId: string | null) => void;

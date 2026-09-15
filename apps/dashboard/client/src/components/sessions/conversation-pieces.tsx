@@ -286,7 +286,7 @@ export function FindingResolveProvider({
       const match = (conflicts ?? []).find((c) =>
         resolutionForConflict([{ ...d, verdict: 'a' }], c.a, c.b, c.overlap.sections),
       );
-      return match ? `?tab=coverage&gconf=${encodeURIComponent(match.id)}` : '?tab=coverage';
+      return match ? `?tab=coverage&conflict=${encodeURIComponent(match.id)}` : '?tab=coverage';
     },
   };
 

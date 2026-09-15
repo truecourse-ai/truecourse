@@ -130,7 +130,7 @@ const isBlankOrAnchorOnly = (line: string): boolean => stripDocAnchors(line).tri
 /**
  * Map every in-page link target the doc mints to the coverage section a click on
  * it should scroll to, so the coverage view turns an in-doc cross-reference
- * (`[§1](#introduction)`) into a `?gsec` selection instead of a new tab.
+ * (`[§1](#introduction)`) into a `?section` selection instead of a new tab.
  *
  * Targets: each block's heading slug and its server anchor, plus the doc's empty
  * `<a id>` anchors. Ownership follows the doc's convention that an anchor sits
