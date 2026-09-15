@@ -286,6 +286,32 @@ describe('the scope', () => {
     );
   });
 
+  it('keeps what a reader typed when a read returns the same scope', async () => {
+    const state = serve();
+    renderAt(at(SITE));
+    const user = userEvent.setup();
+
+    const url = await screen.findByLabelText('llms.txt URL');
+    await user.clear(url);
+    await user.type(url, 'https://docs.acme.com/docs/llms.txt');
+
+    // Sync now re-reads the source, and it comes back unchanged. That is not
+    // the server changing the scope, so the typing stays.
+    const before = state.calls.filter((c) => c === `/api/context/sources/${SITE.id}`).length;
+    const sync = screen.getByRole('button', { name: 'Sync now' });
+    await user.click(sync);
+    await waitFor(() =>
+      expect(
+        state.calls.filter((c) => c === `/api/context/sources/${SITE.id}`).length,
+      ).toBeGreaterThan(before),
+    );
+    // The action settles only once its re-read has landed.
+    await waitFor(() => expect(sync).toBeEnabled());
+
+    expect(screen.getByLabelText('llms.txt URL')).toHaveValue('https://docs.acme.com/docs/llms.txt');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
   it("shows a repository's stored branch and patterns, and saves them", async () => {
     const state = serve({ patch: () => json({ source: REPO_SOURCE, jobId: 'job-sync' }, 202) });
     renderAt(at(REPO_SOURCE));

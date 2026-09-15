@@ -16,7 +16,7 @@
  * save that started no sync says what the server said about why.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import type {
@@ -146,20 +146,28 @@ export default function SourcePage({ sourceId }: { sourceId: string }) {
   const [pending, setPending] = useState<Record<string, boolean>>({});
   /** What the reader has typed, or null while the fields still show the stored scope. */
   const [form, setForm] = useState<ScopeForm | null>(null);
-  /** The stored scope the fields last followed, so a re-read never eats typing. */
-  const [base, setBase] = useState<string>('');
+  /**
+   * The stored scope the fields last followed, or null before the first read. A
+   * ref, not state: the comparison has to see the latest scope the moment a read
+   * lands, not the one an earlier render's closure captured.
+   */
+  const followed = useRef<string | null>(null);
 
   const stored = useMemo(() => (source ? formOf(source) : null), [source]);
 
-  // A scope the server changed (this page's own save included) takes the
-  // fields back: what is on screen is always a scope somebody asked for.
+  // A scope the server CHANGED (this page's own save included) takes the fields
+  // back: what is on screen is always a scope somebody asked for. The first read
+  // is not a change — it only teaches the page what is stored — so it never
+  // resets a field a reader already started typing in; nor is a re-read that
+  // returns the same scope.
   useEffect(() => {
     if (!stored) return;
     const key = JSON.stringify(stored);
-    if (key === base) return;
-    setBase(key);
-    setForm(null);
-  }, [stored, base]);
+    if (followed.current === key) return;
+    const firstRead = followed.current === null;
+    followed.current = key;
+    if (!firstRead) setForm(null);
+  }, [stored]);
 
   /** Run one action, re-read after it, and say what the server said if it refused. */
   const act = useCallback(
