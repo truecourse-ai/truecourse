@@ -169,10 +169,9 @@ export interface GuardTestViewModel {
   /** The claim behind the failing milestone, when the flow named one. */
   failedMilestoneClaim?: string;
   /**
-   * The flow's milestones, the claim sentence each step group is headed with, and
-   * the section that states it, which the divider links to. Matched to a step by
-   * `order`; absent (a hand-written test, an unjoined run) leaves the group headed
-   * by its number alone, with nothing to link to.
+   * The flow's milestones. A step row names the one it proves with an `M<n>`
+   * chip and the flow's own list states the claim, so nothing in the step list
+   * renders a claim sentence of its own.
    */
   milestones?: readonly {
     order: number;
@@ -608,6 +607,16 @@ function StepRow({
           {step.n}
         </span>
         <span className={STEP_KIND}>{step.kind}</span>
+        {/* WHICH milestone this step proves, beside the driver chip because that
+            is where a reader's eye already is. A step that only arranges the
+            world carries none, so the chips also say at a glance how much of a
+            list is setup and how much is evidence. The number alone: the claim
+            sentence reads in the milestone list above. */}
+        {step.milestone != null && (
+          <span className="shrink-0 rounded bg-muted px-1 py-px text-[10px] font-medium tabular-nums text-muted-foreground">
+            {`M${step.milestone}`}
+          </span>
+        )}
         {step.teardown && (
           <span className="shrink-0 rounded bg-sky-500/15 px-1 py-px text-[10px] font-medium text-sky-700 dark:text-sky-300">
             teardown
@@ -691,17 +700,12 @@ function StepBody({
   failedStep,
   passed,
   failure,
-  claim,
-  claimLink,
   picture,
 }: {
   step: GuardScenarioStepView;
   failedStep: number | undefined;
   passed: boolean;
   failure?: GuardFailureDetail;
-  claim?: string;
-  /** The spec section stating the claim, the jump the divider used to carry. */
-  claimLink?: { label: string; onOpen: () => void };
   /** The step's picture, when the run's evidence bundle holds one for it. */
   picture?: ReactNode;
 }) {
@@ -709,24 +713,6 @@ function StepBody({
   const panel = stepPanelProps(step, failedStep, failure);
   return (
     <div className="space-y-1 border-t border-border/50 px-2.5 py-2">
-      {claim && (
-        <p className="text-[11px] leading-snug text-muted-foreground">
-          {claim}
-          {claimLink && (
-            <button
-              type="button"
-              onClick={claimLink.onOpen}
-              aria-label={claimLink.label}
-              className="ml-1.5 inline-flex cursor-pointer items-center gap-0.5 rounded align-baseline text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <span aria-hidden className="text-[11px] leading-none">
-                §
-              </span>
-              <ArrowUpRight aria-hidden className="h-3 w-3" />
-            </button>
-          )}
-        </p>
-      )}
       {failed && (
         <p className="text-[11px] leading-snug text-red-700 dark:text-red-400">
           Execution stopped here. The steps after this one were not reached.
@@ -890,28 +876,6 @@ function RecordedFailureRow({
       </ol>
     </div>
   );
-}
-
-/** The claim or preparation phase a selected step belongs to. */
-function stepClaim(
-  step: GuardScenarioStepView | null,
-  test: GuardTestViewModel,
-  milestones: ReadonlyMap<
-    number,
-    NonNullable<GuardTestViewModel["milestones"]>[number]
-  >,
-): string | undefined {
-  if (!step) return undefined;
-  if (step.milestone != null) {
-    const milestone = milestones.get(step.milestone);
-    return milestone
-      ? `Milestone ${step.milestone}, ${milestone.claimTitle}`
-      : `Milestone ${step.milestone}`;
-  }
-  if (step.claims && step.claims.length > 0) {
-    return step.claims.map((id) => test.claimTitles?.[id] ?? id).join(" · ");
-  }
-  return undefined;
 }
 
 function InterfacePathSection({
@@ -1222,10 +1186,6 @@ export function GuardScenarioBody({
   const verdictTone = VERDICT_TONE[test.status.plain];
   const verdictHeadline =
     verdictWord.charAt(0).toUpperCase() + verdictWord.slice(1);
-  const milestones = useMemo(
-    () => new Map((test.milestones ?? []).map((m) => [m.order, m])),
-    [test.milestones],
-  );
   // WHICH rows start open is a fact about the VIEWED RESULT, so the step list is
   // keyed on it: reading another test, or this same test as another run's
   // record, re-opens that result's failing step instead of inheriting the
@@ -1470,10 +1430,6 @@ export function GuardScenarioBody({
                   const shot = screenshots.find(
                     (visual) => visual.step === step.n,
                   );
-                  const milestone =
-                    step.milestone != null
-                      ? milestones.get(step.milestone)
-                      : undefined;
                   return (
                     <StepRow
                       key={step.n}
@@ -1489,18 +1445,6 @@ export function GuardScenarioBody({
                         failedStep={test.failure?.step}
                         passed={passed}
                         {...(test.failure ? { failure: test.failure } : {})}
-                        {...(stepClaim(step, test, milestones)
-                          ? { claim: stepClaim(step, test, milestones)! }
-                          : {})}
-                        {...(milestone?.doc && milestone.anchor
-                          ? {
-                              claimLink: {
-                                label: `§ ${milestone.headingText ?? milestone.anchor}`,
-                                onOpen: () =>
-                                  onOpenSpec(milestone.doc!, milestone.anchor!),
-                              },
-                            }
-                          : {})}
                         {...(shot && where
                           ? {
                               picture: (

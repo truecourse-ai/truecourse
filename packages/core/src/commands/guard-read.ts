@@ -105,6 +105,7 @@ import {
   type GuardDriverId,
   type GuardFailureDetail,
   type GuardFlow,
+  type GuardFlowMilestone,
   type GuardFlowBucket,
   type GuardFlowDetail,
   type GuardFlowGap,
@@ -1551,14 +1552,23 @@ function flowOrphaned(flowId: string, join: FlowJoin): boolean {
   return join.manifestFlows.get(flowId)?.orphaned === true && !join.corpus.has(flowId)
 }
 
-function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlowSurface[]): GuardFlowProgress {
-  const { join, result } = view
+/**
+ * The proof a flow's PASSING tests carry: every (milestone, driver, cases) a
+ * reviewed, current, non-defective passing scenario establishes. The one
+ * derivation behind both the progress counts and the per-case marks a milestone
+ * wears, so a list and its tally can never disagree.
+ */
+function flowPassingProof(
+  flowId: string,
+  view: FlowViewSources,
+  surfaces: GuardFlowSurface[],
+): ReturnType<typeof scenarioMilestoneProof> {
+  const { join } = view
   const flow = join.corpus.get(flowId)
   const entry = join.manifestFlows.get(flowId)
   const milestones = flow?.milestones ?? entry?.milestones ?? []
-  const rows = surfaces.filter(s => s.scenarioId)
   const proof: ReturnType<typeof scenarioMilestoneProof> = []
-  for (const row of rows) {
+  for (const row of surfaces.filter(s => s.scenarioId)) {
     if (row.status !== 'pass' && row.status !== 'guarded') continue
     const record = entry?.scenarios.find(s => s.id === row.scenarioId)
     const scenario = join.scenarioById.get(row.scenarioId!)
@@ -1567,12 +1577,36 @@ function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlow
     if (milestones.some(m => m.verification?.cases) && (record?.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !record?.caseEvidence || record.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) || scenarioFullFlowDefect(milestones, scenario.steps, record.caseEvidence))) continue
     if (!scenarioFullFlowDefect(milestones, scenario.steps)) proof.push(...scenarioMilestoneProof(scenario.steps))
   }
+  return proof
+}
+
+/** Whether one CASE of one milestone is discharged by the flow's passing proof. */
+function caseVerified(
+  milestone: GuardFlowMilestone,
+  caseId: string,
+  proof: ReturnType<typeof scenarioMilestoneProof>,
+): boolean {
+  return proof.some(
+    (p) =>
+      p.milestone === milestone.order &&
+      milestone.proofDrivers?.includes(p.driver) &&
+      p.checks?.includes(caseId),
+  )
+}
+
+function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlowSurface[]): GuardFlowProgress {
+  const { join, result } = view
+  const flow = join.corpus.get(flowId)
+  const entry = join.manifestFlows.get(flowId)
+  const milestones = flow?.milestones ?? entry?.milestones ?? []
+  const rows = surfaces.filter(s => s.scenarioId)
+  const proof = flowPassingProof(flowId, view, surfaces)
   const cases = milestones.length > 0 && milestones.every(m => m.verification?.cases?.length)
   let total = 0, verified = 0
   for (const m of milestones) {
     if (cases) for (const c of m.verification!.cases!) {
       total++
-      if (proof.some(p => p.milestone === m.order && m.proofDrivers?.includes(p.driver) && p.checks?.includes(c.id))) verified++
+      if (caseVerified(m, c.id, proof)) verified++
     } else {
       total++
       if (coversFlowMilestones([m], proof) === true) verified++
@@ -1714,11 +1748,16 @@ export async function readGuardFlowDetail(
     .map((m) => {
       const live = indexes.get(m.doc)?.sections.find((s) => s.anchor === m.anchor)
       const bound = boundFingerprints.get(`${m.doc}\0${m.anchor}`)
+      // The cases ride as cases. They used to be folded into the claim sentence
+      // as one semicolon-joined run-on, which a milestone with a dozen of them
+      // turned into an unreadable paragraph and named none of them.
+      const cases = (m.verification?.cases ?? []).map((c) => ({ id: c.id, claim: c.claim }))
       return {
         order: m.order,
         doc: m.doc,
         anchor: m.anchor,
-        claimTitle: m.caseIds && m.verification?.cases ? m.verification.cases.map(c => c.claim).join('; ') : m.claimTitle,
+        claimTitle: m.claimTitle,
+        ...(cases.length > 0 ? { cases } : {}),
         ...(m.note ? { note: m.note } : {}),
         ...(live ? { headingText: live.headingText } : {}),
         live: live != null,

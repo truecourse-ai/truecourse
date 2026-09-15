@@ -924,6 +924,23 @@ export const GuardFlowMilestoneViewSchema = z
     currentFingerprint: z.string().optional(),
     /** True when bound and live fingerprints disagree (the section drifted). */
     drifted: z.boolean(),
+    /**
+     * The milestone's CASES — the situations that would prove it, each as the
+     * sentence it states. No per-case state: a flow's cases stand or fall
+     * together, and the flow's own verdict says which. Absent on a milestone
+     * that declares none (the legacy shape).
+     */
+    cases: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            /** The case's own sentence, never its machine id. */
+            claim: z.string().min(1),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict()
 export type GuardFlowMilestoneView = z.infer<typeof GuardFlowMilestoneViewSchema>

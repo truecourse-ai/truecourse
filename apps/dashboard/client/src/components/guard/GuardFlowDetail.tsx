@@ -53,7 +53,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Ban, Braces, Layers, PenLine } from "lucide-react";
-import type { GuardFlowProgress } from "@truecourse/shared";
 import { guardFindingClass } from "@truecourse/shared";
 import type {
   GuardClaimIdentity,
@@ -104,56 +103,67 @@ const LABEL =
 const BTN =
   "inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground";
 
-const EXECUTION_WORD: Record<GuardFlowProgress["execution"], string> = {
-  passed: "Passed",
-  failed: "Failed",
-  error: "Errored",
-  blocked: "Blocked",
-  "not-run": "Not run",
-  "not-generated": "Not generated",
-};
-
-const GENERATION_WORD: Record<GuardFlowProgress["generation"], string> = {
-  ready: "Ready",
-  incomplete: "Incomplete",
-  error: "Errored",
-  unsupported: "Unsupported capability",
-  "needs-setup": "Needs setup",
-};
+/** How many cases a milestone lists before the rest collapse behind a count. */
+const CASES_SHOWN = 4;
 
 /**
- * The flow's three facts under its title, one per line: what its tests DID, how
- * much of its chain that proved, and how far generation got. Plain rows, never a
- * status word of their own: the header above carries the flow's one status.
+ * ONE milestone's cases: the situations that would prove it.
+ *
+ * They carry no state of their own. A flow's cases stand or fall together — the
+ * block below says Blocked once, the verdict says Passed once — so a mark per
+ * case could only repeat it, in the one colour a reader is scanning for.
+ *
+ * A milestone with EXACTLY ONE case lists none: its case restates the claim
+ * almost word for word, so the row would say the same thing twice. A long list
+ * collapses: seventeen cases is a wall, and the count is the honest summary
+ * until a reader asks for the rest.
  */
-function GuardFlowFacts({ progress }: { progress: GuardFlowProgress }) {
-  const facts: [string, string][] = [
-    ["Execution", EXECUTION_WORD[progress.execution]],
-    [
-      "Coverage",
-      progress.coverage === "unknown"
-        ? "Not recorded"
-        : `${progress.verified} of ${progress.total} ${progress.unit} verified`,
-    ],
-    ["Generation", GENERATION_WORD[progress.generation]],
-  ];
+function MilestoneCases({
+  cases,
+}: {
+  cases: NonNullable<GuardFlowMilestoneView['cases']>;
+}) {
+  const [all, setAll] = useState(false);
+  const shown = all ? cases : cases.slice(0, CASES_SHOWN);
+  const rest = cases.length - shown.length;
   return (
-    <dl className="mt-3 flex flex-col gap-0.5 text-xs text-muted-foreground">
-      {facts.map(([label, value]) => (
-        <div key={label} className="flex min-w-0 items-baseline gap-2">
-          <dt className="shrink-0">{label}</dt>
-          <dd className="min-w-0 text-foreground">{value}</dd>
-        </div>
+    <ul className="mt-1.5 space-y-1" aria-label="Cases">
+      {shown.map((c) => (
+        <li key={c.id} className="flex min-w-0 items-start gap-1.5">
+          <span
+            aria-hidden
+            className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40"
+          />
+          <span className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
+            {c.claim}
+          </span>
+        </li>
       ))}
-    </dl>
+      {rest > 0 && (
+        <li>
+          <button
+            type="button"
+            onClick={() => setAll(true)}
+            className="text-[11px] text-primary hover:underline"
+          >
+            {`${rest} more`}
+          </button>
+        </li>
+      )}
+    </ul>
   );
 }
 
 /**
- * The flow's milestones, as a PLAIN LIST, the claim sentences in order, each
- * linking to the section that states it. It carries no state of its own: the
- * page's one verdict is the test's, and a per-milestone paint could only ever
- * disagree with it.
+ * The flow's milestones, the claim sentences in order, each linking to the
+ * section that states it — the flow's CHAIN, and the page shows it whether or
+ * not a test exists. It used to be hidden once a test did, on the theory that
+ * the step list was the same chain; it is not, because a step names its
+ * milestone only once opened, so a proved flow showed no chain at all.
+ *
+ * Below each claim ride its CASES, when it has more than one, each marked with
+ * whether a passing test discharged it. That mark is the only state here: the
+ * page's one verdict stays the test's.
  */
 function MilestoneList({
   milestones,
@@ -172,8 +182,11 @@ function MilestoneList({
           <span className="w-4 shrink-0 text-[11px] text-muted-foreground">
             {m.order}
           </span>
-          <span className="min-w-0 flex-1 text-[12px] leading-snug text-foreground">
-            {m.claimTitle}
+          <span className="min-w-0 flex-1">
+            <span className="block text-[12px] leading-snug text-foreground">
+              {m.claimTitle}
+            </span>
+            {m.cases && m.cases.length > 1 && <MilestoneCases cases={m.cases} />}
           </span>
           <button
             type="button"
@@ -195,9 +208,44 @@ function MilestoneList({
 }
 
 /**
+ * The surface rows to draw, with gaps that say the SAME THING folded into one.
+ *
+ * A gap is recorded per CASE, so one dependency holding up two situations is two
+ * gaps carrying one reason and one action between them — which rendered as two
+ * blocks a reader could not tell apart. The cases themselves are listed above,
+ * each marked blocked, so WHICH obligations are held up is already said; what
+ * this block adds is the reason and the fix, and it says each once.
+ *
+ * Rows carrying a TEST are never folded: two tests are two results, however
+ * alike they read.
+ */
+function foldGapRows(
+  surfaces: readonly GuardFlowScenarioRow[],
+): GuardFlowScenarioRow[] {
+  const out: GuardFlowScenarioRow[] = [];
+  const byReason = new Set<string>();
+  for (const row of surfaces) {
+    if (row.scenarioId != null || !row.gap) {
+      out.push(row);
+      continue;
+    }
+    const key = [row.surface ?? "", row.status, row.gap.kind, row.gap.reason].join("\u0000");
+    if (byReason.has(key)) continue;
+    byReason.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+/**
  * WHY there is no test on this surface, the state, then the sentence. It is
  * deliberately NOT test-shaped: no verdict card, no steps, muted copy. The one
  * exception is the needs-setup CTA, which is a to-do the reader can clear today.
+ *
+ * It names no case. WHICH obligations are held up is said once, in the milestone
+ * list above, where every case already carries its own mark; repeating them here
+ * made the block a second copy of that list. What only this block can say is the
+ * reason and the action, and it says each once.
  */
 function WhyNoTest({
   row,
@@ -225,7 +273,7 @@ function WhyNoTest({
     <div
       role="group"
       aria-label="Why there is no test yet"
-      className={`rounded border border-border px-3 py-2 ${needsSetup ? "bg-amber-500/[0.07]" : "bg-muted/20"}`}
+      className="rounded border border-border bg-muted/20 px-3 py-2"
     >
       <GuardFlowStatusChip status={guardPlainStatus(row.status)} />
       {needsSetup ? (
@@ -548,7 +596,7 @@ export function GuardFlowDetail({
   const blocked = guardRefusalError(detail.errors)?.message;
   const rows: GuardFlowScenarioRow[] =
     detail.surfaces.length > 0
-      ? detail.surfaces
+      ? foldGapRows(detail.surfaces)
       : [
           {
             status: "unguarded",
@@ -663,7 +711,6 @@ export function GuardFlowDetail({
             </p>
           )
         )}
-        {detail.progress && <GuardFlowFacts progress={detail.progress} />}
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-5 px-6 py-4">
@@ -682,11 +729,11 @@ export function GuardFlowDetail({
           )
         ) : (
           <>
-            {/* The chain, as a list, ONLY for a flow with no test. With a test the
-                step list below IS the chain, each group headed by the claim it
-                realizes and linking to the same section, so a list above it would
-                be the same milestones told twice. */}
-            {!test && detail.milestones.length > 0 && (
+            {/* The chain, as a list, ALWAYS. A step names its milestone only
+                once opened, so hiding this behind "the steps are the chain"
+                left a proved flow showing no chain at all. The step rows carry
+                an `M2` chip that points back at these. */}
+            {detail.milestones.length > 0 && (
               <div>
                 <div className={LABEL}>Milestones</div>
                 <MilestoneList

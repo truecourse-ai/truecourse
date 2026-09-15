@@ -19,7 +19,7 @@
  * there, so it is never linked.
  */
 
-import { ArrowUpRight, Plug } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import type { GuardNeedsSetup } from '@truecourse/shared';
 import { MISSING_DATA_NOUN, needsSetupIsDone } from '@truecourse/shared';
 import {
@@ -61,7 +61,7 @@ export function GuardNeedsSetupCta({
   needsSetup,
   onOpenExternals,
   explain = false,
-  className = 'border-b border-amber-500/30 bg-amber-500/[0.07] px-3 py-2',
+  className = 'border-b border-border px-3 py-2',
 }: {
   needsSetup: GuardNeedsSetup;
   /** Jump to the Dependencies tab, landing on this service's card when named. */
@@ -83,7 +83,7 @@ export function GuardNeedsSetupCta({
     !done && needsSetup.services.length > 0 && needsSetup.services.every((s) => s === MISSING_DATA_NOUN);
   return (
     <div className={className}>
-      <p className="text-[12px] leading-snug text-amber-700 dark:text-amber-300">
+      <p className="text-[12px] leading-snug text-foreground">
         {guardNeedsSetupHeadline(needsSetup)}
       </p>
       {explain && !done && !seedOnly && (
@@ -105,11 +105,10 @@ export function GuardNeedsSetupCta({
               type="button"
               onClick={() => onOpenExternals?.(link.service)}
               disabled={!onOpenExternals}
-              className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:cursor-default disabled:hover:bg-amber-500/10 dark:text-amber-300"
+              className="inline-flex items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted/60 disabled:cursor-default disabled:hover:bg-background"
             >
-              <Plug className="h-3 w-3" />
               {link.label}
-              <span className="text-amber-600/80 dark:text-amber-400/80">→ Dependencies</span>
+              <span className="text-muted-foreground">→ Dependencies</span>
               <ArrowUpRight className="h-3 w-3" />
             </button>
           ))}
