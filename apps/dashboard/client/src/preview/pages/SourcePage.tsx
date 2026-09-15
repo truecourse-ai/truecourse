@@ -8,8 +8,9 @@
  * documents it yielded are the Documents view narrowed to it, one link away.
  *
  * The header carries what can be DONE to the source — Sync now, Pause / Resume
- * and, for a site, Remove — beside its status word. A repository source is
- * removed by disconnecting its repository, so it is not offered.
+ * and, for a site, Remove — beside its status word. Remove is not offered for a
+ * repository source: disconnecting its repository drops that repository's links
+ * and leaves the source in the workspace.
  *
  * Every word here is the server's: the scope fields show the stored config, the
  * syncs are stored records, a refusal is the server's message in a toast, and a

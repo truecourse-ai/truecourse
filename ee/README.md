@@ -9,13 +9,17 @@ root MIT license.**
 The product is open except **three things**:
 
 - the document **Connections** (Settings › Connections and its connectors),
-- **repository providers** beyond GitHub and GitLab,
+- **repository providers** beyond the open edition's, which is Azure DevOps
+  today,
 - **more than one workspace** — the switcher, Create workspace, and the
   `/api/auth/workspaces` routes.
 
 Everything else is open: the engine, sign-in, one workspace with its members,
 connecting a repository, Code, Context, Flows, runs and evidence, Agent, Home,
 Notifications, and Settings' Members, Repositories and Models.
+
+GitHub is the provider that connects today, and a folder on this machine in
+local mode. GitLab and Azure DevOps are listed as coming soon.
 
 ## Boundary rule
 

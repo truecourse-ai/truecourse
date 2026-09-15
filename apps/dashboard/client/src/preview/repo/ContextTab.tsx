@@ -7,9 +7,9 @@
  * The tab ADDS nothing — Add context is Context's own action, and this links
  * through to it. It starts no scan either: the Document scan belongs to the
  * workspace and starts on Context. Toggling a link saves the whole set
- * (`PUT /api/repos/:id/context/bindings`), which is what re-scans the workspace
- * and, through the ripple, regenerates the tests of the repositories whose
- * slice moved.
+ * (`PUT /api/repos/:id/context/bindings`); the corpus stands still, and the
+ * server starts THIS repository on what its moved slice needs, Flow setup when
+ * it has none yet and Flow generation once it does.
  */
 
 import { useCallback, useEffect, useState } from 'react';

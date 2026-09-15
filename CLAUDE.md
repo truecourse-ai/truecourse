@@ -45,12 +45,15 @@ pnpm typecheck    # Typecheck every package
 
 **The product is open except three things**, which live in `ee/` and REGISTER into
 the open shell rather than being imported by it: the document Connections
-(Settings › Connections and its connectors), repository providers beyond GitHub
-and GitLab, and more than one workspace (the switcher, Create workspace, and the
-`/api/auth/workspaces` routes). Everything else — the engine, sign-in, one
-workspace with its members, connecting a repository, Code, Context, Flows, runs
-and evidence, Agent, Home, Notifications, and Settings' Members, Repositories and
-Models — is open.
+(Settings › Connections and its connectors), repository providers beyond the
+open edition's (which is Azure DevOps today), and more than one workspace (the
+switcher, Create workspace, and the `/api/auth/workspaces` routes). Everything
+else — the engine, sign-in, one workspace with its members, connecting a
+repository, Code, Context, Flows, runs and evidence, Agent, Home, Notifications,
+and Settings' Members, Repositories and Models — is open.
+
+GitHub is the provider that connects today, and a folder on this machine in
+local mode. GitLab and Azure DevOps are listed as coming soon.
 
 The dependency runs ONE WAY, from `ee/` inward, so no open file ever names an
 `ee/` path (`tests/architecture/ee-import-boundary.test.ts` pins that):
