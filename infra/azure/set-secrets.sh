@@ -46,8 +46,7 @@ set_secret github-app-private-key   "${GITHUB_APP_PRIVATE_KEY:-}"   required
 set_secret github-app-webhook-secret "${GITHUB_APP_WEBHOOK_SECRET:-}" required
 set_secret github-app-slug          "${GITHUB_APP_SLUG:-}"          required
 
-# Optional — to use these, also add the env name to containerapp.bicep `secretEnv`.
-set_secret resend-api-key           "${RESEND_API_KEY:-}"
+# Optional — to use this, also add the env name to containerapp.bicep `secretEnv`.
 set_secret sentry-dsn               "${SENTRY_DSN:-}"
 
 echo "Done. Now deploy the Container Apps (see infra/azure/README.md)."
