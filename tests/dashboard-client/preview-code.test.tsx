@@ -9,16 +9,16 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toPreviewRepo } from '@/preview/data/real-repos';
+import { toDashboardRepo } from '@/dashboard/data/real-repos';
 import type { GuardStatusSummary } from '@truecourse/shared';
-import CodePage from '@/preview/pages/CodePage';
+import CodePage from '@/dashboard/pages/CodePage';
 
-const state = vi.hoisted(() => ({ repos: [] as ReturnType<typeof toPreviewRepo>[] }));
+const state = vi.hoisted(() => ({ repos: [] as ReturnType<typeof toDashboardRepo>[] }));
 const listeners = vi.hoisted(() => new Map<string, Set<(payload: unknown) => void>>());
-vi.mock('@/preview/shell/preview-state', () => ({
-  usePreviewState: () => ({ workspace: { name: 'Test workspace' }, repos: state.repos }),
+vi.mock('@/dashboard/shell/dashboard-state', () => ({
+  useDashboardState: () => ({ workspace: { name: 'Test workspace' }, repos: state.repos }),
 }));
-vi.mock('@/preview/pages/ConnectDialog', () => ({ ConnectDialog: () => null }));
+vi.mock('@/dashboard/pages/ConnectDialog', () => ({ ConnectDialog: () => null }));
 vi.mock('@/lib/socket', () => ({
   connectSocket: () => ({
     on(event: string, handler: (payload: unknown) => void) {
@@ -30,7 +30,7 @@ vi.mock('@/lib/socket', () => ({
   }),
 }));
 
-const repo = toPreviewRepo({ id: 'expense-tracker', name: 'expenses', path: '/expenses', provider: 'github', defaultBranch: 'main' });
+const repo = toDashboardRepo({ id: 'expense-tracker', name: 'expenses', path: '/expenses', provider: 'github', defaultBranch: 'main' });
 const corpus = { corpus: { version: 3, generatedAt: new Date().toISOString(), docs: [], areas: [] } };
 const empty: GuardStatusSummary = { sections: null, coverage: null, lastRun: null, lastGenerate: null };
 const counts = { failed: 1, blocked: 1, 'never-run': 1, succeeded: 3, 'not-testable': 0 };

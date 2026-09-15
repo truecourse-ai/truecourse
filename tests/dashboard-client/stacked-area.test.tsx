@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
-import { StackedArea, type StackedSeries } from '@/preview/ui/stacked-area';
+import { StackedArea, type StackedSeries } from '@/dashboard/ui/stacked-area';
 
 type Status = 'proved' | 'failed';
 

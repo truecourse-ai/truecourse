@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronsUpDown, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { WorkspaceSummary } from '@truecourse/shared';
-import { usePreviewState } from '@/preview/shell/preview-state';
+import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { listWorkspaces, switchWorkspace } from './api';
 
@@ -47,7 +47,7 @@ function useClickOutside(open: boolean, close: () => void) {
 }
 
 export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
-  const { workspace } = usePreviewState();
+  const { workspace } = useDashboardState();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);

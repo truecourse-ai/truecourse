@@ -66,8 +66,8 @@ import {
   ArtifactModeSwitch,
   ArtifactRaw,
   useArtifactMode,
-} from "@/preview/ui/artifact-view";
-import { HoverPopover } from "@/preview/ui/hover-popover";
+} from "@/dashboard/ui/artifact-view";
+import { HoverPopover } from "@/dashboard/ui/hover-popover";
 import { useGuardArtifactRaw } from "@/hooks/useGuardArtifactRaw";
 import type { GuardDecisionsState } from "@/hooks/useGuardDecisions";
 import { collapseAuthoringAttempts } from "@/lib/guard-report";

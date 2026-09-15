@@ -44,8 +44,8 @@ vi.mock('@/lib/socket', () => {
   };
 });
 
-import PreviewApp from '@/preview/PreviewApp';
-import { toFailure } from '@/preview/shell/real-runs';
+import DashboardApp from '@/dashboard/DashboardApp';
+import { toFailure } from '@/dashboard/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 if (!Element.prototype.scrollTo) {
@@ -131,7 +131,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
       <Toaster />
     </MemoryRouter>,

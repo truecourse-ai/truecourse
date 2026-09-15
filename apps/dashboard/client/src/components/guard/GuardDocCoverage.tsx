@@ -29,7 +29,7 @@ import type {
   GuardSectionCoverageStatus,
 } from '@truecourse/shared';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { alignSections, buildAnchorTargets, splitDocBlocks, stripDocAnchors } from '@/lib/guard-doc-sections';
 import { guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
 import { guardStatusWord } from '@/lib/guard-flow-status';

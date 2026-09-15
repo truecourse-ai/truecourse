@@ -31,7 +31,7 @@ into seams the open shell owns rather than being imported by it, and
 There is no loader and no dynamic import. **Which edition a build is was decided
 when it was built.**
 
-- **Client** — `apps/dashboard/client/src/preview/shell/registry.ts` holds the
+- **Client** — `apps/dashboard/client/src/dashboard/shell/registry.ts` holds the
   three seams (a settings tab, a repository provider, the workspace switcher).
   `main.tsx` imports `registerEditionFeatures` from `@edition`, an alias the
   vite config points at `ee/packages/client/src/edition.tsx` when the checkout

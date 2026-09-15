@@ -14,7 +14,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { WorkspaceInvitation, WorkspaceMember } from '@truecourse/shared';
 import { AuthProvider } from '@/auth/AuthContext';
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 
 vi.mock('@/lib/socket', () => {
   const socket = { connected: false, on: vi.fn(), off: vi.fn(), emit: vi.fn(), connect: vi.fn() };
@@ -155,7 +155,7 @@ function renderMembers() {
     <MemoryRouter initialEntries={['/settings/members']}>
       <AuthProvider>
         <Routes>
-          <Route path="/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,
@@ -335,7 +335,7 @@ describe('Settings › Members', () => {
     render(
       <MemoryRouter initialEntries={['/settings/members']}>
         <Routes>
-          <Route path="/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </MemoryRouter>,
     );

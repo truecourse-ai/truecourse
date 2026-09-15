@@ -28,7 +28,7 @@ import {
 } from '@truecourse/shared';
 import type { GuardCoveragePlainStatus, GuardSectionCoverageStatus } from '@truecourse/shared';
 import type { CoverageFilterMode } from '@/components/guard/GuardDocCoverage';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { guardStatusMeta } from '@/lib/guard-status';
 import type { BlockedOnEntry, NeedsSetupEntry } from '@/lib/guard-report';
 import { GUARD_REGENERATE_ACTION } from '@/lib/guard-flow-status';

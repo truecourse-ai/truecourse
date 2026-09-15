@@ -222,7 +222,7 @@ describe('the open/enterprise line', () => {
   it('the open edition has an edition module of its own, so it builds with ee/ absent', () => {
     const stub = path.join(
       repoRoot,
-      'apps/dashboard/client/src/preview/shell/open-edition.ts',
+      'apps/dashboard/client/src/dashboard/shell/open-edition.ts',
     );
     expect(fs.existsSync(stub)).toBe(true);
     expect(fs.readFileSync(stub, 'utf8')).toContain('export function registerEditionFeatures');

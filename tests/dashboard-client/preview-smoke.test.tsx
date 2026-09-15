@@ -11,7 +11,7 @@
  * console. Both halves answer `window.fetch` in the payload shapes the real
  * routes answer in.
  *
- * `PreviewApp` carries no router: it is mounted as a DESCENDANT route set, the
+ * `DashboardApp` carries no router: it is mounted as a DESCENDANT route set, the
  * way `App.tsx` mounts it at `/*`, so the test can supply a
  * MemoryRouter and drive it by address.
  */
@@ -31,7 +31,7 @@ vi.mock('@/lib/socket', () => {
   };
 });
 
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 
 // jsdom implements no layout, so an element has no scrollTo (the shared setup
 // polyfills scrollIntoView for the same reason). A conversation pins itself to
@@ -101,7 +101,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
     </MemoryRouter>,
   );

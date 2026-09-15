@@ -11,8 +11,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { IndexTable, type IndexColumn } from '@/preview/ui/index-table';
-import type { TallyItem } from '@/preview/ui/status-word';
+import { IndexTable, type IndexColumn } from '@/dashboard/ui/index-table';
+import type { TallyItem } from '@/dashboard/ui/status-word';
 
 interface Row {
   id: string;

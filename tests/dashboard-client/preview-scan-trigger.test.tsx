@@ -41,13 +41,13 @@ vi.mock('@/components/sessions/RunConversationPage', () => ({
   RunElapsed: () => <span />,
 }));
 
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 import {
   startContextScan,
   startGuardGenerate,
   startGuardSetup,
-} from '@/preview/data/scan';
-import { triggerFor } from '@/preview/data/run-triggers';
+} from '@/dashboard/data/scan';
+import { triggerFor } from '@/dashboard/data/run-triggers';
 import type { PublicSessionRun } from '@/lib/api';
 
 if (!Element.prototype.scrollTo) {
@@ -130,7 +130,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
       <Toaster />
     </MemoryRouter>,

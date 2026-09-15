@@ -13,7 +13,7 @@ import { Link } from 'react-router-dom';
 import { ArrowUpRight, Check } from 'lucide-react';
 import { buildCorpusConflicts, resolutionForConflict } from '@truecourse/shared';
 import type { DisplayDispute, KnownDisplayBlock } from '@truecourse/agent-loop';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import * as api from '@/lib/api';
 import type { SpecConflictResolution } from '@/lib/api';
 

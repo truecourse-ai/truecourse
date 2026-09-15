@@ -3,7 +3,7 @@
  * Listed and inert until it connects, like GitLab beside it.
  */
 
-import type { RepositoryProvider } from '@/preview/shell/registry';
+import type { RepositoryProvider } from '@/dashboard/shell/registry';
 import azure from './azure.svg';
 
 export const azureDevOps: RepositoryProvider = {

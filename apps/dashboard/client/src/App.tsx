@@ -1,7 +1,7 @@
 /**
  * The dashboard's root: the capability and auth providers, the router, and the
  * app itself, mounted at `/`. Every address the product has is a route of
- * {@link PreviewApp}.
+ * {@link DashboardApp}.
  */
 
 import { BrowserRouter } from 'react-router-dom';
@@ -9,7 +9,7 @@ import { Toaster } from 'sonner';
 import { useDarkMode } from './hooks/useDarkMode';
 import { AppProvider } from './contexts/CapabilityContext';
 import { AuthProvider, AuthGate } from './auth/AuthContext';
-import PreviewApp from './preview/PreviewApp';
+import DashboardApp from './dashboard/DashboardApp';
 
 export default function App() {
   // Mirror the Header toggle so sonner's palette flips with the rest
@@ -21,7 +21,7 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <AuthGate>
-            <PreviewApp />
+            <DashboardApp />
             <Toaster
               position="bottom-center"
               theme={isDark ? 'dark' : 'light'}

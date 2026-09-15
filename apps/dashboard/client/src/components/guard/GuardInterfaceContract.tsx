@@ -81,7 +81,7 @@ import {
   type InterfaceWriteFact,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { stepTargetText, type PomCall } from '@/lib/interface-pom';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';

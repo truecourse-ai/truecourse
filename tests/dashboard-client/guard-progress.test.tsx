@@ -3,16 +3,16 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { GuardFlowListItem, GuardFlowProgress } from '@truecourse/shared';
-import type { Repo } from '@/preview/data/types';
+import type { Repo } from '@/dashboard/data/types';
 
 const state = vi.hoisted(() => ({ flows: [] as unknown[] }));
-vi.mock('@/preview/shell/preview-state', () => ({
-  usePreviewState: () => ({ repos: [{ id: 'repo', fullName: 'acme/repo' } as Repo] }),
+vi.mock('@/dashboard/shell/dashboard-state', () => ({
+  useDashboardState: () => ({ repos: [{ id: 'repo', fullName: 'acme/repo' } as Repo] }),
 }));
 vi.mock('@/lib/api', () => ({ getGuardFlows: async () => ({ flows: state.flows }) }));
 vi.mock('@/lib/socket', () => ({ connectSocket: () => ({ on: () => {}, off: () => {} }) }));
 
-import FlowsPage from '@/preview/pages/FlowsPage';
+import FlowsPage from '@/dashboard/pages/FlowsPage';
 
 const progress: GuardFlowProgress = { execution: 'passed', scenarios: 1, passed: 1, coverage: 'partial', verified: 1, total: 2, unit: 'cases', category: 'behavior', generation: 'incomplete' };
 const flow = (title: string, p: GuardFlowProgress): GuardFlowListItem => ({ flowId: title, title, goal: title, status: p.coverage === 'complete' ? 'guarded' : 'blocked-on', bucket: p.coverage === 'complete' ? 'guarded' : 'partial', epic: false, composedOf: [], manual: false, milestoneCount: 1, sectionCount: 1, docs: [], surfaces: [], drivers: ['web'], findings: 0, toolDefects: 0, errors: 0, progress: p });

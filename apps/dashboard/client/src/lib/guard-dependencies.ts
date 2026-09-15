@@ -15,7 +15,7 @@
  */
 
 import type { GuardDependencyRow, GuardDependencyState } from '@/types/guard-dependencies';
-import type { StatusTone } from '@/preview/ui/status-word';
+import type { StatusTone } from '@/dashboard/ui/status-word';
 
 export interface GuardDependencyPaint {
   label: string;

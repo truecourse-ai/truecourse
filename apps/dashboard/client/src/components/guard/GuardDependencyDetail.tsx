@@ -30,9 +30,9 @@
 
 import { useState } from 'react';
 import { ArrowUpRight, ChevronDown, ChevronRight, Loader2, FlaskConical } from 'lucide-react';
-import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/preview/ui/artifact-view';
+import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/dashboard/ui/artifact-view';
 import { Button } from '@/components/ui/button';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { Input } from '@/components/ui/input';
 import { useGuardArtifactRaw } from '@/hooks/useGuardArtifactRaw';
 import { GUARD_DEPENDENCY_STATE, guardDependencyType } from '@/lib/guard-dependencies';

@@ -58,7 +58,7 @@ vi.mock('@/components/sessions/RunConversationPage', () => ({
   ),
 }));
 
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 import type { WorkspaceRun } from '@/lib/api';
 import type { JobView } from '@truecourse/shared';
 
@@ -217,7 +217,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
       <Address />
       <Toaster />

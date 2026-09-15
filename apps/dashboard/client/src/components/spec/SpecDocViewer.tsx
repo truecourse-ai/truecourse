@@ -9,7 +9,7 @@ import { headingMatchKey } from '@/lib/heading-match';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Loader2, AlertCircle, EyeOff, ExternalLink } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
 

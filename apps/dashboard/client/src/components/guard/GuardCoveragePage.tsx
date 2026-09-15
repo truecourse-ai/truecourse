@@ -28,7 +28,7 @@ import { buildCorpusConflicts, isConflictId, resolveConflictId } from '@truecour
 import { parseSpecKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import * as api from '@/lib/api';
 import { tallyCapabilities, tallyNeedsSetup } from '@/lib/guard-report';
 import { findGuardClaimSelection, type GuardUntestableEntry } from '@/lib/guard-claims';
