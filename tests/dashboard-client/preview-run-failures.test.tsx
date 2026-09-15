@@ -220,9 +220,13 @@ describe('the failure toast', () => {
     const state = serve([scan()]);
     renderAt('/code');
 
-    // The world is loaded and the scan is up; NOW it dies.
+    // The world is loaded and the scan is up; NOW it dies. The repo name
+    // proves only the repo list; the row's onboarding marker proves the RUNNING
+    // scan was read (the workspace read started at mount, so it landed
+    // earlier). Swapping the served runs before that read lands would make the
+    // failure "already dead on load", which the toast rightly stays silent on.
     await screen.findByText('linkwarden/linkwarden');
-    await waitFor(() => expect(state.runs[0]!.status).toBe('running'));
+    await screen.findByText('onboarding');
     state.runs = [failed()];
     fireSocket('session:runs-changed', { repoId: REAL.id });
 
