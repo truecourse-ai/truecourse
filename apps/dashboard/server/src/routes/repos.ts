@@ -77,6 +77,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
           path: e.path,
           provider: e.provider ?? null,
           remoteUrl: e.remoteUrl ?? null,
+          defaultBranch: e.defaultBranch ?? null,
           latestEvent: await resolveLatestEvent(e.path),
         })),
       );

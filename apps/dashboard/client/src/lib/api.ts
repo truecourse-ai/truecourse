@@ -98,7 +98,8 @@ export type RepoResponse = {
   /** Most recent lifecycle event across features (home-page card), or null. */
   latestEvent?: { kind: LatestEventKind; at: string } | null;
   branches?: string[];
-  defaultBranch?: string;
+  /** The branch the provider tracks; null for a local folder, which runs whatever is checked out. */
+  defaultBranch?: string | null;
   isGitRepo?: boolean;
 };
 
