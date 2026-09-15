@@ -179,8 +179,10 @@ function MilestoneList({
           key={m.order}
           className="flex min-w-0 items-start gap-2 border-b border-border/60 px-3 py-2 last:border-b-0"
         >
-          <span className="w-4 shrink-0 text-[11px] text-muted-foreground">
-            {m.order}
+          {/* `M1`, not `1`: the step rows and the chips name a milestone that
+              way, and a bare ordinal beside a claim reads as a list number. */}
+          <span className="w-6 shrink-0 text-[11px] tabular-nums text-muted-foreground">
+            {`M${m.order}`}
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-[12px] leading-snug text-foreground">
