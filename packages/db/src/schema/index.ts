@@ -6,6 +6,7 @@ import { activityRuns, activityEvents } from './activity.js';
  */
 
 export * from './repositories.js';
+export * from './integrations.js';
 export * from './llm.js';
 export * from './content.js';
 export * from './decisions.js';

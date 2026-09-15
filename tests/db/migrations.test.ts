@@ -93,3 +93,25 @@ describe('0022_provider_repositories', () => {
     ]);
   });
 });
+
+describe('0021_drop_ee_era', () => {
+  it('keeps every document connection, with its token, and clears the cached sweep delta', async () => {
+    const { sql, finish } = await databaseBefore('0021_drop_ee_era');
+    await sql.query(
+      `INSERT INTO integration_connections (workspace_org_id, provider, config, token_enc, pending, created_at, updated_at)
+       VALUES ('org_A', 'jira', '{"baseUrl":"https://acme.atlassian.net"}', 'enc-jira', '{"delta":{"new":3}}', $1, $1),
+              ('org_A', 'confluence', '{"spaceKey":"ENG"}', 'enc-confluence', NULL, $1, $1)`,
+      [NOW],
+    );
+
+    await finish();
+
+    const rows = await sql.query<{ provider: string; config: Record<string, string>; token_enc: string; pending: unknown }>(
+      'SELECT provider, config, token_enc, pending FROM integration_connections ORDER BY provider',
+    );
+    expect(rows.rows).toEqual([
+      { provider: 'confluence', config: { spaceKey: 'ENG' }, token_enc: 'enc-confluence', pending: null },
+      { provider: 'jira', config: { baseUrl: 'https://acme.atlassian.net' }, token_enc: 'enc-jira', pending: null },
+    ]);
+  });
+});
