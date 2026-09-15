@@ -107,14 +107,16 @@ const BTN =
 const CASES_SHOWN = 4;
 
 /**
- * ONE milestone's cases: the situations that would prove it.
+ * ONE milestone's cases: the situations this flow proves, each as the
+ * source-grounded sentence it states.
  *
  * They carry no state of their own. A flow's cases stand or fall together — the
  * block below says Blocked once, the verdict says Passed once — so a mark per
  * case could only repeat it, in the one colour a reader is scanning for.
  *
- * A milestone with EXACTLY ONE case lists none: its case restates the claim
- * almost word for word, so the row would say the same thing twice. A long list
+ * A single case is listed like any other: a milestone's cases are a SELECTION
+ * from its claim's, so one case usually means this flow proves one of the
+ * claim's several situations, and the sentence is what says which. A long list
  * collapses: seventeen cases is a wall, and the count is the honest summary
  * until a reader asks for the rest.
  */
@@ -160,9 +162,9 @@ function MilestoneCases({
  * A step names its milestone only once opened, so the step list does not stand
  * in for this.
  *
- * Below each claim ride its CASES, when it has more than one, each marked with
- * whether a passing test discharged it. That mark is the only state here: the
- * page's one verdict stays the test's.
+ * Below each claim ride its CASES, the situations this flow proves of it, as
+ * muted sentences. They carry no mark of their own: the page's one verdict
+ * stays the test's.
  */
 function MilestoneList({
   milestones,
@@ -187,7 +189,7 @@ function MilestoneList({
             <span className="block text-[12px] leading-snug text-foreground">
               {m.claimTitle}
             </span>
-            {m.cases && m.cases.length > 1 && <MilestoneCases cases={m.cases} />}
+            {m.cases && m.cases.length > 0 && <MilestoneCases cases={m.cases} />}
           </span>
           <button
             type="button"

@@ -49,6 +49,30 @@ function renderDetail(detail: GuardFlowDetailData = DETAIL) {
   );
 }
 
+describe('the milestone chain', () => {
+  it('lists a milestone’s single case under its claim', () => {
+    renderDetail({
+      ...DETAIL,
+      milestones: [
+        {
+          order: 1,
+          doc: 'docs/conversion.md',
+          anchor: 'conversion-behaviors',
+          claimTitle: 'Conversion behaviors',
+          headingText: 'Conversion behaviors',
+          live: true,
+          drifted: false,
+          cases: [{ id: 'missing-key', claim: 'A missing key converts to an empty string.' }],
+        },
+      ],
+    });
+
+    const chain = screen.getByRole('list', { name: 'Milestones' });
+    expect(within(chain).getByText('Conversion behaviors')).toBeInTheDocument();
+    expect(within(chain).getByText('A missing key converts to an empty string.')).toBeInTheDocument();
+  });
+});
+
 describe('the flow detail header', () => {
   it('states no progress of its own: the body says what ran and what is missing', () => {
     const { container } = renderDetail();
