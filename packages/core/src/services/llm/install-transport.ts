@@ -188,8 +188,3 @@ export function createClaudeCodeTransport(): LlmTransport {
   claudeCode ??= createClaudeAgentTransport({ pathToClaudeCodeExecutable: resolveClaudeBinary() });
   return claudeCode;
 }
-
-/** Whether `transport` is the claude-code one — the run will spawn `claude`. */
-export function isClaudeCodeTransport(transport: LlmTransport | undefined): boolean {
-  return transport !== undefined && transport === claudeCode;
-}

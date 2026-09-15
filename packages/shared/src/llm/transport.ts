@@ -410,55 +410,22 @@ export function emitLlmCallRecord(rec: LlmCallRecord): void {
 }
 
 // ---------------------------------------------------------------------------
-// process-wide default transport
+// the no-provider sentinel
 // ---------------------------------------------------------------------------
 
-/**
- * Optional process-installed default transport. A long-lived server can't pass
- * a transport through every call site — so the enterprise edition installs an
- * API-backed transport ONCE at boot via `setDefaultTransport`.
- * Runners/providers that aren't handed an explicit transport fall back to this.
- * Unset (OSS) → `undefined`, so callers supply their own transport.
- */
-let installedDefault: LlmTransport | undefined;
-
-/** Install (or clear, with `undefined`) the process-wide default transport. */
-export function setDefaultTransport(transport: LlmTransport | undefined): void {
-  installedDefault = transport;
-}
-
-/** The process-installed default transport, or `undefined` when none is set. */
-export function getDefaultTransport(): LlmTransport | undefined {
-  return installedDefault;
-}
-
-/** User-facing error when no LLM provider is configured (enterprise). */
+/** User-facing error when no LLM provider is configured. */
 export const NO_LLM_PROVIDER_MESSAGE =
   'No LLM provider is configured. Set one in Settings → Models.';
 
 /**
- * The enterprise edition NEVER falls back to the local `claude` CLI. Until a
- * provider is configured, EE installs THIS as the process default (via
- * `setDefaultTransport`), so any LLM work errors loudly instead of silently
- * spawning the (often-absent) CLI. Replaced by the real AI-SDK transport the
- * moment a provider is saved/loaded.
+ * The transport a stage runs on when nothing handed it a real one. There is
+ * no process-wide default: every run carries its workspace's transport, so a
+ * stage that was given none fails loudly with the no-provider message instead
+ * of silently spawning a `claude` that may not exist.
  */
 export const noProviderTransport: LlmTransport = async () => {
   throw new Error(NO_LLM_PROVIDER_MESSAGE);
 };
-
-/**
- * Whether a REAL provider transport is installed — not the no-provider sentinel
- * and not unset. EE entry points that do LLM work (knowledge sync, the gate's
- * contract generation) check this UP FRONT to fail loudly; otherwise the
- * consolidator's fail-open handling (e.g. the relevance filter defaults to
- * "include" on a transport error) silently swallows the "no provider" failure
- * and the run looks like it succeeded with no output.
- */
-export function isLlmConfigured(): boolean {
-  const t = getDefaultTransport();
-  return t !== undefined && t !== noProviderTransport;
-}
 
 /**
  * Strip a single leading ```...``` fence (some models wrap JSON in fences even

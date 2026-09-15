@@ -39,7 +39,6 @@ import {
 import type { GuardVisualJudge, GuardVisualJudgeInput } from '@truecourse/guard-runner';
 import {
   extractJsonValue,
-  getDefaultTransport,
   noProviderTransport,
   jsonSchemaHint,
   OUTPUT_ONLY_GUARDRAIL,
@@ -347,18 +346,17 @@ export function createGuardVisualJudge(
   repoRoot: string,
   opts: {
     /**
-     * Judge on THIS transport instead of the configured one — a hosted run
-     * passes the asking workspace's provider, whose credentials never install
-     * process-wide.
+     * The transport the judge asks through — the asking workspace's provider,
+     * whose credentials never install process-wide.
      */
-    transport?: LlmTransport;
-  } = {},
+    transport: LlmTransport;
+  },
 ): GuardVisualJudge {
   return async (input) => {
     let runner: VisualJudgeRunner;
     try {
       runner = spawnVisualJudgeRunner({
-        transport: opts.transport ?? getDefaultTransport(),
+        transport: opts.transport,
         model: resolveModel('guard.visualJudge'),
         fallbackModel: resolveFallbackModel() ?? undefined,
       });

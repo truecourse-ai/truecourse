@@ -20,6 +20,7 @@ import {
   EstimateDeclined,
 } from '../../packages/core/src/commands/guard-in-process.js';
 import { resetSpecStore } from '../../packages/core/src/lib/spec-store.js';
+import { noProviderTransport } from '@truecourse/shared/llm';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 
@@ -79,6 +80,7 @@ describe('guard generate — open-conflict gate', () => {
     // The estimate must NEVER be reached (never ask to spend, then fail).
     let estimateReached = false;
     const err = await guardGenerateInProcess(repo, {
+      transport: noProviderTransport,
       onLlmEstimate: async () => {
         estimateReached = true;
         return true;
@@ -106,7 +108,7 @@ describe('guard generate — open-conflict gate', () => {
     writeDecisions({
       relations: [{ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/users-entity', detectedFrom: 'manual' }],
     });
-    const err = await guardGenerateInProcess(repo, { onLlmEstimate: async () => false }).catch((e: unknown) => e);
+    const err = await guardGenerateInProcess(repo, { transport: noProviderTransport, onLlmEstimate: async () => false }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(OpenConflictsError);
     expect((err as OpenConflictsError).conflicts).toHaveLength(1);
   });
@@ -114,7 +116,7 @@ describe('guard generate — open-conflict gate', () => {
   it('proceeds past the gate when a force-exclude drops one side of the overlap', async () => {
     seedCorpusWithOverlap();
     writeDecisions({ manualExcludes: ['docs/v1.md'] });
-    const err = await guardGenerateInProcess(repo, { onLlmEstimate: async () => false }).catch((e: unknown) => e);
+    const err = await guardGenerateInProcess(repo, { transport: noProviderTransport, onLlmEstimate: async () => false }).catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(OpenConflictsError);
     expect(err).toBeInstanceOf(EstimateDeclined);
   });
@@ -134,7 +136,7 @@ describe('guard generate — open-conflict gate', () => {
         },
       ],
     });
-    const err = await guardGenerateInProcess(repo, { onLlmEstimate: async () => false }).catch((e: unknown) => e);
+    const err = await guardGenerateInProcess(repo, { transport: noProviderTransport, onLlmEstimate: async () => false }).catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(OpenConflictsError);
     expect(err).toBeInstanceOf(EstimateDeclined);
   });
@@ -146,7 +148,7 @@ describe('guard generate — open-conflict gate', () => {
         { docA: 'docs/v1.md', anchorA: null, docB: 'docs/v2.md', anchorB: null, verdict: 'dismissed', resolvedAt: '' },
       ],
     });
-    const err = await guardGenerateInProcess(repo, { onLlmEstimate: async () => false }).catch((e: unknown) => e);
+    const err = await guardGenerateInProcess(repo, { transport: noProviderTransport, onLlmEstimate: async () => false }).catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(OpenConflictsError);
     expect(err).toBeInstanceOf(EstimateDeclined);
   });

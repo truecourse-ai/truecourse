@@ -26,13 +26,13 @@
  * records a fail-soft failure.
  */
 
-import { getDefaultTransport, noProviderTransport, extractJsonValue, jsonSchemaHint, type LlmTransport } from '@truecourse/shared/llm'
+import { noProviderTransport, extractJsonValue, jsonSchemaHint, type LlmTransport } from '@truecourse/shared/llm'
 import { ClaimDiffSchema, RealizationMatchSchema, RecipeProposalSchema, WorldClassifySchema } from './schemas.js'
 
-/** The transport a one-shot stage calls through: the caller's, else the process
- *  default, else the sentinel that fails with the no-provider message. */
+/** The transport a one-shot stage calls through: the caller's, else the sentinel
+ *  that fails with the no-provider message. */
 function requireTransport(opts: { transport?: LlmTransport }): LlmTransport {
-  return opts.transport ?? getDefaultTransport() ?? noProviderTransport
+  return opts.transport ?? noProviderTransport
 }
 import {
   RECIPE_SYSTEM_PROMPT,

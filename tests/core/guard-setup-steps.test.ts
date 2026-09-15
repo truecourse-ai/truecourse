@@ -27,7 +27,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recipePath, readGuardSetup, writeGuardSetup, computeRecipeFingerprint, computePreparationFingerprint } from '@truecourse/guard-runner';
-import { setDefaultTransport } from '@truecourse/shared/llm';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import type {
   GuardSetupAuthStep,
   GuardSetupCatalogSession,
@@ -56,10 +56,8 @@ afterAll(() => {
 });
 
 const repos: string[] = [];
-beforeEach(() => setDefaultTransport(async () => 'ok'));
 afterEach(() => {
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
-  setDefaultTransport(undefined);
 });
 
 const DOC = 'docs/orgs.md';
@@ -126,6 +124,7 @@ const neverCalled = async (): Promise<never> => {
 /** Every session seam, recording which ones a run actually reached. */
 function seams(): {
   reached: string[];
+  transport: LlmTransport;
   catalogSession: GuardSetupCatalogSession;
   authorInterfaces: GuardSetupInterfacesStep;
   seedSession: GuardSetupSeedSession;
@@ -135,6 +134,7 @@ function seams(): {
   const reached: string[] = [];
   return {
     reached,
+    transport: async () => 'ok',
     catalogSession: async () => {
       reached.push('catalog');
       return { status: 'ok', added: [], findings: [] };

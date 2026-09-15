@@ -38,24 +38,15 @@ import {
 } from '@truecourse/guard-generator';
 import { writeGuardSetup, readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
 import {
-  getDefaultTransport,
   getStageUsage,
   resetStageUsage,
   setLlmCallSink,
-  isLlmConfigured,
   noProviderTransport,
   NO_LLM_PROVIDER_MESSAGE,
   type LlmTransport,
 } from '@truecourse/shared/llm';
-import { resolveClaudeBinary } from '@truecourse/shared';
 import type { RunError, SessionDriver } from '@truecourse/agent-loop';
 import type { GuardSetupReport } from '@truecourse/shared';
-import {
-  LlmApiConfigError,
-  createClaudeCodeTransport,
-  isClaudeCodeTransport,
-} from '../services/llm/install-transport.js';
-import { isCliBinaryAvailable } from '../lib/cli-binary.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import type { LlmTransportMode } from '../services/llm/provider-config.js';
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
@@ -104,12 +95,12 @@ export class NoLlmProviderError extends Error {
 export interface GuardSetupInProcessOptions {
   tracker?: StepTracker;
   /**
-   * Run the ONE-SHOT calls on THIS transport instead of resolving one. The
-   * dashboard server passes the transport it built from the asking workspace's
-   * stored provider config — credentials travel with the run, never through a
-   * process-wide default — and step 0 is answered by its existence.
+   * The transport the ONE-SHOT calls run on: the one the dashboard server
+   * built from the asking workspace's stored provider config, or the
+   * operator's Claude Code. Credentials travel with the run, never through a
+   * process-wide default, and the run has no other way to reach a model.
    */
-  transport?: LlmTransport;
+  transport: LlmTransport;
   /**
    * The mode an explicit `transport`/`driver` runs in, which the run record's
    * attribution states. Unset, the run is on this process's Claude Code.
@@ -190,59 +181,16 @@ export interface GuardSetupInProcessResult {
 
 /**
  * STEP 0 — a usable LLM provider must exist. Cheap and call-free: the
- * no-provider sentinel is a hard refusal, and the Claude Code transport only
- * needs the `claude` binary ON PATH here.
- *
- * The binary is demanded of exactly the runs that SPAWN it: one that resolved no
- * transport at all, and one whose resolved transport runs on `claude`. Resolving
- * a transport is not evidence the thing it spawns exists, and letting that count
- * would move the missing binary from step 0 to minutes later, after the install,
- * build, boot and analysis this gate exists to protect. A workspace on an API
- * provider passes its own transport, so this never looks for a binary that run
- * never spawns.
+ * no-provider sentinel is a hard refusal. A real transport is taken at its
+ * word — the dashboard server probed the workspace's provider (or the
+ * operator's Claude Code login) before it built the run, so there is nothing
+ * left to check here.
  *
  * It runs FIRST because both of setup's LLM stages happen after real work (a build,
  * a boot, an analysis pass), and discovering "no provider" then would waste all of it.
  */
-export function assertLlmProviderConfigured(
-  transport?: LlmTransport,
-  opts: { spawnsClaudeCli?: boolean } = {},
-): void {
+export function assertLlmProviderConfigured(transport: LlmTransport): void {
   if (transport === noProviderTransport) throw new NoLlmProviderError(NO_LLM_PROVIDER_MESSAGE);
-  if (transport) {
-    if (!opts.spawnsClaudeCli) return;
-  } else if (getDefaultTransport() !== undefined) {
-    if (!isLlmConfigured()) throw new NoLlmProviderError(NO_LLM_PROVIDER_MESSAGE);
-    return;
-  }
-  const binary = resolveClaudeBinary();
-  if (!isCliBinaryAvailable(binary)) {
-    throw new NoLlmProviderError(
-      `No LLM provider is configured: \`${binary}\` is not installed or not on your PATH. ` +
-        'Install Claude Code (https://docs.anthropic.com/en/docs/claude-code), set CLAUDE_CODE_BINARY to its path, ' +
-        'or set a provider in Settings → Models.',
-    );
-  }
-}
-
-/**
- * The LLM transport a run's one-shot calls go through: the caller's own (a
- * workspace's provider), else the process default, else this process's own
- * Claude Code.
- */
-function resolveTransport(options: { transport?: LlmTransport }): ResolvedSetupTransport {
-  // A caller that built its own transport has already answered every question
-  // this function asks — including step 0's, since the object exists.
-  if (options.transport) return { transport: options.transport };
-  const installed = getDefaultTransport();
-  if (installed) return { transport: installed, spawnsClaudeCli: isClaudeCodeTransport(installed) };
-  return { transport: createClaudeCodeTransport(), spawnsClaudeCli: true };
-}
-
-/** What a run resolved, plus whether that answer is the `claude`-spawning transport. */
-interface ResolvedSetupTransport {
-  transport?: LlmTransport;
-  spawnsClaudeCli?: boolean;
 }
 
 /** The pre-flight estimate the gate prices the run with. */
@@ -286,23 +234,13 @@ const GUARD_SETUP_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
 
 export async function guardSetupInProcess(
   repoRoot: string,
-  options: GuardSetupInProcessOptions = {},
+  options: GuardSetupInProcessOptions,
 ): Promise<GuardSetupInProcessResult> {
   const { tracker } = options;
   // Step 0, before the estimate: never ask to spend, then fail on a missing
-  // provider. In API mode the provider IS the saved config, so an unusable one is
-  // the same refusal a missing `claude` binary is.
-  let resolved: ResolvedSetupTransport;
-  try {
-    resolved = resolveTransport(options);
-  } catch (e) {
-    if (e instanceof LlmApiConfigError) throw new NoLlmProviderError(e.message);
-    throw e;
-  }
-  const transport = resolved.transport;
-  assertLlmProviderConfigured(transport, {
-    ...(resolved.spawnsClaudeCli ? { spawnsClaudeCli: true } : {}),
-  });
+  // provider.
+  const { transport } = options;
+  assertLlmProviderConfigured(transport);
   const mode: LlmTransportMode = options.transportMode ?? 'claude-code';
 
   if (options.onLlmEstimate) {
@@ -379,6 +317,7 @@ export async function guardSetupInProcess(
               },
               driver: acquired.driver,
               transportMode: mode,
+              transport,
               ...(options.signal ? { signal: options.signal } : {}),
               onStatus: (message) => tracker?.detail('interfaces', message),
             });
@@ -389,6 +328,7 @@ export async function guardSetupInProcess(
               places: run.places,
               diagnostics: run.diagnostics,
               spent: run.spent,
+              ...(run.reconcile ? { reconcile: run.reconcile } : {}),
             };
           },
           ...(options.signal ? { signal: options.signal } : {}),

@@ -660,3 +660,30 @@ describe('mapInterfaces — diagnostics are run reporting', () => {
     expect(InterfacesFileSchema.parse(file).source).toEqual({ cli: 'probes' });
   });
 });
+
+describe('buildInterfacesStep — the authoring half', () => {
+  it("says on the step row what the closing state reconciliation could not do", async () => {
+    const { repo, catalog } = catalogRepo(unionCatalog());
+    // One derived screen with nothing authored for it: the authoring run has work.
+    const withScreen: InterfacesFile = {
+      ...catalog,
+      resources: { web: [{ id: 'root', kind: 'screen', title: '/', address: '/' }] },
+      source: { cli: 'union', web: 'tree' },
+    };
+    fs.writeFileSync(path.join(repo, '.truecourse', 'guard', 'interfaces.json'), JSON.stringify(withScreen, null, 2));
+    const author = async () => ({
+      runId: 'run-1',
+      authored: 1,
+      skipped: [],
+      places: [{ status: 'completed', placeId: 'root' }],
+      diagnostics: [],
+      spent: { turns: 1, tokens: 10, costUsd: 0 },
+      reconcile: { problems: ['the reconciliation call failed: provider down'] },
+    });
+
+    const result = await buildInterfacesStep(forbiddenContext(), { author })(stepInput(repo, catalog.interfaces, []));
+
+    expect(result.status).toBe('ok');
+    expect(result.reason).toContain('state registry not reconciled: the reconciliation call failed: provider down');
+  });
+});

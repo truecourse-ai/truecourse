@@ -27,7 +27,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop';
-import { getDefaultTransport } from '@truecourse/shared/llm';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import { evidenceScenarioDir } from '@truecourse/guard-runner';
 import { readGuardEvidenceAt } from '../../lib/guard-store.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
@@ -76,6 +76,8 @@ export interface AdjudicationToolsInput {
   item: AdjudicationItem;
   exec: AdjudicationExecution;
   state: AdjudicationSessionState;
+  /** The run's transport, which `visual_judge`'s one vision call goes through. */
+  transport: LlmTransport;
 }
 
 export function buildAdjudicationTools(input: AdjudicationToolsInput): SessionTool[] {
@@ -197,7 +199,7 @@ function visualJudgeTool(input: AdjudicationToolsInput): SessionTool {
       let runner;
       try {
         runner = spawnVisualJudgeRunner({
-          transport: getDefaultTransport(),
+          transport: input.transport,
           model: resolveModel('guard.visualJudge'),
           fallbackModel: resolveFallbackModel() ?? undefined,
         });
