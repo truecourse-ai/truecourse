@@ -52,14 +52,12 @@ export async function startServer(): Promise<void> {
   const mode = serverMode();
   // 1. Route all internal diagnostics to the server log file, through the
   //    transport that also reports errors to Sentry. Under `pnpm dev`
-  //    `TRUECOURSE_DEV=1` tees lines to stderr so the dev terminal shows them;
-  //    a deployment that collects logs from a fixed path sets
-  //    `TRUECOURSE_LOG_DIR`.
+  //    `TRUECOURSE_DEV=1` tees lines to stderr so the dev terminal shows them.
   initSentry();
   setLogTransport(
     new ServerLogTransport(
       new FileLogTransport({
-        filePath: path.join(process.env.TRUECOURSE_LOG_DIR ?? getLogDir(), 'dashboard.log'),
+        filePath: path.join(getLogDir(), 'dashboard.log'),
         tee: process.env.TRUECOURSE_DEV === '1',
       }),
     ),
