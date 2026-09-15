@@ -1,5 +1,7 @@
 /**
- * SpecCorpusView, the curated-corpus Spec tab's LEFT NAV (spec-scan redesign).
+ * SpecCorpusView, the curated corpus as a LEFT NAV. Nothing mounts it today —
+ * the corpus list a reader sees is Context's Documents page — and the module is
+ * kept for the live {@link useSpecCorpus} hook and {@link parseSpecKey} below it.
  *
  * The corpus as the shared {@link EntityList}: one search, the area chips as its
  * filter (multi-select, and a typeahead once there are many), and the sections a
@@ -30,8 +32,6 @@ import { CHIP_CLASS } from '@/preview/ui/bits';
 import { formatRelativeTime } from '@truecourse/shared';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 
-/** Shown on decision actions while a PR is being viewed before its gate has run. */
-
 // Docs are listed once (keyed by their plain ref). A conflict is keyed by the id
 // `buildCorpusConflicts` stamps on it, NEVER rebuilt here, because the pair alone
 // cannot tell two disputes on the same two docs apart (see `conflictId`).
@@ -40,7 +40,7 @@ export type SpecKey =
   | { kind: 'doc'; ref: string }
   | { kind: 'overlap'; area: string; a: string; b: string };
 
-/** Parse a `?spec=` value into the corpus item it addresses. A conflict id's
+/** Parse a corpus key (a doc ref or a conflict id) into the item it addresses. A conflict id's
  *  trailing discriminator is not needed to LABEL it, so the first four segments
  *  are read and any discriminator ignored, {@link resolveConflictId} is what
  *  turns the id back into the record. */
@@ -111,7 +111,7 @@ export interface SpecCorpusState {
 
 /**
  * Owns the corpus fetch + scan for one repo. `enabled` gates the initial read so
- * the page doesn't fetch a corpus until the Spec tab is actually shown.
+ * the page doesn't fetch a corpus until the surface that reads it is shown.
  */
 export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState {
   const [data, setData] = useState<SpecCorpusResponse | null>(null);
@@ -167,7 +167,7 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
 
   const apply = useCallback((res: SpecCorpusResponse) => setData(res), []);
 
-  // OSS include/exclude: the corpus is unchanged (no re-curate), so keep the
+  // Include/exclude: the corpus is unchanged (no re-curate), so keep the
   // optimistically-moved corpus and only reconcile the persisted decision lists.
   // Functional update so it merges onto the latest (post-optimistic) data.
   const applyDecisions = useCallback(
@@ -178,7 +178,7 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
     [],
   );
 
-  // OSS conflict verdict: the corpus is unchanged (no re-curate), so keep it and
+  // A conflict verdict: the corpus is unchanged (no re-curate), so keep it and
   // only reconcile the persisted verdict list, the conflict/orphan rows derive.
   const applyConflictResolutions = useCallback(
     (list: SpecConflictResolution[]) =>
@@ -216,8 +216,8 @@ export function SpecCorpusView({
   /** Fired after an include/exclude is recorded, so the parent can refresh the Rescan dot. */
   onDecision?: () => void;
   /**
-   * Jump to the Sources page. Passed only where that page exists (an OSS repo
-   * view); its absence is what keeps the pre-scan pointer off a hosted corpus.
+   * Jump to the Sources page. Passed only where that page exists; its absence is
+   * what keeps the pre-scan pointer off a workspace corpus.
    */
   onOpenSources?: () => void;
 }) {
@@ -243,10 +243,10 @@ export function SpecCorpusView({
 
   // Force-include / exclude. Toggle the decision lists optimistically so the row
   // moves immediately (both directions, the presentation derives from the lists).
-  // OSS records the decision without re-curating (a Scan later materializes the
+  // A decision is recorded without re-curating (a Scan later materializes the
   // batch), so the response is a decision-list ack: reconcile the lists and let the
-  // parent light the Rescan dot. PR scope (EE) re-curates and returns the full
-  // corpus, which replaces the optimistic state.
+  // parent light the Rescan dot. A source that answers with a whole corpus instead
+  // replaces the optimistic state.
   const runDecision = useCallback(
     async (ref: string, action: DecisionAction, call: () => Promise<SpecCorpusResponse | SpecDecisionAck>) => {
       setBusyRef(ref);
@@ -334,7 +334,7 @@ export function SpecCorpusView({
   const manualIncludes = data.manualIncludes ?? [];
   const manualExcludes = data.manualExcludes ?? [];
   // The section rows derive from the decision lists over the unchanged corpus, so
-  // an OSS decision (no re-curate) moves a row in both directions: an excluded doc
+  // a decision (no re-curate) moves a row in both directions: an excluded doc
   // leaves Documents, a restored one returns. A row whose decision the corpus
   // hasn't materialized yet (excluded doc still kept, included doc not yet kept)
   // shows the pending-rescan hint, derived, so it survives a reload and clears
@@ -361,9 +361,9 @@ export function SpecCorpusView({
   const docTitle = new Map(c.docs.map((d) => [d.ref, d.title] as const));
   const labelOf = (ref: string): string => docTitle.get(ref) ?? ref;
 
-  // Hosted repo view: docs inherited from the workspace Knowledge corpus carry
-  // `layer: 'workspace'`. The set drives the workspace badge on kept-doc + conflict
-  // rows (which know refs only). Empty on OSS / repo-local corpora ⇒ no badge.
+  // Docs that come from the workspace corpus carry `layer: 'workspace'`. The set
+  // drives the workspace badge on kept-doc + conflict rows (which know refs only).
+  // Empty on a repo-local corpus ⇒ no badge.
   const workspaceRefs = new Set(c.docs.filter((d) => d.layer === 'workspace').map((d) => d.ref));
 
   // Tag filter: the distinct area tags across docs; selecting some narrows the
@@ -382,7 +382,7 @@ export function SpecCorpusView({
     });
 
   // Conflicts = the shared derivation (ONE copy in @truecourse/shared, the same
-  // the guard-generate gate and CLI use): each flagged within-area overlap, open
+  // one the generate gate reads): each flagged within-area overlap, open
   // or resolved by a matching verdict/dismissal or a covering exclude.
   const conflictResolutions = data.conflictResolutions ?? [];
   const decisions = { manualExcludes, conflictResolutions };
@@ -667,7 +667,7 @@ function DocRowContent({
 }: {
   doc: SpecCorpusDoc;
   tags: string[];
-  /** Hosted repo view: this doc is inherited from the workspace Knowledge corpus. */
+  /** This doc comes from the workspace corpus rather than the repository's own. */
   workspace?: boolean;
   busy: boolean;
   onSkip: () => void;

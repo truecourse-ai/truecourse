@@ -27,7 +27,7 @@ import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-s
 
 
 /**
- * The FLOW read surfaces (OSS): the coverage inversion (a section lists the flows
+ * The FLOW read surfaces: the coverage inversion (a section lists the flows
  * that traverse it), the Flows tab's list + detail, the Interfaces catalog with its
  * reverse index, and the run payload's flow-instance join.
  *
@@ -620,7 +620,7 @@ describe('Guard flow read surfaces', () => {
         sectionCount: 3,
         docs: [DOC],
         // The fixture's finding is a FIDELITY rejection — our own defect, never
-        // committed — so it never counts as drift. It rides in `toolDefects`
+        // stored — so it never counts as drift. It rides in `toolDefects`
         // instead, and the flow does not read red because of it.
         findings: 0,
         toolDefects: 1,
@@ -660,7 +660,7 @@ describe('Guard flow read surfaces', () => {
       // answers instead, so a blocked flow stays reachable by the filter.
       expect(byId.get('task-export').drivers).toEqual(['cli']);
 
-      // The same committed test with a WEB step in it: one sandbox scenario,
+      // The same stored test with a WEB step in it: one sandbox scenario,
       // two drivers, in registry order.
       write(
         SCENARIO_FILE,
@@ -726,7 +726,7 @@ describe('Guard flow read surfaces', () => {
       const res = await request(app).get(url('flows')).expect(200);
       const row = res.body.flows.find((f: any) => f.flowId === FLOW_ID);
       // No corpus ⇒ no goal/milestones, but the coverage state survives — and the
-      // title falls back to the flow's own committed test, never the bare id.
+      // title falls back to the flow's own stored test, never the bare id.
       expect(row).toMatchObject({
         title: 'Tasks are created, listed newest-first, completed and filterable',
         goal: '',
@@ -952,9 +952,8 @@ describe('Guard flow read surfaces', () => {
   // --- The RECIPE artifact: one per repo, and secrets never leave the file ----
   //
   // The recipe is the SINGLETON raw read — a repo has one, so it is addressed by
-  // nothing. It is also the only artifact that can carry a secret, and it is
-  // COMMITTED: what may be read of it here is exactly what `truecourse guard
-  // recipe` prints, which is everything except an inline credential value.
+  // nothing. It is also the only artifact that can carry a secret, so what may be
+  // read of it here is everything except an inline credential value.
 
   describe('the recipe artifact', () => {
     const RECIPE_FILE = '.truecourse/scenarios/recipe.json';
@@ -1072,7 +1071,7 @@ describe('Guard flow read surfaces', () => {
 
     /**
      * The generate that recomposed the corpus left this entry behind, marked: it
-     * is not in `flows.json` (so no title, goal or milestones), but its committed
+     * is not in `flows.json` (so no title, goal or milestones), but its stored
      * test is real coverage. The lifecycle flow is marked TOO — and must not read
      * as orphaned, because synthesis still produces it.
      */
@@ -1103,7 +1102,7 @@ describe('Guard flow read surfaces', () => {
       const byId = new Map<string, any>(res.body.flows.map((f: any) => [f.flowId, f]));
 
       // No corpus entry ⇒ no goal and no milestones: the flag is what lets the row
-      // say why. The TITLE still reads as prose — its committed test names it, and
+      // say why. The TITLE still reads as prose — its stored test names it, and
       // a flow id is an engine handle, never UI copy.
       expect(byId.get(ORPHAN_ID)).toMatchObject({
         orphaned: true,
@@ -1153,7 +1152,7 @@ describe('Guard flow read surfaces', () => {
         type: 'cli',
         title: 'tasks add',
         // This manifest carries no per-surface plan record — usage falls back to
-        // the committed scenario's own grounding path, and reads as realized.
+        // the stored scenario's own grounding path, and reads as realized.
         // Realized is about the USAGE; the word beside it is the flow's own
         // status, and this flow's last run failed.
         flows: [{ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, realized: true, status: 'failed' }],
@@ -1216,7 +1215,7 @@ describe('Guard flow read surfaces', () => {
     it('a written scenario wins over the plan record — the usage is realized, not blocked', async () => {
       seed();
       // The plan says cli/tasks-add was matched AND a gap exists on that surface;
-      // the committed scenario grounds on it, so the union reads realized.
+      // the stored scenario grounds on it, so the union reads realized.
       writeJson('.truecourse/scenarios/manifest.json', {
         ...MANIFEST,
         flows: [
@@ -1251,7 +1250,7 @@ describe('Guard flow read surfaces', () => {
           wordByFlow.get(ref.flowId),
         );
       }
-      // The failing flow's committed scenario grounds here, and the page says so.
+      // The failing flow's stored scenario grounds here, and the page says so.
       expect(refs.find((r: any) => r.flowId === FLOW_ID)).toMatchObject({ realized: true, status: 'failed' });
     });
 
@@ -1320,13 +1319,13 @@ describe('Guard flow read surfaces', () => {
     });
   });
 
-  // --- A test committed FAILING at birth, before any run -------------------
+  // --- A test stored FAILING at birth, before any run ----------------------
   //
   // The dogfood shape that used to read as an EMPTY flow: the generate authored a
-  // scenario, birth failed, and nothing was committed — so the flow's surfaces
-  // list was `[]` and the red was reachable only through the report's findings.
-  // Guard commits the failing test now, so the surface row exists from generate
-  // time and carries its own failure.
+  // scenario, birth failed, and nothing was stored — so the flow's surfaces list
+  // was `[]` and the red was reachable only through the report's findings. Guard
+  // stores the failing test now, so the surface row exists from generate time and
+  // carries its own failure.
 
   describe('a flow whose test was committed red at birth', () => {
     const RED_FLOW = 'handle-pathological-files-without-freezing-analyze';
@@ -1475,7 +1474,7 @@ describe('Guard flow read surfaces', () => {
         file: RED_FILE,
         status: 'fail',
         stage: 'birth',
-        // A committed test is NOT green by construction any more.
+        // A stored test is NOT green by construction any more.
         birthPassed: false,
         failedMilestone: 1,
         hasEvidence: true,
@@ -1501,9 +1500,9 @@ describe('Guard flow read surfaces', () => {
 
     it('reads the verdict off the MANIFEST diagnosis when the report is gone', async () => {
       seedBornRed();
-      // `guard/result.json` is gitignored: a fresh clone has the committed manifest
-      // and the committed test, and nothing else. The diagnosis rides the manifest
-      // for exactly this reason, so the verdict survives.
+      // A materialized tree may hold the manifest and the test with no generate
+      // report beside them. The diagnosis rides the manifest for exactly this
+      // reason, so the verdict survives.
       const manifest = JSON.parse(
         fs.readFileSync(path.join(fixture.repoPath, '.truecourse/scenarios/manifest.json'), 'utf-8'),
       );
@@ -1532,7 +1531,7 @@ describe('Guard flow read surfaces', () => {
 
     it('lets a later RUN outcome override the stored birth status', async () => {
       seedBornRed();
-      // The code got fixed and the committed red test now passes.
+      // The code got fixed and the stored red test now passes.
       writeJson('.truecourse/guard/LATEST.json', {
         run: {
           runId: RUN_ID,

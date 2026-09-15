@@ -80,7 +80,7 @@ export function GuardCoveragePage({
   const activeConflict = activeId && isConflictId(activeId) ? activeId : null;
   const doc = activeId && !activeConflict ? activeId : null;
 
-  // A section's flow row jumps into the Tests tab (`?flow=`), and a claim's
+  // A section's flow row jumps to the flow's own page (`?flow=`), and a claim's
   // source line to the doc section that states it.
   const { openGuardFlow, openSpecSection, openGuardExternals } = useGuardView();
 
@@ -155,7 +155,7 @@ export function GuardCoveragePage({
   );
 
   // Fetch the raw markdown for the active doc (the coverage payload carries
-  // section metadata, not the body). Same file the Spec tab reads.
+  // section metadata, not the body). Same file the Context document pane reads.
   useEffect(() => {
     if (!doc) {
       setContent(null);

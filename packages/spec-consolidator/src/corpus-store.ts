@@ -3,10 +3,11 @@
  * `.truecourse/specs/corpus.json` snapshot of every kept doc, its area tags,
  * and the area groups.
  *
- * Committable (LATEST.json convention): expensive to regenerate (LLM tagging)
- * and not purely deterministic, so teammates inherit it from git. The per-doc
+ * Written into the run's work tree; the durable copy is the workspace spec set
+ * in Postgres. Expensive to regenerate (LLM curation) and not purely
+ * deterministic, which is why it is stored rather than re-derived. The per-doc
  * tag cache keeps it stable across re-scans — it changes only where docs
- * changed. In EE this overlay is Postgres rows of the same shape.
+ * changed.
  *
  * Written deterministically by `curate()` — no LLM call at write time. On
  * corruption (Zod fails / JSON.parse throws) reads return null, matching the

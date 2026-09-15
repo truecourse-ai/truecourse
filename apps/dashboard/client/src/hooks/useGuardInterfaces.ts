@@ -1,7 +1,7 @@
 /**
  * The Interfaces-tab catalog (`guard/interfaces`). Hoisted at page level so the
- * catalog list, the detail pane, and the Tests tab's scenario interfaces all
- * read ONE fetch.
+ * catalog list, the detail pane and a flow page's test interfaces all read ONE
+ * fetch.
  */
 
 import { useEffect, useState } from 'react';

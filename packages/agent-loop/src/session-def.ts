@@ -121,7 +121,7 @@ export interface SessionDef<TOutcome = unknown> {
   presentOutcome?: (outcome: TOutcome) => KnownDisplayBlock[];
   /**
    * A structural demand that `tool` was called before the outcome is accepted
-   * (01 step 2k). Exists because prompting alone did not carry it: across 110
+   * Exists because prompting alone did not carry it: across 110
    * authoring sessions the median first validator call was turn 9 despite the
    * prompt demanding it "EARLY", and 8 sessions never called it at all.
    *

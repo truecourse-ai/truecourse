@@ -137,7 +137,7 @@ export interface GuardDependencyRow {
   staleInstance?: string;
   blocks: GuardDependencyBlockedFlow[];
   /**
-   * How many flows rely on it, needs contributed plus committed scenarios binding
+   * How many flows rely on it, needs contributed plus stored scenarios binding
    * it. A fact, not a state: it does not change when an instance is registered.
    */
   usedBy: number;
@@ -159,7 +159,7 @@ export interface GuardDependenciesView {
 
 /**
  * One dependency's registration, as the page asks for it to be stored. Every
- * field is the INSTANCE half and lands in the gitignored overlay, except
+ * field is the INSTANCE half and lands in the encrypted overlay row, except
  * `baseUrl` on a recipe-declared service, which is that declaration's own field.
  */
 export interface GuardDependencyPatch {

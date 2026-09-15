@@ -4,7 +4,7 @@
  * A `blocked-on` gap names capability nouns (`composeBlockedOnReason`), and
  * external-service detection puts DETECTED SERVICE NAMES (`open-meteo`, `stripe`)
  * among them. Some of those services are ones the user can simply hand guard an
- * account for (the External APIs page) — and the moment they do, the recipe
+ * account for (the Dependencies page) — and the moment they do, the recipe
  * fingerprint moves and the next `guard generate` authors the flows that were
  * blocked. That is a to-do, not an inert grey wall.
  *

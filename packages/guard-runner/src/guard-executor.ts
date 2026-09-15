@@ -1,9 +1,9 @@
 /**
  * The `GuardExecutor` seam — the single boundary all guard EXECUTION crosses
- * (a real `guard run` and generate-time birth validation alike). The OSS default
- * runs in-process through {@link runGuard}; the enterprise edition swaps in a
- * hosted executor (build + run a per-commit checkout elsewhere) via the registry
- * in `@truecourse/core`, symmetric with the `GuardStore` seam.
+ * (a real `guard run` and generate-time birth validation alike). The default
+ * runs in-process through {@link runGuard}; a host may swap in one that builds
+ * and runs a per-commit checkout elsewhere, through the registry in
+ * `@truecourse/core`, symmetric with the `GuardStore` seam.
  *
  * The TYPE and the default live here (guard-runner); the singleton registry lives
  * in core. `guard-generator` never imports core — it receives the executor as a
@@ -80,7 +80,7 @@ export type GuardExecReport = RunGuardResult
 export type GuardExecutor = (input: GuardExecInput) => Promise<GuardExecReport>
 
 /**
- * OSS default: run in-process through the existing engine. The input maps 1:1 onto
+ * The default: run in-process through the existing engine. The input maps 1:1 onto
  * `RunGuardOptions` — `checkoutDir` → `repoRoot`, everything else by name — and the
  * injected `recipe` makes `runGuard` skip its disk load.
  */

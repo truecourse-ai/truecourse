@@ -4,7 +4,7 @@
  * The workspace has ONE corpus over every source's documents; a repository
  * reads the sources it is LINKED to, and what it may generate scenarios from is
  * that corpus cut down to those sources' documents. The slice is derived, never
- * stored as a corpus of its own (plan §3), so this is a pure function over the
+ * stored as a corpus of its own, so this is a pure function over the
  * artifact — one place, used by the repository's corpus route AND by the job
  * that materializes the corpus into a run's clone, so the two can never show
  * the repository different documents.

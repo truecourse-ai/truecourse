@@ -1,6 +1,6 @@
 /**
  * SEED GROUNDING + WRITE PATH — what `seed-draft.ts` still owns now that the
- * DRAFTING itself is an agent session (`guard-setup.seed`, plan 03 step 13, in
+ * DRAFTING itself is an agent session (`guard-setup.seed`, in
  * `@truecourse/core`): the cheap gate, the deterministic grounding readers, and
  * the two-artifact write the session's fold calls.
  *

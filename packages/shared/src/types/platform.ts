@@ -50,7 +50,7 @@ export type AuthVerifier = (
   cookieHeader: string | undefined,
 ) => Promise<AuthResult | null>
 
-// --- GitHub App (PR gate) -------------------------------------------
+// --- GitHub App (connect + Settings › Repositories) ------------------
 
 /** A GitHub App installation visible to the current workspace. */
 export interface GithubInstallationSummary {
@@ -60,16 +60,13 @@ export interface GithubInstallationSummary {
 }
 
 /**
- * Which gate emails a repo wants — one flag per notification type the gate
- * sends. Stored sparsely (absent on the record = "all on"); the API always
- * returns a fully-resolved object.
+ * One flag per notification type. Stored sparsely (absent on the record = "all
+ * on") and returned fully resolved by the connect API. Unused today — nothing
+ * sends; kept for the notification design, which is not built yet.
  */
 export interface GithubNotificationPrefs {
-  /** A PR's gate failed on new findings. */
   gateFailure: boolean
-  /** Spec conflicts need resolution. */
   conflicts: boolean
-  /** A PR changes spec documents and offers to regenerate guard scenarios. */
   specRegen: boolean
 }
 
@@ -80,17 +77,20 @@ export const DEFAULT_NOTIFICATION_PREFS: GithubNotificationPrefs = {
   specRegen: true,
 }
 
-/** A repository connected to the PR gate. */
+/** A repository this workspace has connected through the GitHub App. */
 export interface GithubRepoSummary {
   repoFullName: string
   installationId: number
   defaultBranch: string
-  /** true = new drift fails a required Check; false = advisory only. */
+  /**
+   * `blocking`, `notifyEmails` and `notifications` are unused today: nothing
+   * reads them and nothing sends. They are kept for the notification design,
+   * which is not built yet. `enabled` between them is live — a disabled
+   * connection is one a push no longer re-baselines.
+   */
   blocking: boolean
   enabled: boolean
-  /** Addresses emailed when the gate fails. */
   notifyEmails: string[]
-  /** Per-type email notification toggles (defaults applied). */
   notifications: GithubNotificationPrefs
   /** The repo's dashboard route (`/repos/:slug`), minted when it was connected. */
   slug: string

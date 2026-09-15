@@ -1,5 +1,5 @@
 /**
- * Add context, in three steps that each fit one screen (plan §5): the KIND, the
+ * Add context, in three steps that each fit one screen: the KIND, the
  * SCOPE (with a Check that lists what the scope would yield before anything is
  * stored), and the REPOSITORIES that should read it — none by default, so
  * adding a source never silently changes a corpus.

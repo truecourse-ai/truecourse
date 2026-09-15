@@ -329,7 +329,7 @@ for (const fixture of [apiFixture(), sdkFixture()]) {
     });
 
     /**
-     * A cluster's shared prefix (item 8) is a MESSAGE fact, not a provider one:
+     * A cluster's shared prefix is a MESSAGE fact, not a provider one:
      * whatever each backend does with the cache key — and one of them does
      * nothing with it — both open the session on the prefix, ahead of what that
      * session alone was told, and both record it as something the model saw.

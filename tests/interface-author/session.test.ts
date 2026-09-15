@@ -4,10 +4,10 @@
  *
  * Two things, and they are the same kind of thing: statements the rest of the
  * system compiles against. The def is what the loop reads (its budget, its
- * tools, and — 01 step 2k — the `check_draft` it will not accept an outcome
- * without); the export surface is what the CLI and the dashboard import, and it
- * moved house in 01 step 1 (`packages/interface-author` → `@truecourse/core`)
- * without being allowed to change.
+ * tools, and the `check_draft` it will not accept an outcome without); the
+ * export surface is what the dashboard imports, and it moved house
+ * (`packages/interface-author` → `@truecourse/core`) without being allowed to
+ * change.
  */
 
 import { describe, it, expect } from 'vitest'

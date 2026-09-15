@@ -114,8 +114,9 @@ export async function startServer(): Promise<void> {
 
   // 4. Background job queue. Long-running work runs here instead of inside the
   //    request that asked for it. Built BEFORE the GitHub connection, whose
-  //    link hook enqueues the onboarding scan, and started after — the task
-  //    bodies read seams (the work-tree provider) the connection installs.
+  //    link hook enqueues the connected repository's Flow setup, and started
+  //    after — the task bodies read seams (the work-tree provider) the
+  //    connection installs.
   const jobs = createServerJobs({ db: getDb(), connectionString: databaseUrl });
   // Disconnecting a repository stops whatever it has in flight.
   setRepoJobsCanceller(jobs.cancelRepoJobs);

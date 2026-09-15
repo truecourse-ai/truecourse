@@ -188,7 +188,7 @@ export function proposeRecipe(repoRoot: string, inputs: ProposeRecipeInputs = {}
  * operation-rooted interface. Lets a caller that already mapped interfaces hand the
  * surface over without a second analysis pass.
  *
- * RPC-derived operations are left out (item 12): they are the same procedure
+ * RPC-derived operations are left out: they are the same procedure
  * behind one adapter address, so probing them says nothing a probe of the app's
  * own routes does not, and they are excluded from scenario generation this round
  * anyway.
@@ -352,8 +352,8 @@ interface WorkspaceMemberServe {
 }
 
 /** Dirs that ship alongside the product without BEING it — a routed app under
- *  one of these is a demo, never the server under test (the item-107 rule,
- *  applied to recipes: cal.com's `example-apps/credential-sync` is routed and
+ *  one of these is a demo, never the server under test (the same rule the
+ *  route manifest applies, here for recipes: cal.com's `example-apps/credential-sync` is routed and
  *  must still lose to `apps/api/v2`). */
 const EXAMPLE_DIR = /(^|\/)(examples?|example-apps|demos?|fixtures?|samples?|e2e|__tests?__|tests?)(\/|$)/
 

@@ -8,8 +8,8 @@
  * column. How many runs the list shows is its TALLY, at the bottom, by verdict,
  * never a number beside the title.
  *
- * The rows are EVERY run the store holds, the baseline runs and the
- * pull-request head runs the gate wrote, re-read when a run of this repository
+ * The rows are EVERY run the store holds, each with the origin it ran from,
+ * re-read when a run of this repository
  * lands on the socket — led by the run IN FLIGHT, which no store holds yet: the
  * workspace's own run job for this repository, on the branch the header names,
  * saying what step it is on. It hands over to the stored row the moment that

@@ -1,5 +1,5 @@
 /**
- * THE GUARD-GENERATE SESSIONS' READ TOOLS (plan 04 steps 15 + 16) — every one
+ * THE GUARD-GENERATE SESSIONS' READ TOOLS — every one
  * read-only and bounded. A generate session reads the run's doc universe (the
  * `GuardDoc`s the deterministic plan collected — full text plus the live
  * section index); it writes nothing. Every write happens in the run's fold,

@@ -1,5 +1,5 @@
 /**
- * Background jobs + notifications for the hosted edition.
+ * Background jobs + notifications.
  *
  * Long-running work is enqueued to a Postgres-backed queue (graphile-worker)
  * and tracked here in `jobs` — a UI-facing status row (graphile-worker's own
@@ -33,11 +33,11 @@ export const jobs = pgTable(
   {
     id: text('id').primaryKey(),
     workspaceOrgId: text('workspace_org_id').notNull(),
-    /** Open vocabulary, e.g. 'knowledge.sync'. */
+    /** Open vocabulary, e.g. 'context.sync'. */
     type: text('type').notNull(),
-    /** Single-flight / UI-mapping key, e.g. 'knowledge.sync:confluence'. Null ⇒ no single-flight. */
+    /** Single-flight / UI-mapping key, e.g. 'context.sync:<sourceId>'. Null ⇒ no single-flight. */
     key: text('key'),
-    /** 'queued' | 'running' | 'succeeded' | 'failed'. */
+    /** 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'. */
     status: text('status').notNull(),
     progressCurrent: integer('progress_current').notNull().default(0),
     progressTotal: integer('progress_total').notNull().default(0),
@@ -71,9 +71,9 @@ export const notifications = pgTable(
   {
     id: text('id').primaryKey(),
     workspaceOrgId: text('workspace_org_id').notNull(),
-    /** Free-form category, e.g. 'knowledge.sync'. */
+    /** Free-form category, e.g. 'context.sync'. */
     kind: text('kind').notNull(),
-    /** 'info' | 'success' | 'error'. */
+    /** 'started' | 'info' | 'success' | 'warning' | 'error'. */
     level: text('level').notNull(),
     title: text('title').notNull(),
     body: text('body'),

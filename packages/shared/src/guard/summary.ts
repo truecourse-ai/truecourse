@@ -47,7 +47,7 @@ import type {
 
 /**
  * Flow-coverage rollup from the flow-keyed manifest — the FLOW is the generation
- * unit, so this is the headline count the `guard status` flows line renders.
+ * unit, so this is the headline count the Flows surfaces render.
  * `guarded` + `partial` + `blocked` = `total`.
  */
 export interface GuardFlowsCoverageSummary {

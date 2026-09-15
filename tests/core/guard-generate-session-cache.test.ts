@@ -1,5 +1,5 @@
 /**
- * THE GUARD-GENERATE SESSION SEAMS' CACHE + LAZY DRIVER (plan 04 steps 15–16),
+ * THE GUARD-GENERATE SESSION SEAMS' CACHE + LAZY DRIVER,
  * driven against a SCRIPTED session driver.
  *
  * `createGuardGenerateSessionSeams` takes an optional `driver` seam, but the
@@ -220,7 +220,7 @@ describe('the extract seam’s cache', () => {
 
 // ---------------------------------------------------------------------------
 // The flows seam: the engine's refusal converts a COMPLETED outcome into a
-// malformed failure BEFORE the cache write (plan 04 step 16).
+// malformed failure BEFORE the cache write.
 // ---------------------------------------------------------------------------
 
 const AREA = (r: string): FlowSynthesisArea => ({

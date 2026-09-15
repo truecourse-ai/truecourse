@@ -129,7 +129,7 @@ export function DetailSection({
 /**
  * The preview/pin pair every panel keeps: one previewed row, a set of pinned
  * ones. Pinning is session state and shows as a mark on the detail's header;
- * it never survives a reload, because nothing in the preview does.
+ * it never survives a reload, because no selection state here does.
  */
 export function usePreviewSelection(initialId: string | null) {
   const [activeId, setActiveId] = useState<string | null>(initialId);

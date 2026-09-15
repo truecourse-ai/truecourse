@@ -12,7 +12,7 @@
  * source uses too.
  *
  * `supportsScan` is false: the Document scan starts on Context's own header and
- * nowhere else (plan §5), so the pane offers no second Scan button of its own.
+ * nowhere else, so the pane offers no second Scan button of its own.
  */
 
 import { getContextCorpus, getContextDoc, type SpecSkippedDoc } from '@/lib/api';

@@ -1,7 +1,8 @@
 /**
  * THE SHARED SESSION CONTEXT of one `guard setup` run — the lazy holder every
- * setup session seam (recipe repair, dependency catalog; later seed and auth)
- * draws its driver and its sessions-store run from.
+ * setup session seam (recipe repair, the dependency catalog, the interfaces
+ * step, the seed, the preparations, the auth proof) draws its driver and its
+ * sessions-store run from.
  *
  * LAZY on purpose, twice over:
  *  - the RUN RECORD is only created when a session is actually about to run.
@@ -19,9 +20,8 @@
  * EAGERLY — a run nobody can see is a run nobody can watch fail.
  *
  * ONE run record covers every session of the setup invocation, whatever seam
- * ran it — the sessions-store convention is one run per COMMAND invocation
- * (`sessions/guard-setup/<runId>/`), with each session's own transcript and
- * index row inside it.
+ * ran it — the sessions-store convention is one run row per COMMAND invocation,
+ * with each session's transcript appended to that run's journal.
  */
 
 import path from 'node:path';

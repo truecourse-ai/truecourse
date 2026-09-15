@@ -15,8 +15,8 @@
  * provider — so existing repo callers (and their tests) need no wrapper.
  *
  * Capability flags the components vary on ride the source: `supportsScan` (repo
- * curates on demand via the header Scan button; the workspace equivalent is
- * Sync/Process on Integrations, so the workspace source hides it).
+ * curates on demand via the header Scan button; the workspace equivalent is the
+ * Document scan on Context's header, so the workspace source hides it).
  */
 
 import { createContext, useContext, type ReactNode } from 'react';
@@ -70,7 +70,7 @@ export interface DeleteConflictPayload {
  */
 export interface SpecSource {
   /** Repo curates on demand (header Scan button + scan-oriented empty state). The
-   *  workspace source sets this false — content arrives via Sync/Process. */
+   *  workspace source sets this false — content arrives via Context's Document scan. */
   supportsScan: boolean;
   /** The corpus payload, or null on 404 (never processed / no scan yet). */
   getCorpus(): Promise<SpecCorpusResponse | null>;

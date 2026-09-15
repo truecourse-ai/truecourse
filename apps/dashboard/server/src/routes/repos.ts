@@ -65,9 +65,9 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
     requireVisibleEntry(deps, req, req.params.id as string);
 
   // GET /api/repos - The caller's workspace's connected repos (home page).
-  // `latestEvent` is the repo's most recent lifecycle event (spec scan / guard
-  // generate / guard run) composed from the per-repo stores' own timestamps —
-  // tolerant of missing or unreadable state (`resolveLatestEvent` never throws).
+  // `latestEvent` is the repo's most recent lifecycle event (guard generate /
+  // guard run) composed from the per-repo stores' own timestamps — tolerant of
+  // missing or unreadable state (`resolveLatestEvent` never throws).
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const entries = await visibleTo(deps, req);

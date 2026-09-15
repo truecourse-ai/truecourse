@@ -91,11 +91,11 @@ export function GuardClaimDetail({
   /** Whose store the raw mode reads the claim's entry out of. */
   repoId: string;
   claim: GuardClaimRow;
-  /** The PR head the raw read is scoped to (EE); absent = the repo baseline. */
+  /** The commit the raw read is pinned at; absent = the repo baseline. */
   prRef?: string;
   /** Jump to the doc section this claim states (`?doc=`+`?section=`). */
   onOpenSpec: (doc: string, anchor: string) => void;
-  /** Jump to the Tests tab with one flow's detail open (`?flow=`). */
+  /** Open one flow's own page (`?flow=`). */
   onOpenFlow: (flowId: string) => void;
 }) {
   const { mode, setMode, raw } = useArtifactMode('JSON');

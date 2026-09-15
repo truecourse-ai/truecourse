@@ -18,7 +18,7 @@ export interface BaselineTrigger {
   installationId: number;
   defaultBranch: string;
   commitSha: string;
-  /** The repo's workspace org (from the gate link) — scopes the scan job + notifications. */
+  /** The repo's workspace org (from its connection row) — scopes the scan job + notifications. */
   workspaceOrgId: string;
 }
 
@@ -104,8 +104,8 @@ export function createWebhookRouter(deps: WebhookDeps): Router {
       return;
     }
 
-    // Dispatch is lightweight (store writes + triggers); the heavy clone+verify
-    // work is fire-and-forget inside `onBaseline`. Awaiting here keeps the ack
+    // Dispatch is lightweight (store writes + triggers); the work itself is a
+    // background job the handler enqueues. Awaiting here keeps the ack
     // fast while making handling deterministic. A handler error returns 500 so
     // GitHub retries (handlers are idempotent).
     try {
@@ -215,7 +215,7 @@ async function handlePush(
   if (payload.ref !== defaultRef) return;
   if (!payload.installation) return;
 
-  // Only re-baseline repos that are connected to the gate.
+  // Only act for repositories Code has connected.
   const link = await deps.repos.getRepo(payload.repository.full_name);
   if (!link || !link.enabled) {
     // Not connected in Code, so nothing is baselined. The workspace this

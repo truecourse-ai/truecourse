@@ -32,7 +32,7 @@ export interface SpecScope {
   includes(relPath: string): boolean;
 }
 
-/** Coerce an untrusted `spec.include` value into a clean glob list (drop non-strings / blanks). */
+/** Coerce an untrusted include-glob list into a clean one (drop non-strings / blanks). */
 function normalizeGlobs(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -43,7 +43,7 @@ function normalizeGlobs(value: unknown): string[] {
 /**
  * Build a scope matcher from a list of include globs. An empty/absent list (or
  * one that is all blanks) yields an INACTIVE scope — everything is in scope,
- * exactly as if no `spec.include` were configured.
+ * exactly as if the source configured no include globs.
  */
 export function buildSpecScope(globs: unknown): SpecScope {
   const clean = normalizeGlobs(globs);

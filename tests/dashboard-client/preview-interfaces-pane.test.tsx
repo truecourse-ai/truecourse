@@ -1,6 +1,6 @@
 /**
  * The interface pane's flow references: each one wears the FLOW's own status,
- * as the server computed it from the same join the Flows list reads. A committed
+ * as the server computed it from the same join the Flows list reads. A stored
  * scenario says the interface is exercised, never that its flow passes.
  */
 

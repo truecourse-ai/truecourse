@@ -1,9 +1,9 @@
 /**
  * curateInProcess must forward an injected `decisions` file to the scan run
- * instead of only reading `.truecourse/specs/decisions.json` from the tree. EE
- * relies on this: its re-scan runs on a fresh clone with no decisions file
- * (resolutions live in Postgres), so it loads them and passes them in —
- * otherwise already resolved conflicts get re-detected on every re-scan.
+ * instead of only reading `.truecourse/specs/decisions.json` from the tree. Every
+ * scan relies on this: it runs on an ephemeral tree with no decisions file
+ * (the workspace's resolutions live in Postgres), so the job loads them and passes
+ * them in — otherwise already resolved conflicts get re-detected on every re-scan.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';

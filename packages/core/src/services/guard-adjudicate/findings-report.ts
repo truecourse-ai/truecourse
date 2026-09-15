@@ -1,8 +1,7 @@
 /**
- * THE FINDINGS REPORT (plan 05 step 24) — `guard/findings.md`, the pure render
- * of the board's `bug` / `drift` adjudications. Written on demand by a
- * findings-report regeneration, rendered by the dashboard, COMMITTED
- * (deliberately not in `GITIGNORE_CONTENTS`). GitHub stays untouched.
+ * THE FINDINGS REPORT — `guard/findings.md`, the pure render of the board's
+ * `bug` / `drift` adjudications. Written into the run's work tree on demand by a
+ * findings-report regeneration; nothing outside the run reads it yet.
  *
  * Each finding is one `## F<n>` section: headline verdict, class, the verbatim
  * doc quote resolved from the scenario's `binds` (with the drift said out loud

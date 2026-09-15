@@ -44,7 +44,7 @@ function doc(p: string, content = `body of ${p}`): DocCandidate {
 }
 
 // The kept docs carry pairwise-shared claim tokens so the deterministic
-// collision pairing (item 119) nominates every within-area pair — without a
+// collision pairing nominates every within-area pair — without a
 // shared identifier or heading, a doc pair costs no session and can flag
 // nothing. The bodies keep the `body of <path>` line the flag() quotes pin.
 const DOCS = [
@@ -469,9 +469,9 @@ describe('the scan run — third-party visibility', () => {
     ]);
   });
 
-  // EE scans an ephemeral shallow clone in a temp dir. If an explicit null were
-  // treated as "resolve it yourself", the basename `tc-gate-scan-XXXX` would
-  // become the repo's identity — and it would reach the session in the briefing.
+  // A scan runs over an ephemeral scratch tree. If an explicit null were treated
+  // as "resolve it yourself", the temp basename would become the repo's identity
+  // — and it would reach the session in the briefing.
   it('honors an explicitly null identity instead of resolving one', async () => {
     const briefings: string[] = [];
     const stub = stubDriver(

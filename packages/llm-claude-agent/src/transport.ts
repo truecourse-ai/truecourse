@@ -4,10 +4,10 @@
  * `query()` protocol the session driver runs — so the leaf stages that are a
  * single schema-described call (realization match, world classify, the claim
  * diff gate, the recipe proposal, the visual judge) reach the user's `claude`
- * login through the SDK instead of a hand-rolled `claude -p` spawn.
+ * login through the SDK instead of a hand-rolled CLI spawn.
  *
- * What a call gets, mirroring the `-p` invocation it replaces byte for byte
- * where the model can tell: the system prompt as a FULL replace, no built-in
+ * What a call gets, mirroring the spawn it replaces byte for byte where the
+ * model can tell: the system prompt as a FULL replace, no built-in
  * tools (an output-only stage must never explore the repo), only the user's
  * own settings loaded, the per-stage model and fallback aliases, and the
  * prompt as raw text so its content can never be read as an option.

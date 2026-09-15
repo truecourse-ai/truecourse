@@ -58,8 +58,8 @@ describe('GuardClaimsFileSchema', () => {
     ).toEqual({ ...base, contentHash: 'sha256:abc' })
   })
 
-  // `needs` came BACK as a structured field with plan 04 step 15: the
-  // extraction session reports what testing a claim takes beyond an empty
+  // `needs` came BACK as a structured field: the extraction
+  // session reports what testing a claim takes beyond an empty
   // sandbox, and those needs ride into flow synthesis. The retired STRING form
   // (and `notes`, which never came back) must still fail to load rather than
   // silently drop half of what a stale corpus says.

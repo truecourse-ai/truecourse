@@ -5,10 +5,11 @@
  * API, the link store. This module owns what connecting a repository MEANS here:
  * the `repositories` row IS the connection. Nothing is cloned at connect time — the
  * work-tree provider installed here clones per run (a source's sync, a guard
- * run) and the clone is deleted when the run settles. Linking creates the
- * repository's Context source and ENQUEUES its sync, which is the first link of
- * the onboarding chain; unlinking cancels the repo's in-flight jobs and drops
- * its persistent session transcripts.
+ * run) and the clone is deleted when the run settles. Linking starts the
+ * repository's Flow setup, the first link of the onboarding chain; its
+ * documentation is a Context source, made in Context and linked by the connect
+ * dialog. Unlinking cancels the repo's in-flight jobs and drops its persistent
+ * session transcripts.
  *
  * The factory reads its configuration from the environment and returns `null`
  * when the App is not configured, so a server with no GITHUB_APP_* still boots

@@ -1,5 +1,5 @@
 /**
- * THE ADJUDICATION SESSION'S TOOLS (plan 05 step 21, items 3–4) — the two that
+ * THE ADJUDICATION SESSION'S TOOLS — the two that
  * hold a boundary a prompt cannot: `rerun_scoped`'s hard cap on re-executions,
  * and `read_evidence`'s containment to THIS failure's bundle.
  *

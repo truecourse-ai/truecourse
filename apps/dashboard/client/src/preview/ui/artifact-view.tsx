@@ -18,8 +18,8 @@
  * every surface opens on View.
  *
  * The raw pane is READ-ONLY. Editing an artifact happens in the repo, in an
- * editor, under version control: a dashboard textarea over a committed file
- * would be a second source of truth.
+ * editor: a dashboard textarea over a file the engine re-derives would be a
+ * second source of truth.
  */
 
 import { useState, type ReactNode } from 'react';

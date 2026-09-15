@@ -1,9 +1,9 @@
 /**
  * The repository console: one header, ONE menu, no toggle.
  *
- * The section switcher is gone with Code Analysis, so the left menu here is not
- * a switcher between products, it is the tabs of the one thing this repository
- * has: Runs first (what this repository's tests did, and when) and Pipeline
+ * There is no section switcher: the left menu here is not a switcher between
+ * products, it is the tabs of the one thing this repository has: Runs first
+ * (what this repository's tests did, and when) and Pipeline
  * beside it (the three pieces of work the repository runs, each with its last
  * outcome and a way to run it again), then the setup group, Context (which
  * workspace sources this repository reads), Interfaces, Dependencies and the
@@ -169,10 +169,9 @@ export default function RepoConsole() {
               <DependenciesTab repo={repo} />
             )
           ) : (
-            // Every run the server stored, the baseline runs and the
-            // pull-request head runs the gate wrote, over
-            // '/api/repos/<id>/guard/history?all=1', and one run's snapshot with
-            // its evidence as its own page.
+            // Every run the server stored, each with the origin it ran from,
+            // over '/api/repos/<id>/guard/history?all=1', and one run's snapshot
+            // with its evidence as its own page.
             runId ? (
               <RunPage repo={repo} runId={decodeURIComponent(runId)} />
             ) : (

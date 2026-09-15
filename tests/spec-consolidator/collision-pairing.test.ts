@@ -8,7 +8,7 @@
  *   nothing), ranked by summed idf weight;
  * - the canonical-heading fold (`Authentication` ↔ `Auth`) that subsumed the
  *   retired doc-level widened net;
- * - single-area assignment (item 119's multi-tag fix) and connected-component
+ * - single-area assignment for a multi-tag doc, and connected-component
  *   clustering;
  * - the identity fingerprint: stable under weight shifts, changed by pair
  *   membership.

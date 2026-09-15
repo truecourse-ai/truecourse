@@ -1,8 +1,7 @@
 /**
- * Shared in-process entry points for the BL Drift / Spec Consolidation
- * commands. The dashboard server imports these so progress wiring,
- * decision-file writes, and IL-extraction chaining live in exactly
- * one place.
+ * Shared in-process entry points for the document scan. The dashboard server
+ * imports these so progress wiring and the decisions read-modify-writes live in
+ * exactly one place.
  *
  * The caller passes a `StepTracker` and we drive it through the high-level
  * phases:
@@ -66,9 +65,9 @@ import { estimateScanTokens } from '../services/llm/spec-estimate.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 
 /**
- * Thrown when the user declines the pre-flight LLM cost estimate. Scan/generate
- * are entirely LLM-driven, so a decline aborts the run (unlike analyze, which
- * falls back to deterministic-only). Callers catch this to exit cleanly.
+ * Thrown when the user declines the pre-flight LLM cost estimate. Scan and
+ * generate are entirely LLM-driven, so a decline aborts the run. Callers catch
+ * this to exit cleanly.
  */
 export class EstimateDeclined extends Error {
   constructor(public readonly kind: 'scan' | 'guard' | 'guard setup') {
@@ -144,15 +143,14 @@ function humanTokens(n: number): string {
 
 /**
  * Whether progress may fall back to the per-stage *resolved* model when no real
- * usage was recorded. OSS honors per-stage model tiers, so the
- * fallback is accurate there. EE runs ONE model for every stage (the AI-SDK
- * transport ignores the per-stage hint) and records no per-stage usage, so the
- * fallback would show a misleading OSS tier — EE turns this off at boot
+ * usage was recorded. The product runs ONE model for every stage (the transport
+ * ignores the per-stage hint) and records no per-stage usage, so the fallback
+ * would show a misleading name — the dashboard server turns it off at boot
  * ({@link setShowResolvedStageModel}), and progress then shows no model name.
  */
 let showResolvedStageModel = true;
 
-/** EE calls this at boot (`false`) so progress doesn't show OSS per-stage tiers. */
+/** The dashboard server calls this at boot (`false`). */
 export function setShowResolvedStageModel(show: boolean): void {
   showResolvedStageModel = show;
 }
@@ -171,7 +169,7 @@ export function setShowStageUsage(show: boolean): void {
 /**
  * ` · <model> · <tok> tok · $<cost>` suffix for an explicit stage set — the core
  * of {@link stepUsageTag}, exported so other steppers (guard generate) render the
- * SAME live tag from their own stage mapping, sharing the EE model-name toggle.
+ * SAME live tag from their own stage mapping, sharing the model-name toggle.
  *
  * `mode` is the run's effective transport mode, so the pre-call fallback names the
  * model the run will really use — not the one the saved selection would have.
@@ -235,8 +233,8 @@ export interface SpecCurateInProcessResult {
    * `only: 'overlap'`, which runs through the corpus write).
    */
   stoppedAfter?: ScanStep;
-  /** The sessions-store run dir (`.truecourse/sessions/spec-scan/<runId>/`) —
-   *  where this run's transcripts landed, for stepwise inspection. */
+  /** The sessions-store scratch dir this run used, under the runtime directory —
+   *  for stepwise inspection. */
   sessionsRunDir: string;
 }
 
@@ -395,7 +393,7 @@ export async function curateInProcess(
     }
   }
 
-  // The sessions run + transcript store: `sessions/spec-scan/<runId>/`.
+  // The run record every session's transcript is appended to.
   // Created after the estimate gate, so a declined scan leaves no run record.
   const gitRef = await resolveCommitSha(repoRoot);
   const run = await createStoredSessionRun(options.sessionsKey ?? repoRoot, { command: 'spec-scan', gitRef });
@@ -828,10 +826,10 @@ function uniqueStrings(items: string[]): string[] {
 // server routes. None of these re-curate the corpus.
 // ---------------------------------------------------------------------------
 
-// Pure DecisionsFile transforms — the read-modify-write core, shared verbatim by
-// the repo (file/Postgres) and workspace (Postgres) helpers so both surfaces
-// agree on update semantics. An `apply*` that makes no change returns the SAME
-// object reference, letting callers skip a redundant store.
+// Pure DecisionsFile transforms — the read-modify-write core, shared by the
+// workspace helpers below so every surface agrees on update semantics. An
+// `apply*` that makes no change returns the SAME object reference, letting
+// callers skip a redundant store.
 
 /**
  * Dispute-identity key for a section-scoped conflict verdict: the
@@ -852,7 +850,7 @@ const conflictResolutionKey = (r: ConflictResolution): string => {
 
 /**
  * The v2 fields every rebuild carries through untouched — a mutation of one
- * dimension must never drop another's rows (an EE row stored before v2 may
+ * dimension must never drop another's rows (a row stored before v2 may
  * genuinely lack them, hence the `?? []`).
  */
 function carriedV2Fields(existing: DecisionsFile): Pick<DecisionsFile, 'scopeVerdicts' | 'instructions'> {
@@ -962,7 +960,7 @@ async function storeWorkspaceDecisions(org: string, next: DecisionsFile): Promis
   await saveWorkspaceSpec({ workspaceOrgId: org }, 'decisions', next);
 }
 
-/** The workspace's current decisions (the Knowledge page read), or empty when none. */
+/** The workspace's current decisions (Context's read), or empty when none. */
 export function getWorkspaceDecisions(org: string): Promise<DecisionsFile> {
   return loadWorkspaceDecisions(org);
 }

@@ -1,7 +1,7 @@
 /**
  * `mapInterfaces` — the core wrapper that analyzes the working tree, derives the
  * interface catalog, and snapshots it to `.truecourse/guard/interfaces.json`. Free and
- * deterministic: no LLM, no analyze store, no prior `truecourse analyze` run.
+ * deterministic: no LLM and no prior run of anything.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -539,7 +539,7 @@ describe('external service source locations', () => {
 describe('mapInterfaces — guard-fixture-api acceptance', () => {
   it('derives the api catalog from the fixture OpenAPI doc alone, nothing marked specOnly', async () => {
     // The fixture server is framework-free node:http — the route extractors see
-    // nothing, so the whole surface comes from the committed OpenAPI doc and the
+    // nothing, so the whole surface comes from the OpenAPI doc in the tree and the
     // specOnly cross-check must stay silent (no code-side routes to cross-check).
     fs.cpSync(path.join(__dirname, '../fixtures/guard-fixture-api'), repo, { recursive: true });
     writeRepo({

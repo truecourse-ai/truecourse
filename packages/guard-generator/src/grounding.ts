@@ -39,7 +39,7 @@ export const MAX_OTHER_OPERATIONS = 30
  * (verbatim, so a request never has to be invented) plus what the handler reads off
  * the request. Non-api interfaces and duplicates are dropped.
  *
- * The request half is read off THE INTERFACE'S OWN CONTRACT (plan item 102). It used
+ * The request half is read off THE INTERFACE'S OWN CONTRACT. It used
  * to arrive as a second argument — a separate `ApiRequestContract[]` product joined
  * here by method+path, which meant the two halves could only agree if two
  * derivations composed their paths identically, and meant a run reading the
@@ -58,8 +58,8 @@ export function buildInterfaceContractHints(
     if (iface.type !== 'api' || !entry?.method || !entry?.path) continue
     // An RPC-derived operation is real and invocable, but its request grammar is
     // the procedure's input schema encoded into `?input=` — a shape no hint here
-    // describes and no scenario is authored against this round (item 12). It
-    // stays in the catalog for the web join; it does not ground a scenario.
+    // describes and no scenario is authored against. It stays in the catalog
+    // for the web join; it does not ground a scenario.
     if (iface.procedure) continue
     const key = `${entry.method.toUpperCase()} ${entry.path}`
     if (seen.has(key)) continue

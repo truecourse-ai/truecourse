@@ -3,15 +3,15 @@ import { log } from '../lib/logger.js'
 import { GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect, type GuardFlowProgress } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
- * Read-surface drivers for the guard dashboard — the guard analogue of the verify
- * read routes. All route logic lives here so the Express adapter stays thin (the
- * CLAUDE.md route→driver→store rule): the per-section coverage join, the mtime
- * staleness probe, and the traversal-safe run / scenario-source / evidence reads.
+ * Read-surface drivers for the guard dashboard. All route logic lives here so the
+ * Express adapter stays thin (the CLAUDE.md route→driver→store rule): the
+ * per-section coverage join, the store-only staleness probe, and the
+ * traversal-safe run / scenario-source / evidence reads.
  *
  * Pure composition (`composeDocCoverage`) takes already-parsed inputs so it is
  * unit-testable without I/O; the readers below route through the pluggable
- * `GuardStore` (`../lib/guard-store.js`) so the enterprise Postgres store can serve
- * the same surface. The store readers are re-exported so the dashboard depends only
+ * `GuardStore` (`../lib/guard-store.js`), which boot fills with the Postgres
+ * implementation. The store readers are re-exported so the dashboard depends only
  * on `@truecourse/core`.
  */
 
@@ -177,7 +177,6 @@ import { readRepoDoc } from '../lib/repo-doc-reader.js'
 
 // The dashboard reads the whole guard surface through core (never guard-runner /
 // the store directly), mirroring how spec routes read through spec-in-process.
-// These pass-through delegators are the file store in OSS, Postgres in EE.
 export {
   readGuardLatest,
   readGuardRunForCommit,
@@ -202,12 +201,12 @@ async function guardBaselineCommit(repoKey: string): Promise<string | undefined>
 
 /**
  * The resolved read scope for a guard view:
- *  - `commit` — the explicit `ref` (a PR head) or, absent one, the
+ *  - `commit` — the explicit `ref` (a pinned commit) or, absent one, the
  *    default-branch baseline commit.
  *  - `empty`  — NOTHING resolvable (no ref, no baseline yet). Reads MUST come
  *    back absent, never the store's newest-set fallback: the newest stored set
- *    can be a PR's regenerated corpus, which must not leak into the repo-level
- *    view (the approved no-"newest by createdAt" decision).
+ *    can be a set written at some other commit, which must not leak into the
+ *    repo-level view (the approved no-"newest by createdAt" decision).
  */
 type GuardReadScope =
   | { kind: 'commit'; commit: string }
@@ -615,12 +614,12 @@ export async function readGuardSectionTotals(
 }
 
 /** Everything the flow join reads: the coverage sources plus (where the caller
- *  has it) the committed corpus, which names each scenario's surface and interface. */
+ *  has it) the stored corpus, which names each scenario's surface and interface. */
 type FlowJoinSources = GuardCoverageSources
 
 /**
  * The flow inputs indexed together — the synthesized corpus (identity +
- * milestones), the manifest (surfaces + gaps), the committed scenarios, and the
+ * milestones), the manifest (surfaces + gaps), the stored scenarios, and the
  * last run (outcomes). ONE builder so the coverage join, the flow list, and the
  * flow detail can never disagree about what a flow's surfaces are.
  */
@@ -633,11 +632,11 @@ interface FlowJoin {
   ownerByScenario: Map<string, string>
   /** Flow id → the scenario ids attributed to it (manifest ∪ corpus ∪ run). */
   scenarioIdsByFlow: Map<string, string[]>
-  /** Scenario id → the driver it runs on, when a committed scenario is loaded. */
+  /** Scenario id → the driver it runs on, when a stored scenario is loaded. */
   driverByScenario: Map<string, GuardDriverId>
   /**
    * Scenario id → the status the manifest committed it with. Guard commits tests
-   * that FAILED their birth execution, so a committed test is not green by
+   * that FAILED their birth execution, so a stored test is not green by
    * construction — this is the inventory status a read paints when the current run
    * has no outcome for the scenario.
    */
@@ -693,7 +692,7 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
   }
 
   // Every scenario the flow owns, whichever store knows it: the manifest declares
-  // the generated set, the committed corpus adds hand-written work (and anything a
+  // the generated set, the stored corpus adds hand-written work (and anything a
   // manifest write lost), the run adds a result that outlived its manifest row.
   const scenarioIdsByFlow = new Map<string, string[]>()
   const attribute = (flowId: string, scenarioId: string): void => {
@@ -767,8 +766,8 @@ function flowIdOfResult(result: GuardScenarioResult, join: FlowJoin): string {
 
 /**
  * The coverage status a gap paints under: an awaiting-driver gap → its driver id,
- * a `blocked-on` gap the externals index says is PROVIDABLE → `needs-setup` (item
- * 65 — the kind stays `blocked-on`, only the read-model status is promoted), and
+ * a `blocked-on` gap the externals index says is PROVIDABLE → `needs-setup` (the
+ * kind stays `blocked-on`, only the read-model status is promoted), and
  * every other gap → its own kind.
  */
 function gapStatus(
@@ -818,7 +817,7 @@ function toFlowGap(
  * One surface row for a scenario, painted by the run when there is one. Without a
  * run the row falls back to the test's BIRTH status: guard commits tests that
  * failed their birth execution, so `guarded` is honest only for a test that passed
- * — a committed failing test paints `fail` from the moment it is generated, and
+ * — a stored failing test paints `fail` from the moment it is generated, and
  * the next run that covers it overrides that (a code fix simply turns it green).
  * A test that never executed at all paints `never-run`.
  */
@@ -832,7 +831,7 @@ function scenarioSurface(
   return {
     ...(surface ? { surface } : {}),
     scenarioId,
-    // No run: the birth verdict paints it — `fail` when it was committed red, and
+    // No run: the birth verdict paints it — `fail` when it was written red, and
     // `never-run` when there was no birth execution at all (a hand-authored test),
     // which must never borrow `guarded`'s passing word.
     status: run ? run.outcome : birth === 'failing' ? 'fail' : birth === 'never-run' ? 'never-run' : 'guarded',
@@ -844,7 +843,7 @@ function scenarioSurface(
 
 /**
  * Every surface of one flow: one row per scenario attributed to it (from the
- * manifest, the committed corpus, or the run — whichever knows it) plus one row
+ * manifest, the stored corpus, or the run — whichever knows it) plus one row
  * per gap. Gaps come from the manifest entry; when no manifest entry exists the
  * last generate's flow-level gaps stand in.
  */
@@ -1185,7 +1184,7 @@ const COVERAGE_STATUSES = [
   ...awaitingDriverIds,
   ...RESIDUAL_GAP_KINDS,
   'guarded',
-  // Derived from the manifest's inventory status: a test committed with no birth
+  // Derived from the manifest's inventory status: a test written with no birth
   // execution behind it.
   'never-run',
   // A derived status, so it has no source enum to come from — it is the
@@ -1214,16 +1213,16 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario inventory + recipe card (the Scenarios tab).
+// Scenario inventory + recipe card.
 // ---------------------------------------------------------------------------
 
 /**
- * List every committed scenario for the Scenarios-tab inventory, plus the
- * preparation-recipe card. Generated AND hand-written scenarios are included:
- * hand-written = an id no manifest section binds (the manifest lists the ids the
- * generator authored). The last-run outcome / orphaned flag are joined
- * client-side from the run store — this list is run-independent so a fresh clone
- * shows its committed guards before any local run.
+ * List every stored scenario for the inventory read, plus the preparation-recipe
+ * card. Generated AND hand-written scenarios are included: hand-written = an id no
+ * manifest section binds (the manifest lists the ids the generator authored). The
+ * last-run outcome / orphaned flag are joined client-side from the run store —
+ * this list is run-independent, so the stored scenario set shows before any run
+ * has covered it.
  */
 export async function listGuardScenarios(repoKey: string, ref?: string): Promise<GuardScenarioInventory> {
   const corpus = await loadGuardCorpusForView(repoKey, ref)
@@ -1243,7 +1242,7 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
 
   // The row shows the FIRST bound section (a flow binds several) and names the
   // flow it realizes — hand-written work under its Manual pseudo-flow, so the
-  // Flows tab's drill-down covers every committed scenario.
+  // Flows page's drill-down covers every stored scenario.
   const headingByDocAnchor = await headingTextIndex(repoKey, scenarios.map((s) => s.binds[0].doc), commit)
   const fileById = await scenarioFilesById(repoKey, commit)
   const items: GuardScenarioListItem[] = scenarios
@@ -1275,23 +1274,22 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
   }
 }
 
-/** The committed corpus a (possibly PR-scoped) view reads: scenarios + manifest. */
+/** The stored corpus a (possibly commit-pinned) view reads: scenarios + manifest. */
 interface GuardCorpusForView {
-  /** The commit the set came from (hosted only; undefined on the live store). */
+  /** The commit the set came from. */
   commit?: string
   scenarios: GuardScenario[]
   manifest: GuardManifest | null
 }
 
 /**
- * Load the committed scenario set + its manifest for a view. Corpus loads are
- * RepoRef-keyed (the store convention): the file store ignores the commit
- * and reads the live tree; EE reads the requested ref (a PR head) or the baseline
- * set — never the newest, which a PR regen would pollute. A pinned PR head with NO
- * stored set falls back to the baseline set (the one the gate actually executed
- * against that head); the set moves WHOLE, so scenarios and manifest always come
- * from the same snapshot. An unresolvable hosted scope (no ref, no baseline) is
- * `null` — the empty view, never a "newest" guess.
+ * Load the stored scenario set + its manifest for a view. Corpus loads are
+ * RepoRef-keyed (the store convention): the store reads the requested ref, else
+ * the baseline set — never the newest, which a set written at another commit
+ * would pollute. A pinned ref with NO stored set falls back to the baseline set;
+ * the set moves WHOLE, so scenarios and manifest always come from the same
+ * snapshot. An unresolvable scope (no ref, no baseline) is `null` — the empty
+ * view, never a "newest" guess.
  */
 async function loadGuardCorpusForView(
   repoKey: string,
@@ -1323,7 +1321,7 @@ export async function readGuardScenariosForView(repoKey: string, ref?: string): 
 }
 
 // ---------------------------------------------------------------------------
-// Flows tab — the inventory drill-down (list + detail).
+// Flows — the inventory drill-down (list + detail).
 // ---------------------------------------------------------------------------
 
 /** Repo-relative posix path of the flow corpus, the key the store seam reads by. */
@@ -1353,7 +1351,7 @@ export async function readGuardFlowsFile(
   return result.success ? result.data : null
 }
 
-/** The flow corpus a (possibly PR-scoped) view reads — baseline fallback included. */
+/** The flow corpus a (possibly commit-pinned) view reads — baseline fallback included. */
 export function readGuardFlowsForView(repoKey: string, ref?: string): Promise<GuardFlowsFile | null> {
   return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardFlowsFile(repoKey, c))
 }
@@ -1439,7 +1437,7 @@ function flowSections(flowId: string, join: FlowJoin): Array<{ doc: string; anch
 }
 
 /**
- * A flow's coverage bucket — the tally/filter key `guard status` also counts by.
+ * A flow's coverage bucket — the tally/filter key the flow reads count by.
  * A Manual pseudo-flow IS its hand-written scenario, so it is `guarded` rather
  * than "never generated".
  */
@@ -1457,7 +1455,7 @@ function flowBucket(flowId: string, join: FlowJoin): GuardFlowBucket {
 /**
  * The flow's display title. The corpus names it; when the corpus no longer does
  * (an ORPHANED flow, kept only because its tests still run — and a Manual
- * pseudo-flow, which never had a corpus entry) the flow's own committed TEST
+ * pseudo-flow, which never had a corpus entry) the flow's own stored TEST
  * names it, then the last run's result for that test. The id is the last resort
  * only: a flow id is an engine handle — the detail header wears it as one, in
  * mono, beside the title — and a handle is never the title itself.
@@ -1510,7 +1508,8 @@ function flowFindings(flowId: string, result: GuardGenerateReport | null): Guard
 /**
  * The triage verdict a BIRTH-stage row carries: the last generate's finding when
  * `result.json` is present, else the diagnosis the manifest committed with the test
- * (which is tracked, so it survives a fresh clone). A row a RUN decided carries
+ * (which rides the manifest, so it survives a generate that stored no finding for
+ * it). A row a RUN decided carries
  * none — that failure is a different event, and no verdict was reached about it.
  */
 function birthTriage(
@@ -1548,7 +1547,7 @@ function flowInterfaceIds(flowId: string, join: FlowJoin): string[] {
 }
 
 /**
- * The drivers a flow's TESTS exercise, in registry order — read from the committed
+ * The drivers a flow's TESTS exercise, in registry order — read from the stored
  * scenarios, so a flow with a cli test and a web GAP drives cli only (nothing runs
  * on the surface it is still waiting for).
  *
@@ -1570,7 +1569,7 @@ function flowDrivers(surfaces: readonly GuardFlowSurface[], join: FlowJoin): Gua
 }
 
 /**
- * True when the manifest kept this flow only for its committed scenarios: it is
+ * True when the manifest kept this flow only for its stored scenarios: it is
  * marked orphaned AND no synthesized flow carries its id. The corpus check is the
  * live half — a flow synthesis produces again is derived from the specs whatever
  * an older manifest entry says.
@@ -1690,11 +1689,11 @@ function flowListItem(
 }
 
 /**
- * The Flows tab: every synthesized flow (plus a Manual pseudo-flow per
+ * The Flows page: every synthesized flow (plus a Manual pseudo-flow per
  * hand-written scenario) joined to the manifest's surfaces and gaps, the last
- * run's outcomes, and the last generate's findings — with the preparation-recipe
- * card the tab inherited from the Scenarios tab. Every store may be missing; each
- * absence renders as an empty state, never an error.
+ * run's outcomes, and the last generate's findings — with the same
+ * preparation-recipe card the scenario inventory carries. Every store may be
+ * missing; each absence renders as an empty state, never an error.
  */
 export async function listGuardFlows(repoKey: string, ref?: string): Promise<GuardFlowsView> {
   const view = await loadFlowView(repoKey, ref)
@@ -1796,15 +1795,15 @@ export async function readGuardFlowDetail(
 
   const fileById = await scenarioFilesById(repoKey, view.commit)
   // The birth-stage failure results, keyed by the test they belong to — what a
-  // committed failing test renders until a run covers it.
+  // stored failing test renders until a run covers it.
   const birthFailureById = new Map(
     (view.result?.birthFindings ?? []).flatMap((f) =>
       f.scenarioId && f.committed ? [[f.scenarioId, f] as const] : [],
     ),
   )
-  // The diagnosis a failing test COMMITS with. It rides the manifest, so
-  // it outlives the gitignored `result.json` — a fresh clone still reads the
-  // verdict behind its red tests.
+  // The diagnosis a failing test COMMITS with. It rides the manifest, so the
+  // verdict survives a generate that did not re-execute the test and left no
+  // birth finding for it.
   const diagnosisByScenario = new Map(
     [...join.manifestFlows.values()].flatMap((f) =>
       f.scenarios.flatMap((s) => (s.diagnosis ? [[s.id, s.diagnosis] as const] : [])),
@@ -1825,7 +1824,7 @@ export async function readGuardFlowDetail(
     const scenario = join.scenarioById.get(surface.scenarioId)
     const run = join.runById.get(surface.scenarioId)
     const file = fileById.get(surface.scenarioId)
-    // Without a run the row speaks for the BIRTH stage: a committed failing test
+    // Without a run the row speaks for the BIRTH stage: a stored failing test
     // carries the failure (and evidence) its birth execution recorded.
     const birth = run ? undefined : birthFailureById.get(surface.scenarioId)
     return {
@@ -1867,9 +1866,9 @@ export async function readGuardFlowDetail(
           : {}),
       hasEvidence: (run?.evidencePath ?? birth?.evidencePath) != null,
       // The verdict that committed this test red — birth stage only (a later run's
-      // failure is a different event, with no verdict of its own). `result.json` is
-      // gitignored, so the manifest DIAGNOSIS is the fallback: on a fresh clone the
-      // committed red test still says whose fault it is.
+      // failure is a different event, with no verdict of its own). A generate may
+      // have stored no finding for it, so the manifest DIAGNOSIS is the fallback:
+      // a red test still says whose fault it is.
       ...birthTriage(run != null, surface.scenarioId, birth, diagnosisByScenario),
       interfacePath: scenario?.interface?.path ?? [],
       ...(surface.coverageComplete !== undefined ? { coverageComplete: surface.coverageComplete } : {}),
@@ -1945,14 +1944,14 @@ export async function readGuardRunFlows(
  * The interface catalog plus the reverse index onto the flows that ground on it.
  *
  * The catalog has two homes and this view reads the MERGE of them: the derived
- * snapshot the Map action writes (`guard/interfaces.json`, gitignored) and the
- * committed `guard/interfaces.authored.json` a human writes for the surfaces no
+ * snapshot the Map action writes (`guard/interfaces.json`) and the authored
+ * `guard/interfaces.authored.json` a human writes for the surfaces no
  * derivation produces. Only `cli` and `api` are ever derived whole, so composing
  * this view from the derived half alone would show a repo with no web tasks at
  * all. Each row carries `origin` for which half it came from.
  *
- * In DB mode there is no working tree, so the catalog is read out of the newest
- * stored setup bundle instead; a repo whose setup never ran reports
+ * There is no working tree, so the catalog is read out of the newest stored
+ * setup bundle instead; a repo whose setup never ran reports
  * `unavailable: 'no-working-tree'` with an otherwise-empty payload. Neither half
  * present is likewise a clean empty payload (`mapped: false`) so the tab renders
  * its Map CTA, never a null check.
@@ -2026,7 +2025,7 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
 }
 
 // ---------------------------------------------------------------------------
-// Claims tab — the extracted claim corpus and its trace.
+// Claims — the extracted claim corpus and its trace.
 // ---------------------------------------------------------------------------
 
 /** Repo-relative posix path of the claim corpus, the key the store seam reads by. */
@@ -2037,7 +2036,7 @@ function claimsRelPath(repoKey: string): string {
 /**
  * The extracted claim corpus (`scenarios/claims.json`), read through the SAME
  * store seam as the scenario files so a hosted view reads its commit's set. A
- * missing or malformed file reads as `null` — the Claims tab renders its empty
+ * missing or malformed file reads as `null` — the claims read answers its empty
  * state, never an error.
  */
 export async function readGuardClaimsFile(
@@ -2056,7 +2055,7 @@ export async function readGuardClaimsFile(
   return result.success ? result.data : null
 }
 
-/** The claim corpus a (possibly PR-scoped) view reads — baseline fallback included. */
+/** The claim corpus a (possibly commit-pinned) view reads — baseline fallback included. */
 export function readGuardClaimsForView(repoKey: string, ref?: string): Promise<GuardClaimsFile | null> {
   return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardClaimsFile(repoKey, c))
 }
@@ -2080,8 +2079,8 @@ const EMPTY_CLAIMS_VIEW: GuardClaimsView = {
 }
 
 /**
- * The Claims tab payload: every extracted claim with the trace plan §8.2 asks for
- * — scenario → milestone → claim → doc sentence — read in both directions.
+ * The claims payload: every extracted claim with its full trace — scenario →
+ * milestone → claim → doc sentence — read in both directions.
  *
  * A claim is addressed two different ways by the two layers that reference it,
  * and the join honours both: a FLOW milestone addresses it by IDENTITY
@@ -2279,7 +2278,7 @@ function parseAuthoredInterfaces(text: string | undefined): InterfacesFile | nul
  *    written for authored AND blocked surfaces alike. This is the only trace a
  *    matched-but-unauthored flow leaves, and without it an interface the spec
  *    plainly reaches reads as "no flow uses this";
- *  - the committed scenarios' own grounding path — what actually got written.
+ *  - the stored scenarios' own grounding path — what actually got written.
  *    Also the FALLBACK for manifests written before the plan record existed, and
  *    the only source for hand-written scenarios (no manifest flow at all).
  *
@@ -2289,7 +2288,7 @@ function parseAuthoredInterfaces(text: string | undefined): InterfacesFile | nul
  * Every ref also carries the flow's OWN status, taken from the same flow view the
  * Flows list is built from ({@link flowListItem} read through
  * {@link guardFlowPlainStatus}), so the two surfaces cannot word one flow two ways:
- * a committed scenario says the interface is exercised, never that its flow passes.
+ * a stored scenario says the interface is exercised, never that its flow passes.
  */
 function interfaceReverseIndex(
   view: FlowViewSources | null,
@@ -2437,8 +2436,8 @@ async function headingTextIndex(
 /**
  * `doc` → its LIVE section index, for the joins that need more than the heading
  * (a milestone's live/gone state and the current section fingerprint). Reads go
- * through the `readRepoDoc` seam (FS in OSS, GitHub in EE) at `commit` — never
- * `fs` directly, so a hosted repo joins with no working tree. A doc that escapes
+ * through the `readRepoDoc` seam (the workspace's stored documents) at `commit` —
+ * never `fs`, so a hosted repo joins with no working tree. A doc that escapes
  * the repo or no longer exists contributes no entry (tolerant by design).
  */
 async function docSectionIndexes(
@@ -2470,10 +2469,9 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
   if (scope.kind === 'empty') return null
   let commit = scope.commit
   let report = await readGuardResultStore(repoKey, commit)
-  // A pinned PR head that never generated falls back to the BASELINE report —
-  // the generate its gate-run scenarios came from (never "newest"; the PR-view
-  // analogue of the spec route's corpus fallback). Heading joins follow `commit`
-  // so they read the docs the report's sections actually live in.
+  // A pinned commit that never generated falls back to the BASELINE report
+  // (never "newest"). Heading joins follow `commit` so they read the docs the
+  // report's sections actually live in.
   if (!report && scope.kind === 'commit' && ref !== undefined) {
     const base = await guardBaselineCommit(repoKey)
     if (base !== undefined && base !== commit) {
@@ -2486,7 +2484,7 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
   }
   if (!report) return report
   const held = report.heldSections ?? []
-  // A held section is unsettled by definition, so — like a finding — no committed
+  // A held section is unsettled by definition, so — like a finding — no stored
   // scenario donates its heading client-side; join it server-side the same way.
   if (report.birthFindings.length === 0 && held.length === 0) return report
   const headingByDocAnchor = await headingTextIndex(repoKey, [
@@ -2511,14 +2509,13 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
 }
 
 /**
- * PR-view read policy for a GENERATE-side artifact (manifest / generate result):
+ * Pinned-ref read policy for a GENERATE-side artifact (manifest / generate result):
  * no ref → the repo-level view, resolved through `resolveGuardScope` like every
- * other reader (OSS reads the live store; hosted reads the baseline commit's row,
- * or absent when no baseline exists yet — never the store's newest row, which a
- * PR's regenerated corpus would shadow); a pinned PR head → that commit's row,
- * falling back — on a head miss — to the BASELINE commit's row (the set the gate
- * actually executed against the head; never "newest by createdAt"). Run reads
- * never route through this — a PR head's run is its own.
+ * other reader (the baseline commit's row, or absent when no baseline exists yet
+ * — never the store's newest row, which a set written at another commit would
+ * shadow); a pinned ref → that commit's row, falling back — on a miss — to the
+ * BASELINE commit's row (never "newest by createdAt"). Run reads never route
+ * through this — a run is read at its own commit.
  */
 async function readPinnedWithBaselineFallback<T>(
   repoKey: string,
@@ -2537,26 +2534,24 @@ async function readPinnedWithBaselineFallback<T>(
   return load(base)
 }
 
-/** The manifest a (possibly PR-scoped) guard view joins classifications from. */
+/** The manifest a (possibly commit-pinned) guard view joins classifications from. */
 export function readManifestForView(repoKey: string, ref?: string): Promise<GuardManifest | null> {
   return readPinnedWithBaselineFallback(repoKey, ref, (c) => readManifestStore(repoKey, c))
 }
 
-/** The raw last-generate result a (possibly PR-scoped) guard view paints from. */
+/** The raw last-generate result a (possibly commit-pinned) guard view paints from. */
 export function readGuardResultForView(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
   return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardResultStore(repoKey, c))
 }
 
 /**
  * The preparation-recipe card, or `null` when no (valid) `recipe.json` exists.
- * OSS: `stale` compares the current discovery-input fingerprint (a working-tree
- * hash) to the last run's recorded `recipeFingerprint` — `null` when no run.
- * Hosted: there is NO working tree to fingerprint, so the comparison is
- * unknowable — `stale` is always `null` (never a false "recipe changed"
- * warning), and the informational fingerprint is the resolved ref's run-recorded
- * one (empty when that ref never ran). The recipe content itself always comes
- * from the store at the resolved commit. An invalid `recipe.json` reads as
- * absent (the card is informational).
+ * There is NO working tree to fingerprint, so staleness is unknowable — `stale`
+ * is always `null` (never a false "recipe changed" warning), and the
+ * informational fingerprint is the resolved ref's run-recorded one (empty when
+ * that ref never ran). The recipe content itself always comes from the store at
+ * the resolved commit. An invalid `recipe.json` reads as absent (the card is
+ * informational).
  */
 export async function readGuardRecipeCard(repoKey: string, commit?: string): Promise<GuardRecipeCard | null> {
   const raw = await readRecipeRaw(repoKey, commit)
@@ -2639,7 +2634,7 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
   return { ...card, fingerprint: run?.run.recipeFingerprint ?? '', stale: null }
 }
 
-/** Map each committed scenario id → its repo-relative YAML path (first sorted file wins, matching the loader's dedup). */
+/** Map each stored scenario id → its repo-relative YAML path (first sorted file wins, matching the loader's dedup). */
 async function scenarioFilesById(repoKey: string, commit?: string): Promise<Map<string, string>> {
   const map = new Map<string, string>()
   for (const rel of await listScenarioFiles(repoKey, commit)) {
@@ -2667,9 +2662,9 @@ export function readGuardRun(repoRoot: string, runId: string): Promise<GuardLate
 }
 
 /**
- * The run a (possibly PR-scoped) guard view paints from: with `ref` (a PR head),
- * the run stored at exactly THAT commit — never the baseline (a PR view must not
- * show baseline data); without one, the repo baseline. The shared read behind
+ * The run a (possibly commit-pinned) guard view paints from: with `ref`, the run
+ * stored at exactly THAT commit — never the baseline (a pinned view must not show
+ * another commit's data); without one, the repo baseline. The shared read behind
  * the `/status`, `/latest`, and `/coverage` routes and the hosted recipe card.
  */
 export function readGuardRunForView(repoKey: string, ref?: string): Promise<GuardLatest | null> {
@@ -2705,7 +2700,7 @@ export async function readGuardStepActuals(
 const INVOCATION_FILE = 'invocation.json'
 
 /**
- * Find a committed scenario by id and return its raw YAML source, or `null`. With
+ * Find a stored scenario by id and return its raw YAML source, or `null`. With
  * `actualsFrom`, each step also carries what it ACTUALLY did in that run — the
  * merged view the test detail renders: authored expectation on the left, recorded
  * outcome on the right. A step the run never reached, and every step of a scenario
@@ -2819,7 +2814,7 @@ export async function readGuardInterfaceRaw(
 
 /**
  * One flow's entry in `scenarios/flows.json`, read through the SAME store seam
- * (and the same PR-scoped commit resolution) as the flow VIEW — so the bytes a
+ * (and the same pinned-commit resolution) as the flow VIEW — so the bytes a
  * reader sees are the ones the page beside them was composed from.
  */
 export function readGuardFlowRaw(
@@ -2850,8 +2845,8 @@ export function readGuardClaimRaw(
 /**
  * One dependency's entry in `scenarios/dependencies.json` — the {@link
  * readGuardFlowRaw} sibling for the dependency catalog, keyed on the entry NAME
- * (a catalog entry has no `id`; its name IS its identity). The gitignored
- * instance overlay has no raw reading of its own and never will: it holds the
+ * (a catalog entry has no `id`; its name IS its identity). The instance overlay
+ * has no raw reading of its own and never will: it holds the
  * registered values, and a stored secret is never echoed back.
  */
 export async function readGuardDependencyRaw(
@@ -2872,12 +2867,12 @@ export async function readGuardDependencyRaw(
 
 /**
  * The stored `scenarios/recipe.json` — the raw half of the recipe reading, read
- * through the SAME store seam (and the same PR-scoped commit resolution) as the
+ * through the SAME store seam (and the same pinned-commit resolution) as the
  * recipe CARD beside it. A repo has exactly ONE recipe, so this slice is addressed
  * by nothing: the id echoed back is the file's own path.
  *
- * Inline secrets are MASKED. The recipe is committed, so what a reader may see of
- * it is exactly what the recipe CARD shows — one mask
+ * Inline secrets are MASKED. The recipe is shared by the whole repo, so what a
+ * reader may see of it is exactly what the recipe CARD shows — one mask
  * ({@link maskedRecipeText}) behind both. A file that does not parse reads as
  * absent rather than unmasked, matching {@link readGuardRecipeCard}, which reads
  * an invalid recipe as no card at all.
@@ -3049,7 +3044,7 @@ export async function undismissGuardFlow(
 }
 
 // ---------------------------------------------------------------------------
-// Staleness — the amber-dot signal for the Guard tab.
+// Staleness — the amber-dot signal the repo's guard reads carry.
 // ---------------------------------------------------------------------------
 
 /**
@@ -3073,17 +3068,17 @@ const EMPTY_STALENESS: GuardStaleness = {
 }
 
 /**
- * Staleness composed from store reads at the resolved commit (the PR head, else
- * the baseline). Presence + a generate-vs-run timestamp
+ * Staleness composed from store reads at the resolved commit (the pinned ref,
+ * else the baseline). Presence + a generate-vs-run timestamp
  * compare; no working tree, no mtimes. With an explicit ref (`refPinned`), the
  * run presence is decided by THAT commit's row alone — no baseline-run fallback
- * (a never-run PR head must report hasRun:false, agreeing with `/latest?ref=`);
- * the repo-level view (baseline commit) may still fall back to the baseline row
- * (a guard run recorded at a different commit than the verify baseline).
+ * (a never-run pinned commit must report hasRun:false, agreeing with
+ * `/latest?ref=`); the repo-level view (baseline commit) may still fall back to
+ * the baseline row (a guard run recorded at a different commit).
  *
  * The GENERATE-side stores (manifest / scenario files / result) DO fall back —
- * per store — from a pinned head to the baseline commit, so those inputs ARE
- * established for that view even though nothing re-persisted them at the head.
+ * per store — from a pinned ref to the baseline commit, so those inputs ARE
+ * established for that view even though nothing re-persisted them at that ref.
  * Never "newest by createdAt" — only the explicit baseline.
  */
 async function storeGuardStaleness(

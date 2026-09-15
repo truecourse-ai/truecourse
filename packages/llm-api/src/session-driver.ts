@@ -8,7 +8,7 @@
  * fallback-model retry.
  *
  * The driver owns MECHANICS only. The policy shell (`runAgentLoop` in
- * `@truecourse/shared/llm`) counts budgets from the events emitted here and
+ * `@truecourse/agent-loop`) counts budgets from the events emitted here and
  * enforces them through `interrupt()`; tool argument validation lives in the
  * shell's tool wrapper, whose `SessionToolArgsError` this driver maps into
  * the re-ask path.
@@ -63,7 +63,7 @@ const BEGIN_MESSAGE = 'Begin.';
 const CONTINUE_NUDGE = `Continue. When you have reached the final result, call the \`${OUTCOME_TOOL_NAME}\` tool.`;
 
 /**
- * How this driver answers a provider failure (item 11). The AI SDK's own
+ * How this driver answers a provider failure. The AI SDK's own
  * retry has no observation hook, so `maxRetries: 0` hands the loop to us and
  * every wait becomes a `provider-retry` transcript event. Attempts are per
  * TURN and per MODEL: the primary gets `attempts` tries, then the fallback
@@ -91,7 +91,7 @@ export const DEFAULT_API_RETRY: ApiRetryPolicy = {
 export const RETRY_JITTER = 0.25;
 
 /**
- * The wait before one retry (`attempt` is 1-based). Three rules (01 step 2i):
+ * The wait before one retry (`attempt` is 1-based). Three rules:
  *
  * - The exponential ladder (`baseDelayMs · 2^(attempt-1)`) FLOORS a provider's
  *   `Retry-After`: the header is advice about a world that does not include
@@ -131,7 +131,7 @@ export interface ApiSessionDriverOptions {
    * separate sessions never collide. Ignored by anthropic and bedrock, which
    * key their cache by the prefix content itself.
    *
-   * A run that declares a `sharedPrefix` per session (item 8) names its cluster
+   * A run that declares a `sharedPrefix` per session names its cluster
    * there instead, and that key wins: it is the one the shared prefix is
    * actually shared under.
    */
@@ -217,7 +217,7 @@ interface SessionRuntime {
   fallback?: { model: LanguageModel; modelId: string };
   pricing?: ApiSessionDriverOptions['pricing'];
   retry: ApiRetryPolicy;
-  /** The configured provider's cache + tool-call strategy (item 7). */
+  /** The configured provider's cache + tool-call strategy. */
   tuning: ProviderTuning;
   /** Resolved once per session — the cluster the request-keyed providers cache under. */
   cacheKey: string;

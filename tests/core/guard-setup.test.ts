@@ -3,10 +3,9 @@ import { PREPARATION_SESSION_BUDGET } from '../../packages/core/src/services/gua
 /**
  * The `guard setup` core adapter — the half the engine deliberately does NOT
  * own: step 0 (is a provider configured — a CONFIG question), the pre-flight
- * SESSION estimate (plan 03's retirement subpoint: six session kinds, cache- and
- * settled-aware), the session seams it builds and injects, the run's usage
- * accounting, and the persisted `guard/setup.json` the externals view and
- * `guard status` read back.
+ * SESSION estimate (six session kinds, cache- and settled-aware), the session
+ * seams it builds and injects, the run's usage accounting, and the persisted
+ * `guard/setup.json` the externals view and the setup report read back.
  *
  * The engine itself is covered in `tests/guard-generator/setup.test.ts`. Here
  * the SESSION DRIVER is stubbed at `createClaudeCodeSessionDriver` — the same
@@ -204,7 +203,7 @@ function scriptCatalogSession(entries = [{ name: 'app-database', class: 'seedabl
 
 /**
  * A tracker that keeps every distinct detail each step showed, in order — the
- * live line the terminal checklist and the dashboard popup both paint.
+ * live line the dashboard popup paints.
  */
 function detailRecorder(): { tracker: StepTracker; details: Map<string, string[]> } {
   const details = new Map<string, string[]>();
@@ -235,7 +234,7 @@ describe('assertLlmProviderConfigured', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The pre-flight estimate — six SESSION kinds (plan 03, retirement subpoint)
+// The pre-flight estimate — six SESSION kinds
 // ---------------------------------------------------------------------------
 
 describe('estimateGuardSetupCost', () => {
@@ -374,7 +373,7 @@ describe('estimateGuardSetupCost', () => {
 });
 
 /**
- * A repo where every step is already done AND recorded as settled: a committed
+ * A repo where every step is already done AND recorded as settled: a stored
  * recipe with a seed, both interface halves, and a `guard/setup.json` whose rows
  * carry the fingerprints this tree computes.
  */
@@ -448,8 +447,8 @@ describe('guardSetupInProcess', () => {
 
     expect(report.status).toBe('ok');
     expect(reportPath).toBe(path.join(r, '.truecourse', 'guard', 'setup.json'));
-    // Read BACK through the store reader — this is what the externals view and
-    // `guard status` do, so the file has to satisfy the schema, not just be written.
+    // Read BACK through the store reader — this is what the externals view and the
+    // setup report do, so the file has to satisfy the schema, not just be written.
     const persisted = readGuardSetup(r);
     expect(persisted?.detection?.externalServices.map((s) => s.service)).toEqual(['stripe']);
     expect(persisted?.detection?.database).toEqual({ type: 'sqlite', driver: 'prisma', tables: 1 });
@@ -524,7 +523,7 @@ describe('guardSetupInProcess', () => {
 
     await guardSetupInProcess(r, { tracker, interfaces: interfaces(), ...inertSeams });
 
-    // Step 1 reuses the committed recipe, so what it spends its time on is the
+    // Step 1 reuses the existing recipe, so what it spends its time on is the
     // live probe: booting the server and calling a real route on it.
     expect(details.get('recipe')?.[0]).toBe('probing a live route');
     // The analysis pass is reported against whichever step first needs it — here
@@ -708,7 +707,7 @@ describe('guardSetupInProcess — hosted injection', () => {
   }, 120_000);
 
   // An eager run is VISIBLE from the moment it starts — including one that dies
-  // before any session exists, which the lazy CLI shape leaves unrecorded.
+  // before any session exists, which a lazy, driver-first run leaves unrecorded.
   it('opens the run eagerly with the step checklist, and closes it failed with the reason', async () => {
     const r = fixtureRepo();
     writeRecipe(r, { serve: ['node', path.join(r, 'missing.mjs')], readyTimeoutMs: 4000 });
@@ -732,8 +731,8 @@ describe('guardSetupInProcess — hosted injection', () => {
     expect(run.status).toBe('failed');
     expect(run.error).toEqual({ message: report.reason, kind: 'setup' });
     expect(run.llm).toEqual({ mode: 'claude-code', provider: 'test', model: 'scripted' });
-    // The checklist the terminal renders, mirrored for a surface that can only
-    // read run.json: the step that died carries the error, later steps never ran.
+    // The checklist the run record carries, for a surface that can only read
+    // run.json: the step that died carries the error, later steps never ran.
     expect(checklistOf(run).map((i) => i.key)).toEqual([
       'recipe',
       'detect',

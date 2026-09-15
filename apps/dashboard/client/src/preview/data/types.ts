@@ -9,8 +9,9 @@
 
 /**
  * A source-control provider's id. The registry names them (see
- * `preview/data/providers.ts`): the open edition has GitHub and GitLab, and an
- * edition may add its own, so this is not a closed set.
+ * `preview/data/providers.ts`): the open edition connects GitHub and lists
+ * GitLab as Coming soon, and an edition may register more, so this is not a
+ * closed set.
  */
 export type ProviderId = string;
 

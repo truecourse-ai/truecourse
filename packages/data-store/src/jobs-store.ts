@@ -32,8 +32,8 @@ type JobRow = typeof jobs.$inferSelect;
 
 /**
  * A reaped in-flight job, as returned by {@link JobStore.interruptOrphaned}: enough
- * for boot recovery to settle side effects the dead run left dangling (e.g.
- * complete a `guard.gate`'s stranded PR Check from the stored `payload`).
+ * for boot recovery to settle what the dead run left dangling (the chain link
+ * it was about to enqueue, from the stored `payload`).
  */
 export interface OrphanedJob {
   id: string;

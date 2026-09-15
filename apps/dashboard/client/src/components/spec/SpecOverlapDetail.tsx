@@ -4,10 +4,11 @@
  * the conflicting section) and the SECTION-scoped resolution: a
  * verdict on the disagreement, "<docA> is right" / "<docB> is right" (the loser's
  * disputed claim is suppressed at guard generate) or "Not a real conflict"
- * (dismissal). Verdicts write to decisions.json instantly (OSS, no re-curate) and
+ * (dismissal). Verdicts are recorded instantly (no re-curate) and
  * render resolved-in-place with an Undo. The other resolution path, fixing the
  * doc itself in your editor, is a one-line hint: the docsChanged staleness dot
- * picks the edit up. Opened from the Spec tab's left nav.
+ * picks the edit up. Opened from Context's conflicts, and from a conflict
+ * opened inside a document.
  *
  * The pane reads top-down the way a guard test's does: the judge's ASSESSMENT
  * leads (reasoning and recommendation in one card), the verdict actions sit with
@@ -24,8 +25,6 @@ import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlap, SpecOverl
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
-
-/** Shown on resolution actions while a PR is being viewed before its gate has run. */
 
 /** Caption above a detail card, the label grammar the guard detail panes read in. */
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
@@ -80,9 +79,9 @@ export function SpecOverlapDetail({
   // the ref.
   const docMeta = new Map(data.corpus.docs.map((d) => [d.ref, d] as const));
   const titleOf = (ref: string): string => docMeta.get(ref)?.title ?? ref;
-  // Hosted repo view: a doc inherited from the workspace Knowledge corpus carries
-  // `layer: 'workspace'`, flags the workspace badge beside its title (repo-local
-  // side stays unbadged). Inert on OSS / repo-local corpora.
+  // A doc that comes from the workspace corpus carries `layer: 'workspace'`, which
+  // flags the workspace badge beside its title (repo-local side stays unbadged).
+  // Inert on a repo-local corpus.
   const isWorkspace = (ref: string): boolean => docMeta.get(ref)?.layer === 'workspace';
 
   // The representative overlap of THIS dispute, carried by the conflict the
@@ -142,7 +141,7 @@ export function SpecOverlapDetail({
   const source = ctxSource ?? repoSource;
 
   // Build the persisted verdict from the flagged sections (heading + verbatim quote
-  // per doc), the same identity the gate keys on.
+  // per doc), the same identity a stored verdict is keyed on.
   const buildResolution = (verdict: 'a' | 'b' | 'dismissed'): SpecConflictResolution => {
     const secOf = (d: string) => (overlap?.sections ?? []).find((s) => s.doc === d);
     return {
@@ -162,7 +161,7 @@ export function SpecOverlapDetail({
       const payload = buildResolution(verdict);
       const res = await source.postConflictResolution(payload);
       if ('corpus' in res) {
-        onResolved(res); // EE PR: the re-curated corpus carries the verdict
+        onResolved(res); // a source that answers with a whole corpus carries the verdict
       } else {
         setOverride({ ...payload, resolvedAt: new Date().toISOString() });
         onConflictChange?.(res.conflictResolutions);

@@ -10,8 +10,6 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  * after. That bundle is what carries the per-step fingerprints forward, so a
  * re-run over unchanged inputs settles every step without spending.
  *
- * A repository with no stored corpus is refused up front — setup reads the
- * curated doc universe, and there is nothing to catalogue against without it.
  * A setup whose recipe gate held chains straight into `repo.guard-generate`.
  */
 

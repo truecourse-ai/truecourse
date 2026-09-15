@@ -411,7 +411,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   });
 
   /**
-   * THE Documents view (plan §5): one row per document of the workspace
+   * THE Documents view: one row per document of the workspace
    * corpus, composed here rather than in the browser — the row's status is a
    * join over every repository that reads it, and no client may be asked to
    * fan that out.
@@ -541,8 +541,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   // --- Scan ----------------------------------------------------------------
 
   // The workspace Document scan. The asking workspace's provider is proved
-  // BEFORE anything is queued, exactly as the repository scan route did it: an
-  // unconfigured provider is a setting to fill in, not a job that dies later.
+  // BEFORE anything is queued: an unconfigured provider is a setting to fill
+  // in, not a job that dies later.
   router.post('/scan', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);

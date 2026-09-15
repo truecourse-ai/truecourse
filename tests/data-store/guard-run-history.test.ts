@@ -1,8 +1,8 @@
 /**
  * The hosted run history has two widths: the baseline trend (the default,
- * what the coverage views chart) and EVERY stored run — the pull-request head
- * runs the gate wrote included — for a repository's Runs list. Each entry
- * carries the envelope's provenance so the list needs no snapshot read.
+ * what the coverage views chart) and EVERY stored run — any run that names a
+ * pull request included — for a repository's Runs list. Each entry carries the
+ * envelope's provenance so the list needs no snapshot read.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';

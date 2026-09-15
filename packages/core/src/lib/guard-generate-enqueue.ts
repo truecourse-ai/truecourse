@@ -17,12 +17,13 @@ export type GuardGenerateEnqueue = (repoKey: string) => Promise<void>;
 
 let enqueue: GuardGenerateEnqueue | null = null;
 
-/** Install the EE enqueue (or clear it with null). Called once at boot. */
+/** Install the enqueue (or clear it with null). Called once at boot. */
 export function setGuardGenerateEnqueue(fn: GuardGenerateEnqueue | null): void {
   enqueue = fn;
 }
 
-/** The active guard-generate enqueue, or null when none is registered (OSS/tests). */
+/** The active guard-generate enqueue, or null when none is registered (tests, a
+ *  process with no worker). */
 export function getGuardGenerateEnqueue(): GuardGenerateEnqueue | null {
   return enqueue;
 }

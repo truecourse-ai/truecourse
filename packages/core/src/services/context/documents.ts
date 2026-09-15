@@ -1,6 +1,6 @@
 /**
  * The rows of the Documents view — ONE row per document of the workspace
- * corpus, composed on the server (plan §5, §7).
+ * corpus, composed on the server.
  *
  * Context IS the documents: a source is a filter over them, and a repository is
  * a reading of them. So a row joins four stored things and invents none of

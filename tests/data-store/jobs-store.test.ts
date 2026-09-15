@@ -84,7 +84,7 @@ describe('JobStore — single-flight', () => {
     await store.markRunning(b.id);
 
     // The reaped rows come back with type + stored payload, so boot recovery can
-    // settle side effects the dead job left dangling (e.g. a gate's PR Check).
+    // settle side effects the dead job left dangling.
     const reaped = await store.interruptOrphaned();
     expect(reaped).toHaveLength(2);
     const reapedGate = reaped.find((j) => j.id === b.id);

@@ -63,7 +63,7 @@ describe('the `until` field on a run step', () => {
   it('is not part of the AUTHORING vocabulary — the generate prompt cannot move for it', () => {
     // `GuardStepObjectSchema` is what the authoring schema extends. A runner-only
     // verb that leaked into it would re-author every cli flow in the corpus (the
-    // `patch` precedent, plan §schemas).
+    // `patch` precedent).
     expect(() =>
       GuardStepObjectSchema.parse({ run: ['dashboard'], until: { marker: 'up' }, expect: {} }),
     ).toThrow()

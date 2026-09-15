@@ -685,9 +685,8 @@ export const RecipeSchema = z
      * a git hook, a Makefile, another tool's plugin — silently runs whatever copy
      * of the program the machine happens to have (a published release, a stale
      * global install), and every verdict it reaches is about that copy instead of
-     * this working tree. That is not a hypothetical: TrueCourse's own pre-commit
-     * hook shells out to `truecourse`, so the hook scenarios were grading a
-     * published build until this existed.
+     * this working tree — a git hook or a Makefile that invokes the program by
+     * name is exactly the case this exists for.
      *
      * A string value is a path to a built entry (resolved like `entry`); an array
      * is full argv. Both are recipe-owned, so neither is interpolated. No global
@@ -1038,7 +1037,7 @@ export interface LoadedRecipe {
  * deliberately NOT here: they are the repo's, they move for reasons that have
  * nothing to do with guard, and a recipe that names one already folds that name.
  *
- * Exported for `guard setup`'s recipe-step fingerprint (plan 03 step 8), which
+ * Exported for Flow setup's recipe-step fingerprint, which
  * hashes this exact list (the recipe file itself is folded separately below) —
  * one source, so the two can never drift.
  */

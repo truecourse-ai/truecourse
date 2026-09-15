@@ -4,9 +4,9 @@
  * It is the last entry of the repository menu, so Code stays a list whose rows
  * OPEN the repository rather than previewing its settings beside the list.
  *
- * Only what the server holds is here. The gate policy and the notify list are
- * not stored anywhere yet, so they are not offered: a control whose Save went
- * no further than this tab would be the one thing this page could get wrong.
+ * Only what the server holds is here: what this repository is, and unlink. A
+ * control whose Save went no further than this tab would be the one thing this
+ * page could get wrong.
  */
 
 import { useState } from 'react';

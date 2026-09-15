@@ -46,7 +46,7 @@
  * implementation traffic, kept to the catalog and the raw view.
  *
  * CROSS-NAVIGATION lands on an INTERFACE id (a flow's "grounds on" jump, a
- * bookmark, the retired `?gjourney` alias), which this pane resolves to the row
+ * bookmark, the retired `?journey` alias), which this pane resolves to the row
  * that owns it: a web task to the SCREEN its place is part of, an operation and a
  * command to themselves. It selects that row, expands the member and scrolls to
  * it. The inbound id is consumed by the selection it produces.
@@ -374,7 +374,7 @@ export function GuardInterfacesPane({
   recipeSurface?: GuardDriverId | null;
   /** Drop the recipe — a row selection takes the body back. */
   onCloseRecipe?: () => void;
-  /** The PR head ref scoping the raw read (EE); undefined at repo level. */
+  /** The commit a raw read would pin at; nothing supplies it today. */
   prRef?: string;
   onOpenFlow: (flowId: string) => void;
 }) {
@@ -398,7 +398,7 @@ export function GuardInterfacesPane({
   const memberRows = useScrollToSelected(expanded, [activeId]);
 
   // CROSS-NAVIGATION resolves here, because here is where the catalog is: an
-  // inbound `?ginterface=` names a member, and the pane's subject is a row. The
+  // inbound `?member=` names a member, and the pane's subject is a row. The
   // ref makes the resolution happen ONCE per inbound id — the tab open clears the
   // param, and re-resolving a value the user has since navigated away from would
   // drag them back.

@@ -71,7 +71,7 @@ const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
  */
 export const WORK_TREE_COMMIT = 'worktree';
 
-/** Where the file store keeps a run's section summary: `guard/sections/<runId>.json`. */
+/** Where this double keeps a run's section summary: `guard/sections/<runId>.json`. */
 const SECTIONS_DIR = 'sections';
 
 function guardSectionsPath(repoPath: string, runId: string): string {
@@ -152,7 +152,7 @@ export class WorkTreeGuardStore implements GuardStore {
     }
   }
 
-  // The file store keeps one materialized snapshot (LATEST) — the exact-commit
+  // This double keeps one materialized snapshot (LATEST) — the exact-commit
   // read is a match against its envelope, not a scan of runs/ or history.
   async readGuardRunForCommit(repoPath: string, commitSha: string): Promise<GuardLatest | null> {
     const latest = fileReadGuardLatest(repoPath);
@@ -172,7 +172,7 @@ export class WorkTreeGuardStore implements GuardStore {
   }
 
   // The coverage summaries live beside the run snapshots, one derived file per
-  // run: `guard/sections/<runId>.json`, gitignored like `guard/runs/`.
+  // run: `guard/sections/<runId>.json`, beside `guard/runs/`.
   async writeGuardRunCoverage(repoPath: string, run: GuardRunCoverage): Promise<void> {
     if (!SAFE_SEGMENT.test(run.runId)) return;
     const file = guardSectionsPath(repoPath, run.runId);
@@ -203,8 +203,8 @@ export class WorkTreeGuardStore implements GuardStore {
     return runs.sort((a, b) => a.ranAt.localeCompare(b.ranAt) || a.runId.localeCompare(b.runId));
   }
 
-  // The file impl reads the live store — there is no per-commit history, so
-  // `commitSha` is ignored (OSS is latest). Same for the corpus reads below.
+  // The tree holds one state, so there is no per-commit history and `commitSha`
+  // is ignored. Same for the corpus reads below.
   async readGuardResult(repoKey: string, _commitSha?: string): Promise<GuardGenerateReport | null> {
     return fileReadGuardResult(repoKey);
   }
@@ -281,15 +281,15 @@ export class WorkTreeGuardStore implements GuardStore {
   }
 
   async writeGuardResultEvidence(): Promise<void> {
-    // No-op: OSS birth evidence already lives in the working tree under
+    // No-op: the engine already wrote the birth evidence into this tree under
     // `.truecourse/guard/evidence/`, where `readGuardEvidenceAt` reads it directly.
-    // Only the hosted store (ephemeral checkout) must copy it out.
+    // Only the Postgres store (ephemeral checkout) must copy it out.
   }
 
   async saveScenarios(ref: RepoRef, _sourceDir: string): Promise<SaveScenariosResult> {
     // The corpus is already on disk (the guard-runner/generator wrote it in place),
     // so there is nothing to copy — report the count, matching the contract store.
-    // The commit is ignored: OSS has no per-commit history.
+    // The commit is ignored: a tree has no per-commit history.
     return { fileCount: walkScenarioRelFiles(scenariosDir(ref.repoKey)).length };
   }
 

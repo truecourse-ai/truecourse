@@ -7,12 +7,12 @@ import { type Express } from 'express';
 /**
  * The dependencies routes — `GET /guard/dependencies` (the joined catalog view),
  * `PUT /guard/dependencies` (register ONE instance) and `GET
- * /guard/dependency/raw` (the committed catalog entry behind a row). Real engine,
+ * /guard/dependency/raw` (the declared catalog entry behind a row). Real engine,
  * nothing mocked except the socket emitter.
  *
- * The COMMITTED half (the catalog, the recipe) is seeded as files in the fixture
+ * The DECLARED half (the catalog, the recipe) is seeded as files in the fixture
  * tree, which is what the tree-backed guard store reads. The REGISTERED half —
- * the two gitignored overlays — never touches a repository tree any more: it is
+ * the two instance overlays — never touches a repository tree any more: they are
  * one stored row, so it is seeded and read back through the overlay store.
  */
 
@@ -204,13 +204,13 @@ describe('Guard dependencies routes', () => {
     expect(res.body.dependencies[0]).toMatchObject({ name: 'anthropic', state: 'provided' });
     expect(JSON.stringify(res.body)).not.toContain('sk-secret');
     expect((await overlays()).dependencies).toEqual({ anthropic: { env: { ANTHROPIC_API_KEY: 'sk-secret' } } });
-    // The committed catalog is untouched: the declaration already said all of this.
+    // The declared catalog is untouched: the declaration already said all of this.
     expect(readJson(CATALOG).dependencies).toEqual([ACCOUNT]);
     expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(TEST_ORG, fixture.project.slug, 'guard-externals');
   });
 
   /**
-   * A SERVICE row's account. The committed recipe DECLARES the service and is
+   * A SERVICE row's account. The recipe DECLARES the service and is
    * never edited by a registration; everything the registration supplies — the
    * origin as well as the token and the headers — lands in the stored overlay,
    * and none of it is echoed back.
@@ -242,7 +242,7 @@ describe('Guard dependencies routes', () => {
         headers: { 'X-Api-Key': 'hk_secret', 'X-Tenant': 'acme' },
       },
     });
-    // The committed half carries the declaration and nothing else.
+    // The declared half carries the declaration and nothing else.
     expect(fs.readFileSync(path.join(root, RECIPE), 'utf-8')).not.toContain('sk_live_secret');
     expect(JSON.stringify(res.body)).not.toContain('sk_live_secret');
     expect(JSON.stringify(res.body)).not.toContain('hk_secret');

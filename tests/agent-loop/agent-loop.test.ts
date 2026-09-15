@@ -1043,7 +1043,7 @@ describe('runAgentLoop questions and steering', () => {
 });
 
 // ---------------------------------------------------------------------------
-// the outcome precondition (01 step 2k)
+// the outcome precondition
 // ---------------------------------------------------------------------------
 
 describe('runAgentLoop outcome precondition', () => {

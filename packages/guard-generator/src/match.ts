@@ -76,7 +76,7 @@ export interface SurfaceCatalog {
  * fingerprints, sorted — so the value depends on the SET of surfaces a user can
  * reach, never on derivation order.
  *
- * RPC-DERIVED OPERATIONS ARE NOT CANDIDATES (item 12). A tRPC procedure composed
+ * RPC-DERIVED OPERATIONS ARE NOT CANDIDATES. A tRPC procedure composed
  * into `POST /api/trpc/viewer.bookings.create` is genuinely invocable, but its
  * body is the procedure's input schema in tRPC's own envelope, and whether a
  * scenario should be authored against that encoding is a decision this round did

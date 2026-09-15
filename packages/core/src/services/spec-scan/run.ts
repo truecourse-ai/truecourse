@@ -13,7 +13,7 @@
  *   → `spec-scan.curate-doc`   one session per doc   (pool)
  *   → `spec-scan.settle-areas` ≤1 session per corpus (barrier, concurrency 1)
  *   → groupByArea (det)
- *   → deriveOverlapWorkItems (det — claim-token/heading pairing, item 119)
+ *   → deriveOverlapWorkItems (det — claim-token/heading pairing)
  *   → `spec-scan.overlap`      one session per collision cluster (pool)
  *   → verify pointers + cross-area dedup (det) → assemble → write.
  *
@@ -218,11 +218,11 @@ export interface SpecScanSessionsOptions {
    */
   driver: () => Promise<SessionDriver>
   persistence: SessionPersistence
-  /** Inject the decisions instead of reading `decisions.json` (EE). */
+  /** Inject the decisions instead of reading `decisions.json` (the workspace scan). */
   decisions?: DecisionsFile
-  /** Inject the doc set instead of walking the filesystem (EE). */
+  /** Inject the doc set instead of walking the filesystem (the workspace scan). */
   docSource?: () => DocCandidate[] | Promise<DocCandidate[]>
-  /** Who this repository is; explicit `null` = nothing identifies it (EE). */
+  /** Who this repository is; explicit `null` = nothing identifies it (the workspace scan). */
   repoIdentity?: RepoIdentity | null
   skipGit?: boolean
   /** Skip writing `corpus.json`. The corpus is still assembled + returned. */
@@ -283,8 +283,8 @@ export interface SpecScanSessionsOptions {
   /**
    * The scope orchestration's outcome: `covered` = the deterministic pre-pass
    * found every subtree verdicted (zero sessions), `ran`/`failed` = the
-   * session's fate, `skipped` = an injected doc set (EE/workspace — scope was
-   * settled at repo scope, stored verdicts still apply).
+   * session's fate, `skipped` = an injected doc set (the workspace scan — scope
+   * was settled at repo scope, stored verdicts still apply).
    */
   onScope?: (state: 'covered' | 'ran' | 'failed' | 'skipped') => void
   onCurateProgress?: (done: number, total: number) => void
@@ -578,7 +578,7 @@ export async function runSpecScanSessions(
   // BEFORE identity resolution and the prefilter, so an excluded subtree costs
   // nothing downstream — not an identity read, not a session. The covered-
   // universe pre-pass is deterministic and spends zero sessions; an injected
-  // doc set (EE/workspace) skips the session (scope was settled at repo scope)
+  // doc set (the workspace scan) skips the session (scope was settled at repo scope)
   // but still honors the stored verdicts.
   const pendingQuestions: UserInputQuestion[] = []
   const scanFindings: string[] = []
@@ -760,7 +760,7 @@ export async function runSpecScanSessions(
 
   // Resolve identity AFTER discovery + scope application: corpus name-frequency
   // expansion reads the docs that are actually in scope. `!== undefined` so an
-  // explicit null is honored (EE).
+  // explicit null is honored (the workspace scan).
   const identity =
     opts.repoIdentity !== undefined
       ? opts.repoIdentity
@@ -1035,7 +1035,7 @@ export async function runSpecScanSessions(
     )
   }
 
-  // ---- Overlap sessions (one per collision cluster, item 119) --------------
+  // ---- Overlap sessions (one per collision cluster) -----------------------
   // Retrieval is deterministic: global claim-token/heading pairing over the
   // kept docs, each pair assigned to exactly ONE area, connected components
   // per area — a doc with no candidate collision costs no session at all.

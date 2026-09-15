@@ -1,14 +1,12 @@
 /**
- * THE ADJUDICATION SESSION AT THE COMMAND LEVEL (plan 05, step 21 items 2/5/6
- * and step 22 item 3's fold half) — the verdict cache, the pre-flight plan, the
- * `read_evidence` precondition, and what the fold does with a verdict that
- * breaks a structural invariant.
+ * THE ADJUDICATION SESSION AT THE COMMAND LEVEL — the verdict cache, the
+ * pre-flight plan, the `read_evidence` precondition, and what the fold does
+ * with a verdict that breaks a structural invariant.
  *
  * There is no driver seam on `RunGuardAdjudicationOptions` (an open end the
  * implementation named), so the session driver is scripted at the module the
- * BUILT core imports it from — the pattern `tests/cli/guard-adjudication-e2e`
- * established. Everything else is real: the stores, the cache, the pool, the
- * loop, the fold.
+ * BUILT core imports it from. Everything else is real: the stores, the cache,
+ * the pool, the loop, the fold.
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
@@ -103,7 +101,7 @@ const seedCache = (r: string, key: string, value: unknown): Promise<void> =>
 const readCache = (r: string, key: string): Promise<unknown | null> =>
   getCacheEntry(r, ADJUDICATE_CACHE_NAME, key)
 
-/** Write a committed scenario yaml so the run joins it to the row. */
+/** Write a stored scenario yaml so the run joins it to the row. */
 function commitScenario(r: string, id: string, steps?: unknown): void {
   const doc = scenarioDoc(id, steps ? ({ steps } as never) : {})
   const target = path.join(r, '.truecourse', 'scenarios', 'area', `${id}.yaml`)
@@ -209,7 +207,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
   /**
    * `--scenario <id>` is the documented escape hatch: "An explicitly named row
    * re-adjudicates, its prior verdict briefed" (prepareAdjudication's own
-   * comment, and the CLI's help). The row's identity has not changed, so the
+   * comment). The row's identity has not changed, so the
    * cached verdict is keyed on exactly what a re-adjudication would look up —
    * an explicit scope must therefore beat the cache, or the hatch is a no-op
    * that rewrites the verdict the user asked to overturn.
@@ -281,7 +279,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
 
   /**
    * Skipping the CACHE is not skipping the PRE-PASS: the pre-pass re-derives
-   * its answer off the committed corpus and the board row rather than
+   * its answer off the stored corpus and the board row rather than
    * remembering one, so a scoped declared red still costs zero sessions.
    */
   it('still settles a scoped declared red deterministically, with no session', async () => {
@@ -435,7 +433,7 @@ describe('the `read_evidence` precondition', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The fold's refusal, end to end (step 22 item 3's second half)
+// The fold's refusal, end to end
 // ---------------------------------------------------------------------------
 
 describe('runGuardAdjudication — a refused verdict costs a re-run, never a cache entry', () => {

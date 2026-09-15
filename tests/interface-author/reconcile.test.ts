@@ -1,6 +1,6 @@
 /**
  * STATE RECONCILIATION — the pass that collapses the registry's synonyms after a
- * run whose sessions could not see each other (item 3).
+ * run whose sessions could not see each other.
  *
  * The model is a STUB throughout: what is under test is everything around it —
  * the deterministic collapse that needs no model at all, the guardrails that

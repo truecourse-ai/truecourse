@@ -3,8 +3,8 @@
  * it. One row per repository with its own coverage split and its last check,
  * opening the repository's console, in the platform's index table — the same
  * resizable columns, and the same refusal to scroll sideways, as every other
- * list. Connect repository is the page action. No feed, no jobs: gate activity
- * lives on a repository's Runs, the agent's work on Agent.
+ * list. Connect repository is the page action. No feed, no jobs: a repository's
+ * runs live on its Runs tab, the agent's work on Agent.
  *
  * Every row reads its STORED summary from the server (the coverage split, the
  * last run's verdict, the corpus commit as its baseline), re-read when a run of

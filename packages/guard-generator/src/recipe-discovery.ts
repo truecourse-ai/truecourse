@@ -132,8 +132,8 @@ export type RecipeDiscoveryResult =
   | { status: 'verify-failed'; reason: string; proposal?: RecipeProposal; sessionRunId?: string }
 
 // ---------------------------------------------------------------------------
-// The repair seam (plan 03 step 9) — the agent session that replaced the
-// one-shot LLM fallback. Defined HERE (driver-agnostic types only) because the
+// The repair seam — the agent session that replaced the one-shot LLM
+// fallback. Defined HERE (driver-agnostic types only) because the
 // session itself lives in `@truecourse/core`, which this package must not
 // depend on: core builds a `RecipeRepairFn` and injects it.
 // ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ export interface DiscoverRecipeOptions {
    */
   onPhase?: (phase: RecipeDiscoveryPhase) => void
   /**
-   * THE REPAIR SESSION (plan 03 step 9). When present it REPLACES the one-shot
+   * THE REPAIR SESSION. When present it REPLACES the one-shot
    * `proposeRecipeWithReask` + evidence-retry fallback: discovery hands the seam
    * the failed proposal, the engine's verdict, and the deterministic evidence,
    * and fold-verifies whatever comes back with `verifyProposal` REGARDLESS of
@@ -230,7 +230,7 @@ export interface DiscoverRecipeOptions {
 }
 
 /** The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`.
- *  Exported so the repair session keeps the exact key (plan 03 step 9): a
+ *  Exported so the repair session keeps the exact key: a
  *  proposal the one-shot era settled stays a hit in the session era. */
 export function recipeCacheKey(inputsFingerprint: string): string {
   return createHash('sha256').update(`${RECIPE_PROMPT_FINGERPRINT}::${inputsFingerprint}`).digest('hex')
@@ -349,7 +349,7 @@ export async function discoverRecipe(
 
   const inputsFingerprint = computeRecipeFingerprint(repoRoot)
 
-  // ---- The repair session path (plan 03 step 9). -----------------------------
+  // ---- The repair session path. ---------------------------------------------
   // Loop ONLY on the failure path: a deterministic proposal that verified never
   // reaches here, so a clean repo spends zero sessions. The session frames the
   // work as repair-to-green (the failed proposal + the engine's verdict lead its
@@ -1014,7 +1014,7 @@ async function proposeRecipeWithReask(
 }
 
 // ---------------------------------------------------------------------------
-// The static proposal check (`check_recipe`, plan 03 step 9) — the cheap half
+// The static proposal check (`check_recipe`) — the cheap half
 // of the validator-as-tool pattern: everything that can be refused WITHOUT
 // executing anything. The schema itself is enforced by the session shell (the
 // tool's inputSchema IS `RecipeProposalSchema`); this adds the deterministic

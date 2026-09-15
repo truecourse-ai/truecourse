@@ -3,11 +3,11 @@
  * FAILING web step left behind.
  *
  * It is an ANNOTATION and nothing else. The deterministic expectation is the only
- * thing that decides pass or fail (§10.2's determinism rule is not negotiable: a
+ * thing that decides pass or fail (the determinism rule is not negotiable: a
  * model's opinion is not reproducible, so it can never move a verdict). What the
  * judge adds is the answer to the question a human asks first when a web step goes
  * red — "so what was actually on the screen?" — which is otherwise only available
- * by opening a PNG out of a gitignored evidence directory.
+ * by opening a PNG out of the run's evidence.
  *
  * The most valuable verdict is `yes`: the expected result IS visible even though
  * the assertion missed, which is the signature of a brittle locator or matcher —

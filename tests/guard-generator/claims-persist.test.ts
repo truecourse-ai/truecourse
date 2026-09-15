@@ -1,5 +1,5 @@
 /**
- * The claims-persist merge: extraction's claims must land in the committable
+ * The claims-persist merge: extraction's claims must land in the stored
  * claim corpus (union by identity), because flows and scenario milestones
  * resolve against it at load time — and a no-op merge must not touch the file
  * (an unchanged re-run stays byte-identical).

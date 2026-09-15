@@ -693,7 +693,7 @@ describe('discoverRecipe — the live phase stream', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The repair SEAM (plan 03 step 9) — the agent session that replaced the
+// The repair SEAM — the agent session that replaced the
 // one-shot LLM fallback. Present, it takes over the whole failure path; absent,
 // everything above still holds byte for byte.
 // ---------------------------------------------------------------------------

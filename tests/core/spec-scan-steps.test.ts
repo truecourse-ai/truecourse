@@ -1,6 +1,5 @@
 /**
- * SINGLE-STEP MODE — `runSpecScanSessions({ only })`, the engine behind the
- * CLI's `--only-<step>` flags.
+ * SINGLE-STEP MODE — `runSpecScanSessions({ only })`.
  *
  * The rules under test:
  * - each step runs ONLY its own sessions: prior steps replay from their

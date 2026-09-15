@@ -1,12 +1,13 @@
 import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
 /**
  * The persisted last-generate report — written to `.truecourse/guard/result.json`
- * at the end of every `guard generate` (the `contracts/result.json` convention).
+ * at the end of every `guard generate`.
  *
  * It is the generator's `GuardGenerateResult` plus a `generatedAt` timestamp and
  * the run's optional LLM `usage` totals, so the dashboard coverage view renders
- * its summary from the store file. Gitignored
- * (transient run output); the committed `scenarios/` tree it describes is durable.
+ * its summary from the store file. Transient run output inside the work tree;
+ * the durable copy is the stored generate report, beside the stored scenario set
+ * it describes.
  */
 
 import { z } from 'zod'
@@ -259,7 +260,7 @@ export const GuardScenarioDiagnosisSchema = z.object({
   /** The failing step's RAW program output, copied off the birth-run mismatch. */
   ...OutputExcerptsSchema.shape,
   /** Repo-relative pointer into `guard/evidence/`, when a transcript was written
-   *  (gitignored — it may dangle for a cloner; the fields above stand alone). */
+   *  (it may dangle when no evidence was stored; the fields above stand alone). */
   evidencePath: z.string().optional(),
   /** Repo-relative path of the committed `.yaml`. */
   file: z.string(),
@@ -271,8 +272,8 @@ export const GuardScenarioDiagnosisSchema = z.object({
    *  Absent when the test committed untriaged (no runner, or a fail-soft call). */
   triage: GuardTriageSchema.optional(),
   /**
-   * The FLOW WORKER's own adjudication of this committed red (plan 04 step 17):
-   * the `expectedReds` prediction the engine's confirmation run reproduced before
+   * The FLOW WORKER's own adjudication of this committed red: the
+   * `expectedReds` prediction the engine's confirmation run reproduced before
    * the submission was accepted. On the session path this takes the triage
    * verdict's place — `triage` stays absent; a one-shot generate writes `triage`
    * and leaves this absent.
@@ -389,8 +390,8 @@ export const GuardBirthFindingSchema = z
      */
     triage: GuardTriageSchema.optional(),
     /**
-     * The FLOW WORKER's adjudication of a committed red (plan 04 step 17) — the
-     * confirmed `expectedReds` prediction. The session path's analog of `triage`
+     * The FLOW WORKER's adjudication of a committed red — the confirmed
+     * `expectedReds` prediction. The session path's analog of `triage`
      * (a worker-committed red carries this and no triage verdict). Optional so
      * every one-shot report keeps parsing.
      */
@@ -580,8 +581,8 @@ export type GuardGenerateError = z.infer<typeof GuardGenerateErrorSchema>
 /**
  * One birth-passed-but-withheld candidate under a held section — validated work
  * the all-or-nothing persist held back. The authored `yaml` rides inline (the
- * exact bytes the section would have committed): `result.json` is gitignored and
- * a few KB per scenario is trivial, so the inline copy beats a server-side
+ * exact bytes the section would have committed): a few KB per scenario is
+ * trivial, so the inline copy beats a server-side
  * authoring-cache lookup for robustness (a cleared cache never blanks the UI).
  */
 export const GuardReadyScenarioSchema = z
@@ -844,7 +845,7 @@ export type GuardSeedDraft = z.infer<typeof GuardSeedDraftSchema>
 
 /**
  * An ADJUDICATION stage that lost EVERY call this run, so the corpus shipped
- * without its verdicts (plan item 88). Fidelity and triage judge content birth has
+ * without its verdicts. Fidelity and triage judge content birth has
  * already validated — a lost fidelity review means a green test persisted
  * unreviewed, a lost triage means a red test committed with no verdict — so their
  * collapse costs annotation, not correctness, and the run ships rather than
@@ -1039,9 +1040,9 @@ export type GuardGenerateReport = z.infer<typeof GuardGenerateReportSchema>
 
 /**
  * EVERY evidence transcript the guard stores point at, deduped in first-seen
- * order. Evidence lives in `guard/evidence/` — gitignored, so it exists only in
- * the tree the run happened in — and a hosted job has one chance to copy it out
- * of an ephemeral checkout before that tree is deleted. Enumerating it from the
+ * order. Evidence lives in `guard/evidence/` — inside the run's scratch tree, so
+ * it exists only where the run happened — and a hosted job has one chance to
+ * copy it out before that tree is deleted. Enumerating it from the
  * stores (rather than from one hardcoded bucket) is what keeps that copy complete
  * as new buckets appear:
  *

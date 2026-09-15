@@ -1,7 +1,6 @@
 /**
- * Every run of a repository, for the Runs table: the baseline runs and the
- * pull-request head runs the gate stored, each naming its pull request and
- * where it ran. One read (`guard/history?all=1`); `reloadKey` re-reads it when
+ * Every run of a repository, for the Runs table: each naming its origin, its
+ * pull request when it has one, and where it ran. One read (`guard/history?all=1`); `reloadKey` re-reads it when
  * a run lands on the socket.
  */
 

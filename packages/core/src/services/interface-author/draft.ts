@@ -200,7 +200,7 @@ export interface ValidateFragmentInput {
   /**
    * Ids the fragment is allowed to REPLACE — the work item's own prior tasks on
    * a re-author. Anything else that collides is refused: the authored file is
-   * committed, hand-owned work, and overwriting it is the one loss no derivation
+   * hand-owned work, and overwriting it is the one loss no derivation
    * can undo.
    */
   replaceable?: ReadonlySet<string>

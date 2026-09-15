@@ -2,8 +2,8 @@
  * The file extensions TrueCourse treats as markdown documentation — the single
  * source of truth shared by document discovery (`discoverDocs` in
  * @truecourse/spec-consolidator), the heading-aware chunker (`isMarkdownDoc` in
- * ../guard/doc-chunks.ts) and the EE github-app's PR spec-detect, so all three
- * agree on what counts as a spec document.
+ * ../guard/doc-chunks.ts) and the route-manifest walk, so all three agree on
+ * what counts as a spec document.
  *
  * These three checks were written independently and had drifted to three
  * different sets; a doc that passed one and failed another either vanished

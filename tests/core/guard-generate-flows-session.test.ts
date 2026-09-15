@@ -1,5 +1,5 @@
 /**
- * THE FLOW-SYNTHESIS SESSIONS — `guard-generate.flows` (plan 04 step 16): one
+ * THE FLOW-SYNTHESIS SESSIONS — `guard-generate.flows`: one
  * session per AREA, one epic session after them.
  *
  * What is pinned here is the SESSION half — the defs through the real
@@ -639,7 +639,7 @@ describe('the flows system prompts', () => {
 // 9 — the procedure gate survives the carve-out
 // ---------------------------------------------------------------------------
 
-/** An api interface derived from a tRPC procedure (item 12's exclusion). */
+/** An api interface derived from a tRPC procedure — the kind authoring excludes. */
 function procedureInterface(): Interface {
   const shape = {
     type: 'api' as const,

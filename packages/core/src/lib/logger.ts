@@ -3,14 +3,12 @@ import path from 'node:path';
 
 /**
  * Pluggable diagnostics logger. Internal events (`[Server]`, `[LLM]`, the jobs,
- * the gate, …) go through `log.{info|warn|error}` and are routed to the active
- * TRANSPORT.
+ * the context syncs, …) go through `log.{info|warn|error}` and are routed to the
+ * active TRANSPORT.
  *
- *   - The server installs a `FileLogTransport` — a rotating file under the
- *     runtime directory (`<runtime>/logs/dashboard.log`), optionally tee'd to
- *     stderr under `pnpm dev`.
- *   - A deployment that collects its own diagnostics installs its transport
- *     (terminal + Sentry, no file) via `setLogTransport`.
+ * The server installs one through `setLogTransport`: a rotating file under the
+ * runtime directory (`<runtime>/logs/dashboard.log`) that also reports errors to
+ * Sentry, optionally tee'd to stderr under `pnpm dev`.
  *
  * Tests configure nothing; the silent fallback drops messages so stdout stays
  * clean. `pushLogger`/`popLogger` temporarily route one run's logs into another
@@ -23,10 +21,9 @@ const MAX_LOG_FILES = 5;
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR';
 
 /**
- * A log sink. The active transport receives every line; the file transport
- * writes to disk, the EE transport writes to the terminal + Sentry. `err` carries
- * the original Error (when the caller passed one) so a transport can report a
- * real exception rather than a formatted string.
+ * A log sink. The active transport receives every line and decides where it
+ * lands. `err` carries the original Error (when the caller passed one) so a
+ * transport can report a real exception rather than a formatted string.
  */
 export interface LogTransport {
   write(level: LogLevel, message: string, err?: unknown): void;
@@ -48,7 +45,7 @@ export interface LoggerConfig {
 }
 
 // ---------------------------------------------------------------------------
-// File transport (OSS default)
+// File transport
 // ---------------------------------------------------------------------------
 
 /**
@@ -129,7 +126,7 @@ export function configureLogger(config: LoggerConfig): void {
   stack.push(new FileLogTransport(config));
 }
 
-/** Install a custom transport (EE: terminal + Sentry). Replaces the active stack. */
+/** Install a transport. Replaces the active stack. */
 export function setLogTransport(transport: LogTransport): void {
   clearStack();
   stack.push(transport);
@@ -169,7 +166,8 @@ export const log = {
   warn(msg: string): void {
     emit('WARN', msg);
   },
-  /** `err` (optional) is forwarded to the transport so EE reports a real exception. */
+  /** `err` (optional) is forwarded to the transport so it can report a real
+   *  exception rather than a formatted string. */
   error(msg: string, err?: unknown): void {
     emit('ERROR', msg, err);
   },

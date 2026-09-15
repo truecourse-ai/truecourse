@@ -23,9 +23,9 @@ export const contentScope = {
   /** Document bodies of the workspace's Context sources (sha = `sha256-<ledger contentHash>`). */
   context: (org: string): string => `context:ws:${org}`,
   trace: (org: string): string => `trace:${org}`,
-  /** Committable guard scenario-tree bodies (yaml / recipe.json / manifest.json). */
+  /** Guard scenario-tree bodies (yaml / recipe.json / manifest.json). */
   guard: (repoKey: string): string => `guard:${repoKey}`,
-  /** Per-run guard evidence transcripts (gitignored in OSS). */
+  /** Per-run guard evidence — transcripts as text, a browser run's screenshots and video as bytes. */
   guardEvidence: (repoKey: string): string => `guard-evidence:${repoKey}`,
 };
 

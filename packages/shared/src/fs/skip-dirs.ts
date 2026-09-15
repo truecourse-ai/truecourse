@@ -1,8 +1,8 @@
 /**
  * Build / vendor / tooling directories that document discovery skips when
- * walking a repo. The single source of truth shared by the spec scanner
- * (`discoverDocs` in @truecourse/spec-consolidator) and the EE github-app's PR
- * spec-detect, so the two agree on what counts as a discoverable spec document.
+ * walking a repo. The single source of truth shared by document discovery
+ * (`discoverDocs`), the agent's repo tools and the route-manifest walk, so they
+ * agree on what counts as discoverable.
  */
 
 import { WORK_TREE_DIR } from './work-tree.js';

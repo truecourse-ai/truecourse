@@ -11,8 +11,8 @@
  *
  * The GitHub App is how one gets there: the status read says which installations
  * this workspace has and which repositories are already linked, an installation
- * lists what it can see, and linking one CLONES IT INSIDE THE REQUEST — minutes,
- * not milliseconds, which is why its caller has to say so.
+ * lists what it can see, and linking one writes the row and returns; the
+ * onboarding chain clones for itself in the background.
  *
  * The registry reads degrade to nothing: with no server behind them (a static
  * static page, a test) the list is simply empty, which is the honest answer:
@@ -94,9 +94,9 @@ export async function fetchRealRepos(): Promise<Repo[]> {
 
 /**
  * Disconnect a real repo. REJECTS with the server's reason (an `ApiError`
- * carrying its message): the server refuses a disconnect it cannot make safely
- * — a spec scan another process is running holds the tree — and a caller that
- * swallowed that would show the row snap back with nothing said.
+ * carrying its message): the server refuses a disconnect while a job it cannot
+ * stop is still running, and a caller that swallowed that would show the row
+ * snap back with nothing said.
  */
 export function disconnectRealRepo(id: string): Promise<void> {
   return deleteRepo(id);

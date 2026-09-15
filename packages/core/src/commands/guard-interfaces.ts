@@ -10,9 +10,9 @@
  * package everything it needs, exactly as `guard-externals.ts` adapts the
  * externals engine.
  *
- * Standalone authoring uses `sessions/guard-interfaces/<runId>/`, with a
- * run record and one transcript per session. Setup supplies its own run so
- * authoring remains part of the setup activity and lifecycle.
+ * Standalone authoring opens its own run record, with one transcript per session
+ * appended to its journal. Setup supplies its own run so authoring remains part
+ * of the setup activity and lifecycle.
  *
  * One stage here is NOT a session: the state reconciliation that closes a run
  * is a single schema-bearing completion, so it resolves the ordinary
@@ -139,7 +139,7 @@ export interface RunGuardInterfaceAuthorOptions {
 
 export interface GuardInterfaceAuthorRun extends AuthorRunResult {
   runId: string;
-  /** Directory containing the run's transcripts, including when owned by setup. */
+  /** The run's scratch directory, including when the run is owned by setup. */
   runDir: string;
   /** Which backend ran the sessions, and on whose model — the same record the
    *  run.json carries and every transcript's `session-start` stamps. */
@@ -147,9 +147,10 @@ export interface GuardInterfaceAuthorRun extends AuthorRunResult {
   /** The context pass: how much grounding the sessions were given. */
   context: { places: number; files: number; seconds: number };
   /**
-   * The append to `guard/interfaces.findings.md` this run made — the committed
-   * doc-bug feed, and how many bullets landed in it (the run's findings with the
-   * duplicates of one discrepancy collapsed). Absent when no session found one.
+   * The append to `guard/interfaces.findings.md` this run made — the doc-bug
+   * feed the setup bundle carries, and how many bullets landed in it (the run's
+   * findings with the duplicates of one discrepancy collapsed). Absent when no
+   * session found one.
    */
   findingsLedger?: { path: string; appended: number };
   /**
@@ -161,7 +162,7 @@ export interface GuardInterfaceAuthorRun extends AuthorRunResult {
 }
 
 /**
- * Run the authoring. Every session's transcript lands in the run directory
+ * Run the authoring. Every session's transcript lands on the run's journal
  * whatever the outcome. Standalone authoring closes its own run record:
  * `completed` when every session reached an outcome, `failed` when none did,
  * `interrupted` when the caller aborted.

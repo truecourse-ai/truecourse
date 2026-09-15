@@ -35,13 +35,13 @@ export async function isVisibleTo(
   return link !== null && link.workspaceOrgId === org;
 }
 
-/** Marks a request the resolver already admitted, so the twelve project-scoped
+/** Marks a request the resolver already admitted, so the project-scoped
  *  mounts sharing it don't re-pay the registry + ownership lookups per mount. */
 const RESOLVED = Symbol('projectResolved');
 
 /**
  * Middleware for project-scoped routers mounted at `/api/repos`. Each router's
- * own patterns declare the `:id` segment (e.g. `/:id/violations`), so at the
+ * own patterns declare the `:id` segment (e.g. `/:id/guard/status`), so at the
  * time this middleware runs Express hasn't parsed route params yet — we pull
  * the slug from the first path segment directly.
  *

@@ -127,7 +127,7 @@ export interface CorpusConflict<O extends OverlapLike = OverlapLike> {
    * to one record but keeps the full span here.
    */
   areas: string[];
-  /** The two overlapping docs, by ref (repo-relative path in OSS). */
+  /** The two overlapping docs, by ref (`context/<sourceId>/<docPath>`). */
   a: string;
   b: string;
   /** The disagreement note from the overlap. */

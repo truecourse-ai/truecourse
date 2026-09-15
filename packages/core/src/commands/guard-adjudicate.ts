@@ -1,6 +1,6 @@
 /**
- * `guard adjudicate` — the post-run adjudication of a guard board's failures
- * (plan 05, steps 21–24): the read view (which failures exist, which carry a
+ * `guard adjudicate` — the post-run adjudication of a guard board's failures:
+ * the read view (which failures exist, which carry a
  * verdict, whether the corpus has converged), and the run that classifies the
  * unadjudicated ones — a deterministic pre-pass first (zero sessions for the
  * common case), then one `guard-adjudicate.failure` agent session per
@@ -8,8 +8,8 @@
  *
  * The engine halves live in `services/guard-adjudicate/`; THIS module is the
  * adapter both UIs call — it joins the stores into per-failure work items,
- * resolves the run's driver and transcripts (`sessions/guard-adjudicate/
- * <runId>/`), runs the pool, and folds every verdict through the one serial
+ * resolves the run's driver and appends every session's transcript to the run's
+ * journal, runs the pool, and folds every verdict through the one serial
  * write path (`persistAdjudication`). Tools never write; the fold does.
  */
 
@@ -142,8 +142,8 @@ async function computeConverged(repoRoot: string, latest: GuardLatest | null): P
   const [prev, last] = history.runs.slice(-2);
   // Cheap gate first: differing tallies can never be identical outcome sets.
   if (JSON.stringify(prev.summary) !== JSON.stringify(last.summary)) return false;
-  // The honest check needs both snapshots; a missing one (gitignored, another
-  // machine's run) cannot PROVE identity, so it reads as not converged.
+  // The honest check needs both snapshots; a missing one (no stored row for that
+  // run) cannot PROVE identity, so it reads as not converged.
   const [snapPrev, snapLast] = await Promise.all([
     readGuardRun(repoRoot, prev.runId),
     readGuardRun(repoRoot, last.runId),
@@ -174,7 +174,7 @@ interface PreparedAdjudication {
   sessionItems: AdjudicationItem[];
 }
 
-/** Parse a committed scenario file's yaml, or null (a malformed file is the
+/** Parse a stored scenario file's yaml, or null (a malformed file is the
  *  loader's error feed's business, not adjudication's). */
 function parseScenario(raw: string): GuardScenario | null {
   try {
@@ -215,7 +215,7 @@ async function prepareAdjudication(
   rows = rows.filter((row) => (scoped ? scoped.has(row.id) : row.adjudication === undefined));
 
   // The joins, each read once: the manifest (diagnosis + expectedRed), the
-  // flow corpus, and the committed scenario files (raw yaml + parsed).
+  // flow corpus, and the stored scenario files (raw yaml + parsed).
   const manifest = await readManifest(repoRoot);
   const diagnosisById = new Map<string, GuardScenarioDiagnosis>();
   const flowIdByScenario = new Map<string, string>();
@@ -271,9 +271,9 @@ async function prepareAdjudication(
   // sessions. A cached value that fails the schema OR the fold's structural
   // invariants is a MISS, never a poison. The pre-pass runs for EVERY item,
   // explicitly scoped ones included: it re-derives the verdict fresh off the
-  // committed corpus and the board row (never off a remembered answer), so a
+  // stored corpus and the board row (never off a remembered answer), so a
   // re-adjudication settles the same way for free. The CACHE, by contrast, is
-  // exactly the memory an explicit `--scenario` asks to look past — the row's
+  // exactly the memory an explicitly named `scenarios` scope asks to look past — the row's
   // identity has not moved (that is what makes re-adjudication meaningful), so
   // the probe would always hit and the promised re-run would never happen.
   // Scoped items therefore skip the probe and go straight to a session, prior

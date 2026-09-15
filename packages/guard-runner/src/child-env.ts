@@ -15,7 +15,7 @@
  *    runs against the real working tree.
  *
  * Deliberately EXCLUDED from `BUILD_PASSTHROUGH` (and never in the sandbox env):
- *  - `TRUECOURSE_*` (incl. `TRUECOURSE_SECRET_KEY`, the EE encryption master
+ *  - `TRUECOURSE_*` (incl. `TRUECOURSE_SECRET_KEY`, the encryption master
  *    secret), `DATABASE_URL`, `GITHUB_APP_*`, LLM provider keys (`ANTHROPIC_API_KEY`
  *    and friends), `AWS_*` / other cloud creds — secrets the customer's build has
  *    no business seeing.

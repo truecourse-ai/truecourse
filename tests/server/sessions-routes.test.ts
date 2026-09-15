@@ -250,8 +250,9 @@ describe('Sessions routes', () => {
 
 /**
  * The workspace surface: every run of every repository the caller's workspace
- * connected, as one newest-first page. The registry is file-backed here, so a
- * repository's key is its path and `repo.id` is the slug the console addresses.
+ * connected, as one newest-first page. The registry is the in-memory double here,
+ * so a repository's key is its temp path and `repo.id` is the slug the console
+ * addresses.
  */
 describe('Workspace sessions routes', () => {
   let app: Express;

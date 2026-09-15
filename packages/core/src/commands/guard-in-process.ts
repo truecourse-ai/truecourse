@@ -10,8 +10,7 @@
  * hard error (no docs, recipe discovery failed) is a non-success outcome.
  *
  * It also drives the recipe VIEW, and nothing more. Standalone discovery moved
- * to Flow setup: derivation now exists in exactly one place, so nothing can
- * prepare a repo behind the gate's back.
+ * to Flow setup: derivation now exists in exactly one place.
  */
 
 import {
@@ -132,12 +131,12 @@ export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string 
  * work (and before the estimate) when any overlap is still open. No corpus at all
  * is NOT a conflict — the downstream no-docs path reports that.
  *
- * Reads the ON-DISK `.truecourse/specs/{corpus,decisions}.json` the generator
- * itself reads (via the spec-consolidator file readers) — NOT the active spec
- * store. OSS is byte-identical (the store was these files). EE materializes both
- * artifacts into the checkout before generate, so the gate and the generator see
- * the same corpus + resolutions; a store keyed by `owner/repo` would miss under
- * the ephemeral checkout path and silently skip the gate.
+ * Reads the corpus + decisions out of the run's work tree — the ones the
+ * generator itself reads (via the spec-consolidator file readers) — NOT the
+ * active spec store. The job materializes both into the clone before generate,
+ * so the gate and the generator see the same corpus + resolutions; a store keyed
+ * by `owner/repo` would miss under the ephemeral clone path and silently skip
+ * the gate.
  */
 function assertNoOpenConflicts(repoRoot: string): void {
   const corpus = readCorpus(repoRoot);
@@ -262,8 +261,9 @@ export interface GuardGenerateInProcessOptions {
   signal?: AbortSignal;
   /**
    * Refuse to derive a recipe: generate loads what `guard setup` left and stops
-   * without one. Defaults to "where a user could have run setup" — the in-place
-   * file store. A hosted job materializes setup's bundle first and passes true.
+   * without one. Defaults to false — a bare checkout with no setup bundle still
+   * derives its own recipe. The job materializes setup's bundle first and passes
+   * true.
    */
   requireExistingRecipe?: boolean;
   // --- test seams for the two remaining one-shot stages (production injects
@@ -271,10 +271,9 @@ export interface GuardGenerateInProcessOptions {
   recipeRunner?: RecipeRunner;
   matchRunner?: MatchRunner;
   /**
-   * Session-seam overrides (plan 04) — tests inject stubs here. Unset,
-   * production wires `createGuardGenerateSessionSeams`. The seams are REQUIRED
-   * by the engine since the one-shot retirement (step 20), which is why
-   * `--llm agent` (the mailbox transport, which has no session driver) is
+   * Session-seam overrides — tests inject stubs here. Unset, production wires
+   * `createGuardGenerateSessionSeams`. The seams are REQUIRED by the engine
+   * since the one-shot retirement, which is why a run with no session driver is
    * refused up front unless every seam is injected.
    */
   extractSession?: ExtractSessionSeam;
@@ -285,7 +284,7 @@ export interface GuardGenerateInProcessOptions {
   flowsAreaSession?: FlowsAreaSessionSeam;
   flowsEpicSession?: FlowsEpicSessionSeam;
   flowWorkerSession?: FlowWorkerSessionSeam;
-  /** Interface mapping seam — defaults to the deterministic analyzer-backed mapper. */
+  /** Interface mapping seam — defaults to the deterministic source-facts mapper. */
   interfaces?: InterfaceProvider;
   /**
    * INTERNAL test seam: stop the pipeline after flow synthesis. Never exposed as a
@@ -302,7 +301,7 @@ export interface GuardGenerateInProcessOptions {
    * The estimate gate prices only the chosen step.
    */
   only?: GenerateStep;
-  /** Re-author changed flows from scratch instead of editing their committed scenarios. */
+  /** Re-author changed flows from scratch instead of editing their stored scenarios. */
   fromScratch?: boolean;
 }
 
@@ -322,7 +321,7 @@ export async function estimateGuard(
 /**
  * The models of the two remaining ONE-SHOT stages. Every session stage
  * (extraction, flow synthesis, the flow workers, the fidelity children) runs on
- * the ONE configured session model (§3.4) inside
+ * the ONE configured session model inside
  * `createGuardGenerateSessionSeams` — there is no per-stage tier for them.
  */
 function resolveGuardModels(): GuardGenerateModels {
@@ -336,9 +335,9 @@ function resolveGuardModels(): GuardGenerateModels {
 export interface GuardGenerateInProcessResult {
   guard: GuardGenerateResult;
   /**
-   * The sessions-store run dir (`.truecourse/sessions/guard-generate/<runId>/`)
-   * this run's transcripts landed in — what a stepwise run is inspected
-   * through. The record exists from the first gate on, so it is always set.
+   * The sessions-store scratch dir this run used, under the runtime directory —
+   * what a stepwise run is inspected through. The record exists from the first
+   * gate on, so it is always set.
    */
   sessionsRunDir?: string;
 }
@@ -355,8 +354,8 @@ export async function guardGenerateInProcess(
   const mode: LlmTransportMode = options.transportMode ?? 'api';
   const models = resolveGuardModels();
 
-  // The run record: `sessions/guard-generate/<runId>/` — the step checklist,
-  // what it ran on, how it ended, and every session's transcript. Created
+  // The run record — the step checklist, what it ran on, how it ended, and
+  // every session's transcript, appended to its journal. Created
   // FIRST: a generate that started and was stopped by a gate — a blocked
   // corpus, a declined estimate, an unusable provider config — is still a
   // generate that started, and Activity must say so and why.
@@ -517,10 +516,9 @@ export async function guardGenerateInProcess(
     tracker?.detail('validate', parts.join(' · '));
   };
 
-  // The generate session seams (plan 04): extraction, flow synthesis and the
-  // flow workers run as agent sessions — THE paths since the one-shot
-  // retirement (step 20). Lazy by construction: a fully-cached run creates no
-  // run record and no driver.
+  // The generate session seams: extraction, flow synthesis and the flow workers
+  // run as agent sessions — THE paths since the one-shot retirement. Lazy by
+  // construction: a fully-cached run creates no run record and no driver.
   // The sessions run on the command's OWN run record (created above, before
   // the gates), so the seams are handed its driver and persistence and create
   // none of their own. The driver is built LAZILY: a fully-cached run resolves
@@ -575,7 +573,7 @@ export async function guardGenerateInProcess(
       executor: getGuardExecutor(),
       // The require-a-recipe gate — where a user could have run `guard setup`, or
       // where the caller materialized setup's bundle itself (the hosted job). A
-      // gate generate over a bare checkout keeps deriving its own recipe.
+      // generate over a bare checkout keeps deriving its own recipe.
       requireExistingRecipe: options.requireExistingRecipe ?? false,
       recipeRunner: options.recipeRunner,
       matchRunner: options.matchRunner,
@@ -594,7 +592,7 @@ export async function guardGenerateInProcess(
           return {
             interfaces: mapped.catalog.interfaces,
             // The resource registry rides the same seam — the mapper forms the
-            // cli and api places itself now (plan item 102), and a hand-authored
+            // cli and api places itself now, and a hand-authored
             // web registry arrives the same way.
             ...(mapped.catalog.resources ? { resources: mapped.catalog.resources } : {}),
             externalServices: mapped.externalServices,
@@ -710,7 +708,7 @@ export async function guardGenerateInProcess(
       // Single-step mode, before the final step: the same write gate as a clean
       // stop. This run could never have produced a whole generate's report, so
       // persisting one would overwrite the LAST FULL generate's `result.json`
-      // (what `guard status` and the dashboard read) with a partial abort. The
+      // (what the dashboard reads) with a partial abort. The
       // caller still gets the failure — loudly, and non-zero.
       if (!options.only || options.only === 'worker') persistGuardReport(repoRoot, guard);
       finishRun('failed', {
@@ -736,7 +734,7 @@ export async function guardGenerateInProcess(
       tracker?.done('validate', 'nothing changed');
     } else {
       tracker?.done('author', `${guard.written.length} test${guard.written.length === 1 ? '' : 's'} written`);
-      // Every authored test is committed, so the validate line reports the split:
+      // Every authored test is stored, so the validate line reports the split:
       // how many landed green vs. red at the worker's confirmation run.
       const failing = guard.written.filter((w) => w.status === 'failing').length;
       const failingTag = failing ? ` · ${failing} failing` : '';
@@ -800,15 +798,15 @@ function firstLine(reason: string | undefined): string | undefined {
  * The guard LLM stages whose usage the report totals — the two remaining
  * ONE-SHOT transport stages. The session stages (extraction, flows, workers,
  * fidelity children) never reach the stage-usage sink: their spend lives in the
- * sessions store (`sessions/guard-generate/<runId>/`), so the persisted
+ * sessions store, on the run's own record, so the persisted
  * `usage` row deliberately covers the transport half only.
  */
 const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.match'] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`
- * when no real call landed (a noChanges no-op, cache-only run, or the `agent`
- * transport which records nothing) so the report stays a clean superset.
+ * when no real call landed (a noChanges no-op or a cache-only run) so the
+ * report stays a clean superset.
  */
 function sumGuardUsage(): GuardGenerateUsage | undefined {
   const usage = getStageUsage();
@@ -829,7 +827,7 @@ function sumGuardUsage(): GuardGenerateUsage | undefined {
 
 /**
  * Persist the generate report, carrying forward the PRIOR report's birth findings
- * for committed failing tests this generate did not re-execute (see
+ * for stored failing tests this generate did not re-execute (see
  * `carryForwardBirthFindings`) — without it, a cached/no-op regenerate wipes the
  * only record of what those red tests actually saw (expected/actual/evidence)
  * while the manifest still marks them failing. The prior report is read BEFORE
@@ -860,9 +858,9 @@ export function buildGuardReport(
  * The blocked report an unresolved-conflict generate persists: `status:
  * 'open-conflicts'` with the error's formatted multi-line message as `reason`,
  * and every list field empty (nothing generated). The conflict list is NOT
- * snapshotted — surfaces render it live from the corpus. Used by EE onboarding to
- * record a needs-attention outcome without saving a scenario set; OSS never
- * persists it (the error propagates to the caller and no report is written).
+ * snapshotted — surfaces render it live from the corpus. Used by the hosted
+ * generate job to record a needs-attention outcome without saving a scenario
+ * set.
  */
 export function buildOpenConflictsReport(
   error: OpenConflictsError,
@@ -913,7 +911,7 @@ export interface GuardRunInProcessOptions {
 
 /**
  * In-process driver for a Flow run — the guard analogue of the
- * curate/generate drivers. Resolves the repo ref, runs the committed scenarios
+ * curate/generate drivers. Resolves the repo ref, runs the stored scenarios
  * through the guard-runner, and drives a tracker through GUARD_RUN_STEPS (build →
  * run, with a live per-scenario counter) so every surface watching the run sees
  * the same stream. Returns the runner's discriminated result untouched
@@ -953,7 +951,7 @@ export async function guardRunInProcess(
       checkoutDir: repoRoot,
       recipe: loaded.recipe,
       scenarios: selected,
-      // The `--scenario` filter was applied HERE, so the run has to be told what it
+      // The `scenario` filter was applied HERE, so the run has to be told what it
       // filtered out: a scoped run merges into the recorded board, and only the ids
       // that left the corpus may drop off it.
       corpusIds,
@@ -1048,11 +1046,12 @@ export interface GuardRecipeView {
   invalidReason: string | null;
   /** `sha256:…` over the discovery inputs; null when there is no valid recipe. */
   fingerprint: string | null;
-  /** True when the inputs moved since the last run's fingerprint; null with no run. */
+  /** Always null: there is no working tree to fingerprint, so staleness is
+   *  unknowable — the recipe-card read never claims otherwise. */
   stale: boolean | null;
   /**
-   * The credential `satisfies` verdict against the corpus's OpenAPI schemes (item
-   * 56) — the SAME check `guard generate` fails on, surfaced while showing the
+   * The credential `satisfies` verdict against the corpus's OpenAPI schemes — the
+   * SAME check `guard generate` fails on, surfaced while showing the
    * recipe so the defect is visible before a generate is paid for. Both lists are
    * empty when there is no recipe (nothing to validate).
    */

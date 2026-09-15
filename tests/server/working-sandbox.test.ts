@@ -1,5 +1,5 @@
 /**
- * THE WORKING SANDBOX (01 step 2c) — the persistent world an agent session
+ * THE WORKING SANDBOX — the persistent world an agent session
  * works in across turns. Same isolation as every guard sandbox (allowlist env,
  * redirected HOME/XDG/TMP, containment); the difference is LIFETIME: what turn
  * 3 installed is still there on turn 7, through either entry point.

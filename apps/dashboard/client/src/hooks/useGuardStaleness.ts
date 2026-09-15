@@ -1,6 +1,6 @@
 /**
- * The Guard tab's run-staleness amber dot plus the pipeline-stage flags the
- * coverage view uses to pick its onboarding empty state. RepoPage calls
+ * The pipeline's run-staleness amber dot plus the pipeline-stage flags the
+ * coverage view uses to pick its onboarding empty state. The caller re-reads with
  * `refetch()` on tab entry and after guard socket events so the indicators stay
  * in sync without polling. The probe is advisory — a failure is swallowed,
  * never blocking the page.
@@ -22,8 +22,8 @@ export function useGuardStaleness(repoId: string | undefined, ref?: string, enab
   const [loaded, setLoaded] = useState(false);
 
   const refetch = useCallback(async () => {
-    // `enabled` gates an unresolved PR scope: with no head SHA a ref-less probe
-    // would answer with repo-BASELINE staleness, which must not surface there.
+    // `enabled` lets a caller hold the probe until it has a repository to ask
+    // about.
     if (!repoId || !enabled) return;
     try {
       setStaleness(await api.getGuardStaleness(repoId, ref));

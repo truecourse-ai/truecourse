@@ -4,11 +4,11 @@ import { resolvePrerequisites } from '@truecourse/guard-runner';
  * EXTERNAL API ACCOUNTS — the read/write surface every UI drives.
  *
  * The engine half lives in `@truecourse/guard-runner`
- * (`externals.ts`: the recipe declaration ∪ the gitignored local overlay →
+ * (`externals.ts`: the recipe declaration ∪ the local instance overlay →
  * provided / incomplete / unprovided). THIS module is the adapter the dashboard
  * page calls:
  *
- *   {@link readGuardExternalsView}  — the joined view: what the analyzer DETECTED
+ *   {@link readGuardExternalsView}  — the joined view: what SETUP DETECTED
  *      (`guard/setup.json`'s detection snapshot — setup runs BEFORE the
  *      first generate, so this page works from the start; `guard/result.json` is
  *      generate's own artifact and is only the fallback for a repo that generated
@@ -16,13 +16,13 @@ import { resolvePrerequisites } from '@truecourse/guard-runner';
  *      machine (with per-requirement reasons), and how many flows the last generate
  *      left blocked on each service.
  *   {@link writeGuardExternals}     — the declaration write, split across the two
- *      files by SECRECY: declarations to the committed `recipe.json`, values to
- *      the gitignored `externals.local.json`. Both writes are atomic and
+ *      files by SECRECY: declarations to `recipe.json`, which the setup bundle
+ *      carries, values to `externals.local.json`, which rides the repo's
+ *      encrypted overlay row instead. Both writes are atomic and
  *      byte-stable — the recipe is parsed, patched, and re-serialized in its own
  *      2-space format, and a write that changes nothing touches no file.
  *
  * Written against a working tree: it reads and writes files inside the repo. The
- * externals routes themselves still gate on `guardsMaterializeInPlace()`; the
  * dependencies surface, which composes this view, serves a hosted repo over a
  * scratch tree of its stored state with an empty host env (`env` option).
  */
@@ -177,15 +177,15 @@ export interface GuardExternalServiceView {
 export interface GuardExternalsView {
   /** Absolute path to `recipe.json` — shown whether or not it exists. */
   recipePath: string;
-  /** Absolute path to the gitignored overlay — shown whether or not it exists. */
+  /** Absolute path to the instance overlay — shown whether or not it exists. */
   localPath: string;
   /** False when `recipe.json` is absent or does not parse (see `invalidReason`). */
   recipeValid: boolean;
   /** Why the recipe (or the overlay) could not be read; null when both are fine. */
   invalidReason: string | null;
-  /** Absolute path of the committed dependency catalog — shown whether or not it exists. */
+  /** Absolute path of the dependency catalog — shown whether or not it exists. */
   catalogPath: string;
-  /** Absolute path of the gitignored instance overlay. */
+  /** Absolute path of the instance overlay. */
   catalogLocalPath: string;
   /**
    * True when detection has run — `guard setup` recorded a snapshot, or (for a repo
@@ -340,8 +340,8 @@ export function readGuardExternalsView(
  * is keyed by service identity.
  *
  * They need no `api` block and no recipe at all: the catalog declares WHAT the
- * program depends on and the gitignored overlay holds the instance, which is the
- * same committed/local split `api.externals` uses one class narrower. A broken
+ * program depends on and the instance overlay holds the instance, which is the
+ * same declaration/value split `api.externals` uses one class narrower. A broken
  * catalog file degrades to no rows rather than blanking the page — the recipe half
  * is still true.
  */
@@ -440,7 +440,7 @@ function withDetection(
  * services are in it (they read `unprovided`) — those are precisely the ones an
  * "provide it" CTA is for.
  *
- * Working-tree only: it reads `recipe.json`, the gitignored overlay, and the host
+ * Working-tree only: it reads `recipe.json`, the instance overlay, and the host
  * env. A hosted store has no working tree, so callers pass `null` there and every
  * `blocked-on` gap stays plain blocked — the honest degradation, since a hosted
  * view could not offer the form that clears it either.
@@ -616,11 +616,11 @@ export class GuardExternalsWriteError extends Error {}
 
 /** One env var of an external, as a caller asks for it to be stored. */
 export type GuardExternalEnvPatch =
-  /** A SECRET value. Lands in the gitignored overlay; the recipe only declares the name. */
+  /** A SECRET value. Lands in the instance overlay; the recipe only declares the name. */
   | { value: string }
-  /** A host env-var name. Lands in the committed recipe — it names a variable, not a secret. */
+  /** A host env-var name. Lands in the recipe — it names a variable, not a secret. */
   | { valueFromEnv: string }
-  /** An explicit INLINE recipe value. Only for a non-secret; it is committed as written. */
+  /** An explicit INLINE recipe value. Only for a non-secret; it is declared as written. */
   | { value: string; inline: true }
   /** Drop this variable from the declaration (and its overlay value). */
   | null;
@@ -631,11 +631,11 @@ export interface GuardExternalPatch {
   baseUrlEnv: string;
   /** The provided origin. Omit to leave it unset (the service stays unprovided). */
   baseUrl?: string;
-  /** Where the base URL is stored — the committed recipe (default) or the overlay. */
+  /** Where the base URL is stored — the recipe (default) or the overlay. */
   baseUrlTarget?: 'recipe' | 'local';
   /**
    * EXTRA base-URL variables of this service: env var → origin, or `null`
-   * to drop one. Always committed to `recipe.json` — an origin is not a secret, and
+   * to drop one. Always declared in `recipe.json` — an origin is not a secret, and
    * the declaration is what tells the runner to PROXY that variable rather than
    * forward it as an opaque value. Variables not named here keep what they had.
    */
@@ -646,7 +646,7 @@ export interface GuardExternalPatch {
   env?: Record<string, GuardExternalEnvPatch>;
   /**
    * The authorization token this machine reaches the service with; `null` (or
-   * blank) clears it. Always stored in the gitignored overlay — a token is a
+   * blank) clears it. Always stored in the instance overlay — a token is a
    * secret, and the caller does not get to choose otherwise.
    */
   token?: string | null;
@@ -672,9 +672,9 @@ export interface GuardExternalsWrite {
  * Apply `patch` to `api.externals` and answer with the fresh view.
  *
  * The SPLIT is the point: a declaration (service, `baseUrlEnv`, which variables it
- * needs, `mode`, `description`) is committed so the team shares it — and so the
- * recipe fingerprint re-authors the sections the service used to block. A VALUE is
- * a secret unless the caller says otherwise, so it goes to the gitignored overlay;
+ * needs, `mode`, `description`) rides the recipe, so the whole repo shares it — and
+ * so the recipe fingerprint re-authors the sections the service used to block. A
+ * VALUE is a secret unless the caller says otherwise, so it goes to the overlay;
  * `valueFromEnv` is the exception (a variable NAME is not a secret) and `inline`
  * is the deliberate escape hatch for a value that genuinely is not one.
  *
@@ -703,7 +703,7 @@ export function writeGuardExternals(
   if (!api || typeof api !== 'object') {
     // No `api` block, and that is FINE: an external service is a dependency of the
     // program under test, not a feature of the api driver, so it is declared in the
-    // dependency catalog and configured from the gitignored instance overlay. The
+    // dependency catalog and configured from the instance overlay. The
     // recipe is not touched at all on this path — a cli-only repo has no api block
     // to grow one, and requiring it was the coupling that made external services
     // unconfigurable for every repo without an HTTP server.
@@ -752,10 +752,10 @@ export function writeGuardExternals(
 
 /**
  * The api-block-free write: an external service becomes a SUPPLIED entry of the
- * dependency catalog, and its values go to the catalog's gitignored instance
- * overlay. Same split, same reasons — the declaration is committed so the team
- * shares it and it enters the recipe fingerprint; the base URL and the keys never
- * reach git.
+ * dependency catalog, and its values go to the catalog's instance overlay. Same
+ * split, same reasons — the declaration rides the catalog so the whole repo shares
+ * it and it enters the recipe fingerprint; the base URL and the keys stay in the
+ * encrypted overlay row.
  *
  * The registration is `env`-shaped because that is what an external account IS on
  * this path: the variables the program reads the origin and the credentials from.
@@ -827,7 +827,7 @@ function writeCatalogExternals(
         vars.push({ name, description: `the ${service} credential the program reads`, secret: true });
       }
       // `valueFromEnv` has no catalog analogue on purpose: the overlay IS the value
-      // store (it is gitignored), so a value is stored, not pointed at.
+      // store (encrypted, never in the bundle), so a value is stored, not pointed at.
       values[name] = 'value' in source ? source.value : (process.env[source.valueFromEnv] ?? '');
     }
     const declaration: GuardDependencyEntry = {
@@ -895,7 +895,7 @@ function writeCatalogExternals(
   return readGuardExternalsView(repoRoot);
 }
 
-/** Split one patch entry into its committed declaration and its overlay values. */
+/** Split one patch entry into its recipe declaration and its overlay values. */
 function splitPatch(
   service: string,
   entry: GuardExternalPatch,
@@ -938,7 +938,7 @@ function splitPatch(
   }
 
   // Extra base-URL variables. Like `env`, a variable the caller does not
-  // mention keeps what it had; unlike `env`, the VALUE is always committed — it is an
+  // mention keeps what it had; unlike `env`, the VALUE is always declared — it is an
   // origin, and the declaration is what makes the runner proxy it.
   const declaredEndpoints: Record<string, string> = { ...(priorDeclaration?.endpoints ?? {}) };
   const localEndpoints: Record<string, string> = { ...(priorLocal?.endpoints ?? {}) };

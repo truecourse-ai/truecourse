@@ -1,22 +1,21 @@
 /**
- * Local LLM call logger — the OSS, on-disk analog of the EE trace store
- * (`LlmTraceRecorder` → Postgres/blob). It captures every `claude -p`
- * invocation the cli transport makes and writes:
+ * Local LLM call logger — the per-run record of the one-shot calls a run makes,
+ * whichever transport makes them. It captures every call and writes:
  *
  *   - `.truecourse/logs/llm-<label>-<runId>.jsonl`     one metrics line per call
  *   - `.truecourse/logs/llm-<label>-<runId>.summary.json`  the rolled-up summary
  *   - `.truecourse/logs/llm-<label>-<runId>.io/<n>.json`   full system/user/output
  *                                                          (only with LLM_DUMP)
  *
- * Unlike the EE recorder, this is cli-native: cache tokens, $ cost, num_turns and
- * the spawn-overhead timing breakdown are first-class, because the `claude -p`
- * envelope exposes them and they're the signals a perf investigation needs.
+ * Cache tokens, $ cost, num_turns and the timing breakdown are first-class,
+ * because the transports' result envelopes expose them and they're the signals a
+ * perf investigation needs.
  *
  * The metrics + summary files are written on EVERY run: a long LLM pipeline that
  * dies at a timeout is only diagnosable from a record that already exists, and
  * asking an operator to reproduce a 40-minute generate under an env var is not a
- * diagnosis path. They are small, per-repo, and gitignored with the rest of
- * `logs/`. Opt out with `TRUECOURSE_LLM_LOG=0`. The full prompt/response dump is
+ * diagnosis path. They are small, and they live in the run's own work tree with
+ * the rest of `logs/`. Opt out with `TRUECOURSE_LLM_LOG=0`. The full prompt/response dump is
  * heavy and stays opt-in: `TRUECOURSE_LLM_DUMP=1` (default on under
  * `TRUECOURSE_DEV`).
  */
@@ -66,8 +65,8 @@ function sanitize(id: string): string {
  * when BOTH are explicitly disabled (`TRUECOURSE_LLM_LOG=0`), so the caller
  * installs no sink and pays nothing.
  *
- * Writing is silent by default — the run's own output is unchanged, matching how
- * the per-repo analyze logs are written. The stderr summary prints only when the
+ * Writing is silent by default — the run's own output is unchanged. The stderr
+ * summary prints only when the
  * operator asked for logging explicitly (`TRUECOURSE_LLM_LOG` / `_DUMP`) or is
  * in dev.
  */

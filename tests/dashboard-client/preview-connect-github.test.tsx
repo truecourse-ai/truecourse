@@ -1,11 +1,10 @@
 /**
  * Connecting a repository through the GitHub App, from the one-product shell.
  *
- * Everything else in the preview is fake, so this file is about the seam: the
- * dialog reads the real `/api/github/status`, lists what an installation can
- * see, posts one `/api/github/repos/link` per picked repository, and the shell
- * re-reads the real `/api/repos`. A repository that came back that way renders
- * on Code with none of the fixture coverage the mock repositories have.
+ * This file is about the seam: the dialog reads the real `/api/github/status`,
+ * lists what an installation can see, posts one `/api/github/repos/link` per
+ * picked repository, and the shell re-reads the real `/api/repos`. A repository
+ * that came back that way renders on Code with no stored coverage behind it.
  *
  * The CONTEXT STEP is the second real seam: the workspace's EXISTING sources
  * come from `/api/context/sources` (connecting creates none, sources are made
@@ -14,8 +13,8 @@
  * `PUT /api/repos/:id/context/bindings` once the link landed.
  *
  * The seam widened with the agent's own page: its conversations are the real
- * ones (`/api/sessions/runs`, over every connected repository), and a fixture
- * repository contributes none — the last describe here.
+ * ones (`/api/sessions/runs`, over every connected repository), and the page
+ * reads that route rather than a repository's — the last describe here.
  *
  * `window.fetch` is replaced wholesale rather than routed around the preview's
  * own shim: the shim is installed once when the preview chunk loads (it never

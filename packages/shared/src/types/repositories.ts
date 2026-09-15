@@ -39,12 +39,15 @@ export interface RepositoryRecord {
   defaultBranch: string | null
   /** Where the provider finds it when the name is not enough: a local folder's absolute path. */
   location?: string | null
-  /** When true (default) a PR with newly failing scenarios fails a required Check; false = advisory. */
+  /**
+   * `blocking`, `notifyEmails` and `notifications` are unused today: nothing
+   * reads them and nothing sends. They are kept for the notification design,
+   * which is not built yet. `enabled` between them is live — a disabled
+   * connection is one a push no longer re-baselines.
+   */
   blocking: boolean
   enabled: boolean
-  /** Addresses notified when the gate fails. */
   notifyEmails?: string[]
-  /** Per-type email toggles. Absent = every type on (the default). */
   notifications?: GithubNotificationPrefs
   createdAt: string
   updatedAt: string

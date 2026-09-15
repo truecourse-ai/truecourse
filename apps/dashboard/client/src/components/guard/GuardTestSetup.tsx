@@ -9,8 +9,8 @@
  * the steps below), the GIT world as one line per fact, and the ENV overlay.
  *
  * A file's content is long data, so it goes through the same block as every other
- * long value on the page ({@link GuardLongText}): clamped vertically, scrolled
- * horizontally, never re-wrapped.
+ * long value on the page ({@link GuardLongText}): clamped vertically and wrapped
+ * in place, never behind a horizontal scrollbar.
  */
 
 import { useState } from 'react';

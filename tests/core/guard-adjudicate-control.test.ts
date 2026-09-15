@@ -1,5 +1,5 @@
 /**
- * THE VERIFICATION CHILD — `guard-adjudicate.control` (plan 05 step 22): the
+ * THE VERIFICATION CHILD — `guard-adjudicate.control`: the
  * depth-1 session a suspected `bug` must survive, and the `verify_bug` tool
  * that dispatches it.
  *

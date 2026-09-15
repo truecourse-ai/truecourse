@@ -1,8 +1,8 @@
 /**
  * Claim extraction — the engine half of the `guard-generate.extract` SESSION
- * (plan 04 step 15; the per-view one-shot engine was retired by step 20). One
- * agent session per document pages the doc itself and returns its testable
- * claims plus per-section untestable notes; the session implementation lives in
+ * (the per-view one-shot engine was retired). One agent session per document
+ * pages the doc itself and returns its testable claims plus per-section
+ * untestable notes; the session implementation lives in
  * `@truecourse/core` (this package cannot depend on it) and is injected through
  * {@link ExtractSessionSeam}.
  *
@@ -49,9 +49,9 @@ export type ExtractResult =
   | { ok: false; reason: string }
 
 // ---------------------------------------------------------------------------
-// The extraction SESSION seam (plan 04 step 15) — typed here because the engine
-// cannot depend on `@truecourse/core`, which owns the sessions; the command
-// adapter injects the implementation. Mirrors the guard-setup seams (plan 03).
+// The extraction SESSION seam — typed here because the engine cannot depend on
+// `@truecourse/core`, which owns the sessions; the command adapter injects the
+// implementation. Mirrors the guard-setup seams.
 // ---------------------------------------------------------------------------
 
 /**

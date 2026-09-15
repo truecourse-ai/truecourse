@@ -37,8 +37,8 @@ process.on('exit', () => {
   fs.rmSync(testRuntimeDir, { recursive: true, force: true })
 })
 
-// The env override of that selection gets the same pin. The code under test
-// loads the developer's repo-root `.env` (core's env loader), where
+// The transport selection gets its own pin. The code under test loads the
+// developer's repo-root `.env` (core's env loader), where
 // `TRUECOURSE_LLM_TRANSPORT=claude-code` is how a self-hosted dashboard runs on
 // its operator's Claude Code — and that flips every dashboard route test into
 // operator mode. dotenv never overwrites a key that already exists, so an EMPTY

@@ -1,6 +1,6 @@
 /**
  * CLUSTERING — which places one session's reading serves several of, and the
- * pack that reading becomes (SPEC_GUARD_PLAN item 8).
+ * pack that reading becomes.
  *
  * Two properties are under test and they pull against each other: a cluster
  * must be ALIKE enough that its members really do render the same modules, and
@@ -121,7 +121,7 @@ describe('clustering places by what they render', () => {
 })
 
 /**
- * THE SERIAL-CHAIN BOUND (01 step 2j). A cluster's members run one after
+ * THE SERIAL-CHAIN BOUND. A cluster's members run one after
  * another, so the run cannot finish before its longest cluster does — at ~20
  * minutes a member, an eight-member group is a two-and-a-half hour critical
  * path that no amount of workers shortens. The greedy pass therefore stops

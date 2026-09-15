@@ -21,9 +21,9 @@ import { createAppError } from '@truecourse/core/lib/errors';
 import { sessionsDir } from '@truecourse/core/lib/sessions-store';
 
 /**
- * How disconnect stops the repository's background jobs (its scan, its guard
- * setup). Installed at boot with the job runner; absent in a test, or in a
- * server whose queue never came up, where there are no jobs to stop.
+ * How disconnect stops the repository's background jobs (its setup, its
+ * generate, its run). Installed at boot with the job runner; absent in a test,
+ * or in a server whose queue never came up, where there are no jobs to stop.
  */
 export type RepoJobsCanceller = (
   repoKey: string,
@@ -65,8 +65,8 @@ export async function removeRepoRunState(repoKey: string, orgId: string): Promis
   // An in-flight job holds an ephemeral clone and is appending transcripts
   // right now. One running in THIS process is aborted and awaited
   // (disconnecting the repository is the answer to whether its work is still
-  // wanted) and a queued one is settled cancelled, so the chain a scan would
-  // have started never runs. Only a job claimed by another replica — which is
+  // wanted) and a queued one is settled cancelled, so the setup → generate →
+  // run chain never runs. Only a job claimed by another replica — which is
   // not ours to stop — refuses the disconnect.
   if ((await cancelRepoJobs?.(repoKey, orgId)) === 'not-here') {
     throw createAppError(

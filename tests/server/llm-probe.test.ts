@@ -1,7 +1,7 @@
 /**
- * `probeApiConfig()` — the live check `config llm setup` / `config llm test`
- * run before a provider configuration is saved or trusted. Same semantics the
- * enterprise Models page uses, exercised through the transport seam (no network).
+ * `probeApiConfig()` — the live check the Models page runs before a provider
+ * configuration is saved or trusted, exercised through the transport seam (no
+ * network).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';

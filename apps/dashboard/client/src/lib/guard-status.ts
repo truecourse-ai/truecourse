@@ -16,16 +16,16 @@
  * + pill variants. All colours are opacity-based so they read in both light and
  * dark themes, matching the Spec conflict-band idiom (`border-<c>-500 bg-<c>-500/10`).
  *
- * FOUR COLOURS, and only these four. Amber and orange are BANNED across every
- * guard surface (a style sweep fails the build if one returns), they read as a
- * third severity between red and green, and guard has no such thing:
+ * FIVE COLOURS, and only these five:
  *
  *   RED    something is wrong and someone must fix it, `fail`, `error`, and
  *          `authoring-error` (our engine failing to do its job);
- *   GREEN  proven, `pass`, and `guarded` (proven by an earlier execution);
- *   BLUE   NOT YET, and someone can move it, the Blocked tier a user can clear
- *          (`blocked`, `needs-setup`, `blocked-on`, `no-interface`, `unguarded`) plus
- *          `never-run`, which is the same shape of fact;
+ *   GREEN  proven, `pass`;
+ *   AMBER  the Blocked tier a user can clear (`blocked`, `needs-setup`,
+ *          `blocked-on`, `no-interface`, `unguarded`): a to-do, never a failure,
+ *          and the same amber every blocked thing wears wherever it is read;
+ *   BLUE   NOT YET, with nobody asked to act, `never-run` and `guarded` (proven
+ *          by an earlier execution, no verdict of its own this time);
  *   GREY   nothing to act on, the settled non-testables (`unrealizable`,
  *          `untestable`, `no-claim`, `dismissed`), the drivers we haven't built
  *          yet, and the two UNKNOWNS (`stale`, `orphaned`): a bind that no longer

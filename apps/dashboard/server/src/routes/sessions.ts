@@ -199,8 +199,9 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
 router.get('/:id/sessions/runs', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    // listSessionRuns sweeps as a side effect: a run left `running` by a dead
-    // pid reads `interrupted` here without any separate boot reconciliation.
+    // The listing sweeps as a side effect: a run whose lease a dead process
+    // stopped renewing reads `interrupted` here, the same word the boot sweep
+    // gives it.
     res.json({ runs: (await listStoredSessionRuns(repo.path)).map(toPublicRunRecord) });
   } catch (e) {
     next(e);

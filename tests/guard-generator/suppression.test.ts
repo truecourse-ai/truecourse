@@ -134,7 +134,7 @@ describe('readSuppressionIndex', () => {
   })
 })
 
-// The per-view `extractDocClaims` runner is RETIRED (plan 04 step 15): extraction
+// The per-view `extractDocClaims` runner is RETIRED: extraction
 // is one `guard-generate.extract` agent SESSION per doc, and the suppression
 // block now rides in the session's briefing while the suppression key re-keys the
 // per-doc session cache. Both halves are pinned against the real briefing and the

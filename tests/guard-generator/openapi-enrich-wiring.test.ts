@@ -267,5 +267,5 @@ describe('generateGuards — the api author prompt carries the matched request s
   }, 60_000)
 })
 
-// `retryCacheKey` is RETIRED with the birth-retry round (plan 04 step 20): the
+// `retryCacheKey` is RETIRED with the birth-retry round: the
 // worker revises in-loop, so there is no second-round key to fold evidence into.

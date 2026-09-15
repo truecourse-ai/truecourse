@@ -1,7 +1,7 @@
 /**
  * A TEST, rendered ONCE, the ONE scenario rendering in guard.
  *
- * Two things can feed it: the flow's own committed test (read inside the merged
+ * Two things can feed it: the flow's own stored test (read inside the merged
  * FLOW detail, which is the entity) or an INSTANCE, how that test ran in one run,
  * on the Runs tab. The body is identical, only the provenance and the result that
  * feeds it differ, so a reader learns it once.
@@ -36,11 +36,10 @@
  * keeps its whole text in the title, because the closed list is for SCANNING; the
  * reading happens inside the opened row.
  *
- * THE MILESTONE IS A DIVIDER, NOT A BAND. A group of steps is headed by its number
- * alone (`M2`) and a link to the section it proves; the claim SENTENCE reads at the
- * top of every opened step in the group, which is where a reader asking "what was
- * this step for?" already is. A full-width claim band per group cost more vertical
- * space than the steps it introduced.
+ * THE MILESTONE IS A CHIP. A step row names the milestone it proves with `M<n>`;
+ * the claim SENTENCE reads in the flow's own milestone list above, where a reader
+ * asking "what was this step for?" can take the whole chain at once. A full-width
+ * claim band per group cost more vertical space than the steps it introduced.
  *
  * SETUP IS STEP 0. The `setup:` block is the world step 1 starts in, so it reads as
  * a pseudo-row at the top of the same list, expandable like any other step, with
@@ -162,7 +161,7 @@ export interface GuardTestViewModel {
   /**
    * The triage verdict behind a BIRTH failure, what the failure IS, not
    * just that it happened. Absent on a run failure (a different event, with no
-   * verdict of its own) and on a test that committed untriaged.
+   * verdict of its own) and on a test stored untriaged.
    */
   triage?: GuardTriage;
   failedMilestone?: number;
@@ -183,9 +182,9 @@ export interface GuardTestViewModel {
   }[];
   /**
    * Claim id → its sentence, for the steps that name their milestone by IDENTITY
-   * rather than by position. An id the map doesn't answer for renders as itself:
-   * the divider always names the claim the group proves, never a blank and never
-   * "Prepare".
+   * rather than by position. Carried on the model for the flow header's milestone
+   * list; this screen reads neither it nor `milestones`, a step row points back at
+   * the chain with its `M<n>` chip alone.
    */
   claimTitles?: Readonly<Record<string, string>>;
   interfaceDrifted?: boolean;
@@ -200,7 +199,7 @@ export interface GuardTestViewModel {
   flow?: { id: string; title: string };
   /**
    * The spec section the test binds to, the footer's Spec fact. Optional: read
-   * inside its own flow the step dividers already link every section the test
+   * inside its own flow the milestone list already links every section the test
    * walks, and a flow with no inventory row behind it has nothing to point at.
    */
   binds?: {
@@ -383,8 +382,8 @@ function VisualJudgeRow({ visual }: { visual: GuardVisualAnnotation }) {
  * earlier failure) and every step of a test that has never run say so, in place of
  * the value they do not have.
  *
- * Every value is a long-data block, clamped vertically, scrolled horizontally,
- * never wrapped (a wrapped command line or JSON body lies about its shape).
+ * Every value is a long-data block, clamped by its own expander and wrapped in
+ * place; only the indentation-sensitive raw source keeps an unwrapped block.
  */
 interface StepPanelProps {
   /** What the step asserts, as authored, empty when it asserts nothing. */
@@ -693,7 +692,7 @@ function SetupRow({
  * One step's whole record, inline under its row, as the labelled rows a reader
  * asks for in order: what it asserted and got, what it printed, the picture it
  * left, and the conditions it ran under. Every value is a long-data block -
- * clamped by its own expander, scrolled horizontally, never wrapped.
+ * clamped by its own expander and wrapped in place.
  */
 function StepBody({
   step,
@@ -1174,8 +1173,8 @@ export function GuardScenarioBody({
 
   const failed = test.status.plain === "failed";
   const passed = test.status.plain === "succeeded" && !failed;
-  // "failed (birth)" is the plan's own wording for a test committed red: it ran
-  // once, at authoring time, and disagreed with the code.
+  // "failed (birth)" is the wording for a test stored red: it ran once, at
+  // authoring time, and disagreed with the code.
   const verdictWord = failed
     ? test.status.birth
       ? "failed (birth)"

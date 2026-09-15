@@ -1,6 +1,6 @@
 /**
- * THE AUTO-RESOLUTION LEDGER ACROSS RUNS. The triage STAGE is retired (plan 04
- * step 20) — a committed red's adjudication is the worker's own confirmed
+ * THE AUTO-RESOLUTION LEDGER ACROSS RUNS. The triage STAGE is retired — a
+ * stored red's adjudication is the worker's own confirmed
  * `expectedReds` prediction — but the durable ledger it fed lives on, now fed
  * by the flow worker's `retired` outcomes (source `worker`) and by the fidelity
  * child's rejections (source `fidelity`).

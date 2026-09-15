@@ -1,5 +1,5 @@
 /**
- * INTERFACE RECONCILIATION (plan 03 step 12) — the `guard-setup.reconcile-interfaces`
+ * INTERFACE RECONCILIATION — the `guard-setup.reconcile-interfaces`
  * session and the two halves around it:
  *
  *  - the pure fold (`validateResolutions` / `applyReconcileResolutions`): the

@@ -1,12 +1,13 @@
 /**
  * The direct-API LLM transport: implements `@truecourse/shared/llm`'s
  * `LlmTransport` on top of the Vercel AI SDK, so TrueCourse talks to
- * Anthropic / OpenAI / Bedrock / Copilot over their APIs instead of spawning a
- * `claude` binary. The dashboard server builds one per run from the asking
- * workspace's stored provider config and threads it into the run.
+ * Anthropic / OpenAI / Bedrock / Copilot over their APIs instead of running on
+ * the machine's own `claude` login. The dashboard server builds one per run
+ * from the asking workspace's stored provider config and threads it into the
+ * run.
  *
- * Like the cli backend, it is content-agnostic: it returns the model's RAW
- * assistant text and the caller (each runner) strips fences + parses + Zod-
+ * Like the claude-code backend, it is content-agnostic: it returns the model's
+ * RAW assistant text and the caller (each runner) strips fences + parses + Zod-
  * validates. The provider config fixes the model(s); the request's
  * `model`/`fallbackModel` hints are ignored unless `honorRequestModel` is set
  * (the default in `createApiTransportFor`, so per-stage model overrides keep
@@ -14,7 +15,7 @@
  *
  * ACCOUNTING: every successful call reports its tokens to the shared per-stage
  * usage table, with a cost from the optional `pricing` hook — the same
- * ` · model · tokens · $cost` tags the cli backend produces.
+ * ` · model · tokens · $cost` tags the claude-code backend produces.
  *
  * OBSERVABILITY: when a `recorder` is supplied (EE only — OSS passes none),
  * every call (success or failure) is captured as one trace — the prompt/output
@@ -43,7 +44,7 @@ import {
 import { currentTrace, type TraceContext } from './trace-context.js';
 import type { ProviderConfig } from './types.js';
 
-/** One call's token counts, in the same buckets the cli backend reports. */
+/** One call's token counts, in the same buckets the claude-code backend reports. */
 export interface CallUsage {
   inputTokens: number;
   outputTokens: number;
@@ -55,19 +56,19 @@ export interface ApiTransportOptions {
   /** Trace sink. Omit (e.g. OSS, or the config-probe call) to record nothing. */
   recorder?: LlmTraceRecorder;
   /**
-   * Cost for one call's usage, in USD. Omit (EE, the config probe) and calls are
+   * Cost for one call's usage, in USD. Omit (the config probe) and calls are
    * recorded with a zero cost — tokens are still counted.
    */
   pricing?: (modelId: string, usage: CallUsage) => number;
   /**
    * Run each request on its own `model`/`fallbackModel` when it carries one,
-   * falling back to the config's. Off by default: EE fixes the model in the
-   * stored provider config and its requests carry cli tier aliases.
+   * falling back to the config's. Off by default: the stored provider config
+   * fixes the model, and a stage's request carries a tier alias, not a model id.
    */
   honorRequestModel?: boolean;
 }
 
-/** Former name of {@link ApiTransportOptions}, kept for EE consumers. */
+/** Former name of {@link ApiTransportOptions}, kept for callers still on it. */
 export type AiSdkTransportOptions = ApiTransportOptions;
 
 /** The subset of the AI SDK result we capture (structurally satisfied by GenerateTextResult). */
@@ -420,5 +421,5 @@ export function createApiTransport(
   };
 }
 
-/** Former name of {@link createApiTransport}, kept for EE consumers. */
+/** Former name of {@link createApiTransport}, kept for callers still on it. */
 export const createAiSdkTransport = createApiTransport;

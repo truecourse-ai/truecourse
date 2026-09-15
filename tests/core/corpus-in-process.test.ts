@@ -124,9 +124,9 @@ describe('curateInProcess', () => {
   });
 
   // The estimate reads every doc before the gate opens; without a surface of its
-  // own the CLI/dashboard sat silent for seconds on a large corpus. That surface
+  // own the dashboard sat silent for seconds on a large corpus. That surface
   // is the caller's `onEstimatePhase` — NOT the run checklist, which must stay the
-  // run's own steps (the terminal renderer repaints it in place).
+  // run's own steps.
   it('reports the pre-flight estimate through its own phase, off the run checklist', async () => {
     const frames: AnalysisStep[][] = [];
     const tracker = new StepTracker(

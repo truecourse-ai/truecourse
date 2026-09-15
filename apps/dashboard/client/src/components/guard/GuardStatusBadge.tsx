@@ -101,7 +101,7 @@ export function GuardDismissedChip({ className = '' }: { className?: string }) {
 
 /**
  * The marker a flow wears when the last generate's finding was OUR defect, a
- * scenario judged faulty and withheld, never committed. Muted like its siblings,
+ * scenario judged faulty and withheld, never stored. Muted like its siblings,
  * and for the strongest reason of the three: rendering our own defect in a failure
  * colour would report a broken repo where nothing is broken. It never replaces the
  * status chip; the flow's real state is whatever its tests say.

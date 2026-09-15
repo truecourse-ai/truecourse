@@ -5,8 +5,8 @@
  * (`recipe.json`), resolution (the overlay + the host env) — plus the per-service
  * blocked-flow count parsed back out of the last generate's gaps.
  *
- * The WRITE is the secrecy split: declarations to the committed recipe, values to
- * the gitignored overlay, both byte-stable and both no-ops when nothing changed.
+ * The WRITE is the secrecy split: declarations to the recipe, values to the
+ * instance overlay, both byte-stable and both no-ops when nothing changed.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -412,7 +412,8 @@ describe('writeGuardExternals', () => {
       baseUrlEnv: 'GEOCODING_BASE_URL',
       baseUrl: 'https://sandbox.test',
       mode: 'sandbox',
-      // The secret's variable is DECLARED, its value is not committed.
+      // The secret's variable is DECLARED here; its value is only registered in
+      // the overlay.
       env: { GEO_ACCOUNT: { valueFromEnv: 'HOST_GEO_ACCOUNT' }, GEO_KEY: {} },
       description: 'team sandbox',
     });
@@ -504,7 +505,7 @@ describe('writeGuardExternals', () => {
     expect(JSON.parse(fs.readFileSync(localFile(r), 'utf-8')).svc.env).toEqual({ KEEP: 'k' });
   });
 
-  // Extra base URLs are committed declarations, and the view reports them.
+  // Extra base URLs are declarations, and the view reports them.
   it('writes extra base URLs to the recipe as `endpoints`, and keeps overlay overrides', () => {
     const r = repo();
     writeJson(recipeFile(r), baseRecipe());
@@ -523,7 +524,8 @@ describe('writeGuardExternals', () => {
     expect(recipe.api.externals['open-meteo'].endpoints).toEqual({
       GEOCODING_BASE_URL: 'https://geo.open-meteo.test',
     });
-    // An origin is not a secret: it is committed, never written to the overlay.
+    // An origin is not a secret: it is declared in the recipe, never written to
+    // the overlay.
     const overlay = JSON.parse(fs.readFileSync(localFile(r), 'utf-8'));
     expect(overlay['open-meteo'].endpoints).toBeUndefined();
     const service = view.services.find((s) => s.service === 'open-meteo')!;
@@ -636,7 +638,7 @@ describe('external services without an api block (the dependency catalog)', () =
     expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8')).api).toBeUndefined();
     const catalog = JSON.parse(fs.readFileSync(catalogFile(r), 'utf-8'));
     expect(catalog.dependencies[0]).toMatchObject({ name: 'stripe', class: 'supplied', services: ['stripe'] });
-    // The committed half declares NAMES only; the values live in the gitignored overlay.
+    // The declared half carries NAMES only; the values live in the instance overlay.
     expect(fs.readFileSync(catalogFile(r), 'utf-8')).not.toContain('sk-secret');
     expect(JSON.parse(fs.readFileSync(catalogLocalFile(r), 'utf-8'))).toEqual({
       stripe: { env: { STRIPE_BASE: 'https://sandbox.test', STRIPE_KEY: 'sk-secret' } },

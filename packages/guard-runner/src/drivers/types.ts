@@ -1,7 +1,7 @@
 /**
  * THE STEP-DRIVER SEAM — how a step gets taken.
  *
- * The driver belongs to the STEP, not to the scenario (§2, 2026-08-09), so the
+ * The driver belongs to the STEP, not to the scenario, so the
  * runner must not know how any particular kind of step is taken. It walks the step
  * list, asks the REGISTRY which driver owns each step, and hands it over. What comes
  * back is one of four outcomes in a vocabulary that says nothing about browsers or
@@ -47,7 +47,7 @@ export type StepOutcome =
        * screenshot, with the step's expectation in words. Supplied by the driver
        * (only it knows whether its surface can be looked at) and consumed by the
        * runner's optional visual judge. The runner never asks what KIND of step it
-       * was: the presence of this field IS the answer, which is what keeps §2's
+       * was: the presence of this field IS the answer, which is what keeps
        * "nothing in the runner branches on a step kind" intact.
        */
       visual?: {

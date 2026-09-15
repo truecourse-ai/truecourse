@@ -1,6 +1,6 @@
 /**
- * THE ADJUDICATION SESSION — `guard-adjudicate.failure` (plan 05 step 21), one
- * per failing scenario of a guard run. The session does what the corpus runs
+ * THE ADJUDICATION SESSION — `guard-adjudicate.failure`, one per failing
+ * scenario of a guard run. The session does what the corpus runs
  * cost a human per red row: read the evidence, hunt the mechanism in the
  * source, discriminate flake from fact with a scoped rerun, and end with one
  * verdict object the fold validates and persists.
@@ -135,7 +135,7 @@ export function adjudicationWorkItem(item: AdjudicationItem): string {
 // The briefing
 // ---------------------------------------------------------------------------
 
-/** Caps on what the briefing inlines (context is the budget, §3.3). */
+/** Caps on what the briefing inlines (context is the budget). */
 const BRIEFING_SECTION_CHARS = 2200;
 const BRIEFING_MAX_SECTIONS = 5;
 const BRIEFING_YAML_CHARS = 8000;

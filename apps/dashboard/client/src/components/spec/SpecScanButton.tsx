@@ -1,10 +1,10 @@
 /**
- * The Spec / Guard-Coverage header action: Scan (first curate) or Rescan (re-curate
- * the docs into the corpus). Mirrors the other section header actions
- * (ContractsHeaderActions / GuardHeaderActions), same outline variant, and carries
- * an amber staleness dot when there is queued work: include/exclude/conflict
- * decisions recorded since the last scan (`decisionsPending`) OR a kept doc edited
- * since it (`docsChanged`), so one Rescan applies the batch.
+ * The coverage header action: Scan (first curate) or Rescan (re-curate the docs
+ * into the corpus). Mirrors the other page header actions, same outline variant,
+ * and carries an amber staleness dot when there is queued work:
+ * include/exclude/conflict decisions recorded since the last scan
+ * (`decisionsPending`) OR a kept doc changed since it (`docsChanged`), so one
+ * Rescan applies the batch.
  */
 
 import { Loader2, Play } from 'lucide-react';

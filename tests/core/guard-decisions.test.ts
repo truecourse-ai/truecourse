@@ -104,7 +104,7 @@ describe('guard decisions over the file store', () => {
         note: 'not a user path',
       },
     ]);
-    // It landed in the committable file, not just the returned value.
+    // It landed in the store, not just the returned value.
     expect((await readGuardDecisions(repo)).dismissedFlows.map((f) => f.flowId)).toEqual([
       'task-lifecycle',
     ]);

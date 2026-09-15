@@ -4,9 +4,9 @@
  * (verb + ISO time) for a repo card. Route→driver: the Express `/api/repos`
  * adapter stays thin and all cross-store composition lives here.
  *
- * Every read is isolated and tolerant: a missing/corrupt file or an unreadable
- * repo path skips only that source (never throws). When no store yields a
- * timestamp the event is `null`.
+ * Every read is isolated and tolerant: an absent row, a malformed stored
+ * document or an unreachable store skips only that source (never throws). When
+ * no store yields a timestamp the event is `null`.
  */
 
 import { readGuardLatest, readGuardResult } from '../lib/guard-store.js';
@@ -58,8 +58,8 @@ function toEpochMs(at: string | null | undefined): number | null {
 
 /**
  * Read every per-repo store's own timestamp tolerantly and return the newest
- * lifecycle event, or `null`. Never throws — each source is wrapped so a
- * corrupt file or an unreadable repo path skips just that source.
+ * lifecycle event, or `null`. Never throws — each source is wrapped so an absent
+ * row, a malformed document or an unreachable store skips just that source.
  */
 export async function resolveLatestEvent(repoPath: string): Promise<LatestEvent | null> {
   const candidates: EventCandidate[] = [

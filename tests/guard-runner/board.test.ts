@@ -363,7 +363,7 @@ describe('mergeGuardBoard — the merge itself', () => {
     expect(merged.summary).toMatchObject({ total: 3, pass: 2, fail: 1 })
   })
 
-  // --- Adjudication verdicts across a scoped run (plan 05 step 23) ----------
+  // --- Adjudication verdicts across a scoped run ----------------------------
   //
   // A verdict judges ONE recorded actual. A row nobody re-ran still shows that
   // actual, so its verdict carries; a row this run re-executed shows a new one,

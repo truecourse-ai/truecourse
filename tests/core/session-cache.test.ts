@@ -1,5 +1,5 @@
 /**
- * THE SESSION OUTCOME CACHE (01 step 2b) — the agent-session analog of the
+ * THE SESSION OUTCOME CACHE — the agent-session analog of the
  * one-shot stage caches. A hit must skip the session entirely; a miss, a
  * failure, a rotted entry and a broken store must each cost a re-run and
  * nothing more.

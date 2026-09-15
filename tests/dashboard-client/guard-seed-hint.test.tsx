@@ -1,7 +1,7 @@
 /**
  * The SEED hint in the UI. A section blocked on missing data has exactly
  * one action, and which one depends on where the seed stands:
- *   no seed → plain `blocked-on`, and the hint offers `guard seed --init`;
+ *   no seed → plain `blocked-on`, and the hint offers Flow setup;
  *   a seed the last generate never saw → the core read path promotes the gap to
  *     needs-setup's "setup done" sub-state, whose action is the re-generate
  *     COMMAND — and the hint must not also appear (there is nothing left to draft);

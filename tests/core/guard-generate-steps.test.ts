@@ -1,8 +1,8 @@
 /**
  * SINGLE-STEP MODE — `generateGuards({ only })` plus
- * `createGuardGenerateSessionSeams({ only })`, the two halves behind the CLI's
- * `only: extract | only: flows | only: worker` flags (the `spec scan`
- * template, SPEC_GUARD_PLAN item 110).
+ * `createGuardGenerateSessionSeams({ only })`, the two halves behind
+ * single-step generation (`only: extract | flows | worker`), on the
+ * `spec scan` template.
  *
  * The rules under test:
  * - each step runs ONLY its own sessions: the ENGINE returns before the next
@@ -178,7 +178,7 @@ describe('only: flows', () => {
     expect(res.stoppedAfter).toBe('flows')
     // The step's work really happened — the flows exist in the result…
     expect(res.flows.total).toBeGreaterThan(0)
-    // …and only in the result: the committable corpus is untouched.
+    // …and only in the result: the stored corpus is untouched.
     expect(readFlowsFile(r)).toBeNull()
     wroteNothing(r)
   })

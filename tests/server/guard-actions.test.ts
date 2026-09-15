@@ -5,13 +5,13 @@ import request from 'supertest';
 import { type Express } from 'express';
 
 /**
- * Guard ACTION routes (OSS) — the write surface that triggers `guard generate` /
+ * Guard ACTION routes — the write surface that triggers `guard generate` /
  * `guard run` from the dashboard. Temp-repo fixture + supertest over the real app.
  *
  * The estimate route runs the REAL estimateGuard (deterministic, offline —
  * TRUECOURSE_NO_PRICE_FETCH is set by tests/setup.ts), so its shape is asserted
- * against a direct call: proof the dashboard shows the SAME numbers as the CLI. The
- * two engine drivers are mocked (never a real LLM call, no sandbox build), so the
+ * against a direct call: proof the route answers exactly what `estimateGuard`
+ * returns. The two engine drivers are mocked (never a real LLM call, no sandbox build), so the
  * trigger tests assert only the route contract: generate ENQUEUES (202, 409 while
  * the repo is working), run starts in the request, emits the completion lifecycle
  * event and rejects a concurrent duplicate (409).
@@ -107,7 +107,7 @@ describe('Guard action routes', () => {
     resetSpecStore();
   });
 
-  // --- Estimate: the CLI-identical shape ------------------------------------
+  // --- Estimate: the engine-identical shape ---------------------------------
 
   it('GET /guard/estimate returns the same estimateGuard payload the CLI renders', async () => {
     seedCorpus();
@@ -115,7 +115,7 @@ describe('Guard action routes', () => {
     const direct = JSON.parse(JSON.stringify(await estimateGuard(root)));
     // Byte-identical to a direct estimateGuard call — no re-derivation.
     expect(res.body.estimate).toEqual(direct);
-    // And it is the staged pipeline shape (what the modal + CLI prompt render).
+    // And it is the staged pipeline shape (what the confirm modal renders).
     expect(Array.isArray(res.body.estimate.stages)).toBe(true);
     expect(res.body.estimate.stages.length).toBeGreaterThan(0);
     expect(res.body.estimate.stages[0]).toMatchObject({ stage: expect.any(String), model: expect.any(String), calls: expect.any(Number) });
@@ -181,7 +181,7 @@ describe('Guard action routes', () => {
     expect(res.body.dismissedFlows).toEqual([
       expect.objectContaining({ flowId: 'task-lifecycle', title: 'Task lifecycle', note: 'not a user path' }),
     ]);
-    // It reads back from the committable decisions file, not just the response.
+    // It reads back from the stored decisions, not just the response.
     const read = await request(app).get(url('decisions')).expect(200);
     expect(read.body.dismissedFlows.map((f: { flowId: string }) => f.flowId)).toEqual(['task-lifecycle']);
     // The claim tier is untouched.
@@ -282,9 +282,9 @@ describe('Guard dismiss/undismiss routes (hosted store)', () => {
 //
 // A repo-scope dismissal that suppresses the LAST active finding re-generates the
 // scenario corpus honoring the dismissal — the hosted analog of resolving the last
-// spec conflict. The write rides the established `setGuardGenerateEnqueue` seam
-// (EE installs it; OSS leaves it unset → the dismissal is a plain file write). The
-// findings live in the guard result store, so the OSS file fixture seeds one.
+// spec conflict. The write rides the `setGuardGenerateEnqueue` seam the server
+// installs at boot; a test that leaves it unset gets the dismissal alone. The
+// findings live in the guard result store, so the tree-backed fixture seeds one.
 describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
   let app: Express;
   let fixture: TestFixture;
@@ -377,7 +377,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
   it('never enqueues when the seam is unset (OSS)', async () => {
     setGuardGenerateEnqueue(null);
     await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA]));
-    await dismiss(findingA).expect(200); // plain file write, no throw
+    await dismiss(findingA).expect(200); // the write alone, no throw
     expect(enqueue).not.toHaveBeenCalled();
   });
 

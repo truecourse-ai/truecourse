@@ -146,7 +146,7 @@ export function GuardCoverageOverview({
   staleness: GuardStaleness;
   /** Bumped on a generate/run completion → refetch the summary. */
   reloadKey?: number;
-  /** EE PR scope. */
+  /** The commit the summary is pinned at. */
   prRef?: string;
 }) {
   // Tab switches remount this pane; the last summary is kept module-side so a
@@ -210,7 +210,7 @@ export function GuardCoverageOverview({
       : '';
 
   // The tests' CURRENT state: the last run's outcomes when one exists (the
-  // committed-at statuses go stale the moment a run records real verdicts);
+  // stored-at statuses go stale the moment a run records real verdicts);
   // the generate's written split is the fallback for a corpus never run.
   const testSegments: Segment[] = lastRun
     ? [
@@ -229,10 +229,10 @@ export function GuardCoverageOverview({
         ]
       : [];
 
-  // Surfaces are IDENTITY, not status, the guard four colours are reserved for
+  // Surfaces are IDENTITY, not status, the guard status colours are reserved for
   // verdicts, so this bar wears NEUTRAL steps (a slate ramp): the legend words
   // carry which driver is which, the bar carries the shape, and no segment can
-  // be misread as a verdict. The counts are the SAME derivation the Tests tab's
+  // be misread as a verdict. The counts are the SAME derivation the Flows page's
   // driver filter uses: each flow's step-level drivers, a mixed test counts
   // under every driver its steps exercise, a UNION, so the right-side label
   // names the real test total instead of summing overlapping segments.

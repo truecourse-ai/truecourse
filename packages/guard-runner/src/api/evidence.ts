@@ -1,8 +1,8 @@
 /**
  * Api-driver evidence capture — the api analog of the cli `writeEvidence`,
  * writing the same bundle layout under `.truecourse/guard/evidence/<runId>/<scenarioId>/`
- * so every downstream consumer (the dashboard evidence view, the EE blob
- * mirror) reads one shape: `invocation.json`, the focus step's raw/normalized
+ * so every downstream consumer (the dashboard evidence view, the stored
+ * evidence bundle) reads one shape: `invocation.json`, the focus step's raw/normalized
  * response body, `diff.txt`, `files.txt`, `transcript.txt` — plus the server's
  * own stdout/stderr (`server.stdout.txt` / `server.stderr.txt`), which is where
  * a 500's stack trace actually lives.
