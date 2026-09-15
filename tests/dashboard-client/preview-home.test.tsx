@@ -170,7 +170,7 @@ const REPO = {
   id: 'web',
   name: 'acme/web',
   path: 'acme/web',
-  remoteUrl: 'https://github.com/acme/web',
+  provider: 'github',
 };
 
 const EMPTY: HomeResponse = {

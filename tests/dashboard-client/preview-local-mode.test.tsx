@@ -118,7 +118,6 @@ describe('a connected folder, as Code lists it', () => {
       name: 'local/orders-api',
       path: 'local/orders-api',
       provider: 'local',
-      remoteUrl: '/Users/dana/code/orders-api',
     });
     expect(repo).toMatchObject({
       id: 'local-orders-api',

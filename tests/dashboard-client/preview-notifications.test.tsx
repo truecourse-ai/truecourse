@@ -87,7 +87,7 @@ const REPO = {
   id: 'widgets',
   name: 'acme/widgets',
   path: '/clones/acme__widgets',
-  remoteUrl: 'https://github.com/acme/widgets',
+  provider: 'github',
 };
 
 const SETUP_RUN = '2026-09-11T09-00-00Z_setup001';

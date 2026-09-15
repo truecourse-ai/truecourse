@@ -52,7 +52,7 @@ beforeEach(() => {
       id: 'spiderhands-filecli',
       name: 'spiderhands/filecli',
       path: '/tmp/clones/spiderhands__filecli',
-      remoteUrl: 'https://github.com/spiderhands/filecli',
+      provider: 'github',
     },
   ];
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -157,7 +157,6 @@ function derivedRegistry(gate: MemoryInstallationStore): RegistryStore {
     path: r.repoFullName,
     provider: 'github',
     ...(r.defaultBranch ? { defaultBranch: r.defaultBranch } : {}),
-    remoteUrl: `https://github.com/${r.repoFullName}`,
   });
   const mine = async (org: string): Promise<RegistryEntry[]> =>
     (await gate.listReposForWorkspace(org)).map(toEntry);
@@ -537,8 +536,7 @@ describe('linking a repository', () => {
     expect(detail.body).toMatchObject({
       name: REPO,
       defaultBranch: 'main',
-      // The preview reads `remoteUrl` to tell a real repository from a fixture.
-      remoteUrl: `https://github.com/${REPO}`,
+      provider: 'github',
     });
 
     // The setup was started for the repository that landed, no sync went with

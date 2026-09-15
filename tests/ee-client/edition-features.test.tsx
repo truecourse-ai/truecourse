@@ -16,7 +16,6 @@ import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { GithubConnectStatusResponse } from '@truecourse/shared';
 import PreviewApp from '@/preview/PreviewApp';
-import { parseRemote } from '@/preview/data/real-repos';
 import { registerEditionFeatures } from '../../ee/packages/client/src/edition';
 
 registerEditionFeatures();
@@ -122,16 +121,5 @@ describe('Settings › Repositories, with this edition', () => {
     expect(within(azure).getByText('Coming soon')).toBeInTheDocument();
     expect(within(azure).queryByRole('button')).toBeNull();
     expect(within(azure).queryByRole('link')).toBeNull();
-  });
-
-  it('claims its own hosts, so an Azure remote reads as Azure DevOps', () => {
-    expect(parseRemote('https://dev.azure.com/acme/billing')).toEqual({
-      fullName: 'acme/billing',
-      provider: 'azure',
-    });
-    expect(parseRemote('https://acme.visualstudio.com/_git/billing').provider).toBe('azure');
-    // The open edition's two are untouched.
-    expect(parseRemote('https://github.com/acme/orders.git').provider).toBe('github');
-    expect(parseRemote('https://gitlab.com/group/thing').provider).toBe('gitlab');
   });
 });

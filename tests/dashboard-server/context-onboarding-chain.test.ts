@@ -303,7 +303,7 @@ beforeEach(async () => {
   });
   await setContextBindings(ORG, REPO, [SOURCE]);
   // And it is a repository Code knows: only a connected one is set up.
-  const entry = { slug: `acme-widgets-${orgCounter}`, name: REPO, path: REPO };
+  const entry = { slug: `acme-widgets-${orgCounter}`, name: REPO, path: REPO, provider: 'github' };
   const registry: RegistryStore = {
     readRegistry: async () => [entry],
     getProjectBySlug: async (_org, slug) => (slug === entry.slug ? entry : null),

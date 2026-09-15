@@ -78,6 +78,7 @@ export async function setupTestFixture(fixturePath?: string): Promise<TestFixtur
       slug: slugify(path.basename(resolved), entries.map((e) => e.slug)),
       name: path.basename(resolved),
       path: resolved,
+      provider: 'github',
     };
   if (!existing) entries.push(project);
   cleanupPaths.push({ tmpDir, workTree: preexisting ? null : workTree });

@@ -72,14 +72,14 @@ const REPO_A = {
   id: 'expense-tracker',
   name: 'spiderhands/expense-tracker',
   path: '/clones/spiderhands__expense-tracker',
-  remoteUrl: 'https://github.com/spiderhands/expense-tracker',
+  provider: 'github',
 };
 
 const REPO_B = {
   id: 'filecli',
   name: 'spiderhands/filecli',
   path: '/clones/spiderhands__filecli',
-  remoteUrl: 'https://github.com/spiderhands/filecli',
+  provider: 'github',
 };
 
 function run(over: Partial<WorkspaceRun> = {}): WorkspaceRun {

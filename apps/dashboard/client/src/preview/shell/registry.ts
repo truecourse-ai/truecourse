@@ -62,12 +62,6 @@ export interface RepositoryProvider {
   mode?: ServerMode;
   /** How it connects a repository from inside the app, when it does. */
   connect?: RepositoryConnect;
-  /**
-   * Whether a remote's host belongs to this provider, which is how a connected
-   * repository gets its mark. GitHub needs none: an unrecognized host reads as
-   * GitHub, the one that connects.
-   */
-  matchesHost?(host: string): boolean;
 }
 
 /**

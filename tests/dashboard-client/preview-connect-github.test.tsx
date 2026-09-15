@@ -34,7 +34,7 @@ import type {
 } from '@truecourse/shared';
 import type { ContextSourceView } from '@truecourse/shared';
 import PreviewApp from '@/preview/PreviewApp';
-import { parseRemote, toPreviewRepo } from '@/preview/data/real-repos';
+import { toPreviewRepo } from '@/preview/data/real-repos';
 
 // The real sessions view opens a socket for its live tail; jsdom has no server
 // to reach, and the tail is not what this file is about.
@@ -57,7 +57,7 @@ interface RegistryEntry {
   id: string;
   name: string;
   path: string;
-  remoteUrl?: string | null;
+  provider: string;
   defaultBranch?: string;
 }
 
@@ -209,30 +209,13 @@ afterEach(() => {
   window.fetch = realFetch;
 });
 
-describe('a remote URL as a preview repository', () => {
-  it('reads owner/repo and the provider off the host', () => {
-    expect(parseRemote('https://github.com/acme/orders-api.git')).toEqual({
-      fullName: 'acme/orders-api',
-      provider: 'github',
-    });
-    expect(parseRemote('https://gitlab.com/group/sub/thing')).toEqual({
-      fullName: 'sub/thing',
-      provider: 'gitlab',
-    });
-    // A host no registered provider claims reads as github, the one that connects.
-    expect(parseRemote('https://git.sr.ht/~user/thing').provider).toBe('github');
-    expect(parseRemote('https://dev.azure.com/acme/billing')).toEqual({
-      fullName: 'acme/billing',
-      provider: 'github',
-    });
-  });
-
+describe('a registry entry as a preview repository', () => {
   it('maps a registry entry to a repository with no history behind it', () => {
     const repo = toPreviewRepo({
       id: 'orders-api',
       name: 'acme/orders-api',
       path: '/clones/acme__orders-api',
-      remoteUrl: 'https://github.com/acme/orders-api',
+      provider: 'github',
       defaultBranch: 'trunk',
     });
     expect(repo).toMatchObject({
@@ -255,19 +238,17 @@ describe('connecting a repository through the GitHub App', () => {
   it('lists a connected repository on Code with no coverage yet', async () => {
     serve({
       registry: [
-        // A path-registered repo of the developer's own: never the product's business.
-        { id: 'local-thing', name: 'local-thing', path: '/home/dev/local-thing' },
         {
           id: 'linkwarden',
           name: 'linkwarden/linkwarden',
           path: '/clones/linkwarden__linkwarden',
-          remoteUrl: 'https://github.com/linkwarden/linkwarden',
+          provider: 'github',
+          defaultBranch: 'main',
         },
       ],
     });
     renderAt('/code');
     const name = await screen.findByText('linkwarden/linkwarden');
-    expect(screen.queryByText('local-thing')).toBeNull();
     // Wait for the stored summary before asserting the empty state.
     const row = name.closest('tr')!;
     expect(await within(row).findByText('no corpus yet')).toBeInTheDocument();
@@ -290,7 +271,7 @@ describe('connecting a repository through the GitHub App', () => {
           id: String(body.repoFullName).split('/')[1]!,
           name: String(body.repoFullName),
           path: `/clones/${String(body.repoFullName).replace('/', '__')}`,
-          remoteUrl: `https://github.com/${String(body.repoFullName)}`,
+          provider: 'github',
           defaultBranch: body.defaultBranch,
         });
         return json({ ok: true }, 201);
@@ -584,7 +565,7 @@ describe('connecting a repository through the GitHub App', () => {
           id: String(body.repoFullName).split('/')[1]!,
           name: String(body.repoFullName),
           path: `/clones/${String(body.repoFullName).replace('/', '__')}`,
-          remoteUrl: `https://github.com/${String(body.repoFullName)}`,
+          provider: 'github',
           defaultBranch: body.defaultBranch,
         });
         return json({ ok: true }, 201);
@@ -627,7 +608,7 @@ describe('the agent page reads the workspace route', () => {
     id: 'linkwarden',
     name: 'linkwarden/linkwarden',
     path: '/clones/linkwarden__linkwarden',
-    remoteUrl: 'https://github.com/linkwarden/linkwarden',
+    provider: 'github',
   };
 
   it('reads the workspace route and shows its empty line', async () => {

@@ -60,7 +60,7 @@ const REAL = {
   id: 'linkwarden',
   name: 'linkwarden/linkwarden',
   path: '/clones/linkwarden__linkwarden',
-  remoteUrl: 'https://github.com/linkwarden/linkwarden',
+  provider: 'github',
 };
 
 function json(body: unknown, status = 200): Response {

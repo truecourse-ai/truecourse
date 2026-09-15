@@ -20,19 +20,13 @@ function toEntry(r: RepositoryRow): RegistryEntry {
   // `path` is the opaque repo identity every per-repo store keys by (repoKey).
   // `defaultBranch` comes from the row so the repo route never has to shell
   // out to git on a non-path identity (a run works on a copy, and nothing is
-  // checked out between runs). `remoteUrl` is where the provider serves it,
-  // which the client reads as the mark of a connected repository — a local
-  // folder's is the path it was connected from.
+  // checked out between runs).
   return {
     slug: r.slug,
     name: r.repoFullName,
     path: r.repoFullName,
     provider: r.provider,
     ...(r.defaultBranch ? { defaultBranch: r.defaultBranch } : {}),
-    remoteUrl:
-      r.provider === 'local'
-        ? (r.location ?? r.repoFullName)
-        : `https://github.com/${r.repoFullName}`,
   };
 }
 
