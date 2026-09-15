@@ -34,16 +34,12 @@ import {
 import { readAuthoredInterfaceCatalog, readInterfaceCatalog } from '@truecourse/guard-runner';
 import {
   extractJsonValue,
-  getDefaultTransport,
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import type { SessionDriver, SessionEvent } from '@truecourse/agent-loop';
 import path from 'node:path';
 import { createStoredSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
-import {
-  createClaudeCodeTransport,
-} from '../services/llm/install-transport.js';
 import { createClaudeCodeSessionDriver } from '../services/llm/session-driver.js';
 import { deriveWebAuthoringContext } from '../services/web-context.service.js';
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
@@ -117,6 +113,12 @@ export interface RunGuardInterfaceAuthorOptions {
   driver?: SessionDriver;
   /** The mode an explicit `driver` runs in — the run record's attribution. */
   transportMode?: LlmTransportMode;
+  /**
+   * The transport the closing state reconciliation asks through: one
+   * schema-bearing completion, the run's own provider, never a process-wide
+   * default.
+   */
+  transport: LlmTransport;
   /**
    * Where the run record and transcripts are keyed — the repo IDENTITY when
    * `repoRoot` is an ephemeral clone deleted after the run. Defaults to
@@ -245,7 +247,7 @@ export async function runGuardInterfaceAuthoring(
       opts.onStatus?.('reconciling the state registry');
       reconcile = await reconcileAuthoredStates({
         repoRoot,
-        complete: stateReconcileComplete(),
+        complete: stateReconcileComplete(opts.transport),
       });
     }
 
@@ -267,6 +269,8 @@ export async function runGuardInterfaceAuthoring(
 
 export interface RunGuardInterfaceReconcileOptions {
   repoRoot: string;
+  /** The transport the one reconciliation call goes through. */
+  transport: LlmTransport;
 }
 
 /**
@@ -280,7 +284,7 @@ export async function runGuardInterfaceReconcile(
 ): Promise<StateReconciliation> {
   return reconcileAuthoredStates({
     repoRoot: opts.repoRoot,
-    complete: stateReconcileComplete(),
+    complete: stateReconcileComplete(opts.transport),
   });
 }
 
@@ -288,11 +292,9 @@ export async function runGuardInterfaceReconcile(
  * The one-shot model call the reconciliation asks through. It is NOT the session
  * driver: this is a single schema-bearing completion with no tools and no
  * transcript, so it goes through the ordinary `LlmTransport` seam every other
- * one-shot stage uses — the installed default when a run installed one, and
- * this process's Claude Code otherwise.
+ * one-shot stage uses — the run's own transport, handed in by the caller.
  */
-function stateReconcileComplete(): ReconcileComplete {
-  const transport = getDefaultTransport() ?? createClaudeCodeTransport();
+function stateReconcileComplete(transport: LlmTransport): ReconcileComplete {
   const model = resolveModel(STATE_RECONCILE_STAGE);
   const fallbackModel = resolveFallbackModel();
   return async (prompt, schema) => {

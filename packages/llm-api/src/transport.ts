@@ -2,8 +2,8 @@
  * The direct-API LLM transport: implements `@truecourse/shared/llm`'s
  * `LlmTransport` on top of the Vercel AI SDK, so TrueCourse talks to
  * Anthropic / OpenAI / Bedrock / Copilot over their APIs instead of spawning a
- * `claude` binary. `ee-server` installs one process-wide via
- * `setDefaultTransport` from the active stored provider config.
+ * `claude` binary. The dashboard server builds one per run from the asking
+ * workspace's stored provider config and threads it into the run.
  *
  * Like the cli backend, it is content-agnostic: it returns the model's RAW
  * assistant text and the caller (each runner) strips fences + parses + Zod-

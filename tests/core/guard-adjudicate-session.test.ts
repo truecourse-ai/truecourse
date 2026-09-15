@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { noProviderTransport } from '@truecourse/shared/llm'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -186,7 +187,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
     const { r, key } = seedOneFailure()
     await seedCache(r, key, DRIFT)
 
-    const run = await runGuardAdjudication({ repoRoot: r })
+    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'cache' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')
@@ -264,7 +265,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
       return outcome(DRIFT)
     }
 
-    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'] })
+    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'], transport: noProviderTransport })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'session' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')
@@ -296,7 +297,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
       sessions: 0,
     })
 
-    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'] })
+    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'], transport: noProviderTransport })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'pre-pass' })
     expect(run.scenarios[0].verdict?.class).toBe('expected-red')
@@ -486,7 +487,7 @@ describe('runGuardAdjudication — a refused verdict costs a re-run, never a cac
       })
     }
 
-    const run = await runGuardAdjudication({ repoRoot: r })
+    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
 
     expect(controlRef).toMatch(/^control-[0-9a-f]{8}$/)
     expect(run.scenarios[0].source).toBe('session')
@@ -521,7 +522,7 @@ describe('runGuardAdjudication — a refused verdict costs a re-run, never a cac
       return outcome({ ...DRIFT, findings: ['docs/spec.md says exit 0; the CLI has always exited 2'] })
     }
 
-    const run = await runGuardAdjudication({ repoRoot: r })
+    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'session' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')

@@ -60,16 +60,11 @@ import { getGuardExecutor } from '../lib/guard-executor.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import { createStoredSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../lib/sessions-store.js';
 import {
-  getDefaultTransport,
   getStageUsage,
   resetStageUsage,
   setLlmCallSink,
   type LlmTransport,
 } from '@truecourse/shared/llm';
-import {
-  createClaudeCodeTransport,
-} from '../services/llm/install-transport.js';
-import { createGuardVisualJudge, guardVisualJudgeEnabled } from '../services/llm/guard-visual-judge.js';
 import type { GuardVisualJudge } from '@truecourse/guard-runner';
 import type { LlmTransportMode } from '../services/llm/provider-config.js';
 import { createClaudeCodeSessionDriver } from '../services/llm/session-driver.js';
@@ -209,13 +204,13 @@ export interface GuardGenerateInProcessOptions {
   /** Restore this interrupted run's completed stages without repeating their LLM work. */
   resume?: GuardGenerateResume;
   /**
-   * Run the ONE-SHOT stages (recipe discovery, realization matching) on THIS
-   * transport instead of resolving one. The dashboard server passes the
-   * transport it built from the asking workspace's stored provider config —
-   * credentials travel with the run, not through a process-wide default. The
-   * session stages ride `driver`; a hosted caller passes both.
+   * The transport the ONE-SHOT stages (recipe discovery, realization matching)
+   * run on: the one the dashboard server built from the asking workspace's
+   * stored provider config, or the operator's Claude Code. Credentials travel
+   * with the run, not through a process-wide default. The session stages ride
+   * `driver`; a hosted caller passes both.
    */
-  transport?: LlmTransport;
+  transport: LlmTransport;
   /**
    * Run the SESSION stages (extraction, flow synthesis, the flow workers) on
    * THIS driver instead of the configured one. Ignored when every session seam
@@ -224,10 +219,9 @@ export interface GuardGenerateInProcessOptions {
    */
   driver?: SessionDriver;
   /**
-   * The mode an explicit `transport` runs in, which decides the stage models:
-   * `claude-code` keeps the tier aliases `claude -p` understands, `api` (the
-   * default) substitutes the one configured API model. Ignored without
-   * `transport`.
+   * The mode `transport` runs in, which decides the stage models: `claude-code`
+   * keeps the tier aliases the Agent SDK understands, `api` (the default)
+   * substitutes the one configured API model.
    */
   transportMode?: LlmTransportMode;
   /**
@@ -339,16 +333,6 @@ function resolveGuardModels(): GuardGenerateModels {
   };
 }
 
-/**
- * The LLM transport a run's one-shot stages go through: the caller's own (a
- * workspace's provider), else the process default, else this process's own
- * Claude Code.
- */
-function resolveTransport(options: { transport?: LlmTransport }): LlmTransport {
-  if (options.transport) return options.transport;
-  return getDefaultTransport() ?? createClaudeCodeTransport();
-}
-
 export interface GuardGenerateInProcessResult {
   guard: GuardGenerateResult;
   /**
@@ -361,15 +345,14 @@ export interface GuardGenerateInProcessResult {
 
 export async function guardGenerateInProcess(
   repoRoot: string,
-  options: GuardGenerateInProcessOptions = {},
+  options: GuardGenerateInProcessOptions,
 ): Promise<GuardGenerateInProcessResult> {
   const { tracker } = options;
   const restored = new Set(options.resume?.completedSteps ?? []);
-  // The transport this run actually uses decides the models. An explicit
-  // transport IS the selection, and its caller says which mode it runs in (a
-  // stored provider block is api mode; the operator's Claude Code keeps the
-  // tier aliases).
-  const mode: LlmTransportMode = options.transport ? (options.transportMode ?? 'api') : 'claude-code';
+  // The transport this run uses decides the models, and its caller says which
+  // mode it runs in (a stored provider block is api mode; the operator's Claude
+  // Code keeps the tier aliases).
+  const mode: LlmTransportMode = options.transportMode ?? 'api';
   const models = resolveGuardModels();
 
   // The run record: `sessions/guard-generate/<runId>/` — the step checklist,
@@ -423,7 +406,7 @@ export async function guardGenerateInProcess(
       }
     }
 
-    transport = resolveTransport(options);
+    transport = options.transport;
     if (options.resume) {
       assertGuardGenerateResumeCommit(options.resume, await resolveCommitSha(repoRoot));
       const liveTransport = transport;
@@ -919,11 +902,11 @@ export interface GuardRunInProcessOptions {
   /** Fires with each scenario's result as it settles. */
   onScenarioResult?: (result: GuardScenarioResult) => void;
   /**
-   * Override the visual judge for a failing web step. An injected judge always
-   * wins (a test that must never reach a model passes its own, or one that
-   * returns `null`). Unset, production gets {@link createGuardVisualJudge} — but
-   * only when {@link guardVisualJudgeEnabled} says so: the judge is parked
-   * (off by default) until its cost/value is settled.
+   * The visual judge for a failing web step, when the run has one: the hosted
+   * run job builds it on the workspace's transport (`createGuardVisualJudge`)
+   * only when `guardVisualJudgeEnabled` says so — the judge is parked (off by
+   * default) until its cost/value is settled. A test that must never reach a
+   * model passes one that returns `null`. Unset, the run has no judge.
    */
   visualJudge?: GuardVisualJudge;
 }
@@ -936,14 +919,15 @@ export interface GuardRunInProcessOptions {
  * the same stream. Returns the runner's discriminated result untouched
  * — the caller decides how to present each status.
  *
- * Deterministic, with ONE opt-in annotation: when {@link guardVisualJudgeEnabled}
- * (off by default — the judge is parked), a failing WEB step's screenshot is shown
- * to a vision model, whose verdict is recorded beside the failure (see
- * {@link createGuardVisualJudge}). It cannot move an outcome and it never fires on
+ * Deterministic, with ONE opt-in annotation: when the caller hands in a visual
+ * judge (the hosted run job does, on the workspace's transport, only while
+ * `guardVisualJudgeEnabled` says so — the judge is parked, off by default), a
+ * failing WEB step's screenshot is shown to a vision model, whose verdict is
+ * recorded beside the failure. It cannot move an outcome and it never fires on
  * a green run, so a passing run is exactly as LLM-free as it always was. THIS is
  * the boundary the judge is wired at — the guard-runner takes it as an optional
- * callback, so every caller that does not come through here (birth validation, the
- * test suite, a hosted executor) runs with no judge and no model at all.
+ * callback, so every caller that passes none (birth validation, the test suite,
+ * a hosted executor) runs with no judge and no model at all.
  */
 export async function guardRunInProcess(
   repoRoot: string,
@@ -962,9 +946,7 @@ export async function guardRunInProcess(
   const { loaded, selected, corpusIds, loadErrors } = sourced;
 
   // Failure-only, fail-soft, and unable to change a verdict — see the doc above.
-  // An injected judge always wins; the built one is gated on the opt-in flag.
-  const visualJudge =
-    options.visualJudge ?? (guardVisualJudgeEnabled() ? createGuardVisualJudge(repoRoot) : undefined);
+  const { visualJudge } = options;
 
   const result = mergeLoadErrors(
     await getGuardExecutor()({

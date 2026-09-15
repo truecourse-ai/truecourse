@@ -62,7 +62,6 @@ import pLimit from 'p-limit'
 import os from 'node:os'
 import {
   auditTransport,
-  getDefaultTransport,
   noProviderTransport,
   formatStageFailure,
   type LlmTransport,
@@ -70,11 +69,11 @@ import {
   type TransportAudit,
 } from '@truecourse/shared/llm'
 
-/** The transport a run's one-shot stages call through: the caller's, else the
- *  process default. With neither, a stage that calls fails with the
- *  no-provider message — a run whose stages are all injected never notices. */
+/** The transport a run's one-shot stages call through: the caller's. Without
+ *  one, a stage that calls fails with the no-provider message — a run whose
+ *  stages are all injected never notices. */
 function requireTransport(options: { transport?: LlmTransport }): LlmTransport {
-  return options.transport ?? getDefaultTransport() ?? noProviderTransport
+  return options.transport ?? noProviderTransport
 }
 import {
   writeManifest,

@@ -70,6 +70,8 @@ export interface InterfacesAuthorRun {
   places: { status: string; placeId?: string; problems?: string[] }[];
   diagnostics: MapperDiagnostic[];
   spent: { turns: number; tokens: number; costUsd: number };
+  /** The state reconciliation that closed the run, when anything was authored. */
+  reconcile?: { problems: string[] };
 }
 
 export type InterfacesAuthorFn = (opts: {
@@ -158,6 +160,11 @@ export function buildInterfacesStep(
       const allFailed = run.places.length > 0 && failed.length === run.places.length;
       for (const place of failed) {
         notes.push(`${place.placeId ?? 'authoring session'}: ${place.problems?.join('; ') || place.status}`);
+      }
+      // The closing state reconciliation never fails the run (the tasks are
+      // written), so what it could not do is said on the step row, not lost.
+      for (const problem of run.reconcile?.problems ?? []) {
+        notes.push(`state registry not reconciled: ${problem}`);
       }
       return {
         status: failed.length > 0 ? 'failed' : 'ok',

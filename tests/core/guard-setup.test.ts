@@ -30,7 +30,7 @@ import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
 } from '@truecourse/guard-runner';
-import { setDefaultTransport, noProviderTransport } from '@truecourse/shared/llm';
+import { noProviderTransport } from '@truecourse/shared/llm';
 import { setCacheEntry } from '@truecourse/llm';
 import {
   proposeRecipe,
@@ -117,7 +117,6 @@ afterEach(() => {
   resetKvCacheStore();
   resetSessionRuns();
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
-  setDefaultTransport(undefined);
   sessionDriver.built.length = 0;
   sessionDriver.script = null;
 });
@@ -186,6 +185,7 @@ const neverCalled = async (): Promise<never> => {
 
 /** The seed/auth seams stubbed out: those sessions are covered by their own lanes. */
 const inertSeams = {
+  transport: async () => 'ok',
   authorInterfaces: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
   seedSession: (async () => ({ status: 'skipped', reason: 'stubbed in this test' })) as GuardSetupSeedSession,
   preparationSession: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
@@ -232,22 +232,6 @@ describe('assertLlmProviderConfigured', () => {
     expect(() => assertLlmProviderConfigured(async () => 'ok')).not.toThrow();
   });
 
-  // The installed default is the process-wide answer when no transport is injected.
-  it('refuses when the process default IS the sentinel', () => {
-    setDefaultTransport(noProviderTransport);
-    expect(() => assertLlmProviderConfigured()).toThrow(NoLlmProviderError);
-  });
-
-  it('accepts an installed real default', () => {
-    setDefaultTransport(async () => 'ok');
-    expect(() => assertLlmProviderConfigured()).not.toThrow();
-  });
-
-  // Claude Code mode is the one mode that needs the binary — and the suite-wide
-  // tripwire points CLAUDE_CODE_BINARY at a path that does not exist.
-  it('demands the `claude` binary when nothing else answers', () => {
-    expect(() => assertLlmProviderConfigured()).toThrow(/not installed or not on your PATH/);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -452,8 +436,6 @@ function settledRepo(): string {
 // ---------------------------------------------------------------------------
 
 describe('guardSetupInProcess', () => {
-  beforeEach(() => setDefaultTransport(async () => 'ok'));
-
   it('persists guard/setup.json with the detection snapshot and the step spine', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -586,13 +568,13 @@ describe('guardSetupInProcess', () => {
   // Never ask to spend, then fail: step 0 runs BEFORE the estimate gate.
   it('fails the provider check before the estimate is even offered', async () => {
     const r = fixtureRepo();
-    setDefaultTransport(noProviderTransport);
     let asked = false;
 
     await expect(
       guardSetupInProcess(r, {
         recipeRunner: neverCalled,
         ...inertSeams,
+        transport: noProviderTransport,
         onLlmEstimate: async () => {
           asked = true;
           return true;
@@ -609,57 +591,19 @@ describe('guardSetupInProcess', () => {
 // ---------------------------------------------------------------------------
 
 describe('guardSetupInProcess — the transport the sessions run on', () => {
-  // No installed default: the run has to answer the provider question from the
-  // saved config alone, exactly as it does on a machine that never ran anything else.
-  beforeEach(() => setDefaultTransport(undefined));
-
   // The failure this pins: setup read the MODEL from the API config but not the
   // TRANSPORT, so it spawned `claude --model gpt-5.5` — a deterministic error. The
-  // configured model must ride the configured transport, and the suite-wide
-  // tripwire binary means a run that reached for `claude` could not have gotten here.
+  // configured model must ride the configured transport.
   it('runs its sessions on this process\u2019s own Claude Code when the caller injects none', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
     scriptCatalogSession();
-    // Step 0 demands the binary of exactly the runs that SPAWN it; node stands
-    // in for the `claude` the suite-wide tripwire otherwise refuses this run for.
-    const tripwire = process.env.CLAUDE_CODE_BINARY;
-    process.env.CLAUDE_CODE_BINARY = process.execPath;
 
-    try {
-      const { report } = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
+    const { report } = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
 
-      expect(report.status).toBe('ok');
-      expect(sessionDriver.built).toEqual([{ mode: 'claude-code', model: 'opus' }]);
-    } finally {
-      if (tripwire === undefined) delete process.env.CLAUDE_CODE_BINARY;
-      else process.env.CLAUDE_CODE_BINARY = tripwire;
-    }
+    expect(report.status).toBe('ok');
+    expect(sessionDriver.built).toEqual([{ mode: 'claude-code', model: 'opus' }]);
   }, 120_000);
-
-  // Step 0 exists so a missing provider is found BEFORE the install, build, server
-  // boot and analysis pass setup runs.
-  it('refuses a run that would spawn `claude` when it is not on PATH, before step 1', async () => {
-    const r = fixtureRepo();
-    writeRecipe(r);
-    let asked = false;
-
-    const run = guardSetupInProcess(r, {
-      interfaces: interfaces(),
-      recipeRunner: neverCalled,
-      ...inertSeams,
-      onLlmEstimate: async () => {
-        asked = true;
-        return true;
-      },
-    });
-
-    await expect(run).rejects.toThrow(NoLlmProviderError);
-    await expect(run).rejects.toThrow(/not installed or not on your PATH/);
-    // Nothing ran: not the estimate, and no step wrote a report.
-    expect(asked).toBe(false);
-    expect(readGuardSetup(r)).toBeNull();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -667,9 +611,7 @@ describe('guardSetupInProcess — the transport the sessions run on', () => {
 // ---------------------------------------------------------------------------
 
 describe('guardSetupInProcess — hosted injection', () => {
-  // A hosted run answers the provider question itself: nothing is installed
-  // process-wide and no global config is read.
-  beforeEach(() => setDefaultTransport(undefined));
+  // A hosted run answers the provider question itself: no global config is read.
 
   /** Where a hosted run's sessions are keyed — never the (ephemeral) work tree. */
   function sessionsHome(): string {
