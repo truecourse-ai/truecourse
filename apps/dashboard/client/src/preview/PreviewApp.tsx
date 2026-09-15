@@ -13,7 +13,7 @@
  *
  * The repositories are Code (`/code`) and the flows of every one of them are
  * Flows (`/flows`, one flow at `/flows/:flowId?repo=`): neither is a tab of the
- * other, and Home is the product owner's dashboard, which is not built yet.
+ * other, and Home is the product owner's dashboard over `GET /api/home`.
  *
  * Context LANDS on its sources (`/context`), each source is a page of its own
  * (`/context/sources/:id`), and their documents are a place of their own

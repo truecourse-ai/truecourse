@@ -29,7 +29,7 @@ vi.mock('../../packages/llm-api/src/model.js', () => ({ buildModel: buildModelMo
 import { createApiTransport } from '../../packages/llm-api/src/index';
 
 // --- spec scan ---------------------------------------------------------------
-// The five spec stages are AGENT SESSIONS now (plan 02): they build no
+// The five spec stages are AGENT SESSIONS now: they build no
 // `LlmRequest`, so they contribute nothing to the request sweep below. Their
 // outcome schemas ride the session driver's toolset instead, and are checked
 // object-rooted in their own describe at the end of this file.
@@ -40,7 +40,7 @@ import { ScanScopeOutcomeSchema } from '../../packages/core/src/services/spec-sc
 import type { DocCandidate } from '../../packages/spec-consolidator/src/index.js';
 
 // --- guard-generator ---------------------------------------------------------
-// Guard generate keeps exactly TWO one-shot stages (plan 04 step 20): realization
+// Guard generate keeps exactly TWO one-shot stages: realization
 // matching and recipe discovery. Extraction, flow synthesis, authoring, the
 // evidence retry, fidelity review and triage are agent SESSIONS (or retired), so
 // they build no `LlmRequest` and contribute nothing to the sweep below — their
@@ -55,12 +55,12 @@ import type {
   RecipeDiscoveryInput,
 } from '../../packages/guard-generator/src/prompts.js';
 
-// --- guard generate (plan 04) ------------------------------------------------
+// --- guard generate ----------------------------------------------------------
 import { ExtractOutcomeSchema, GuardFlowWorkerOutcomeSchema } from '../../packages/shared/src/index.js';
 import { EpicSynthesisSchema } from '../../packages/guard-generator/src/schemas.js';
 import { FidelityVerdictSchema } from '../../packages/core/src/services/guard-generate/fidelity.js';
 
-// --- guard setup (plan 03) ---------------------------------------------------
+// --- guard setup -------------------------------------------------------------
 // Six one-shot stages became agent SESSIONS here too; like the scan's, their
 // outcome schemas ride the driver's toolset and are checked object-rooted below.
 import { RecipeProposalSchema } from '../../packages/guard-generator/src/schemas.js';
@@ -236,7 +236,7 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   // on the API transport — the failure mode this list exists to prevent.
   it('carries a schema on EVERY guard generate stage', () => {
     const guard = collected.filter((c) => c.name.startsWith('guard.')).map((c) => c.name);
-    // Two one-shots left (plan 04 step 20). A stage reappearing here means a
+    // Two one-shots left. A stage reappearing here means a
     // session was quietly turned back into a transport call.
     expect(guard.sort()).toEqual(['guard.match', 'guard.recipe']);
   });
@@ -413,7 +413,7 @@ describe('spec-scan session outcome schemas', () => {
 });
 
 /**
- * The guard-setup sessions (plan 03 steps 9–14) reach a provider the same way:
+ * The guard-setup sessions reach a provider the same way:
  * the api driver renders the outcome schema as the injected `outcome` TOOL's
  * input schema, and the Agent SDK driver hands it to `outputFormat.json_schema`.
  * Both places take a JSON SCHEMA OBJECT — a tool's `input_schema` must be
@@ -438,8 +438,8 @@ describe('guard-setup session outcome schemas', () => {
 });
 
 /**
- * Guard generate's six content stages became sessions the same way (plan 04
- * steps 15–18), so the same rule binds them: the api session driver renders each
+ * Guard generate's six content stages became sessions the same way, so the same
+ * rule binds them: the api session driver renders each
  * `outcomeSchema` as the injected `outcome` TOOL's `inputSchema`
  * (`packages/llm-api/src/session-driver.ts` → `buildToolset`), and a tool's
  * input schema must be `type: "object"` on every provider — an `anyOf` root is

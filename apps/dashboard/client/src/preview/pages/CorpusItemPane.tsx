@@ -39,7 +39,8 @@ function Pane({
   itemId: string;
   backTo: string;
 }) {
-  // A test's name on a section is a door into that repository's Tests tab.
+  // A test's name on a section is a door into that flow's page, read through
+  // this repository.
   useGuardTabJump(repoId);
   const navigate = useNavigate();
   const corpus = useSpecCorpus(repoId, true);

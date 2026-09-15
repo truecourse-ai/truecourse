@@ -1,5 +1,5 @@
 /**
- * THE DETERMINISTIC PRE-PASS (plan 05 step 21, item 1) — the failures that
+ * THE DETERMINISTIC PRE-PASS — the failures that
  * explain themselves off facts the stores already hold, settled with the
  * machine as the author and ZERO sessions.
  *

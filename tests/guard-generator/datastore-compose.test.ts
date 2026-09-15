@@ -281,7 +281,7 @@ describe('proposeRecipe — when a datastore is generated', () => {
 
     expect(out.ok).toBe(true)
     if (!out.ok) return
-    // A reviewed, committed artifact by now — a `--refresh` must not revert edits.
+    // A reviewed artifact by now — a `refresh` must not revert edits.
     expect(out.compose).toBeUndefined()
     expect(out.recipe.api?.services?.up).toContain(GUARD_COMPOSE_FILE)
     expect(out.recipe.api?.env).toEqual({ DATABASE_URL: 'postgres://guard@localhost:5432/weather' })

@@ -5,13 +5,9 @@
  *   Failing (birth)  hand-written
  *
  * ONE ROW ANATOMY, shared by every guard list (the flow inventory, a run's
- * results): the TITLE first, it wraps, because a claim is a sentence and a
- * sentence cut at the panel's edge is the thing a reader most needs whole, then
- * the chip line, whose FIRST chip is always the one status word. Anything else on
- * the line is a marker, never a status, and never takes a status colour.
- *
- * Wrapping never widens the row: every line is width-bound (`w-full` + `min-w-0` +
- * `break-words`), so the list still scrolls DOWN only.
+ * results): the TITLE first, truncated, with the one status word at its right
+ * edge, then a marker line below it (a hand-written test's chip). Anything on
+ * that line is a marker, never a status, and never takes a status colour.
  *
  * There is no SURFACE label. Guard runs one surface per flow today, so "CLI test"
  * said the same word on every row; when a second surface exists it comes back as a

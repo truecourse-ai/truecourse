@@ -114,8 +114,8 @@ describe('the read view', () => {
   });
 
   it('reads an authored task standing on a derived place — the half-catalog case', () => {
-    // The derived half is gitignored, so a fresh clone has the authored file and
-    // nothing else. Reading it must not fail on an `at` its own half cannot resolve.
+    // A tree that has not been mapped has the authored file and nothing else.
+    // Reading it must not fail on an `at` its own half cannot resolve.
     fs.writeFileSync(guardAuthoredInterfacesPath(repo), JSON.stringify(AUTHORED));
     const view = readGuardInterfacesAuthorView(repo);
     expect(view.unmapped).toBe(true);

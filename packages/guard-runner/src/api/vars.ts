@@ -322,7 +322,7 @@ export function resolveFixtureText(
 /**
  * Does this text carry a `{{fixture:…}}` reference AT ALL? A question about need,
  * not about value: the run asks it of a scenario's steps to decide whether this
- * selection has to prepare the seeded world before anything runs (item 98). It
+ * selection has to prepare the seeded world before anything runs. It
  * lives beside {@link substitutePlaceholders} so the pattern it asks with and the
  * pattern the scan resolves with can never drift apart.
  */

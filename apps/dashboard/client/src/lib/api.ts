@@ -60,8 +60,8 @@ export async function fetchApi<T>(
   const url = `${BASE_URL}${endpoint}`;
   const res = await fetch(url, {
     ...options,
-    // Send the enterprise session cookie (no-op in community). Required
-    // because the dashboard API sits behind the auth gate in enterprise.
+    // Send the session cookie: a hosted server answers nothing without it, and
+    // a local one has none to read.
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
@@ -121,13 +121,13 @@ export function deleteRepo(id: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Spec Consolidation (Module 1)
+// Spec Consolidation
 // ---------------------------------------------------------------------------
 
 export type SpecStalenessResponse = {
   /** Recorded include/exclude/conflict decisions are newer than the corpus — a Scan applies them. */
   decisionsPending: boolean;
-  /** A kept doc changed on disk since the last scan (edited in the dashboard or outside it). */
+  /** A kept document changed since the last scan (a sync, or a source's scope moving). */
   docsChanged: boolean;
   hasCorpus: boolean;
 };
@@ -207,9 +207,8 @@ export interface SpecCorpusDoc {
   status?: string;
   lastTouched: string;
   areaTags: string[];
-  /** Hosted only: `'workspace'` when this doc is inherited from the workspace
-   *  Knowledge corpus (folded into the repo scan before curate). Absent on
-   *  repo-local docs and in OSS — the UI shows no workspace badge then. */
+  /** `'workspace'` when this doc comes from the workspace corpus rather than the
+   *  repository's own; absent otherwise — the UI shows no workspace badge then. */
   layer?: 'workspace';
   /** Workspace only: the ledger's human title for this ref (synthetic docPath).
    *  Absent on repo corpora — the UI falls back to the ref. */
@@ -218,7 +217,7 @@ export interface SpecCorpusDoc {
    *  A WEB-SOURCE doc carries the original page URL here (same meaning). */
   url?: string | null;
   /** `'web'` when this doc is a page snapshotted from a registered llms.txt site
-   *  (`.truecourse/specs/sources/…`). Absent on repo-local + workspace docs. */
+   *  (`context/<sourceId>/<docPath>`). Absent on repo-local + workspace docs. */
   origin?: 'web';
   /** Web only: the source's registry id (the ref's own path segment). */
   sourceId?: string;
@@ -342,7 +341,7 @@ export function startContextScan(): Promise<{ jobId: string }> {
   return fetchApi<{ jobId: string }>('/api/context/scan', { method: 'POST' });
 }
 
-/** A source doc's markdown (for the prose Spec tab). */
+/** A source doc's markdown, for the document pane and the coverage surface. */
 export function getSpecDoc(repoId: string, ref: string): Promise<{ ref: string; content: string }> {
   return fetchApi<{ ref: string; content: string }>(
     `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}`,
@@ -353,14 +352,14 @@ export function getSpecDoc(repoId: string, ref: string): Promise<{ ref: string; 
 // Guard — spec-section scenario coverage (read-only, diff-free).
 // ---------------------------------------------------------------------------
 
-/** Append `?ref=`/`&ref=` when a PR head is being viewed (EE); a no-op otherwise. */
+/** Append `?ref=`/`&ref=` to pin the read at a commit; a no-op otherwise. */
 function withRef(base: string, ref?: string): string {
   if (!ref) return base;
   return `${base}${base.includes('?') ? '&' : '?'}ref=${encodeURIComponent(ref)}`;
 }
 
-/** The two amber-dot signals for the Guard tab (generate / run staleness). `ref`
- *  scopes to a PR head (EE). */
+/** The two amber-dot signals for the pipeline (generate / run staleness). `ref`
+ *  pins the read at a commit. */
 export function getGuardStaleness(repoId: string, ref?: string): Promise<GuardStaleness> {
   return fetchApi<GuardStaleness>(withRef(`/api/repos/${repoId}/guard/staleness`, ref));
 }
@@ -400,7 +399,7 @@ export async function getGuardRun(repoId: string, runId: string): Promise<GuardL
   }
 }
 
-/** The Flows-tab payload — flow inventory + recipe card. Always 200. `ref` scopes to a PR head (EE). */
+/** The Flows-tab payload — flow inventory + recipe card. Always 200. `ref` pins the read at a commit. */
 export function getGuardFlows(repoId: string, ref?: string): Promise<GuardFlowsView> {
   return fetchApi<GuardFlowsView>(withRef(`/api/repos/${repoId}/guard/flows`, ref));
 }
@@ -438,7 +437,7 @@ export function getGuardStatus(repoId: string, ref?: string): Promise<GuardStatu
 }
 
 /**
- * The dependencies view: every class of starting state the committed catalog
+ * The dependencies view: every class of starting state the stored catalog
  * declares, joined with the instances THIS workspace registered, the flows each
  * one blocks, and the external-service half where the row is one.
  */
@@ -500,7 +499,7 @@ export async function getGuardArtifactRaw(
   }
 }
 
-/** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */
+/** The last `guard generate` report; null on 404 (never generated). `ref` pins the read at a commit. */
 export async function getGuardReport(repoId: string, ref?: string): Promise<GuardGenerateReport | null> {
   try {
     return await fetchApi<GuardGenerateReport>(withRef(`/api/repos/${repoId}/guard/report`, ref));
@@ -510,7 +509,7 @@ export async function getGuardReport(repoId: string, ref?: string): Promise<Guar
   }
 }
 
-/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). `ref` scopes to a PR head (EE). */
+/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). `ref` pins the read at a commit. */
 export async function getGuardCoverage(repoId: string, doc: string, ref?: string): Promise<GuardDocCoverage | null> {
   try {
     return await fetchApi<GuardDocCoverage>(
@@ -522,12 +521,12 @@ export async function getGuardCoverage(repoId: string, doc: string, ref?: string
   }
 }
 
-/** The committed-scenario inventory + recipe card for the Scenarios tab. `ref` scopes to a PR head (EE). */
+/** The stored scenario inventory + recipe card, read by the flow page. `ref` pins the read at a commit. */
 export function getGuardScenarios(repoId: string, ref?: string): Promise<GuardScenarioInventory> {
   return fetchApi<GuardScenarioInventory>(withRef(`/api/repos/${repoId}/guard/scenarios`, ref));
 }
 
-/** A scenario's raw YAML source; null on 404 (unknown id). `ref` scopes to a PR head (EE). */
+/** A scenario's raw YAML source; null on 404 (unknown id). `ref` pins the read at a commit. */
 export async function getGuardScenarioSource(
   repoId: string,
   id: string,
@@ -632,7 +631,7 @@ export async function getGuardFindingEvidence(
   return res.text();
 }
 
-/** The committable guard decisions (dismissed claims) — always 200 (empty until
+/** The stored guard decisions (dismissed claims) — always 200 (empty until
  *  the user dismisses anything). */
 export function getGuardDecisions(repoId: string): Promise<GuardDecisions> {
   return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions`);

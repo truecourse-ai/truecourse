@@ -223,11 +223,11 @@ export function guardStatusHint(status: GuardSectionCoverageStatus): string | un
 }
 
 /** A flow's plain status, one of the five, derived once in `@truecourse/shared`
- *  so `guard flows` and the Flows tab can never disagree about a flow. */
+ *  so the server's flow view and the Flows page can never disagree about a flow. */
 export const guardFlowPlainStatus = sharedFlowPlainStatus;
 
 // ---------------------------------------------------------------------------
-// A TEST's status, the Tests tab's row word and the flow detail's test row.
+// A TEST's status: a run result row's word and the flow detail's test row.
 // ---------------------------------------------------------------------------
 
 /**
@@ -246,7 +246,7 @@ export const GUARD_TEST_VERDICT_WORD: Record<GuardFlowPlainStatus, string> = {
   'never-run': GUARD_COVERAGE_STATUS_WORD['never-run'],
 };
 
-/** A committed test's status and which execution decided it. */
+/** A stored test's status and which execution decided it. */
 export interface GuardTestStatusView {
   status: GuardSectionCoverageStatus;
   plain: GuardFlowPlainStatus;
@@ -257,15 +257,15 @@ export interface GuardTestStatusView {
 }
 
 /**
- * What a committed test's status IS: the last run's outcome when a run covered
- * it, else the status the generate committed it with (guard commits a test that
- * failed its first execution, so a fresh clone paints its red tests red). A test
- * no run covered and no manifest names reads `guarded`, committed, never run.
+ * What a stored test's status IS: the last run's outcome when a run covered it,
+ * else the status the generate stored it with (a test that failed its first
+ * execution is stored anyway, so its red is painted red from the start). A test
+ * no run covered and no manifest names reads `guarded`, stored, never run.
  */
 export function guardTestStatusView(test: {
   /** The last run's outcome for this test, when the run had one. */
   outcome?: GuardOutcome | null;
-  /** The status the generate committed it with (absent on hand-written work). */
+  /** The status the generate stored it with (absent on hand-written work). */
   committed?: GuardTestStatus;
   /** Overrides the derivation when the server already resolved both (flow rows). */
   status?: GuardSectionCoverageStatus;
@@ -330,7 +330,7 @@ export function guardRefusalError<T extends { kind?: string; message: string }>(
 export const GUARD_NOT_ATTEMPTED_SENTENCE = 'no test yet, will be attempted on the next generate';
 
 /**
- * The sentence for a flow the specs no longer derive, kept for its committed test.
+ * The sentence for a flow the specs no longer derive, kept for its stored test.
  * It stands WHERE THE GOAL WOULD BE, because the missing goal is what it explains.
  */
 export const GUARD_UNDERIVED_SENTENCE =
@@ -356,7 +356,7 @@ export const GUARD_DISMISSED_LABEL = 'Dismissed';
 /**
  * The marker a flow carries when the last generate produced a finding that is OUR
  * OWN defect, a `generation-defect` verdict or a fidelity rejection. Muted for
- * the same reason as its siblings: it is not a status. Nothing was committed and
+ * the same reason as its siblings: it is not a status. Nothing was stored and
  * nothing in the repo is broken, so it must never read as drift or take a status
  * colour; the flow simply re-authors on the next generate.
  */

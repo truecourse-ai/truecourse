@@ -7,7 +7,8 @@
  *
  * Doc universe = the corpus-kept docs (`.truecourse/specs/corpus.json`, read
  * tolerantly) — the corpus is the single authority on which docs are spec.
- * A repo without a corpus has nothing to generate against: run `spec scan`.
+ * A repo without a corpus has nothing to generate against: the Document scan
+ * curates one first.
  * (The RUNNER additionally indexes scenario-bound docs, which it must for
  * stale/orphan detection; generation deliberately does not.)
  */
@@ -46,7 +47,7 @@ import { corpusFilePath } from '@truecourse/shared/work-tree'
 
 /**
  * The RETIRED one-shot extract / flows / epic prompts' fingerprints, FROZEN as
- * literals (plan 04 step 20). They stay in {@link flowGenerationInputsHash} as
+ * literals. They stay in {@link flowGenerationInputsHash} as
  * constant salt on purpose: swapping in the session prompts' fingerprints (or
  * dropping these) would move EVERY committed flow's hash and mass-re-author
  * every user's corpus for no behavioral reason. The trade: an edit to the

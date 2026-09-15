@@ -1,8 +1,8 @@
 /**
- * The "workspace" chip — marks a spec doc inherited from the workspace Knowledge
- * corpus (folded into a repo's spec before curate). Shown in repo Spec views next
- * to a kept-doc row / conflict side so an inherited doc reads distinctly from a
- * repo-local one. Absent in OSS and on repo-local docs (no `layer`). Same geometry
+ * The "workspace" chip — marks a doc that comes from the workspace corpus rather
+ * than a repository's own. Shown beside a kept-doc row / conflict side so such a
+ * doc reads distinctly from a repo-local one. Absent on repo-local docs (no
+ * `layer`). Same geometry
  * as the guard status chips (GuardHeldBadge / GuardFindingBadge) so it sits inline
  * with them.
  */

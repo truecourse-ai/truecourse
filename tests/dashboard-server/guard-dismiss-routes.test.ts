@@ -50,7 +50,7 @@ describe('Guard dismiss + finding-evidence routes', () => {
     expect(dismissed.body.dismissedClaims[0]).toMatchObject({ ...claim, note: 'wont fix' });
     expect(dismissed.body.dismissedClaims[0].dismissedAt).toEqual(expect.any(String));
 
-    // Persisted to the committable file next to recipe/manifest.
+    // Persisted to the decisions document next to recipe/manifest.
     expect(fs.existsSync(decisionsFile())).toBe(true);
     const onDisk = JSON.parse(fs.readFileSync(decisionsFile(), 'utf-8'));
     expect(onDisk.dismissedClaims[0]).toMatchObject(claim);

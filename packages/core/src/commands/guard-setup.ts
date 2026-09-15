@@ -173,8 +173,8 @@ export interface GuardSetupInProcessResult {
   /** Absolute path of the persisted `guard/setup.json`. */
   reportPath: string;
   /**
-   * Setup's transcript directory, including interface authoring sessions.
-   * Empty when no run was opened.
+   * Setup's scratch directory under the runtime dir, including interface
+   * authoring sessions. Empty when no run was opened.
    */
   sessionsRunDirs: string[];
 }
@@ -210,8 +210,8 @@ export async function estimateGuardSetupCost(
 
 /**
  * The ONE-SHOT stage setup can still spend on: the legacy recipe fallback,
- * which fires only on runs without a session driver (the `agent` mailbox
- * transport, or an injected `recipeRunner` test seam). The sessions' spend is
+ * which fires only on runs without a session driver (an injected `recipeRunner`
+ * test seam). The sessions' spend is
  * accounted separately — the loop's `BudgetSpent` has no input/output token
  * split, so it rides `usage.sessions` instead of being forced into these fields.
  */
@@ -350,7 +350,7 @@ export async function guardSetupInProcess(
         })
       : undefined);
 
-  /** All setup sessions share one transcript directory. */
+  /** All setup sessions share one scratch directory. */
   const sessionsRunDirs = (): string[] => {
     const key = options.sessionsKey ?? repoRoot;
     const setupRunId = sessionContext?.runId();

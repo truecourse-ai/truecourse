@@ -61,13 +61,11 @@ function toRepoSummary(r: RepositoryRecord): GithubRepoSummary {
 }
 
 /**
- * Follow-up work on a freshly connected repo — cloning it, registering it as a
- * project, kicking its initial scan, whatever the host wires up. Runs after the
- * link is persisted, with an installation-scoped client for the repo's own
- * installation.
+ * Follow-up work on a freshly connected repo — enqueuing its first Context sync
+ * and Flow setup, whatever the host wires up. Runs after the link is persisted,
+ * with an installation-scoped client for the repo's own installation.
  *
- * PART OF THE LINK: a hook that throws rolls the link back, because for a host
- * where the hook IS the connection (the OSS mount clones inside it) a link row
+ * PART OF THE LINK: a hook that throws rolls the link back, because a link row
  * with none of that work behind it is a repo the UI calls connected and nothing
  * can act on.
  */
@@ -77,11 +75,11 @@ export type OnRepoLinked = (
 ) => Promise<void>;
 
 /**
- * Cleanup for a repo the user is disconnecting — dropping the project it was
- * registered as, deleting the managed clone. Runs BEFORE the link is removed,
- * so everything it touches is still owned by exactly one workspace while it
- * works; a hook that throws leaves the link intact and fails the request, since
- * a clone that outlives its link row is scoped to nobody and visible to all.
+ * Cleanup for a repo the user is disconnecting — cancelling its in-flight work
+ * and purging its rows. Runs BEFORE the link is removed, so everything it
+ * touches is still owned by exactly one workspace while it works; a hook that
+ * throws leaves the link intact and fails the request, since state that
+ * outlives its link row is scoped to nobody.
  */
 export type OnRepoUnlinked = (link: RepositoryRecord) => Promise<void>;
 
@@ -338,9 +336,9 @@ export function createConnectRouter(deps: ConnectDeps): Router {
         .json({ error: 'repository already connected to another workspace' });
       return;
     }
-    // Nor let a workspace re-link its OWN repo: linking runs the post-link hook,
-    // and for a host that clones in it that means deleting and re-cloning the
-    // working copy other surfaces (and any running scan) are using right now.
+    // Nor let a workspace re-link its OWN repo: linking runs the post-link
+    // hook, which would start a second onboarding over the work already in
+    // flight.
     if (existing) {
       res.status(409).json({ error: 'repository is already connected' });
       return;
@@ -405,8 +403,8 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       }
       // Cleanup FIRST, link row second. The row is what scopes the repo to this
       // workspace, so removing it ahead of a cleanup that then fails would leave
-      // the clone and its registry entry visible to every workspace, with no way
-      // to disconnect them again.
+      // the repo's rows — runs, scenario sets, Context links — behind with no
+      // link scoping them to a workspace.
       if (deps.onRepoUnlinked) {
         try {
           await deps.onRepoUnlinked(existing);

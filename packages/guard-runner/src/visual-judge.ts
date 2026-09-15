@@ -15,7 +15,7 @@
  *     deterministic expectation and left a screenshot behind;
  *   - its answer is an ANNOTATION. It cannot rescue a failing step and cannot fail
  *     a passing one — the deterministic check is the only thing that decides an
- *     outcome, because a model's opinion is not reproducible (§10.2);
+ *     outcome, because a model's opinion is not reproducible;
  *   - it is FAIL-SOFT by construction: `null` means "no verdict", and a judge that
  *     throws is caught by the runner and treated the same way. A run must never
  *     get slower, redder or greener because a model was unavailable.

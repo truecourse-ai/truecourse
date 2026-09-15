@@ -10,7 +10,7 @@
  *
  * The implementations live beside their backends: the direct-API one in
  * `@truecourse/llm-api`, the Agent SDK one in `@truecourse/llm-claude-agent`.
- * This module owns the contract, the usage accounting and the process default.
+ * This module owns the contract, the usage accounting and the no-provider sentinel.
  */
 
 import { zodToJsonSchema } from 'zod-to-json-schema';
@@ -25,9 +25,8 @@ import {
 // Re-exported here so every output-only prompt reaches it through the same
 // `@truecourse/shared/llm` entry it already imports the transport from.
 export { OUTPUT_ONLY_GUARDRAIL } from './guardrail.js';
-// The agent-session contract and policy shell live in `@truecourse/agent-loop`
-// (decision 2026-08-17): one package defines the loop, one package per
-// backend implements it.
+// The agent-session contract and policy shell live in `@truecourse/agent-loop`:
+// one package defines the loop, one package per backend implements it.
 export {
   StageTransportTallySchema,
   LlmStageFailureError,
@@ -38,8 +37,8 @@ export {
 
 /**
  * ONE image attached to a request — base64 bytes plus their media type, which is
- * the only form every backend agrees on (the `claude` CLI's stream-json envelope,
- * the AI SDK's image part, and the mailbox's JSON payload all take base64).
+ * the only form every backend agrees on (the Agent SDK's message content and the
+ * AI SDK's image part both take base64).
  * Deliberately NOT a path or a URL: a transport must never read the filesystem or
  * the network on the caller's behalf, and an artifact under `.truecourse/` is not
  * reachable from a hosted answerer anyway.
@@ -56,14 +55,14 @@ export interface LlmRequest {
   id?: string;
   /** Pipeline stage, e.g. `spec.relevance` / `contract.extract` — informational. */
   stage?: string;
-  /** Primary model (cli passes `--model`; agent treats it as a hint). */
+  /** Primary model (the api transport binds it; claude-code treats it as a hint). */
   model?: string;
-  /** Fallback model (cli passes `--fallback-model`). */
+  /** Fallback model, for the transport that can retry on one. */
   fallbackModel?: string;
   system: string;
   user: string;
   /** What the answer should be: a JSON object the caller will parse, or free text.
-   *  A hint for the agent answerer; the cli path ignores it. Defaults to 'json'. */
+   *  A hint the claude-code path takes as prompt guidance. Defaults to 'json'. */
   responseFormat?: 'json' | 'text';
   /** Optional JSON-schema string the JSON answer must satisfy (agent hint). */
   schema?: string;
@@ -71,11 +70,11 @@ export interface LlmRequest {
    * Whether `schema` is ENFORCED by the answerer. Defaults to true whenever
    * `schema` is present: the api transport submits it as provider-side structured
    * output and fails loudly if it cannot. `false` = the schema rides as a hint
-   * only (mailbox answerers, prompt parity); the api transport uses plain JSON
+   * only (prompt parity); the api transport uses plain JSON
    * mode and parse-time Zod validates, as in claude-code mode. Set it at the call
    * sites whose schema strict structured output cannot express — a typed record
-   * or a non-object root. The cli/agent backends treat `schema` as informational
-   * either way.
+   * or a non-object root. The claude-code backend treats `schema` as
+   * informational either way.
    */
   enforceSchema?: boolean;
   /** Per-call timeout in ms. */
@@ -237,7 +236,7 @@ export function auditTransport(inner: LlmTransport): TransportAudit {
   return audit;
 }
 
-/** Token/cost/timing usage parsed out of one `claude -p` JSON envelope. */
+/** Token/cost/timing usage parsed out of one result envelope. */
 export interface EnvelopeUsage {
   /** Resolved model id (e.g. `claude-sonnet-4-6`), or the requested alias. */
   model: string;
@@ -259,10 +258,9 @@ export interface EnvelopeUsage {
 }
 
 /**
- * Pull token/cost/timing/model usage out of the terminal `result` event (same
- * shape as the buffered `claude -p --output-format json` envelope, and as the
- * Agent SDK's own result message). The `agent` transport has no such envelope,
- * so usage there is simply absent (returns null).
+ * Pull token/cost/timing/model usage out of the terminal `result` event — the
+ * shape the Agent SDK's own result message carries. A caller with no such
+ * envelope gets null.
  */
 export function parseEnvelopeUsage(req: LlmRequest, envelope: unknown): EnvelopeUsage | null {
   if (!envelope || typeof envelope !== 'object') return null;
@@ -315,7 +313,7 @@ export function recordUsageFromEnvelope(req: LlmRequest, envelope: unknown): Env
 // ---------------------------------------------------------------------------
 
 /**
- * One `claude -p` invocation's metrics + raw I/O, emitted to the installed sink
+ * One LLM call's metrics + raw I/O, emitted to the installed sink
  * (if any) on every terminal path — success or failure. Cache hits never reach
  * the transport, so they never produce a record. The raw `system`/`user`/
  * `responseText` are present so a sink can dump full I/O; the transport does not
@@ -395,8 +393,8 @@ export function getLlmCallSink(): ((rec: LlmCallRecord) => void) | undefined {
 }
 
 /**
- * Hand one call record to the installed sink. Every `claude`-backed transport
- * reports through here — the `-p` spawn below and the Agent SDK one-shot in
+ * Hand one call record to the installed sink. Every transport reports through
+ * here — the api transport and the Agent SDK one-shot in
  * `@truecourse/llm-claude-agent` — so the call log reads the same whichever
  * produced the call.
  */
@@ -477,10 +475,10 @@ export function extractJsonValue(text: string): string {
 }
 
 /**
- * Render a Zod schema as a JSON-schema STRING for `LlmRequest.schema`. The EE AI
- * SDK transport feeds this to `generateObject` (structured output, schema-
- * enforced); the OSS cli transport ignores it (it relies on the schema being
- * described in the prompt + `stripCodeFences`).
+ * Render a Zod schema as a JSON-schema STRING for `LlmRequest.schema`. The api
+ * transport feeds this to `generateObject` (structured output, schema-
+ * enforced); the claude-code transport treats it as a prompt hint (it relies on
+ * the schema being described in the prompt + `stripCodeFences`).
  *
  * `$refStrategy: 'none'` INLINES every reused sub-schema rather than emitting a
  * `$ref`. zod-to-json-schema's default refs a reused sub-schema by its first

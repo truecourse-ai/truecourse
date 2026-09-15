@@ -5,7 +5,7 @@
  *                     a part of it, an expectation is never anonymous, and the
  *                     flow that wants it is one click away.
  *   WHEN IT APPLIES   the condition sentence, or the honest "always".
- *   WHAT IT BLOCKS    the flows held back right now: committed tests that cannot
+ *   WHAT IT BLOCKS    the flows held back right now: stored tests that cannot
  *                     run, and the ones the last generate never wrote for want of
  *                     an instance.
  *   REGISTERING IT    the form, one input per declared variable, a path, or a config
@@ -24,7 +24,7 @@
  * can actually show (a host path or URL) looks like.
  *
  * The header carries the same two-mode switch every artifact-backed entity has:
- * this page, or the catalog's own committed entry. The gitignored overlay has no
+ * this page, or the catalog's own stored entry. The encrypted overlay row has no
  * raw reading and never will.
  */
 
@@ -110,7 +110,7 @@ export function GuardDependencyDetail({
   saving: boolean;
   /** Register this dependency's instance; resolves to an error message, or null. */
   onSave: (patch: GuardDependencyPatch) => Promise<string | null>;
-  /** Jump into the Tests tab with one flow's detail open. */
+  /** Open one flow's own page. */
   onOpenFlow?: (flowId: string) => void;
 }) {
   const { mode, setMode, raw } = useArtifactMode('JSON');

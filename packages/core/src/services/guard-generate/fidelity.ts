@@ -1,9 +1,9 @@
 import { GuardCaseEvidenceSchema, caseEvidenceIssues, formatCaseEvidenceIssues, type GuardEvidenceProofContext } from '@truecourse/shared'
 /**
- * THE FIDELITY JUDGE CHILD — `guard-generate.fidelity` (plan 04 step 18): a
- * depth-1 session `submit_scenario` dispatches (via `ctx.dispatchChild`) for
- * every GREEN confirmation. Fresh context IS the independence (§3.4 — same
- * model, by decision): the child sees the claims, the candidate yaml and the
+ * THE FIDELITY JUDGE CHILD — `guard-generate.fidelity`: a depth-1 session
+ * `submit_scenario` dispatches (via `ctx.dispatchChild`) for every GREEN
+ * confirmation. Fresh context IS the independence (the same model, by
+ * decision): the child sees the claims, the candidate yaml and the
  * engine's confirmation capture, and nothing of the worker's reasoning.
  *
  * Cache: name `guard/fidelity` KEPT from the one-shot stage; the key keeps the
@@ -32,10 +32,10 @@ export const FIDELITY_SESSION_KIND = 'guard-generate.fidelity'
 /** Cache name KEPT from the one-shot fidelity stage. */
 export const FIDELITY_SESSION_CACHE_NAME = 'guard/fidelity'
 
-/** The three numbers (§3.3): the briefing already carries everything — the
+/** The three numbers: the briefing already carries everything — the
  *  turns cover a couple of section re-reads and the verdict. No resume: a
  *  failed child is reported `unavailable` and the green ships unreviewed
- *  (annotation, not correctness — the item-88 trade). */
+ *  (annotation, not correctness). */
 export const FIDELITY_SESSION_BUDGET: SessionBudget = {
   turns: 5,
   maxResumes: 0,

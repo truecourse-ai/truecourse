@@ -216,8 +216,8 @@ function MilestoneList({
  * A gap is recorded per CASE, so one dependency holding up two situations is two
  * gaps carrying one reason and one action between them — which rendered as two
  * blocks a reader could not tell apart. The cases themselves are listed above,
- * each marked blocked, so WHICH obligations are held up is already said; what
- * this block adds is the reason and the fix, and it says each once.
+ * so WHICH obligations are held up is already said; what this block adds is the
+ * reason and the fix, and it says each once.
  *
  * Rows carrying a TEST are never folded: two tests are two results, however
  * alike they read.
@@ -246,7 +246,7 @@ function foldGapRows(
  * exception is the needs-setup CTA, which is a to-do the reader can clear today.
  *
  * It names no case. WHICH obligations are held up is said once, in the milestone
- * list above, where every case already carries its own mark; repeating them here
+ * list above, where every case is already named; repeating them here
  * made the block a second copy of that list. What only this block can say is the
  * reason and the action, and it says each once.
  */
@@ -503,7 +503,7 @@ function ClaimDismissalNote({
   );
 }
 
-/** A flow's committed test as the shared scenario model. */
+/** A flow's stored test as the shared scenario model. */
 function scenarioModel(
   row: GuardFlowScenarioRow,
   detail: GuardFlowDetailData,
@@ -536,9 +536,9 @@ function scenarioModel(
     ...(row.failedMilestone != null
       ? { failedMilestone: row.failedMilestone }
       : {}),
-    // The chain the step list is grouped under, each section headed by the claim
-    // its steps realize, addressed by position (`milestones`) or by claim id
-    // (`claimTitles`, the claim corpus). A test may use either.
+    // The flow's chain, which a step row points back at with its `M<n>` chip,
+    // addressed by position (`milestones`) or by claim id (`claimTitles`, the
+    // claim corpus). A test may use either.
     milestones: detail.milestones,
     ...(row.interfaceDrifted ? { interfaceDrifted: true } : {}),
     ...(row.blockedPrecondition ? { blockedPrecondition: true } : {}),
@@ -571,9 +571,9 @@ export function GuardFlowDetail({
   claimTitles?: Readonly<Record<string, string>>;
   /** scenarioId → the spec section it binds to (the inventory join). */
   binds?: ReadonlyMap<string, GuardTestBinds>;
-  /** The dismissals state; omitted (guard reads off / PR scope unresolved) = no ruling. */
+  /** The dismissals state; omitted (guard reads off) = no ruling. */
   decisions?: GuardDecisionsState;
-  /** The PR head the raw read is scoped to (EE); absent = the repo baseline. */
+  /** The commit the raw read is pinned at; absent = the repo baseline. */
   prRef?: string;
   onOpenSpec: (doc: string, section: string) => void;
   onOpenInterface: (interfaceId: string) => void;
@@ -582,7 +582,7 @@ export function GuardFlowDetail({
 }) {
   const dismissed = decisions?.flowDismissal(detail.flowId) != null;
   // OUR OWN withheld defects (a faulty scenario, a fidelity rejection). They are
-  // never a status and never red, nothing was committed and nothing in the repo
+  // never a status and never red, nothing was stored and nothing in the repo
   // is broken, so they ride as a muted marker beside the status chip.
   const toolDefects = detail.findings.filter(
     (f) => guardFindingClass(f) === "defect",
@@ -621,7 +621,7 @@ export function GuardFlowDetail({
     prRef,
   );
 
-  // Every committed test on the flow as its scenario model, by id. Keyed rather
+  // Every stored test on the flow as its scenario model, by id. Keyed rather
   // than singular so a second surface renders its OWN test rather than nothing.
   const models = useMemo(
     () =>

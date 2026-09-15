@@ -2,7 +2,7 @@
  * The section detail side panel, opened by clicking a statused section. It tells
  * the FLOW story (the user-directed inversion): the section's status + reason,
  * then the flows that traverse it, each with its per-surface chips, the milestone
- * positions it covers, and an "open" jump into the Tests tab. Scenarios never
+ * positions it covers, and an "open" jump to the flow's own page. Scenarios never
  * appear here, a section shows the flows that test it; the scenarios live one
  * level deeper, inside each flow.
  *
@@ -138,7 +138,7 @@ export function GuardSectionDetail({
   /** Whose store the claim drill-in reads its raw entry out of. */
   repoId: string;
   section: GuardSectionCoverage;
-  /** The PR head the claim's raw read is scoped to (EE). */
+  /** The commit the claim's raw read is pinned at. */
   prRef?: string;
   /** The doc this section belongs to, claims are keyed doc + anchor. */
   doc?: string | null;
@@ -150,7 +150,7 @@ export function GuardSectionDetail({
   activeClaimId?: string | null;
   /** Select (or clear, with null) the claim this panel drills into. */
   onSelectClaim?: (claimId: string | null) => void;
-  /** Jump into the Tests tab with this flow's detail open (`?flow=`). */
+  /** Open this flow's page (`?flow=`). */
   onOpenFlow: (flowId: string) => void;
   /** Jump to a doc section, the claim detail's source line. */
   onOpenSpec?: (doc: string, anchor: string) => void;

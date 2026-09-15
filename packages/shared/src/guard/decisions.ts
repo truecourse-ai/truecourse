@@ -3,10 +3,9 @@
  * reads, the guard analogue of the spec-consolidator's `specs/decisions.json`.
  *
  * It lives at `.truecourse/scenarios/decisions.json`, next to `recipe.json` and
- * `manifest.json` (the committable scenario-binding files) — NOT under the mostly
- * gitignored `guard/` run store. It is committable and MUST travel with the repo:
- * a teammate who clones and re-runs generate inherits your dismissals, so a claim
- * you judged noise stays dismissed for everyone.
+ * `manifest.json` (the scenario-binding files) — NOT under the `guard/` run
+ * store. It is stored per repository and materialized into every generate's
+ * clone, so a claim one person judged noise stays dismissed for everyone.
  *
  * It holds two lists. `dismissedClaims`: findings the user judged a generation
  * defect / won't-fix / noise. A dismissed claim (identity = its section anchor +

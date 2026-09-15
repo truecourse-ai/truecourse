@@ -166,8 +166,8 @@ export function writeGuardSetup(repoRoot: string, report: GuardSetupReport): str
 
 /**
  * Read the last `guard setup` record, or `null` when absent or unparseable. A
- * missing/corrupt file means "setup has not run" — never a failure: the file is
- * derived and gitignored, so a fresh clone legitimately has none.
+ * missing/corrupt file means "setup has not run" — never a failure: a clone
+ * whose bundle carried none legitimately has none.
  */
 export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
   return readJsonOr(guardSetupPath(repoRoot), GuardSetupReportSchema, null)
@@ -175,8 +175,8 @@ export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
 
 /**
  * Read the interface catalog the last mapping DERIVED, or `null` when it is absent
- * or unparseable. The catalog is derived and gitignored, so a missing/corrupt one is
- * simply "no interface knowledge" — it never fails a run, it only means the drift
+ * or unparseable. The catalog is derived, so a missing/corrupt one is simply
+ * "no interface knowledge" — it never fails a run, it only means the drift
  * annotation has nothing to compare against.
  *
  * This is HALF the catalog. A consumer asking what surfaces the repo has wants
@@ -189,7 +189,7 @@ export function readInterfaceCatalog(repoRoot: string): InterfacesFile | null {
 }
 
 /**
- * Read the COMMITTED authored catalog — `guard/interfaces.authored.json`, the
+ * Read the AUTHORED catalog — `guard/interfaces.authored.json`, the
  * home of the interfaces and places NO derivation produces. The mapper derives
  * `cli` and `api` and nothing else, so every web surface in existence is
  * hand-authored; until this file existed they lived in the derived snapshot and
@@ -205,9 +205,9 @@ export function readInterfaceCatalog(repoRoot: string): InterfacesFile | null {
  *
  * It is read as a FRAGMENT (`InterfacesFragmentSchema`): the shape in full, the
  * cross-reference rules not here. An authored task stands on a place the
- * DERIVATION writes (the web screens land in the gitignored half),
- * so its `at`/`to` ids resolve in the merge and nowhere else — and on a fresh
- * clone, where nothing has mapped yet, the derived half does not exist at all.
+ * DERIVATION writes (the web screens land in the derived half), so its `at`/`to`
+ * ids resolve in the merge and nowhere else — and in a clone where nothing has
+ * mapped yet, the derived half does not exist at all.
  * Checking them here would refuse a file that is correct. They are checked where
  * they can be: against the merged catalog, by the authoring write path.
  */
@@ -368,9 +368,9 @@ export type InterfaceMergeDiagnostic = MapperDiagnostic
  * An authored screen whose id no derivation produced usually means the routing
  * tree moved on: the measured case is a route module that now only redirects
  * (which the derivation correctly drops), leaving an authored entry that re-earns an
- * authoring session on every `--replace` run for an address nobody can stand at.
- * The MERGE keeps the entry regardless — a fresh clone has no derived half at
- * all, and dropping authored places there would drop every web surface — so
+ * authoring session on every re-author with `replace` for an address nobody can
+ * stand at. The MERGE keeps the entry regardless — a clone that has not mapped
+ * yet has no derived half at all, and dropping authored places there would drop every web surface — so
  * the rule lives here as a REPORT for the authoring work-list to act on, never
  * as a merge rule.
  *

@@ -1,9 +1,9 @@
 /**
  * Spec Consolidation routes — the dashboard surface for the curated-corpus
- * spec scan (Module 1).
+ * spec scan.
  *
  *   GET    /api/repos/:id/spec/corpus       the repository's slice of the workspace corpus.
- *   GET    /api/repos/:id/spec/doc?ref=...  a doc's markdown (for the prose Spec tab).
+ *   GET    /api/repos/:id/spec/doc?ref=...  a doc's markdown (the prose the coverage view reads).
  *   GET    /api/repos/:id/spec/staleness    cheap probe powering the amber dots.
  *
  * There is NO scan here. Documentation belongs to the workspace, so the

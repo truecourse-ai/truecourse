@@ -1539,10 +1539,10 @@ const InterfacesFileShapeSchema = z
  * distinction is forced by the split itself: the authored file
  * holds the interfaces no derivation produces, and their `at`/`to`/`resource`
  * ids resolve against the MERGED catalog — a web task stands on a screen the
- * derivation writes into the gitignored half. Checking those references against
- * the authored file alone would refuse every task that stands on a derived
- * place, and on a fresh clone (where the derived half does not exist yet) it
- * would refuse the file the clone just inherited from git.
+ * derivation writes into the derived half. Checking those references against the
+ * authored file alone would refuse every task that stands on a derived place,
+ * and in a clone that has not mapped yet (where the derived half does not exist)
+ * it would refuse the file the bundle just carried in.
  *
  * So the halves are checked for SHAPE and the WHOLE is checked for references:
  * {@link InterfacesFileSchema} — this schema plus the id resolution — is what a

@@ -241,7 +241,7 @@ describe('generateGuards — api surface authoring + birth', () => {
   }, 60_000)
 })
 
-// `spawnGenerateRunner` is RETIRED (plan 04 step 20): the per-driver system
+// `spawnGenerateRunner` is RETIRED: the per-driver system
 // prompt is now the flow-worker session's, pinned in
 // `tests/core/guard-generate-worker-seam.test.ts` ("authors each surface under
 // its own prompt").

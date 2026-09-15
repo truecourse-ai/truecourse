@@ -9,7 +9,7 @@
  * subtract, and hands every kept file back with its body. Nothing is written
  * into the checkout, and the tree is disposed whatever happens.
  *
- * The scan no longer looks for documents (plan §5): this walk IS the discovery,
+ * The scan no longer looks for documents: this walk IS the discovery,
  * and what it yields is what the workspace corpus curates.
  *
  * BRANCH. The checkout the provider hands over is the repository's default

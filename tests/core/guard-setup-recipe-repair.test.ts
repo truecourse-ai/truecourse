@@ -1,5 +1,5 @@
 /**
- * THE RECIPE REPAIR SESSION — `guard-setup.recipe-repair` (plan 03 step 9),
+ * THE RECIPE REPAIR SESSION — `guard-setup.recipe-repair`,
  * core's half: the session definition (its tools and its done-check
  * precondition) and `buildRecipeRepair`, the `RecipeRepairFn` the command
  * adapter injects into `discoverRecipe`.

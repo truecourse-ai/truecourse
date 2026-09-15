@@ -20,8 +20,9 @@
  *     we re-discovered them, every run would compound on its previous
  *     output and the canonical spec would echo into itself.
  *
- * Include-scope: when `spec.include` is set in `.truecourse/config.json`, only
- * markdown matching one of its globs enters the universe. `.truecourseignore`
+ * Include-scope: when the caller passes include globs (a repository source's
+ * `include` list), only markdown matching one of them enters the universe.
+ * `.truecourseignore`
  * is still applied first, so it always subtracts — an include glob can never
  * resurrect an ignored path. Absent/empty scope → everything (unchanged).
  */
@@ -56,8 +57,8 @@ export interface DocCandidate {
   absPath: string;
   /**
    * In-memory body. When set, downstream stages read this instead of `absPath`
-   * — used by sources with no real file on disk (e.g. an EE connector holding a
-   * fetched page in RAM). File-based discovery leaves it undefined and the
+   * — used by sources with no file on disk (a documentation site's fetched
+   * page). File-based discovery leaves it undefined and the
    * extractor reads `absPath` lazily, exactly as before.
    */
   content?: string;
@@ -78,8 +79,8 @@ export interface DocCandidate {
 
 /**
  * A doc's full text, wherever it lives: the in-memory `content` an injected
- * source supplies (EE holds fetched bodies in RAM), the file on disk, or — if
- * neither is readable — the discovery preview.
+ * source supplies (a site source holds fetched bodies in RAM), the file on disk,
+ * or — if neither is readable — the discovery preview.
  *
  * Lives beside `DocCandidate` rather than in any one consumer: the relevance
  * filter's near-duplicate detector, the third-party backstop, and corpus name

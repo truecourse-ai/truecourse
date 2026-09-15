@@ -1,7 +1,7 @@
 /**
  * The preparation recipe as a CARD — the structured half of {@link
  * GuardRecipeDetail}, which each surface's recipe row in the Interfaces catalog
- * opens. The committed `recipe.json` plus its short inputs fingerprint,
+ * opens. The stored `recipe.json` plus its short inputs fingerprint,
  * provenance, and a staleness signal (inputs changed since the last run).
  * Compact and read-only: the recipe is discovered + human-reviewed by
  * Flow setup and re-derived only there.
@@ -234,7 +234,7 @@ export function GuardRecipeCard({
           <span className="font-mono">fingerprint {shortFingerprint(recipe.fingerprint)}</span>
         </HoverPopover>
         <span>·</span>
-        <span>Committed · reviewed at first generate</span>
+        <span>Reviewed at first generate</span>
       </div>
     </div>
   );

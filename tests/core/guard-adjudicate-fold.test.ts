@@ -1,5 +1,5 @@
 /**
- * THE FOLD'S REFUSAL INVARIANTS (plan 05 step 22, item 1) — the structural
+ * THE FOLD'S REFUSAL INVARIANTS — the structural
  * rules `adjudicationRefusalReason` states that the outcome schema cannot.
  *
  * The schema can say "a control has a conclusion"; it cannot say "a `bug`

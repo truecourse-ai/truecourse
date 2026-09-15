@@ -1,11 +1,11 @@
 /**
- * Guard tables for the hosted edition — the Postgres home for the guard pipeline,
- * mirroring the verify + contract conventions:
+ * Guard tables — the Postgres home for the guard pipeline. The convention is one
+ * row per (repo, commit), with the default-branch rows flagged baseline:
  *
  *   guard_runs          — one row per (repo_key, commit_sha): every `guard run`
  *                         snapshot. The default-branch runs mark `is_baseline`, so
  *                         the current run state is the latest baseline row and the
- *                         run trend is all baseline rows over time (verify's model).
+ *                         run trend is all baseline rows over time.
  *                         The full `GuardLatest` lives in `snapshot`; `summary`
  *                         (denormalized counts) + `run_id` + `branch` are lifted out
  *                         for cheap trend / by-runId queries without parsing it.
@@ -13,10 +13,10 @@
  *                         contentSha }` into the content pool (scope guard-evidence).
  *   guard_results       — one row per (repo_key, commit_sha): the last `guard
  *                         generate` report (the run-result the dashboard reads back).
- *   guard_scenario_sets — content-addressed manifest of the committable `scenarios/`
- *                         tree (yaml + recipe.json + manifest.json), exactly like
- *                         `contract_sets`: bodies live once in `content` (scope
- *                         guard), this holds the `{ relPath: sha }` map.
+ *   guard_scenario_sets — content-addressed manifest of the `scenarios/` tree (yaml
+ *                         + recipe.json + manifest.json): bodies live once in
+ *                         `content` (scope guard), this holds the
+ *                         `{ relPath: sha }` map.
  *   guard_setup_sets    — the same shape for what `guard setup` leaves behind, so a
  *                         hosted run's settle spine survives its ephemeral clone.
  *
@@ -89,13 +89,12 @@ export const guardResults = pgTable(
      * Birth-finding evidence manifest `{ "<scenarioSeg>/<file>": 'sha256-…' }` into
      * `content` (scope guard-evidence). A birth run is `persist: false`, so it never
      * creates a `guard_runs` row — its transcripts hang off the generate report here,
-     * copied out of the (ephemeral) checkout by the EE generate jobs.
+     * copied out of the ephemeral clone by the `repo.guard-generate` job.
      */
     evidence: jsonb('evidence').$type<unknown>().notNull().default({}),
     /**
-     * A DEFAULT-BRANCH generate. The repo-level guard views anchor on the newest
-     * flagged row when the repo has no analyze baseline; a PR head's regenerate
-     * is written unflagged and never becomes the anchor.
+     * A DEFAULT-BRANCH generate — the row the repo-level views anchor on. A
+     * generate over any other commit is written unflagged.
      */
     isBaseline: boolean('is_baseline').notNull().default(false),
     generatedAt: ts('generated_at').notNull(),

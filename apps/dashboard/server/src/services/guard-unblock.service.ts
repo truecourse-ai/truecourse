@@ -34,8 +34,7 @@ import { workspaceRepositories } from './context-scan.service.js';
  *
  * The guard-store read is gated on an empty open set so the hot path (conflicts
  * still remain) never touches it. The report is the repository-level view read
- * (the baseline commit's row) — never the store's newest row, which a PR head's
- * regenerated `ok` report would shadow, silently skipping the unblock forever.
+ * (the baseline commit's row), never the store's newest row.
  */
 export async function unblockRepoGenerate(
   repoKey: string,
@@ -60,7 +59,7 @@ export async function unblockRepoGenerate(
 export async function unblockWorkspaceGenerates(org: string): Promise<string[]> {
   const started: string[] = [];
   try {
-    // Nothing to enqueue through (file mode, tests) is not a walk worth taking.
+    // Nothing to enqueue through (a test) is not a walk worth taking.
     if (!getGuardGenerateEnqueue()) return started;
     const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus');
     if (!corpus) return started;

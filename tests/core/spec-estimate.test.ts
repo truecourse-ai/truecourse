@@ -523,7 +523,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
     expect(kinds.filter((k) => k === CURATE_DOC_SESSION_KIND)).toHaveLength(1);
   });
 
-  // -- the no-changes contract the CLI/dashboard gate on ---------------------
+  // -- the no-changes contract the dashboard gates on ------------------------
 
   it('curateInProcess skips the confirm prompt (and every session) on a fully warmed repo', async () => {
     writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });

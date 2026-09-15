@@ -90,8 +90,8 @@ function stepLine(step: InvocationStep, failingStep: number | undefined): string
 }
 
 /**
- * Render the digest, or an honest note when the bundle is gone (evidence is
- * gitignored — a cloner's board points at bundles only the running tree had).
+ * Render the digest, or an honest note when the bundle is gone — a board can
+ * point at evidence only the machine that ran it ever held.
  */
 export async function buildEvidenceDigest(
   repoRoot: string,

@@ -2,10 +2,10 @@
  * The guard state a hosted generate reads and leaves — moved between the
  * store and an ephemeral clone.
  *
- * The generator is file-based by design (its outputs are committable in a
- * working-tree product), so a job that runs it over a throwaway clone has to
- * put the stored state back where the generator reads it before running, and
- * lift what the generator wrote out again before the clone goes:
+ * The generator reads and writes its state as FILES, so a job that runs it over
+ * a throwaway clone has to put the stored state back where the generator reads
+ * it before running, and lift what the generator wrote out again before the
+ * clone goes:
  *
  *   IN  — the user's guard decisions (dismissed claims and flows), the baseline
  *         scenario set (the manifest is what makes an unchanged section a skip

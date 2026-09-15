@@ -2,7 +2,7 @@
  * THE RUN — interface authoring as agent sessions, end to end, with a SCRIPTED
  * driver in place of a model. What is under test is everything around the model:
  * the work list, the per-place session, the tools it reaches the repository
- * with, the validation gate, the fold into the committed authored file, and what
+ * with, the validation gate, the fold into the authored file, and what
  * a failing session costs (its own place, and nothing else).
  *
  * The driver script calls the session's real tools — the shell hands the driver
@@ -361,7 +361,7 @@ describe('a session that authors', () => {
     expect(home.unresolved).toEqual(['the icon-only settings control has no accessible name'])
     expect(result.authored).toBe(1)
 
-    // The committed file carries the task, its state registry, and a computed
+    // The authored file carries the task, its state registry, and a computed
     // fingerprint — and no `origin`, which only the merge may stamp.
     const file = readAuthoredFile()
     expect(file.interfaces.map((i) => i.id)).toEqual(['web/add-repository-by-path'])
@@ -589,7 +589,7 @@ describe('the findings a session reports', () => {
    * The two lists are different claims, and the prompt has to keep them apart —
    * `unresolved` is what this session could not establish, a finding is what it
    * established and the repository contradicts. The prompt also has to demand
-   * the EARLY `check_draft` (item 10): a rule broken at turn 24 costs the place.
+   * the EARLY `check_draft`: a rule broken at turn 24 costs the place.
    */
   it('is a field the session is told about, beside the early draft check', async () => {
     const { persistence } = memoryPersistence()
@@ -676,7 +676,7 @@ describe('re-running', () => {
 })
 
 /**
- * STALE AUTHORED PLACES (01 step 2h). An authored screen the derivation no
+ * STALE AUTHORED PLACES. An authored screen the derivation no
  * longer produces is an address nobody can stand at — the measured case is a
  * route module that now only redirects. It stays in the MERGED catalog (a fresh
  * clone has no derived half at all), but it earns no session: a work-list rule,
@@ -746,7 +746,7 @@ describe('an authored screen the derivation no longer produces', () => {
 
   /**
    * THE ESCAPE HATCH. A repository whose web half the derivation cannot read at
-   * all (an unrecognized routing idiom, or a fresh clone that has not mapped
+   * all (an unrecognized routing idiom, or a tree that has not been mapped
    * yet) has every authored screen legitimately unbacked — reporting them all
    * would be reporting the derivation's own gap as the author's mistake.
    */
@@ -788,7 +788,7 @@ describe('an authored screen the derivation no longer produces', () => {
 })
 
 /**
- * THE OUTCOME PRECONDITION (01 step 2k), wired onto this def. The prompt has
+ * THE OUTCOME PRECONDITION, wired onto this def. The prompt has
  * demanded an early `check_draft` in the strongest terms it has, and across 110
  * measured sessions the median first call was turn 9 — eight never called it.
  * So the shell refuses the FIRST outcome of a session that skipped it, feeds
@@ -947,7 +947,7 @@ describe('the tools are read-only and bounded to the repository', () => {
   })
 })
 
-describe('the briefing carries what the AST pass knows (item 105)', () => {
+describe('the briefing carries what the AST pass knows', () => {
   it('states the route module, the modules it renders, and the calls with no api id', async () => {
     const { persistence } = memoryPersistence()
     let briefing = ''
@@ -1221,9 +1221,8 @@ describe('sessions run in a pool, the fold does not', () => {
 
   /**
    * A collision with an entry the session was SHOWN is not a race: it had the id
-   * in `list_interfaces` and authored over it anyway, and that is the refusal
-   * item 104 exists for. Only the difference between the briefing and the fold
-   * is forgiven.
+   * in `list_interfaces` and authored over it anyway, so the fold refuses it.
+   * Only the difference between the briefing and the fold is forgiven.
    */
   it('still refuses a fragment that collides with what the session was briefed with', async () => {
     const { persistence } = memoryPersistence()
@@ -1257,8 +1256,8 @@ describe('sessions run in a pool, the fold does not', () => {
    * with the catalog as it stands when it STARTS, so peers in flight beside it
    * are invisible — their states are not in its registry and their tasks are not
    * in its `list_interfaces`. This is why the default concurrency is small, and
-   * why the standing registry (which every session does see) is where item 106's
-   * reuse actually comes from.
+   * why the standing registry (which every session does see) is where the reuse
+   * actually comes from.
    */
   it('cannot brief a session with a peer that is still running', async () => {
     const { persistence } = memoryPersistence()
@@ -1367,7 +1366,7 @@ describe('sessions run in a pool, the fold does not', () => {
       await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 4, context })
 
       // `root` folded before its cluster peers started, so they see its world —
-      // which is exactly what running a cluster serially buys (item 4).
+      // which is exactly what running a cluster serially buys.
       expect(briefings.get('repos-repoid')).toContain('  repository-registered  ')
       expect(briefings.get('settings')).toContain('  repository-registered  ')
       // The other cluster started beside it and could not be told.
@@ -1375,7 +1374,7 @@ describe('sessions run in a pool, the fold does not', () => {
     })
 
     /**
-     * THE HAND-OFF ORDER (01 step 2j). A cluster's members run serially, so the
+     * THE HAND-OFF ORDER. A cluster's members run serially, so the
      * run cannot finish before its longest chain does; the pool starts groups in
      * the order it is handed them, so handing over the longest one first is the
      * whole of the scheduling. What must NOT move is the report.

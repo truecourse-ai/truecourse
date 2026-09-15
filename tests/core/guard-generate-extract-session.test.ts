@@ -1,5 +1,5 @@
 /**
- * THE CLAIM-EXTRACTION SESSION — `guard-generate.extract` (plan 04 step 15).
+ * THE CLAIM-EXTRACTION SESSION — `guard-generate.extract`.
  *
  * Three layers, deliberately separated:
  *  - the SESSION DEF through the real `runAgentLoop` with a scripted driver

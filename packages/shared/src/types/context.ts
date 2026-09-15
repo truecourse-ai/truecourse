@@ -93,7 +93,7 @@ export interface SiteSourceConfig {
 
 export type ContextSourceConfig = RepositorySourceConfig | SiteSourceConfig | Record<string, unknown>;
 
-/** The default scope a Repository source is created with (plan §3). */
+/** The default scope a Repository source is created with. */
 export const DEFAULT_REPOSITORY_INCLUDE: readonly string[] = ['docs/**', '**/*.md'];
 
 /** Changelogs and licenses are documentation of the release, not of the product. */

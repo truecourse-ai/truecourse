@@ -4,10 +4,10 @@
  * A generate produces two very different kinds of finding, and only ONE of them is
  * news about the repo:
  *
- *   drift   a committed red test — the code and the doc disagree. Red, counted,
+ *   drift   a stored red test — the code and the doc disagree. Red, counted,
  *           reproduced by `guard run`;
  *   defect  a withheld `generation-defect` verdict or a fidelity rejection. WE
- *           wrote a bad test; nothing was committed and nothing in the repo is
+ *           wrote a bad test; nothing was stored and nothing in the repo is
  *           broken. It must never paint red, never count as drift, and never make
  *           a flow read "Failing".
  *
@@ -36,9 +36,9 @@ const finding = (over: Partial<GuardBirthFinding> = {}): GuardBirthFinding => ({
   ...over,
 });
 
-/** A committed red test — the repo and the doc disagree. */
+/** A stored red test — the repo and the doc disagree. */
 const DRIFT = finding({ committed: true, triage: { verdict: 'code-drift', confidence: 'high', brief: 'b', recommendation: 'r' } });
-/** A withheld generation defect — ours, never committed. */
+/** A withheld generation defect — ours, never stored. */
 const DEFECT = finding({
   triage: { verdict: 'generation-defect', confidence: 'high', brief: 'b', recommendation: 'r' },
 });

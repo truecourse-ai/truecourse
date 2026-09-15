@@ -358,8 +358,8 @@ describe('GuardFlowWorkerOutcomeSchema payload pairing', () => {
     // Incident-verbatim: the first run with the web authoring arm produced 83
     // journey-defects that all died malformed on exactly these two fields —
     // "kind \"journey-defect\" must not carry `attempts`". The allowance was
-    // scoped blocked-only when item 128 landed, on the assumption that a defect
-    // is stated rather than probed. It is not: a worker reaches `journey-defect`
+    // scoped blocked-only at first, on the assumption that a defect is stated
+    // rather than probed. It is not: a worker reaches `journey-defect`
     // by TRYING the interface and watching it fail, so it volunteers the probe
     // count and the last evidence for the same reason a blocked one does — and
     // refusing them threw away 83 real diagnoses.

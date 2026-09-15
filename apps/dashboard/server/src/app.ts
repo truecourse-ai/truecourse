@@ -218,8 +218,8 @@ export function createApp(opts: CreateAppOptions): express.Express {
   app.use('/api/sessions', createWorkspaceSessionsRouter({ repoLinks }));
   // Project-scoped routes. Each router's patterns declare their own `:id`
   // (e.g. `/:id/guard`), so we mount at `/api/repos` — the router
-  // matches the `:id` segment itself. The resolver validates the slug, scopes
-  // it to the caller's workspace, and touches `lastAccessed`.
+  // matches the `:id` segment itself. The resolver validates the slug and
+  // scopes it to the caller's workspace.
   const projectResolver = createProjectResolver(repoLinks);
   app.use('/api/repos', projectResolver, specRouter);
   app.use('/api/repos', projectResolver, createContextBindingsRouter());

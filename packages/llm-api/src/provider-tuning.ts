@@ -1,5 +1,5 @@
 /**
- * PER-PROVIDER PROMPT-CACHE AND TOOL-CALL TUNING (item 7).
+ * PER-PROVIDER PROMPT-CACHE AND TOOL-CALL TUNING.
  *
  * The session driver resends the whole history every turn, so what the
  * provider is told about caching decides the bill, and what it is told about

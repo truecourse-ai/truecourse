@@ -24,9 +24,10 @@ import type { RippleRepo } from '../jobs/context-ripple.js';
 
 /**
  * Every repository of the workspace, with the sources it reads. A repository is
- * "of the workspace" by having a Context link — connecting one always creates
- * and links its Repository source, so the bindings ARE the membership list, and
- * they are workspace-scoped by construction (the registry is not).
+ * "of the workspace" by having a Context link — made in Context (the connect
+ * dialog links the sources that already exist) — so the bindings ARE the
+ * membership list, and they are workspace-scoped by construction (the registry
+ * is not).
  *
  * A repository source whose repository has somehow lost its link still names
  * that repository: its documents are the repository's own, and leaving it out

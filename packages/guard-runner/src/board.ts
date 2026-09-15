@@ -65,7 +65,7 @@ export function mergeGuardBoard(
 ): GuardLatest {
   // A RE-RUN row never carries an adjudication verdict: the verdict judged an
   // ACTUAL, and this run produced a new one — a new actual needs a new verdict
-  // (`guard adjudicate`, plan 05 step 23). The runner never writes the field,
+  // (run adjudication writes it). The runner never writes the field,
   // so this strip is the stated invariant rather than a live code path; an
   // untouched CARRIED row (below) keeps its verdict verbatim.
   run = { ...run, scenarios: run.scenarios.map(withoutAdjudication) }
@@ -103,7 +103,7 @@ function withoutAdjudication(row: GuardScenarioResult): GuardScenarioResult {
 
 /**
  * Attach an adjudication verdict to ONE scenario row of a board — the PURE fold
- * behind `guard adjudicate`'s write path (plan 05 step 23), exported so the
+ * behind run adjudication's write path, exported so the
  * run-snapshot patch and the LATEST patch go through the same rule.
  *
  * `onlyIfRunId`, when given, holds the patch to a row whose EFFECTIVE run

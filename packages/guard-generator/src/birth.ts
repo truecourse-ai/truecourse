@@ -112,9 +112,9 @@ export function birthRunTimeoutMs(count: number): number {
 
 export interface BirthOptions {
   /**
-   * The execution seam every candidate runs through (REQUIRED). The OSS default runs
-   * in-process; EE swaps in a hosted executor. Threaded from `generateGuards`, which
-   * resolves it from core's `getGuardExecutor()`.
+   * The execution seam every candidate runs through (REQUIRED). The default runs
+   * in-process unless a host installed another. Threaded from `generateGuards`,
+   * which resolves it from core's `getGuardExecutor()`.
    */
   executor: GuardExecutor
   /**

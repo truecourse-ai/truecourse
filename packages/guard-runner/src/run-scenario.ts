@@ -109,8 +109,8 @@ export interface RunScenarioContext {
    * never ran for this selection is the RUN's — and sending an author to fix a
    * manifest that is perfectly correct is the worse of the two messages.
    *
-   * Since item 98 the run prepares the seeded world for ANY selection that needs one
-   * — a scenario referencing a fixture included — so `runGuard` no longer reaches
+   * The run now prepares the seeded world for ANY selection that needs one — a
+   * scenario referencing a fixture included — so `runGuard` no longer reaches
    * this message. It stays because this context is a public API: a caller that
    * assembles one without fixtures still gets the honest half of the answer rather
    * than "no such fixture".

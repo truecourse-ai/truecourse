@@ -1,7 +1,7 @@
 /**
  * The Runs tab of a CONNECTED repository reads the server, not the fixtures: it
- * lists every stored run — the baseline runs and the pull-request head runs the
- * gate wrote — opens one as its own page, and re-reads itself when a run of the
+ * lists every stored run — its baseline runs, and any run that names a pull
+ * request — opens one as its own page, and re-reads itself when a run of the
  * repository lands on the socket. Starting this repository's work is the
  * Pipeline tab's (see preview-pipeline-tab.test.tsx); the Runs header keeps its
  * search only.

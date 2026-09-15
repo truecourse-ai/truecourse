@@ -57,8 +57,7 @@ import {
 
 /**
  * Spec route tests assert the HTTP shape of the corpus routes. The
- * curate/generate engine has its own suite under tests/spec-consolidator/ and
- * tests/contract-extractor/.
+ * curate/generate engine has its own suite under tests/spec-consolidator/.
  */
 
 /**
@@ -245,7 +244,7 @@ describe('corpus routes (spec-scan redesign)', () => {
   });
 
   // Every decision here is the WORKSPACE's — the repository routes refuse an
-  // unscoped one (see "the repository decision routes without a pull request"),
+  // unscoped one (see "no repository decision routes"),
   // and the reads below fold the workspace ledger they are written to.
   it('GET /spec/staleness pends a WORKSPACE decision the corpus has not absorbed', async () => {
     await seedCorpus([]);
@@ -285,7 +284,7 @@ describe('corpus routes (spec-scan redesign)', () => {
 
 });
 
-// DB mode (hosted): repo.path is a repoKey and the corpus lives in the store,
+// Hosted: repo.path is a repoKey and the corpus lives in the store,
 // with no local working tree to read. What a repository still answers over that
 // stored state is its staleness — the decisions it is read against are the
 // WORKSPACE's, written through the workspace routes.

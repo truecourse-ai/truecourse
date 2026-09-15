@@ -66,7 +66,7 @@ export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef
     resolveOutcome: resolveCheckedDraft,
     outcomeSchemaRepairs: 2,
     budget: INTERFACE_AUTHOR_BUDGET,
-    // The structural half of "run check_draft" (01 step 2k). The prompt already
+    // The structural half of "run check_draft". The prompt already
     // demands it in the strongest available terms and did not carry it: across
     // 110 measured sessions the median first `check_draft` was turn 9, and 8
     // sessions never called it at all — each of those risking a whole fragment

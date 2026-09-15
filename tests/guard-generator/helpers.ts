@@ -239,7 +239,7 @@ export function withCodeTruth(
 ): InterfaceProvider {
   return async () => {
     const mapped = await provider()
-    // The inbound contract has ONE home now (plan item 102): the operation it
+    // The inbound contract has ONE home now: the operation it
     // belongs to. The helper keeps its `ApiRequestContract[]` ergonomics and
     // writes them onto the catalog exactly as `mapInterfaces` does.
     const byOperation = new Map(
@@ -284,7 +284,7 @@ export const DEFAULT_INTERFACES = (repo: string): InterfaceProvider =>
   interfacesOf(repo, cliInterface(['relkit']), cliInterface(['relkit', 'boom']))
 
 // ---------------------------------------------------------------------------
-// The SESSION SEAMS (plan 04). The one-shot runners are retired: `generateGuards`
+// The SESSION SEAMS. The one-shot runners are retired: `generateGuards`
 // now takes four REQUIRED seams, and a test states the answers those seams give
 // instead of the replies a runner returned. Every stub below is deliberately
 // shallow — it fabricates an ANSWER; nothing about the pool, the cache or the

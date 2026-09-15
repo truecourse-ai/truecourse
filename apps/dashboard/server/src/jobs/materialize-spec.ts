@@ -23,8 +23,8 @@
  * written, holding nothing. That is the honest artifact (this repository reads
  * no documents) and it is what lets Flow setup run at all: setup derives a
  * recipe, its dependencies and its interfaces from the CODE, and needs no
- * documents (product-owner plan §6). The count comes back so the caller can
- * decide what an empty slice means for it — setup runs, generate does not.
+ * documents. The count comes back so the caller can decide what an empty slice
+ * means for it — setup runs, generate does not.
  */
 
 import fs from 'node:fs';
@@ -79,7 +79,7 @@ export async function materializeStoredSpec(
   // The resolutions travel with the corpus they resolve: without them a
   // conflict the user already settled reads as open again in this clone. They
   // are the WORKSPACE's — a conflict is a property of its documents, resolved
-  // once (plan §2).
+  // once.
   const decisions = await loadWorkspaceSpec<DecisionsFile>({ workspaceOrgId }, 'decisions');
   if (decisions != null) writeJson(decisionsPath(treeDir), decisions);
 

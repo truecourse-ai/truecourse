@@ -2,10 +2,10 @@
  * The workspace's LLM provider, resolved per run.
  *
  * There is no process-wide transport here. Every step that spends — the
- * onboarding scan, the manual scan, guard generate, analyze's LLM rules, flow
- * enrichment — asks THIS module for the provider of the workspace that
- * triggered it, and threads the resulting driver/transport into the pipeline
- * call. Credentials travel with the run.
+ * workspace Document scan, guard setup, guard generate and its adjudication,
+ * the run's visual judge — asks THIS module for the provider of the workspace
+ * that triggered it, and threads the resulting driver/transport into the
+ * pipeline call. Credentials travel with the run.
  *
  * Two things always happen before a run spends, in this order:
  *   1. LOAD. No stored config ⇒ {@link LlmNotConfiguredError}. Nothing is

@@ -32,8 +32,8 @@ export type StageId =
   // --- guard generate (scenario tests) ---
   // Only the two remaining ONE-SHOT stages are configurable here. The retired
   // per-stage ids (`guard.extract`, `guard.flows`, `guard.generate`,
-  // `guard.retry`, `guard.fidelity`, `guard.triage`) became agent SESSIONS
-  // (plan 04), which all run on the one configured session model (§3.4) —
+  // `guard.retry`, `guard.fidelity`, `guard.triage`) became agent SESSIONS,
+  // which all run on the one configured session model —
   // there is no per-stage tier for them, so declaring the ids would advertise
   // overrides nothing reads.
   | 'guard.match'

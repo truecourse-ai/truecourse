@@ -1,5 +1,5 @@
 /**
- * THE FIDELITY SELF-HEAL, in-loop (plan 04 step 18). A green candidate the
+ * THE FIDELITY SELF-HEAL, in-loop. A green candidate the
  * judge flags at HIGH confidence is the system's own mess: the flag comes back
  * to the STILL-OPEN worker as the submit error, the worker revises and submits
  * again, and no human task is created. There is no separate re-author round any

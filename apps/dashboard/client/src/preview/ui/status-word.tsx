@@ -78,7 +78,8 @@ export function StatusWord({
   );
 }
 
-/** A check's conclusion, in the gate's words. An error is a failure, never neutral. */
+/** A repository's last check, in the words a run's tally gives it. An error is a
+ *  failure, never neutral. */
 export const CONCLUSION_TONE: Record<CheckConclusion, StatusTone> = {
   success: 'success',
   failure: 'failure',

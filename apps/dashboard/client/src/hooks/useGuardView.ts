@@ -1,16 +1,14 @@
 /**
  * Guard's bidirectional-navigation primitive. `openSpecSection` jumps from a
  * drift, a scenario, a milestone, or a birth finding to the highlighted spec
- * section on the Guard coverage tab: it lands the Guard section + coverage tab and
- * writes `?doc=`+`?section=` in ONE param update so the writes never race (and drops
- * the `?gdrift` tab selection the Runs view was showing). `openGuardFlow` /
- * `openGuardInterface` are the same jump in the other direction
- *, a section's flow row into the Flows tab, a flow's interface into the Interfaces
- * tab, and
- * `openSpecDoc` / `openSpecSources` connect the Sources page to the doc viewer
- * and back.
+ * section: it names the coverage destination and writes `?doc=`+`?section=` in ONE
+ * param update so the writes never race (and drops the `?result` tab selection
+ * the Runs view was showing). `openGuardFlow` / `openGuardInterface` are the same
+ * jump in the other direction, a section's flow row to the flow's own page, a
+ * flow's interface into the Interfaces tab, and `openSpecDoc` / `openSpecSources`
+ * connect the Sources page to the doc viewer and back.
  *
- * Which *drift tab* is open is owned by `useGuardTabs('result', …)` (the shared
+ * Which RESULT tab is open is owned by `useGuardTabs('result', …)` (the shared
  * preview/pin tab model), not here, this hook only owns the jump OUT of the view.
  */
 
@@ -32,13 +30,14 @@ export interface GuardViewState {
    */
   openSpecDoc: (ref: string) => void;
   /**
-   * Jump to the Sources tab, the route the pre-scan corpus note takes ("add a
-   * documentation site first"). Lands the page; the user picks or adds a site.
+   * Jump to the sources a repository reads through, the route the pre-scan corpus
+   * note takes ("add a documentation site first"). Lands the page; the user picks
+   * or adds a site.
    */
   openSpecSources: () => void;
   /**
-   * Jump to the Flows tab with one flow's detail open (`?flow=`), the route a
-   * Coverage section's flow row and an interface's "grounds" link both take.
+   * Jump to one flow's own page (`?flow=`), the route a coverage section's flow
+   * row and an interface's "grounds" link both take.
    */
   openGuardFlow: (flowId: string) => void;
   /** Jump to the Interfaces tab with one interface's detail open (`?interface=`). */
@@ -67,12 +66,13 @@ export function useGuardView(): GuardViewState {
     (doc: string, section: string) => {
       setParams((prev) => {
         const q = new URLSearchParams(prev);
-        // Land on the Guard section's coverage tab (where the doc surface lives).
+        // Name the coverage destination (the translation lands it on Context,
+        // where the doc surface lives).
         q.set('section', 'guard');
         q.set('tab', 'coverage');
         clearGuardSelections(q);
-        // Land on the doc's coverage tab, drop any active conflict tab so it
-        // doesn't win the coverage read and shadow the jumped-to section.
+        // Land on the doc, dropping any active conflict tab so it doesn't win
+        // the coverage read and shadow the jumped-to section.
         q.delete('conflict');
         q.set('doc', doc);
         q.set('section', section);

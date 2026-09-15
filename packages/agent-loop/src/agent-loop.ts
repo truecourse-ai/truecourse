@@ -56,7 +56,7 @@ export interface AgentLoopInput<TOutcome> {
   workItem: string;
   initialMessages: readonly string[];
   /**
-   * A prefix this session shares with its cluster peers (item 8) — carried to
+   * A prefix this session shares with its cluster peers — carried to
    * the driver untouched. It does NOT descend to a child session: a child runs
    * on its own system prompt, so the same prefix would be 60KB no cache of any
    * provider could reuse.
@@ -219,7 +219,7 @@ function startSession<TOutcome>(
   let prevTurnMalformed = false;
   let currentTurnMalformed = false;
 
-  // The outcome precondition (01 step 2k): whether the required tool has
+  // The outcome precondition: whether the required tool has
   // produced a result in this session. Tracked live from the shell's own
   // events; a resumed-from prior transcript is folded in below. Stays false
   // (and unread) when the def declares no precondition.
@@ -493,7 +493,7 @@ function startSession<TOutcome>(
       result = await runOnce({ cursor, events }, ingestedInitials ? [] : undefined);
     }
 
-    // The outcome precondition (01 step 2k): an outcome produced before the
+    // The outcome precondition: an outcome produced before the
     // required tool was ever called is refused ONCE — the message goes back as
     // a user message (the resumed driver run records it on ingestion) and the
     // session continues under its ordinary budget. Not a malformed turn, and

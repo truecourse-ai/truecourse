@@ -1,18 +1,18 @@
 import type { GuardSetupPreparationSession } from '@truecourse/guard-generator';
 /**
- * SINGLE-STEP MODE — `guard setup --only-<step>`, driven through the core
- * adapter (`guardSetupInProcess({ only })`) because the merge of
- * `guard/setup.json` and the pre-flight estimate are its half of the feature.
+ * SINGLE-STEP MODE — `guardSetupInProcess({ only })`, driven through the core
+ * adapter because the merge of `guard/setup.json` and the pre-flight estimate
+ * are its half of the feature.
  *
  * The rules under test:
- * - each flag runs ONLY its own step: steps before it replay from what they
+ * - each step runs ONLY its own work: steps before it replay from what they
  *   left on disk (the recipe from `recipe.json` — no discovery, no live
  *   endpoint probe), steps after it never start;
  * - a prior step nothing ever ran fails loud (`SetupStepNotReadyError`, naming
- *   the flag to run first) instead of quietly spending it here;
+ *   the step to run first) instead of quietly spending it here;
  * - `detect` always runs, so the detection snapshot is always this run's;
  * - the persisted report MERGES: the steps that did not run keep the previous
- *   report's rows, which is what keeps `guard status`, the externals view and
+ *   report's rows, which is what keeps the setup report, the externals view and
  *   skip-when-settled whole;
  * - the estimate gate prices only the chosen step.
  *
@@ -44,8 +44,8 @@ import { StepTracker, type AnalysisStep } from '../../packages/core/src/progress
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
 
-// Setup reads (and would write) the user-level LLM config; these run against a
-// throwaway runtime dir rather than the developer's real one.
+// Setup writes into the runtime directory; these run against a throwaway one
+// rather than the developer's real one.
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-setup-steps-home-'));
 beforeAll(() => {
   process.env.TRUECOURSE_RUNTIME_DIR = HOME;

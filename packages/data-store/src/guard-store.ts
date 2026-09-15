@@ -3,7 +3,8 @@
  *
  *   - RUN STATE (`guard_runs`, one row per repo+commit):
  *     `writeGuardLatest` marks the default-branch baseline, `writeGuardRun` writes
- *     a (PR-head) snapshot without marking it, `readGuardLatest` is the newest
+ *     a snapshot without marking it baseline (the adjudication fold re-writes a
+ *     run this way), `readGuardLatest` is the newest
  *     baseline row, and the run history is every baseline row. `readGuardRun(runId)`
  *     stays LIVE (the `(repo, run_id)` index). The commit key comes from the payload
  *     (`latest.run.commit`), falling
@@ -13,7 +14,8 @@
  *     `readGuardRun` (the row's `run_id` is overwritten), and its evidence
  *     manifest resets to `{}` so the old transcripts are never served under the
  *     new runId (the blobs remain in `content`, unreferenced). Deliberate: one row
- *     per commit, unlike the OSS append-only `history.json`.
+ *     per commit, and the trend is derived from the baseline rows rather than
+ *     appended to.
  *
  *   - EVIDENCE — per-run transcripts, content-addressed in `content` (scope
  *     `guard-evidence:<repo>`); the run row's `evidence` jsonb is the
@@ -23,11 +25,11 @@
  *     falls back to it when the evidence path's runId matches no run row.
  *
  *   - SCENARIO CORPUS (`guard_scenario_sets`) — content-addressed and keyed
- *     per (repo, commit): the committable `scenarios/` tree (yaml +
+ *     per (repo, commit): the `scenarios/` tree (yaml +
  *     recipe.json + manifest.json) is deduped into `content` (scope `guard:<repo>`)
  *     with a per-(repo, commit) `{ relPath: sha }` manifest row. `saveScenarios`
  *     takes a `RepoRef` and rejects an empty commit; `loadScenarios(ref)` is that
- *     commit's set (exact — no fallback, like `loadContracts`), materialized into
+ *     commit's set (exact — no latest fallback), materialized into
  *     a temp dir the unchanged guard-runner loader reads; the browse reads take an
  *     optional commit and fall back to the newest stored set. The generate report
  *     (`guard_results`) is keyed the same way.
@@ -44,8 +46,7 @@
  *     `decisions` table under a `guard:<repo>` scope, one row per repository. An
  *     absent row reads as `EMPTY_GUARD_DECISIONS`, never null.
  *
- * In EE the `repoPath` argument carries the stable repo key (as in the other EE
- * stores), never an on-disk path.
+ * The `repoPath` argument is the stable repo key, never an on-disk path.
  */
 
 import os from 'node:os';
@@ -95,7 +96,7 @@ import { WORK_TREE_DIR, scenariosDir } from '@truecourse/shared/work-tree';
 
 const OBJECT_CONCURRENCY = 16;
 
-/** Reject an empty commit on the per-commit writes (mirrors `assertCommit`). */
+/** Reject an empty commit on the per-commit writes. */
 function requireCommit(ref: RepoRef, what: string): string {
   if (!ref.commitSha) {
     throw new Error(`[data-store] ${what} requires a non-empty commit SHA`);
@@ -175,7 +176,7 @@ export class PgGuardStore implements GuardStore {
     return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
   }
 
-  /** The `(repoKey, commitSha)` row's snapshot (PK lookup) — baseline or PR-head. */
+  /** The `(repoKey, commitSha)` row's snapshot (PK lookup) — baseline or not. */
   async readGuardRunForCommit(repoKey: string, commitSha: string): Promise<GuardLatest | null> {
     const rows = await this.db
       .select({ snapshot: guardRuns.snapshot })
@@ -187,8 +188,8 @@ export class PgGuardStore implements GuardStore {
 
   /**
    * The run trend: every baseline run for the repo, oldest-first. With `all`,
-   * every stored run — the pull-request head runs the gate wrote included —
-   * each entry carrying the envelope's provenance (`pullRequest`, `origin`).
+   * every stored run, not just the baselines — each entry carrying the
+   * envelope's provenance (`origin`, `pullRequest`).
    */
   async readGuardHistory(repoKey: string, opts: GuardHistoryReadOptions = {}): Promise<GuardHistory> {
     const rows = await this.db
@@ -587,7 +588,7 @@ export class PgGuardStore implements GuardStore {
     return { fileCount: files.length };
   }
 
-  /** Exactly that commit's set (no latest fallback — mirrors `loadContracts`). */
+  /** Exactly that commit's set (no latest fallback). */
   async loadScenarios(ref: RepoRef): Promise<LoadedScenarios> {
     const manifest = await this.commitManifest(ref);
     if (!manifest) return { scenarios: [], errors: [] };

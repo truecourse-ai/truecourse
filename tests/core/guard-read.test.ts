@@ -1,13 +1,9 @@
 /**
- * Guard read-drivers over a HOSTED (PgGuardStore) store — the commit-aware,
- * de-filesystem behavior issue 07 adds. Exercises the driver functions directly
- * against a PGlite-backed guard store (+ Pg spec store for corpus presence, and
+ * Guard read-drivers over a HOSTED (PgGuardStore) store — commit-aware and
+ * de-filesystem. Exercises the driver functions directly against a
+ * PGlite-backed guard store (+ Pg spec store for corpus presence, and
  * a baseline-flagged generate for the baseline-commit fallback), with an
  * injected repo-doc reader so heading joins never touch a local working tree.
- *
- * OSS (FileGuardStore) behavior is regression-covered by tests/server/guard-routes
- * and tests/core/guard-store; here we only assert the async staleness signature
- * still reflects the file store for a temp repo.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -174,9 +170,9 @@ describe('listGuardScenarios — commit-scoped (hosted)', () => {
   });
 
   it('carries the status each test was COMMITTED with — a red test reads red before any run', async () => {
-    // Guard commits a test that failed its birth execution, so the inventory has
-    // to say so without `guard/LATEST.json`: a fresh clone lists its red tests as
-    // red, and a later run outcome (joined client-side) simply wins over it.
+    // Guard stores a test that failed its birth execution, so the inventory has
+    // to say so with no run stored: the set alone lists its red tests as red, and
+    // a later run outcome (joined client-side) simply wins over it.
     await saveSet('shaC1234567', [
       ['a1', 'alpha', 'failing'],
       ['b1', 'beta', 'passing'],
@@ -212,7 +208,8 @@ describe('listGuardScenarios — commit-scoped (hosted)', () => {
 
 describe('listGuardScenarios — PR-head baseline fallback (hosted)', () => {
   it('a head with no stored set falls back to the baseline set, labelled by scenariosCommit', async () => {
-    // The PR-gate shape: the set lives at the baseline; the head persisted nothing.
+    // A non-default-branch commit: the set lives at the baseline, and this head
+    // persisted nothing.
     const repo = await makeBaselineRepo('baseline9999');
     try {
       await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
@@ -348,7 +345,7 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
 
 describe('hosted repo-level view with NO baseline — empty, never the newest set', () => {
   it('listGuardScenarios with no ref and no baseline returns empty (a PR set must not leak)', async () => {
-    // Only a PR head's set is stored; the repo has no analyze baseline yet.
+    // Only a PR head's set is stored; the repo has no baseline-flagged generate yet.
     await saveSet('prheadonly12', [['pr1', 'alpha']]);
     const inv = await listGuardScenarios(REPO);
     expect(inv).toEqual({ recipe: null, scenarios: [] });
@@ -570,7 +567,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     const repo = await makeBaselineRepo('baseline9999');
     try {
       await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
-      // A baseline run exists — it must not make the ungated PR head look run.
+      // A baseline run exists — it must not make another commit look run.
       await guardStore.writeGuardLatest(repo, RUN('run-base', 'baseline9999', '2026-07-07T00:00:00.000Z'));
 
       const s = await computeGuardStaleness(repo, 'prhead0000');
@@ -596,8 +593,8 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
 
 describe('hosted repo-level view anchored on the store baseline', () => {
   // The hosted generate job only ever runs on the default branch, so the report
-  // it writes is flagged as the repo's guard baseline; a repo that never ran
-  // analyze anchors its guard views on it.
+  // it writes is flagged as the repo's guard baseline; every repo anchors its
+  // guard views on it.
   it('reads the flagged generate’s set and report, never a newer PR-head row', async () => {
     await saveSet('gen1111111', [['a1', 'alpha']]);
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'gen1111111' }, REPORT(), { baseline: true });

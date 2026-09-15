@@ -11,7 +11,7 @@ import { GuardCaseEvidenceSchema } from './proof.js'
  * Per-SECTION coverage derives at read time from the flows' bindings — see
  * {@link guardManifestSections}.
  *
- * It travels with the repo (committable, like the scenarios themselves). At run
+ * It is stored with the scenario set, like the scenarios themselves. At run
  * time it is informational — binding truth is the scenarios' own `binds` checked
  * against the live section index, not this file.
  */
@@ -219,7 +219,7 @@ function dropLegacyVersion(value: unknown): unknown {
  * no-flow verdict). Persisted so the next generate's section-change gate can
  * tell "known, judged, unchanged" from "never seen": without this record every
  * uncovered section re-entered the work set on every run, forever, because the
- * verdicts lived only in the gitignored run report. Keyed by the same text
+ * verdicts lived only in the run report. Keyed by the same text
  * fingerprint the flow bindings use — an edit to the section re-admits it.
  */
 export const GuardManifestGapSectionSchema = z

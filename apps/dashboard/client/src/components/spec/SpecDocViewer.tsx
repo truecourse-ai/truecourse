@@ -1,9 +1,8 @@
 /**
  * SpecDocViewer, right-pane viewer for one corpus source doc, rendered as
- * markdown. Opened from the Spec tab's left nav (preview on click, pinned on
- * double-click) the same way spec/contract files open, URL-synced as
- * `?spec=<docRef>`; the Sources page renders it in place for a fetched page,
- * passing its own header `actions`.
+ * markdown. Opened from the conflict resolver and the Context document pane, by
+ * the corpus ref it is handed; the Sources page renders it in place for a
+ * fetched page, passing its own header `actions`.
  */
 
 import { headingMatchKey } from '@/lib/heading-match';

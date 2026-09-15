@@ -1,7 +1,7 @@
 /**
  * Guard dashboard read routes over a HOSTED store (PgGuardStore + PgSpecStore).
- * The same OSS Express routes, but with the enterprise stores installed and an
- * injected repo-doc reader — so the guard tabs render Pg-backed data with NO local
+ * The same Express routes, over the Postgres stores and an injected repo-doc
+ * reader — so the guard tabs render Pg-backed data with NO local
  * filesystem access, scope to a commit via `?ref=`, and answer an empty envelope
  * (never baseline data) when no run is stored at that commit.
  */
@@ -96,8 +96,8 @@ const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suff
 beforeEach(async () => {
   fixture = await setupTestFixture();
   app = createTestApp();
-  // The hosted store keys by the SAME canonical path the route resolves (the Pg
-  // store matches keys by exact string, unlike the FS store's symlink-following).
+  // The hosted store keys by the SAME canonical path the route resolves: the Pg
+  // store matches keys by exact string, so the key has to be that path.
   repoKey = (await resolveProjectForRequest(TEST_ORG, fixture.project.slug)).path;
   client = new PGlite();
   db = drizzle(client, { schema }) as unknown as Db;

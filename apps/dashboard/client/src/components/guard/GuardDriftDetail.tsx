@@ -10,8 +10,8 @@
  * they want its current state instead.
  *
  * Read-only; the tab strip owns the close, and drift-vs-bug is the developer's
- * call, never resolved here. The steps are already grouped under the claim each
- * one realizes, so the run says where it broke without a second state beside the
+ * call, never resolved here. Each step names the milestone it realizes with an
+ * `M<n>` chip, so the run says where it broke without a second state beside the
  * verdict.
  */
 
@@ -54,8 +54,7 @@ export function GuardDriftDetail({
     ...(scenario.failure ? { failure: scenario.failure } : {}),
     ...(scenario.failedMilestone != null ? { failedMilestone: scenario.failedMilestone } : {}),
     ...(failedMilestone ? { failedMilestoneClaim: failedMilestone.claimTitle } : {}),
-    // The chain the step list is grouped under, each section headed by the claim
-    // its steps realize.
+    // The flow's chain, which a step row points back at with its `M<n>` chip.
     ...(runFlow ? { milestones: runFlow.milestones } : {}),
     ...(scenario.interfaceDrifted ? { interfaceDrifted: true } : {}),
     ...(scenario.blockedPrecondition ? { blockedPrecondition: true } : {}),

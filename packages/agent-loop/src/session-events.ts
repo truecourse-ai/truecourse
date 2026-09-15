@@ -211,8 +211,8 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
      *  DECLARED because this schema is non-strict and would strip it. */
     display: SessionDisplaySchema.optional(),
   }),
-  // A steer, an initial message, or a resume observation. `actor` is empty in
-  // OSS, the workspace user in EE, so "who answered" is auditable.
+  // A steer, an initial message, or a resume observation. `actor` names the
+  // workspace user who answered, when one did, so it is auditable.
   z.object({
     type: z.literal('user-message'),
     content: z.string(),

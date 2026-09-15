@@ -1,8 +1,8 @@
 import { log } from '../../lib/logger.js'
 /**
  * THE GUARD-GENERATE SESSION SEAMS — the implementations `@truecourse/core`
- * injects into `generateGuards` for plan 04 steps 15 (claim extraction) and 16
- * (flow synthesis). The engine (`@truecourse/guard-generator`) declares the
+ * injects into `generateGuards` for claim extraction and flow synthesis. The
+ * engine (`@truecourse/guard-generator`) declares the
  * seam TYPES and keeps the deterministic spine; this module owns everything
  * session-shaped: the pool, the cache, the run record, the driver.
  *
@@ -19,8 +19,8 @@ import { log } from '../../lib/logger.js'
  *   a crashed generate);
  * - tools never write repo/store state; every write stays in `generateGuards`.
  *
- * SINGLE-STEP MODE (`only`, SPEC_GUARD_PLAN
- * item 110): run one step's sessions in isolation. Prior steps REPLAY from
+ * SINGLE-STEP MODE (`only`): run one step's sessions in isolation. Prior steps
+ * REPLAY from
  * their outcome caches — a miss throws {@link GenerateStepNotReadyError}
  * instead of spending sessions that belong to that step's own flag — and the
  * engine stops before the next one, writing nothing durable until the final
@@ -119,7 +119,7 @@ import { FIDELITY_SESSION_KIND, emptyFidelityTally, judgeWorkerFidelity } from '
 // (`services/guard-setup/session-context.ts`) rather than a reuse: that one
 // hardcodes its command + report accounting, and this run's adapter only needs
 // acquire/finish. ONE run record covers every session of the generate
-// invocation (`sessions/guard-generate/<runId>/`).
+// invocation, with each session's transcript appended to that run's journal.
 // ---------------------------------------------------------------------------
 
 export interface AcquiredContext {
@@ -156,15 +156,14 @@ export interface GuardGenerateSessionSeams {
   reuseExtraction: ReuseExtractionSeam
   flowsAreaSession: FlowsAreaSessionSeam
   flowsEpicSession: FlowsEpicSessionSeam
-  /** The flow-worker pool (plan 04 steps 17 + 18) — waves, cache, fidelity children. */
+  /** The flow-worker pool — waves, cache, fidelity children. */
   flowWorkerSession: FlowWorkerSessionSeam
   /** The run id, once a session has run; undefined on a fully-cached run. */
   runId(): string | undefined
   /**
-   * The sessions-store run dir (`.truecourse/sessions/guard-generate/<runId>/`)
-   * where this run's transcripts landed — what a stepwise run is inspected
-   * through. Undefined until a session actually runs (and on the injected-driver
-   * test seam, which owns its own run record).
+   * The sessions-store scratch dir this run used, under the runtime directory —
+   * what a stepwise run is inspected through. Undefined until a session actually
+   * runs (and on the injected-driver test seam, which owns its own run record).
    */
   runDir(): string | undefined
   /** Close the run record (when one was created). `failed` only when every
@@ -584,7 +583,7 @@ export function createGuardGenerateSessionSeams(
     return { result, summary }
   }
 
-  // The flow-worker pool (plan 04 steps 17 + 18). Not `runCachedGuardPool`:
+  // The flow-worker pool. Not `runCachedGuardPool`:
   // the worker cache holds MORE than the outcome (the settled yaml), a cached
   // `settled` must survive a fresh confirmation run before it counts as a hit,
   // and the two WAVES (non-epic, then epic — a true barrier, so an epic's

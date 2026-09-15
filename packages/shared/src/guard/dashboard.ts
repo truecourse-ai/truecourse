@@ -13,8 +13,9 @@ import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
  *
  * The server composes these from the store files (`scenarios/flows.json`,
  * `scenarios/manifest.json`, `guard/LATEST.json`, `guard/result.json`,
- * `guard/interfaces.json`) plus the live spec doc; the client consumes them as the
- * wire types for the Guard tabs (Coverage, Flows, Interfaces, Runs).
+ * `guard/interfaces.json`) plus the live spec doc; the client consumes them as
+ * the wire types the repository's Runs / Pipeline / Interfaces views and the
+ * workspace's Flows and Context pages read.
  */
 
 import { z } from 'zod'
@@ -451,7 +452,7 @@ export interface GuardSectionCoverage {
   /**
    * The providable external services behind a `needs-setup` status — present iff
    * `status === 'needs-setup'`. The CTA the coverage view renders
-   * ("Provide open-meteo → External APIs") is built from this.
+   * ("Provide open-meteo → Dependencies") is built from this.
    */
   needsSetup?: GuardNeedsSetup
   /**
@@ -507,7 +508,8 @@ export interface GuardDocCoverage {
 }
 
 /**
- * The Guard tab's amber-dot signal and the pipeline-stage flags beside it:
+ * The amber-dot signal the Pipeline view and Context's Scan button read, and
+ * the pipeline-stage flags beside it:
  *  - `runStale` — the scenarios are newer than the last `guard run` (a re-run would
  *    re-test), or scenarios exist and nothing was ever run.
  */
@@ -610,11 +612,11 @@ export interface GuardArtifactSource {
 }
 
 /**
- * One row in the Scenarios-tab inventory — every committed scenario, generated
- * OR hand-written, joined from the loaded corpus and the manifest. The last-run
+ * One row in the Tests inventory — every committed scenario, generated OR
+ * hand-written, joined from the loaded corpus and the manifest. The last-run
  * outcome and any orphaned flag are joined client-side from the run store, so
- * they are NOT part of this row (which stays run-independent — a fresh clone
- * lists its committed guards before any local run).
+ * they are NOT part of this row (which stays run-independent — the inventory
+ * renders from the stored set before any run).
  */
 export interface GuardScenarioListItem {
   id: string
@@ -648,7 +650,7 @@ export interface GuardScenarioListItem {
    * The status the last generate COMMITTED the test with — `failing` for a test
    * that failed its birth execution (committed anyway: the doc and the code
    * disagree), else `passing`. It makes the inventory renderable without a run:
-   * a fresh clone lists its red tests as red. A `guard run` outcome, joined
+   * the stored set lists its red tests as red. A run outcome, joined
    * client-side, always wins over it. Absent for hand-written work (no manifest
    * row names it) and for manifests written before failing tests were committed.
    */
@@ -734,19 +736,16 @@ export interface GuardRecipeCard {
 }
 
 /**
- * The Scenarios-tab payload — the recipe card plus the committed-scenario
- * inventory. One envelope so the tab has a single read (the recipe rides the
- * scenarios response rather than a separate endpoint).
+ * The Tests payload — the recipe card plus the committed-scenario inventory.
+ * One envelope so the surface has a single read (the recipe rides the scenarios
+ * response rather than a separate endpoint).
  */
 export interface GuardScenarioInventory {
   recipe: GuardRecipeCard | null
   scenarios: GuardScenarioListItem[]
   /**
-   * The commit the inventory was read at (hosted only; absent on the OSS live
-   * store and on an empty hosted scope). Under a PR ref this can be the BASELINE
-   * commit — a PR-gate run executes the baseline set against the head without
-   * re-persisting it, so a head miss falls back (the `corpusCommit` convention);
-   * the client compares it to the viewed ref to label the fallback.
+   * The commit the inventory was read at; absent when the repo has no stored
+   * set.
    */
   scenariosCommit?: string
 }
@@ -755,7 +754,7 @@ export interface GuardScenarioInventory {
 // Flows tab — the inventory drill-down (replaces the flat Scenarios list).
 // ---------------------------------------------------------------------------
 
-/** A flow's coverage bucket, the same one `guard status` counts by. */
+/** A flow's coverage bucket, the same one the Flows list counts by. */
 export const GuardFlowBucketSchema = z.enum(['guarded', 'partial', 'blocked', 'ungenerated'])
 export type GuardFlowBucket = z.infer<typeof GuardFlowBucketSchema>
 
@@ -896,8 +895,8 @@ export const GuardFlowsViewCoreSchema = z
   .strict()
 
 /**
- * The Flows-tab payload — the flow inventory plus the preparation-recipe card the
- * tab inherited from the Scenarios tab. ONE read per tab (the recipe rides along,
+ * The Flows payload — the flow inventory plus the preparation-recipe card the
+ * page inherited from the Tests inventory. ONE read per surface (the recipe rides along,
  * the same convention `GuardScenarioInventory` follows). The findings block and
  * dismissed chips come from `/guard/report` and `/guard/decisions` as before.
  */
@@ -994,15 +993,14 @@ export const GuardFlowScenarioRowSchema = z
      * actually is, in one word plus a plain-words brief and the concrete unblock.
      * Birth stage only: the verdict was reached about that birth failure, and a
      * later run's failure is a different event with no verdict of its own. Read
-     * from the last generate's finding, else from the diagnosis the manifest
-     * committed with the test (which survives a fresh clone, where `result.json`
-     * — gitignored — does not).
+     * from the last generate's finding, else from the diagnosis stored with the
+     * test in the scenario set (which outlives any one generate report).
      */
     triage: GuardTriageSchema.optional(),
     /**
      * True when the run recorded an evidence bundle for this row (so the detail can
-     * render the transcript open). `guard/evidence/` is gitignored, so a fresh clone
-     * can still 404 the fetch — the flag says "the run wrote one", not "it is here".
+     * render the transcript open). The flag says "the run wrote one", not "it is
+     * still stored" — the fetch can still 404.
      */
     hasEvidence: z.boolean(),
     /** Interface ids this scenario grounds on (its realization path, in order). */

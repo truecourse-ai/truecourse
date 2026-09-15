@@ -1,5 +1,5 @@
 /**
- * THE FLOW-WORKER SESSION — `guard-generate.flow-worker` (plan 04 step 17), one
+ * THE FLOW-WORKER SESSION — `guard-generate.flow-worker`, one
  * per (flow, surface with a realization plan). The pivot of the generate
  * pipeline's session move: the one-shot author → birth-retry → fidelity →
  * triage stages collapse into ONE session that authors, runs, revises and
@@ -12,7 +12,7 @@
  *    the condensed result. A pre-flight defect returns as an error WITHOUT
  *    execution, so a malformed draft costs a turn, not a sandbox.
  *  - `submit_scenario` — the engine-side done-gate: a fresh confirmation run,
- *    the fidelity CHILD on a green (step 18, via `ctx.dispatchChild`), and the
+ *    the fidelity CHILD on a green (via `ctx.dispatchChild`), and the
  *    red-prediction gate on a red. Acceptance stashes the yaml ENGINE-side and
  *    names the sha the outcome must reference — the fold takes the yaml from
  *    the stash, never from the outcome text.
@@ -52,7 +52,7 @@ export const FLOW_WORKER_SESSION_KIND = 'guard-generate.flow-worker'
  *  never collide (see {@link flowWorkerCacheKey}). */
 export const FLOW_WORKER_CACHE_NAME = 'guard/generate'
 
-/** The three numbers (§3.3): the loop is draft → run → revise → submit, and a
+/** The three numbers: the loop is draft → run → revise → submit, and a
  *  hard flow legitimately takes several sandbox rounds plus a fidelity
  *  correction; 25 turns with ONE resume grant covers it without letting a
  *  thrashing worker run forever. */
@@ -363,7 +363,7 @@ export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<
     validateOutcome: outcome => task.validateOutcome(outcome),
     outcomeSchemaRepairs: 2,
     budget: FLOW_WORKER_BUDGET,
-    // The structural half of "run before you conclude" (01 step 2k): an
+    // The structural half of "run before you conclude": an
     // outcome from a worker that never executed anything is refused once —
     // even a `blocked` verdict is better grounded after one probe run.
     outcomePrecondition: {

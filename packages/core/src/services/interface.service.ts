@@ -5,12 +5,10 @@ import { relativeExternalServicePaths } from '../lib/external-service-paths.js';
  * `.truecourse/guard/interfaces.json`. No LLM and no prior analysis: the
  * per-file facts are derived directly from the tree.
  *
- * Degradation is defined, never inherited. A mapper or analyzer failure yields an
- * EMPTY catalog for that surface (whose flows then settle as honest `no-interface`
+ * Degradation is defined, never inherited. A mapper failure yields an EMPTY
+ * catalog for that surface (whose flows then settle as honest `no-interface`
  * gaps) and never fails the caller — the spec half of the pipeline has to keep
- * working on a repo the mapper chokes on. That includes C# without the Roslyn
- * host: interface mapping is tree-sitter-only, so analyze's hard-fail policy does
- * not extend here.
+ * working on a repo the mapper chokes on.
  *
  * The snapshot is HALF the catalog, and this half is the only one that is
  * derived. `cli` and `api` are read off the tree whole — their places AND their
@@ -18,7 +16,7 @@ import { relativeExternalServicePaths } from '../lib/external-service-paths.js';
  * the routing tree (`deriveWebPlacesFromTree`), its TASKS are not derived at all.
  * A web task is an ordered navigate/activate sequence with a start and an end
  * state — intent, which no tree states — so it stays hand-authored, lives in the
- * committed `guard/interfaces.authored.json`, is never written here, and is
+ * authored `guard/interfaces.authored.json`, is never written here, and is
  * merged over this file by every reader (`readMergedInterfaceCatalog`). The one
  * place that rule is enforced rather than assumed is
  * {@link assertDerivedSnapshot}, which stops the mapping dead rather than
@@ -105,7 +103,7 @@ export interface MapInterfacesResult {
    * The third parties the analyzed tree imports, read off the SAME
    * `FileAnalysis[]` the interfaces were derived from — a pure registry match, no
    * second pass. Deliberately NOT part of the snapshot: it is a fact about the
-   * working tree, re-derived every mapping, never a stale committed claim.
+   * working tree, re-derived every mapping, never a stale stored claim.
    */
   externalServices: DetectedExternalService[];
   /**

@@ -300,7 +300,7 @@ describe('synthesizeFlows — composition', () => {
 
     // The tui claim reaches the session, but leaving it out of every flow is
     // not a refusal — the area settles. (`tui`, not `web`: web's row flips to
-    // runnable once generate can author it — item 132.)
+    // runnable once generate can author it.)
     expect(res.calls).toBe(1)
     expect(res.unsettled).toEqual([])
     expect(runner.seen[0].claims.some((c) => c.driver === 'tui')).toBe(true)
@@ -350,7 +350,7 @@ describe('synthesizeFlows — milestone snapping and validation', () => {
     expect(res.flows[0].milestones.map((m) => m.claimTitle)).toEqual([ADD, LIST])
   })
 
-  // The corrective RE-ASK is retired (plan 04 step 20): the session's own
+  // The corrective RE-ASK is retired: the session's own
   // `check_flows` tool is where a milestone gets corrected, in-turn, and the
   // fold NEVER trusts the transcript — a value that still fails validation
   // refuses the area outright instead of buying a second round.
@@ -577,7 +577,7 @@ describe('synthesizeFlows — epic pass', () => {
 })
 
 describe('synthesizeFlows — subsumption post-pass', () => {
-  // Plan 04 step 16: the near-duplicate is a REPORT in session (the checker
+  // The near-duplicate is a REPORT in session (the checker
   // never deletes) and a deterministic DROP in the fold. Both halves, on the
   // same draft.
   it('the checker reports a near-duplicate cleanly; the fold is what drops it', async () => {
@@ -916,7 +916,7 @@ describe('synthesizeFlows — the inputs stamp and the write gate', () => {
   })
 
   // The wipeout guard: a run that SPENT sessions and produced no flow at all
-  // is a loss, and the committable corpus is never rewritten with it.
+  // is a loss, and the stored corpus is never rewritten with it.
   it('never rewrites a committed flows.json on a wipeout', async () => {
     const r = repo()
     const first = await synth(r, [tasksArea], areaSessions({ tasks: TASK_LIFECYCLE }))
@@ -975,7 +975,7 @@ describe('buildFlowAreas — the one grouping rule', () => {
   })
 })
 
-describe('synthesizeFlows — a sharded area folds per chunk (item 133)', () => {
+describe('synthesizeFlows — a sharded area folds per chunk', () => {
   /**
    * Two chunks share an `areaId`, so anything pairing a session RESULT back to
    * the work that produced it must key on the CHUNK. Keying on `areaId` alone
@@ -1019,7 +1019,7 @@ describe('synthesizeFlows — a sharded area folds per chunk (item 133)', () => 
   })
 })
 
-describe('buildFlowAreas — chunking an oversized area (item 133)', () => {
+describe('buildFlowAreas — chunking an oversized area', () => {
   /**
    * A flow-synthesis session must account for EVERY claim it is briefed with —
    * flowed or listed as a no-flow claim, verbatim — so the accounting output

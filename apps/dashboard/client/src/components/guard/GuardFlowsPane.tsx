@@ -59,9 +59,9 @@ export function GuardFlowsPane({
   reloadKey?: number;
   prRef?: string;
   /**
-   * The committable dismissals, the flow detail's "don't test this flow" ruling
+   * The stored dismissals, the flow detail's "don't test this flow" ruling
    * and its undo, plus the read-only note on a claim already dismissed. Omitted
-   * (guard reads off / an unresolved PR scope) hides both entirely: a decision the
+   * (guard reads off) hides both entirely: a decision the
    * reader could not have seen never gets made.
    */
   decisions?: GuardDecisionsState;

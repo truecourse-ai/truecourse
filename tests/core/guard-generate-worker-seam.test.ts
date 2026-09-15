@@ -1,6 +1,6 @@
 import { createAuthorCatalog } from '../../packages/guard-generator/src/author-catalog.js'
 /**
- * THE FLOW-WORKER SEAM AND THE FIDELITY CHILD (plan 04 steps 17 + 18) — core's
+ * THE FLOW-WORKER SEAM AND THE FIDELITY CHILD — core's
  * half: the session def, the `guard/generate` cache (kept name, session prompt
  * fingerprint), the two-wave pool, the settled-sha reject, and the depth-1
  * fidelity child with its `guard/fidelity` cache.
@@ -241,12 +241,12 @@ describe('flowWorkerSessionDef', () => {
   })
 
   it('holds the cli and api prompt fingerprints bit-for-bit — the corpus-roll tripwire', () => {
-    // These literals are the author-cache keys of every committed cli/api corpus.
+    // These literals are the author-cache keys of every stored cli/api corpus.
     // A prompt edit that moves one re-authors EVERY such flow; fail here first,
     // loudly, so the roll is a decision rather than an accident. The web arm was
     // added with both unchanged; both then moved ONCE, deliberately, with the
     // blast-radius cut: the canonical scenario schema gained `world` and the
-    // doctrine gained the shared-world/self-mint contract (a committed
+    // doctrine gained the shared-world/self-mint contract (a stored
     // delete-account scenario had deleted the seeded principal mid-run).
     // Moved again for incremental authoring: the addendum gained the edit
     // contract (`replaces`, `drop_scenario`, multi-scenario settled). Only a

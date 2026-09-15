@@ -1,5 +1,5 @@
 /**
- * THE WEB BRIEFING CARRIES THE SEED CATALOG (plan item 140): a web worker can
+ * THE WEB BRIEFING CARRIES THE SEED CATALOG: a web worker can
  * only reach a signed-in world through the login principal the seed minted, and
  * it can only know that principal exists if the briefing says so. The first
  * documenso web run proved the inverse — the fixture catalog was api-gated, the

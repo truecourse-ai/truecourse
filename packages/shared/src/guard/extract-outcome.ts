@@ -1,8 +1,8 @@
 import { GuardVerificationSchema } from './verification.js'
 /**
  * THE CLAIM-EXTRACTION SESSION OUTCOME — what one `guard-generate.extract`
- * agent session returns for ONE spec document (SPEC_GUARD_PLAN item's session
- * carve-out of the per-view extract one-shots).
+ * agent session returns for ONE spec document, in place of the per-view extract
+ * one-shots.
  *
  * Shape-wise it is the one-shot `DocExtractionSchema` (claims + untestable
  * notes) grown with the structured `needs` field the strapi reference corpus

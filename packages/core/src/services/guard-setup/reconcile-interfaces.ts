@@ -162,7 +162,7 @@ export function reconcileInterfacesSessionDef(
     // The structural half of "check before you produce": the validator is the
     // exact check the fold runs, and a subject dropped on the way to the
     // outcome costs the whole outcome a round trip. Same mechanism as
-    // interface authoring's check_draft precondition (01 step 2k).
+    // interface authoring's check_draft precondition.
     outcomePrecondition: {
       tool: 'check_resolutions',
       message:

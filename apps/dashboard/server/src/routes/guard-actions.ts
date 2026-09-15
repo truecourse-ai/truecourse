@@ -19,9 +19,6 @@
  *   POST /:id/guard/setup      enqueue `guard setup` (recipe, dependencies, seed)
  *                              as a background job; 202 { jobId }, 409 when the
  *                              repository is already working.
- *   POST /:id/guard/map        derive the interface catalog from the working tree
- *                              (analyzer + interface-mapper: deterministic, free,
- *                              no LLM — so no estimate modal, ever).
  *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
  *   POST /:id/guard/undismiss  reverse a dismissal.
  *   POST /:id/guard/flows/dismiss    dismiss a whole FLOW — the manual dismissal
@@ -29,22 +26,14 @@
  *                              its tests. Same file, `dismissedFlows`.
  *   POST /:id/guard/flows/undismiss  reverse a flow dismissal.
  *   PUT  /:id/guard/dependencies  register ONE dependency's instance: the values
- *                              go to the gitignored scenarios/dependencies.local.json
- *                              (a hosted repo: its encrypted overlay row)
- *   PUT  /:id/guard/externals  declare/clear external API accounts:
- *                              declarations to the committed recipe.json, secret
- *                              values to the gitignored externals.local.json.
- *   PUT  /:id/guard/dependencies  register ONE dependency's instance: the values
- *                              go to the gitignored scenarios/dependencies.local.json
- *                              (a recipe-declared service's base URL / mode still
- *                              go to recipe.json, where the team shares them).
+ *                              go to scenarios/dependencies.local.json in the
+ *                              scratch tree, kept as the repo's encrypted
+ *                              overlay row.
  *
- * Concurrency: one guard job per repo at a time. Generate and setup are queued
- * jobs, so the queue's single-flight key (plus the store-wide look at the repo's
- * runs) answers 409 for them; run and map still execute inside the request, so
- * they share an in-process lock and a duplicate POST can never double-run the
- * engine. Dismiss/undismiss are instant file writes (no job, no lock) — they
- * never mutate the store the engine touches.
+ * Concurrency: one guard job per repo at a time — setup, generate and run are
+ * queued jobs, so the queue's single-flight key (plus the store-wide look at the
+ * repo's runs) answers 409. Dismiss/undismiss are instant store writes (no job,
+ * no lock) — they never mutate the store the engine touches.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -118,10 +107,9 @@ async function mutateGuardDecisions(
 // same shared derivation the coverage view uses decides "active": a finding is
 // dismissed when its `dismissedClaimKey(doc, anchor, claim)` is recorded; a finding
 // with no extracted claim can never be dismissed, so it keeps the set non-empty.
-// EE installs the seam; OSS/tests leave it unset → no-op. Best-effort: a failed
-// enqueue never fails the decision save. The report is the REPO-level view read
-// (the baseline commit's row) — never the store's newest row, which a PR head's
-// regenerated (findings-free) report would shadow, masking the repo's findings.
+// Boot installs the seam; a test that leaves it unset gets a no-op. Best-effort:
+// a failed enqueue never fails the decision save. The report is the REPO-level
+// view read (the baseline commit's row), never the store's newest row.
 async function regenerateIfLastFindingDismissed(repoPath: string): Promise<void> {
   const enqueue = getGuardGenerateEnqueue();
   if (!enqueue) return;
@@ -195,7 +183,7 @@ router.get('/:id/guard/estimate', async (req: Request, res: Response, next: Next
 // POST — author scenarios. Minutes of LLM work plus a sandbox build, so it is a
 // QUEUED JOB rather than work inside the request: the route answers the two
 // refusals a user can act on now — the open-conflict gate (the same one the
-// driver hits, read through the store so a hosted repo is gated too) and the
+// driver hits, read through the store) and the
 // provider check — then enqueues and answers 202 with the job id. There is no
 // estimate gate: an unchanged corpus is the engine's own deterministic no-op.
 router.post('/:id/guard/generate', async (req: Request, res: Response, next: NextFunction) => {
@@ -399,11 +387,11 @@ router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, ne
 // stored is ever echoed back: the response is the fresh view, which masks every
 // secret.
 //
-// A working tree writes its gitignored overlays in place. A hosted repo runs the
-// same writer over a scratch tree of its stored state and keeps what the writer
-// left in the two overlay files as its encrypted overlay row — a path (nothing on
-// the server to point at) and a recipe edit (a new variable, a base-URL variable,
-// an account mode) are refused there, since the dashboard edits no recipe.
+// The writer runs over a scratch tree of the repo's stored state, and what it
+// leaves in the two overlay files becomes the repo's encrypted overlay row — a
+// path (nothing on the server to point at) and a recipe edit (a new variable, a
+// base-URL variable, an account mode) are refused there, since the dashboard
+// edits no recipe.
 //
 // Not a job: an instant write like dismiss/undismiss, so it takes no guard lock —
 // but registering an instance changes what the next generate can author, so it

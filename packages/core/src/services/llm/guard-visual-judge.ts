@@ -5,13 +5,13 @@
  * A web step asserts on the DOM: a role, an accessible name, a substring of the
  * page's text. When one of those misses, the transcript can say the words were not
  * found and the run leaves a full-page PNG behind — but the question a human
- * actually has ("so what WAS on the screen?") is answerable only by opening that
- * PNG out of a gitignored directory. This stage answers it in the transcript: it
+ * actually has ("so what WAS on the screen?") is answered only by opening that
+ * PNG. This stage answers it in the transcript instead: it
  * hands the screenshot, the step's claim, its mechanical expectation and the
  * deterministic mismatch to a vision model and records what it saw.
  *
  * THE RULES, all of which follow from the runner's determinism rule:
- *  - OPT-IN, off by default. The judge is PARKED (2026-08-14): fully implemented
+ *  - OPT-IN, off by default. The judge is PARKED: fully implemented
  *    and tested, but its vision call slows every red run, so day-to-day runs skip
  *    it until its cost/value is settled. `TRUECOURSE_GUARD_VISUAL_JUDGE=1` turns
  *    it back on — see {@link guardVisualJudgeEnabled}.
@@ -323,11 +323,12 @@ function quoteInvalidOutput(raw: unknown): string {
 }
 
 /**
- * Whether `guard run` should wire the judge in at all. Off by default: the judge
- * is parked, not deleted — every red web step would otherwise wait on a vision
- * call, and that cost is not currently buying its keep. `TRUECOURSE_GUARD_VISUAL_JUDGE=1`
- * (or `true`) opts a run back in; everything downstream (cache, schema,
- * dashboard rendering) is unchanged and springs back to life with the flag.
+ * Whether the hosted run job should wire the judge in at all, on the workspace's
+ * transport. Off by default: the judge is parked, not deleted — every red web
+ * step would otherwise wait on a vision call, and that cost is not currently
+ * buying its keep. `TRUECOURSE_GUARD_VISUAL_JUDGE=1` (or `true`) opts a run back
+ * in; everything downstream (cache, schema, dashboard rendering) is unchanged and
+ * springs back to life with the flag.
  */
 export function guardVisualJudgeEnabled(): boolean {
   const value = process.env.TRUECOURSE_GUARD_VISUAL_JUDGE?.trim().toLowerCase();
@@ -335,12 +336,12 @@ export function guardVisualJudgeEnabled(): boolean {
 }
 
 /**
- * The judge `guard run` is wired with: the run's transport, the stage's model,
- * and every failure mode flattened to `null`.
+ * The judge a run is wired with: the run's transport, the stage's model, and
+ * every failure mode flattened to `null`.
  *
  * The transport is resolved LAZILY, inside the call: building it eagerly would
- * resolve the `claude` binary on every run, including the overwhelming majority
- * that never fail a web step.
+ * cost every run, including the overwhelming majority that never fail a web
+ * step.
  */
 export function createGuardVisualJudge(
   repoRoot: string,

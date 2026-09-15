@@ -93,9 +93,9 @@ import {
 
 /**
  * ONE step of a sandbox scenario: a cli action, a WEB action, or an HTTP REQUEST —
- * all taken in the SAME sandbox. They are one list because the sandbox is ONE WORLD
- * (§2, 2026-08-09) — a real promise spans surfaces ("run the analysis, the dashboard
- * shows it, the API answers it"), and a step list locked to one driver cannot state
+ * all taken in the SAME sandbox. They are one list because the sandbox is ONE
+ * WORLD — a real promise spans surfaces ("run the analysis, the dashboard shows
+ * it, the API answers it"), and a step list locked to one driver cannot state
  * it. Which executor runs a step is the STEP's business.
  *
  * A `request` step here is the api driver's own verb ({@link

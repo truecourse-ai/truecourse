@@ -91,9 +91,8 @@ export class StepTracker {
 
   /**
    * Insert a step at runtime if it isn't already there. Used for phases we can't
-   * declare up front — e.g. the C# semantic tier only exists when the repo
-   * actually has C#, and the pre-flight cost estimate only runs when the caller
-   * gates on it. `position: 'first'` puts it at the front (a phase that precedes
+   * declare up front — e.g. the pre-flight cost estimate only runs when the
+   * caller gates on it. `position: 'first'` puts it at the front (a phase that precedes
    * everything declared); otherwise it lands just before `persist`.
    * No-op if the key already exists.
    */

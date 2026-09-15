@@ -1,5 +1,5 @@
 /**
- * The Claims tab's pure half: how a claim corpus is READ.
+ * The claim corpus's pure half: how a claim corpus is READ.
  *
  * Two things live here so the section panel and the claim detail can never
  * disagree about them:

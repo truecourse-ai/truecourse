@@ -154,7 +154,7 @@ describe('the visual judge annotates failing web steps', () => {
       expect(path.basename(asked.screenshotPath)).toBe('step-2.png')
       expect(fs.readFileSync(asked.screenshotPath).subarray(1, 4).toString()).toBe('PNG')
 
-      // The inline annotation the committable board carries — the WHOLE reading,
+      // The inline annotation the stored board carries — the WHOLE reading,
       // rationale included, because the dashboard renders from here…
       expect(result.failure?.visual).toEqual({
         verdict: 'no',

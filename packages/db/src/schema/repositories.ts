@@ -52,15 +52,20 @@ export const repositories = pgTable(
     defaultBranch: text('default_branch'),
     /** Where the provider finds it, when the name is not enough: a local folder's absolute path. */
     location: text('location'),
+    /**
+     * `blocking`, `notify_emails` and `notifications` are unused today: nothing
+     * reads them and nothing sends. They are kept for the notification design,
+     * which is not built yet. `enabled` between them is live — a disabled
+     * connection is one a push no longer re-baselines. `notifications` is
+     * loosely typed because @truecourse/db is a dependency-free leaf; the store
+     * casts at the boundary.
+     */
     blocking: boolean('blocking').notNull().default(true),
     enabled: boolean('enabled').notNull().default(true),
     notifyEmails: text('notify_emails')
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
-    // Per-type email toggles ({ gateFailure, conflicts }). Loosely typed here
-    // (@truecourse/db is a dependency-free leaf); the store casts at the boundary.
-    // Null = unset → every type on.
     notifications: jsonb('notifications').$type<Record<string, boolean>>(),
     createdAt: ts('created_at').notNull(),
     updatedAt: ts('updated_at').notNull(),

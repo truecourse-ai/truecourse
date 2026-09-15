@@ -1,5 +1,5 @@
 /**
- * THE AUTH VERIFICATION SESSION — `guard-setup.auth-proof` (plan 03 step 14):
+ * THE AUTH VERIFICATION SESSION — `guard-setup.auth-proof`:
  * the last setup step takes the catalog's SUPPLIED entries and proves each
  * REGISTERED one actually authenticates, by running the program under test in a
  * fresh sandbox that already carries the materialized state.
@@ -125,7 +125,7 @@ function writeCatalog(r: string, registration: unknown = {
   );
 }
 
-/** The gitignored instance overlay — what the user registered on this machine. */
+/** The instance overlay — what the user registered on this machine. */
 function writeLocal(r: string, instance: unknown): void {
   const file = path.join(r, '.truecourse', 'scenarios', 'dependencies.local.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });

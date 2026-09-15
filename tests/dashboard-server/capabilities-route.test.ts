@@ -3,8 +3,8 @@
  * one product now, so `edition` is the constant `'community'` and the
  * capability list is the community set — no env sniffing, no plugin registry.
  *
- * The response shape { edition, capabilities } is the contract the client
- * depends on, so both fields are pinned here.
+ * The response shape is `{ edition, mode, capabilities }`; `edition` and
+ * `capabilities` are pinned here, `mode` in `local-mode.test.ts` beside it.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -15,9 +15,8 @@ import { createTestApp } from '../helpers/test-app';
 
 describe('GET /api/capabilities', () => {
   it("reports edition 'community' regardless of the environment", async () => {
-    // WORKOS_* + TRUECOURSE_EDITION used to flip this to 'enterprise'. WorkOS is
-    // now always configured, and the client's enterprise branch loads a dead
-    // client chunk, so the value must not move.
+    // WORKOS_* + TRUECOURSE_EDITION used to flip this to 'enterprise'. Which
+    // edition a bundle is, is decided when it is built, so the value must not move.
     vi.stubEnv('TRUECOURSE_EDITION', 'enterprise');
     vi.stubEnv('WORKOS_API_KEY', 'sk_test_dummy');
     vi.stubEnv('WORKOS_CLIENT_ID', 'client_test_dummy');

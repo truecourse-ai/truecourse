@@ -1,5 +1,5 @@
 /**
- * Run adjudication (plan 05) — the engine halves behind
+ * Run adjudication — the engine halves behind
  * `commands/guard-adjudicate.ts`: the deterministic pre-pass, the
  * `guard-adjudicate.failure` session (tools, briefing, cache key), the
  * `guard-adjudicate.control` child, the serial fold + routing, and the

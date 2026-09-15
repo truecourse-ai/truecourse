@@ -8,7 +8,7 @@
  * `runnable: false` — so `guard generate` discarded every web claim and authored
  * no web scenario, on a repo whose reference corpus runs eleven of them. A
  * shipped driver with a stale row is invisible: nothing fails, work is silently
- * dropped (SPEC_GUARD_PLAN item 132).
+ * dropped.
  *
  * SECOND: a runnable driver must name the recipe block that PREPARES it. That
  * mapping used to be spelled as hardcoded `driver === 'cli' | 'api'` branches in

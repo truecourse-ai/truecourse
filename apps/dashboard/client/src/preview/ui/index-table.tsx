@@ -1,8 +1,8 @@
 /**
  * THE index of a top-level page: the search full width, ONE filter row (Add
  * filter, the dimension, the value), a one-line table whose rows open the
- * thing, and THE TALLY under it. Code, Tests and Sessions read this way;
- * Context's lists do too. A surface names its columns and renders its cells;
+ * thing, and THE TALLY under it. Code, Flows and Agent read this way; a
+ * repository's Runs, Interfaces and Dependencies and Context's lists do too. A surface names its columns and renders its cells;
  * the chrome, the row's click and keyboard, the empty line are this
  * component's.
  *

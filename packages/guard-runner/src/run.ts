@@ -512,7 +512,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
    *
    * Anything else — pure git/write/`run:` sandbox work — needs none of it, and that
    * is the economy this predicate exists to protect: a cli-only selection must not
-   * start docker (item 98).
+   * start docker.
    */
   const needsPreparedWorld = (s: GuardScenario): boolean =>
     isApiServerScenario(s) ||
@@ -567,7 +567,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   //
   // Never a `fail`: the code is not in dispute here and the spec is not
   // contradicted; what is missing is a real-world input the engine must not
-  // fabricate (§7.2). Registering an instance is the one action that clears it.
+  // fabricate. Registering an instance is the one action that clears it.
   let resolvedDependencies: ResolvedDependencies
   try {
     resolvedDependencies = resolveDependencies(repoRoot, {
@@ -620,12 +620,12 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   })
 
   /**
-   * THE PREPARED-WORLD GATE (item 98). Services and the seed are the RUN's shared
+   * THE PREPARED-WORLD GATE. Services and the seed are the RUN's shared
    * world, so what decides whether to prepare it is whether anything this selection
    * will actually RUN needs it — not the size of the api pool. Gating on the pool is
-   * what made `guard run --scenario <a web one>` start no services and seed nothing,
-   * leaving every `{{fixture:…}}` in it settling as "the seed did not run for this
-   * selection". Only scenarios that passed the prerequisite gate prepare a world.
+   * what made a run selecting one web scenario start no services and seed
+   * nothing, leaving every `{{fixture:…}}` in it settling as "the seed did not
+   * run for this selection". Only scenarios that passed the prerequisite gate prepare a world.
    */
   const prerequisiteRunnableApi = runnable.filter(p => isApiServerScenario(p.scenario))
   const worldNeeded = runnable.some((p) => needsPreparedWorld(p.scenario))
@@ -863,9 +863,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // Resolve declared credentials from the host env BEFORE booting — a missing
       // env var is a loud stop, and the secret values never touch the recipe env.
       // Only the api pool can READ a credential (a sandbox scenario binds no server,
-      // and `{{cred:…}}` is deliberately not active there — item 99), so a world-only
-      // preparation resolves none: refusing a web-only run over an api key nothing in
-      // it can use would be the same false gate item 98 removes. The seed still folds
+      // and `{{cred:…}}` is deliberately not active there), so a world-only
+      // preparation resolves none: refusing a web-only run over an api key
+      // nothing in it can use would be the same false gate the prepared-world
+      // gate removes. The seed still folds
       // whatever it PUBLISHES into this map.
       if (apiPool) {
         try {

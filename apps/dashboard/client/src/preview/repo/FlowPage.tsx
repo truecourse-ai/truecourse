@@ -1,6 +1,6 @@
 /**
  * One flow, as its own page (`/flows/:flowId?repo=`): the breadcrumb
- * back to Flows, then the vendored flow workspace (`GuardFlowsPane`), pinned to
+ * back to Flows, then the flow workspace (`GuardFlowsPane`), pinned to
  * this one flow. A scenario or finding the workspace opens rides the same URL
  * tabs it always did. The reads are the server's, re-read
  * when a generate or a run lands.

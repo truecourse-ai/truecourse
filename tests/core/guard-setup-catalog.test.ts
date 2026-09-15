@@ -1,10 +1,10 @@
 /**
- * THE DEPENDENCY CATALOG SESSION — `guard-setup.dependency-catalog`
- * (plan 03 step 10): the condition grammar, the validation `check_catalog` runs
- * verbatim, the ADD-ONLY fold into the committed catalog + the gitignored
- * overlay, and the seam the engine's catalog step calls.
+ * THE DEPENDENCY CATALOG SESSION — `guard-setup.dependency-catalog`: the
+ * condition grammar, the validation `check_catalog` runs verbatim, the ADD-ONLY
+ * fold into the catalog + the instance overlay, and the seam the engine's
+ * catalog step calls.
  *
- * Plus `externalServiceStates` — the read surface §7.6 moves to the catalog:
+ * Plus `externalServiceStates`, the read surface that lives on the catalog:
  * a supplied catalog entry that names a service answers for it, and the recipe
  * declaration keeps answering for the services only IT declares.
  */
@@ -285,7 +285,7 @@ describe('foldCatalogDraft', () => {
         },
       },
     ]);
-    // The INSTANCE skeleton lands in the gitignored overlay — the user's file.
+    // The INSTANCE skeleton lands in the instance overlay — the user's half.
     expect(JSON.parse(fs.readFileSync(dependenciesLocalPath(r), 'utf-8'))).toEqual({
       stripe: { env: { STRIPE_BASE_URL: '' } },
     });
@@ -392,7 +392,7 @@ describe('foldCatalogDraft', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The read surface §7.6 moves onto the catalog
+// The read surface that lives on the catalog
 // ---------------------------------------------------------------------------
 
 describe('externalServiceStates', () => {

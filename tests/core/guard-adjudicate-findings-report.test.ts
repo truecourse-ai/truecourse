@@ -1,5 +1,5 @@
 /**
- * THE FINDINGS REPORT (plan 05 step 24) — `guard/findings.md`, the pure render
+ * THE FINDINGS REPORT — `guard/findings.md`, the pure render
  * of the board's `bug` / `drift` verdicts.
  *
  * Two properties earn the file its own module. NUMBERING IS STABLE: `F7` in an
@@ -9,10 +9,9 @@
  * a section edited since the scenario bound it says so instead of quoting text
  * the verdict never read.
  *
- * The report is regenerated WHOLE each `--report`; its sibling
+ * The report is regenerated WHOLE on every render; its sibling
  * `guard/adjudicate.findings.md` is the opposite — an append-only per-run
- * ledger. Both are committable, and that is asserted against the real gitignore
- * template rather than trusted.
+ * ledger.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -284,9 +283,9 @@ describe('writeGuardFindingsReport — when a file is written at all', () => {
 })
 
 /**
- * The `--report` path reads the CURRENT board off the store rather than being
- * handed one — the CLI's two outcomes ("Nothing to report." vs `report N
- * finding(s) → …`) are exactly this function's `null` and its result.
+ * The report path reads the CURRENT board off the store rather than being
+ * handed one — the two outcomes a caller has to tell apart are exactly this
+ * function's `null` and its result.
  */
 describe('writeGuardAdjudicationReport — the --report entry point', () => {
   it('reports nothing on a board with no bug/drift verdict', async () => {

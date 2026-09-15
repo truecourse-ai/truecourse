@@ -1,6 +1,7 @@
 /**
- * The committable guard decisions (`scenarios/decisions.json`) as ONE state
- * object: what the user ruled out of testing, plus the writes that change it.
+ * The stored guard decisions (materialized into a run as
+ * `scenarios/decisions.json`) as ONE state object: what the user ruled out of
+ * testing, plus the writes that change it.
  *
  * TWO TIERS, and they are not interchangeable:
  *  - `dismissedFlows`, the MANUAL unit. A flow is a stable, spec-derived

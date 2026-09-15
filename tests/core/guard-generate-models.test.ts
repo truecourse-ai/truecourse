@@ -1,5 +1,5 @@
 /**
- * MODEL RESOLUTION after the one-shot retirement (plan 04 step 20).
+ * MODEL RESOLUTION after the one-shot retirement.
  *
  * `resolveGuardModels` shrank to the two stages that still ride the transport —
  * `{ match, recipe, fallback }`. Every other guard-generate stage is an agent

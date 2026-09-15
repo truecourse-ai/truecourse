@@ -5,7 +5,7 @@
  *
  *   GET /:id/guard/status        composed status summary (coverage / last run / last generate)
  *   GET /:id/guard/latest        the last run's per-scenario results (+ failure/evidence + runFlows)
- *   GET /:id/guard/history       the baseline run trend (?all=1: every stored run, PR heads included)
+ *   GET /:id/guard/history       the baseline run trend (?all=1: every stored run, not just the trend)
  *   GET /:id/guard/runs/:runId   one past run snapshot (+ runFlows)
  *   GET /:id/guard/report        the last `guard generate` report
  *   GET /:id/guard/coverage      per-section coverage join for ?doc=<path> (over the live doc)
@@ -28,7 +28,6 @@
  *   GET /:id/guard/evidence/visual   one of those files, as image/png or video/webm
  *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
- *   GET /:id/guard/externals     detected + declared external API accounts
  *   GET /:id/guard/setup         the last `guard setup` report (?commit= pins one)
  */
 
@@ -88,9 +87,9 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const ref = refOf(req);
-    // PR view: the RUN comes from the PR head alone (never the baseline); the
-    // generate-side inputs (manifest / result) fall back to the baseline set —
-    // the one the gate executed — when the head persisted nothing.
+    // With `?ref=<commit>`: the run is the one stored at that commit and never
+    // the baseline; the generate-side inputs (manifest / result) fall back to
+    // the baseline set when that commit stored none.
     res.json(
       composeGuardStatus(
         await readManifestForView(repo.path, ref),
@@ -177,7 +176,8 @@ router.get('/:id/guard/report', async (req: Request, res: Response, next: NextFu
 });
 
 // The per-section coverage join over a live spec doc. `?doc=` is repo-relative;
-// `?ref=` (EE) pins the revision the doc is read at (OSS ignores it).
+// `?ref=` is accepted for the guard-side join; the document body is the
+// workspace's current one (the doc reader takes no revision).
 router.get('/:id/guard/coverage', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
@@ -197,8 +197,8 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
       res.status(404).json({ error: `Doc not found: ${doc}` });
       return;
     }
-    // PR view: the run comes from the PR head's stored run, never the baseline;
-    // the manifest/flows/result join falls back to the baseline set the gate executed.
+    // With a pinned commit: the run is the one stored at that commit, never the
+    // baseline; the join falls back to the baseline set.
     res.json(
       composeDocCoverage(doc, content, {
         scenarios: await readGuardScenariosForView(repo.path, commit),
@@ -213,7 +213,7 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
         claims: await readGuardClaimsForView(repo.path, commit),
         // Which third parties the user could PROVIDE right now — the join
         // that promotes a providable `blocked-on` section to `needs-setup`,
-        // using the stored overlay for hosted repositories.
+        // read from the stored overlay.
         externals: await guardExternalSetupIndexForView(repo.path, refOf(req)),
       }),
     );
@@ -267,8 +267,7 @@ router.get('/:id/guard/interfaces', async (req: Request, res: Response, next: Ne
 // THE RAW ARTIFACT behind one entity — the second reading every artifact-backed
 // surface offers (View + the stored file). Each answers the entity's own slice of
 // its JSON store, pretty-printed by the driver; 404 when the store, or that entry
-// in it, does not exist — which is also how a hosted repo reads, since the stores
-// live in the working tree. The id selects INSIDE an already-read file and never
+// in it, does not exist. The id selects INSIDE an already-read file and never
 // reaches a path, so the store seam's own confinement is the whole path story.
 //
 // The scenario detail has no route here: its artifact is the whole YAML file,
@@ -546,11 +545,11 @@ router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFun
 
 // GET — the DEPENDENCIES view: every class of starting state the program needs
 // (the committed catalog) joined with the registered instances, the flows each
-// one blocks, and the external-service half where the row is one. A working tree
-// reads itself, host env included; a hosted repo composes the same view over a
-// scratch tree of its stored state — the setup bundle, the scenario set, the
-// generate report and the encrypted overlays — with an EMPTY host env, so the
-// server's own variables never read as a registered account.
+// one blocks, and the external-service half where the row is one. The view is
+// composed over a scratch tree of the repo's stored state — the setup bundle,
+// the scenario set, the generate report and the encrypted overlays — with an
+// EMPTY host env, so the server's own variables never read as a registered
+// account.
 router.get('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);

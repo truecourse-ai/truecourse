@@ -184,11 +184,11 @@ describe('the per-driver preparation gate', () => {
 })
 
 /**
- * THE PREPARED WORLD (item 98). `api.services.up` and `api.seed` prepare the world
- * the RUN shares — the datastore behind the app and the rows in it — and that world
- * used to be gated on the api pool alone: `guard run --scenario <a web one>` started
- * no services and seeded nothing, so every `{{fixture:…}}` in it settled the "the
- * seed did not run for this selection" error. The gate now asks the same question
+ * THE PREPARED WORLD. `api.services.up` and `api.seed` prepare the world the RUN
+ * shares — the datastore behind the app and the rows in it — and that world used
+ * to be gated on the api pool alone: a run scoped by `scenario` to a web one
+ * started no services and seeded nothing, so every `{{fixture:…}}` in it settled
+ * the "the seed did not run for this selection" error. The gate now asks the same question
  * the per-driver gate above asks — what does this selection NEED — and the economy
  * it protects is the other half: a cli-only selection must still start no docker.
  */

@@ -21,11 +21,11 @@
  *    outcome is refused: the step fails with the SeedError, setup does not.
  *
  * SCRATCH LIVES INSIDE THE TREE, deliberately: `.truecourse/.cache/guard/
- * seed-drafts/<id>/` (gitignored wholesale via `.cache/`, deleted after the
+ * seed-drafts/<id>/` (the run's scratch cache, deleted after the
  * session). A draft must import the app's own ORM, and Node resolves bare
  * specifiers from the IMPORTING FILE's directory upward — a draft in the OS
  * tmpdir would fail every import and prove nothing. What "never the repo"
- * protects — no draft at a committed path until the fold — still holds.
+ * protects — no draft at the script's real path until the fold — still holds.
  *
  * SECRET HYGIENE: every tool result passes `buildCredentialRedactor` before
  * it enters the transcript. The redactor grows as the session mints values —
@@ -112,7 +112,7 @@ const DB_QUERY_TIMEOUT_MS = 20_000;
  * the credential, so the verify can make a real authenticated request instead
  * of trusting the manifest's shape (2026-08-23 bench: a `Bearer `-prefixed
  * token passed every static check and would have 401'd at guard run).
- * Session-side verification only — probes never enter the committed recipe.
+ * Session-side verification only — probes never enter the stored recipe.
  */
 /**
  * Proof that the LOGIN CHANNEL works — the request the web scenarios' sign-in
@@ -210,7 +210,7 @@ export const SeedSessionOutcomeSchema = z
 export type SeedSessionOutcome = z.infer<typeof SeedSessionOutcomeSchema>;
 
 /** `sha256(prompt fp :: the seed step's input fingerprint)` — the step
- *  fingerprint already folds the recipe and the committed catalog. */
+ *  fingerprint already folds the recipe and the stored catalog. */
 export function seedSessionCacheKey(stepFingerprint: string): string {
   return createHash('sha256')
     .update(`${promptFingerprint(SYSTEM_PROMPT)}::${stepFingerprint}`)
@@ -220,7 +220,7 @@ export function seedSessionCacheKey(stepFingerprint: string): string {
 /**
  * The path the fold writes the script to — the recipe's declared
  * `api.seed.script` when one is being replaced (an edit stays an edit),
- * else the plan's convention under the committed scenarios directory.
+ * else the conventional name for its ecosystem under the scenarios directory.
  */
 export function seedScriptTargetPath(input: {
   existingScript?: { scriptPath: string };
@@ -418,7 +418,7 @@ export function seedSessionDef(world: SeedSessionWorld): SessionDef<SeedSessionO
       message:
         'Outcome refused: you never ran `run_seed_draft` in this session. Run it on your complete draft now — it executes the script against the live services and validates its manifest against your `provides`, exactly as the fold will. Fix anything it reports, then call `outcome` again.',
     },
-    // The item-118 checkpoint, extended here after the 2026-08-23 bench: two
+    // The draft checkpoint, extended after a bench in which two
     // seed sessions spent their entire first grant (20/20 turns) exploring
     // with zero drafts, and only the exhaustion warning forced drafting.
     draftCheckpoint: {

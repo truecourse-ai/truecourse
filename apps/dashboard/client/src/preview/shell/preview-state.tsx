@@ -157,9 +157,8 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
 
   /**
    * The row goes optimistically and the refresh settles it either way — so a
-   * refused disconnect (the server holds the repo while a scan it cannot stop
-   * writes into it) has to SAY so, or the row simply reappears and reads as a
-   * bug.
+   * refused disconnect (a job the server cannot stop is still running) has to
+   * SAY so, or the row simply reappears and reads as a bug.
    */
   const unlinkRepo = useCallback(
     (id: string) => {

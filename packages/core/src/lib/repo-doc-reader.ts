@@ -7,7 +7,7 @@
  * the repository's own snapshot. Callers use `readRepoDoc` and never touch `fs`.
  */
 
-/** Options for a doc read. `commit` pins the snapshot a PR view reads. */
+/** Options for a doc read. `commit` pins which stored snapshot is read. */
 export interface RepoDocReadOptions {
   /** The commit whose snapshot to read the document from. */
   commit?: string;

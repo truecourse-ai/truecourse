@@ -1,16 +1,15 @@
 /**
- * Ambient LLM trace context (enterprise observability).
+ * Ambient LLM trace context.
  *
  * The transport (`createApiTransport`) sees each `LlmRequest` — which carries
- * `id`/`stage` but NOT the EE-only facts (which org, which job, which repo).
- * Those come from here: the EE worker wraps each job body in `runWithTrace(...)`,
- * and the transport reads `currentTrace()` to tag the trace it records. Only EE
- * sets it — OSS runs outside any `runWithTrace`, so `currentTrace()` is
- * `undefined` and nothing is recorded.
+ * `id`/`stage` but not which org, which job or which repo asked. Those come from
+ * here: a caller wraps the job body in `runWithTrace(...)` and the transport
+ * reads `currentTrace()` to tag the trace it records. Nothing does today, so
+ * `currentTrace()` is `undefined` and nothing is recorded.
  *
  * `AsyncLocalStorage` propagates across the concurrent slice awaits, so every
- * call of one job shares the same `traceId` without threading a parameter through
- * the OSS pipeline.
+ * call of one job would share the same `traceId` without threading a parameter
+ * through the pipeline.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';

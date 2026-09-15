@@ -1,8 +1,8 @@
 /**
- * BLAST-RADIUS SCHEDULING, the generate side (plan item 144): the batched world
+ * BLAST-RADIUS SCHEDULING, the generate side: the batched world
  * classifier routes destructive flows into the pool's serialized mutator wave,
  * the shared world is restored after that wave, the authored `world` field
- * survives into the committed file — and the C-lite briefing hands every worker
+ * survives into the stored file — and the C-lite briefing hands every worker
  * the committed GREEN siblings that already walk its interfaces, so arranging
  * is copy-and-parameterize rather than rediscovery.
  */

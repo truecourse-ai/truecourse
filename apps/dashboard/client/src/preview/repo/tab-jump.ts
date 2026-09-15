@@ -1,19 +1,18 @@
 /**
- * The preview's ROUTER SEAM for guard's cross-tab jumps.
+ * The ROUTER SEAM for guard's cross-tab jumps.
  *
- * The vendored components jump between tabs through `useGuardView`, which is the
- * real dashboard's hook and writes the destination as `?section=guard&tab=<id>`
- * beside the selection it carries (`?flow=`, `?interface=`, `?dependency=`,
- * `?doc=`+`?section=`). The real repo page reads the tab out of that param; the
- * preview reads it out of the PATH ('/repos/:slug/:tab'), so the param
- * alone would land nowhere and a call to action would quietly do nothing.
+ * The guard components jump between tabs through `useGuardView`, which writes
+ * the destination as `?section=guard&tab=<id>` beside the selection it carries
+ * (`?flow=`, `?interface=`, `?dependency=`, `?doc=`+`?section=`). This app
+ * routes by PATH ('/repos/:slug/:tab'), so the param alone would land nowhere
+ * and a call to action would quietly do nothing.
  *
  * This hook is the one line of translation, and only that: it moves the tab the
  * jump named into the address, keeps every selection param the jump wrote
  * untouched, and replaces the entry rather than pushing one, so the jump is one
  * navigation and the Back button still returns where the reader came from. The
- * ids are the ones `navigation/registry.ts` names on the current dashboard; the
- * paths are the ones `RepoConsole` routes on.
+ * ids are the ones `useGuardView` writes; the paths are the ones `RepoConsole`
+ * routes on.
  *
  * Every tab whose surfaces can fire a jump calls it once, at the top, because a
  * jump can come from a control nested far below the tab's own props. A Context
@@ -26,7 +25,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { DOCUMENTS_BASE, conflictHref, docHref } from '@/preview/pages/context-hrefs';
 import { flowHref, flowsHref } from '@/preview/pages/flow-hrefs';
 
-/** The dashboard's guard tab ids, as the preview's path segments. */
+/** The guard tab ids `useGuardView` writes, as this app's path segments. */
 const TAB_PATH: Record<string, string> = {
   // Documentation is the workspace's: a jump that named the repository's
   // retired Sources tab lands on the links this repository reads through.
@@ -76,18 +75,18 @@ export function useGuardTabJump(repoId?: string): void {
       // The reading repository is the destination's own parameter, written by
       // `docHref` — carrying the old one through would double it.
       next.delete('repo');
-      // `section` carries two things under one key: the real dashboard's
-      // product switch (which the preview does not have) and, on a jump that
-      // named a document, the within-document anchor it wrote over the switch.
-      // Only the anchor survives.
+      // `section` carries two things under one key: a leftover product switch
+      // this app does not have and, on a jump that named a document, the
+      // within-document anchor it wrote over the switch. Only the anchor
+      // survives.
       if (!doc) next.delete('section');
       const to = doc ? docHref(doc, slug) : conflict ? conflictHref(conflict) : DOCUMENTS_BASE;
       const query = next.toString();
       navigate(query ? `${to}${to.includes('?') ? '&' : '?'}${query}` : to, { replace: true });
       return;
     }
-    // `section` is the real dashboard's product switch, which the preview does
-    // not have: the jump wrote it, so the jump's translation drops it.
+    // `section` is a leftover product switch the jump writes, which this app
+    // does not have, so the translation drops it.
     next.delete('section');
     const path = TAB_PATH[tab] ?? '';
     const query = next.toString();

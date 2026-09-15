@@ -772,7 +772,7 @@ describe('api session driver', () => {
 });
 
 // ---------------------------------------------------------------------------
-// per-provider cache strategy (item 7): each provider is told to cache and to
+// per-provider cache strategy: each provider is told to cache and to
 // keep tool calls single-file in the way IT takes — never anthropic's way
 // aimed at everyone and silently dropped by three of the four.
 // ---------------------------------------------------------------------------
@@ -904,7 +904,7 @@ describe('api session driver provider cache strategy', () => {
   });
 
   /**
-   * A cluster's shared prefix (item 8) is the only part of two sessions' prompts
+   * A cluster's shared prefix is the only part of two sessions' prompts
    * that is byte-identical, so it has to close a cacheable prefix of its own:
    * marked only as part of one session's moving tail, the next session of the
    * cluster has nothing to read back.
@@ -955,7 +955,7 @@ describe('api session driver provider cache strategy', () => {
 });
 
 // ---------------------------------------------------------------------------
-// attribution (item 2): what ran this, on the driver and on every turn
+// attribution: what ran this, on the driver and on every turn
 // ---------------------------------------------------------------------------
 
 describe('api session driver attribution', () => {
@@ -1010,7 +1010,7 @@ describe('api session driver attribution', () => {
 });
 
 // ---------------------------------------------------------------------------
-// provider retries (item 11): the wait is transcript, not silence
+// provider retries: the wait is transcript, not silence
 // ---------------------------------------------------------------------------
 
 describe('api session driver provider retries', () => {
@@ -1075,7 +1075,7 @@ describe('api session driver provider retries', () => {
     ]);
   });
 
-  it('floors a short Retry-After with the ladder (01 step 2i)', async () => {
+  it('floors a short Retry-After with the ladder', async () => {
     // The header is advice about a world that does not include the load we
     // ourselves generate: twenty sessions each waiting the suggested second
     // keep the deployment saturated forever.
@@ -1180,7 +1180,7 @@ describe('api session driver provider retries', () => {
 });
 
 // ---------------------------------------------------------------------------
-// retryDelayMs (01 step 2i): the three rules, as arithmetic
+// retryDelayMs: the three rules, as arithmetic
 // ---------------------------------------------------------------------------
 
 describe('retryDelayMs', () => {

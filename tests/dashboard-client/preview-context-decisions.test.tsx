@@ -6,9 +6,6 @@
  * verdict made while reading through a repository must land in that workspace
  * ledger, not in a repository-scoped one nothing reads back. The reads stay the
  * repository's: its slice, its documents.
- *
- * The one exception is the pull-request gate, which keeps a decisions overlay
- * of its own on the repository's routes.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';

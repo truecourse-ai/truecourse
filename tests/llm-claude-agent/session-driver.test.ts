@@ -640,7 +640,7 @@ describe('claude agent session driver', () => {
 });
 
 // ---------------------------------------------------------------------------
-// attribution (item 2) + provider retries (item 11)
+// attribution + provider retries
 // ---------------------------------------------------------------------------
 
 describe('claude agent session driver attribution', () => {

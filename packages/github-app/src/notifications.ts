@@ -1,7 +1,8 @@
 /**
  * Per-repo email notification preferences. Stored sparsely on the repo link
- * (absent = every type on); these helpers resolve the defaults so the gate's
- * send sites and the connect API can ask a simple yes/no.
+ * (absent = every type on) and resolved here so the connect API can answer a
+ * simple yes/no. Unused today — nothing sends; kept for the notification
+ * design, which is not built yet.
  */
 
 import type { GithubNotificationPrefs, RepositoryRecord } from '@truecourse/shared';

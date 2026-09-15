@@ -69,7 +69,8 @@ export interface GuardRunCoverage {
 // Store interface
 // ---------------------------------------------------------------------------
 
-/** Pluggable guard store. File-backed by default; EE injects Postgres/Blob. */
+/** Pluggable guard store. Nothing is installed by default; boot installs the
+ *  Postgres one. */
 export interface GuardStore {
   // --- Run state ------------------------------------------------------------
   readGuardLatest(repoPath: string): Promise<GuardLatest | null>;
@@ -78,11 +79,12 @@ export interface GuardStore {
   writeGuardRun(repoPath: string, latest: GuardLatest): Promise<WrittenGuardRun>;
   /** Read + validate a past run snapshot by runId, or `null` (unsafe id / absent). */
   readGuardRun(repoPath: string, runId: string): Promise<GuardLatest | null>;
-  /** Stored run for an exact commit (base-run reuse + webhook-redelivery dedupe), or null. */
+  /** Stored run at an exact commit — what a commit-pinned view and the staleness
+   *  probe read. `null` when none. */
   readGuardRunForCommit(repoPath: string, commitSha: string): Promise<GuardLatest | null>;
   /**
    * The run trend: the repo's baseline runs, oldest-first. `all` widens it to
-   * EVERY stored run — a pull request's head runs included — for a run list.
+   * EVERY stored run, whatever its origin — what the Runs tab reads.
    */
   readGuardHistory(repoPath: string, opts?: GuardHistoryReadOptions): Promise<GuardHistory>;
   appendGuardHistory(repoPath: string, entry: GuardHistoryEntry): Promise<void>;
@@ -103,8 +105,7 @@ export interface GuardStore {
   /**
    * Persist a generate report for `ref`, keyed by its commit. `baseline` marks
    * a DEFAULT-BRANCH generate — the one the repo-level views anchor on (see
-   * {@link GuardStore.readGuardBaselineCommit}); a PR head's regenerate never
-   * sets it.
+   * {@link GuardStore.readGuardBaselineCommit}).
    */
   writeGuardResult(
     ref: RepoRef,
@@ -189,7 +190,7 @@ export interface GuardStore {
   readManifest(repoKey: string, commitSha?: string): Promise<GuardManifest | null>;
   /** Raw `recipe.json` content, or `null` when absent. */
   readRecipeRaw(repoKey: string, commitSha?: string): Promise<string | null>;
-  /** Repo-relative posix paths of every committed scenario YAML (sorted). */
+  /** Repo-relative posix paths of every stored scenario YAML (sorted). */
   listScenarioFiles(repoKey: string, commitSha?: string): Promise<string[]>;
   /** One scenario YAML's content by its repo-relative path, or `null`. */
   readScenarioFile(repoKey: string, relPath: string, commitSha?: string): Promise<string | null>;

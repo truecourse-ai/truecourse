@@ -1,6 +1,6 @@
 /**
  * The reusable Guard main-pane tab model, the same transient/pinned tab model as
- * the Spec doc tabs (single-click opens a preview tab the next single-click
+ * the corpus document tabs (single-click opens a preview tab the next single-click
  * replaces; double-click pins; the tab bar and close buttons render like the
  * other viewers). Parameterised by the URL it mirrors so each Guard surface gets
  * its OWN addressable tab set from ONE reducer, never a second implementation:

@@ -228,12 +228,13 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
 
   const all = planWorkItems(derived, authored)
 
-  // THE STALE-PLACE RULE (01 step 2h) — a WORK-LIST rule, never a merge rule.
+  // THE STALE-PLACE RULE — a WORK-LIST rule, never a merge rule.
   // An authored screen the derivation no longer produces (in a repo whose
   // derived web half is non-empty) is an address nobody can stand at any more —
   // the measured case is a route module that now only redirects — and a session
-  // spent on it is a session wasted, on every `--replace` run, forever. It stays
-  // in the merged catalog (a fresh clone has no derived half at all, and the
+  // spent on it is a session wasted, on every `replace` run, forever. It stays
+  // in the merged catalog (a repo whose derivation never ran has no derived half
+  // at all, and the
   // empty-derived-half escape hatch below rests on exactly that), but it earns
   // no session: excluded here, reported as a named diagnostic on the result.
   const diagnostics = staleAuthoredPlaceDiagnostics(derived, authored)
@@ -321,7 +322,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     serialKey: (item) => clusterOf.get(item.place.id)!.id,
     sharedPrefix: (item) => packOf(item.place.id).prefix,
     session: (item) => {
-      // An explicit `--replace` re-author may replace THIS place's own tasks and
+      // An explicit `replace` re-author may replace THIS place's own tasks and
       // nothing else: every other authored entry is somebody else's work.
       const replaceable = new Set(opts.replace ? item.existing : [])
       briefed.set(item.place.id, authored)

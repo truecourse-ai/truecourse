@@ -303,7 +303,7 @@ describe('Guard routes', () => {
     writeJson('.truecourse/scenarios/recipe.json', RECIPE);
     const res = await request(app).get(url('scenarios')).expect(200);
     expect(res.body.recipe.stale).toBeNull();
-    // No manifest → every committed scenario reads as hand-written. The bound doc
+    // No manifest → every stored scenario reads as hand-written. The bound doc
     // was never written here, so no heading text joins (the row carries none).
     expect(res.body.scenarios).toEqual([
       expect.objectContaining({ id: 'a1', handWritten: true }),
@@ -588,7 +588,7 @@ describe('Guard routes', () => {
 
   // --- The merged step list: authored expectations + the run's actuals -------
 
-  /** A three-step committed test — enough for a run that stops at the second one. */
+  /** A three-step stored test — enough for a run that stops at the second one. */
   const THREE_STEP_YAML = [
     'id: m1',
     'title: three steps',
@@ -705,7 +705,7 @@ describe('Guard routes', () => {
 
   it('staleness lights the run dot when the generate is newer than the last run', async () => {
     seed();
-    // A generate that landed AFTER the run: the committed scenarios have not been
+    // A generate that landed AFTER the run: the stored scenarios have not been
     // re-run since they were re-authored.
     writeJson('.truecourse/guard/result.json', { ...RESULT, generatedAt: '2026-07-08T00:00:00.000Z' });
     const res = await request(app).get(url('staleness')).expect(200);

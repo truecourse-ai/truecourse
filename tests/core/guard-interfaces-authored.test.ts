@@ -3,7 +3,7 @@
  *
  * `guard/interfaces.json` is derived and holds the `cli` + `api` interfaces — plus,
  * since the web derivation landed, the web PLACES. Every web TASK in existence is
- * hand-authored and lives in the committed `guard/interfaces.authored.json`. A
+ * hand-authored and lives in `guard/interfaces.authored.json`. A
  * view composed from the derived half alone shows a repo that has no web tasks at
  * all, which is the visible half of the same loss the split was made to stop.
  *

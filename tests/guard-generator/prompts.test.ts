@@ -165,9 +165,9 @@ describe('guard-generator prompts', () => {
     expect(RECIPE_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
   })
 
-  // The EXTRACT one-shot prompt (and its fingerprint) is RETIRED — plan 04
-  // step 15 replaced it with the `guard-generate.extract` SESSION, whose prompt
-  // lives in `@truecourse/core`. Its classification rules (server-process ⇒ api,
+  // The EXTRACT one-shot prompt (and its fingerprint) is RETIRED — the
+  // `guard-generate.extract` SESSION replaced it, and its prompt lives in
+  // `@truecourse/core`. Its classification rules (server-process ⇒ api,
   // llm-provider ⇒ untestable, library by consumption form) are re-pinned
   // against the session prompt in
   // `tests/core/guard-generate-extract-session.test.ts`; the session prompt is
@@ -1263,8 +1263,8 @@ describe('guard-generator prompts', () => {
   })
 
   // The flow-synthesis one-shot prompts (FLOWS / FLOWS_EPIC, their fingerprints
-  // and `buildFlowsUserPrompt` / `buildFlowsEpicUserPrompt`) are RETIRED — plan
-  // 04 step 16 replaced them with the `guard-generate.flows` SESSIONS, whose
+  // and `buildFlowsUserPrompt` / `buildFlowsEpicUserPrompt`) are RETIRED —
+  // replaced by the `guard-generate.flows` SESSIONS, whose
   // prompts and briefings live in `@truecourse/core` and are pinned in
   // `tests/core/guard-generate-flows-session.test.ts`. One rule genuinely
   // CHANGED with the move and is pinned there in its new form: synthesis is no

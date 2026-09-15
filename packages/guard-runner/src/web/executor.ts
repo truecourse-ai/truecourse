@@ -3,7 +3,7 @@
  *
  * THE DETERMINISM RULE, and every line here follows from it: a web step waits for
  * OBSERVABLE STATE and never for a duration. There is no sleep verb, and there is
- * no retry — a flaky pass is worse than a red (§10.2). Waiting is one poll loop
+ * no retry — a flaky pass is worse than a red. Waiting is one poll loop
  * over the SAME predicate the assertion is made of, bounded by the step's budget:
  * the moment the predicate holds the step is done, and when the budget runs out the
  * failure reported is the LAST OBSERVED one, so the message describes the page as
