@@ -11,8 +11,7 @@ import path from 'node:path';
  * Sentry, optionally tee'd to stderr under `pnpm dev`.
  *
  * Tests configure nothing; the silent fallback drops messages so stdout stays
- * clean. `pushLogger`/`popLogger` temporarily route one run's logs into another
- * file — a file-transport concept.
+ * clean.
  */
 
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
@@ -120,25 +119,10 @@ function clearStack(): void {
   while (stack.length > 0) void stack.pop()?.close?.();
 }
 
-/** Install a file sink (OSS). Replaces the active stack. */
-export function configureLogger(config: LoggerConfig): void {
-  clearStack();
-  stack.push(new FileLogTransport(config));
-}
-
 /** Install a transport. Replaces the active stack. */
 export function setLogTransport(transport: LogTransport): void {
   clearStack();
   stack.push(transport);
-}
-
-/** Temporarily route logs into another file (OSS analyze run). */
-export function pushLogger(config: LoggerConfig): void {
-  stack.push(new FileLogTransport(config));
-}
-
-export function popLogger(): void {
-  void stack.pop()?.close?.();
 }
 
 export async function closeLogger(): Promise<void> {

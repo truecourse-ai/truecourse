@@ -74,12 +74,12 @@ describe('JobStore — single-flight', () => {
 
   it('interruptOrphaned reaps queued/running jobs (boot recovery), returns them with their payload, and frees the key', async () => {
     const store = new JobStore(db);
-    const a = await store.create({ org: 'org_A', type: 'knowledge.sync', key: 'a' });
+    const a = await store.create({ org: 'org_A', type: 'context.sync', key: 'a' });
     const b = await store.create({
       org: 'org_A',
-      type: 'guard.gate',
+      type: 'repo.guard-run',
       key: 'b',
-      payload: { repoFullName: 'acme/api', headSha: 'sha1', installationId: 42, checkRunId: 7 },
+      payload: { repoFullName: 'acme/api', workspaceOrgId: 'org_A' },
     });
     await store.markRunning(b.id);
 
@@ -89,10 +89,10 @@ describe('JobStore — single-flight', () => {
     expect(reaped).toHaveLength(2);
     const reapedGate = reaped.find((j) => j.id === b.id);
     expect(reapedGate).toMatchObject({
-      type: 'guard.gate',
+      type: 'repo.guard-run',
       key: 'b',
       workspaceOrgId: 'org_A',
-      payload: { repoFullName: 'acme/api', headSha: 'sha1', installationId: 42, checkRunId: 7 },
+      payload: { repoFullName: 'acme/api', workspaceOrgId: 'org_A' },
     });
     expect(reaped.find((j) => j.id === a.id)?.payload).toBeNull();
     expect(await store.listActive('org_A')).toEqual([]);
@@ -102,7 +102,7 @@ describe('JobStore — single-flight', () => {
     });
 
     // The freed key accepts a fresh job.
-    const fresh = await store.create({ org: 'org_A', type: 'knowledge.sync', key: 'a' });
+    const fresh = await store.create({ org: 'org_A', type: 'context.sync', key: 'a' });
     expect(fresh.status).toBe('queued');
   });
 

@@ -3,11 +3,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { initParsers } from '../packages/source-facts/src/parser'
 
-// Never emit usage telemetry from the test suite — the spec scan calls
-// trackEvent when given a `source`, and we don't want tests hitting PostHog.
-// (`spec-telemetry.test.ts` mocks trackEvent directly to assert it's called.)
-process.env.TRUECOURSE_TELEMETRY = '0'
-
 // Never fetch live model prices from OpenRouter in tests — the pre-flight cost
 // estimate falls back to bundled list prices. (`model-prices.test.ts` deletes
 // this to exercise the real fetch/cache path against a stubbed `fetch`.)

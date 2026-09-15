@@ -54,8 +54,6 @@ export function GuardDriftDetail({
     ...(scenario.failure ? { failure: scenario.failure } : {}),
     ...(scenario.failedMilestone != null ? { failedMilestone: scenario.failedMilestone } : {}),
     ...(failedMilestone ? { failedMilestoneClaim: failedMilestone.claimTitle } : {}),
-    // The flow's chain, which a step row points back at with its `M<n>` chip.
-    ...(runFlow ? { milestones: runFlow.milestones } : {}),
     ...(scenario.interfaceDrifted ? { interfaceDrifted: true } : {}),
     ...(scenario.blockedPrecondition ? { blockedPrecondition: true } : {}),
     ...(runFlow?.goal ? { goal: runFlow.goal } : {}),

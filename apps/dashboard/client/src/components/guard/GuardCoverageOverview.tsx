@@ -136,7 +136,6 @@ export function GuardCoverageOverview({
   claims,
   staleness,
   reloadKey = 0,
-  prRef,
 }: {
   repoId: string;
   /** The curated corpus's kept-doc count. */
@@ -146,12 +145,10 @@ export function GuardCoverageOverview({
   staleness: GuardStaleness;
   /** Bumped on a generate/run completion → refetch the summary. */
   reloadKey?: number;
-  /** The commit the summary is pinned at. */
-  prRef?: string;
 }) {
   // Tab switches remount this pane; the last summary is kept module-side so a
   // revisit paints the bars instantly and the fetch revalidates behind them.
-  const cacheKey = `${repoId}|${prRef ?? ''}`;
+  const cacheKey = repoId;
   const [status, setStatus] = useState<GuardStatusSummary | null>(
     () => statusCache.get(cacheKey) ?? null,
   );
@@ -162,7 +159,7 @@ export function GuardCoverageOverview({
   useEffect(() => {
     let cancelled = false;
     api
-      .getGuardStatus(repoId, prRef)
+      .getGuardStatus(repoId)
       .then((s) => {
         statusCache.set(cacheKey, s);
         if (cancelled) return;
@@ -175,7 +172,7 @@ export function GuardCoverageOverview({
         setLoaded(true);
       });
     api
-      .getGuardFlows(repoId, prRef)
+      .getGuardFlows(repoId)
       .then((v) => {
         flowsCache.set(cacheKey, v);
         if (!cancelled) setFlowsView(v);
@@ -184,7 +181,7 @@ export function GuardCoverageOverview({
     return () => {
       cancelled = true;
     };
-  }, [repoId, prRef, reloadKey, cacheKey]);
+  }, [repoId, reloadKey, cacheKey]);
 
   const coverage = status?.coverage ?? null;
   const sections = status?.sections ?? null;

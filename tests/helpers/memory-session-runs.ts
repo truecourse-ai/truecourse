@@ -10,6 +10,7 @@
  */
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
   RunRecord,
@@ -17,7 +18,7 @@ import type {
   SessionEvent,
   SessionIndexEntry,
 } from '@truecourse/agent-loop';
-import type { ActivityEvent } from '@truecourse/shared/activity-stream';
+import type { ActivityEvent, ActivityEventBody } from '@truecourse/shared/activity-stream';
 import {
   parseSessionRunCursor,
   sessionRunDir,
@@ -31,12 +32,32 @@ import {
   type SessionRunStore,
 } from '@truecourse/core/lib/sessions-store';
 import {
-  appendActivityEvent,
+  ACTIVITY_JOURNAL_FILE,
   publishActivityProgress,
+  publishCommittedActivity,
   readActivityEvents,
+  retireActivityProgress,
   validateActivityCursor,
 } from '@truecourse/core/lib/activity-journal';
 import { setSessionRunBackend as setSessionRunBackendBySource } from '../../packages/core/src/lib/sessions-store';
+
+/**
+ * Append one event to the run's journal file and publish it, the way this
+ * double keeps the journal a hosted run keeps as rows. The cursor is the
+ * file's size before the write: a test never leaves a partial line behind.
+ */
+function appendActivityEvent(dir: string, body: ActivityEventBody): ActivityEvent {
+  const file = path.join(dir, ACTIVITY_JOURNAL_FILE);
+  const cursor = fs.existsSync(file) ? fs.statSync(file).size : 0;
+  const serialized = JSON.stringify({ ...body, cursor });
+  fs.appendFileSync(file, serialized + '\n');
+  // Live delivery carries the same detached snapshot as replay, not a reference
+  // a later index update can change.
+  const event = JSON.parse(serialized) as ActivityEvent;
+  retireActivityProgress(dir, body);
+  publishCommittedActivity(dir, event);
+  return event;
+}
 
 interface Held {
   repoKey: string;

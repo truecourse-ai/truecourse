@@ -70,7 +70,6 @@ import {
   guardExternalSetupIndexForView,
   type GuardEvidenceLocator,
 } from '@truecourse/core/commands/guard-read';
-import { readGuardExternalsView } from '@truecourse/core/commands/guard-externals';
 import { readGuardDependenciesView } from '@truecourse/core/commands/guard-dependencies';
 import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
 import { hostedDependenciesView } from './guard-dependencies-hosted.js';

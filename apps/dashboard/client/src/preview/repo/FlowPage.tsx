@@ -65,10 +65,6 @@ export function FlowPage({ repo, flowId }: { repo: Repo; flowId: string }) {
     };
   }, [flowId, navigate, repo.id, urlTabs]);
 
-  const claimTitles = useMemo(
-    () => Object.fromEntries((claims.view?.claims ?? []).map((c) => [c.id, c.title])),
-    [claims.view],
-  );
   const binds = useMemo(() => guardTestBinds(tests.rows), [tests.rows]);
 
   return (
@@ -85,7 +81,6 @@ export function FlowPage({ repo, flowId }: { repo: Repo; flowId: string }) {
           error={flows.error}
           tabs={tabs}
           interfaces={interfaces.view?.interfaces ?? null}
-          claimTitles={claimTitles}
           binds={binds}
           reloadKey={reloadKey}
           decisions={decisions}
