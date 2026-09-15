@@ -16,7 +16,7 @@
  */
 
 import type { GuardTriage, GuardTriageVerdict } from '@truecourse/shared';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
 

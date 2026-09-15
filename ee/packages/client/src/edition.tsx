@@ -12,7 +12,7 @@ import {
   registerRepositoryProvider,
   registerSettingsTab,
   registerWorkspaceSwitcher,
-} from '@/preview/shell/registry';
+} from '@/dashboard/shell/registry';
 import { ConnectionsTab } from './connections/ConnectionsTab';
 import { azureDevOps } from './providers/azure';
 import { WorkspaceSwitcher } from './workspaces/WorkspaceSwitcher';

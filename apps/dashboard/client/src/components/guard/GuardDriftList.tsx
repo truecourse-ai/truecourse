@@ -16,7 +16,7 @@
  */
 
 import type { GuardScenarioResult } from '@truecourse/shared';
-import { EntityList, type EntityListGroup } from '@/preview/ui/entity-list';
+import { EntityList, type EntityListGroup } from '@/dashboard/ui/entity-list';
 import { guardStatusMeta } from '@/lib/guard-status';
 import { guardTestStatusView } from '@/lib/guard-flow-status';
 import { GUARD_DRIFT_ORDER } from '@/lib/guard-drifts';

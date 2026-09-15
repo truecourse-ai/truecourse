@@ -26,8 +26,8 @@
 
 import { ArrowUpRight, FileText, FlaskConical } from 'lucide-react';
 import type { GuardClaimRow, GuardUntestableRow } from '@truecourse/shared';
-import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/preview/ui/artifact-view';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/dashboard/ui/artifact-view';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { useGuardArtifactRaw } from '@/hooks/useGuardArtifactRaw';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';

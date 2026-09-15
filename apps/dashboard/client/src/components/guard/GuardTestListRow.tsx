@@ -22,8 +22,8 @@
  * and each already has a home in the detail the row opens.
  */
 
-import { CHIP_CLASS } from '@/preview/ui/bits';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { CHIP_CLASS } from '@/dashboard/ui/bits';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { PenLine } from 'lucide-react';
 import type { GuardFlowPlainStatus } from '@/lib/guard-flow-status';
 import { GuardFlowStatusChip } from '@/components/guard/GuardStatusBadge';

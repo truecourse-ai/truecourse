@@ -20,7 +20,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Loader2 } from 'lucide-react';
 import type { ConflictResolutionLike, CorpusConflict } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlap, SpecOverlapReview } from '@/lib/api';
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';

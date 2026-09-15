@@ -14,7 +14,7 @@
     "jsx": "react-jsx",
     "incremental": true,
     "paths": {
-      "@edition": ["./src/preview/shell/open-edition.ts"],
+      "@edition": ["./src/dashboard/shell/open-edition.ts"],
       "@/*": ["./src/*"]
     }
   },

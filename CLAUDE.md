@@ -58,11 +58,11 @@ local mode. GitLab and Azure DevOps are listed as coming soon.
 The dependency runs ONE WAY, from `ee/` inward, so no open file ever names an
 `ee/` path (`tests/architecture/ee-import-boundary.test.ts` pins that):
 
-- **Client** — `apps/dashboard/client/src/preview/shell/registry.ts` holds the
+- **Client** — `apps/dashboard/client/src/dashboard/shell/registry.ts` holds the
   three seams (a settings tab, a repository provider, the workspace switcher).
   `main.tsx` imports `registerEditionFeatures` from `@edition`, an alias the
   vite config points at `ee/packages/client/src/edition.tsx` when the checkout
-  has one and at `preview/shell/open-edition.ts` when it does not. No loader and
+  has one and at `dashboard/shell/open-edition.ts` when it does not. No loader and
   no dynamic import: which edition a bundle is was decided when it was built.
 - **Server** — `apps/dashboard/server/src/features.ts` is the registry, and
   `boot.ts` exports `startServer`. The open edition's process entry is
@@ -93,7 +93,7 @@ one does — the same `repositories` row, with the folder's absolute path as its
 (`createRunCopy`), never on the developer's tree. It has no webhook, so its
 documentation re-reads on a Sync now or on the watcher it installs over the
 folder. On the client it is a repository provider like any other
-(`preview/data/providers.ts` → the registry seam), offered only when the server
+(`dashboard/data/providers.ts` → the registry seam), offered only when the server
 says it is local.
 
 ## Storage

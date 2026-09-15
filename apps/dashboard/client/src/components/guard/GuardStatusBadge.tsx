@@ -13,7 +13,7 @@
  */
 
 import type { GuardSectionCoverageStatus } from '@truecourse/shared';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import {
   GUARD_DISMISSED_LABEL,
   GUARD_FLOW_STATUS_WORD,

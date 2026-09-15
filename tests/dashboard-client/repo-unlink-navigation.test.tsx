@@ -18,7 +18,7 @@ vi.mock('sonner', () => ({ toast: toastMock }));
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 
 vi.mock('@/lib/socket', () => {
   const socket = { connected: false, on: vi.fn(), off: vi.fn(), emit: vi.fn(), connect: vi.fn() };
@@ -80,7 +80,7 @@ describe('unlinking a repository from its settings', () => {
     render(
       <MemoryRouter initialEntries={['/repos/spiderhands-filecli/settings']}>
         <Routes>
-          <Route path="/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -100,7 +100,7 @@ describe('unlinking a repository from its settings', () => {
     render(
       <MemoryRouter initialEntries={['/repos/spiderhands-filecli/settings']}>
         <Routes>
-          <Route path="/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </MemoryRouter>,
     );

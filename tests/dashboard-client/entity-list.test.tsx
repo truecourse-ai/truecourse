@@ -21,7 +21,7 @@ import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { EntityList, type EntityListGroup } from '@/preview/ui/entity-list';
+import { EntityList, type EntityListGroup } from '@/dashboard/ui/entity-list';
 
 interface Item {
   id: string;

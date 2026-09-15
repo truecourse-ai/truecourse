@@ -53,7 +53,7 @@ afterEach(() => {
 /** A fresh module per test: the stream is page state, held in module scope. */
 async function subscribeToServerEvents() {
   vi.resetModules();
-  return (await import('@/preview/shell/event-stream')).subscribeToServerEvents;
+  return (await import('@/dashboard/shell/event-stream')).subscribeToServerEvents;
 }
 
 const scanned: ServerEvent = {

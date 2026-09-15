@@ -32,8 +32,8 @@ import type {
   GithubRepoSummary,
 } from '@truecourse/shared';
 import type { ContextSourceView } from '@truecourse/shared';
-import PreviewApp from '@/preview/PreviewApp';
-import { toPreviewRepo } from '@/preview/data/real-repos';
+import DashboardApp from '@/dashboard/DashboardApp';
+import { toDashboardRepo } from '@/dashboard/data/real-repos';
 
 // The real sessions view opens a socket for its live tail; jsdom has no server
 // to reach, and the tail is not what this file is about.
@@ -182,7 +182,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/*" element={<PreviewApp />} />
+        <Route path="/*" element={<DashboardApp />} />
       </Routes>
       <Toaster />
     </MemoryRouter>,
@@ -210,7 +210,7 @@ afterEach(() => {
 
 describe('a registry entry as a preview repository', () => {
   it('maps a registry entry to a repository with no history behind it', () => {
-    const repo = toPreviewRepo({
+    const repo = toDashboardRepo({
       id: 'orders-api',
       name: 'acme/orders-api',
       path: '/clones/acme__orders-api',

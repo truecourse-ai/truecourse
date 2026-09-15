@@ -13,7 +13,7 @@ const repoRoot = path.resolve(__dirname, '../../..');
 const eeEdition = path.resolve(repoRoot, 'ee/packages/client/src/edition.tsx');
 const edition = fs.existsSync(eeEdition)
   ? eeEdition
-  : path.resolve(__dirname, './src/preview/shell/open-edition.ts');
+  : path.resolve(__dirname, './src/dashboard/shell/open-edition.ts');
 
 export default defineConfig(({ command }) => ({
   plugins: [react()],

@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { DependencyPage } from '@/preview/repo/DependencyPage';
-import type { Repo } from '@/preview/data/types';
+import { DependencyPage } from '@/dashboard/repo/DependencyPage';
+import type { Repo } from '@/dashboard/data/types';
 import type { GuardDependenciesView, GuardDependencyRow } from '@/types/guard-dependencies';
 
 vi.mock('@/lib/socket', () => ({ connectSocket: () => ({ on: vi.fn(), off: vi.fn() }) }));

@@ -49,9 +49,9 @@ vi.mock('@/lib/socket', () => {
   };
 });
 
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 import { AuthProvider } from '@/auth/AuthContext';
-import { relativeTime, repoRunState, toJobChain } from '@/preview/shell/real-runs';
+import { relativeTime, repoRunState, toJobChain } from '@/dashboard/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 function fireSocket(event: string, payload: unknown): void {
@@ -125,7 +125,7 @@ function renderAt(path: string) {
       {/* The shell joins a room as the workspace it is signed into, which the session probe answers. */}
       <AuthProvider>
         <Routes>
-          <Route path="/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </AuthProvider>
       {/* The real app mounts the Toaster; the preview routes are a descendant of it. */}

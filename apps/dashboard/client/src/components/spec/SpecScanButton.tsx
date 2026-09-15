@@ -9,7 +9,7 @@
 
 import { Loader2, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 
 interface SpecScanButtonProps {
   /** A corpus exists → the label reads "Rescan"; otherwise "Scan". */

@@ -27,7 +27,7 @@ import type { PublicSessionRun } from '@/lib/api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { Capsule } from '@/preview/ui/bits';
+import { Capsule } from '@/dashboard/ui/bits';
 import { FindingCard, FindingResolveProvider } from './conversation-pieces';
 import { STEP_DOT, formatDuration, runDuration } from './run-model';
 import { useRunConversation } from './useRunConversation';

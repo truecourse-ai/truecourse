@@ -108,8 +108,8 @@ import {
   ArtifactModeSwitch,
   ArtifactRaw,
   useArtifactMode,
-} from "@/preview/ui/artifact-view";
-import { HoverPopover } from "@/preview/ui/hover-popover";
+} from "@/dashboard/ui/artifact-view";
+import { HoverPopover } from "@/dashboard/ui/hover-popover";
 import * as api from "@/lib/api";
 import { renderInlineMarkup } from "@/lib/inline-markup";
 import { formatGuardDuration } from "@/lib/guard-drifts";

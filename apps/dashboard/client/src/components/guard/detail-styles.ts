@@ -1,4 +1,4 @@
-import { ARTIFACT_PRE } from '@/preview/ui/artifact-view';
+import { ARTIFACT_PRE } from '@/dashboard/ui/artifact-view';
 
 /**
  * The mono code-block class the raw and unavailable blocks use, the SAME class

@@ -28,8 +28,8 @@ import { ArrowLeft, ArrowUpRight, FlaskConical, Layers, PenLine, X } from 'lucid
 import type { GuardClaimRow, GuardSectionCoverage, GuardSectionFlow } from '@truecourse/shared';
 import { MISSING_DATA_NOUN } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
-import { EntityList, type EntityListGroup } from '@/preview/ui/entity-list';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { EntityList, type EntityListGroup } from '@/dashboard/ui/entity-list';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import {
   GUARD_SEED_INIT_ACTION,
   guardNeedsSetupNeed,

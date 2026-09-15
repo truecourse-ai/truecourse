@@ -15,9 +15,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { CapabilitiesResponse, ServerMode } from '@truecourse/shared';
 import { AuthProvider } from '@/auth/AuthContext';
 import { AppProvider } from '@/contexts/CapabilityContext';
-import { offeredRepositoryProviders, repositoryProviders } from '@/preview/data/providers';
-import { toPreviewRepo } from '@/preview/data/real-repos';
-import PreviewApp from '@/preview/PreviewApp';
+import { offeredRepositoryProviders, repositoryProviders } from '@/dashboard/data/providers';
+import { toDashboardRepo } from '@/dashboard/data/real-repos';
+import DashboardApp from '@/dashboard/DashboardApp';
 
 vi.mock('@/lib/socket', () => {
   const socket = { connected: false, on: vi.fn(), off: vi.fn(), emit: vi.fn(), connect: vi.fn() };
@@ -83,7 +83,7 @@ function renderAt(path: string, mode: ServerMode) {
       <AppProvider initial={capabilities}>
         <AuthProvider>
           <Routes>
-            <Route path="/*" element={<PreviewApp />} />
+            <Route path="/*" element={<DashboardApp />} />
           </Routes>
         </AuthProvider>
       </AppProvider>
@@ -113,7 +113,7 @@ describe('the providers a server offers', () => {
 
 describe('a connected folder, as Code lists it', () => {
   it('takes its name and its provider from the server, and draws no branch', () => {
-    const repo = toPreviewRepo({
+    const repo = toDashboardRepo({
       id: 'local-orders-api',
       name: 'local/orders-api',
       path: 'local/orders-api',

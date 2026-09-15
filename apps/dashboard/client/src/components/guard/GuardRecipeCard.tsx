@@ -33,7 +33,7 @@ import type {
   GuardRecipeSurface,
 } from '@truecourse/shared';
 import { GUARD_DRIVERS, guardDriver } from '@truecourse/shared';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { shortFingerprint } from '@/lib/guard-drifts';
 
 const LABEL = 'text-[10px] font-semibold uppercase tracking-wider text-muted-foreground';

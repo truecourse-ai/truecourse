@@ -69,9 +69,9 @@ import type {
   InterfaceState,
 } from '@truecourse/shared';
 import { guardDriver } from '@truecourse/shared';
-import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/preview/ui/artifact-view';
+import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/dashboard/ui/artifact-view';
 import { EmptyState } from '@/components/ui/empty-state';
-import { HoverPopover } from '@/preview/ui/hover-popover';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { useGuardArtifactRaw } from '@/hooks/useGuardArtifactRaw';
 import { useScrollToSelected } from '@/hooks/useScrollToSelected';
 import { formatGuardTime, shortFingerprint } from '@/lib/guard-drifts';

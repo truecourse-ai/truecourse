@@ -20,7 +20,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ServerMode, WorkspaceSummary } from '@truecourse/shared';
 import { AuthProvider } from '@/auth/AuthContext';
 import { AppProvider } from '@/contexts/CapabilityContext';
-import PreviewApp from '@/preview/PreviewApp';
+import DashboardApp from '@/dashboard/DashboardApp';
 import { registerEditionFeatures } from '../../ee/packages/client/src/edition';
 
 registerEditionFeatures();
@@ -136,7 +136,7 @@ function renderShell() {
     <MemoryRouter initialEntries={['/']}>
       <AuthProvider>
         <Routes>
-          <Route path="/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,
@@ -150,7 +150,7 @@ function renderShellIn(mode: ServerMode) {
       <AppProvider initial={{ edition: 'enterprise', mode, capabilities: [] }}>
         <AuthProvider>
           <Routes>
-            <Route path="/*" element={<PreviewApp />} />
+            <Route path="/*" element={<DashboardApp />} />
           </Routes>
         </AuthProvider>
       </AppProvider>
@@ -254,7 +254,7 @@ describe('the workspace switcher', () => {
     render(
       <MemoryRouter initialEntries={['/']}>
         <Routes>
-          <Route path="/*" element={<PreviewApp />} />
+          <Route path="/*" element={<DashboardApp />} />
         </Routes>
       </MemoryRouter>,
     );

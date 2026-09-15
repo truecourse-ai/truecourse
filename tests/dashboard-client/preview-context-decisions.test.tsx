@@ -14,7 +14,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
 import { createRepoSpecSource } from '@/components/spec/spec-source';
-import { createWorkspaceContextSource } from '@/preview/pages/context-spec-source';
+import { createWorkspaceContextSource } from '@/dashboard/pages/context-spec-source';
 import { FindingCard, FindingResolveProvider } from '@/components/sessions/conversation-pieces';
 
 const realFetch = window.fetch;
