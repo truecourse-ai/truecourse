@@ -16,9 +16,9 @@ param monitoringEnabled bool = false
 // Environment resource names live here, alongside the infrastructure that uses them.
 var environments = {
   dev: {
-    name: 'truecourse-staging'
+    name: 'truecourse-dev'
     fqdn: ''
-    dnsLabel: 'truecourse-staging-k7m2x9q4'
+    dnsLabel: 'truecourse-dev'
     keyVaultName: 'truecoursekvk7ncoyeug2nb'
     registryName: 'truecourseacrk7ncoyeug2nb2'
     databaseServerName: 'truecourse-pg-k7ncoyeug2nb2'

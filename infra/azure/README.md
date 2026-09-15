@@ -1,8 +1,8 @@
 # Azure infra — TrueCourse hosted deployment
 
-The [staging and production VM runbook](vm/DEPLOYMENT.md) replaces application
+The [dev and production VM runbook](vm/DEPLOYMENT.md) replaces application
 compute with native Ubuntu + Docker while reusing the managed services below.
-Staging is deployed; production remains pending. Start with that runbook for VM
+Dev is deployed; production remains pending. Start with that runbook for VM
 provisioning, releases and monitoring.
 
 The existing foundation provisions **Azure Container Apps + Azure DB for
@@ -176,7 +176,7 @@ before Azure login. Keep a required reviewer on `prod`.
 
 ## Deployment triggers
 
-- Add `deploy-dev` to a same-repository PR to deploy staging. Further pushes while
+- Add `deploy-dev` to a same-repository PR to deploy dev. Further pushes while
   labeled redeploy it. Manual **Deploy (dev)** dispatch deploys any branch.
 - Create a GitHub Release / push a stable `vX.Y.Z` tag on a `main` commit to
   deploy production. **Deploy (prod)** dispatch on `main` re-rolls main's HEAD.

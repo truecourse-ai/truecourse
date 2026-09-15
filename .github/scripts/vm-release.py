@@ -233,7 +233,7 @@ def application_env(config, image):
                 'WORKOS_REDIRECT_URI': 'https://' + config['fqdn'] + '/api/auth/callback',
                 'NODE_ENV': 'production', 'PORT': '3001',
                 'TRUECOURSE_LOG_DIR': '/var/log/truecourse',
-                'SENTRY_ENVIRONMENT': 'production' if config['environment'] == 'prod' else 'staging',
+                'SENTRY_ENVIRONMENT': 'production' if config['environment'] == 'prod' else 'dev',
                 'TRUECOURSE_RELEASE': validate_image(config, image)})
     return env
 
