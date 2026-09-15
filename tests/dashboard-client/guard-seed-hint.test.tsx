@@ -7,7 +7,7 @@
  *     COMMAND — and the hint must not also appear (there is nothing left to draft);
  *   a seed that already FED the last generate → the gap survived a run with this
  *     very seed, so the seed doesn't create the data; the banner says so and the
- *     action is EXTENDING the seed script — never "re-run guard generate", which
+ *     action is EXTENDING the seed script — never "re-run Flow generation", which
  *     would only re-derive the same gap from cache.
  * The word for the synthetic service key is "seed data", never `missing-data`.
  */
@@ -119,7 +119,7 @@ describe('the missing-data seed hint', () => {
     expect(guardSetupServiceLabel('missing-data')).toBe('seed data');
     expect(guardSetupServiceLabel('open-meteo')).toBe('open-meteo');
     expect(guardNeedsSetupNeed({ services: [], provided: ['missing-data'] })).toBe(
-      'seed data is set up, re-run guard generate to author these flows',
+      'seed data is set up, re-run Flow generation to author these flows',
     );
   });
 });

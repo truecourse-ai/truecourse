@@ -97,6 +97,9 @@ interface GuardStatusVocab {
   hint?: string;
 }
 
+/** The work the "setup done" sub-state points at, named once. */
+export const GUARD_REGENERATE_ACTION = 'Flow generation';
+
 const VOCAB = {
   // The two RUN outcomes keep the verdict words wherever a run names its own
   // results (a drift group header, a run tally). Their coverage word is still
@@ -132,7 +135,7 @@ const VOCAB = {
   blocked: {
     label: 'Blocked',
     sentence: 'needs a test subject you provide',
-    hint: 'The test binds a supplied dependency, a project, a corpus, credentials, that has no registered instance on this machine, so it did not run. Register one in dependencies.local.json.',
+    hint: 'The test binds a supplied dependency, a project, a corpus, credentials, that has no registered instance, so it did not run. Register one on the Dependencies tab.',
   },
   // No label: this state IS "Blocked". What it needs is a SENTENCE, and the
   // capability nouns the gap names decide it (`guardGapNeed`).
@@ -144,7 +147,7 @@ const VOCAB = {
   // attention colour.
   'needs-setup': {
     sentence: 'needs an external service or seed data you can provide',
-    hint: 'Blocked on something you can provide: a third-party account (Dependencies page) or seed data the seed script doesn’t create yet. Provide it, then re-run guard generate.',
+    hint: `Blocked on something you can provide: a third-party account (Dependencies tab) or seed data the seed script doesn’t create yet. Provide it, then re-run ${GUARD_REGENERATE_ACTION}.`,
   },
   untestable: { label: 'Nothing testable', sentence: 'nothing testable' },
   'no-claim': { label: 'No testable claim', sentence: 'no testable claim' },
@@ -453,7 +456,7 @@ export function guardNeedsSetupServiceList(needsSetup: GuardNeedsSetup): string 
  */
 export function guardNeedsSetupNeed(needsSetup: GuardNeedsSetup): string {
   if (needsSetupIsDone(needsSetup)) {
-    return `${guardNeedsSetupServiceList(needsSetup)} is set up, re-run guard generate to author these flows`;
+    return `${guardNeedsSetupServiceList(needsSetup)} is set up, re-run ${GUARD_REGENERATE_ACTION} to author these flows`;
   }
   // The seed exists, its being outstanding means it doesn't create this data, and
   // "needs setup: seed data" would send the reader to a page with no row for it.
@@ -518,9 +521,6 @@ export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
   if (needsSetup.services.every((s) => s === MISSING_DATA_NOUN)) return 'Extend the seed script';
   return `Provide ${guardNeedsSetupServiceList(needsSetup)}`;
 }
-
-/** The work the "setup done" sub-state points at, named once. */
-export const GUARD_REGENERATE_ACTION = 'Flow generation';
 
 /**
  * The one line UNDER the banner headline: what the headline deliberately leaves

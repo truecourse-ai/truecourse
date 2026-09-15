@@ -89,7 +89,7 @@ describe('needs-setup vocabulary and paint', () => {
     expect(guardGapNeed(NEEDS_SETUP_GAP)).toBe('needs setup: open-meteo');
     expect(
       guardGapNeed({ ...NEEDS_SETUP_GAP, needsSetup: { services: [], provided: ['open-meteo'] } }),
-    ).toBe('open-meteo is set up, re-run guard generate to author these flows');
+    ).toBe('open-meteo is set up, re-run Flow generation to author these flows');
     // Two outstanding services read as one English phrase.
     expect(
       guardGapNeed({ ...NEEDS_SETUP_GAP, needsSetup: { services: ['open-meteo', 'stripe'], provided: [] } }),
