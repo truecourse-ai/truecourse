@@ -716,6 +716,19 @@ describe('a slug that belongs to another workspace', () => {
 // ---------------------------------------------------------------------------
 
 describe('GET /api/repos with a link store', () => {
+  it("answers each repository's default branch, which the row recorded on link", async () => {
+    const app = buildApp({ startSetup: async () => 'queued' });
+    await linkRepo(app).expect(201);
+
+    const mine = await request(app)
+      .get('/api/repos')
+      .set('Cookie', `tc_session=${ORG}`)
+      .expect(200);
+    expect((mine.body as Array<{ name: string; defaultBranch: string | null }>).map((r) => [r.name, r.defaultBranch])).toEqual([
+      [REPO, 'main'],
+    ]);
+  });
+
   it("hides another workspace's connected repository", async () => {
     const app = buildApp({ startSetup: async () => 'queued' });
     await linkRepo(app).expect(201);
