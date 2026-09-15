@@ -202,12 +202,14 @@ export async function recordGuardRunCoverage(
         `[Guard] no flow summary could be derived for ${repoKey} run ${latest.run.runId}; it stays out of the flow trend`,
       );
     }
+    // An empty summary records that there was nothing to derive, so the Home
+    // read never re-derives this run; null would mean "try again".
     await writeGuardRunCoverage(repoKey, {
       runId: latest.run.runId,
       ranAt: latest.run.ranAt,
       commit: latest.run.commit,
       sections,
-      flows,
+      flows: flows ?? {},
     });
     return true;
   } catch (err) {
