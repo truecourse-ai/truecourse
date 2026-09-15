@@ -7,8 +7,8 @@
  * repositories' scenarios stale and leaves the rest exactly as they were. This
  * module decides which, and starts each one where it actually needs starting:
  *
- *   - nothing set up yet  → Test setup, which chains generate → the baseline run;
- *   - already set up      → Test generation, which chains the baseline run.
+ *   - nothing set up yet  → Flow setup, which chains generate → the baseline run;
+ *   - already set up      → Flow generation, which chains the baseline run.
  *
  * Three gates keep it cheap and calm — the EE inheritance ripple's, ported:
  *
@@ -20,7 +20,7 @@
  *   - SLICE-CHANGED ONLY — a repository whose own documents did not move is
  *     left alone, however much the rest of the workspace moved.
  *
- * And a repository whose Test setup is already queued or running is skipped:
+ * And a repository whose Flow setup is already queued or running is skipped:
  * connecting one starts its setup before any scan exists, and that setup
  * chains its own generate.
  *
@@ -63,16 +63,16 @@ export interface ContextRippleDeps {
   /** Whether the repository already has a stored setup bundle. */
   hasSetup(repoFullName: string): Promise<boolean>;
   /**
-   * Whether a Test setup is ALREADY queued or running for the repository — a
-   * connect starts one from the sync's settle hook before this scan exists, and
-   * that setup chains its own generate. The single-flight key would refuse a
+   * Whether a Flow setup is ALREADY queued or running for the repository — a
+   * connect starts one from its own link hook before this scan exists, and that
+   * setup chains its own generate. The single-flight key would refuse a
    * second enqueue anyway; asking outright means the ripple never depends on
    * winning that race, and never reports a start it did not make.
    */
   isSettingUp(repoFullName: string): Promise<boolean>;
-  /** Enqueue Test setup. Returns false when the repository is already working. */
+  /** Enqueue Flow setup. Returns false when the repository is already working. */
   startSetup(repo: RippleRepo): Promise<boolean>;
-  /** Enqueue Test generation. Returns false when the repository is already working. */
+  /** Enqueue Flow generation. Returns false when the repository is already working. */
   startGenerate(repo: RippleRepo): Promise<boolean>;
 }
 
@@ -105,7 +105,7 @@ export function sliceChanged(
 /**
  * Start what ONE repository whose slice moved needs: nothing while its setup
  * is already in flight (that run reads the stored corpus and chains its own
- * generate), Test generation once it has been set up, Test setup before. Null
+ * generate), Flow generation once it has been set up, Flow setup before. Null
  * when nothing started — the repository is already working, and its running
  * job will read the stored corpus.
  */

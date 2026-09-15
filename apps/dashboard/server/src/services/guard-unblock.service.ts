@@ -1,5 +1,5 @@
 /**
- * Unblocking the Test generation a conflict stopped.
+ * Unblocking the Flow generation a conflict stopped.
  *
  * `guard generate` refuses to author scenarios against documents that disagree:
  * it stores a report whose status is `open-conflicts` and stops. The decision

@@ -228,7 +228,7 @@ function queryValues(raw: unknown): string[] {
 const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
 
 /**
- * Write one workspace decision, then start the Test generation it unblocked in
+ * Write one workspace decision, then start the Flow generation it unblocked in
  * every repository whose conflicts it settled. Every decision goes through here:
  * whether one clears the last conflict of a repository's slice is what the
  * derivation answers, not something a route can tell from the verb it served.
@@ -581,7 +581,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   // Each write persists the decisions artifact and acks it; the corpus itself
   // is unchanged until the next scan, which is what the staleness dot says.
   //
-  // What a decision DOES move right away is a Test generation that stopped on
+  // What a decision DOES move right away is a Flow generation that stopped on
   // an open conflict, in every repository the decision left with none —
   // `settled` is that pass (see guard-unblock.service).
 
@@ -603,7 +603,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
    * workspace's changed-at stamp moves and the change is announced — which is
    * what lights the amber dot on Scan and says a scan is what is missing.
    *
-   * A conflict verdict is not one of these: it is applied at Test generation,
+   * A conflict verdict is not one of these: it is applied at Flow generation,
    * so it leaves the corpus's own document set alone.
    */
   async function decided(org: string, write: () => Promise<DecisionsFile>): Promise<DecisionsFile> {

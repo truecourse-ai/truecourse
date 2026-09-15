@@ -34,7 +34,7 @@ apps/dashboard/server/    — Express + Socket.io HTTP layer (thin adapter over 
 packages/core/            — The engine the server runs: the agent sessions, the store seams, the LLM transports
 packages/shared/          — Shared Zod schemas and types, the transport seam, the work-tree layout
 packages/guard-runner/    — The deterministic test runner and its drivers
-packages/guard-generator/ — The deterministic half of test generation
+packages/guard-generator/ — The deterministic half of flow generation
 packages/spec-consolidator/ — The deterministic half of the document scan
 packages/data-store/      — The Postgres implementation of every store seam
 tests/                    — All tests (centralized, not colocated)
