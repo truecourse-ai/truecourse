@@ -8,4 +8,7 @@ DROP TABLE "repo_ui_state" CASCADE;--> statement-breakpoint
 DROP TABLE "knowledge_documents" CASCADE;--> statement-breakpoint
 DROP TABLE "llm_traces" CASCADE;--> statement-breakpoint
 DROP TABLE "workspace_settings" CASCADE;--> statement-breakpoint
-DROP SCHEMA IF EXISTS "truecourse_reset_backup" CASCADE;
+DROP SCHEMA IF EXISTS "truecourse_reset_backup" CASCADE;--> statement-breakpoint
+DELETE FROM "content" WHERE "scope" LIKE 'trace:%';--> statement-breakpoint
+DELETE FROM "content" WHERE "scope" LIKE 'knowledge:%';--> statement-breakpoint
+DELETE FROM "content" WHERE "scope" LIKE 'contract:%';

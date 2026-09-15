@@ -115,3 +115,42 @@ describe('0021_drop_ee_era', () => {
     ]);
   });
 });
+
+describe('0020_drop_analyze_era', () => {
+  it('sweeps the content bodies of the tables it drops and leaves every other scope', async () => {
+    const { sql, finish } = await databaseBefore('0020_drop_analyze_era');
+    const scopes = [
+      'trace:org_A',
+      'knowledge:ws',
+      'contract:acme/api',
+      'contract:ws',
+      'guard:acme/api',
+      'guard-evidence:acme/api',
+      'spec:ws:org_A',
+      'context:ws',
+    ];
+    for (const [i, scope] of scopes.entries()) {
+      await sql.query('INSERT INTO content (scope, sha, body, created_at) VALUES ($1, $2, $3, $4)', [scope, `sha${i}`, 'x', NOW]);
+    }
+
+    await finish();
+
+    const kept = await sql.query<{ scope: string }>('SELECT scope FROM content ORDER BY scope');
+    expect(kept.rows.map((r) => r.scope)).toEqual(['context:ws', 'guard-evidence:acme/api', 'guard:acme/api', 'spec:ws:org_A']);
+  });
+});
+
+describe('0023_drop_pull_request_gate', () => {
+  it("deletes a repository's own spec decisions and every PR overlay, keeping the workspace and guard ledgers", async () => {
+    const { sql, finish } = await databaseBefore('0023_drop_pull_request_gate');
+    const scopes = ['ws:org_A', 'guard:acme/api', 'acme/api', 'local/my-folder', 'acme/api#pr/4', 'guard:acme/api#pr/5'];
+    for (const scope of scopes) {
+      await sql.query('INSERT INTO decisions (scope, payload, updated_at) VALUES ($1, $2, $3)', [scope, '{}', NOW]);
+    }
+
+    await finish();
+
+    const kept = await sql.query<{ scope: string }>('SELECT scope FROM decisions ORDER BY scope');
+    expect(kept.rows.map((r) => r.scope)).toEqual(['guard:acme/api', 'ws:org_A']);
+  });
+});
