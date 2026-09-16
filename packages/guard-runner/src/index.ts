@@ -188,7 +188,7 @@ export {
   substitutePort,
   PORT_PLACEHOLDER,
 } from './api/server.js'
-export { allocateFreePort, releasePort, isPortHeld, listenEphemeral } from './ports.js'
+export { allocateFreePort, releasePort, isPortHeld, portIsFree, listenEphemeral } from './ports.js'
 export type {
   ApiServerHandle,
   ApiServerExit,
@@ -293,7 +293,7 @@ export type { NormalizerContext } from './normalizers.js'
 export { evaluateExpect, matchTextMatcher, describeTextMatcher } from './expect.js'
 export type { ExpectMismatch, EvaluateExpectParams } from './expect.js'
 
-export { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS } from './build.js'
+export { runBuild, runInstall, buildOutputTail, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS } from './build.js'
 export type { BuildResult } from './build.js'
 
 export {

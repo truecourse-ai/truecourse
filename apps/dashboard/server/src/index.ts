@@ -1,4 +1,7 @@
-/** The open edition's process entry: the server, with nothing registered into it. */
+/**
+ * The process entry, for every edition: boot the one server, which registers
+ * whatever bundle sits beside this tree before anything mounts.
+ */
 
 import { runServer } from './boot.js';
 

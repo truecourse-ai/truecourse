@@ -4,7 +4,7 @@
  * The client learns the mode from the server's own description of itself
  * (`GET /api/capabilities`), and two things follow: the folder on this machine
  * is offered as a repository provider, and everything that assumes an identity
- * provider — Sign out, Invite member — is not drawn, because there is nothing
+ * provider — Sign out, Invite by email — is not drawn, because there is nothing
  * behind it. A hosted server is unchanged, which is the other half of each case.
  */
 
@@ -204,17 +204,17 @@ describe('the account menu', () => {
   });
 });
 
-describe('Invite member', () => {
+describe('Invite by email', () => {
   it('is not offered locally: there is nothing to send an invitation through', async () => {
     serve('local');
     renderAt('/settings/members', 'local');
     await screen.findByRole('button', { name: 'Account menu' });
-    expect(screen.queryByRole('button', { name: 'Invite member' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Invite by email' })).toBeNull();
   });
 
   it('is offered on a hosted server', async () => {
     serve('hosted');
     renderAt('/settings/members', 'hosted');
-    expect(await screen.findByRole('button', { name: 'Invite member' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Invite by email' })).toBeInTheDocument();
   });
 });

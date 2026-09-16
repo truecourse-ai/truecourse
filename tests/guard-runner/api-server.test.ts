@@ -10,7 +10,7 @@ import {
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { FIXTURE_API_SERVER, FIXTURE_API_CRASH } from './helpers.js'
+import { FIXTURE_API_SERVER, FIXTURE_API_CRASH, FIXTURE_API_LOSES_PORT } from './helpers.js'
 
 function tempCwd(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tc-api-server-test-'))
@@ -88,6 +88,44 @@ describe('startApiServer', () => {
     if (result.ok) return
     expect(result.reason).toContain('exited before becoming healthy')
     expect(result.stderr).toContain('fixture crash')
+  })
+
+  it('re-boots on a fresh port when another process took the one it was given', async () => {
+    const cwd = tempCwd()
+    const result = await startApiServer({
+      resolvedServe: [process.execPath, FIXTURE_API_LOSES_PORT],
+      cwd,
+      env: ENV,
+      healthPath: '/health',
+      readyTimeoutMs: 15_000,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    try {
+      const boots = fs.readFileSync(path.join(cwd, 'boots.log'), 'utf8').trim().split('\n')
+      expect(boots).toHaveLength(2)
+      // The second boot got a port of its own, never the one the squatter holds.
+      const lost = fs.readFileSync(path.join(cwd, 'lost-port.marker'), 'utf8')
+      expect(String(result.server.port)).not.toBe(lost)
+      expect((await fetch(`${result.server.baseUrl}/health`)).status).toBe(200)
+    } finally {
+      await result.server.stop()
+    }
+  })
+
+  it('a server that dies with its port left free is reported, not booted again', async () => {
+    const cwd = tempCwd()
+    const result = await startApiServer({
+      resolvedServe: [process.execPath, FIXTURE_API_LOSES_PORT],
+      cwd,
+      env: { ...ENV, TC_NO_SQUAT: '1' },
+      healthPath: '/health',
+      readyTimeoutMs: 15_000,
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toContain('exited before becoming healthy')
+    expect(fs.readFileSync(path.join(cwd, 'boots.log'), 'utf8').trim().split('\n')).toHaveLength(1)
   })
 
   it('a server that never turns healthy times out and is killed', async () => {

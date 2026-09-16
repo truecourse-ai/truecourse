@@ -1,6 +1,6 @@
 /**
  * The public half of invite by link (`/api/auth`): the preview the invite
- * page shows, the sign-up hint on login, and the accept that redeems a link
+ * page shows, the login an invite sends a visitor through, and the accept that redeems a link
  * for the signed-in visitor — once, with the membership created in WorkOS and
  * the session re-minted into the workspace. WorkOS is faked the way
  * `auth-workspace.test.ts` fakes it.
@@ -111,24 +111,15 @@ beforeEach(() => {
   session = { user: { id: USER.id, email: USER.email } };
 });
 
-describe('GET /api/auth/login?screen=sign-up', () => {
-  it('asks AuthKit for its sign-up screen, with the destination riding state', async () => {
+describe('GET /api/auth/login from an invite', () => {
+  it('carries the invite page as the destination and asks AuthKit for no particular screen', async () => {
     const m = makeWorkos();
     const app = makeApp(m.workos);
     await request(app)
       .get('/api/auth/login')
       .query({ next: '/invite/tok_1?accept=1', screen: 'sign-up' })
       .expect(302);
-    expect(m.calls.authorizationUrl[0]).toMatchObject({
-      screenHint: 'sign-up',
-      state: '/invite/tok_1?accept=1',
-    });
-  });
-
-  it('asks for no screen without the hint', async () => {
-    const m = makeWorkos();
-    const app = makeApp(m.workos);
-    await request(app).get('/api/auth/login').expect(302);
+    expect(m.calls.authorizationUrl[0]).toMatchObject({ state: '/invite/tok_1?accept=1' });
     expect(m.calls.authorizationUrl[0]).not.toHaveProperty('screenHint');
   });
 });
@@ -213,14 +204,16 @@ describe('POST /api/auth/invite/:token/accept', () => {
     expect(m.calls.membership).toEqual([]);
   });
 
-  it('releases the link when WorkOS refuses the membership, so it can be tried again', async () => {
+  it('releases the link when WorkOS refuses the membership, so it can be tried again, and keeps WorkOS’s words to itself', async () => {
     const m = makeWorkos({ refuseMembership: 'organization is full' });
     const app = makeApp(m.workos);
     const link = links.seed({ workspaceOrgId: ORG });
 
     const res = await accept(app, link.token).expect(502);
 
-    expect(res.body.error).toContain('organization is full');
+    // The visitor is an outsider: what WorkOS said stays in the log.
+    expect(res.body.error).toBe('Could not join the workspace. Try again in a moment.');
+    expect(JSON.stringify(res.body)).not.toContain('organization is full');
     expect(links.rows.get(link.id)).toMatchObject({ consumedAt: null, consumedByUserId: null });
     expect(m.calls.refresh).toEqual([]);
     expect(res.headers['set-cookie']).toBeUndefined();
@@ -297,5 +290,56 @@ describe('POST /api/auth/invite/:token/accept', () => {
     const joined = await accept(app, link.token).expect(200);
     expect(joined.headers['set-cookie']).toHaveLength(1);
     expect(joined.headers['set-cookie']?.[0]).toContain(`tc_session=sealed%3A${ORG}`);
+  });
+});
+
+describe('what a visitor may present as a token', () => {
+  it('reads an odd token as a link that does not exist, on the preview and the accept alike', async () => {
+    const m = makeWorkos();
+    const app = makeApp(m.workos);
+    const odd = ['%2F', 'a%20b', 'x'.repeat(2000), encodeURIComponent('tok/with?query=1&x=2'), '%F0%9F%94%91'];
+    for (const token of odd) {
+      const preview = await request(app).get(`/api/auth/invite/${token}`);
+      expect(preview.status, `preview of ${token}`).toBe(404);
+      expect(preview.body.reason).toBe('invalid');
+      const accepted = await accept(app, token);
+      expect(accepted.status, `accept of ${token}`).toBe(404);
+      expect(accepted.body.reason).toBe('invalid');
+    }
+    expect(m.calls.membership).toEqual([]);
+    expect(m.calls.refresh).toEqual([]);
+  });
+
+  it('lets a member whose session already sits in the workspace through, spending nothing', async () => {
+    session = { user: { id: USER.id, email: USER.email, organizationId: ORG } };
+    const m = makeWorkos({ alreadyMember: true });
+    const app = makeApp(m.workos);
+    const link = links.seed({ workspaceOrgId: ORG });
+
+    // The same workspace is never "elsewhere", whatever the edition.
+    const res = await accept(app, link.token).expect(200);
+
+    expect(res.body.user).toMatchObject({ id: USER.id, organizationId: ORG });
+    expect(links.rows.get(link.id)).toMatchObject({ consumedAt: null, consumedByUserId: null });
+  });
+
+  it('previews a workspace whose name WorkOS will not give as "a workspace"', async () => {
+    const m = makeWorkos();
+    const workos = {
+      ...m.workos,
+      organizations: {
+        getOrganization: async () => {
+          throw new Error('WorkOS is unavailable');
+        },
+      },
+    };
+    const app = makeApp(workos);
+    // An organization no earlier test named, so the process-wide name cache is cold for it.
+    const link = links.seed({ workspaceOrgId: 'org_nameless' });
+
+    const res = await request(app).get(`/api/auth/invite/${link.token}`).expect(200);
+
+    expect(res.body.workspaceName).toBe('a workspace');
+    expect(JSON.stringify(res.body)).not.toContain('unavailable');
   });
 });

@@ -28,7 +28,7 @@
 - `packages/github-app/` — The GitHub App protocol: webhook receiver, connect API, and the App's own rows (`PostgresInstallationStore`: its installations as `provider_accounts` rows). The repositories it connects are written through the provider-generic `RepositoryStore` its routers are handed. The webhook handles `installation`, `installation_repositories` and `push`; every other event, `pull_request` included, is authenticated, acknowledged and ignored until the pull request flow is built.
 - `packages/jobs/` — `@truecourse/jobs`: the generic background job runner. A Postgres-backed queue (graphile-worker) with a tracked row per job, the shared lifecycle harness (`executeJob`: row bookkeeping, the stepped checklist, the standardized notification, the settled hook), a local cancel registry, the LISTEN/NOTIFY event hub, and the three routers the server mounts (`/api/events`, `/api/jobs`, `/api/notifications`). Enqueues are single-flight per `(workspace, key)`, and an enqueue may also name a QUEUE (graphile's `queueName`) — every job sharing a queue name runs one at a time, in enqueue order, waiting IN the queue as a `queued` row rather than in this process, which is how the dashboard's three heavy repository jobs (`repo.guard-setup` / `repo.guard-generate` / `repo.guard-run`) are rationed to one at a time per workspace while a `context.sync` or `context.scan` still runs beside them. Job TYPES live with their consumer — the dashboard server's are in `apps/dashboard/server/src/jobs/tasks/`.
 - `ee/packages/client/` — `@truecourse/ee-client`: the enterprise edition's CLIENT features, registered into the open shell's registries by `src/edition.tsx` — the Settings › Connections tab, Azure DevOps among the repository providers, and the workspace switcher with its Create workspace dialog. Reached only through the client's `@edition` alias (see EDITIONS below).
-- `ee/packages/server/` — `@truecourse/ee-server`: the enterprise edition's SERVER features and its process entry (`src/main.ts`). Today that is the three `/api/auth/workspaces` routes behind more than one workspace. It registers into `@truecourse/dashboard-server`'s feature registry and then starts that same server.
+- `ee/packages/server/` — `@truecourse/ee-server`: the enterprise edition's SERVER features, exported as `eeServerFeatures`. Today that is the three `/api/auth/workspaces` routes behind more than one workspace. Not a process of its own: the open server's entry finds this package beside its tree at boot and registers the list (see EDITIONS below).
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/core/`, `tests/server/` and `tests/dashboard-server/` (routes and core services), `tests/guard-runner/`, `tests/guard-generator/`, `tests/dashboard-client/`, plus `tests/ee-server/` and `tests/ee-client/` for the enterprise bundle.
 - `tests/fixtures/` — Fixture repos the tests drive: `guard-fixture-cli/` (the `relkit` CLI), `guard-fixture-api/` (the `todos` + `api-v2` HTTP servers) and `guard-fixture-web/` for the guard drivers, `recipe-propose/` and `route-manifest-monorepo/` for the deterministic recipe/route derivations
 
@@ -56,20 +56,34 @@ and Settings' Members, Repositories and Models — is open.
 GitHub is the provider that connects today, and a folder on this machine in
 local mode. GitLab and Azure DevOps are listed as coming soon.
 
-The dependency runs ONE WAY, from `ee/` inward, so no open file ever names an
-`ee/` path (`tests/architecture/ee-import-boundary.test.ts` pins that):
+**One build, one image, one process entry.** The image carries both editions
+and nothing in the Dockerfile or a release script picks one; which edition a
+process is comes from whether `ee/` sits beside the open tree.
+
+The dependency runs ONE WAY, from `ee/` inward: no open source file reaches
+into `ee/`, and the one seam on each side is pinned by
+`tests/architecture/ee-import-boundary.test.ts` — `main.tsx`'s `@edition`
+import on the client, `edition-loader.ts` on the server. The client's build
+config and stylesheet (`vite.config.ts`, `globals.css`) point the alias and
+Tailwind's source scan at the bundle by path; they sit outside the scanned
+source roots, so moving the bundle means moving those two lines by hand.
 
 - **Client** — `apps/dashboard/client/src/dashboard/shell/registry.ts` holds the
   three seams (a settings tab, a repository provider, the workspace switcher).
   `main.tsx` imports `registerEditionFeatures` from `@edition`, an alias the
   vite config points at `ee/packages/client/src/edition.tsx` when the checkout
-  has one and at `dashboard/shell/open-edition.ts` when it does not. No loader and
-  no dynamic import: which edition a bundle is was decided when it was built.
+  has one and at `dashboard/shell/open-edition.ts` when it does not, so the
+  choice is made when the bundle is built.
 - **Server** — `apps/dashboard/server/src/features.ts` is the registry, and
-  `boot.ts` exports `startServer`. The open edition's process entry is
-  `apps/dashboard/server/src/index.ts`; the enterprise edition's is
-  `ee/packages/server/src/main.ts`, which registers its features and then starts
-  the same server. The Dockerfile picks whichever entry the image was built with.
+  `apps/dashboard/server/src/index.ts` is the ONE process entry, for every
+  edition. Boot's first step after the log is `edition-loader.ts`, which looks
+  for `ee/packages/server` beside its own tree (`dist/` built, `src/` under tsx
+  and the tests), registers the bundle's exported `eeServerFeatures` when it is
+  there, registers nothing when it is not, and logs which edition it found and
+  the path it probed either way. A bundle that is present but cannot load or
+  exports no feature list stops the boot, naming it. `GET /api/capabilities`
+  reports the result as `edition`, and the client's workspace switcher draws
+  only when the server says `enterprise`.
 
 ## Modes
 
@@ -80,6 +94,12 @@ so no route, job or store knows which mode it is in.
 
 - **Hosted** — WorkOS signs people in (`auth/workos-auth.ts`), a workspace is
   the session's organization, and the gate refuses a request with no session.
+  The organization on a session is a claim made when its token was minted, so
+  the verifier confirms the membership behind it (cached a minute per pair, and
+  forgotten at once by the server that removes a member); a session whose
+  membership ended runs org-less, and `/api/auth/me` moves it into the user's
+  other workspace or leaves it to name one. The client re-probes the session on
+  any 401 after load and reloads when the answer moved.
 - **Local** — one developer's machine: one implicit person and one implicit
   workspace behind a fixed organization id (`auth/local.ts`, `org_local`), the
   gate answering that session for every request with no cookie to read and no

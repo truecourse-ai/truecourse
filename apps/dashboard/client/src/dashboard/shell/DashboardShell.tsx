@@ -38,7 +38,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { Brand } from '@/components/brand';
 import { DiscordIcon } from '@/components/DiscordIcon';
 import { EVENTS, trackEvent } from '@/lib/posthog';
-import { useServerMode } from '@/contexts/CapabilityContext';
+import { useEdition, useServerMode } from '@/contexts/CapabilityContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { useDashboardState } from './dashboard-state';
 import { useDashboardUser } from './use-dashboard-user';
@@ -142,14 +142,17 @@ function useClickOutside(open: boolean, close: () => void) {
  *
  * Local mode is always this block: there is one implicit workspace and no
  * identity provider to move a session through, so the server mounts no
- * `/api/auth/workspaces` routes for a switcher to call. The mode is checked
- * here, once, rather than inside whatever was registered.
+ * `/api/auth/workspaces` routes for a switcher to call. So is a server that
+ * booted the open edition under a client built with the enterprise one: it
+ * says `community`, and has no such routes either. Both are checked here,
+ * once, rather than inside whatever was registered.
  */
 function WorkspaceBlock({ collapsed }: { collapsed: boolean }) {
   const Switcher = registeredWorkspaceSwitcher();
   const { workspace } = useDashboardState();
   const local = useServerMode() === 'local';
-  if (Switcher && !local) return <Switcher collapsed={collapsed} />;
+  const enterprise = useEdition() === 'enterprise';
+  if (Switcher && !local && enterprise) return <Switcher collapsed={collapsed} />;
 
   // Nobody is signed in: there is no workspace to name.
   if (!workspace) return null;

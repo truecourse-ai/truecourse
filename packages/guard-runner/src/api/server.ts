@@ -27,7 +27,7 @@ import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { trackProcessGroup } from '../child-kill.js'
-import { allocateFreePort, releasePort } from '../ports.js'
+import { allocateFreePort, portIsFree, releasePort } from '../ports.js'
 
 /** Poll interval while waiting for the health endpoint. */
 const HEALTH_POLL_INTERVAL_MS = 100
@@ -35,6 +35,8 @@ const HEALTH_POLL_INTERVAL_MS = 100
 const HEALTH_ATTEMPT_TIMEOUT_MS = 2_000
 /** Grace between the stop SIGKILL and giving up on the close event. */
 const STOP_WAIT_MS = 5_000
+/** Boots one start may make, each on its own port, while it keeps losing the port. */
+const PORT_RACE_ATTEMPTS = 3
 /** Read size for one pass over a server's captured stdout/stderr. */
 const LOG_READ_CHUNK = 64 * 1024
 
@@ -334,34 +336,56 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
  * Boot the server and wait until `GET <healthPath>` answers 2xx. On any failure
  * (spawn error, early exit, health timeout, abort) the child is killed and the
  * captured output returned — the server never outlives a failed start.
+ *
+ * A boot that DIED ON ITS PORT is re-booted on a fresh one. The number is only
+ * ours while we hold it here; from the moment it is handed over until the child
+ * binds it, a sibling process, a browser or any other socket on the host can
+ * take it, and the child then dies in `listen`: an exit that reads exactly like
+ * a crash and is nothing of the kind. The port still belonging to someone else
+ * once the child is gone is what tells the two apart, so only a boot that can
+ * SHOW it lost the port is tried again; an application that crashed on its own
+ * surfaces after one attempt, as it always did.
  */
 export async function startApiServer(opts: StartApiServerOptions): Promise<StartApiServerResult> {
-  if (opts.signal?.aborted) {
+  for (let attempt = 1; ; attempt++) {
+    if (opts.signal?.aborted) {
+      return {
+        ok: false,
+        reason: 'run aborted before the api server started',
+        timedOut: false,
+        spawnFailed: false,
+        stdout: '',
+        stderr: '',
+      }
+    }
+    const spawned = await spawnApiProcess(opts)
+    const { server } = spawned
+    const ready = await awaitApiServerReady(spawned, opts)
+    if (ready.ok) return { ok: true, server }
+    // Whether the child was already gone is the question the port test is asked
+    // ABOUT, so it has to be read before the kill below answers it for us.
+    const diedOnItsOwn = server.exit() !== null && spawned.spawnError() === null
+    // An already-dead process needs no kill; anything still running must not outlive
+    // a failed start.
+    if (!server.exit()) await server.stop()
+    // A stop that gave up on the close event leaves output unread; the barrier makes
+    // the reported logs everything the child actually got out.
+    await server.drain()
+    if (
+      attempt < PORT_RACE_ATTEMPTS &&
+      diedOnItsOwn &&
+      !opts.signal?.aborted &&
+      !(await portIsFree(server.port))
+    ) {
+      continue
+    }
     return {
       ok: false,
-      reason: 'run aborted before the api server started',
-      timedOut: false,
-      spawnFailed: false,
-      stdout: '',
-      stderr: '',
+      reason: ready.reason,
+      timedOut: ready.timedOut,
+      spawnFailed: spawned.spawnError() !== null,
+      ...server.logs(),
     }
-  }
-  const spawned = await spawnApiProcess(opts)
-  const { server } = spawned
-  const ready = await awaitApiServerReady(spawned, opts)
-  if (ready.ok) return { ok: true, server }
-  // An already-dead process needs no kill; anything still running must not outlive
-  // a failed start.
-  if (!server.exit()) await server.stop()
-  // A stop that gave up on the close event leaves output unread; the barrier makes
-  // the reported logs everything the child actually got out.
-  await server.drain()
-  return {
-    ok: false,
-    reason: ready.reason,
-    timedOut: ready.timedOut,
-    spawnFailed: spawned.spawnError() !== null,
-    ...server.logs(),
   }
 }
 

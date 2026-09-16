@@ -1237,13 +1237,24 @@ describe('the guard run job', () => {
     await storeGeneratedSet();
     await saveSetupBundle();
     runImpl = async () =>
-      ({ status: 'build-failed', build: { command: 'pnpm build', exitCode: 1, timedOut: false, stdout: '', stderr: 'boom' } }) as never;
+      ({
+        status: 'build-failed',
+        build: { ok: false, command: 'pnpm build', exitCode: 1, timedOut: false, output: '> tsc\n\nsrc/a.ts(1,1): error TS2304\nboom\n' },
+      }) as never;
 
     await jobs.enqueueGuardRun(request);
     await Promise.all(running);
 
+    // The job row keeps the runner's reason AND the build's own last words; the
+    // notification shows the first line, which already carries the last of them.
     const [job] = await jobsOfType('repo.guard-run');
     expect(job).toMatchObject({ status: 'failed', error: expect.stringMatching(/pnpm build/) });
+    expect(job?.error).toContain('Last output: > tsc | src/a.ts(1,1): error TS2304 | boom');
+    expect(job?.error).toMatch(/\n\n> tsc\nsrc\/a\.ts\(1,1\): error TS2304\nboom$/);
+    const notes = await new NotificationStore(db).listForOrg(ORG);
+    expect(notes[0]?.body).toBe(
+      'Build failed (`pnpm build`). No scenarios ran. Last output: > tsc | src/a.ts(1,1): error TS2304 | boom',
+    );
     expect(await readGuardLatest(REPO)).toBeNull();
   });
 

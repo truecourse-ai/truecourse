@@ -14,6 +14,33 @@ import { armChildKill } from './child-kill.js'
 export const DEFAULT_BUILD_TIMEOUT_MS = 600_000
 export const DEFAULT_INSTALL_TIMEOUT_MS = 600_000
 
+/** ANSI escape sequences a toolchain may still emit despite `NO_COLOR`. */
+const ANSI_SEQUENCE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
+/** C0/DEL control bytes other than tab and the line breaks — Postgres rejects a NUL in text. */
+const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g
+/** How much of the end of the output is worth scanning: a build log can run to megabytes. */
+const TAIL_WINDOW_CHARS = 64_000
+/** The tail travels in a job's error text and its NOTIFY payload, so it is byte-bounded too. */
+const MAX_TAIL_CHARS = 3_000
+
+/**
+ * The last `maxLines` non-empty lines of a build's captured output, colour codes
+ * and control bytes stripped — what a failure message carries so the reader sees
+ * the compiler's own words instead of only the command that ran. A lone carriage
+ * return ends a line too, so a progress bar redrawn in place does not swallow the
+ * error printed after it. The result is capped at `MAX_TAIL_CHARS` from the end.
+ */
+export function buildOutputTail(output: string, maxLines = 40): string {
+  const lines = output
+    .slice(-TAIL_WINDOW_CHARS)
+    .replace(ANSI_SEQUENCE, '')
+    .replace(CONTROL_CHARS, '')
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0)
+  return lines.slice(-maxLines).join('\n').slice(-MAX_TAIL_CHARS)
+}
+
 export interface BuildResult {
   ok: boolean
   command: string

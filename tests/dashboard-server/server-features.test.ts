@@ -54,6 +54,15 @@ describe('the open edition', () => {
     const app = createApp({ serveStatic: false, authVerifier: null, github: null, jobs: null });
     await request(app).get('/api/auth/workspaces').expect(404);
   });
+
+  it('refuses a route nobody mounted as JSON, whatever the method', async () => {
+    installTestRegistry();
+    const app = createApp({ serveStatic: false, authVerifier: null, github: null, jobs: null });
+    const got = await request(app).get('/api/auth/workspaces').expect(404);
+    expect(got.body).toEqual({ error: 'The server has no such route.' });
+    const posted = await request(app).post('/api/auth/workspaces').send({ name: 'x' }).expect(404);
+    expect(posted.body).toEqual({ error: 'The server has no such route.' });
+  });
 });
 
 describe('an edition that registers features', () => {

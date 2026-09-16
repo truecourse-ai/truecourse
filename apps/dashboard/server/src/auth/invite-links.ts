@@ -34,12 +34,12 @@ function inviteLinkRefusal(link: WorkspaceInviteLinkRecord | null): InviteLinkRe
 }
 
 const INVITE_REFUSED: Record<InviteLinkRefusal, { status: number; error: string }> = {
-  invalid: { status: 404, error: 'This invite link does not exist.' },
+  invalid: { status: 404, error: 'This invite link is not valid.' },
   used: { status: 409, error: 'This invite link has already been used.' },
   expired: { status: 410, error: 'This invite link has expired.' },
   elsewhere: {
     status: 409,
-    error: 'You are already in a workspace. Sign in with another account to join this one.',
+    error: 'This account is already in a workspace. Switch to another account to join this one.',
   },
 };
 
@@ -159,10 +159,11 @@ export function createInviteLinkRouter({
     } catch (err) {
       await inviteLinks.release(link.id).catch(() => {});
       if (!isConflict(err)) {
+        // The visitor is an outsider: WorkOS's words stay in the log.
         log.error(
           `[Auth] could not put ${result.user.id} into ${link.workspaceOrgId} by invite link: ${(err as Error).message}`,
         );
-        res.status(502).json({ error: `Could not join the workspace: ${(err as Error).message}` });
+        res.status(502).json({ error: 'Could not join the workspace. Try again in a moment.' });
         return;
       }
       // Already a member, so nothing to create: the session is moved into the
@@ -181,7 +182,7 @@ export function createInviteLinkRouter({
         `[Auth] ${result.user.id} joined ${link.workspaceOrgId} but the session could not follow: ${(err as Error).message}`,
       );
       res.status(502).json({
-        error: 'You joined the workspace, but the session could not be moved into it. Sign out and back in.',
+        error: 'You joined the workspace. Sign out and back in to open it.',
       });
     }
   });

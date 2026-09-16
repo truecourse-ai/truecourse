@@ -31,6 +31,7 @@ import {
   type WorkspaceMembersResponse,
 } from '@truecourse/shared';
 import type { WorkosConfig } from './config.js';
+import { forgetMembership } from './workos-auth.js';
 import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
 
 /** How long an invitation stands before it expires; a link's lifetime is the inviter's pick. */
@@ -323,6 +324,9 @@ export function createWorkspaceMembersRouter(
         return;
       }
       await workos.userManagement.deleteOrganizationMembership(id);
+      // Their session still claims this workspace until its token expires; the
+      // verifier on this server refuses it from the next request on.
+      forgetMembership(membership.userId, caller.org);
       res.status(204).end();
     } catch (err) {
       upstreamFailed(res, `removing membership ${id}`, err);

@@ -10,6 +10,12 @@
  * So every port picked for a child is HELD here until that child is gone, and
  * every in-process listen re-binds when the kernel lands it on a held port.
  * One process is one run, which is why the set is module-wide.
+ *
+ * The hold reaches only THIS process. Between the pick and the child's own bind
+ * the number belongs to nobody, so a sibling worker, a browser or any other
+ * process on the host can take it, which is what {@link portIsFree} is for: a
+ * boot that died before its health answer asks whether its port is now someone
+ * else's, and that answer is what separates a lost race from a crash.
  */
 
 import net from 'node:net'
@@ -60,6 +66,25 @@ export function releasePort(port: number): void {
 /** Whether a child still owns the port. */
 export function isPortHeld(port: number): boolean {
   return held.has(port)
+}
+
+/**
+ * Whether the port can still be bound on loopback. False means something else
+ * is listening on it RIGHT NOW, the one observation that tells a boot which
+ * died before its health answer that it lost its port rather than crashed.
+ *
+ * Only EADDRINUSE answers false: any other refusal says nothing about an owner,
+ * and a boot must not re-try itself on a guess.
+ */
+export function portIsFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const srv = net.createServer()
+    srv.unref()
+    srv.once('error', (err: NodeJS.ErrnoException) => resolve(err.code !== 'EADDRINUSE'))
+    srv.listen(port, '127.0.0.1', () => {
+      srv.close(() => resolve(true))
+    })
+  })
 }
 
 /**

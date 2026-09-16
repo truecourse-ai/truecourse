@@ -14,13 +14,16 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
 } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@truecourse/shared';
+import { takeRememberedInvite } from '@/auth/invite-resume';
 import { useServerMode } from '@/contexts/CapabilityContext';
+import { SESSION_REFUSED_EVENT } from '@/lib/api';
 import { resetUser } from '@/lib/posthog';
 import { getServerUrl } from '@/lib/server-url';
 
@@ -33,8 +36,8 @@ interface AuthValue {
   status: AuthStatus;
   user: AuthUser | null;
   signIn: () => void;
-  /** End the session; `returnTo` is the path on this app to land on afterwards, the root by default. */
-  signOut: (returnTo?: string) => Promise<void>;
+  /** End the session; the browser lands on the app root afterwards. */
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthValue>({
@@ -44,33 +47,71 @@ const AuthContext = createContext<AuthValue>({
   signOut: async () => {},
 });
 
+/** The session the server holds right now: its user, or null for none. */
+async function probeSession(): Promise<AuthUser | null> {
+  try {
+    const res = await fetch(`${getServerUrl()}${AUTH_BASE}/me`, { credentials: 'include' });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { user: AuthUser };
+    return body.user;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether two probes answered the same person in the same workspace. */
+function sameSession(a: AuthUser, b: AuthUser): boolean {
+  return a.id === b.id && a.organizationId === b.organizationId;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<AuthUser | null>(null);
+  // What the last probe answered, for a later refusal to compare against.
+  const probed = useRef<AuthUser | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setStatus('loading');
-    fetch(`${getServerUrl()}${AUTH_BASE}/me`, { credentials: 'include' })
-      .then(async (res) => {
-        if (cancelled) return;
-        if (res.ok) {
-          const body = (await res.json()) as { user: AuthUser };
-          setUser(body.user);
-          setStatus('authed');
-        } else {
-          setUser(null);
-          setStatus('anon');
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setUser(null);
-        setStatus('anon');
-      });
+    void probeSession().then((next) => {
+      if (cancelled) return;
+      probed.current = next;
+      setUser(next);
+      setStatus(next ? 'authed' : 'anon');
+    });
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // A request refused as unauthenticated after the page loaded. The session is
+  // probed again and compared with the one the page runs on. Gone: anonymous,
+  // and the gate sends the browser to sign-in. The same person elsewhere or
+  // nowhere (a member removed from this workspace, whom the probe moved into
+  // their other one): a reload, which opens the right place. The same session:
+  // nothing, so a refusal for any other reason cannot loop.
+  useEffect(() => {
+    let probing = false;
+    const onRefused = () => {
+      if (probing) return;
+      probing = true;
+      void probeSession()
+        .then((next) => {
+          const current = probed.current;
+          if (!next) {
+            probed.current = null;
+            setUser(null);
+            setStatus('anon');
+          } else if (current && !sameSession(current, next)) {
+            window.location.reload();
+          }
+        })
+        .finally(() => {
+          probing = false;
+        });
+    };
+    window.addEventListener(SESSION_REFUSED_EVENT, onRefused);
+    return () => window.removeEventListener(SESSION_REFUSED_EVENT, onRefused);
   }, []);
 
   // Ride the address the visitor asked for through login, so the callback
@@ -82,7 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = `${getServerUrl()}${AUTH_BASE}/login?next=${next}`;
   }, []);
 
-  const signOut = useCallback(async (returnTo?: string) => {
+  const signOut = useCallback(async () => {
     // The analytics identity ends with the session, before the browser leaves
     // for the logout: what the next person on this machine does is theirs.
     resetUser();
@@ -90,8 +131,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch(`${getServerUrl()}${AUTH_BASE}/logout`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(returnTo ? { returnTo } : {}),
       });
       const body = (await res.json().catch(() => ({}))) as {
         logoutUrl?: string;
@@ -194,6 +233,10 @@ function CreateWorkspace() {
  * callback error came back (so we never redirect-loop). A tree with no
  * provider above it (`disabled`) renders straight through.
  *
+ * A visitor who switched account on an invite page comes back to the root
+ * signed out, with the invite remembered; the gate sends them there rather
+ * than into sign-in, and the invite page takes it from there.
+ *
  * A LOCAL SERVER has no sign-in: its session probe always answers, so the only
  * way to be anonymous there is a server that is not answering at all — and
  * sending the browser to a login that does not exist would hide that. It is
@@ -207,7 +250,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (status === 'anon' && !authError && !local) signIn();
+    if (status !== 'anon' || authError || local) return;
+    const invite = takeRememberedInvite();
+    if (invite) window.location.replace(invite);
+    else signIn();
   }, [status, authError, signIn, local]);
 
   if (status === 'disabled') return <>{children}</>;

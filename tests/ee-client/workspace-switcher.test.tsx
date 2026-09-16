@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { ServerMode, WorkspaceSummary } from '@truecourse/shared';
+import type { Edition, ServerMode, WorkspaceSummary } from '@truecourse/shared';
 import { AuthProvider } from '@/auth/AuthContext';
 import { AppProvider } from '@/contexts/CapabilityContext';
 import DashboardApp from '@/dashboard/DashboardApp';
@@ -131,23 +131,16 @@ function stubAssign(): ReturnType<typeof vi.fn> {
   return assign;
 }
 
+/** The shell under a hosted enterprise server, which is where the switcher lives. */
 function renderShell() {
-  render(
-    <MemoryRouter initialEntries={['/']}>
-      <AuthProvider>
-        <Routes>
-          <Route path="/*" element={<DashboardApp />} />
-        </Routes>
-      </AuthProvider>
-    </MemoryRouter>,
-  );
+  renderShellIn('hosted');
 }
 
-/** The same shell, told how the server runs, the way `/api/capabilities` tells it. */
-function renderShellIn(mode: ServerMode) {
+/** The same shell, told what the server is, the way `/api/capabilities` tells it. */
+function renderShellIn(mode: ServerMode, edition: Edition = 'enterprise') {
   render(
     <MemoryRouter initialEntries={['/']}>
-      <AppProvider initial={{ edition: 'enterprise', mode, capabilities: [] }}>
+      <AppProvider initial={{ edition, mode, capabilities: [] }}>
         <AuthProvider>
           <Routes>
             <Route path="/*" element={<DashboardApp />} />
@@ -289,5 +282,19 @@ describe('the workspace switcher and the server mode', () => {
   it('still draws the switcher in hosted mode', async () => {
     renderShellIn('hosted');
     expect(await switcher()).toHaveTextContent('Acme');
+  });
+
+  // A client built with this edition can reach a server that booted without
+  // its bundle; that server says `community` and mounts no workspaces routes.
+  it('leaves the one-workspace block in place when the server says community', async () => {
+    renderShellIn('hosted', 'community');
+
+    expect((await screen.findAllByText('Acme')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Switch workspace' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create workspace' })).toBeNull();
+    const reads = (window.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+      (call) => String(call[0]).includes('/api/auth/workspaces'),
+    );
+    expect(reads).toEqual([]);
   });
 });
