@@ -14,6 +14,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -22,6 +23,7 @@ import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@truecourse/shared';
 import { takeRememberedInvite } from '@/auth/invite-resume';
 import { useServerMode } from '@/contexts/CapabilityContext';
+import { SESSION_REFUSED_EVENT } from '@/lib/api';
 import { getServerUrl } from '@/lib/server-url';
 
 // The server's public auth router.
@@ -44,33 +46,71 @@ const AuthContext = createContext<AuthValue>({
   signOut: async () => {},
 });
 
+/** The session the server holds right now: its user, or null for none. */
+async function probeSession(): Promise<AuthUser | null> {
+  try {
+    const res = await fetch(`${getServerUrl()}${AUTH_BASE}/me`, { credentials: 'include' });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { user: AuthUser };
+    return body.user;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether two probes answered the same person in the same workspace. */
+function sameSession(a: AuthUser, b: AuthUser): boolean {
+  return a.id === b.id && a.organizationId === b.organizationId;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<AuthUser | null>(null);
+  // What the last probe answered, for a later refusal to compare against.
+  const probed = useRef<AuthUser | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setStatus('loading');
-    fetch(`${getServerUrl()}${AUTH_BASE}/me`, { credentials: 'include' })
-      .then(async (res) => {
-        if (cancelled) return;
-        if (res.ok) {
-          const body = (await res.json()) as { user: AuthUser };
-          setUser(body.user);
-          setStatus('authed');
-        } else {
-          setUser(null);
-          setStatus('anon');
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setUser(null);
-        setStatus('anon');
-      });
+    void probeSession().then((next) => {
+      if (cancelled) return;
+      probed.current = next;
+      setUser(next);
+      setStatus(next ? 'authed' : 'anon');
+    });
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // A request refused as unauthenticated after the page loaded. The session is
+  // probed again and compared with the one the page runs on. Gone: anonymous,
+  // and the gate sends the browser to sign-in. The same person elsewhere or
+  // nowhere (a member removed from this workspace, whom the probe moved into
+  // their other one): a reload, which opens the right place. The same session:
+  // nothing, so a refusal for any other reason cannot loop.
+  useEffect(() => {
+    let probing = false;
+    const onRefused = () => {
+      if (probing) return;
+      probing = true;
+      void probeSession()
+        .then((next) => {
+          const current = probed.current;
+          if (!next) {
+            probed.current = null;
+            setUser(null);
+            setStatus('anon');
+          } else if (current && !sameSession(current, next)) {
+            window.location.reload();
+          }
+        })
+        .finally(() => {
+          probing = false;
+        });
+    };
+    window.addEventListener(SESSION_REFUSED_EVENT, onRefused);
+    return () => window.removeEventListener(SESSION_REFUSED_EVENT, onRefused);
   }, []);
 
   // Ride the address the visitor asked for through login, so the callback

@@ -13,8 +13,10 @@ import request from 'supertest';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { parseCookies } from '../../apps/dashboard/server/src/auth/cookies';
 import {
+  clearMembershipCache,
   createAuthRouter,
   createSessionVerifier,
+  forgetMembership,
 } from '../../apps/dashboard/server/src/auth/workos-auth';
 
 const cfg = {
@@ -72,6 +74,7 @@ function makeAuthenticatedWorkos(userId: string, getUser: (id: string) => Promis
 
 afterEach(() => {
   vi.useRealTimers();
+  clearMembershipCache();
 });
 
 describe('parseCookies', () => {
@@ -245,5 +248,150 @@ describe('createSessionVerifier: operator lookup', () => {
     const second = await verify('tc_session=sealed');
     expect(second?.user.isOperator).toBe(false);
     expect(workos.userManagement.getUser).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The organization on a session is a claim made when the token was minted. The
+ * verifier confirms the membership behind it, once per minute per pair, and the
+ * server that removed a member refuses their next request without waiting.
+ */
+describe('createSessionVerifier: the membership behind the claim', () => {
+  const active = (userId: string, organizationId: string) => ({
+    id: `om_${userId}`,
+    userId,
+    organizationId,
+    organizationName: 'Acme',
+    status: 'active' as const,
+  });
+
+  /** A live session claiming org_1, and a WorkOS whose memberships the test controls. */
+  function makeMemberWorkos(memberships: () => unknown[]) {
+    const user: FakeUser = { id: 'user_m', email: 'm@acme.test' };
+    return {
+      userManagement: {
+        getUser: vi.fn(async () => user),
+        listOrganizationMemberships: vi.fn(async () => {
+          const rows = memberships();
+          return { data: rows, autoPagination: async () => rows };
+        }),
+        loadSealedSession: vi.fn(() => ({
+          authenticate: async () => ({ authenticated: true, user, organizationId: 'org_1' }),
+          refresh: async () => {
+            throw new Error('should not refresh a live session');
+          },
+        })),
+      },
+    };
+  }
+
+  it('keeps the organization while the membership stands, asking WorkOS once a minute', async () => {
+    vi.useFakeTimers();
+    const workos = makeMemberWorkos(() => [active('user_m', 'org_1')]);
+    const verify = verifierFor(workos);
+
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBe('org_1');
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBe('org_1');
+    expect(workos.userManagement.listOrganizationMemberships).toHaveBeenCalledTimes(1);
+    expect(workos.userManagement.listOrganizationMemberships).toHaveBeenCalledWith({
+      userId: 'user_m',
+      organizationId: 'org_1',
+      statuses: ['active'],
+    });
+
+    vi.setSystemTime(Date.now() + 61_000);
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBe('org_1');
+    expect(workos.userManagement.listOrganizationMemberships).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops the organization once the membership is gone, keeping the identity', async () => {
+    const workos = makeMemberWorkos(() => []);
+    const result = await verifierFor(workos)('tc_session=sealed');
+    expect(result?.user).toMatchObject({ id: 'user_m', organizationId: null });
+  });
+
+  it('collapses a burst of requests into one lookup', async () => {
+    const gate = deferred<unknown[]>();
+    const workos = makeMemberWorkos(() => []);
+    workos.userManagement.listOrganizationMemberships.mockImplementation(async () => {
+      const rows = await gate.promise;
+      return { data: rows, autoPagination: async () => rows };
+    });
+    const verify = verifierFor(workos);
+    const burst = Promise.all([verify('tc_session=sealed'), verify('tc_session=sealed'), verify('tc_session=sealed')]);
+    gate.resolve([active('user_m', 'org_1')]);
+    for (const r of await burst) expect(r?.user.organizationId).toBe('org_1');
+    expect(workos.userManagement.listOrganizationMemberships).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses the next request the moment this process removed the member, with no lookup', async () => {
+    const workos = makeMemberWorkos(() => [active('user_m', 'org_1')]);
+    const verify = verifierFor(workos);
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBe('org_1');
+
+    forgetMembership('user_m', 'org_1');
+
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBeNull();
+    expect(workos.userManagement.listOrganizationMemberships).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the last answer when WorkOS is unreachable, and never locks out on a cold cache', async () => {
+    vi.useFakeTimers();
+    let up = true;
+    const workos = makeMemberWorkos(() => {
+      if (!up) throw new Error('WorkOS is unavailable');
+      return [active('user_m', 'org_1')];
+    });
+    const verify = verifierFor(workos);
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBe('org_1');
+
+    up = false;
+    vi.setSystemTime(Date.now() + 61_000);
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBe('org_1');
+
+    // Cold: nothing is known, and the claim is believed rather than everyone refused.
+    clearMembershipCache();
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBe('org_1');
+  });
+});
+
+describe('POST /api/auth/workspace for a member removed from the workspace the token names', () => {
+  it('creates the new workspace instead of answering the one they are no longer in', async () => {
+    const user: FakeUser = { id: 'user_gone', email: 'gone@acme.test' };
+    const created: string[] = [];
+    const minted: Array<{ organizationId?: string }> = [];
+    const workos = {
+      userManagement: {
+        getUser: vi.fn(async () => user),
+        // Neither the claimed org nor any other: the membership was removed.
+        listOrganizationMemberships: vi.fn(async () => ({ data: [], autoPagination: async () => [] })),
+        createOrganizationMembership: vi.fn(async () => ({ id: 'om_new' })),
+        loadSealedSession: vi.fn(() => ({
+          authenticate: async () => ({ authenticated: true, user, organizationId: 'org_old' }),
+          refresh: async (o: { organizationId?: string }) => {
+            minted.push(o);
+            return { authenticated: true, sealedSession: `sealed:${o.organizationId}`, user, organizationId: o.organizationId };
+          },
+        })),
+      },
+      organizations: {
+        createOrganization: vi.fn(async ({ name }: { name: string }) => {
+          created.push(name);
+          return { id: 'org_new', name };
+        }),
+      },
+    };
+    const app = appFor(workos, verifierFor(workos));
+
+    const res = await request(app)
+      .post('/api/auth/workspace')
+      .set('Cookie', 'tc_session=sealed')
+      .send({ name: 'Fresh start' })
+      .expect(200);
+
+    expect(created).toEqual(['Fresh start']);
+    expect(minted).toEqual([{ organizationId: 'org_new' }]);
+    expect(res.body.user).toMatchObject({ id: 'user_gone', organizationId: 'org_new', organizationName: 'Fresh start' });
+    expect(res.headers['set-cookie']?.[0]).toContain('tc_session=sealed%3Aorg_new');
   });
 });
