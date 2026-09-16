@@ -14,8 +14,8 @@
  * Names below are the AI SDK's, verified against the installed typings:
  * `@ai-sdk/anthropic@3` (`cacheControl`, `disableParallelToolUse`),
  * `@ai-sdk/openai@3` (`promptCacheKey`, `parallelToolCalls` — on both the
- * chat and the responses options; `store` and `include` on the responses
- * options, which is the model `createOpenAI()` builds),
+ * chat and the responses options; `store` on the responses options, which is
+ * the model `createOpenAI()` builds),
  * `@ai-sdk/amazon-bedrock@4` (`cachePoint`, `additionalModelRequestFields`)
  * and `@ai-sdk/openai-compatible@2`.
  */
@@ -77,20 +77,22 @@ const ANTHROPIC: ProviderTuning = {
  * 'rs_…' not found" and the whole session dies on a validation error it can
  * never retry past. With `store: false` the request carries the reasoning item
  * itself, encrypted content and all, so nothing has to be retained anywhere.
+ * That is the whole cost of statelessness and there is no way around it: the
+ * item reference is the only smaller form, and it is the one that needs the
+ * retention `store: false` gives up. So every turn of a long session re-sends
+ * the reasoning of every turn before it, and the wire grows with the square of
+ * the transcript.
  *
- * `include` is what asks the model to hand that encrypted content back. The
- * SDK adds it itself for the model ids it recognizes as reasoning models, but
- * that test is a prefix match on OpenAI's own names — a deployment-named model
- * behind a gateway fails it — so the ask is named here rather than inferred.
+ * `reasoning.encrypted_content` is what asks the model to hand that encrypted
+ * content back, and it is the SDK's ask to make, not ours: it adds the include
+ * itself when `store` is false and the model id reads as a reasoning model, and
+ * a model that has no reasoning to encrypt REJECTS the parameter outright
+ * ("Encrypted content is not supported with this model"), which would be every
+ * turn of every session on a `gpt-4o`-class model.
  */
 const OPENAI: ProviderTuning = {
   callOptions: (_modelId, cacheKey) => ({
-    openai: {
-      promptCacheKey: cacheKey,
-      parallelToolCalls: false,
-      store: false,
-      include: ['reasoning.encrypted_content'],
-    },
+    openai: { promptCacheKey: cacheKey, parallelToolCalls: false, store: false },
   }),
 };
 

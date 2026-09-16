@@ -10,6 +10,10 @@
  * With `store: false` the reasoning item travels whole, encrypted content and
  * all, and nothing has to be retained anywhere.
  *
+ * The encrypted content the replay needs is asked for by the SDK, on the model
+ * ids whose family HAS reasoning to encrypt; a model without one rejects the
+ * ask, so the tuning must not make it blindly.
+ *
  * So this runs the REAL `@ai-sdk/openai` responses model over a captured fetch
  * and reads the request body: the only place that distinction is visible.
  */
@@ -60,6 +64,7 @@ const REPLY = {
 /** Run one call through the real provider and hand back what it put on the wire. */
 async function requestBodyFor(
   providerOptions: Record<string, Record<string, unknown>>,
+  modelId = cfg.model,
 ): Promise<{ input: Array<Record<string, unknown>>; store?: boolean; include?: string[] }> {
   let body: unknown;
   vi.stubGlobal('fetch', async (_url: unknown, init: { body: string }) => {
@@ -69,7 +74,7 @@ async function requestBodyFor(
       headers: { 'content-type': 'application/json' },
     });
   });
-  const model = buildModel(cfg, cfg.model);
+  const model = buildModel({ ...cfg, model: modelId }, modelId);
   await (model as { doGenerate: (o: unknown) => Promise<unknown> }).doGenerate({
     prompt: REPLAYED_PROMPT,
     providerOptions,
@@ -99,4 +104,18 @@ describe('openai reasoning replay', () => {
     expect(body.input).toContainEqual({ type: 'item_reference', id: 'rs_034f' });
     expect(body.input.some((item) => item.type === 'reasoning')).toBe(false);
   });
+
+  // `include: ['reasoning.encrypted_content']` is a 400 on a model with no
+  // reasoning to encrypt, which on this path would be every turn of every
+  // session. The tuning is one object for every OpenAI model, so it must carry
+  // nothing that only some of them accept.
+  it.each(['gpt-4o', 'gpt-4.1', 'gpt-5-chat-latest'])(
+    'asks a non-reasoning model (%s) for no encrypted content',
+    async (modelId) => {
+      const body = await requestBodyFor(providerTuningFor('openai').callOptions(modelId, 'k'), modelId);
+
+      expect(body.store).toBe(false);
+      expect(body.include ?? []).not.toContain('reasoning.encrypted_content');
+    },
+  );
 });

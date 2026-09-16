@@ -39,7 +39,7 @@ import {
   GUARD_GENERATE_STEPS,
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
-import { scenariosDir, walkScenarioRelFiles } from '@truecourse/guard-runner';
+import { loadScenarios } from '@truecourse/guard-runner';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
@@ -56,14 +56,15 @@ import { firstLine, type OnboardingJobRequest } from './onboarding.js';
 export const REPO_GUARD_GENERATE_TASK = 'repo.guard-generate';
 
 /**
- * Scenarios the RUNNER would find in this tree — what the baseline run has to
- * work with, counted the way the runner counts it rather than inferred from
- * the report. The tree at this point holds the prior baseline set as well as
- * whatever this generate authored, so zero here means zero for the run: the
- * inherited set is empty too, not merely unchanged.
+ * Scenarios the RUNNER would find in this tree — the loader's own count, not
+ * the files on disk: a tree of scenarios the loader rejects loads as none, and
+ * the run would end on "no scenarios" all the same. The tree at this point
+ * holds the prior baseline set as well as whatever this generate authored, so
+ * zero here means zero for the run: the inherited set is empty too, not merely
+ * unchanged.
  */
 function runnableScenarios(treeDir: string): number {
-  return walkScenarioRelFiles(scenariosDir(treeDir)).filter((rel) => /\.ya?ml$/i.test(rel)).length;
+  return loadScenarios(treeDir).scenarios.length;
 }
 
 export type GuardGenerateJobRequest = OnboardingJobRequest & { resumeRunId?: string };
@@ -245,25 +246,26 @@ export function createRepoGuardGenerateTask(
           const written = report.written.length;
           const findings = report.birthFindings.length;
 
+          const result: GuardGenerateJobResult = {
+            repoFullName,
+            status: 'ok',
+            written,
+            birthFindings: findings,
+            noChanges: report.noChanges,
+            openConflicts: 0,
+          };
+
           // Nothing authored, nothing inherited: the scenario set this run just
           // stored is empty, so the baseline run it would chain into can only
           // clone and fail on "no scenarios" seconds later. Settle on the reason
           // the report carries instead — a refused run latches one, a failed
           // author leaves an error — and end the chain here. A `noChanges`
           // report is no exception: an empty set that stayed empty is still
-          // empty, and the count below is what tells that from an unchanged
+          // empty, and the count here is what tells that from an unchanged
           // set with scenarios in it.
           if (written === 0 && runnableScenarios(tree.dir) === 0) {
-            const result: GuardGenerateJobResult = {
-              repoFullName,
-              status: 'nothing-written',
-              written: 0,
-              birthFindings: findings,
-              noChanges: report.noChanges,
-              openConflicts: 0,
-            };
             return {
-              result,
+              result: { ...result, status: 'nothing-written' },
               notification: {
                 level: 'warning',
                 title: 'Flows generated nothing',
@@ -276,14 +278,6 @@ export function createRepoGuardGenerateTask(
             };
           }
 
-          const result: GuardGenerateJobResult = {
-            repoFullName,
-            status: 'ok',
-            written,
-            birthFindings: findings,
-            noChanges: report.noChanges,
-            openConflicts: 0,
-          };
           return {
             result,
             notification: report.noChanges

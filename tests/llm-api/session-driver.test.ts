@@ -823,10 +823,11 @@ describe('api session driver provider cache strategy', () => {
         parallelToolCalls: false,
         // The driver resends the whole history every turn, so a replayed
         // reasoning part must carry itself rather than point at an item the
-        // endpoint is expected to be holding — see the wire shapes those two
-        // options decide between in `openai-reasoning-replay.test.ts`.
+        // endpoint is expected to be holding — see the wire shapes this option
+        // decides between in `openai-reasoning-replay.test.ts`. The encrypted
+        // content it asks back for is the SDK's to request, on the models that
+        // have any; asking here would reach the ones that reject it too.
         store: false,
-        include: ['reasoning.encrypted_content'],
       },
     });
     expect(calls[0].providerOptions?.openai?.promptCacheKey).not.toBe('');

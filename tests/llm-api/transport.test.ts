@@ -490,12 +490,13 @@ describe('createApiTransport — TRUECOURSE_LLM_TIMEOUT_SCALE', () => {
 });
 
 /**
- * A timeout is the one failure that says nothing about the request — only about
- * the minutes the provider spent not answering it. A leaf stage gets ONE call,
- * so an expiry there is a stage's worth of the run gone; it is worth spending a
- * second clock on before giving up.
+ * `timeoutMs` is the ceiling on the WHOLE transport call, not on one provider
+ * request: callers size it as the wall clock they are willing to block for (the
+ * config probe fails fast on a bad key, a leaf stage bounds a long call), and
+ * nothing outside can cut a call short, so a transport that spent a second
+ * clock of its own would silently double every one of those ceilings.
  */
-describe('createApiTransport — the timeout retry', () => {
+describe('createApiTransport — one deadline for the whole call', () => {
   const SCALE_ENV = 'TRUECOURSE_LLM_TIMEOUT_SCALE';
   const orig = process.env[SCALE_ENV];
   beforeEach(() => delete process.env[SCALE_ENV]);
@@ -504,12 +505,9 @@ describe('createApiTransport — the timeout retry', () => {
     else process.env[SCALE_ENV] = orig;
   });
 
-  /** No fallback model: every call the stub sees is an attempt on the primary. */
-  const solo = { provider: 'anthropic' as const, model: 'primary-model', apiKey: 'test' };
-
   /**
    * A model that hangs until its deadline aborts it — `hangs` times over, then
-   * answers. Counts the calls, which is what "one more attempt" is read from.
+   * answers. Counts the calls, which is how many clocks were spent.
    */
   function hangingModel(hangs: number, text = 'OK') {
     let calls = 0;
@@ -532,51 +530,33 @@ describe('createApiTransport — the timeout retry', () => {
     return { model, calls: () => calls };
   }
 
-  it('tries a timed-out call once more, and says so', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  /** No fallback model: every call the stub sees is an attempt on the primary. */
+  const solo = { provider: 'anthropic' as const, model: 'primary-model', apiKey: 'test' };
+
+  it('spends one clock on a timed-out call, not a second', async () => {
     const hanging = hangingModel(1);
-    buildModelMock.mockReturnValue(hanging.model);
-
-    const out = await createApiTransport(solo)({
-      id: 'a:b',
-      stage: 'realization-match',
-      system: 'S',
-      user: 'U',
-      timeoutMs: 40,
-    });
-
-    expect(out).toBe('OK');
-    expect(hanging.calls()).toBe(2);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('realization-match'));
-    warn.mockRestore();
-  });
-
-  it('surfaces the timeout unchanged once the second deadline expires too', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const hanging = hangingModel(2);
     buildModelMock.mockReturnValue(hanging.model);
 
     await expect(
       createApiTransport(solo)({ id: 'a:b', stage: 'slow', system: 'S', user: 'U', timeoutMs: 40 }),
     ).rejects.toThrow('[llm-api] timed out after 40ms');
-    expect(hanging.calls()).toBe(2);
-    warn.mockRestore();
+    expect(hanging.calls()).toBe(1);
   });
 
-  it('spends no second attempt on a failure that is not the clock', async () => {
-    let calls = 0;
-    buildModelMock.mockImplementation(() => ({
-      ...stubModel({ throws: new Error('provider is down') }),
-      async doGenerate() {
-        calls += 1;
-        throw new Error('provider is down');
-      },
-    }));
+  it('leaves the fallback model out of a call the clock killed', async () => {
+    const hanging = hangingModel(1);
+    const fallbackCall = vi.fn();
+    buildModelMock.mockImplementation((_cfg: unknown, id: string) =>
+      id === cfg.fallbackModel
+        ? { ...stubModel({ text: 'FB' }), doGenerate: fallbackCall }
+        : hanging.model,
+    );
 
     await expect(
-      createApiTransport(solo)({ id: 'a:b', stage: 'slow', system: 'S', user: 'U', timeoutMs: 40 }),
-    ).rejects.toThrow('provider is down');
-    expect(calls).toBe(1);
+      createApiTransport(cfg)({ id: 'a:b', stage: 'slow', system: 'S', user: 'U', timeoutMs: 40 }),
+    ).rejects.toThrow('[llm-api] timed out after 40ms');
+    expect(hanging.calls()).toBe(1);
+    expect(fallbackCall).not.toHaveBeenCalled();
   });
 });
 

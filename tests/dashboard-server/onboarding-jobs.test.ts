@@ -955,7 +955,22 @@ describe('the guard generate job', () => {
     const prior = makeTmpDir('tc-onboarding-gen-prior-');
     const orgs = path.join(scenariosDir(prior), 'orgs');
     fs.mkdirSync(orgs, { recursive: true });
-    fs.writeFileSync(path.join(orgs, 'a1.yaml'), 'guard: 2\nid: a1\ntitle: create an org\n');
+    fs.writeFileSync(
+      path.join(orgs, 'a1.yaml'),
+      [
+        'id: a1',
+        'title: create an org',
+        'binds:',
+        '  - doc: docs/orgs.md',
+        '    section: create',
+        '    fingerprint: "sha256:x"',
+        'steps:',
+        '  - run: ["--help"]',
+        '    expect:',
+        '      exit: 0',
+        '',
+      ].join('\n'),
+    );
     const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
     await saveScenarios(priorRef, scenariosDir(prior));
     await writeGuardResult(priorRef, { ...okReport(['a1']), generatedAt: '2026-01-01T00:00:00Z' }, { baseline: true });
@@ -976,6 +991,33 @@ describe('the guard generate job', () => {
       result: { status: 'ok', written: 0 },
     });
     expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
+  }, 60_000);
+
+  // A stored set of files the loader REJECTS is no set at all: the run would
+  // load zero scenarios and die on "no scenarios". Counting yaml files would
+  // call that a set and chain the run anyway.
+  it('chains nothing when the only stored scenarios are malformed', async () => {
+    await saveSetupBundle();
+    const prior = makeTmpDir('tc-onboarding-gen-malformed-');
+    const orgs = path.join(scenariosDir(prior), 'orgs');
+    fs.mkdirSync(orgs, { recursive: true });
+    fs.writeFileSync(path.join(orgs, 'a1.yaml'), 'guard: 2\nid: a1\n');
+    const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
+    await saveScenarios(priorRef, scenariosDir(prior));
+    await writeGuardResult(priorRef, { ...okReport(['a1']), generatedAt: '2026-01-01T00:00:00Z' }, { baseline: true });
+
+    generateImpl = async (repoRoot) => {
+      writeCloneGuardResult(repoRoot, { ...okReport([]), generatedAt: '2026-03-03T00:00:00Z' });
+      return okResult([]);
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({
+      status: 'succeeded',
+      result: { status: 'nothing-written', written: 0 },
+    });
+    expect(enqueued).toEqual(['repo.guard-generate']);
   }, 60_000);
 
   it('saves partial extraction results but fails the job and Activity without chaining', async () => {
