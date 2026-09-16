@@ -19,12 +19,14 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import type { SessionEvent, SessionRunInput } from '../../packages/agent-loop/src/index';
 import {
   computeRecipeFingerprint,
+  guardWorldDirtyMarkerPath,
   loadRecipe,
   recipePath,
   type Recipe,
@@ -184,6 +186,9 @@ function seedInput(r: string, over: Partial<GuardSetupSeedSessionInput> = {}): G
     ecosystem: 'js',
     replaceExisting: false,
     fingerprint: 'seed-fp-1',
+    // Every case here is a tree a run gets as a clone; the one case that is
+    // not says so, and the cold-clone proof stands down for it.
+    freshCheckout: true,
     ...over,
   };
 }
@@ -317,6 +322,36 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
     expect(servicesLog(r)).toEqual(['up', 'seed', 'down', 'up', 'seed', 'down']);
   }, 60_000);
 
+  // The compose project is the repository's, so one world outlives every job of
+  // it: a clone that declares its state unknown gets a wipe before the FIRST
+  // bring-up, and the declaration is consumed with it.
+  it('wipes the shared world before the first bring-up when the clone says its state is unknown', async () => {
+    const r = fixtureRepo();
+    const log = path.join(r, 'services.log');
+    writeRecipe(r, {
+      services: {
+        up: `printf 'up\\n' >> ${log}`,
+        down: `printf 'down\\n' >> ${log}`,
+        reset: `printf 'reset\\n' >> ${log}`,
+      },
+    });
+    const marker = guardWorldDirtyMarkerPath(r);
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, 'materialized: the shared world may carry an earlier job\'s state\n');
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result.status).toBe('ok');
+    // The wipe, the session's world — then the fold's own fresh world, which
+    // resets whatever this run left, marker or no marker.
+    expect(servicesLog(r)).toEqual(['reset', 'up', 'seed', 'down', 'reset', 'up', 'seed', 'down']);
+    expect(fs.existsSync(marker)).toBe(false);
+  }, 60_000);
+
   it('refuses a draft the fresh world will not accept, and restores the tree', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -412,10 +447,10 @@ describe('buildSeedSession — builds the app before the world boots', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The cold-clone proof — the seed is proved a second time from a copy of the
-// repository with no `node_modules`, so a script that only runs because THIS
-// tree accumulated something across the session's attempts is refused here
-// rather than in the fresh clone the next stage works in
+// The cold-clone proof — the seed is proved a second time from the tree a RUN
+// gets: a `git clone` of the repository, which carries its committed state and
+// its `.git` and none of what this tree accumulated across the session's
+// attempts, with the work tree laid over it
 // ---------------------------------------------------------------------------
 
 /** A seed that resolves a module out of the tree's own `node_modules` — the
@@ -451,12 +486,30 @@ const installsModule = (r: string, name: string): string =>
   `mkdir -p node_modules/${name} && printf '{"name":"${name}","main":"index.js"}' > node_modules/${name}/package.json && ` +
   `printf 'module.exports = 1\\n' > node_modules/${name}/index.js`;
 
+/** The fixture as a real checkout: the proof CLONES the tree, so only what a
+ *  commit carries travels into the copy — exactly what a run's clone gets. */
+function committedRepo(): string {
+  const r = fixtureRepo();
+  fs.writeFileSync(path.join(r, '.gitignore'), 'node_modules/\n');
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: r, stdio: 'ignore' });
+  };
+  git('init', '--initial-branch=main');
+  // The suite hides the developer's global git config, so identity is per-repo.
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@example.com');
+  git('add', '-A');
+  git('commit', '-m', 'the repository as it is committed');
+  return r;
+}
+
 describe('buildSeedSession — the cold-clone proof', () => {
   // The proof is ON by default; the rest of this file opts out of it through
-  // the session option, which is the only switch there is.
+  // the session option, and an operator opts a whole process out through the
+  // environment.
 
-  it('runs install, build and the seed in a copy that has no node_modules', async () => {
-    const r = fixtureRepo();
+  it('runs install, build and the seed in a clone that has no node_modules', async () => {
+    const r = committedRepo();
     writeRecipe(r, {}, { install: installsModule(r, 'x') });
     plantModule(r, 'x');
     const script = moduleSeedScript('x');
@@ -477,8 +530,30 @@ describe('buildSeedSession — the cold-clone proof', () => {
     ]);
   }, 120_000);
 
+  // The clone is the tree a run gets, `.git` included: a build that stamps a
+  // version out of git works in a run and must work here, or the proof refuses
+  // seeds over a condition no run has.
+  it('clones the repository rather than stripping it, so git is still there', async () => {
+    const r = committedRepo();
+    const log = path.join(r, 'services.log');
+    writeRecipe(r, {}, { build: `git rev-parse --verify HEAD > /dev/null && printf 'build\\n' >> ${log}` });
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result).toMatchObject({ status: 'ok' });
+    expect(servicesLog(r)).toEqual([
+      'build', 'up', 'seed', 'down',
+      'up', 'seed', 'down',
+      'build', 'up', 'seed', 'down',
+    ]);
+  }, 120_000);
+
   it('refuses a seed that only runs because this tree accumulated the module', async () => {
-    const r = fixtureRepo();
+    const r = committedRepo();
     writeRecipe(r, {}, { install: installsModule(r, 'x') });
     plantModule(r, 'x');
     // Left behind by an earlier attempt; the shipped install never produces it.
@@ -503,7 +578,7 @@ describe('buildSeedSession — the cold-clone proof', () => {
   }, 120_000);
 
   it('names the failing stage and carries its output when the cold install fails', async () => {
-    const r = fixtureRepo();
+    const r = committedRepo();
     writeRecipe(r, {}, { install: "printf 'ERR no lockfile for this tree\\n' >&2 && false" });
     const recipeBefore = fs.readFileSync(recipePath(r), 'utf-8');
     const stub = stubDriver(async (call) => {
@@ -523,7 +598,7 @@ describe('buildSeedSession — the cold-clone proof', () => {
   }, 120_000);
 
   it('a seed the cold copy cannot run is not a recipe defect', async () => {
-    const r = fixtureRepo();
+    const r = committedRepo();
     writeRecipe(r, {}, { install: installsModule(r, 'x') });
     plantModule(r, 'x');
     plantModule(r, 'y');
@@ -539,31 +614,88 @@ describe('buildSeedSession — the cold-clone proof', () => {
     expect(result).not.toHaveProperty('recipeDefect');
   }, 120_000);
 
-  it('restores the tree when the copy itself throws, so an unproven seed never ships', async () => {
+  // The clone has no built client either, and it is the OUTCOME's probes that
+  // say whether a page will be loaded out of it — a web probe authored where no
+  // web principal is required still needs the build.
+  it('builds the web surface in the clone for the probes that load a page', async () => {
+    const r = committedRepo();
+    const log = path.join(r, 'services.log');
+    const { web } = webBlock(r);
+    writeRecipe(r, {}, { web: { ...web, build: `printf 'web-build\\n' >> ${log}` } });
+    const script = webMintingScript();
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script,
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      expect(verdict.isError).toBeUndefined();
+      return outcome({ script, command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
+    });
+
+    // The schema holds no login principal, so no web principal is REQUIRED and
+    // the warm tree never builds the surface: the one build is the clone's.
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result).toMatchObject({ status: 'ok', credentials: ['webSession'] });
+    expect(servicesLog(r).filter((line) => line === 'web-build')).toEqual(['web-build']);
+  }, 120_000);
+
+  it('restores the tree when the clone itself throws, so an unproven seed never ships', async () => {
+    // No commits and no `.git`: there is nothing to clone, and the proof says so
+    // rather than proving the seed against a tree it could not make.
     const r = fixtureRepo();
     writeRecipe(r, {});
     const recipeBefore = fs.readFileSync(recipePath(r), 'utf-8');
-    // A directory the copy cannot read — what a root-owned bind mount looks like.
-    const locked = path.join(r, 'locked');
-    fs.mkdirSync(locked);
-    fs.writeFileSync(path.join(locked, 'x'), 'x');
-    fs.chmodSync(locked, 0o000);
-    try {
-      const stub = stubDriver(async (call) => {
-        await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
-        return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
-      });
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
 
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result.status).toBe('failed');
+    expect(result.status === 'failed' && result.reason).toMatch(/cold-clone proof failed/);
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
+    // And the half-made copy is gone.
+    expect(fs.readdirSync(seedColdCopiesDir()).filter((n) => n.startsWith('tc-seed-cold-'))).toEqual([]);
+  }, 120_000);
+
+  // A folder on this machine is copied whole into a run, dependencies and build
+  // output included, so a clone is not the tree its runs get: an install that
+  // only fails from scratch would refuse a seed over something no run of that
+  // repository ever does.
+  it('stands down for a tree whose runs are never cold', async () => {
+    const r = committedRepo();
+    writeRecipe(r, {}, { install: "printf 'ERR no lockfile for this tree\\n' >&2 && false" });
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r, { freshCheckout: false }));
+
+    expect(result).toMatchObject({ status: 'ok' });
+    expect(servicesLog(r)).toEqual(['up', 'seed', 'down', 'up', 'seed', 'down']);
+  }, 120_000);
+
+  it('an operator turns the proof off for the whole process', async () => {
+    const r = committedRepo();
+    writeRecipe(r, {}, { install: "printf 'ERR no lockfile for this tree\\n' >&2 && false" });
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+    process.env.TRUECOURSE_SEED_COLD_PROOF = '0';
+    try {
       const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
 
-      expect(result.status).toBe('failed');
-      expect(result.status === 'failed' && result.reason).toMatch(/cold-clone proof failed/);
-      expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
-      expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
-      // And the half-made copy is gone.
-      expect(fs.readdirSync(seedColdCopiesDir()).filter((n) => n.startsWith('tc-seed-cold-'))).toEqual([]);
+      expect(result).toMatchObject({ status: 'ok' });
+      expect(servicesLog(r)).toEqual(['up', 'seed', 'down', 'up', 'seed', 'down']);
     } finally {
-      fs.chmodSync(locked, 0o755);
+      delete process.env.TRUECOURSE_SEED_COLD_PROOF;
     }
   }, 120_000);
 });

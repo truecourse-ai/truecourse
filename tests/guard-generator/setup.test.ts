@@ -443,13 +443,39 @@ describe('runGuardSetup — skip when settled', () => {
     expect(first.recipe.status).toBe('failed')
     expect(statuses(first).seed).toMatch(/^failed:/)
 
-    // The next run re-verifies the recipe (the probe boots again) rather than
-    // skipping it as settled.
-    const second = await runAndPersist(r, { probe: probe.probe, seedSession: seedSeam().seam })
+    // The next run RE-DERIVES the recipe rather than reading the refused one
+    // back off disk (or out of the bundle) and paying the whole fold to reach
+    // the same verdict again. The dependency-free fixture declares no start
+    // script, so discovery reaches the repair seam — that it is reached at all
+    // is the proof it ran with `ignoreExisting`.
+    let repairs = 0
+    const second = await runAndPersist(r, {
+      probe: probe.probe,
+      seedSession: seedSeam().seam,
+      repair: async () => {
+        repairs++
+        return {
+          proposal: {
+            build: 'true',
+            api: {
+              serve: ['node', path.join(r, 'server.mjs')],
+              healthPath: '/health',
+              env: { SEED_STORE: path.join(r, 'store.json') },
+            },
+          },
+        }
+      },
+    })
+    expect(repairs).toBe(1)
     expect(statuses(second).recipe).toBe('ok')
+    expect(second.recipe.outcome).toBe('discovered')
     expect(probe.calls).toBe(2)
     expect(second.status).toBe('ok')
-  })
+
+    // And once it holds, the third run is back to skipping it.
+    const third = await runAndPersist(r, { probe: probe.probe, seedSession: seedSeam().seam })
+    expect(statuses(third).recipe).toBe('skipped:unchanged')
+  }, 120_000)
 
   it('--refresh re-runs every step, re-deriving the recipe it already had', async () => {
     const r = fixtureRepo()

@@ -8,28 +8,35 @@
  * un-skipped install, and the seed only crashes later, in a clone that ran the
  * shipped install exactly once — after generation has already been refused.
  *
- * So the seed is proved a second time from a COLD COPY of the repository: what
- * a fresh checkout holds — nothing git ignores (no `node_modules`, no build
- * output), no `.git` — plus the work tree's scenarios (the recipe and the
- * just-written seed script), never its caches. In that copy the recipe's own
- * steps run in the order a run runs them — `install`, `build`, the services,
- * the seed, the credential probes — so the proof is about what a fresh
- * checkout does, not about what this tree grew.
+ * So the seed is proved a second time from THE TREE A RUN GETS: a local `git
+ * clone` of the repository — its committed state, `.git` and all, without the
+ * untracked and ignored paths (`node_modules`, every build output) this tree
+ * grew — with the work tree laid over it, which is exactly what a job hands a
+ * run: a clone with the setup bundle materialized into it. The caches never
+ * travel. In that copy the recipe's own steps run in the order a run runs them
+ * — `install`, `build`, the services, the seed, the credential probes — so the
+ * proof is about what a fresh checkout does, not about what this tree grew.
  *
- * The proof is on by default; the seed session takes a `coldProof: false`
- * option for a caller that must not pay the install and build (the test
- * suite). What it catches is unrecoverable later, so nothing in production
- * turns it off.
+ * A clone is the tree a run gets only when the run's own tree arrives cold: a
+ * cloned repository does, a folder copied off this machine (the local provider)
+ * carries the developer's dependencies and build output with it. Which one this
+ * is, is the caller's to know, and it skips the proof for the second — refusing
+ * a seed over an install no run of that repository ever performs would be a
+ * verdict about nothing.
+ *
+ * The proof is on by default. `TRUECOURSE_SEED_COLD_PROOF=0` is the operator's
+ * opt-out (it costs one install and one build per setup); the seed session's
+ * `coldProof: false` option is the test suite's.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import {
   DEFAULT_BUILD_TIMEOUT_MS,
   DEFAULT_INSTALL_TIMEOUT_MS,
   SeedError,
-  buildOutputTail,
   runBuild,
   runInstall,
   runSeed,
@@ -41,14 +48,31 @@ import { failureReport } from '@truecourse/guard-generator';
 import { WORK_TREE_DIR, workTreeCacheDir } from '@truecourse/shared/work-tree';
 import { getRuntimeDir } from '../../config/runtime-dir.js';
 
+const execFileAsync = promisify(execFile);
+
 /** Where the cold copies live: machine-local scratch under the runtime dir,
  *  never the system temp dir (a container's root filesystem). */
 const COLD_COPIES_DIR = 'seed-cold';
 const COLD_COPY_PREFIX = 'tc-seed-cold-';
 
+/** A repository can be large, and a clone copies the whole of its history. */
+const CLONE_TIMEOUT_MS = 10 * 60 * 1000;
+
 /** The dir the copies are made in, created on demand. */
 export function seedColdCopiesDir(): string {
   return path.join(getRuntimeDir(), COLD_COPIES_DIR);
+}
+
+/**
+ * Whether the proof runs at all. On unless an operator turned it off for this
+ * process (`TRUECOURSE_SEED_COLD_PROOF=0`) or a caller opted out in code, which
+ * the test suite does and production never should: what the proof catches is
+ * unrecoverable by the time a generate's own clone meets it.
+ */
+export function seedColdProofEnabled(option: boolean | undefined): boolean {
+  if (option === false) return false;
+  const value = process.env.TRUECOURSE_SEED_COLD_PROOF?.trim().toLowerCase();
+  return value !== '0' && value !== 'false';
 }
 
 /**
@@ -81,14 +105,24 @@ export type ColdProofStage = 'install' | 'build' | 'services' | 'seed' | 'probe'
 
 export type ColdCloneProofResult = { ok: true } | { ok: false; stage: ColdProofStage; reason: string };
 
+/** One tree's `api.services` lifecycle — the handle the warm proof drives its
+ *  own world with, built by the caller over the copy this one made. */
+export interface ColdProofServices {
+  up: () => Promise<void>;
+  down: () => Promise<void>;
+  reset: () => Promise<void>;
+}
+
 export interface ColdCloneProofInput {
-  /** The tree to copy — the repository the fold just wrote the seed into. */
+  /** The tree to clone — the repository the fold just wrote the seed into. */
   repoRoot: string;
   recipe: Recipe;
   /** The seed as the fold wrote it; runs against the copy. */
   seed: RecipeApiSeed;
   /** The server env the seed runs with, exactly as the warm proof uses it. */
   env: Record<string, string>;
+  /** The services lifecycle, over the copy this proof makes. */
+  services: (copyRoot: string) => ColdProofServices;
   /**
    * The web surface's build command, when a web principal will be probed — the
    * copy has no built client either, and an unbuilt one fails the page load for
@@ -112,78 +146,61 @@ const refuse = (stage: ColdProofStage, detail: string): ColdCloneProofResult => 
 });
 
 /**
- * Copy `repoRoot` into `destRoot` as a fresh checkout would look: nothing git
- * ignores (which is where `node_modules` and every build output live), no
- * `.git`, and none of the work tree's caches — but the rest of the work tree
- * (the recipe, the scenarios, the seed script) travels, because that is what
- * the proof runs. Without git to ask, `node_modules` at any depth is the one
- * thing left out.
+ * Build the tree a run gets out of the tree setup worked in: clone the
+ * repository into `destRoot` (its committed state, `.git` kept — a build that
+ * asks git what it is building still has an answer), then lay the work tree
+ * over it, minus the caches, the way a job materializes the setup bundle into a
+ * fresh clone. A seed script the recipe points at OUTSIDE the work tree travels
+ * too: the fold has only just written it, so no commit carries it.
  *
- * Symlinks are copied verbatim: a relative link stays relative inside the copy
- * instead of being resolved to an absolute path back into the warm tree, which
- * would make the "cold" copy read the tree it exists to be isolated from.
+ * Throws when the tree cannot be cloned — the caller refuses the seed rather
+ * than proving it against a tree it could not make.
  */
-export async function copyRepoCold(repoRoot: string, destRoot: string): Promise<void> {
+async function cloneRepoCold(repoRoot: string, destRoot: string, seedScript?: string): Promise<void> {
   const root = path.resolve(repoRoot);
+  await execFileAsync('git', ['clone', root, destRoot], {
+    timeout: CLONE_TIMEOUT_MS,
+    maxBuffer: 16 * 1024 * 1024,
+    // A local clone reads no remote; a prompt would hang the proof.
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'true' },
+  });
+
   const cacheDir = path.resolve(workTreeCacheDir(root, ''));
   const workTree = path.join(root, WORK_TREE_DIR);
-  const ignored = gitIgnoredPaths(root);
-  await fs.promises.cp(root, destRoot, {
-    recursive: true,
-    verbatimSymlinks: true,
-    filter: (src) => {
-      const name = path.basename(src);
-      if (name === 'node_modules' || name === '.git') return false;
-      const abs = path.resolve(src);
-      if (abs === cacheDir) return false;
-      // The work tree is git-ignored by convention and must travel anyway.
-      if (abs === workTree || abs.startsWith(workTree + path.sep)) return true;
-      return !ignored.has(abs);
-    },
-  });
-}
-
-/**
- * Every path git ignores under `root`, directories collapsed to one entry (git
- * does not descend into an ignored directory), as absolute paths. Empty when
- * `root` is not a git checkout or git is unavailable.
- */
-function gitIgnoredPaths(root: string): Set<string> {
-  try {
-    const out = execFileSync(
-      'git',
-      ['-C', root, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 },
-    );
-    return new Set(
-      out
-        .split('\0')
-        .filter(Boolean)
-        .map((rel) => path.resolve(root, rel.replace(/\/$/, ''))),
-    );
-  } catch {
-    return new Set();
+  if (fs.existsSync(workTree)) {
+    await fs.promises.cp(workTree, path.join(destRoot, WORK_TREE_DIR), {
+      recursive: true,
+      filter: (src) => path.resolve(src) !== cacheDir,
+    });
+  }
+  if (seedScript !== undefined && !seedScript.startsWith(`${WORK_TREE_DIR}/`)) {
+    const from = path.resolve(root, seedScript);
+    if (fs.existsSync(from)) {
+      const to = path.resolve(destRoot, seedScript);
+      await fs.promises.mkdir(path.dirname(to), { recursive: true });
+      await fs.promises.cp(from, to);
+    }
   }
 }
 
 /**
  * Run the recipe's preparation steps, the seed and the credential probes in a
- * cold copy of the repository. Every failure names its stage and, for the shell
+ * cold clone of the repository. Every failure names its stage and, for the shell
  * steps, carries the tail of what the command printed. Never throws for a
- * failing step; a thrown copy (an unreadable directory, a cancellation) is the
+ * failing step; a thrown clone (an unreadable tree, a cancellation) is the
  * caller's to catch, and the copy is removed either way.
  */
 export async function proveSeedFromColdClone(input: ColdCloneProofInput): Promise<ColdCloneProofResult> {
   const { recipe, signal } = input;
-  const services = recipe.api?.services;
   fs.mkdirSync(seedColdCopiesDir(), { recursive: true });
   const copyRoot = fs.mkdtempSync(path.join(seedColdCopiesDir(), COLD_COPY_PREFIX));
+  const services = input.services(copyRoot);
   // Whether `up` was ATTEMPTED — a bring-up that failed halfway has containers
   // to tear down too.
   let servicesAttempted = false;
   try {
     input.onPhase?.('proving the seed from a cold clone', 'cold-clone proof');
-    await copyRepoCold(input.repoRoot, copyRoot);
+    await cloneRepoCold(input.repoRoot, copyRoot, input.seed.script);
 
     if (recipe.install) {
       const installed = await runInstall(copyRoot, recipe.install, recipe.env, DEFAULT_INSTALL_TIMEOUT_MS, signal);
@@ -208,26 +225,16 @@ export async function proveSeedFromColdClone(input: ColdCloneProofInput): Promis
       }
     }
 
-    if (services) {
-      // The wipe first when the recipe has one: the copy shares the warm world's
-      // datastore (one compose project, one database URL), so the proof starts
-      // from a state the warm run did not leave behind. A reset that fails is
-      // not a verdict — there may be nothing to wipe — but it is part of the
-      // story when the bring-up fails after it.
-      const reset = services.reset
-        ? await runBuild(copyRoot, services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal)
-        : null;
+    if (recipe.api?.services) {
+      // The wipe first: the copy addresses the warm world's datastore (one
+      // compose project, one database URL), so the proof starts from a state
+      // the warm run did not leave behind.
+      await services.reset();
       servicesAttempted = true;
-      const up = await runBuild(copyRoot, services.up, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
-      if (!up.ok) {
-        const wipe =
-          reset && !reset.ok
-            ? `\`${services.reset}\` ran first and failed: ${buildOutputTail(reset.output, 5)}\n`
-            : '';
-        return refuse(
-          'services',
-          `\`${services.up}\` failed${up.timedOut ? ' (timed out)' : ''} in a cold clone: ${wipe}${buildOutputTail(up.output, 5)}`,
-        );
+      try {
+        await services.up();
+      } catch (error) {
+        return refuse('services', `${message(error)} — in a cold clone`);
       }
     }
 
@@ -242,7 +249,7 @@ export async function proveSeedFromColdClone(input: ColdCloneProofInput): Promis
         ...(signal ? { signal } : {}),
       });
     } catch (error) {
-      const detail = error instanceof SeedError ? error.message : error instanceof Error ? error.message : String(error);
+      const detail = error instanceof SeedError ? error.message : message(error);
       return refuse(
         'seed',
         `the seed does not run in a tree the recipe's own \`install\` prepared — what survives in this repository's working tree does not survive a fresh checkout:\n${detail}`,
@@ -257,13 +264,14 @@ export async function proveSeedFromColdClone(input: ColdCloneProofInput): Promis
   } finally {
     if (servicesAttempted) {
       // Best effort, and never a verdict: the stop, then the wipe, so nothing
-      // the proof brought up outlives it — `down` is optional in a recipe and
-      // `reset` is what a reset-only one tears down with.
-      for (const command of [services?.down, services?.reset]) {
-        if (!command) continue;
-        await runBuild(copyRoot, command, recipe.env, DEFAULT_BUILD_TIMEOUT_MS).catch(() => undefined);
-      }
+      // the proof brought up outlives it.
+      await services.down().catch(() => undefined);
+      await services.reset().catch(() => undefined);
     }
     await fs.promises.rm(copyRoot, { recursive: true, force: true });
   }
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

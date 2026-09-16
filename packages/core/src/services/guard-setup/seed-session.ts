@@ -15,10 +15,12 @@
  *    introspection of the session's own database; `check_provides` is the
  *    free static half.
  *  - the FOLD (the only repo writes): `writeSeedArtifacts` (script file +
- *    the `api.seed` patch, whole-recipe re-validated), THEN the done-gate —
- *    a FRESH world (`services.down` → `up`), the real `runSeed`, manifest
- *    validation. A gate failure restores both files byte-for-byte and the
- *    outcome is refused: the step fails with the SeedError, setup does not.
+ *    the `api.seed` patch, whole-recipe re-validated), THEN the two done-gates
+ *    — a FRESH world (`services.down` → the wipe → `up`), the real `runSeed`,
+ *    manifest validation and the credential probes; then the same seed proved
+ *    again from a COLD CLONE of the repository (`seed-cold-proof.ts`). A gate
+ *    failure restores both files byte-for-byte and the outcome is refused:
+ *    the step fails with the SeedError, setup does not.
  *
  * SCRATCH LIVES INSIDE THE TREE, deliberately: `.truecourse/.cache/guard/
  * seed-drafts/<id>/` (the run's scratch cache, deleted after the
@@ -69,6 +71,7 @@ import {
   SeedError,
   buildCredentialRedactor,
   guardSetupFindingsPath,
+  guardWorldDirtyMarkerPath,
   loadDependencyCatalog,
   PORT_PLACEHOLDER,
   preflightApiServer,
@@ -87,7 +90,7 @@ import { cachedSessionOutcome, promptFingerprint } from '../agent/session-cache.
 import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
-import { proveSeedFromColdClone } from './seed-cold-proof.js';
+import { proveSeedFromColdClone, seedColdProofEnabled } from './seed-cold-proof.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
 
@@ -384,8 +387,10 @@ export const SACRIFICIAL_FIXTURE = 'sacrificialUser';
  * user is disposable by construction — the seed's converging exists path
  * restores it every run — so those flows have something of their own to burn.
  *
- * The refusal is the draft tool's, not the fold's: it is a requirement on what a
- * session AUTHORS, and it costs nothing to state before an execution is spent.
+ * The draft tool refuses it FIRST, because it costs nothing to state before an
+ * execution is spent; the fold refuses it LAST, on the outcome, because the
+ * outcome's `provides` is what gets written and a session can re-emit one
+ * without the fixture its verified draft carried.
  * Returns the reason, or null when nothing is missing.
  */
 export function missingSacrificialUser(
@@ -401,6 +406,25 @@ export function missingSacrificialUser(
     `shared principal, whose published password they would otherwise invalidate for every flow that follows. ` +
     `Create it in this same script and declare it under \`provides.fixtures\`; it needs no credential and no probe.`
   );
+}
+
+/**
+ * Everything a declaration must carry before it can land: a probed principal on
+ * every runnable surface that requires one, and the sacrificial user a web
+ * surface needs. ONE list, applied twice — by `run_seed_draft` before an
+ * execution is spent on a draft that could never verify, and by the fold to the
+ * outcome that actually gets written.
+ */
+function principalRefusals(
+  provides: SeedProvidesProposal,
+  probes: Record<string, SeedCredentialProbe> | undefined,
+  required: readonly RequiredPrincipalSurface[],
+): string[] {
+  const sacrificial = missingSacrificialUser(provides, required);
+  return [
+    ...missingPrincipalSurfaces(provides, probes, required).map((m) => m.reason),
+    ...(sacrificial ? [sacrificial] : []),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,12 +1098,7 @@ function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
       // salvage path can only ever keep one that carries them (the documenso
       // incident inverted — the session spent its budget on fixtures, died at
       // the ceiling, and the folded partial declared zero credentials).
-      const required = requiredPrincipalSurfaces(world.input);
-      const sacrificial = missingSacrificialUser(args.provides, required);
-      const missing = [
-        ...missingPrincipalSurfaces(args.provides, args.probes, required).map((m) => m.reason),
-        ...(sacrificial ? [sacrificial] : []),
-      ];
+      const missing = principalRefusals(args.provides, args.probes, requiredPrincipalSurfaces(world.input));
       if (missing.length > 0) {
         return {
           content:
@@ -1272,23 +1291,34 @@ export interface BuildSeedSessionOptions {
   signal?: AbortSignal;
   onSessionEvent?: (workItem: string, event: SessionEvent) => void;
   /**
-   * The fold's second gate — the seed proved again from a cold copy of the
-   * repository, through the recipe's own `install` and `build`. On by default;
-   * `false` is for a caller that must not pay a full install and build (the
-   * test suite), never for production, where what it catches is unrecoverable
-   * later.
+   * The fold's second gate — the seed proved again from a cold clone of the
+   * repository, through the recipe's own `install` and `build`. On by default,
+   * and an operator turns it off for a whole process with
+   * `TRUECOURSE_SEED_COLD_PROOF=0`; `false` here is for a caller that must not
+   * pay a full install and build (the test suite), never for production, where
+   * what it catches is unrecoverable later.
    */
   coldProof?: boolean;
 }
 
 /** One `api.services` lifecycle handle — up/down/reset through `runBuild`,
- *  exactly as `verifyProposal` runs them, teardown always safe to call twice. */
+ *  exactly as `verifyProposal` runs them, teardown always safe to call twice.
+ *
+ *  The FIRST bring-up wipes when the tree carries the world-dirty marker: the
+ *  compose project is named after the repository, so one shared world outlives
+ *  every job of it, and a run that was cancelled or crashed mid-scenario left
+ *  its rows behind for this setup's baseline assertions to inherit. */
 function servicesController(repoRoot: string, recipe: Recipe, signal?: AbortSignal) {
   const services = recipe.api?.services;
   let up = false;
   return {
     async up(): Promise<void> {
       if (!services) return;
+      const marker = guardWorldDirtyMarkerPath(repoRoot);
+      if (services.reset && fs.existsSync(marker)) {
+        await runBuild(repoRoot, services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
+        fs.rmSync(marker, { force: true });
+      }
       const result = await runBuild(repoRoot, services.up, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
       if (!result.ok) {
         throw new Error(
@@ -1480,7 +1510,7 @@ export function buildSeedSession(
         };
       }
 
-      const folded = await foldSeedOutcome(world, services, outcome.output, opts.coldProof !== false);
+      const folded = await foldSeedOutcome(world, services, outcome.output, seedColdProofEnabled(opts.coldProof));
       if ('reason' in folded) {
         return {
           status: 'failed',
@@ -1523,7 +1553,7 @@ export function buildSeedSession(
 
 /**
  * THE FOLD: write the two artifacts, then the done-gates — a fresh world and
- * the real `runSeed`, then the same again from a cold copy of the repository —
+ * the real `runSeed`, then the same again from a cold clone of the repository —
  * restoring the tree byte-for-byte when a gate refuses OR throws. A refusal
  * whose cause is the recipe's own `install`/`build` says so (`recipeDefect`).
  */
@@ -1558,11 +1588,7 @@ async function foldSeedOutcome(
   // absence, but the outcome's `provides` is what is written, and a session
   // can re-emit it without the fixture it verified with.
   const required = requiredPrincipalSurfaces(input);
-  const sacrificial = missingSacrificialUser(output.provides, required);
-  const missing = [
-    ...missingPrincipalSurfaces(output.provides, output.probes, required).map((m) => m.reason),
-    ...(sacrificial ? [sacrificial] : []),
-  ];
+  const missing = principalRefusals(output.provides, output.probes, required);
   if (missing.length > 0) {
     return { reason: missing.join('; ') };
   }
@@ -1639,16 +1665,25 @@ async function foldSeedOutcome(
     await services.down();
   }
 
-  // THE SECOND GATE: the same seed, proved again from a COLD COPY of the
+  // THE SECOND GATE: the same seed, proved again from a COLD CLONE of the
   // repository — the recipe's own `install` and `build`, then the services, the
   // seed and the probes. What this tree's `node_modules` accumulated over the
   // session's attempts is exactly what a generate's fresh clone will not have.
-  // A refusal AND a throw (a directory the copy cannot read, a cancellation)
-  // put the tree back: an unproven seed must not ship in the setup bundle.
-  if (coldProof) {
+  // A refusal AND a throw (a tree that cannot be cloned, a cancellation) put
+  // the tree back: an unproven seed must not ship in the setup bundle.
+  //
+  // Only for a repository whose runs really are handed a clone. A folder on
+  // this machine is copied whole into every run of it, dependencies and build
+  // output included, so a cold install there would refuse a seed over something
+  // no run of that repository ever does.
+  if (coldProof && input.freshCheckout) {
     const probes = output.probes;
     const webSurface = resolveWebSurface(input.recipe);
-    const needsWebBuild = webSurface?.build !== undefined && required.some((s) => s.surface === 'web');
+    // The clone has no built client either, so the web build is paid exactly
+    // when a probe will load a page from it — which is what the OUTCOME's
+    // probes say, not what the surfaces require.
+    const needsWebBuild =
+      webSurface?.build !== undefined && Object.values(probes ?? {}).some((p) => p.surface === 'web');
     try {
       const cold = await proveSeedFromColdClone({
         repoRoot: input.repoRoot,
@@ -1656,6 +1691,7 @@ async function foldSeedOutcome(
         seed: written.seed,
         env: world.server.env,
         knownCredentials: world.secrets,
+        services: (copyRoot) => servicesController(copyRoot, input.recipe, world.signal),
         ...(needsWebBuild && webSurface?.build ? { webBuild: webSurface.build } : {}),
         ...(world.signal ? { signal: world.signal } : {}),
         ...(input.onPhase ? { onPhase: input.onPhase } : {}),

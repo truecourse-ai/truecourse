@@ -3,8 +3,9 @@
  *
  * Everything durable lives in Postgres. What lands here is what a process needs
  * a filesystem for and can lose without consequence: the per-run clones a job
- * works in, the live progress journals the run watcher tails, and the server's
- * own log. A booting process sweeps what a crashed one left behind.
+ * works in, the cold clones the seed's second gate proves itself in, the live
+ * progress journals the run watcher tails, and the server's own log. A booting
+ * process sweeps what a crashed one left behind.
  *
  * `TRUECOURSE_RUNTIME_DIR` relocates the whole directory (the container image
  * points it at its data volume); `TRUECOURSE_LOG_DIR` relocates the log alone,

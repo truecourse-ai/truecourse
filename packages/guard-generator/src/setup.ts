@@ -53,7 +53,9 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { promisify } from 'node:util'
 import {
   loadRecipe,
   recipePath,
@@ -78,6 +80,7 @@ import {
   type RecipeApiExternal,
 } from '@truecourse/guard-runner'
 import { parseSecuritySchemes, parseOpenApiSpec, type SecurityScheme } from '@truecourse/shared/openapi'
+import { WORK_TREE_DIR } from '@truecourse/shared/work-tree'
 import type {
   DatastoreUrlRef,
   DetectedExternalService,
@@ -92,6 +95,7 @@ import type {
   Interface,
   MapperDiagnostic,
 } from '@truecourse/shared'
+import { GUARD_COMPOSE_FILE } from './datastore-compose.js'
 import { discoverRecipe, type RecipeDiscoveryPhase, type RecipeRepairFn } from './recipe-discovery.js'
 import { detectEcosystems, routesFromInterfaces, type ApiRouteRef } from './recipe-propose.js'
 import { probeApiServers } from './endpoint-probe.js'
@@ -119,6 +123,8 @@ import {
 } from './seed-evidence.js'
 import type { InterfaceProvider } from './generate.js'
 import type { RecipeRunner } from './runners.js'
+
+const execFileAsync = promisify(execFile)
 
 /** How many spec docs the seed draft is shown, and how much of each. */
 const MAX_SPEC_EXCERPTS = 6
@@ -385,6 +391,16 @@ export interface GuardSetupSeedSessionInput {
   existingScript?: { scriptPath: string; scriptContent: string }
   /** The seed step's PRE-RUN input fingerprint — the session's cache key. */
   fingerprint: string
+  /**
+   * Whether setup was handed a FRESH CHECKOUT — a git repository carrying
+   * nothing git ignores beyond what the caller materialized into it. A cloned
+   * repository arrives that way and so does every run of it; a folder copied
+   * off this machine arrives with the developer's dependencies and build
+   * output, and a run of it does too. The seed's cold-clone proof runs only in
+   * the first case: it proves the seed against a clone, which is the tree a run
+   * gets only there.
+   */
+  freshCheckout: boolean
   /** The live phase line: what is running now, and what to call it when done. */
   onPhase?: (running: string, done: string) => void
 }
@@ -488,11 +504,17 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const steps: GuardSetupTaxonomyStep[] = []
   const settled = settledFingerprints(repoRoot, opts.refresh === true)
 
+  // Asked BEFORE any step installs or builds anything: what this tree carries
+  // right now is what a run of this repository is handed, and the seed's
+  // cold-clone proof needs to know which kind of tree that is.
+  const freshCheckout = await isFreshCheckout(repoRoot)
+
+  const priorReport = readGuardSetup(repoRoot)
   // Single-step mode. `prior` is both the merge source and the evidence a soft
   // step ever ran — a step that ran and produced nothing legitimately left no
   // artifact behind, so the row is what says it happened.
   const only = opts.only
-  const prior = only ? readGuardSetup(repoRoot) : null
+  const prior = only ? priorReport : null
   const rank = (step: GuardSetupOnlyStep): number => GUARD_SETUP_ONLY_STEPS.indexOf(step)
   /** Prior to the chosen step: replay from disk, never spend. */
   const replayed = (step: GuardSetupOnlyStep): boolean => only !== undefined && rank(step) < rank(only)
@@ -525,6 +547,14 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // re-runs everything — the step re-derives when the repo moved.
   const recipeInputFp = ecosystemFingerprint(repoRoot)
   const preexisting = reloadRecipe(repoRoot)
+  // A recipe the last run FAILED is never reused. Discovery answers `exists`
+  // for whatever sits at the recipe path, and the recipe travels in the setup
+  // bundle, so without this the refused recipe is read back, re-folded and
+  // re-refused every run — each one paying the whole seed fold to reach the
+  // same verdict — until someone asks for a refresh by hand.
+  const rederive =
+    opts.refresh === true ||
+    (priorReport?.steps ?? []).some((row) => row.key === 'recipe' && row.status === 'failed')
   let recipe: Recipe
   let recipeStep: GuardSetupRecipeStep
   if (replayed('recipe')) {
@@ -548,15 +578,16 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     fact('recipe', 'unchanged since the last setup, from cache: neither re-derived nor re-probed')
     opts.onStepDone?.('recipe', 'unchanged — reused without re-verifying')
   } else {
-    // A REFRESH re-derives, and discovery writes what it derived — which knows nothing
-    // about the blocks it never proposes (`api.seed`, `api.externals`,
-    // `api.credentials`, `ownHosts`). Those are user- and setup-authored CAPABILITY
-    // declarations; losing them to a refresh would be silent data loss, and it would
-    // also defeat the seed confirmation below (a wiped `api.seed` is not a seed anyone
-    // is asked about replacing). Captured before, merged back after.
-    const authored = opts.refresh ? authoredBlocks(preexisting) : null
+    // A RE-DERIVATION (a refresh, or a recipe the last run failed) writes what
+    // discovery derived — which knows nothing about the blocks it never proposes
+    // (`api.seed`, `api.externals`, `api.credentials`, `ownHosts`). Those are user-
+    // and setup-authored CAPABILITY declarations; losing them would be silent data
+    // loss, and it would also defeat the seed confirmation below (a wiped `api.seed`
+    // is not a seed anyone is asked about replacing). Captured before, merged back
+    // after.
+    const authored = rederive ? authoredBlocks(preexisting) : null
     const discovery = await discoverRecipe(repoRoot, opts.recipeRunner, {
-      ...(opts.refresh ? { ignoreExisting: true } : {}),
+      ...(rederive ? { ignoreExisting: true } : {}),
       ...(opts.repair ? { repair: opts.repair } : {}),
       ...(opts.composeKey ? { composeKey: opts.composeKey } : {}),
       routes: async () => routesFromInterfaces((await mapOnce()).interfaces),
@@ -1004,6 +1035,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         }),
         requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,
+        freshCheckout,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
       seedStep = seedRun.step
@@ -1168,6 +1200,33 @@ function mergeStepSpine(
     if (row) out.push(row)
   }
   return out
+}
+
+/**
+ * Whether `repoRoot` is a FRESH CHECKOUT: a git repository whose working tree
+ * carries nothing git ignores except what a job materialized into it — the work
+ * tree and the datastore compose file guard generates. That is how a cloned
+ * repository arrives, and how every run of it arrives; a folder copied off this
+ * machine arrives with the developer's dependencies and build output instead.
+ *
+ * `false` for a tree git cannot read at all: without git there is no clone for a
+ * run's tree to be compared to.
+ */
+async function isFreshCheckout(repoRoot: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', repoRoot, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'],
+      { maxBuffer: 64 * 1024 * 1024 },
+    )
+    const materialized = new Set<string>([WORK_TREE_DIR, GUARD_COMPOSE_FILE])
+    return stdout
+      .split('\0')
+      .filter(Boolean)
+      .every((rel) => materialized.has(rel.replace(/\/$/, '')))
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -1655,6 +1714,8 @@ async function runSeedStep(args: {
   requiredResources: RequiredResource[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
+  /** Whether the tree setup was handed is a fresh checkout — the cold proof's gate. */
+  freshCheckout: boolean
   onPhase: (running: string, done: string) => void
 }): Promise<{ step: GuardSetupSeedStep; sessionRunId?: string; fromCache?: boolean; recipeDefect?: boolean }> {
   const { opts, recipe, database, routes, schemes } = args
@@ -1739,6 +1800,7 @@ async function runSeedStep(args: {
         })()
       : {}),
     fingerprint: args.fingerprint,
+    freshCheckout: args.freshCheckout,
     onPhase: args.onPhase,
   })
 

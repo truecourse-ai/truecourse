@@ -258,6 +258,8 @@ describe('the guard setup job', () => {
   const catalogCalls: string[] = [];
   /** Whether the clone held the dependencies overlay when the engine looked. */
   const overlaysSeen: boolean[] = [];
+  /** Whether the clone declared its world of unknown state when the engine looked. */
+  const worldDirtySeen: boolean[] = [];
   let preparationError: string | undefined;
 
   /** A fresh clone of the fixture at a stable path, as a run really gets one. */
@@ -300,6 +302,7 @@ describe('the guard setup job', () => {
   beforeEach(async () => {
     catalogCalls.length = 0;
     overlaysSeen.length = 0;
+    worldDirtySeen.length = 0;
     preparationError = undefined;
     installWorkTree();
     // Setup reads the curated doc universe, and the job materializes the
@@ -322,6 +325,7 @@ describe('the guard setup job', () => {
               overlaysSeen.push(
                 fs.existsSync(path.join(repoRoot, '.truecourse', 'scenarios', 'dependencies.local.json')),
               );
+              worldDirtySeen.push(fs.existsSync(guardWorldDirtyMarkerPath(repoRoot)));
               // The real mapping snapshots the derived catalog; the bundle
               // collects that file, so the stub writes it too.
               const snapshot = path.join(repoRoot, '.truecourse', 'guard', 'interfaces.json');
@@ -417,6 +421,16 @@ describe('the guard setup job', () => {
     expect(Object.keys(bundle)).not.toContain('.truecourse/scenarios/dependencies.local.json');
     expect(Object.keys(bundle)).not.toContain('.truecourse/scenarios/externals.local.json');
     expect(JSON.stringify(bundle)).not.toContain('sk-test-not-real');
+  }, 60_000);
+
+  // The compose project is the repository's, so a cancelled or crashed run's
+  // volumes are still standing when the next setup boots the world: the clone
+  // says so, and the engine wipes before it brings the services up.
+  it('declares the shared world of unknown state in every clone', async () => {
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(worldDirtySeen).toEqual([true]);
   }, 60_000);
 
   it('replays the settled steps on a second run, from the stored bundle', async () => {
