@@ -24,6 +24,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PageHeader, SideMenu } from '@/dashboard/ui/bits';
 import { startContextScan } from '@/dashboard/data/scan';
+import { EVENTS, trackEvent } from '@/lib/posthog';
 import { toastNoLlmProvider } from '@/dashboard/shell/use-run-trigger';
 import { useWorkspaceRuns } from '@/dashboard/shell/use-workspace-runs';
 import { useContextSources, useContextStaleness } from '@/dashboard/shell/use-context';
@@ -52,6 +53,7 @@ function ScanButton({ stale, scanning }: { stale: boolean; scanning: boolean }) 
       .then((outcome) => {
         switch (outcome.kind) {
           case 'started':
+            trackEvent(EVENTS.scanStarted, { command: 'spec-scan' });
             return;
           case 'not-configured':
             toastNoLlmProvider(navigate, outcome.message);

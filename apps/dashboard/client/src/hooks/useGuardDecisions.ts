@@ -31,6 +31,7 @@ import type {
   GuardDismissedFlow,
 } from '@truecourse/shared';
 import * as api from '@/lib/api';
+import { EVENTS, trackEvent } from '@/lib/posthog';
 
 /** What a flow dismissal is written with: the id it keys on plus its display copy. */
 export interface GuardFlowDismissalInput {
@@ -90,11 +91,13 @@ export function useGuardDecisions(
   );
 
   // ONE write tail for both tiers: run the route, land the decisions it answers
-  // with. A disabled hook writes nothing at all.
+  // with, and only then tell `wrote` the ruling stands. A disabled hook writes
+  // nothing at all, and so reports nothing.
   const write = useCallback(
-    async (run: (repoId: string) => Promise<GuardDecisions>) => {
+    async (run: (repoId: string) => Promise<GuardDecisions>, wrote?: () => void) => {
       if (!repoId || !enabled) return;
       setDecisions(await run(repoId));
+      wrote?.();
     },
     [repoId, enabled],
   );
@@ -102,13 +105,21 @@ export function useGuardDecisions(
   return useMemo<GuardDecisionsState>(
     () => ({
       dismissalFor: (claim) => claimsByKey.get(dismissedClaimKey(claim.doc, claim.anchor, claim.title)),
-      dismiss: (claim) => write((id) => api.dismissGuardClaim(id, claim)),
+      dismiss: (claim) =>
+        write(
+          (id) => api.dismissGuardClaim(id, claim),
+          () => trackEvent(EVENTS.findingDismissed, { kind: 'claim', repoId }),
+        ),
       undismiss: (claim) => write((id) => api.undismissGuardClaim(id, claim)),
       flowDismissal: (flowId) => flowsById.get(flowId),
       dismissedFlowIds: new Set(flowsById.keys()),
-      dismissFlow: (flow) => write((id) => api.dismissGuardFlow(id, flow)),
+      dismissFlow: (flow) =>
+        write(
+          (id) => api.dismissGuardFlow(id, flow),
+          () => trackEvent(EVENTS.findingDismissed, { kind: 'flow', repoId }),
+        ),
       undismissFlow: (flowId) => write((id) => api.undismissGuardFlow(id, flowId)),
     }),
-    [claimsByKey, flowsById, write],
+    [claimsByKey, flowsById, repoId, write],
   );
 }

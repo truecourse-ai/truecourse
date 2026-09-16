@@ -30,7 +30,7 @@ import { log } from '@truecourse/core/lib/logger';
 import type { Router } from 'express';
 import type { Runner } from 'graphile-worker';
 import { EventHub, publishEvent, type EventBackplane } from './events.js';
-import type { JobPayload, JobRuntime } from './harness.js';
+import type { JobPayload, JobRuntime, JobSettledInfo } from './harness.js';
 import { releaseAbandonedQueueLocks } from './queue-locks.js';
 import {
   cancelLocalJob,
@@ -64,6 +64,12 @@ export interface CreateJobsOptions<M = Record<string, unknown>> {
   onReaped?(jobs: OrphanedJob[]): Promise<void>;
   /** Where a job failure is reported (Sentry in the hosted edition). */
   onException?(err: unknown, meta: M | undefined): void;
+  /**
+   * Where a settled job is observed, whatever its outcome (product analytics in
+   * the hosted edition). Runs after the definition's own settle hook, and a
+   * throw from it is logged rather than allowed to reach the job.
+   */
+  onSettled?(info: JobSettledInfo): void;
   /** The live backplane. Defaults to a Postgres LISTEN/NOTIFY hub. */
   hub?: EventBackplane;
   /** How the worker runner is started. Substituted in tests. */
@@ -138,6 +144,7 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
     notifications,
     publish,
     onException: opts.onException,
+    onSettled: opts.onSettled,
   };
 
   let runner: Runner | null = null;
@@ -280,6 +287,7 @@ export {
   type JobOutcomeStatus,
   type JobPayload,
   type JobRuntime,
+  type JobSettledInfo,
   type StepDef,
 } from './harness.js';
 export {

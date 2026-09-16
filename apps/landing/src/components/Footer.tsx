@@ -18,7 +18,6 @@ const PRODUCT: LinkItem[] = [
 const RESOURCES: LinkItem[] = [
   { href: GITHUB_URL, label: 'GitHub' },
   { href: DISCORD_URL, label: 'Discord' },
-  { href: 'https://www.npmjs.com/package/truecourse', label: 'npm' },
   { href: 'https://github.com/truecourse-ai/truecourse#readme', label: 'Documentation' },
   { href: '/blog', label: 'Blog' },
   { href: 'mailto:mushegh@truecourse.dev', label: 'Contact' },

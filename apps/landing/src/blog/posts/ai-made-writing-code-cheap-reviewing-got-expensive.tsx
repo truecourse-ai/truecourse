@@ -1,4 +1,5 @@
 import { Link } from 'react-router';
+import { AppLink } from '@/components/AppLink';
 import { VideoEmbed } from '@/components/VideoEmbed';
 import type { PostMeta } from '@/blog/types';
 
@@ -391,7 +392,7 @@ truecourse guard run        # deterministic: spec vs code, pass or fail`}</code>
         Want this as a gate in your CI/CD pipeline, checking spec drift on every PR before
         merge? Want your specs pulled straight from Confluence, Jira, Linear, and Google Docs
         instead of just the Markdown in your repo? That is what the commercial version does.{' '}
-        <Link to="/request-access">Join the waitlist</Link>.
+        <AppLink placement="blog">Get started</AppLink>.
       </p>
 
       <hr />

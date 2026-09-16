@@ -93,7 +93,7 @@ export function WhereItRuns() {
               </div>
               <div className="sbx-term">
                 <div className="cmd">
-                  $ <b>truecourse guard run</b> --area {sb.area}
+                  <b>Running scenarios</b> · area {sb.area}
                 </div>
                 {sb.lines.map((ln, i) => (
                   <div className={ln.state === 'pass' ? 'tln pass' : 'tln runy'} key={i}>

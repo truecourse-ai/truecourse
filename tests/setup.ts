@@ -23,6 +23,11 @@ process.env.CLAUDE_CODE_BINARY = '/nonexistent/claude-test-tripwire'
 process.env.GIT_CONFIG_GLOBAL = os.devNull
 process.env.GIT_CONFIG_NOSYSTEM = '1'
 
+// No test may send product analytics: the server's PostHog client bakes in the
+// real project key, so a test that settles a job would report it as production
+// traffic.
+process.env.POSTHOG_DISABLED = '1'
+
 // The server's RUNTIME DIRECTORY gets its own per-process temp dir: a run's
 // scratch (its session journal, its clone, the log) must never land in the
 // developer's home, and two test files must never share one.

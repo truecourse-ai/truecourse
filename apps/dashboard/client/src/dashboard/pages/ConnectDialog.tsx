@@ -55,6 +55,7 @@ import type {
 } from '@truecourse/shared';
 import { CONTEXT_SOURCE_KIND_LABEL } from '@truecourse/shared';
 import { listContextSources, putRepoContextBindings } from '@/lib/api';
+import { EVENTS, trackEvent } from '@/lib/posthog';
 import {
   fetchGithubStatus,
   fetchInstallationRepos,
@@ -292,7 +293,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
    */
   const connectThroughProvider = async () => {
     const connect = provider?.connect;
-    if (!connect || linking !== null) return;
+    if (!provider || !connect || linking !== null) return;
     const asked = named.trim();
     setLinkErrors({});
     setLinking(0);
@@ -304,6 +305,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     }
     setLinking(null);
     if (!landed) return;
+    trackEvent(EVENTS.repoConnected, { repo: landed, provider: provider.id });
     const connected = await refreshRealRepos();
     await bindContext([landed], connected);
     if (llmProvider === 'missing') {
@@ -341,6 +343,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       }
     }
     const landed = targets.map((r) => r.fullName).filter((name) => !failures[name]);
+    for (const repo of landed) trackEvent(EVENTS.repoConnected, { repo, provider: 'github' });
     setLinking(null);
     setLinkErrors(failures);
     setPicked((prev) => prev.filter((name) => failures[name]));

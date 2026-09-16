@@ -2,6 +2,7 @@ import { Link, Navigate, useParams } from 'react-router';
 import { FaLinkedin } from 'react-icons/fa6';
 import { pageMeta } from '@/lib/seo';
 import { getPost } from '@/blog';
+import { AppLink } from '@/components/AppLink';
 import { ViewCount } from '@/components/ViewCount';
 
 export function meta({ params }: { params: { slug?: string } }) {
@@ -68,9 +69,9 @@ export default function BlogPostPage() {
         <Link className="post-back" to="/blog">
           ← All posts
         </Link>
-        <Link className="btn btn-primary btn-sm" to="/request-access">
-          Request access →
-        </Link>
+        <AppLink className="btn btn-primary btn-sm" placement="blog">
+          Get started →
+        </AppLink>
       </div>
     </article>
   );

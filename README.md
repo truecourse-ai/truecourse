@@ -54,6 +54,25 @@ This needs the `claude` binary on your PATH and signed in. Every run then uses
 that login and the Models page is read-only; leave the variable out to save a
 provider and key on that page instead.
 
+## Telemetry
+
+The app sends product analytics to PostHog: pageviews, the named actions someone
+takes (connecting a repository, starting a run, saving a provider), and the
+signed-in person's id, email and workspace. Never a document, a key or a token.
+
+Three build-time variables control it, read by the client when it is built:
+
+| Variable | What it does |
+| --- | --- |
+| `VITE_POSTHOG_DISABLED` | `1` turns it off entirely: the client never starts. |
+| `VITE_POSTHOG_KEY` | Send to your own PostHog project instead of TrueCourse's. |
+| `VITE_POSTHOG_HOST` | The PostHog host. Default: `https://us.i.posthog.com`. |
+
+The server sends the other half: one event per background job that finished (a
+scan, a setup, a generation, a run) with its outcome, how long it took and the
+repository it was for. It reads `POSTHOG_DISABLED`, `POSTHOG_KEY` and
+`POSTHOG_HOST` from its own environment, which do the same three things.
+
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the development setup, the project
