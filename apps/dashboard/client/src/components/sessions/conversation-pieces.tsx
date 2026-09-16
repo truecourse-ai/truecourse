@@ -16,7 +16,6 @@ import type { DisplayDispute, KnownDisplayBlock } from '@truecourse/agent-loop';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import * as api from '@/lib/api';
 import type { SpecConflictResolution } from '@/lib/api';
-import { EVENTS, trackEvent } from '@/lib/posthog';
 
 /**
  * The dispute identity of a finding: the SAME key `conflictResolutions`
@@ -149,7 +148,6 @@ function FindingResolveFooter({
         await ctx.undo(dispute);
       } else {
         await ctx.resolve(dispute, verdict);
-        trackEvent(EVENTS.conflictResolved, { verdict });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

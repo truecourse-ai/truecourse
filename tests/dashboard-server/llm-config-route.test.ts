@@ -16,11 +16,22 @@ import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import { PgLlmConfigStore } from '../../packages/data-store/src/index';
 import { createTestApp, TEST_ORG, testAuthVerifier } from '../helpers/test-app';
 import {
+  captureAction,
+  EVENTS,
+} from '../../apps/dashboard/server/src/observability/posthog';
+import {
   resetWorkspaceLlmBackend,
   resetWorkspaceLlmConfigStore,
   setWorkspaceLlmBackend,
   setWorkspaceLlmConfigStore,
 } from '../../apps/dashboard/server/src/services/workspace-llm.service';
+
+// The save is reported from the route; the analytics module's one capture is a
+// spy, so the call is asserted and nothing is sent.
+vi.mock('../../apps/dashboard/server/src/observability/posthog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../apps/dashboard/server/src/observability/posthog')>()),
+  captureAction: vi.fn(),
+}));
 
 const SECRET = 'master-secret-at-least-32-chars-long!!';
 const OTHER_ORG = 'org_other';
@@ -31,6 +42,7 @@ let app: Express;
 let probe: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
+  vi.mocked(captureAction).mockClear();
   client = new PGlite();
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
@@ -89,6 +101,14 @@ describe('PATCH /api/llm/config', () => {
     });
     expect(res.body.config).toMatchObject({ model: 'claude-x', hasKey: true, keyMask: '••••1234' });
     expect(await store.getConfig(TEST_ORG)).toMatchObject({ apiKey: 'sk-new1234' });
+
+    // Reported once the row is stored: the provider and the model, never the key.
+    expect(captureAction).toHaveBeenCalledTimes(1);
+    expect(captureAction).toHaveBeenCalledWith(EVENTS.llmProviderSaved, {
+      userId: 'user_test',
+      workspaceId: TEST_ORG,
+      properties: { provider: 'anthropic', model: 'claude-x' },
+    });
   });
 
   it('saves NOTHING when the provider refuses the probe', async () => {
@@ -97,6 +117,7 @@ describe('PATCH /api/llm/config', () => {
     const res = await request(app).patch('/api/llm/config').send(body).expect(400);
     expect(res.body.error).toContain('401 invalid x-api-key');
     expect(await store.getConfig(TEST_ORG)).toBeNull();
+    expect(captureAction).not.toHaveBeenCalled();
   });
 
   it('leaves the existing config intact when a replacement fails its probe', async () => {

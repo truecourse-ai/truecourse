@@ -9,7 +9,7 @@
  * route leaves behind.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import request from 'supertest';
@@ -35,6 +35,17 @@ import {
   setContextEventPublisher,
 } from '../../apps/dashboard/server/src/services/context.service';
 import { contextDocRef } from '@truecourse/core/lib/context-ref';
+import {
+  captureAction,
+  EVENTS,
+} from '../../apps/dashboard/server/src/observability/posthog';
+
+// An added source is reported from the route that stores it; the analytics
+// module's one capture is a spy, so the call is asserted and nothing is sent.
+vi.mock('../../apps/dashboard/server/src/observability/posthog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../apps/dashboard/server/src/observability/posthog')>()),
+  captureAction: vi.fn(),
+}));
 
 let app: Express;
 let fixture: TestFixture;
@@ -47,6 +58,7 @@ let syncs: { workspaceOrgId: string; sourceId: string; source: string }[];
 let trees: RepositorySourceConfig[];
 
 beforeEach(async () => {
+  vi.mocked(captureAction).mockClear();
   fixture = await setupTestFixture();
   store = memoryContextStore();
   setContextStore(store);
@@ -168,6 +180,14 @@ describe('POST /api/context/sources', () => {
     expect(syncs).toEqual([
       { workspaceOrgId: TEST_ORG, sourceId: res.body.source.id, source: 'add' },
     ]);
+
+    // Reported once the source is stored: its kind, never its URL.
+    expect(captureAction).toHaveBeenCalledTimes(1);
+    expect(captureAction).toHaveBeenCalledWith(EVENTS.contextSourceAdded, {
+      userId: 'user_test',
+      workspaceId: TEST_ORG,
+      properties: { kind: 'site' },
+    });
   });
 
   it('links nothing when no repository is named', async () => {
@@ -180,6 +200,8 @@ describe('POST /api/context/sources', () => {
     const again = await addSite().expect(409);
     expect(again.body.error).toContain('already a source of this workspace');
     expect(await store.listSources(TEST_ORG)).toHaveLength(1);
+    // One source, one event: the refusal stored nothing to report.
+    expect(captureAction).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a URL that is not an llms.txt', async () => {
@@ -255,6 +277,14 @@ describe('POST /api/context/sources', () => {
     expect(syncs).toEqual([
       { workspaceOrgId: TEST_ORG, sourceId: res.body.source.id, source: 'add' },
     ]);
+
+    // The same report, carrying the kind this source is.
+    expect(captureAction).toHaveBeenCalledTimes(1);
+    expect(captureAction).toHaveBeenCalledWith(EVENTS.contextSourceAdded, {
+      userId: 'user_test',
+      workspaceId: TEST_ORG,
+      properties: { kind: 'repository' },
+    });
   });
 
   it('refuses an installation this workspace does not have', async () => {

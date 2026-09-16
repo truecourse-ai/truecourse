@@ -38,6 +38,7 @@ import { stopAllRunsWatches } from './services/run-watch.service.js';
 import { getLogDir } from '@truecourse/core/config/runtime-dir';
 import { initSentry, flushSentry } from './observability/sentry.js';
 import { shutdownServerAnalytics } from './observability/posthog.js';
+import { observeRepositories } from './observability/repositories.js';
 import { ServerLogTransport } from './observability/log-transport.js';
 import { LOCAL_ORG_ID } from './auth/local.js';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
@@ -110,7 +111,9 @@ export async function startServer(): Promise<void> {
   // The connected repositories, whichever provider brought them. Built before
   // the providers: each writes its rows through this one store, and a run
   // resolves which provider has a repository's files from it.
-  const repoLinks = new PgRepositoryStore(getDb());
+  // Wrapped so every path that connects or disconnects a repository — a route
+  // and a webhook alike — reports it from the one place that writes the row.
+  const repoLinks = observeRepositories(new PgRepositoryStore(getDb()));
   setRepoProviderLookup(async (repoKey) => (await repoLinks.getRepo(repoKey))?.provider ?? null);
   // A `context/` document ref belongs to a workspace, not to a repository, so
   // the doc reader needs to know whose workspace a repository reads.

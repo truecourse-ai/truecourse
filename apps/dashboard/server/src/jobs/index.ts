@@ -77,7 +77,7 @@ import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
 import { openConflicts } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
-import { captureJobFinished } from '../observability/posthog.js';
+import { captureJobFinished, captureJobStarted } from '../observability/posthog.js';
 import { rippleLinksChanged, type RippleStart } from './context-ripple.js';
 import type { OnboardingJobRequest } from './tasks/onboarding.js';
 
@@ -316,7 +316,9 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     db: opts.db,
     connectionString: opts.connectionString,
     tasks,
-    // The finish of every job someone started, from the one place they settle.
+    // The start and the finish of every job someone asked for, from the two
+    // places every job passes through: its claim and its settle.
+    onStarted: captureJobStarted,
     onSettled: captureJobFinished,
     ...(opts.startWorker ? { startWorker: opts.startWorker } : {}),
     ...(opts.hub ? { hub: opts.hub } : {}),

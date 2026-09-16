@@ -15,6 +15,7 @@ import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions
 import capabilitiesRouter from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
 import { createAuthGate } from './middleware/auth.js';
+import { actorContext } from './middleware/actor.js';
 import type { GithubMount } from './github/index.js';
 import type { RepoLinkStore } from './routes/repos.js';
 import type { JobsMount } from './jobs/index.js';
@@ -161,6 +162,11 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // The auth gate protects everything under /api below this line. Static SPA
   // assets are outside /api, so the dashboard shell still loads to drive login.
   app.use('/api', createAuthGate(opts.authVerifier));
+  // Carry the caller's identity down the whole call stack, so a seam a route
+  // reaches through (the repository link store) knows a person was behind its
+  // write. Above the gate there is no session and no actor, which is what tells
+  // a webhook's write apart from a route's.
+  app.use('/api', actorContext());
 
   // The connect API is workspace-scoped, so it sits behind the gate.
   if (opts.github) {

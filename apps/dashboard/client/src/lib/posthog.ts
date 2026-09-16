@@ -1,5 +1,5 @@
 /**
- * Product analytics: what someone does in the dashboard, sent to PostHog.
+ * Product analytics: what only the browser can see, sent to PostHog.
  *
  * ONE PROJECT, two sources. The landing site sends to the same project tagged
  * `source: 'landing'`; everything from this app carries `source: 'dashboard'`,
@@ -7,9 +7,12 @@
  *
  * WHAT IS SENT: autocaptured clicks and form submits, a pageview per address
  * (the SPA's route changes are manual — {@link trackPageview} — because only
- * the first load is a real navigation), and the named events of {@link EVENTS},
- * one per user-initiated action. A property is an identifier or a kind: the
- * repository key, the job, the decision. Never a key, a token or an invite URL.
+ * the first load is a real navigation), who is signed in, and the one named
+ * event of {@link EVENTS} that never reaches this server: following the Discord
+ * link out. Every product ACTION is the server's to send, from the place the
+ * fact becomes true — the row written, the job claimed, the provider probed —
+ * because that is where it is true whoever or whatever asked, and no navigation
+ * can race it.
  *
  * OFF WITH ONE FLAG: `VITE_POSTHOG_DISABLED=1` in the build's environment and
  * `initPostHog` does nothing, which leaves every helper below a no-op — they
@@ -35,34 +38,12 @@ const SOURCE = 'dashboard';
 const GROUP = 'workspace';
 
 /**
- * The named events, one per action a person takes. The names are here rather
- * than at the call sites so the catalogue is readable in one place and a name
- * cannot drift between the place that fires it and the place that reads it.
+ * The named events this client sends. The names are here rather than at the
+ * call sites so the catalogue is readable in one place and a name cannot drift
+ * between the place that fires it and the place that reads it.
  */
 export const EVENTS = {
-  /** A repository was connected, one event per repository that landed. */
-  repoConnected: 'repo_connected',
-  /** A connected repository was unlinked. */
-  repoDisconnected: 'repo_disconnected',
-  /** The workspace document scan was started. */
-  scanStarted: 'scan_started',
-  /** A repository's guard setup was started. */
-  setupStarted: 'setup_started',
-  /** A repository's flow generation was started. */
-  generateStarted: 'generate_started',
-  /** A repository's flow run was started. */
-  runStarted: 'run_started',
-  /** A context source was added (a repository's markdown, a documentation site). */
-  contextSourceAdded: 'context_source_added',
-  /** A documentation conflict was ruled on: a side picked, or dismissed. */
-  conflictResolved: 'conflict_resolved',
-  /** A flow or a claim was ruled out of testing. */
-  findingDismissed: 'finding_dismissed',
-  /** The workspace's LLM provider was saved on the Models page. */
-  llmProviderSaved: 'llm_provider_saved',
-  /** An invite link was minted on the Members page. */
-  inviteLinkCreated: 'invite_link_created',
-  /** The sidebar's Join Discord link was followed. */
+  /** The account menu's Join Discord link was followed, off to another site. */
   discordJoinClicked: 'discord_join_clicked',
 } as const;
 

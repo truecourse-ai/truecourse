@@ -13,10 +13,21 @@
 
 import express, { type Express } from 'express';
 import request from 'supertest';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { AuthUser } from '@truecourse/shared';
 import { createWorkspaceMembersRouter } from '../../apps/dashboard/server/src/auth/workspace-members';
 import { MemoryInviteLinkStore } from '../helpers/memory-invite-links';
+import {
+  captureAction,
+  EVENTS,
+} from '../../apps/dashboard/server/src/observability/posthog';
+
+// Minting a link is reported from the route that mints it; the analytics
+// module's one capture is a spy, so the call is asserted and nothing is sent.
+vi.mock('../../apps/dashboard/server/src/observability/posthog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../apps/dashboard/server/src/observability/posthog')>()),
+  captureAction: vi.fn(),
+}));
 
 const ORG = 'org_acme';
 const DAY = 24 * 60 * 60 * 1000;
@@ -148,6 +159,10 @@ function makeApp(workos: unknown, user: AuthUser | null): Express {
   app.use('/api/workspace', createWorkspaceMembersRouter(workos as any, cfg, links));
   return app;
 }
+
+beforeEach(() => {
+  vi.mocked(captureAction).mockClear();
+});
 
 const CALLER: AuthUser = {
   id: ME.id,
@@ -429,6 +444,14 @@ describe('invite links', () => {
     const life = Date.parse(res.body.link.expiresAt) - before;
     expect(life).toBeGreaterThan(3 * DAY - 5000);
     expect(life).toBeLessThanOrEqual(3 * DAY + 5000);
+
+    // Reported once the row exists: how long it stands, never the token or the URL.
+    expect(captureAction).toHaveBeenCalledTimes(1);
+    expect(captureAction).toHaveBeenCalledWith(EVENTS.inviteLinkCreated, {
+      userId: ME.id,
+      workspaceId: ORG,
+      properties: { days: 3 },
+    });
   });
 
   it.each([undefined, 0, 2, 31, 2.5, '7'])('refuses %j as a lifetime', async (expiresInDays) => {
@@ -436,6 +459,7 @@ describe('invite links', () => {
     const app = makeApp(m.workos, CALLER);
     await request(app).post('/api/workspace/invite-links').send({ expiresInDays }).expect(400);
     expect(links.rows.size).toBe(0);
+    expect(captureAction).not.toHaveBeenCalled();
   });
 
   it('lists the standing links after the invitations, newest first, an old one marked expired', async () => {

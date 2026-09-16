@@ -56,11 +56,17 @@ provider and key on that page instead.
 
 ## Telemetry
 
-The app sends product analytics to PostHog: pageviews, the named actions someone
-takes (connecting a repository, starting a run, saving a provider), and the
-signed-in person's id, email and workspace. Never a document, a key or a token.
+The app sends product analytics to PostHog. The server sends every product
+action: a repository connected or disconnected, a scan, setup, generation or run
+starting and finishing, a context source added, a conflict resolved, a finding
+dismissed, a provider saved, an invite link minted, a workspace created. Each
+carries identifiers and kinds only, never a document, a key, a token or an
+invite URL. It reads `POSTHOG_DISABLED`, `POSTHOG_KEY` and `POSTHOG_HOST` from
+the repo-root `.env`.
 
-Three build-time variables control it, read by the client when it is built:
+The browser sends what only it can see: pageviews, autocaptured clicks and form
+submits, the signed-in person's id, email and workspace, and the Join Discord
+click. Three build-time variables control it:
 
 | Variable | What it does |
 | --- | --- |
@@ -68,12 +74,8 @@ Three build-time variables control it, read by the client when it is built:
 | `VITE_POSTHOG_KEY` | Send to your own PostHog project instead of TrueCourse's. |
 | `VITE_POSTHOG_HOST` | The PostHog host. Default: `https://us.i.posthog.com`. |
 
-The server sends the other half: one event per background job that finished (a
-scan, a setup, a generation, a run) with its outcome, how long it took and the
-repository it was for. It reads `POSTHOG_DISABLED`, `POSTHOG_KEY` and
-`POSTHOG_HOST` from the same repo-root `.env`, which do the same three things.
-`POSTHOG_DISABLED=1` there turns off both halves at once, so a development
-machine sends nothing.
+`POSTHOG_DISABLED=1` turns off both halves at once, so a development machine
+sends nothing.
 
 ## Contributing
 

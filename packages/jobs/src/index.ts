@@ -30,7 +30,7 @@ import { log } from '@truecourse/core/lib/logger';
 import type { Router } from 'express';
 import type { Runner } from 'graphile-worker';
 import { EventHub, publishEvent, type EventBackplane } from './events.js';
-import type { JobPayload, JobRuntime, JobSettledInfo } from './harness.js';
+import type { JobPayload, JobRuntime, JobSettledInfo, JobStartedInfo } from './harness.js';
 import { releaseAbandonedQueueLocks } from './queue-locks.js';
 import {
   cancelLocalJob,
@@ -64,6 +64,12 @@ export interface CreateJobsOptions<M = Record<string, unknown>> {
   onReaped?(jobs: OrphanedJob[]): Promise<void>;
   /** Where a job failure is reported (Sentry in the hosted edition). */
   onException?(err: unknown, meta: M | undefined): void;
+  /**
+   * Where a claimed job is observed, before its body runs (product analytics in
+   * the hosted edition). A throw from it is logged rather than allowed to reach
+   * the job.
+   */
+  onStarted?(info: JobStartedInfo): void;
   /**
    * Where a settled job is observed, whatever its outcome (product analytics in
    * the hosted edition). Runs after the definition's own settle hook, and a
@@ -144,6 +150,7 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
     notifications,
     publish,
     onException: opts.onException,
+    onStarted: opts.onStarted,
     onSettled: opts.onSettled,
   };
 
@@ -288,6 +295,7 @@ export {
   type JobPayload,
   type JobRuntime,
   type JobSettledInfo,
+  type JobStartedInfo,
   type StepDef,
 } from './harness.js';
 export {

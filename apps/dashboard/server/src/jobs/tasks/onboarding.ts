@@ -23,6 +23,11 @@ export interface OnboardingJobRequest {
   repoFullName: string;
   workspaceOrgId: string;
   source: OnboardingJobSource;
+  /**
+   * The user id of the person whose request enqueued it. Unset when nobody
+   * asked directly: a chain, a webhook, the scheduler.
+   */
+  requestedBy?: string;
 }
 
 export type OnboardingJobPayload = OnboardingJobRequest & JobPayload;

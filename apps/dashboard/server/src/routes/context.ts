@@ -101,6 +101,7 @@ import {
   type SiteSourceConfig,
 } from '@truecourse/shared';
 import { requireJobs } from '../jobs/current.js';
+import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
 import { emitContextChanged, serverContextDrivers } from '../services/context.service.js';
 import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
 
@@ -563,6 +564,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
       const outcome = await requireJobs().enqueueContextScan({
         workspaceOrgId: org,
         source: 'manual',
+        ...(req.user?.id ? { requestedBy: req.user.id } : {}),
       });
       if (outcome.status === 'busy') {
         res.status(409).json({ error: 'A document scan is already running for this workspace.' });
@@ -675,6 +677,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
           note: body.note,
         }),
       );
+      const who = actorOf(req);
+      if (who) captureAction(EVENTS.conflictResolved, { ...who, properties: { verdict } });
       res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
     } catch (e) {
       respond(res, next, e);
@@ -848,6 +852,9 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         ]);
       }
       await emitContextChanged(org, { change: 'sources', sourceId: id });
+
+      const who = actorOf(req);
+      if (who) captureAction(EVENTS.contextSourceAdded, { ...who, properties: { kind } });
 
       const outcome = await requireJobs().enqueueContextSync({
         workspaceOrgId: org,

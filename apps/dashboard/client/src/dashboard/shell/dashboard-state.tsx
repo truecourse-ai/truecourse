@@ -31,7 +31,6 @@ import { toast } from 'sonner';
 import { disconnectRealRepo, fetchRealRepos } from '@/dashboard/data/real-repos';
 import { fetchLlmConfig } from '@/dashboard/data/llm-config';
 import { useAuth } from '@/auth/AuthContext';
-import { EVENTS, trackEvent } from '@/lib/posthog';
 import { useRealRunStream, type RunFailure } from './real-runs';
 import { useActiveJobs } from './use-active-jobs';
 import { useNotifications } from './use-notifications';
@@ -163,11 +162,6 @@ export function DashboardStateProvider({ children }: { children: ReactNode }) {
    */
   const unlinkRepo = useCallback(
     (id: string) => {
-      const going = repos.find((repo) => repo.id === id);
-      trackEvent(EVENTS.repoDisconnected, {
-        repo: going?.fullName ?? id,
-        ...(going?.provider ? { provider: going.provider } : {}),
-      });
       setRepos((prev) => prev.filter((r) => r.id !== id));
       void disconnectRealRepo(id)
         .catch((e: unknown) => {
@@ -177,7 +171,7 @@ export function DashboardStateProvider({ children }: { children: ReactNode }) {
         })
         .then(refreshRealRepos);
     },
-    [repos, refreshRealRepos],
+    [refreshRealRepos],
   );
 
   // The repositories' runs, followed live. Inert without a server.

@@ -22,7 +22,18 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
+// A conflict verdict is reported from the route that records it; the analytics
+// module's one capture is a spy, so the call is asserted and nothing is sent.
+vi.mock('../../apps/dashboard/server/src/observability/posthog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../apps/dashboard/server/src/observability/posthog')>()),
+  captureAction: vi.fn(),
+}));
+
 import { createTestApp, stubJobs, TEST_ORG, type StubJobs } from '../helpers/test-app';
+import {
+  captureAction,
+  EVENTS,
+} from '../../apps/dashboard/server/src/observability/posthog';
 import {
   clearTestRegistry,
   setupTestFixture,
@@ -81,6 +92,7 @@ const corpus = (): CuratedCorpus => ({
 });
 
 beforeEach(async () => {
+  vi.mocked(captureAction).mockClear();
   fixture = await setupTestFixture();
   context = memoryContextStore();
   setContextStore(context);
@@ -104,7 +116,10 @@ describe('POST /api/context/scan', () => {
     const res = await request(app).post('/api/context/scan').expect(202);
 
     expect(res.body).toEqual({ jobId: 'job_test' });
-    expect(jobs.contextScans).toEqual([{ workspaceOrgId: TEST_ORG, source: 'manual' }]);
+    // The person who pressed it rides the payload, so the job's start is theirs.
+    expect(jobs.contextScans).toEqual([
+      { workspaceOrgId: TEST_ORG, source: 'manual', requestedBy: 'user_test' },
+    ]);
   });
 
   it('answers 409 while one is already running', async () => {
@@ -187,6 +202,35 @@ describe('an inclusion decision says a scan is needed', () => {
       previous = changedAt;
     }
     expect((await stamp()).stale).toBe(true);
+  });
+
+  it('reports a conflict verdict once, as the person who ruled', async () => {
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
+    await request(app)
+      .post('/api/context/conflict-resolution')
+      .send({
+        docA: ref(SRC_A, 'one.md'),
+        anchorA: 'Cancellation',
+        docB: ref(SRC_B, 'site.md'),
+        anchorB: 'Cancellation',
+        verdict: 'b',
+      })
+      .expect(200);
+
+    expect(captureAction).toHaveBeenCalledTimes(1);
+    expect(captureAction).toHaveBeenCalledWith(EVENTS.conflictResolved, {
+      userId: 'user_test',
+      workspaceId: TEST_ORG,
+      properties: { verdict: 'b' },
+    });
+  });
+
+  it('reports nothing for a verdict the route refuses', async () => {
+    await request(app)
+      .post('/api/context/conflict-resolution')
+      .send({ docA: ref(SRC_A, 'one.md'), docB: ref(SRC_B, 'site.md'), verdict: 'maybe' })
+      .expect(400);
+    expect(captureAction).not.toHaveBeenCalled();
   });
 
   it('leaves the stamp alone for a conflict verdict, which a scan does not apply', async () => {

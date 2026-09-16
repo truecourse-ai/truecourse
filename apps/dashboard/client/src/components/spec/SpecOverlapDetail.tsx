@@ -25,7 +25,6 @@ import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlap, SpecOverl
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
-import { EVENTS, trackEvent } from '@/lib/posthog';
 
 /** Caption above a detail card, the label grammar the guard detail panes read in. */
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
@@ -168,7 +167,6 @@ export function SpecOverlapDetail({
         onConflictChange?.(res.conflictResolutions);
       }
       onDecision?.();
-      trackEvent(EVENTS.conflictResolved, { verdict });
     } finally {
       setBusy(null);
     }

@@ -48,6 +48,11 @@ export type ContextScanSource = 'manual' | 'sync' | 'link' | 'connect' | 'rescan
 export interface ContextScanJobRequest {
   workspaceOrgId: string;
   source: ContextScanSource;
+  /**
+   * The user id of the person whose request enqueued it. Unset when nobody
+   * asked directly: the ripple, a sync, the scheduler.
+   */
+  requestedBy?: string;
 }
 
 export type ContextScanJobPayload = ContextScanJobRequest & JobPayload;

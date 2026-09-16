@@ -51,7 +51,19 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
+// Connecting and disconnecting are reported from the link store; the analytics
+// module's one capture is a spy, so the calls are asserted and nothing is sent.
+vi.mock('../../apps/dashboard/server/src/observability/posthog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../apps/dashboard/server/src/observability/posthog')>()),
+  captureAction: vi.fn(),
+}));
+
 import { createApp } from '../../apps/dashboard/server/src/app';
+import {
+  captureAction,
+  EVENTS,
+} from '../../apps/dashboard/server/src/observability/posthog';
+import { observeRepositories } from '../../apps/dashboard/server/src/observability/repositories';
 import {
   createGithubConnection,
   type ContextSyncStart,
@@ -181,9 +193,12 @@ let store: MemoryInstallationStore;
 let contextStore: ReturnType<typeof memoryContextStore>;
 
 function buildApp(opts: MountOptions = {}): Express {
+  // Wrapped exactly as boot wraps it, so every path that writes a repository
+  // row reports it the way production does.
+  const repos = observeRepositories(store);
   const github = createGithubConnection({
     store,
-    repos: store,
+    repos,
     octokitFor: () => octokit,
     ...opts,
   });
@@ -191,7 +206,7 @@ function buildApp(opts: MountOptions = {}): Express {
   return createApp({
     serveStatic: false,
     authVerifier: verify,
-    repoLinks: store,
+    repoLinks: repos,
     github,
     jobs: null,
   });
@@ -218,6 +233,7 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
+  vi.mocked(captureAction).mockClear();
   installMemorySessionRuns();
   // The per-repo guard surfaces this suite reaches are about VISIBILITY, not
   // guard data: the stores are here so the routes resolve, and hold nothing.
@@ -546,6 +562,14 @@ describe('linking a repository', () => {
     expect(started).toEqual([]);
     expect(await contextStore.listSources(ORG)).toEqual([]);
     expect(fs.existsSync(getRunClonesDir())).toBe(false);
+
+    // Reported once the row exists, as the person whose request wrote it.
+    expect(captureAction).toHaveBeenCalledTimes(1);
+    expect(captureAction).toHaveBeenCalledWith(EVENTS.repoConnected, {
+      userId: `u_${ORG}`,
+      workspaceId: ORG,
+      properties: { repo: REPO, provider: 'github', via: 'app' },
+    });
   });
 
   // Context owns the sources, so a repository whose own documentation is
@@ -626,6 +650,44 @@ describe('disconnecting a repository', () => {
 
     expect(await store.getRepo(REPO)).toBeNull();
     expect(fs.existsSync(sessionsDir(REPO))).toBe(false);
+
+    // The connect and the disconnect, in that order, both as the person.
+    expect(captureAction.mock.calls.map((c) => c[0])).toEqual([
+      EVENTS.repoConnected,
+      EVENTS.repoDisconnected,
+    ]);
+    expect(captureAction).toHaveBeenLastCalledWith(EVENTS.repoDisconnected, {
+      userId: `u_${ORG}`,
+      workspaceId: ORG,
+      properties: { repo: REPO, provider: 'github', via: 'app' },
+    });
+  });
+
+  it('reports a repository GitHub took away as the workspace’s, with nobody behind it', async () => {
+    const app = buildApp({ startSetup: async () => 'queued' });
+    await linkRepo(app).expect(201);
+    vi.mocked(captureAction).mockClear();
+
+    const { payload, signature } = signed({
+      action: 'removed',
+      installation: { id: INSTALLATION_ID },
+      repositories_removed: [{ full_name: REPO }],
+    });
+    await request(app)
+      .post('/api/github/webhook')
+      .set('Content-Type', 'application/json')
+      .set('X-GitHub-Event', 'installation_repositories')
+      .set('X-Hub-Signature-256', signature)
+      .send(payload)
+      .expect(202);
+
+    expect(await store.getRepo(REPO)).toBeNull();
+    // No session on a webhook, so no person: the workspace owns the event.
+    expect(captureAction).toHaveBeenCalledTimes(1);
+    expect(captureAction).toHaveBeenCalledWith(EVENTS.repoDisconnected, {
+      workspaceId: ORG,
+      properties: { repo: REPO, provider: 'github', via: 'github' },
+    });
   });
 
   it('drops the link row when the repo is disconnected from Home', async () => {

@@ -50,7 +50,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { addContextSource, previewContextSource } from '@/lib/api';
-import { EVENTS, trackEvent } from '@/lib/posthog';
 import { fetchGithubStatus, fetchInstallationRepos } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
@@ -276,7 +275,6 @@ export function AddContextDialog({
     setFailure(null);
     void addContextSource({ kind, config: config(), repoIds: [], ...account() })
       .then((res) => {
-        trackEvent(EVENTS.contextSourceAdded, { kind });
         onAdded?.();
         onOpenChange(false);
         navigate(sourceHref(res.source.id));

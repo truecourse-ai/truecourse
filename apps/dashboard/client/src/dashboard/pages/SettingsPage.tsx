@@ -25,7 +25,6 @@ import type {
 import { StatusWord } from '@/dashboard/ui/status-word';
 import { Facts, ProviderIcon, PageHeader, SideMenu } from '@/dashboard/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/dashboard/data/llm-config';
-import { EVENTS, trackEvent } from '@/lib/posthog';
 import { offeredRepositoryProviders } from '@/dashboard/data/providers';
 import { fetchGithubStatus } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
@@ -313,7 +312,6 @@ function ModelsTab() {
         apply(next);
         setApiKey('');
         setSaved(true);
-        trackEvent(EVENTS.llmProviderSaved, { provider, model: next.config?.model ?? update.model });
         // The shell's needs-setup surfaces answer to this read, not to the form.
         return refreshLlmProvider();
       })

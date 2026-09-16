@@ -1,17 +1,18 @@
 /**
- * Server-side product analytics: the finish of a background job.
+ * Server-side product analytics: every action the server establishes.
  *
- * What is pinned is the mapping (which job types are someone's action and what
- * each is called), the shape of what leaves the process — the workspace group,
- * no person profile, and nothing from the payload — and the opt-out, which must
- * create no client at all rather than be trusted to stay quiet.
+ * What is pinned is the attribution (a person when a request carried one, the
+ * workspace with no person profile otherwise), the job mapping — which job
+ * types are someone's action, what each is called at its claim and at its
+ * settle — and the opt-out, which must create no client at all rather than be
+ * trusted to stay quiet.
  *
  * Each case loads a FRESH copy of the module (`vi.resetModules`), because the
  * client is module state and a test that inherited it would prove nothing.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { JobSettledInfo } from '@truecourse/jobs';
+import type { JobSettledInfo, JobStartedInfo } from '@truecourse/jobs';
 
 const client = vi.hoisted(() => ({
   capture: vi.fn(),
@@ -42,6 +43,15 @@ const settled = (over: Partial<JobSettledInfo> = {}): JobSettledInfo => ({
   ...over,
 });
 
+const claimed = (over: Partial<JobStartedInfo> = {}): JobStartedInfo => ({
+  type: 'repo.guard-run',
+  jobId: 'job_1',
+  org: 'org_A',
+  payload: { jobId: 'job_1' },
+  meta: { repoFullName: 'acme/app', commitSha: 'c0ffee' },
+  ...over,
+});
+
 /** The single event the mocked client was handed. */
 function capturedEvent(): Record<string, unknown> {
   return client.capture.mock.calls[0]?.[0] as Record<string, unknown>;
@@ -53,6 +63,114 @@ beforeEach(() => {
   // The suite disables analytics globally (tests/setup.ts); these cases are
   // about what the enabled module does.
   vi.stubEnv('POSTHOG_DISABLED', '');
+});
+
+describe('captureAction', () => {
+  it('is the person a request carried, with their workspace as the group', async () => {
+    const { captureAction, EVENTS } = await load();
+    captureAction(EVENTS.contextSourceAdded, {
+      userId: 'user_1',
+      workspaceId: 'org_A',
+      properties: { kind: 'site' },
+    });
+
+    expect(capturedEvent()).toEqual({
+      distinctId: 'user_1',
+      event: 'context_source_added',
+      properties: { source: 'server', kind: 'site' },
+      groups: { workspace: 'org_A' },
+    });
+  });
+
+  it('is the workspace when nobody asked, and mints no person for it', async () => {
+    const { captureAction, EVENTS } = await load();
+    captureAction(EVENTS.repoDisconnected, {
+      workspaceId: 'org_A',
+      properties: { repo: 'acme/app', provider: 'github', via: 'github' },
+    });
+
+    expect(capturedEvent()).toEqual({
+      distinctId: 'org_A',
+      event: 'repo_disconnected',
+      properties: {
+        source: 'server',
+        repo: 'acme/app',
+        provider: 'github',
+        via: 'github',
+        $process_person_profile: false,
+      },
+      groups: { workspace: 'org_A' },
+    });
+  });
+
+  it('sends nothing with the opt-out set', async () => {
+    vi.stubEnv('POSTHOG_DISABLED', '1');
+    const { captureAction, EVENTS } = await load();
+    captureAction(EVENTS.llmProviderSaved, { userId: 'user_1', workspaceId: 'org_A' });
+
+    expect(PostHog).not.toHaveBeenCalled();
+    expect(client.capture).not.toHaveBeenCalled();
+  });
+});
+
+describe('captureJobStarted', () => {
+  it.each([
+    ['context.scan', 'scan_started'],
+    ['repo.guard-setup', 'setup_started'],
+    ['repo.guard-generate', 'generate_started'],
+    ['repo.guard-run', 'run_started'],
+  ])('sends %s as %s', async (type, event) => {
+    const { captureJobStarted } = await load();
+    captureJobStarted(claimed({ type }));
+
+    expect(client.capture).toHaveBeenCalledTimes(1);
+    expect(capturedEvent()).toMatchObject({ event });
+  });
+
+  it('says nothing about a job nobody started', async () => {
+    const { captureJobStarted } = await load();
+    captureJobStarted(claimed({ type: 'context.sync' }));
+
+    expect(PostHog).not.toHaveBeenCalled();
+    expect(client.capture).not.toHaveBeenCalled();
+  });
+
+  it('is the person who asked for it, and is not chained', async () => {
+    const { captureJobStarted } = await load();
+    captureJobStarted(claimed({ requestedBy: 'user_1' }));
+
+    expect(capturedEvent()).toEqual({
+      distinctId: 'user_1',
+      event: 'run_started',
+      properties: {
+        source: 'server',
+        jobId: 'job_1',
+        repo: 'acme/app',
+        commit: 'c0ffee',
+        chained: false,
+      },
+      groups: { workspace: 'org_A' },
+    });
+  });
+
+  it('is the workspace, and chained, when the queue started it itself', async () => {
+    const { captureJobStarted } = await load();
+    captureJobStarted(claimed({ type: 'repo.guard-generate' }));
+
+    expect(capturedEvent()).toEqual({
+      distinctId: 'org_A',
+      event: 'generate_started',
+      properties: {
+        source: 'server',
+        jobId: 'job_1',
+        repo: 'acme/app',
+        commit: 'c0ffee',
+        chained: true,
+        $process_person_profile: false,
+      },
+      groups: { workspace: 'org_A' },
+    });
+  });
 });
 
 describe('captureJobFinished — the mapping', () => {

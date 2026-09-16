@@ -1,11 +1,13 @@
 /**
- * The analytics module: what it sends, and the two conditions under which it
- * sends nothing.
+ * The client's analytics module: what it sends, and the two conditions under
+ * which it sends nothing.
  *
  * Every helper answers to one `initialized` flag, so the contract worth pinning
  * is that flag: before `initPostHog`, and with the build's opt-out set, nothing
  * reaches PostHog at all. The rest is shape — the source tag every event
- * carries, the distinct id a person is named by, and the workspace group.
+ * carries, the distinct id a person is named by, and the workspace group. The
+ * product ACTIONS are the server's; what is left here is what only a browser
+ * can see.
  *
  * Each case loads a FRESH copy of the module (`vi.resetModules`), because that
  * flag is module state and a test that inherited it would prove nothing.
@@ -80,7 +82,7 @@ describe('initPostHog', () => {
     vi.stubEnv('VITE_POSTHOG_DISABLED', '1');
     const mod = await load();
     mod.initPostHog();
-    mod.trackEvent(mod.EVENTS.scanStarted);
+    mod.trackEvent(mod.EVENTS.discordJoinClicked);
     mod.trackPageview('/code');
     mod.identifyUser({ id: 'user_1', email: 'dana@acme.dev' });
     mod.resetUser();
@@ -95,7 +97,7 @@ describe('initPostHog', () => {
 describe('before the client is started', () => {
   it('sends nothing rather than throwing', async () => {
     const mod = await load();
-    mod.trackEvent(mod.EVENTS.runStarted, { repoId: 'repo_1' });
+    mod.trackEvent(mod.EVENTS.discordJoinClicked);
     mod.trackPageview('/flows');
     mod.identifyUser({ id: 'user_1', email: 'dana@acme.dev' });
     mod.resetUser();
@@ -111,11 +113,10 @@ describe('once it is started', () => {
   it('sends a named event with its properties', async () => {
     const mod = await load();
     mod.initPostHog();
-    mod.trackEvent(mod.EVENTS.repoConnected, { repo: 'acme/orders', provider: 'github' });
+    mod.trackEvent(mod.EVENTS.discordJoinClicked, { placement: 'account-menu' });
 
-    expect(posthog.capture).toHaveBeenCalledWith('repo_connected', {
-      repo: 'acme/orders',
-      provider: 'github',
+    expect(posthog.capture).toHaveBeenCalledWith('discord_join_clicked', {
+      placement: 'account-menu',
     });
   });
 
