@@ -89,6 +89,9 @@ importers:
       jsdom:
         specifier: ^26.0.0
         version: 26.1.0
+      posthog-js:
+        specifier: ^1.372.10
+        version: 1.372.10
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -143,6 +146,9 @@ importers:
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.4)
+      posthog-js:
+        specifier: ^1.372.10
+        version: 1.372.10
       react:
         specifier: ^19.0.0
         version: 19.2.4

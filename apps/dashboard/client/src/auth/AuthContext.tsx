@@ -21,6 +21,7 @@ import {
 import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@truecourse/shared';
 import { useServerMode } from '@/contexts/CapabilityContext';
+import { resetUser } from '@/lib/posthog';
 import { getServerUrl } from '@/lib/server-url';
 
 // The server's public auth router.
@@ -82,6 +83,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async (returnTo?: string) => {
+    // The analytics identity ends with the session, before the browser leaves
+    // for the logout: what the next person on this machine does is theirs.
+    resetUser();
     try {
       const res = await fetch(`${getServerUrl()}${AUTH_BASE}/logout`, {
         method: 'POST',

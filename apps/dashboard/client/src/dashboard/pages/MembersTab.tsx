@@ -38,6 +38,7 @@ import {
   revokeWorkspaceInvitation,
   revokeWorkspaceInviteLink,
 } from '@/lib/api';
+import { EVENTS, trackEvent } from '@/lib/posthog';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { StatusWord } from '@/dashboard/ui/status-word';
 import { expiresIn, relativeTime } from '@/dashboard/shell/real-runs';
@@ -180,6 +181,7 @@ function InviteLinkDialog({
     try {
       const { link: created } = await createWorkspaceInviteLink(days);
       setLink(created);
+      trackEvent(EVENTS.inviteLinkCreated, { days });
       onCreated();
     } catch (e) {
       setError(reasonOf(e, 'The link could not be created.'));

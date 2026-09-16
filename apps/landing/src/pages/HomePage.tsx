@@ -12,7 +12,7 @@ export const meta = () =>
   pageMeta({
     title: 'TrueCourse · Keep your code on course',
     description:
-      "AI ships your code. We keep it on course. TrueCourse compiles your team's decisions into machine-readable contracts and checks every change against them — deterministically, with no LLM in the verification loop.",
+      'AI ships your code. We keep it on course. Connect your docs and your repo, and TrueCourse turns what your team decided into scenario tests that run against every pull request.',
     path: '/',
   });
 

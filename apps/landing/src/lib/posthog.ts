@@ -1,11 +1,10 @@
 import posthog from 'posthog-js';
 
 /**
- * Default PostHog project key — matches the one used by the CLI + dashboard
- * (`packages/core/src/services/telemetry.service.ts`). Project API keys are
- * write-only and explicitly designed to be exposed client-side, so hardcoding
- * here keeps all three sources (cli / dashboard / landing) in the same
- * PostHog project without an extra env var setup step.
+ * Default PostHog project key, the same one the dashboard app sends to. Project
+ * API keys are write-only and explicitly designed to be exposed client-side, so
+ * hardcoding it here keeps both sources (dashboard / landing) in one PostHog
+ * project without an extra env var setup step.
  *
  * Override with VITE_POSTHOG_KEY for staging / experiments.
  */
@@ -17,8 +16,7 @@ const HOST = (import.meta.env.VITE_POSTHOG_HOST as string | undefined) || DEFAUL
 
 /**
  * Tag every event with `source: 'landing'` so the marketing-site events are
- * distinguishable from CLI (`'cli'`) and dashboard (`'dashboard'`) events
- * inside PostHog. Mirrors what the core telemetry service does.
+ * distinguishable from the dashboard app's (`'dashboard'`) inside PostHog.
  */
 const SOURCE = 'landing';
 
@@ -61,12 +59,6 @@ export function trackPageview(path: string): void {
 export function trackEvent(event: string, properties?: Record<string, unknown>): void {
   if (!initialized) return;
   posthog.capture(event, properties);
-}
-
-/** Identify a user by their email. Used after waitlist submission. */
-export function identifyUser(email: string, traits?: Record<string, unknown>): void {
-  if (!initialized) return;
-  posthog.identify(email, { ...traits, source: SOURCE });
 }
 
 export { posthog };

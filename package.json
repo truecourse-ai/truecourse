@@ -40,6 +40,7 @@
     "express": "^4.22.1",
     "js-yaml": "^4.1.0",
     "jsdom": "^26.0.0",
+    "posthog-js": "^1.372.10",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.0",

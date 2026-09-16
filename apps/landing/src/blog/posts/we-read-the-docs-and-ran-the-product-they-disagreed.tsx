@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
+import { AppLink } from '@/components/AppLink';
 import type { PostMeta } from '@/blog/types';
 
 export const meta: PostMeta = {
@@ -661,9 +662,9 @@ mismatch (step 2)
         change, ask for access and tell us which repo.
       </p>
       <p>
-        <Link className="btn btn-primary" to="/request-access">
-          Request access <span className="arr">→</span>
-        </Link>
+        <AppLink className="btn btn-primary" placement="blog">
+          Get started <span className="arr">→</span>
+        </AppLink>
       </p>
 
       <hr />

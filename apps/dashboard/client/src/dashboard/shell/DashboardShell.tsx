@@ -3,7 +3,7 @@
  *
  * Top to bottom: the workspace the session is in, then Home, Context, Code,
  * Flows, Agent, Notifications (with the unread badge) and Settings, then the
- * user menu.
+ * way out to the community and the user menu.
  *
  * There is ONE workspace, so the block at the top names it and offers no way
  * out of it. An edition with more than one registers a switcher that replaces
@@ -36,6 +36,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Brand } from '@/components/brand';
+import { DiscordIcon } from '@/components/DiscordIcon';
+import { EVENTS, trackEvent } from '@/lib/posthog';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { useDashboardState } from './dashboard-state';
@@ -54,6 +56,9 @@ const NAV: { to: string; label: string; icon: LucideIcon; disabled?: boolean }[]
   { to: '/notifications', label: 'Notifications', icon: Bell },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
+
+/** The community's front door, the same invitation the README and the site give. */
+export const DISCORD_INVITE_URL = 'https://discord.gg/TanxB63arz';
 
 function rowClass(active: boolean, collapsed: boolean): string {
   return `relative flex items-center rounded-md text-sm font-medium transition-colors ${
@@ -106,6 +111,29 @@ function NavRow({
     <Link to={to} className={rowClass(active, collapsed)} aria-current={active ? 'page' : undefined}>
       {body}
     </Link>
+  );
+}
+
+/**
+ * The way out to the community: a link off the app, styled as a nav row so it
+ * belongs to the sidebar. It is here for everyone, signed in or not — the
+ * Discord is the product's, not the workspace's.
+ */
+function DiscordRow({ collapsed }: { collapsed: boolean }) {
+  return (
+    <a
+      href={DISCORD_INVITE_URL}
+      target="_blank"
+      rel="noreferrer"
+      onClick={() => trackEvent(EVENTS.discordJoinClicked)}
+      {...(collapsed ? { 'aria-label': 'Join Discord' } : {})}
+      className={rowClass(false, collapsed)}
+    >
+      <span className="relative flex shrink-0">
+        <DiscordIcon className="h-4 w-4" />
+      </span>
+      {!collapsed && <span className="min-w-0 flex-1 truncate">Join Discord</span>}
+    </a>
   );
 }
 
@@ -360,7 +388,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         </nav>
 
         <GettingStarted collapsed={collapsed} />
-        <div className="border-t border-border px-2 py-2">
+        <div className="space-y-0.5 border-t border-border px-2 py-2">
+          <DiscordRow collapsed={collapsed} />
           <UserMenu collapsed={collapsed} />
         </div>
       </aside>

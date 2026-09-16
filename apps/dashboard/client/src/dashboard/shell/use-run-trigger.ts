@@ -16,7 +16,16 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { RunStarter } from '@/components/sessions/run-model';
+import { EVENTS, trackEvent, type AnalyticsEvent } from '@/lib/posthog';
 import { triggerFor } from '@/dashboard/data/run-triggers';
+
+/** What each command reports once the server has taken it. */
+const STARTED_EVENT: Record<string, AnalyticsEvent> = {
+  'spec-scan': EVENTS.scanStarted,
+  'guard-setup': EVENTS.setupStarted,
+  'guard-generate': EVENTS.generateStarted,
+  'guard-run': EVENTS.runStarted,
+};
 
 /**
  * The one no-provider error toast, shared by every surface that hits the wall:
@@ -49,8 +58,11 @@ export function useRunTrigger(repoId: string): RunStarter {
       void trigger(repoId, resumeRunId)
         .then((outcome) => {
           switch (outcome.kind) {
-            case 'started':
+            case 'started': {
+              const event = STARTED_EVENT[command];
+              if (event) trackEvent(event, { command, ...(repoId ? { repoId } : {}) });
               return;
+            }
             case 'not-configured':
               toastNoLlmProvider(navigate, outcome.message);
               return;

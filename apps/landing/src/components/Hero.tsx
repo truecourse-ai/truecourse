@@ -1,5 +1,5 @@
-import { Link } from 'react-router';
 import { SiConfluence, SiGithub } from 'react-icons/si';
+import { AppLink } from './AppLink';
 import { Reveal } from './Reveal';
 
 const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
@@ -46,9 +46,9 @@ export function Hero() {
           </Reveal>
 
           <Reveal className="cta-row" delay={300}>
-            <Link className="btn btn-primary" to="/request-access">
-              Request access <span className="arr">→</span>
-            </Link>
+            <AppLink className="btn btn-primary" placement="hero">
+              Get started <span className="arr">→</span>
+            </AppLink>
             <a className="btn" href={GITHUB_URL} target="_blank" rel="noreferrer">
               View on GitHub
             </a>

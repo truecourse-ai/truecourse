@@ -16,7 +16,7 @@ export default {
   // HTML at build time and hydrated in the browser (SPA).
   ssr: false,
   async prerender({ getStaticPaths }) {
-    // All static routes (/, /request-access, /blog) plus one path per blog post.
+    // All static routes (/, /blog) plus one path per blog post.
     return [...getStaticPaths(), ...postSlugs.map((slug) => `/blog/${slug}`)];
   },
 } satisfies Config;

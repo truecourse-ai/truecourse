@@ -3,6 +3,7 @@ import { Menu, X } from 'lucide-react';
 import { SiGithub } from 'react-icons/si';
 import { Link, useLocation } from 'react-router';
 import { cn } from '@/lib/cn';
+import { AppLink } from './AppLink';
 import { DiscordIcon } from './DiscordIcon';
 
 const DISCORD_URL = 'https://discord.gg/TanxB63arz';
@@ -22,7 +23,6 @@ export function Header() {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
   const onHome = pathname === '/';
-  const onRequestAccess = pathname === '/request-access';
   const onBlog = pathname.startsWith('/blog');
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export function Header() {
   }, [pathname]);
 
   // Off the home page there's no hero behind the header, so keep the blurred
-  // surface always on (mirrors the request-access prototype).
+  // surface always on.
   const showSurface = scrolled || !onHome;
 
   return (
@@ -88,15 +88,9 @@ export function Header() {
           >
             <SiGithub />
           </a>
-          {onRequestAccess ? (
-            <Link className="btn btn-sm" to="/">
-              <span className="arr">←</span> Back
-            </Link>
-          ) : (
-            <Link className="btn btn-primary btn-sm" to="/request-access">
-              Request access
-            </Link>
-          )}
+          <AppLink className="btn btn-primary btn-sm" placement="header">
+            Sign in
+          </AppLink>
           <button
             type="button"
             className="icon-btn mobile-toggle"

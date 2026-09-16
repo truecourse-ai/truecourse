@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { AppLink } from './AppLink';
 import { Reveal } from './Reveal';
 
 export function CTASection() {
@@ -14,9 +14,9 @@ export function CTASection() {
           your team decided, before it ships.
         </Reveal>
         <Reveal className="cta-row" delay={160}>
-          <Link className="btn btn-primary" to="/request-access">
-            Request access <span className="arr">→</span>
-          </Link>
+          <AppLink className="btn btn-primary" placement="cta">
+            Get started <span className="arr">→</span>
+          </AppLink>
         </Reveal>
       </div>
     </section>
