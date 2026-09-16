@@ -1,8 +1,6 @@
 import { pageMeta } from '@/lib/seo';
 import { Hero } from '@/components/Hero';
-import { WhyNow } from '@/components/WhyNow';
-import { OurApproach } from '@/components/OurApproach';
-import { WhereItRuns } from '@/components/WhereItRuns';
+import { HowItWorks } from '@/components/HowItWorks';
 import { Integrations } from '@/components/Integrations';
 import { Enterprise } from '@/components/Enterprise';
 import { BlogTeaser } from '@/components/BlogTeaser';
@@ -10,9 +8,9 @@ import { CTASection } from '@/components/CTASection';
 
 export const meta = () =>
   pageMeta({
-    title: 'TrueCourse · Keep your code on course',
+    title: 'TrueCourse · Know which of your requirements hold',
     description:
-      'AI ships your code. We keep it on course. Connect your docs and your repo, and TrueCourse turns what your team decided into scenario tests that run against every pull request.',
+      'TrueCourse reads the requirements you own, proves each one against the running product, and shows you section by section what holds, what is broken and what is not yet covered, kept current as the product changes.',
     path: '/',
   });
 
@@ -20,9 +18,7 @@ export default function HomePage() {
   return (
     <>
       <Hero />
-      <WhyNow />
-      <OurApproach />
-      <WhereItRuns />
+      <HowItWorks />
       <Integrations />
       <Enterprise />
       <BlogTeaser />

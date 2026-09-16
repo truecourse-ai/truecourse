@@ -8,9 +8,7 @@ const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
 type LinkItem = { href: string; label: string };
 
 const PRODUCT: LinkItem[] = [
-  { href: '/#why-now', label: 'Why now' },
-  { href: '/#approach', label: 'Approach' },
-  { href: '/#run', label: 'Where it runs' },
+  { href: '/#how', label: 'How it works' },
   { href: '/#integrations', label: 'Integrations' },
   { href: '/#enterprise', label: 'Enterprise' },
 ];
@@ -44,10 +42,7 @@ export function Footer() {
               <span className="mark" aria-hidden />
               TrueCourse
             </Link>
-            <p>
-              The verified knowledge layer for engineering. Specs become scenario tests;
-              every commit is checked against them.
-            </p>
+            <p>Your documentation, checked on every pull request.</p>
             <div className="foot-social">
               <a
                 className="icon-btn"

@@ -10,7 +10,7 @@ export function meta({ params }: { params: { slug?: string } }) {
   if (!post) {
     return pageMeta({
       title: 'Blog · TrueCourse',
-      description: 'Notes on specs, drift, and verification — from the team building TrueCourse.',
+      description: 'Notes on specs, drift, and verification from the team building TrueCourse.',
       path: '/blog',
     });
   }

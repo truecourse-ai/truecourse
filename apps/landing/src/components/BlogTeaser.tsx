@@ -1,7 +1,4 @@
 import { Link } from 'react-router';
-import { cn } from '@/lib/cn';
-import { Reveal } from '@/components/Reveal';
-import { useReveal } from '@/lib/useReveal';
 import { posts } from '@/blog';
 
 /**
@@ -10,29 +7,17 @@ import { posts } from '@/blog';
  */
 export function BlogTeaser() {
   const post = posts[0];
-  const { ref, visible } = useReveal<HTMLAnchorElement>();
 
   return (
     <section className="band" id="blog">
       <div className="wrap">
-        <Reveal as="p" className="eyebrow">
-          Blog
-        </Reveal>
-        <Reveal as="h2" className="section-title">
-          <span className="dim">Notes from the team on</span> specs, drift, and{' '}
-          <span className="hl">verification.</span>
-        </Reveal>
+        <h2 className="eyebrow">Blog</h2>
 
-        <Link
-          ref={ref}
-          to={`/blog/${post.slug}`}
-          className={cn('post-card featured reveal', visible && 'visible')}
-          style={{ marginTop: 48 }}
-        >
+        <Link to={`/blog/${post.slug}`} className="post-card featured" style={{ marginTop: 28 }}>
           <div className="pcf-main">
             <div className="pc-tag">{post.tag} · Latest post</div>
             <h3>{post.title}</h3>
-            <p>{post.excerpt}</p>
+            <p>{post.summary}</p>
             <div className="pc-meta">
               <span className="pc-ava author" aria-hidden="true">
                 MG
@@ -47,9 +32,7 @@ export function BlogTeaser() {
         </Link>
 
         <p className="fine">
-          <Link to="/blog" style={{ color: 'var(--accent)' }}>
-            View all posts →
-          </Link>
+          <Link to="/blog">View all posts →</Link>
         </p>
       </div>
     </section>

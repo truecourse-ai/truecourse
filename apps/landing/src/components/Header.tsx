@@ -10,10 +10,7 @@ const DISCORD_URL = 'https://discord.gg/TanxB63arz';
 const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
 
 const NAV = [
-  { href: '/#why-now', label: 'Why now' },
-  { href: '/#approach', label: 'Approach' },
-  { href: '/#run', label: 'Where it runs' },
-  { href: '/#integrations', label: 'Integrations' },
+  { href: '/#how', label: 'How it works' },
   { href: '/#enterprise', label: 'Enterprise' },
   { href: '/#blog', label: 'Blog' },
 ];
@@ -89,7 +86,7 @@ export function Header() {
             <SiGithub />
           </a>
           <AppLink className="btn btn-primary btn-sm" placement="header">
-            Sign in
+            Sign in <span className="arr">→</span>
           </AppLink>
           <button
             type="button"

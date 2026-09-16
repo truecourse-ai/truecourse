@@ -1,109 +1,53 @@
-import { SiConfluence, SiGithub } from 'react-icons/si';
 import { AppLink } from './AppLink';
 import { Reveal } from './Reveal';
+import { useReveal } from '@/lib/useReveal';
+import { HomeScreen } from '@/screens/HomeScreen';
 
 const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
 
 export function Hero() {
+  // The baseline sits at the bottom of the hero, often below the fold, so it
+  // draws when it comes into view rather than on load.
+  const line = useReveal<SVGSVGElement>({ threshold: 0.5, rootMargin: '0px' });
+  // The screen's own motion (the chart, the counts, the sections) runs on the
+  // same signal as its settle-in.
+  const stage = useReveal<HTMLDivElement>();
   return (
     <section className="hero" id="top">
+      <div className="hero-grid" />
       <div className="hero-glow" />
       <svg
-        className="hero-baseline"
-        viewBox="0 0 1440 220"
+        ref={line.ref}
+        className={`hero-line${line.visible ? ' visible' : ''}`}
+        viewBox="0 0 1440 160"
         preserveAspectRatio="none"
         aria-hidden="true"
       >
-        <line
-          className="bline"
-          x1="0"
-          y1="150"
-          x2="1440"
-          y2="150"
-          style={{ stroke: 'var(--accent)' }}
-          strokeWidth="1.5"
-          opacity="0.5"
-        />
-        <path
-          className="bdrift"
-          d="M0 150 C 760 150, 920 150, 1440 210"
-          fill="none"
-          style={{ stroke: 'var(--warn)' }}
-          strokeWidth="1.5"
-          strokeDasharray="2 9"
-          opacity="0.55"
-        />
+        <path d="M0 98 C 380 98, 600 58, 840 82 S 1240 132, 1440 108" pathLength={1} />
       </svg>
-
-      <div className="wrap hero-inner hero-grid">
-        <div className="hero-copy">
-          <Reveal as="h1" delay={80}>
-            AI ships your code. We keep it <span className="hl">on course.</span>
-          </Reveal>
-
-          <Reveal as="p" className="sub" delay={160}>
-            Every change, checked against what your team actually decided.
-          </Reveal>
-
-          <Reveal className="cta-row" delay={300}>
-            <AppLink className="btn btn-primary" placement="hero">
-              Get started <span className="arr">→</span>
-            </AppLink>
-            <a className="btn" href={GITHUB_URL} target="_blank" rel="noreferrer">
-              View on GitHub
-            </a>
-          </Reveal>
-        </div>
-
-        <Reveal className="hero-visual" delay={260}>
-          <div className="hv-comp">
-            <div className="checks">
-              <div className="ck-head">
-                <span className="glyph ckg">
-                  <SiGithub />
-                </span>
-                Some checks failed <span className="ck-sub">1 failing · 2 successful</span>
-              </div>
-              <div className="ck-row">
-                <span className="ck-ico ok">✓</span>
-                <span className="ck-name">ci / build</span>
-                <span className="ck-time">2m 14s</span>
-              </div>
-              <div className="ck-row">
-                <span className="ck-ico ok">✓</span>
-                <span className="ck-name">ci / tests</span>
-                <span className="ck-time">4m 02s</span>
-              </div>
-              <div className="ck-row nb">
-                <span className="ck-ico bad">✕</span>
-                <span className="ck-name">TrueCourse / guard</span>
-                <span className="ck-note">1 drift detected</span>
-                <span className="ck-link">Details</span>
-              </div>
-              <div className="ck-detail">
-                <div className="ckd-quote">
-                  <p>“Refunds must return to the original payment method.”</p>
-                  <span className="ckd-src">
-                    <span className="glyph">
-                      <SiConfluence />
-                    </span>
-                    Refund policy · Payments
-                  </span>
-                </div>
-                <div className="ckd-obs">
-                  <span className="ck-ico bad sm">✕</span>
-                  <span>
-                    <b>Observed:</b> refund issued as store credit
-                  </span>
-                </div>
-              </div>
-              <div className="ck-foot">
-                <span className="ck-ico bad sm">✕</span> Merging is blocked{' '}
-                <span className="ck-btn">Merge</span>
-              </div>
-            </div>
-          </div>
+      <div className="wrap hero-inner">
+        <Reveal as="h1" delay={60} rise>
+          Know which of your requirements hold.
         </Reveal>
+        <Reveal as="p" className="sub" delay={140} rise>
+          Every requirement you wrote, proven against the running product and kept current as it
+          changes.
+        </Reveal>
+        <Reveal className="cta-row" delay={220} rise>
+          <AppLink className="btn btn-primary" placement="hero">
+            Get started <span className="arr">→</span>
+          </AppLink>
+          <a className="btn" href={GITHUB_URL} target="_blank" rel="noreferrer">
+            View on GitHub
+          </a>
+        </Reveal>
+        <div
+          ref={stage.ref}
+          className={`reveal rise hero-stage${stage.visible ? ' visible' : ''}`}
+          style={{ ['--delay' as string]: '300ms' }}
+        >
+          <HomeScreen visible={stage.visible} />
+        </div>
       </div>
     </section>
   );

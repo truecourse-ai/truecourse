@@ -6,7 +6,7 @@ export type { BlogPost, PostMeta } from './types';
 /**
  * Every post is a self-contained file under `posts/<slug>.tsx` exporting its
  * `meta` and a default `Body` component. They're collected here automatically,
- * so adding a post is just dropping in a new file — no central list to edit.
+ * so adding a post is just dropping in a new file, with no central list to edit.
  */
 const modules = import.meta.glob<{ meta: PostMeta; default: () => ReactNode }>('./posts/*.tsx', {
   eager: true,
