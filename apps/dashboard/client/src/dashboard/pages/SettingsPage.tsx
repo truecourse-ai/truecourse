@@ -491,7 +491,7 @@ export default function SettingsPage() {
                 onClick={() => setInvite('email')}
                 className="rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
               >
-                Invite member
+                Invite by email
               </button>
             </div>
           )

@@ -421,8 +421,9 @@ export function createAuthRouter(
 
   // Kick off login — redirect to the WorkOS AuthKit hosted UI. `?next=/path`
   // rides the OAuth `state` param so the callback can land the user where they
-  // were headed before the redirect to login. `?screen=sign-up` opens AuthKit
-  // on its sign-up screen, which is where an invite link sends a newcomer.
+  // were headed before the redirect to login. There is one screen: a newcomer
+  // and a returning person sign in the same way, and AuthKit creates the
+  // account on first sign-in.
   router.get('/login', (req, res) => {
     const next = safeNext(req.query.next);
     const url = workos.userManagement.getAuthorizationUrl({
@@ -430,7 +431,6 @@ export function createAuthRouter(
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
       ...(next ? { state: next } : {}),
-      ...(req.query.screen === 'sign-up' ? { screenHint: 'sign-up' as const } : {}),
     });
     res.redirect(url);
   });
@@ -593,14 +593,12 @@ export function createAuthRouter(
     }
   });
 
-  // Logout — clear the cookie and hand back the WorkOS logout URL. A body
-  // `returnTo` (a path on this app, checked like `?next=`) is where the
-  // browser lands afterwards; the app root otherwise. The invite page uses it
-  // so switching accounts comes back to the invite.
+  // Logout — clear the cookie and hand back the WorkOS logout URL. The browser
+  // lands on the app root afterwards: WorkOS returns only to a Sign-out URI
+  // configured in its dashboard, and the root is the one there.
   router.post('/logout', async (req, res) => {
     const sealed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-    const next = safeNext((req.body as { returnTo?: unknown } | undefined)?.returnTo);
-    const returnTo = next ? `${cfg.appUrl}${next}` : cfg.appUrl;
+    const returnTo = cfg.appUrl;
     res.setHeader(
       'Set-Cookie',
       serializeCookie(SESSION_COOKIE, '', { maxAgeSeconds: 0, secure }),

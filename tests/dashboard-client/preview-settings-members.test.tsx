@@ -262,8 +262,8 @@ describe('Settings › Members', () => {
     renderMembers();
     await waitFor(async () => expect(await rows()).toHaveLength(4));
 
-    await user.click(screen.getByRole('button', { name: 'Invite member' }));
-    expect(await screen.findByText('Invite member', { selector: 'h2' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Invite by email' }));
+    expect(await screen.findByText('Invite by email', { selector: 'h2' })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText('Email'), 'new@acme.dev');
     await user.click(screen.getByRole('button', { name: 'Send' }));
@@ -279,7 +279,7 @@ describe('Settings › Members', () => {
     renderMembers();
     await waitFor(async () => expect(await rows()).toHaveLength(4));
 
-    await user.click(screen.getByRole('button', { name: 'Invite member' }));
+    await user.click(screen.getByRole('button', { name: 'Invite by email' }));
     await user.type(screen.getByLabelText('Email'), 'sam@acme.dev');
     await user.click(screen.getByRole('button', { name: 'Send' }));
 
@@ -393,7 +393,8 @@ describe('Settings › Members', () => {
     renderMembers();
 
     const row = await rowFor('Invite link');
-    expect(within(row).getByText('Link')).toBeInTheDocument();
+    expect(within(row).getByText('Unused')).toBeInTheDocument();
+    expect(within(row).getByText(/^expires /)).toBeInTheDocument();
     await user.click(within(row).getByRole('button', { name: 'Copy link' }));
     expect(writeText).toHaveBeenCalledWith('http://localhost:3000/invite/tok_1');
 
@@ -426,5 +427,107 @@ describe('Settings › Members', () => {
     await user.keyboard('{Escape}');
     await waitFor(async () => expect(await rows()).toHaveLength(5));
     expect(await rowFor('Invite link')).toBeTruthy();
+  });
+});
+
+describe('Settings › Members, the invite link rows', () => {
+  it('hides the links while a search is on, and brings them back when it is cleared', async () => {
+    const user = userEvent.setup();
+    serve({ inviteLinks: [OPEN_LINK] });
+    renderMembers();
+    await rowFor('Invite link');
+
+    await user.type(screen.getByLabelText('Search members'), 'sam');
+    expect(await rowFor('Sam Okoro')).toBeTruthy();
+    expect(screen.queryByText('Invite link')).toBeNull();
+
+    await user.clear(screen.getByLabelText('Search members'));
+    expect(await rowFor('Invite link')).toBeTruthy();
+  });
+
+  it('marks a link past its date Expired, once, and still offers Revoke', async () => {
+    serve({
+      inviteLinks: [{ ...OPEN_LINK, state: 'expired', expiresAt: '2026-01-01T00:00:00.000Z' }],
+    });
+    renderMembers();
+
+    const row = await rowFor('Invite link');
+    expect(within(row).getByText('Expired')).toBeInTheDocument();
+    // The status word says it; the row does not say "expires expired" beside it.
+    expect(within(row).queryByText(/expires/)).toBeNull();
+    expect(within(row).getByRole('button', { name: 'Revoke' })).toBeEnabled();
+  });
+
+  it('shows the address for copying by hand when the browser refuses the clipboard', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: {
+        writeText: vi.fn(async () => {
+          throw new Error('denied');
+        }),
+      },
+      configurable: true,
+    });
+    serve({ inviteLinks: [OPEN_LINK] });
+    renderMembers();
+
+    // On the row: the URL takes the place of the expiry.
+    const row = await rowFor('Invite link');
+    await user.click(within(row).getByRole('button', { name: 'Copy link' }));
+    expect(await within(row).findByText('http://localhost:3000/invite/tok_1')).toBeInTheDocument();
+    expect(within(row).queryByText('Copied')).toBeNull();
+
+    // In the dialog: the field is already there, so the page says to use it.
+    await user.click(screen.getByRole('button', { name: 'Invite by link' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Create link' }));
+    await within(dialog).findByLabelText('Invite link');
+    await user.click(within(dialog).getByRole('button', { name: 'Copy link' }));
+    expect(await within(dialog).findByText(/Copy failed/)).toBeInTheDocument();
+    expect(within(dialog).queryByText('Copied')).toBeNull();
+  });
+
+  it('acknowledges a copy from the dialog and from the row', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: { writeText: vi.fn(async () => {}) },
+      configurable: true,
+    });
+    serve({ inviteLinks: [OPEN_LINK] });
+    renderMembers();
+
+    const row = await rowFor('Invite link');
+    await user.click(within(row).getByRole('button', { name: 'Copy link' }));
+    expect(await within(row).findByText('Copied')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Invite by link' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Create link' }));
+    await within(dialog).findByLabelText('Invite link');
+    await user.click(within(dialog).getByRole('button', { name: 'Copy link' }));
+    expect(await within(dialog).findByText('Copied')).toBeInTheDocument();
+  });
+
+  it('says why a link could not be minted, in the dialog', async () => {
+    const user = userEvent.setup();
+    serve();
+    const fetchWithWorld = window.fetch;
+    window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(href, window.location.origin).pathname === '/api/workspace/invite-links' && init?.method === 'POST') {
+        return json({ error: 'WorkOS refused: rate limited' }, 502);
+      }
+      return fetchWithWorld(input, init);
+    }) as unknown as typeof window.fetch;
+    renderMembers();
+    await rowFor('Dana Rees');
+
+    await user.click(screen.getByRole('button', { name: 'Invite by link' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Create link' }));
+
+    expect(await within(dialog).findByText('WorkOS refused: rate limited')).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('Invite link')).toBeNull();
+    expect(world.inviteLinks).toEqual([]);
   });
 });

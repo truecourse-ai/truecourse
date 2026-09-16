@@ -87,3 +87,27 @@ describe('PgInviteLinkStore', () => {
     expect(await store.findByToken(theirs.token)).not.toBeNull();
   });
 });
+
+describe('a link many visitors redeem at once', () => {
+  it('goes to exactly one of them, and the row names that one', async () => {
+    const link = await store.create({ workspaceOrgId: ORG, inviterUserId: 'user_1', inviterName: 'Dana Rees', expiresAt: inWeek() });
+
+    const results = await Promise.all(
+      Array.from({ length: 16 }, (_, i) => store.consume(link.token, `user_${i}`)),
+    );
+
+    const winners = results.filter((r) => r !== null);
+    expect(winners).toHaveLength(1);
+    expect((await store.findByToken(link.token))?.consumedByUserId).toBe(winners[0]!.consumedByUserId);
+    expect(await store.listOpen(ORG)).toEqual([]);
+  });
+
+  it('stands again for a different visitor once it was released', async () => {
+    const link = await store.create({ workspaceOrgId: ORG, inviterUserId: 'user_1', inviterName: 'Dana Rees', expiresAt: inWeek() });
+    await store.consume(link.token, 'user_a');
+    await store.release(link.id);
+
+    expect((await store.listOpen(ORG)).map((l) => l.id)).toEqual([link.id]);
+    expect((await store.consume(link.token, 'user_b'))?.consumedByUserId).toBe('user_b');
+  });
+});

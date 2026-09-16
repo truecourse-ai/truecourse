@@ -110,7 +110,7 @@ describe('createSessionVerifier: malformed cookies', () => {
 });
 
 describe('POST /api/auth/logout', () => {
-  it('returns the browser to a path on this app when asked, and to the root otherwise', async () => {
+  it('returns the browser to the app root, whatever the body asks', async () => {
     const returnTos: string[] = [];
     const workos = {
       userManagement: {
@@ -125,24 +125,17 @@ describe('POST /api/auth/logout', () => {
     };
     const app = appFor(workos, verifierFor(workos));
 
-    const invite = await request(app)
+    // WorkOS returns only to a configured Sign-out URI, and the root is the one
+    // configured; a body naming another place is not honored.
+    const asked = await request(app)
       .post('/api/auth/logout')
       .set('Cookie', 'tc_session=sealed')
       .send({ returnTo: '/invite/tok_1' })
       .expect(200);
-    expect(invite.body.logoutUrl).toContain(encodeURIComponent('http://localhost:3000/invite/tok_1'));
-    // Anywhere off this app is not a destination: the root stands in.
-    await request(app)
-      .post('/api/auth/logout')
-      .set('Cookie', 'tc_session=sealed')
-      .send({ returnTo: 'https://evil.test/' })
-      .expect(200);
+    expect(asked.body.logoutUrl).toContain(encodeURIComponent('http://localhost:3000'));
+    expect(asked.body.logoutUrl).not.toContain('invite');
     await request(app).post('/api/auth/logout').set('Cookie', 'tc_session=sealed').expect(200);
-    expect(returnTos).toEqual([
-      'http://localhost:3000/invite/tok_1',
-      'http://localhost:3000',
-      'http://localhost:3000',
-    ]);
+    expect(returnTos).toEqual(['http://localhost:3000', 'http://localhost:3000']);
   });
 });
 

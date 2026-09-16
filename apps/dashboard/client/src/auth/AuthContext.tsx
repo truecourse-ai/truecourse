@@ -20,6 +20,7 @@ import {
 } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@truecourse/shared';
+import { takeRememberedInvite } from '@/auth/invite-resume';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { getServerUrl } from '@/lib/server-url';
 
@@ -32,8 +33,8 @@ interface AuthValue {
   status: AuthStatus;
   user: AuthUser | null;
   signIn: () => void;
-  /** End the session; `returnTo` is the path on this app to land on afterwards, the root by default. */
-  signOut: (returnTo?: string) => Promise<void>;
+  /** End the session; the browser lands on the app root afterwards. */
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthValue>({
@@ -81,13 +82,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = `${getServerUrl()}${AUTH_BASE}/login?next=${next}`;
   }, []);
 
-  const signOut = useCallback(async (returnTo?: string) => {
+  const signOut = useCallback(async () => {
     try {
       const res = await fetch(`${getServerUrl()}${AUTH_BASE}/logout`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(returnTo ? { returnTo } : {}),
       });
       const body = (await res.json().catch(() => ({}))) as {
         logoutUrl?: string;
@@ -190,6 +189,10 @@ function CreateWorkspace() {
  * callback error came back (so we never redirect-loop). A tree with no
  * provider above it (`disabled`) renders straight through.
  *
+ * A visitor who switched account on an invite page comes back to the root
+ * signed out, with the invite remembered; the gate sends them there rather
+ * than into sign-in, and the invite page takes it from there.
+ *
  * A LOCAL SERVER has no sign-in: its session probe always answers, so the only
  * way to be anonymous there is a server that is not answering at all — and
  * sending the browser to a login that does not exist would hide that. It is
@@ -203,7 +206,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (status === 'anon' && !authError && !local) signIn();
+    if (status !== 'anon' || authError || local) return;
+    const invite = takeRememberedInvite();
+    if (invite) window.location.replace(invite);
+    else signIn();
   }, [status, authError, signIn, local]);
 
   if (status === 'disabled') return <>{children}</>;
