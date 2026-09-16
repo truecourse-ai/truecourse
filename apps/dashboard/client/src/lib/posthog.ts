@@ -60,6 +60,8 @@ export const EVENTS = {
   findingDismissed: 'finding_dismissed',
   /** The workspace's LLM provider was saved on the Models page. */
   llmProviderSaved: 'llm_provider_saved',
+  /** A new signup named their workspace: the one moment a self-serve user becomes a customer. */
+  workspaceCreated: 'workspace_created',
   /** An invite link was minted on the Members page. */
   inviteLinkCreated: 'invite_link_created',
   /** The sidebar's Join Discord link was followed. */
@@ -120,10 +122,22 @@ export function trackPageview(path: string): void {
   posthog.capture('$pageview', { $current_url: window.location.origin + path });
 }
 
-/** One named action. */
-export function trackEvent(event: AnalyticsEvent, properties?: Record<string, unknown>): void {
+/**
+ * One named action. `leaving` is for an event the page navigates away from
+ * right after: it is sent at once, over a beacon that outlives the unload,
+ * instead of waiting in the batch the navigation would discard.
+ */
+export function trackEvent(
+  event: AnalyticsEvent,
+  properties?: Record<string, unknown>,
+  options?: { leaving?: boolean },
+): void {
   if (!initialized) return;
-  posthog.capture(event, properties);
+  posthog.capture(
+    event,
+    properties,
+    options?.leaving ? { send_instantly: true, transport: 'sendBeacon' } : undefined,
+  );
 }
 
 /**
