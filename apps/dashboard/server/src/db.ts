@@ -7,12 +7,19 @@
  */
 
 import { createDb, type Db, type DbHandle } from '@truecourse/db';
+import { log } from '@truecourse/core/lib/logger';
 
 let handle: DbHandle | null = null;
 
 export async function initDb(databaseUrl: string): Promise<DbHandle> {
   if (handle) return handle;
-  handle = await createDb(databaseUrl);
+  handle = await createDb(databaseUrl, {
+    // A connection the backend dropped is one connection lost, not a crash: the
+    // query on it (if any) has already rejected, the pool discards the client and
+    // reconnects on the next checkout.
+    onPoolError: (err, pool) =>
+      log.warn(`[db] Postgres client error on the ${pool} pool, connection dropped: ${err.message}`),
+  });
   return handle;
 }
 
