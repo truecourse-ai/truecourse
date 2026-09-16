@@ -3,7 +3,7 @@
  *
  * Top to bottom: the workspace the session is in, then Home, Context, Code,
  * Flows, Agent, Notifications (with the unread badge) and Settings, then the
- * way out to the community and the user menu.
+ * user menu, which also holds the way out to the community.
  *
  * There is ONE workspace, so the block at the top names it and offers no way
  * out of it. An edition with more than one registers a switcher that replaces
@@ -111,29 +111,6 @@ function NavRow({
     <Link to={to} className={rowClass(active, collapsed)} aria-current={active ? 'page' : undefined}>
       {body}
     </Link>
-  );
-}
-
-/**
- * The way out to the community: a link off the app, styled as a nav row so it
- * belongs to the sidebar. It is here for everyone, signed in or not — the
- * Discord is the product's, not the workspace's.
- */
-function DiscordRow({ collapsed }: { collapsed: boolean }) {
-  return (
-    <a
-      href={DISCORD_INVITE_URL}
-      target="_blank"
-      rel="noreferrer"
-      onClick={() => trackEvent(EVENTS.discordJoinClicked)}
-      {...(collapsed ? { 'aria-label': 'Join Discord' } : {})}
-      className={rowClass(false, collapsed)}
-    >
-      <span className="relative flex shrink-0">
-        <DiscordIcon className="h-4 w-4" />
-      </span>
-      {!collapsed && <span className="min-w-0 flex-1 truncate">Join Discord</span>}
-    </a>
   );
 }
 
@@ -316,6 +293,19 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
             {isDark ? 'Light mode' : 'Dark mode'}
           </button>
+          <a
+            href={DISCORD_INVITE_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => {
+              setOpen(false);
+              trackEvent(EVENTS.discordJoinClicked);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          >
+            <DiscordIcon className="h-3.5 w-3.5" />
+            Join Discord
+          </a>
           {signedIn && (
             <button
               type="button"
@@ -388,8 +378,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         </nav>
 
         <GettingStarted collapsed={collapsed} />
-        <div className="space-y-0.5 border-t border-border px-2 py-2">
-          <DiscordRow collapsed={collapsed} />
+        <div className="border-t border-border px-2 py-2">
           <UserMenu collapsed={collapsed} />
         </div>
       </aside>

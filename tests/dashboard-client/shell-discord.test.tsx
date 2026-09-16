@@ -1,10 +1,10 @@
 /**
- * The sidebar's way out to the community.
+ * The user menu's way out to the community.
  *
  * It is a link OFF the app, so it is an anchor and not a route: the same
- * invitation the README and the site give, opened in a new tab. It is there
- * whether or not anyone is signed in, and it survives the collapse into the
- * icon rail, where the label becomes the accessible name.
+ * invitation the README and the site give, opened in a new tab. It lives in
+ * the account menu, so it is there for whoever is signed in, expanded or
+ * collapsed, and nowhere when nobody is.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -63,6 +63,19 @@ function renderShell(user?: AuthUser) {
   );
 }
 
+const USER: AuthUser = {
+  id: 'user_1',
+  email: 'dana@acme.dev',
+  firstName: 'Dana',
+  organizationId: 'org_1',
+  organizationName: 'Northwind Labs',
+};
+
+/** Open the account menu once the session probe has drawn it. */
+async function openMenu() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Account menu' }));
+}
+
 const discordLink = () => screen.getByRole('link', { name: 'Join Discord' });
 
 afterEach(() => {
@@ -70,51 +83,42 @@ afterEach(() => {
   vi.mocked(trackEvent).mockClear();
 });
 
-describe('the sidebar Discord link', () => {
-  it('is the invitation, opened in a new tab', () => {
-    renderShell();
+describe('the account menu Discord link', () => {
+  it('is the invitation, opened in a new tab', async () => {
+    renderShell(USER);
+    await openMenu();
     const link = discordLink();
     expect(link).toHaveAttribute('href', DISCORD_INVITE_URL);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noreferrer');
   });
 
-  it('is above the user menu, in the sidebar and not in the page', () => {
-    renderShell();
+  it('is in the menu and not in the sidebar until the menu opens', async () => {
+    renderShell(USER);
+    await screen.findByRole('button', { name: 'Account menu' });
+    expect(screen.queryByRole('link', { name: 'Join Discord' })).toBeNull();
+    await openMenu();
     const sidebar = screen.getByRole('complementary');
     expect(within(sidebar).getByRole('link', { name: 'Join Discord' })).toBe(discordLink());
   });
 
-  it('is there with nobody signed in, and with somebody', async () => {
-    const { unmount } = renderShell();
-    expect(discordLink()).toBeInTheDocument();
-    unmount();
-
-    renderShell({
-      id: 'user_1',
-      email: 'dana@acme.dev',
-      firstName: 'Dana',
-      organizationId: 'org_1',
-      organizationName: 'Northwind Labs',
-    });
-    expect(await screen.findByRole('link', { name: 'Join Discord' })).toHaveAttribute(
-      'href',
-      DISCORD_INVITE_URL,
-    );
+  it('is nowhere with nobody signed in', () => {
+    renderShell();
+    expect(screen.queryByRole('button', { name: 'Account menu' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Join Discord' })).toBeNull();
   });
 
-  it('survives the collapse as an icon, named by its label', () => {
-    renderShell();
+  it('survives the collapse, behind the same menu', async () => {
+    renderShell(USER);
+    await screen.findByRole('button', { name: 'Account menu' });
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
-
-    const link = discordLink();
-    expect(link).toHaveAttribute('href', DISCORD_INVITE_URL);
-    expect(link).toHaveAttribute('aria-label', 'Join Discord');
-    expect(link).toHaveTextContent('');
+    await openMenu();
+    expect(discordLink()).toHaveAttribute('href', DISCORD_INVITE_URL);
   });
 
-  it('reports the click', () => {
-    renderShell();
+  it('reports the click and closes the menu', async () => {
+    renderShell(USER);
+    await openMenu();
     // jsdom would try to open the tab for real; the app's handler has already
     // run by the time this bubbles to the document, so the default is dropped
     // here rather than in the component.
@@ -122,5 +126,6 @@ describe('the sidebar Discord link', () => {
     fireEvent.click(discordLink());
 
     expect(trackEvent).toHaveBeenCalledWith(EVENTS.discordJoinClicked);
+    expect(screen.queryByRole('link', { name: 'Join Discord' })).toBeNull();
   });
 });
