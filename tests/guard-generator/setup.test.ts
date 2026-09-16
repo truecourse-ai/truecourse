@@ -326,6 +326,33 @@ describe('runGuardSetup — the step spine', () => {
     expect(report.steps.find((s) => s.key === 'preparations')?.reason).toBe(findings.join('; '))
   })
 
+  // A gate that did not run is reported, never assumed: the seam says the
+  // cold-clone proof stood down and the step's facts carry the line.
+  it('records the seam’s reason when the cold-clone proof did not run', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const facts: string[] = []
+
+    const { report } = await runGuardSetup(
+      baseOpts(r, {
+        seedSession: seedSeam({
+          status: 'ok',
+          scriptPath: 'scripts/guard-seed.mjs',
+          command: 'node scripts/guard-seed.mjs',
+          coldProofSkipped: 'the cold-clone proof did not run: a run of this repository is handed the tree as it stands',
+        }).seam,
+        onStepFact: (step, line) => {
+          if (step === 'seed') facts.push(line)
+        },
+      }),
+    )
+
+    expect(report.status).toBe('ok')
+    expect(facts).toContain(
+      'the cold-clone proof did not run: a run of this repository is handed the tree as it stands',
+    )
+  })
+
   it('retries unavailable preparation authoring when a session becomes available', async () => {
     const r = fixtureRepo(); writeRecipe(r);
     writeGuardSetup(r, (await runGuardSetup(baseOpts(r, { seedSession: seedSeam().seam }))).report);

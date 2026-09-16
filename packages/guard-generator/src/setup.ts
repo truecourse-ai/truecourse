@@ -415,6 +415,12 @@ export type GuardSetupSeedSessionResult =
       fromCache?: boolean
       /** The session died without an outcome and its last verified draft was folded. */
       salvaged?: boolean
+      /**
+       * The cold-clone proof did NOT run, in one line saying why. The seed was
+       * proved in the warm tree alone, so the report says so rather than
+       * letting a reader assume a clone verified it.
+       */
+      coldProofSkipped?: string
     }
   | {
       status: 'failed' | 'skipped'
@@ -1071,6 +1077,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         fact('recipe', `unsettled by the seed's cold-clone proof: ${firstReasonLine(recipeFailure)}`)
       }
       fact('seed', seedOutcomeFact(seedStep, seedRun.fromCache === true))
+      if (seedRun.coldProofSkipped) fact('seed', seedRun.coldProofSkipped)
       for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
       opts.onStepDone?.('seed', seedSummary(seedStep))
     }
@@ -1204,22 +1211,30 @@ function mergeStepSpine(
 
 /**
  * Whether `repoRoot` is a FRESH CHECKOUT: a git repository whose working tree
- * carries nothing git ignores except what a job materialized into it — the work
- * tree and the datastore compose file guard generates. That is how a cloned
- * repository arrives, and how every run of it arrives; a folder copied off this
- * machine arrives with the developer's dependencies and build output instead.
+ * carries nothing git ignores except what a caller materialized into it. That
+ * is how a cloned repository arrives, and how every run of it arrives; a folder
+ * copied off this machine arrives with the developer's dependencies and build
+ * output instead.
  *
  * `false` for a tree git cannot read at all: without git there is no clone for a
  * run's tree to be compared to.
  */
 async function isFreshCheckout(repoRoot: string): Promise<boolean> {
+  // What a caller wrote into this tree before setup ran is not evidence of a
+  // warm one: the work tree, the datastore compose file guard generates, and
+  // the corpus's own documents, which land wherever their refs point (the
+  // workspace corpus a hosted job materializes writes them under `context/`).
+  const materialized = new Set<string>([WORK_TREE_DIR, GUARD_COMPOSE_FILE])
+  for (const ref of readCorpusAreaTags(repoRoot).keys()) {
+    const root = ref.split('/')[0]
+    if (root) materialized.add(root)
+  }
   try {
     const { stdout } = await execFileAsync(
       'git',
       ['-C', repoRoot, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'],
       { maxBuffer: 64 * 1024 * 1024 },
     )
-    const materialized = new Set<string>([WORK_TREE_DIR, GUARD_COMPOSE_FILE])
     return stdout
       .split('\0')
       .filter(Boolean)
@@ -1717,7 +1732,14 @@ async function runSeedStep(args: {
   /** Whether the tree setup was handed is a fresh checkout — the cold proof's gate. */
   freshCheckout: boolean
   onPhase: (running: string, done: string) => void
-}): Promise<{ step: GuardSetupSeedStep; sessionRunId?: string; fromCache?: boolean; recipeDefect?: boolean }> {
+}): Promise<{
+  step: GuardSetupSeedStep
+  sessionRunId?: string
+  fromCache?: boolean
+  recipeDefect?: boolean
+  /** The cold-clone proof stood down, in the seam's own words. */
+  coldProofSkipped?: string
+}> {
   const { opts, recipe, database, routes, schemes } = args
   const existing = recipe.api?.seed
 
@@ -1820,6 +1842,7 @@ async function runSeedStep(args: {
       },
       ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
       ...(result.fromCache ? { fromCache: true } : {}),
+      ...(result.coldProofSkipped ? { coldProofSkipped: result.coldProofSkipped } : {}),
     }
   }
   return {

@@ -1538,6 +1538,7 @@ export function buildSeedSession(
         ...(sessionRunId ? { sessionRunId } : {}),
         ...(outcome.fromCache ? { fromCache: true } : {}),
         ...(world.salvaged ? { salvaged: true } : {}),
+        ...(folded.coldProofSkipped ? { coldProofSkipped: folded.coldProofSkipped } : {}),
       };
     } catch (error) {
       return {
@@ -1562,7 +1563,10 @@ async function foldSeedOutcome(
   services: ReturnType<typeof servicesController>,
   output: SeedSessionOutcome,
   coldProof: boolean,
-): Promise<{ fixtures: string[]; credentials: string[] } | { reason: string; recipeDefect?: boolean }> {
+): Promise<
+  | { fixtures: string[]; credentials: string[]; coldProofSkipped?: string }
+  | { reason: string; recipeDefect?: boolean }
+> {
   const { input, targetPath } = world;
   if (!output.command.includes(targetPath)) {
     return {
@@ -1676,7 +1680,12 @@ async function foldSeedOutcome(
   // this machine is copied whole into every run of it, dependencies and build
   // output included, so a cold install there would refuse a seed over something
   // no run of that repository ever does.
-  if (coldProof && input.freshCheckout) {
+  const coldProofSkipped = !coldProof
+    ? 'the cold-clone proof did not run: it is turned off for this process (TRUECOURSE_SEED_COLD_PROOF)'
+    : !input.freshCheckout
+      ? 'the cold-clone proof did not run: a run of this repository is handed the tree as it stands, dependencies and build output included, so a cold clone is not the tree it works in'
+      : undefined;
+  if (coldProofSkipped === undefined) {
     const probes = output.probes;
     const webSurface = resolveWebSurface(input.recipe);
     // The clone has no built client either, so the web build is paid exactly
@@ -1723,6 +1732,7 @@ async function foldSeedOutcome(
   return {
     fixtures: [...proof.fixtures.keys()].sort(),
     credentials: [...proof.credentials.keys()].sort(),
+    ...(coldProofSkipped ? { coldProofSkipped } : {}),
   };
 }
 

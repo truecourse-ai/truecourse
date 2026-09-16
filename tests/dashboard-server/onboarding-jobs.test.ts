@@ -260,6 +260,8 @@ describe('the guard setup job', () => {
   const overlaysSeen: boolean[] = [];
   /** Whether the clone declared its world of unknown state when the engine looked. */
   const worldDirtySeen: boolean[] = [];
+  /** Whether the seed seam was told the clone reads as a fresh checkout. */
+  const freshCheckoutSeen: boolean[] = [];
   let preparationError: string | undefined;
 
   /** A fresh clone of the fixture at a stable path, as a run really gets one. */
@@ -272,9 +274,12 @@ describe('the guard setup job', () => {
       // The suite hides the developer's global git config, so identity is per-repo.
       git(clone, 'config', 'user.name', 'Test');
       git(clone, 'config', 'user.email', 'test@example.com');
-      writeRecipe(clone);
+      // As a repository really ignores what the engine writes into it, so the
+      // work tree and the corpus the job materializes below are git-ignored.
+      fs.writeFileSync(path.join(clone, '.gitignore'), 'node_modules/\n.truecourse/\ncontext/\n');
       git(clone, 'add', '-A');
       git(clone, 'commit', '-m', 'one');
+      writeRecipe(clone);
       return {
         dir: clone,
         dispose: () => {
@@ -303,6 +308,7 @@ describe('the guard setup job', () => {
     catalogCalls.length = 0;
     overlaysSeen.length = 0;
     worldDirtySeen.length = 0;
+    freshCheckoutSeen.length = 0;
     preparationError = undefined;
     installWorkTree();
     // Setup reads the curated doc universe, and the job materializes the
@@ -357,7 +363,10 @@ describe('the guard setup job', () => {
               return { status: 'ok', added: [], findings: [] };
             },
             authorInterfaces: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
-            seedSession: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
+            seedSession: async (input) => {
+              freshCheckoutSeen.push(input.freshCheckout);
+              return { status: 'skipped', reason: 'stubbed in this suite' };
+            },
             preparationSession: async () => preparationError
               ? { status: 'failed', reason: preparationError }
               : { status: 'skipped', reason: 'stubbed in this suite' },
@@ -431,6 +440,21 @@ describe('the guard setup job', () => {
     await Promise.all(running);
 
     expect(worldDirtySeen).toEqual([true]);
+  }, 60_000);
+
+  // Everything the job writes into the clone before the engine runs — the work
+  // tree, the corpus's documents, the setup bundle with its compose file, the
+  // two overlay files — is the job's own, so the clone still reads as the fresh
+  // checkout it is and the seed's cold-clone proof still has a tree to compare.
+  it('leaves the clone reading as a fresh checkout, whatever it materialized', async () => {
+    await writeGuardOverlays(REPO, {
+      dependencies: { anthropic: { env: { ANTHROPIC_API_KEY: 'sk-test-not-real' } } },
+      externals: {},
+    });
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(freshCheckoutSeen).toEqual([true]);
   }, 60_000);
 
   it('replays the settled steps on a second run, from the stored bundle', async () => {

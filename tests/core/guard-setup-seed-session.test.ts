@@ -679,6 +679,9 @@ describe('buildSeedSession — the cold-clone proof', () => {
 
     expect(result).toMatchObject({ status: 'ok' });
     expect(servicesLog(r)).toEqual(['up', 'seed', 'down', 'up', 'seed', 'down']);
+    // And the step says the gate stood down, so a reader of the report never
+    // takes the seed for one a clone proved.
+    expect(result.status === 'ok' && result.coldProofSkipped).toMatch(/the tree as it stands/);
   }, 120_000);
 
   it('an operator turns the proof off for the whole process', async () => {
@@ -694,6 +697,7 @@ describe('buildSeedSession — the cold-clone proof', () => {
 
       expect(result).toMatchObject({ status: 'ok' });
       expect(servicesLog(r)).toEqual(['up', 'seed', 'down', 'up', 'seed', 'down']);
+      expect(result.status === 'ok' && result.coldProofSkipped).toMatch(/TRUECOURSE_SEED_COLD_PROOF/);
     } finally {
       delete process.env.TRUECOURSE_SEED_COLD_PROOF;
     }
