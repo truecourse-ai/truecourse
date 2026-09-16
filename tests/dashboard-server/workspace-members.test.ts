@@ -16,6 +16,10 @@ import request from 'supertest';
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { AuthUser } from '@truecourse/shared';
 import { createWorkspaceMembersRouter } from '../../apps/dashboard/server/src/auth/workspace-members';
+import {
+  clearMembershipCache,
+  createSessionVerifier,
+} from '../../apps/dashboard/server/src/auth/workos-auth';
 import { MemoryInviteLinkStore } from '../helpers/memory-invite-links';
 
 const ORG = 'org_acme';
@@ -105,7 +109,11 @@ function makeWorkos(
       listOrganizationMemberships: async (opts: Record<string, unknown>) => {
         calls.memberships.push(opts);
         refuse();
-        return page(memberships.filter((m) => m.organizationId === opts.organizationId));
+        return page(
+          memberships.filter(
+            (m) => m.organizationId === opts.organizationId && (!opts.userId || m.userId === opts.userId),
+          ),
+        );
       },
       listUsers: async (opts: { organizationId?: string }) => {
         refuse();
@@ -471,5 +479,37 @@ describe('invite links', () => {
     const m = makeWorkos();
     const app = makeApp(m.workos, { id: ME.id, email: ME.email, organizationId: null });
     await request(app).post('/api/workspace/invite-links').send({ expiresInDays: 7 }).expect(401);
+  });
+});
+
+describe('DELETE /api/workspace/members/:id and the removed member’s own session', () => {
+  beforeEach(() => clearMembershipCache());
+
+  it('refuses their next request on this server before WorkOS is asked again', async () => {
+    const m = makeWorkos();
+    // The removed member's session: a live token still claiming the workspace.
+    const theirWorkos = {
+      ...m.workos,
+      userManagement: {
+        ...m.workos.userManagement,
+        getUser: async () => THEM,
+        loadSealedSession: () => ({
+          authenticate: async () => ({ authenticated: true, user: THEM, organizationId: ORG }),
+        }),
+      },
+    };
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    const verify = createSessionVerifier(theirWorkos as any, { ...cfg, cookiePassword: 'x'.repeat(40) } as any);
+    const app = makeApp(m.workos, CALLER);
+
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBe(ORG);
+    const asked = m.calls.memberships.length;
+
+    await request(app).delete('/api/workspace/members/om_them').expect(204);
+    expect(m.calls.deleted).toEqual(['om_them']);
+
+    // The fake WorkOS still lists the membership: the refusal is this process's own.
+    expect((await verify('tc_session=sealed'))?.user.organizationId).toBeNull();
+    expect(m.calls.memberships.length - asked).toBe(1);
   });
 });

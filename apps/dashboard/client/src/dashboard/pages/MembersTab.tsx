@@ -122,7 +122,7 @@ function InviteDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Invite member</DialogTitle>
+          <DialogTitle>Invite by email</DialogTitle>
         </DialogHeader>
         <form
           onSubmit={(e) => {
@@ -158,6 +158,7 @@ function InviteDialog({
 /**
  * Invite by link: pick how long the link stands, mint it, copy it. The link is
  * shown once here and again as a row, so closing without copying loses nothing.
+ * The dialog says only what the inviter must know to hand the link on.
  */
 function InviteLinkDialog({
   open,
@@ -206,10 +207,7 @@ function InviteLinkDialog({
         </DialogHeader>
         {link ? (
           <div>
-            <p className="text-[11px] text-muted-foreground">
-              Anyone with this link can join once. It expires {expiresIn(link.expiresAt)}.
-            </p>
-            <label className="mt-3 block text-[11px] font-medium text-muted-foreground">
+            <label className="block text-[11px] font-medium text-muted-foreground">
               Link
               <input
                 readOnly
@@ -221,7 +219,7 @@ function InviteLinkDialog({
             </label>
             {failed === link.id && (
               <p className="mt-2 text-[11px] text-destructive">
-                The browser would not copy it. Select the link above and copy it yourself.
+                Copy failed. Select the link and copy it.
               </p>
             )}
             <DialogFooter className="mt-4 items-center">
@@ -243,7 +241,7 @@ function InviteLinkDialog({
             }}
           >
             <p className="text-[11px] text-muted-foreground">
-              Anyone with the link can sign up and join this workspace. Each link works once.
+              Anyone with the link can join this workspace once.
             </p>
             <label className="mt-3 block text-[11px] font-medium text-muted-foreground">
               Link expires in
@@ -426,20 +424,21 @@ export function MembersTab({
         {shownLinks.map((link) => (
           <li key={link.id} className="flex items-center gap-4 px-6 py-3">
             {/* A link has nobody behind it yet: what it is stands where the name would.
+                Beside it, when the link runs out; the status word alone says so once it has.
                 The address itself shows only when the clipboard would not take it. */}
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <span className="truncate text-[13px] font-medium text-foreground">Invite link</span>
               <span className="min-w-0 truncate text-[11px] text-muted-foreground">
                 {failed === link.id ? (
                   <span className="select-all text-foreground">{link.url}</span>
-                ) : (
+                ) : link.state === 'expired' ? null : (
                   `expires ${expiresIn(link.expiresAt)}`
                 )}
               </span>
             </div>
             <StatusWord
               tone={link.state === 'expired' ? 'failure' : 'neutral'}
-              word={link.state === 'expired' ? 'Expired' : 'Link'}
+              word={link.state === 'expired' ? 'Expired' : 'Unused'}
             />
             <span className="shrink-0 text-[11px] text-muted-foreground">
               {relativeTime(link.createdAt)}

@@ -91,6 +91,89 @@ async function resolveIsOperator(workos: WorkOS, userId: string): Promise<boolea
   return pending;
 }
 
+/**
+ * Whether a user's membership of an organization still stands, cached per pair.
+ *
+ * The sealed session's organization is a CLAIM made when the token was minted.
+ * A member removed since carries it until the access token expires, and would
+ * keep the workspace for that long if the claim were believed as is; so every
+ * request asks here, and the answer is what the session runs on. One WorkOS
+ * call per (user, organization) per TTL; concurrent callers share it; a
+ * refused call keeps the last answer (a member, when there is none) so an
+ * outage locks nobody out. The process that removes a member writes the
+ * refusal straight in (`forgetMembership`), so on this server the next request
+ * is refused; elsewhere the TTL bounds it.
+ */
+const MEMBERSHIP_CACHE_TTL_MS = 60 * 1000;
+const membershipCache = new Map<string, { member: boolean; at: number }>();
+const membershipInFlight = new Map<string, Promise<boolean>>();
+
+const membershipKey = (userId: string, organizationId: string) => `${userId}\u0000${organizationId}`;
+
+async function lookupIsMember(
+  workos: WorkOS,
+  userId: string,
+  organizationId: string,
+  fallback: boolean,
+): Promise<boolean> {
+  try {
+    const page = await workos.userManagement.listOrganizationMemberships({
+      userId,
+      organizationId,
+      statuses: ['active'],
+    });
+    return (await page.autoPagination()).some((m) => m.status === 'active');
+  } catch {
+    return fallback;
+  }
+}
+
+async function resolveIsMember(
+  workos: WorkOS,
+  userId: string,
+  organizationId: string,
+): Promise<boolean> {
+  const key = membershipKey(userId, organizationId);
+  const cached = membershipCache.get(key);
+  if (cached && Date.now() - cached.at < MEMBERSHIP_CACHE_TTL_MS) return cached.member;
+  const inFlight = membershipInFlight.get(key);
+  if (inFlight) return inFlight;
+  const pending = lookupIsMember(workos, userId, organizationId, cached?.member ?? true)
+    .then((member) => {
+      membershipCache.set(key, { member, at: Date.now() });
+      return member;
+    })
+    .finally(() => membershipInFlight.delete(key));
+  membershipInFlight.set(key, pending);
+  return pending;
+}
+
+/** The organization the session claims, when the user is still in it; null otherwise. */
+async function standingOrganization(
+  workos: WorkOS,
+  userId: string,
+  claimed: string | null | undefined,
+): Promise<string | null> {
+  if (!claimed) return null;
+  return (await resolveIsMember(workos, userId, claimed)) ? claimed : null;
+}
+
+/** This process ended the membership: the next request is refused, not the next lookup. */
+export function forgetMembership(userId: string, organizationId: string): void {
+  membershipCache.set(membershipKey(userId, organizationId), { member: false, at: Date.now() });
+}
+
+/** This process saw the membership begin (or a session minted into it): no stale refusal outlives that. */
+export function rememberMembership(userId: string, organizationId: string): void {
+  membershipCache.set(membershipKey(userId, organizationId), { member: true, at: Date.now() });
+}
+
+/** Test seam: one file's memberships must not outlive its tests. */
+export function clearMembershipCache(): void {
+  membershipCache.clear();
+  membershipInFlight.clear();
+}
+
 function toAuthUser(
   u: User,
   organizationId?: string | null,
@@ -155,7 +238,10 @@ export function createSessionVerifier(
     const refreshed = await session.refresh();
     if (!refreshed.authenticated || !refreshed.sealedSession) return null;
     return {
-      user: toAuthUser(refreshed.user, refreshed.organizationId),
+      user: toAuthUser(
+        refreshed.user,
+        await standingOrganization(workos, refreshed.user.id, refreshed.organizationId),
+      ),
       setCookie: serializeCookie(SESSION_COOKIE, refreshed.sealedSession, {
         maxAgeSeconds: SESSION_MAX_AGE,
         secure,
@@ -173,7 +259,12 @@ export function createSessionVerifier(
       });
       const result = await session.authenticate();
       if (result.authenticated) {
-        return { user: toAuthUser(result.user, result.organizationId) };
+        return {
+          user: toAuthUser(
+            result.user,
+            await standingOrganization(workos, result.user.id, result.organizationId),
+          ),
+        };
       }
       // Access token expired/invalid → refresh (single-flight per cookie).
       let pending = refreshInFlight.get(sealed);
@@ -258,6 +349,9 @@ async function mintSessionInto(
   if (!refreshed.authenticated || !refreshed.sealedSession) {
     throw new Error('the session could not be moved into the workspace');
   }
+  // WorkOS minted the session into it, so the membership stands, whatever this
+  // process last heard.
+  rememberMembership(refreshed.user.id, organizationId);
   return {
     organizationId: refreshed.organizationId ?? organizationId,
     setCookie: serializeCookie(SESSION_COOKIE, refreshed.sealedSession, {
@@ -341,7 +435,11 @@ async function requireSession(
     res.status(401).json({ error: 'Not authenticated' });
     return null;
   }
-  return { sealed, user: authed.user, organizationId: authed.organizationId ?? null };
+  return {
+    sealed,
+    user: authed.user,
+    organizationId: await standingOrganization(workos, authed.user.id, authed.organizationId),
+  };
 }
 
 /**
@@ -421,8 +519,9 @@ export function createAuthRouter(
 
   // Kick off login — redirect to the WorkOS AuthKit hosted UI. `?next=/path`
   // rides the OAuth `state` param so the callback can land the user where they
-  // were headed before the redirect to login. `?screen=sign-up` opens AuthKit
-  // on its sign-up screen, which is where an invite link sends a newcomer.
+  // were headed before the redirect to login. There is one screen: a newcomer
+  // and a returning person sign in the same way, and AuthKit creates the
+  // account on first sign-in.
   router.get('/login', (req, res) => {
     const next = safeNext(req.query.next);
     const url = workos.userManagement.getAuthorizationUrl({
@@ -430,7 +529,6 @@ export function createAuthRouter(
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
       ...(next ? { state: next } : {}),
-      ...(req.query.screen === 'sign-up' ? { screenHint: 'sign-up' as const } : {}),
     });
     res.redirect(url);
   });
@@ -546,9 +644,11 @@ export function createAuthRouter(
         return;
       }
       // Already in a workspace → no-op, so a double-submit can't spawn a second
-      // org or orphan a membership.
-      if (authed.organizationId) {
-        res.json({ user: toAuthUser(authed.user, authed.organizationId) });
+      // org or orphan a membership. The token's claim alone does not count: a
+      // member removed from the workspace it names is in none.
+      const current = await standingOrganization(workos, authed.user.id, authed.organizationId);
+      if (current) {
+        res.json({ user: toAuthUser(authed.user, current) });
         return;
       }
 
@@ -571,36 +671,30 @@ export function createAuthRouter(
       });
 
       // Re-mint the session INTO the new org so the next `/me` reflects it.
-      const refreshed = await session.refresh({ organizationId: org.id });
-      if (!refreshed.authenticated || !refreshed.sealedSession) {
+      let minted: MintedSession;
+      try {
+        minted = await mintSessionInto(workos, cfg, sealed, org.id);
+      } catch {
         res.status(500).json({
           error: 'Workspace created, but the session could not be updated — sign out and back in.',
         });
         return;
       }
-      res.setHeader(
-        'Set-Cookie',
-        serializeCookie(SESSION_COOKIE, refreshed.sealedSession, {
-          maxAgeSeconds: SESSION_MAX_AGE,
-          secure,
-        }),
-      );
+      res.setHeader('Set-Cookie', minted.setCookie);
       // The name is the one just typed — no lookup needed.
       orgNameCache.set(org.id, org.name);
-      res.json({ user: toAuthUser(refreshed.user, refreshed.organizationId, org.name) });
+      res.json({ user: toAuthUser(minted.user, minted.organizationId, org.name) });
     } catch (err) {
       res.status(500).json({ error: `Could not create workspace: ${(err as Error).message}` });
     }
   });
 
-  // Logout — clear the cookie and hand back the WorkOS logout URL. A body
-  // `returnTo` (a path on this app, checked like `?next=`) is where the
-  // browser lands afterwards; the app root otherwise. The invite page uses it
-  // so switching accounts comes back to the invite.
+  // Logout — clear the cookie and hand back the WorkOS logout URL. The browser
+  // lands on the app root afterwards: WorkOS returns only to a Sign-out URI
+  // configured in its dashboard, and the root is the one there.
   router.post('/logout', async (req, res) => {
     const sealed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-    const next = safeNext((req.body as { returnTo?: unknown } | undefined)?.returnTo);
-    const returnTo = next ? `${cfg.appUrl}${next}` : cfg.appUrl;
+    const returnTo = cfg.appUrl;
     res.setHeader(
       'Set-Cookie',
       serializeCookie(SESSION_COOKIE, '', { maxAgeSeconds: 0, secure }),

@@ -94,6 +94,12 @@ so no route, job or store knows which mode it is in.
 
 - **Hosted** — WorkOS signs people in (`auth/workos-auth.ts`), a workspace is
   the session's organization, and the gate refuses a request with no session.
+  The organization on a session is a claim made when its token was minted, so
+  the verifier confirms the membership behind it (cached a minute per pair, and
+  forgotten at once by the server that removes a member); a session whose
+  membership ended runs org-less, and `/api/auth/me` moves it into the user's
+  other workspace or leaves it to name one. The client re-probes the session on
+  any 401 after load and reloads when the answer moved.
 - **Local** — one developer's machine: one implicit person and one implicit
   workspace behind a fixed organization id (`auth/local.ts`, `org_local`), the
   gate answering that session for every request with no cookie to read and no

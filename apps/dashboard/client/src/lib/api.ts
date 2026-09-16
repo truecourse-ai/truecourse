@@ -61,14 +61,22 @@ export class ApiError extends Error {
 }
 
 /**
+ * Raised on `window` when the server refused a request as unauthenticated after
+ * the page loaded. The auth provider listens: the session may have ended, or
+ * moved (a member removed from the workspace the page runs on).
+ */
+export const SESSION_REFUSED_EVENT = 'tc:session-refused';
+
+/**
  * The error a refused response becomes. Read once: the body is a stream, and a
  * second read after a failed JSON parse throws. A route's own refusal is JSON
  * with an `error` and is shown as written; anything else (a proxy's HTML page,
  * a bare 404) is not for the user's eyes, so they see the status and the body
  * rides on the error. The URL stays out of the message: an invite link's token
- * is part of one.
+ * is part of one. A 401 also raises {@link SESSION_REFUSED_EVENT}.
  */
 async function apiRefusal(res: Response): Promise<ApiError> {
+  if (res.status === 401) window.dispatchEvent(new Event(SESSION_REFUSED_EVENT));
   const text = await res.text().catch(() => '');
   let body: unknown = null;
   try {

@@ -137,7 +137,11 @@ describe('GET /api/auth/workspaces', () => {
       { id: 'org_ws_a', name: 'Org org_ws_a', current: true },
       { id: 'org_ws_b', name: 'Org org_ws_b', current: false },
     ]);
-    expect(m.calls.listMemberships).toEqual([{ userId: 'user_1' }]);
+    // The session's own membership is confirmed first, then the list is read.
+    expect(m.calls.listMemberships).toEqual([
+      { userId: 'user_1', organizationId: 'org_ws_a', statuses: ['active'] },
+      { userId: 'user_1' },
+    ]);
   });
 
   it('names each workspace through the cache `/me` fills, looking one up once', async () => {

@@ -192,3 +192,23 @@ describe('what the server tells the client about itself', () => {
     expect((await request(app).get('/api/capabilities').expect(200)).body.mode).toBe('local');
   });
 });
+
+describe('the local server and invite links', () => {
+  it('has no invite page to serve and mints no links', async () => {
+    const auth = createAuth('local', deps);
+    const app = createApp({
+      serveStatic: false,
+      authVerifier: auth.verify,
+      authRouter: auth.router,
+      workspaceRouter: auth.members,
+      repoLinks: null,
+      github: null,
+      jobs: null,
+    });
+
+    await request(app).get('/api/auth/invite/tok_1').expect(404);
+    await request(app).post('/api/auth/invite/tok_1/accept').expect(404);
+    await request(app).post('/api/workspace/invite-links').send({ expiresInDays: 7 }).expect(404);
+    await request(app).post('/api/workspace/invitations').send({ email: 'kim@acme.dev' }).expect(404);
+  });
+});

@@ -145,7 +145,13 @@ describe('POST /api/auth/workspace', () => {
   });
 
   it('is idempotent: a user already in an org gets it back without creating a new one', async () => {
-    const m = makeWorkos({ existingOrg: 'org_existing' });
+    // The token's claim is confirmed against the membership behind it.
+    const m = makeWorkos({
+      existingOrg: 'org_existing',
+      memberships: [
+        { id: 'om_existing', organizationId: 'org_existing', organizationName: 'Existing', status: 'active', userId: 'user_1' },
+      ],
+    });
     const res = await request(makeApp(m.workos))
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-has-org')
