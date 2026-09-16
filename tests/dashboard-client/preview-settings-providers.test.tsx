@@ -30,7 +30,8 @@ if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = (() => {}) as Element['scrollTo'];
 }
 
-const INSTALL_URL = 'https://github.com/apps/truecourse/installations/new?state=org_1';
+const INSTALL_URL = 'https://github.com/apps/truecourse/installations/new?state=signed';
+const CONNECT_URL = 'https://github.com/login/oauth/authorize?client_id=Iv1.app&state=signed';
 const realFetch = window.fetch;
 
 function json(body: unknown, status = 200): Response {
@@ -54,6 +55,7 @@ function linkedRepo(repoFullName: string, installationId: number): GithubRepoSum
 function status(over: Partial<GithubConnectStatusResponse> = {}): GithubConnectStatusResponse {
   return {
     configured: true,
+    connectUrl: CONNECT_URL,
     installUrl: INSTALL_URL,
     installations: [{ installationId: 42, accountLogin: 'linkwarden', accountType: 'Organization' }],
     repos: [linkedRepo('linkwarden/linkwarden', 42), linkedRepo('linkwarden/docs', 42)],
@@ -113,11 +115,15 @@ describe('Settings › Repositories', () => {
     const rows = within(installations).getAllByRole('listitem');
     expect(rows).toHaveLength(1);
     expect(rows[0]).toHaveTextContent('linkwarden · organization · 2 repositories linked');
-    // Adding an account is the App's install page, nothing the client invents.
+    // Adding an account is GitHub's authorize page, nothing the client invents;
+    // installing on an account that has no App yet is the secondary link.
     expect(within(github).getByRole('link', { name: 'Add account' })).toHaveAttribute(
       'href',
-      INSTALL_URL,
+      CONNECT_URL,
     );
+    expect(
+      within(github).getByRole('link', { name: 'Install on another GitHub account' }),
+    ).toHaveAttribute('href', INSTALL_URL);
   });
 
   it('asks for an install link that returns to where the user came from', async () => {
@@ -151,7 +157,8 @@ describe('Settings › Repositories', () => {
 
     const github = providerRow('GitHub');
     expect(await within(github).findByText('Not connected')).toBeInTheDocument();
-    expect(within(github).getByRole('link', { name: 'Connect' })).toHaveAttribute('href', INSTALL_URL);
+    expect(within(github).getByRole('link', { name: 'Connect' })).toHaveAttribute('href', CONNECT_URL);
+    expect(within(github).queryByRole('link', { name: 'Install on another GitHub account' })).toBeNull();
     expect(within(github).queryByRole('list', { name: 'GitHub installations' })).toBeNull();
   });
 

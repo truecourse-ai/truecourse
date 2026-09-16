@@ -97,9 +97,9 @@ export interface GithubRepoSummary {
 }
 
 /**
- * Where a GitHub App install was started from, carried through GitHub's
- * `state` so the return lands there: Settings, Code's connect dialog, or Add
- * context's repository step.
+ * Where a trip to GitHub (Connect, or an install) was started from, carried
+ * through GitHub's `state` so the return lands there: Settings, Code's connect
+ * dialog, or Add context's repository step.
  */
 export const GITHUB_INSTALL_ORIGINS = ['settings', 'code-connect', 'context-add'] as const;
 export type GithubInstallOrigin = (typeof GITHUB_INSTALL_ORIGINS)[number];
@@ -107,7 +107,13 @@ export type GithubInstallOrigin = (typeof GITHUB_INSTALL_ORIGINS)[number];
 export interface GithubConnectStatusResponse {
   /** Whether the GitHub App is configured server-side. */
   configured: boolean
-  /** URL to install the App (carries the workspace id as `state`). */
+  /**
+   * Connect: authorize with GitHub, which attaches every installation of the
+   * App the person can reach to this workspace, or sends them on to install
+   * when there is none. Carries a signed `state` for this workspace and user.
+   */
+  connectUrl: string
+  /** Install the App on a GitHub account that does not have it yet (same `state`). */
   installUrl: string
   installations: GithubInstallationSummary[]
   repos: GithubRepoSummary[]
@@ -118,6 +124,8 @@ export interface GithubInstallableRepo {
   fullName: string
   defaultBranch: string
   private: boolean
+  /** Connected in another workspace: a repository belongs to one, so not pickable here. */
+  connectedElsewhere: boolean
 }
 
 export interface GithubInstallationReposResponse {

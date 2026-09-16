@@ -172,11 +172,11 @@ const OTHER_ACCOUNT: GithubInstallationSummary = {
 
 /** What each account can see, including a repository Code has NOT connected. */
 const ACME_REPOS: GithubInstallableRepo[] = [
-  { fullName: 'acme/web', defaultBranch: 'main', private: true },
-  { fullName: 'acme/handbook', defaultBranch: 'trunk', private: false },
+  { fullName: 'acme/web', defaultBranch: 'main', private: true, connectedElsewhere: false },
+  { fullName: 'acme/handbook', defaultBranch: 'trunk', private: false, connectedElsewhere: false },
 ];
 const OTHER_REPOS: GithubInstallableRepo[] = [
-  { fullName: 'contoso/docs', defaultBranch: 'main', private: false },
+  { fullName: 'contoso/docs', defaultBranch: 'main', private: false, connectedElsewhere: false },
 ];
 
 interface World {
@@ -223,7 +223,7 @@ function serve(over: Partial<World> = {}) {
     }
     if (url.pathname === '/api/repos') return json(state.repos);
     if (url.pathname === '/api/github/status') {
-      return json({ configured: true, installUrl: '', installations: state.installations, repos: [] });
+      return json({ configured: true, connectUrl: '', installUrl: '', installations: state.installations, repos: [] });
     }
     const installationRepos = /^\/api\/github\/installations\/(\d+)\/repos$/.exec(url.pathname);
     if (installationRepos) {

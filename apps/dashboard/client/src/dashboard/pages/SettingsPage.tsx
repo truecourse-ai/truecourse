@@ -26,7 +26,7 @@ import { StatusWord } from '@/dashboard/ui/status-word';
 import { Facts, ProviderIcon, PageHeader, SideMenu } from '@/dashboard/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/dashboard/data/llm-config';
 import { offeredRepositoryProviders } from '@/dashboard/data/providers';
-import { fetchGithubStatus } from '@/dashboard/data/real-repos';
+import { detachGithubInstallation, fetchGithubStatus } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { MembersTab, type InviteKind } from '@/dashboard/pages/MembersTab';
@@ -36,7 +36,13 @@ import { registeredSettingsTabs, type SettingsTab } from '@/dashboard/shell/regi
 /** What '/api/github/status' said; null while the read is in flight. */
 type GithubProviderState = {
   installations: GithubInstallationSummary[];
-  /** Where the App is installed. Absent on a server that has no App configured. */
+  /**
+   * Connect: authorize with GitHub, which attaches the installations this
+   * person can reach, or sends them on to install. Absent on a server that
+   * has no App configured.
+   */
+  connectUrl: string | null;
+  /** The App's install page, for an account that does not have it yet. */
   installUrl: string | null;
   /** The repositories linked to this workspace, per installation. */
   linked: GithubRepoSummary[];
@@ -52,7 +58,8 @@ type GithubProviderState = {
  * GitHub is the real one: its accounts are the App's installations the server
  * reports, each line naming the account, its type and how many repositories
  * this workspace has linked through it, and connecting is a top-level
- * navigation to the App's install page. On a local server the folders of this
+ * navigation to GitHub's authorize page, which attaches every installation the
+ * person can reach or sends them on to install. On a local server the folders of this
  * machine are real too, each line naming the repository and the path behind it,
  * and connecting one is the connect dialog, where the path is typed. Every
  * other provider is listed and says Coming soon: hiding one would make the page
@@ -68,35 +75,71 @@ function installOriginOf(raw: string | null): GithubInstallOrigin {
 
 function RepositoriesTab() {
   const mode = useServerMode();
+  const { refreshRealRepos } = useDashboardState();
   const [github, setGithub] = useState<GithubProviderState | null>(null);
   const [folders, setFolders] = useState<LocalRepositorySummary[] | null>(null);
+  const [detaching, setDetaching] = useState<number | null>(null);
   const [params] = useSearchParams();
   const from = installOriginOf(params.get('from'));
+  // The callback lands here with this flag when GitHub did not confirm the
+  // person can reach the installation the trip was about.
+  const refused = params.get('github') === 'refused';
+
+  const readGithub = useCallback(async () => {
+    try {
+      const status = await fetchGithubStatus(from);
+      setGithub({
+        installations: status.installations,
+        connectUrl: status.connectUrl || null,
+        installUrl: status.installUrl || null,
+        linked: status.repos,
+      });
+    } catch (error: unknown) {
+      setGithub({
+        installations: [],
+        connectUrl: null,
+        installUrl: null,
+        linked: [],
+        reason: error instanceof Error ? error.message : 'GitHub could not be reached',
+      });
+    }
+  }, [from]);
 
   useEffect(() => {
-    let live = true;
-    void fetchGithubStatus(from)
-      .then((status) => {
-        if (!live) return;
-        setGithub({
-          installations: status.installations,
-          installUrl: status.installUrl || null,
-          linked: status.repos,
-        });
-      })
-      .catch((error: unknown) => {
-        if (!live) return;
-        setGithub({
-          installations: [],
-          installUrl: null,
-          linked: [],
-          reason: error instanceof Error ? error.message : 'GitHub could not be reached',
-        });
-      });
-    return () => {
-      live = false;
-    };
-  }, [from]);
+    void readGithub();
+  }, [readGithub]);
+
+  // Detach an installation from this workspace: the repositories connected
+  // through it here go with it, so the person is told how many before it does.
+  const detach = useCallback(
+    async (installation: GithubInstallationSummary) => {
+      const linked = (github?.linked ?? []).filter(
+        (r) => r.installationId === installation.installationId,
+      );
+      const name = installation.accountLogin || `#${installation.installationId}`;
+      const warning =
+        linked.length === 0
+          ? `Remove ${name} from this workspace?`
+          : `Remove ${name} from this workspace? ${linked.length} repositor${
+              linked.length === 1 ? 'y' : 'ies'
+            } connected through it will be disconnected: ${linked.map((r) => r.repoFullName).join(', ')}.`;
+      if (!window.confirm(warning)) return;
+      setDetaching(installation.installationId);
+      try {
+        await detachGithubInstallation(installation.installationId);
+        await Promise.all([readGithub(), refreshRealRepos()]);
+      } catch (error: unknown) {
+        setGithub((prev) =>
+          prev
+            ? { ...prev, reason: error instanceof Error ? error.message : 'Could not remove the account' }
+            : prev,
+        );
+      } finally {
+        setDetaching(null);
+      }
+    },
+    [github, readGithub, refreshRealRepos],
+  );
 
   // The folders this machine has connected. Only a local server has any, and
   // only a local server has the route to ask.
@@ -144,21 +187,46 @@ function RepositoriesTab() {
               {isGithub && github?.reason && (
                 <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
               )}
+              {isGithub && refused && (
+                <p className="mt-1 text-[11px] text-destructive">
+                  GitHub did not confirm your access to that installation. Nothing was added.
+                </p>
+              )}
               {isGithub && installations.length > 0 && (
                 <ul className="mt-1 space-y-1" aria-label="GitHub installations">
                   {installations.map((i) => {
                     const linked = (github?.linked ?? []).filter(
                       (r) => r.installationId === i.installationId,
                     ).length;
+                    const name = i.accountLogin || `#${i.installationId}`;
                     return (
-                      <li key={i.installationId} className="truncate text-[11px] text-muted-foreground">
-                        <span className="text-foreground">{i.accountLogin || `#${i.installationId}`}</span>
-                        {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} ·{' '}
-                        {linked} repositor{linked === 1 ? 'y' : 'ies'} linked
+                      <li key={i.installationId} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className="min-w-0 truncate">
+                          <span className="text-foreground">{name}</span>
+                          {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} ·{' '}
+                          {linked} repositor{linked === 1 ? 'y' : 'ies'} linked
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void detach(i)}
+                          disabled={detaching !== null}
+                          aria-label={`Remove ${name}`}
+                          className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                        >
+                          {detaching === i.installationId ? 'Removing' : 'Remove'}
+                        </button>
                       </li>
                     );
                   })}
                 </ul>
+              )}
+              {isGithub && installations.length > 0 && github?.installUrl && (
+                <a
+                  href={github.installUrl}
+                  className="mt-1 inline-block text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Install on another GitHub account
+                </a>
               )}
               {isLocal && (folders ?? []).length > 0 && (
                 <ul className="mt-1 space-y-1" aria-label="Connected folders">
@@ -170,9 +238,9 @@ function RepositoriesTab() {
                 </ul>
               )}
             </div>
-            {isGithub && github?.installUrl && (
+            {isGithub && github?.connectUrl && (
               <a
-                href={github.installUrl}
+                href={github.connectUrl}
                 className={`shrink-0 rounded px-2.5 py-1.5 text-xs font-medium ${
                   installations.length === 0
                     ? 'bg-primary text-primary-foreground hover:opacity-90'

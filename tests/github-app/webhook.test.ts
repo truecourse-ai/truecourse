@@ -8,7 +8,7 @@ import {
   type SourcePushTrigger,
 } from '../../packages/github-app/src/index';
 import type { RepositoryRecord } from '@truecourse/shared';
-import { MemoryInstallationStore } from './memory-store';
+import { MemoryInstallationStore, seedInstallation } from './memory-store';
 
 const SECRET = 'whsec';
 
@@ -91,14 +91,7 @@ describe('webhook router', () => {
   });
 
   it('removes an installation on installation.deleted', async () => {
-    await store.saveInstallation({
-      installationId: 7,
-      accountLogin: 'acme',
-      accountType: 'Organization',
-      workspaceOrgId: 'org_A',
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
+    await seedInstallation(store, 7, ['org_A']);
     await post('installation', {
       action: 'deleted',
       installation: { id: 7, account: { login: 'acme', type: 'Organization' } },
@@ -203,17 +196,41 @@ describe('webhook router', () => {
     expect(sourcePushCalls).toHaveLength(0);
   });
 
+  it('drops every workspace link with the installation on installation.deleted', async () => {
+    await seedInstallation(store, 7, ['org_A', 'org_B']);
+    await store.linkRepo(repoLink('acme/api', 7));
+    await store.linkRepo({ ...repoLink('acme/web', 7), workspaceOrgId: 'org_B' });
+
+    await post('installation', {
+      action: 'deleted',
+      installation: { id: 7, account: { login: 'acme', type: 'Organization' } },
+    }).expect(202);
+
+    expect(removedCalls.map((l) => [l.repoFullName, l.workspaceOrgId]).sort()).toEqual([
+      ['acme/api', 'org_A'],
+      ['acme/web', 'org_B'],
+    ]);
+    expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
+    expect(await store.listInstallationsForWorkspace('org_B')).toEqual([]);
+  });
+
+  it('reports a push to an unconnected repo to every workspace the installation is attached to', async () => {
+    await seedInstallation(store, 9, ['org_A', 'org_B']);
+
+    await post('push', {
+      ref: 'refs/heads/main',
+      after: 'sha-after',
+      repository: { full_name: 'acme/handbook', default_branch: 'main' },
+      installation: { id: 9 },
+    }).expect(202);
+
+    expect(sourcePushCalls.map((t) => t.workspaceOrgId)).toEqual(['org_A', 'org_B']);
+  });
+
   // Nothing is baselined for a repository Code has not connected, but the
   // workspace that installed the App may read it as a context source.
   it('reports a push to an unconnected repo of a workspace’s installation', async () => {
-    await store.saveInstallation({
-      installationId: 9,
-      accountLogin: 'acme',
-      accountType: 'Organization',
-      workspaceOrgId: 'org_A',
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
+    await seedInstallation(store, 9, ['org_A']);
 
     await post('push', {
       ref: 'refs/heads/main',

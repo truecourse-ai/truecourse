@@ -32,7 +32,8 @@ const JOBS_NOT_RUNNING =
 /** What an unconfigured server tells a caller who reaches /api/github. */
 const GITHUB_NOT_CONFIGURED =
   'GitHub is not configured on this server. Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, ' +
-  'GITHUB_APP_WEBHOOK_SECRET and GITHUB_APP_SLUG, then restart it.';
+  'GITHUB_APP_WEBHOOK_SECRET, GITHUB_APP_SLUG, GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET, ' +
+  'then restart it.';
 
 /** What a request under /api that no router answered is told. */
 const API_ROUTE_NOT_FOUND = 'The server has no such route.';
@@ -140,15 +141,16 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // answers 503 with the env vars to set, rather than a 404 that reads as a bug.
   if (opts.github) {
     app.use('/api/github', opts.github.webhook);
-    // GET /setup is a browser TOP-LEVEL NAVIGATION from GitHub after an App
-    // install. Behind the gate, a missing/expired session would render raw
-    // 401 JSON as the whole page and the installation would never bind to a
-    // workspace (invisible to /status, 403 on connect — a dead end). Bounce
-    // through login instead, returning here with a live session; with one,
-    // fall through to the gate and the connect router's real handler.
+    // GET /callback is a browser TOP-LEVEL NAVIGATION from GitHub after an
+    // authorize or an App install. Behind the gate, a missing/expired session
+    // would render raw 401 JSON as the whole page and the installation would
+    // never attach to a workspace (invisible to /status, 403 on connect — a
+    // dead end). Bounce through login instead, returning here with a live
+    // session; with one, fall through to the gate and the connect router's
+    // real handler.
     if (opts.authVerifier) {
       const verify = opts.authVerifier;
-      app.get('/api/github/setup', async (req, res, next) => {
+      app.get('/api/github/callback', async (req, res, next) => {
         const session = await verify(req.headers.cookie).catch(() => null);
         if (session) {
           next();

@@ -49,6 +49,17 @@ export async function fetchInstallationRepos(
   return body.repos;
 }
 
+/**
+ * Detach an installation from this workspace. The repositories connected
+ * through it here are disconnected with it; other workspaces keep theirs.
+ * Rejects with the server's reason.
+ */
+export async function detachGithubInstallation(installationId: number): Promise<void> {
+  await fetchApi<{ ok: boolean }>(`/api/github/installations/${installationId}`, {
+    method: 'DELETE',
+  });
+}
+
 /** Link one repository. The row is the connection — the onboarding scan clones
  *  for itself in the background, so this returns as soon as the row is written. */
 export async function linkGithubRepo(link: {

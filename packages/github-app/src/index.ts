@@ -6,7 +6,19 @@
  * the webhook router.
  */
 
-export { loadGithubAppConfig, type GithubAppConfig } from './config.js';
+export { loadGithubAppConfig, GITHUB_APP_ENV_VARS, type GithubAppConfig } from './config.js';
+export {
+  exchangeUserCode,
+  listUserInstallations,
+  reachableInstallations,
+  type UserInstallation,
+} from './oauth.js';
+export {
+  signConnectState,
+  verifyConnectState,
+  CONNECT_STATE_TTL_MS,
+  type ConnectState,
+} from './connect-state.js';
 export { verifyWebhookSignature } from './signature.js';
 export {
   createGithubAuth,
@@ -38,10 +50,15 @@ export {
 } from './webhook.js';
 export {
   createConnectRouter,
+  CONNECT_REFUSED_FLAG,
   type ConnectDeps,
   type OnRepoLinked,
   type OnRepoUnlinked,
 } from './connect.js';
 export { GITHUB_PROVIDER, installationOf } from './provider.js';
-export type { InstallationStore, InstallationRecord } from './store/types.js';
+export type {
+  InstallationStore,
+  InstallationRecord,
+  InstallationAccount,
+} from './store/types.js';
 export { PostgresInstallationStore, type InstallationDb } from './store/pg-store.js';

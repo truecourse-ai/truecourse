@@ -485,17 +485,20 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                 </li>
               )}
               {(installationRepos ?? []).map((r) => {
+                // A repository belongs to one workspace: connected here, or
+                // in another one, it is shown and not pickable.
                 const linked = isLinked(r.fullName);
+                const taken = linked || r.connectedElsewhere;
                 const selected = picked[0] === r.fullName;
                 return (
                   <li key={r.fullName}>
                     <button
                       type="button"
-                      disabled={linked}
+                      disabled={taken}
                       aria-pressed={selected}
                       onClick={() => setPicked([r.fullName])}
                       className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
-                        linked ? 'cursor-default opacity-60' : selected ? 'bg-muted' : 'hover:bg-muted/40'
+                        taken ? 'cursor-default opacity-60' : selected ? 'bg-muted' : 'hover:bg-muted/40'
                       }`}
                     >
                       <span
@@ -507,7 +510,15 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                         {selected && <Check className="h-2.5 w-2.5" />}
                       </span>
                       <span className="block min-w-0 flex-1 truncate font-mono text-xs text-foreground">{r.fullName}</span>
-                      <Capsule>{linked ? 'connected' : r.private ? 'private' : 'public'}</Capsule>
+                      <Capsule>
+                        {linked
+                          ? 'connected'
+                          : r.connectedElsewhere
+                            ? 'in another workspace'
+                            : r.private
+                              ? 'private'
+                              : 'public'}
+                      </Capsule>
                     </button>
                   </li>
                 );

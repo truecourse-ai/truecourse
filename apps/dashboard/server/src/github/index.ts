@@ -31,10 +31,12 @@ import {
   loadGithubAppConfig,
   installationOf,
   PostgresInstallationStore,
+  reachableInstallations,
   splitRepo,
   type InstallationStore,
   type GithubAuth,
   type OctokitClient,
+  type UserInstallation,
 } from '@truecourse/github-app';
 import type { RepositoryRecord, RepositoryStore } from '@truecourse/shared';
 import { getDb } from '../db.js';
@@ -73,6 +75,13 @@ export interface GithubConnectionOverrides {
   lookupInstallationAccount?: (
     installationId: number,
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
+  /**
+   * The installations the person behind an OAuth code can reach. Default: the
+   * code exchanged with GitHub for a user token, asked once.
+   */
+  userInstallationsFor?: (code: string) => Promise<UserInstallation[]>;
+  /** Signs the connect `state`. Default: `TRUECOURSE_SECRET_KEY`. */
+  stateSecret?: string;
   /** Per-run work trees. Default: a token clone into the workspace's run dir. */
   workTree?: WorkTreeProvider;
   /**
@@ -205,10 +214,21 @@ export function createGithubConnection(
     },
   });
 
+  // The connect `state` is signed with the server's own secret, the one boot
+  // already requires for the workspace's encrypted rows.
+  const stateSecret = overrides.stateSecret ?? process.env.TRUECOURSE_SECRET_KEY;
+  if (!stateSecret) {
+    throw new Error('TRUECOURSE_SECRET_KEY is required to sign the GitHub connect state');
+  }
+
   const connect = createConnectRouter({
     store,
     repos,
     appSlug: cfg.appSlug,
+    clientId: cfg.clientId,
+    stateSecret,
+    userInstallationsFor:
+      overrides.userInstallationsFor ?? ((code: string) => reachableInstallations(cfg, code)),
     appUrl: process.env.WORKOS_APP_URL || 'http://localhost:3000',
     // Back to the connect dialog, so the new installation is pickable at once.
     setupRedirectPath: '/settings/repositories',

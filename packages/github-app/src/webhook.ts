@@ -152,10 +152,11 @@ async function handleInstallation(
 ): Promise<void> {
   const { action, installation } = payload;
   if (action === 'deleted') {
-    // Uninstalling the App disconnects every repo it linked. Run the same
-    // per-repo cleanup an explicit unlink runs (cancel the running scan, drop
-    // the repo's server state) BEFORE the rows go — the cascade below deletes
-    // the link rows, and cleanup must not run on repos nobody owns anymore.
+    // Uninstalling the App disconnects every repo it linked, in every
+    // workspace the installation was attached to. Run the same per-repo
+    // cleanup an explicit unlink runs (cancel the running scan, drop the
+    // repo's server state) BEFORE the rows go — the cascade below deletes the
+    // link rows, and cleanup must not run on repos nobody owns anymore.
     for (const link of await deps.repos.listReposForAccount(
       GITHUB_PROVIDER,
       String(installation.id),
@@ -168,15 +169,15 @@ async function handleInstallation(
     log.info(`[github-app] installation ${installation.id} removed`);
     return;
   }
-  // created (and other lifecycle events) — upsert the installation. The
-  // workspace link is set later when the user completes the connect flow.
+  // created (and other lifecycle events) — upsert the installation's account.
+  // Its workspace links are the connect callback's to write, and a re-sent
+  // event never touches them.
   const now = new Date().toISOString();
   const existing = await deps.store.getInstallation(installation.id);
   await deps.store.saveInstallation({
     installationId: installation.id,
     accountLogin: installation.account.login,
     accountType: installation.account.type,
-    workspaceOrgId: existing?.workspaceOrgId ?? null,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   });
@@ -218,19 +219,20 @@ async function handlePush(
   // Only act for repositories Code has connected.
   const link = await deps.repos.getRepo(payload.repository.full_name);
   if (!link || !link.enabled) {
-    // Not connected in Code, so nothing is baselined. The workspace this
-    // installation belongs to may still read the repository as a context
+    // Not connected in Code, so nothing is baselined. Every workspace this
+    // installation is attached to may still read the repository as a context
     // source, and that source's documents just moved.
     if (link || !deps.onSourcePush) return;
     const installation = await deps.store.getInstallation(payload.installation.id);
-    if (!installation?.workspaceOrgId) return;
-    deps.onSourcePush({
-      repoFullName: payload.repository.full_name,
-      installationId: payload.installation.id,
-      defaultBranch: payload.repository.default_branch,
-      commitSha: payload.after,
-      workspaceOrgId: installation.workspaceOrgId,
-    });
+    for (const workspaceOrgId of installation?.workspaceOrgIds ?? []) {
+      deps.onSourcePush({
+        repoFullName: payload.repository.full_name,
+        installationId: payload.installation.id,
+        defaultBranch: payload.repository.default_branch,
+        commitSha: payload.after,
+        workspaceOrgId,
+      });
+    }
     return;
   }
 

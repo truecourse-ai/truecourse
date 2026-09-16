@@ -31,7 +31,7 @@ import {
 } from '../../apps/dashboard/server/src/services/context-lifecycle.service';
 import { setContextEventPublisher } from '../../apps/dashboard/server/src/services/context.service';
 import { memoryContextStore, type MemoryContextStore } from '../helpers/memory-context-store';
-import { MemoryInstallationStore } from '../github-app/memory-store';
+import { MemoryInstallationStore, seedInstallation } from '../github-app/memory-store';
 
 const ORG = 'org_A';
 const REPO = 'acme/api';
@@ -43,6 +43,9 @@ const APP_ENV = {
   GITHUB_APP_PRIVATE_KEY: 'not-a-real-key',
   GITHUB_APP_WEBHOOK_SECRET: WEBHOOK_SECRET,
   GITHUB_APP_SLUG: 'truecourse-test',
+  GITHUB_APP_CLIENT_ID: 'Iv1.test',
+  GITHUB_APP_CLIENT_SECRET: 'client-shh',
+  TRUECOURSE_SECRET_KEY: 'test-secret-key-for-connect-state-signing',
 } as const;
 
 let store: MemoryContextStore;
@@ -62,14 +65,7 @@ beforeEach(async () => {
   setContextEventPublisher(() => {});
   gate = new MemoryInstallationStore();
   syncs = [];
-  await gate.saveInstallation({
-    installationId: INSTALLATION_ID,
-    accountLogin: 'acme',
-    accountType: 'Organization',
-    workspaceOrgId: ORG,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  });
+  await seedInstallation(gate, INSTALLATION_ID, [ORG]);
 });
 
 afterEach(() => {

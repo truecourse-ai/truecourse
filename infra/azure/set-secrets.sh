@@ -10,7 +10,8 @@
 #   export TRUECOURSE_SECRET_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")"
 #   export WORKOS_API_KEY=... WORKOS_CLIENT_ID=... WORKOS_COOKIE_PASSWORD=...
 #   export GITHUB_APP_ID=... GITHUB_APP_PRIVATE_KEY="$(base64 -i app.private-key.pem | tr -d '\n')" \
-#          GITHUB_APP_WEBHOOK_SECRET=... GITHUB_APP_SLUG=truecourse-gate
+#          GITHUB_APP_WEBHOOK_SECRET=... GITHUB_APP_SLUG=truecourse-gate \
+#          GITHUB_APP_CLIENT_ID=... GITHUB_APP_CLIENT_SECRET=...
 #   ./infra/azure/set-secrets.sh
 #
 # Each name set here is the dashed form of a name in .github/scripts/vm-release.py
@@ -47,6 +48,8 @@ set_secret github-app-id            "${GITHUB_APP_ID:-}"            required
 set_secret github-app-private-key   "${GITHUB_APP_PRIVATE_KEY:-}"   required
 set_secret github-app-webhook-secret "${GITHUB_APP_WEBHOOK_SECRET:-}" required
 set_secret github-app-slug          "${GITHUB_APP_SLUG:-}"          required
+set_secret github-app-client-id     "${GITHUB_APP_CLIENT_ID:-}"     required
+set_secret github-app-client-secret "${GITHUB_APP_CLIENT_SECRET:-}" required
 
 # Optional — absent means the app's default.
 set_secret sentry-dsn                    "${SENTRY_DSN:-}"
