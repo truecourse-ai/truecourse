@@ -87,7 +87,7 @@ import { cachedSessionOutcome, promptFingerprint } from '../agent/session-cache.
 import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
-import { coldProofEnabled, proveSeedFromColdClone } from './seed-cold-proof.js';
+import { proveSeedFromColdClone } from './seed-cold-proof.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
 
@@ -1271,10 +1271,18 @@ function checkProvidesTool(world: SeedSessionWorld): SessionTool {
 export interface BuildSeedSessionOptions {
   signal?: AbortSignal;
   onSessionEvent?: (workItem: string, event: SessionEvent) => void;
+  /**
+   * The fold's second gate — the seed proved again from a cold copy of the
+   * repository, through the recipe's own `install` and `build`. On by default;
+   * `false` is for a caller that must not pay a full install and build (the
+   * test suite), never for production, where what it catches is unrecoverable
+   * later.
+   */
+  coldProof?: boolean;
 }
 
-/** One `api.services` lifecycle handle — up/down through `runBuild`, exactly
- *  as `verifyProposal` runs them, teardown always safe to call twice. */
+/** One `api.services` lifecycle handle — up/down/reset through `runBuild`,
+ *  exactly as `verifyProposal` runs them, teardown always safe to call twice. */
 function servicesController(repoRoot: string, recipe: Recipe, signal?: AbortSignal) {
   const services = recipe.api?.services;
   let up = false;
@@ -1293,6 +1301,13 @@ function servicesController(repoRoot: string, recipe: Recipe, signal?: AbortSign
       if (!services?.down || !up) return;
       up = false;
       await runBuild(repoRoot, services.down, recipe.env, DEFAULT_BUILD_TIMEOUT_MS);
+    },
+    /** The wipe (`down -v`), when the recipe declares one; a no-op otherwise.
+     *  Best-effort: a reset that fails is not a verdict, the `up` after it is. */
+    async reset(): Promise<void> {
+      if (!services?.reset) return;
+      up = false;
+      await runBuild(repoRoot, services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
     },
   };
 }
@@ -1465,9 +1480,14 @@ export function buildSeedSession(
         };
       }
 
-      const folded = await foldSeedOutcome(world, services, outcome.output);
+      const folded = await foldSeedOutcome(world, services, outcome.output, opts.coldProof !== false);
       if ('reason' in folded) {
-        return { status: 'failed', reason: folded.reason, ...(sessionRunId ? { sessionRunId } : {}) };
+        return {
+          status: 'failed',
+          reason: folded.reason,
+          ...(sessionRunId ? { sessionRunId } : {}),
+          ...(folded.recipeDefect ? { recipeDefect: true } : {}),
+        };
       }
       if (!outcome.fromCache && outcome.output.findings.length > 0) {
         appendFindingsLedger({
@@ -1502,14 +1522,17 @@ export function buildSeedSession(
 }
 
 /**
- * THE FOLD: write the two artifacts, then the done-gate — a fresh world and
- * the real `runSeed` — restoring the tree byte-for-byte when the gate refuses.
+ * THE FOLD: write the two artifacts, then the done-gates — a fresh world and
+ * the real `runSeed`, then the same again from a cold copy of the repository —
+ * restoring the tree byte-for-byte when a gate refuses OR throws. A refusal
+ * whose cause is the recipe's own `install`/`build` says so (`recipeDefect`).
  */
 async function foldSeedOutcome(
   world: SeedSessionWorld,
   services: ReturnType<typeof servicesController>,
   output: SeedSessionOutcome,
-): Promise<{ fixtures: string[]; credentials: string[] } | { reason: string }> {
+  coldProof: boolean,
+): Promise<{ fixtures: string[]; credentials: string[] } | { reason: string; recipeDefect?: boolean }> {
   const { input, targetPath } = world;
   if (!output.command.includes(targetPath)) {
     return {
@@ -1530,14 +1553,18 @@ async function foldSeedOutcome(
   // The binding fitness check, re-applied to what actually lands: an outcome
   // (or a salvaged draft) that leaves a runnable surface without a probed
   // principal is a seed every authenticated test downstream will block on, so
-  // the step fails with the surface named rather than reporting success.
-  const missing = missingPrincipalSurfaces(
-    output.provides,
-    output.probes,
-    requiredPrincipalSurfaces(input),
-  );
+  // the step fails with the surface named rather than reporting success. The
+  // sacrificial user is held to the same rule: the draft tool refused its
+  // absence, but the outcome's `provides` is what is written, and a session
+  // can re-emit it without the fixture it verified with.
+  const required = requiredPrincipalSurfaces(input);
+  const sacrificial = missingSacrificialUser(output.provides, required);
+  const missing = [
+    ...missingPrincipalSurfaces(output.provides, output.probes, required).map((m) => m.reason),
+    ...(sacrificial ? [sacrificial] : []),
+  ];
   if (missing.length > 0) {
-    return { reason: missing.map((m) => m.reason).join('; ') };
+    return { reason: missing.join('; ') };
   }
   const scriptAbs = path.resolve(input.repoRoot, targetPath);
   const scriptExisted = fs.existsSync(scriptAbs);
@@ -1569,13 +1596,16 @@ async function foldSeedOutcome(
     return { reason: written.status === 'failed' ? written.reason : written.reason };
   }
 
-  // THE DONE-GATE: a FRESH world — down, up, the real runSeed (which validates
+  // THE DONE-GATE: a FRESH world — down, the wipe when the recipe has one (a
+  // stopped world keeps its volumes, and the compose project is the
+  // repository's, shared by every run), up, the real runSeed (which validates
   // the manifest against the written `provides`). A cached or transcript-green
   // draft that cannot survive this is refused, and the tree is put back.
   let proof: SeedResult;
   try {
     input.onPhase?.('proving the seed in a fresh world', 'fresh-world proof');
     await services.down();
+    await services.reset();
     await services.up();
     proof = await runSeed({
       repoRoot: input.repoRoot,
@@ -1613,35 +1643,44 @@ async function foldSeedOutcome(
   // repository — the recipe's own `install` and `build`, then the services, the
   // seed and the probes. What this tree's `node_modules` accumulated over the
   // session's attempts is exactly what a generate's fresh clone will not have.
-  if (coldProofEnabled()) {
+  // A refusal AND a throw (a directory the copy cannot read, a cancellation)
+  // put the tree back: an unproven seed must not ship in the setup bundle.
+  if (coldProof) {
     const probes = output.probes;
     const webSurface = resolveWebSurface(input.recipe);
-    const needsWebBuild =
-      webSurface?.build !== undefined && requiredPrincipalSurfaces(input).some((s) => s.surface === 'web');
-    const cold = await proveSeedFromColdClone({
-      repoRoot: input.repoRoot,
-      recipe: input.recipe,
-      seed: written.seed,
-      env: world.server.env,
-      knownCredentials: world.secrets,
-      ...(needsWebBuild && webSurface?.build ? { webBuild: webSurface.build } : {}),
-      ...(world.signal ? { signal: world.signal } : {}),
-      ...(input.onPhase ? { onPhase: input.onPhase } : {}),
-      ...(probes
-        ? {
-            probe: async (copyRoot: string, seeded: SeedResult) => {
-              if (seeded.credentials.size === 0) return { ok: true as const };
-              // The copy's own repoRoot is what every boot parameter derives
-              // from, so the probes drive the clone, not the warm tree.
-              const coldWorld: SeedSessionWorld = { ...world, input: { ...input, repoRoot: copyRoot } };
-              return bootAndProbe(coldWorld, probes, seeded.credentials, seeded.fixtures, world.signal);
-            },
-          }
-        : {}),
-    });
-    if (!cold.ok) {
+    const needsWebBuild = webSurface?.build !== undefined && required.some((s) => s.surface === 'web');
+    try {
+      const cold = await proveSeedFromColdClone({
+        repoRoot: input.repoRoot,
+        recipe: input.recipe,
+        seed: written.seed,
+        env: world.server.env,
+        knownCredentials: world.secrets,
+        ...(needsWebBuild && webSurface?.build ? { webBuild: webSurface.build } : {}),
+        ...(world.signal ? { signal: world.signal } : {}),
+        ...(input.onPhase ? { onPhase: input.onPhase } : {}),
+        ...(probes
+          ? {
+              probe: async (copyRoot: string, seeded: SeedResult) => {
+                if (seeded.credentials.size === 0) return { ok: true as const };
+                // The copy's own repoRoot is what every boot parameter derives
+                // from, so the probes drive the clone, not the warm tree.
+                const coldWorld: SeedSessionWorld = { ...world, input: { ...input, repoRoot: copyRoot } };
+                return bootAndProbe(coldWorld, probes, seeded.credentials, seeded.fixtures, world.signal);
+              },
+            }
+          : {}),
+      });
+      if (!cold.ok) {
+        restore();
+        // An install or build that fails in a fresh copy is the RECIPE's
+        // defect: it verified against a tree that had grown what it needs.
+        const recipeDefect = cold.stage === 'install' || cold.stage === 'build';
+        return { reason: cold.reason, ...(recipeDefect ? { recipeDefect: true } : {}) };
+      }
+    } catch (error) {
       restore();
-      return { reason: cold.reason };
+      return { reason: `the cold-clone proof failed: ${message(error)}` };
     }
   }
 

@@ -46,6 +46,7 @@ import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { readGuardGenerateResume } from '../guard-generate-resume.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
 import {
+  markWorldStateUnknown,
   materializeStoredGuardState,
   persistGeneratedGuard,
   readGeneratedReport,
@@ -164,6 +165,7 @@ export function createRepoGuardGenerateTask(
             );
           }
           materializeGuardSetupBundle(tree.dir, bundle);
+          markWorldStateUnknown(tree.dir);
           activityTracker.fact('clone', `the newest setup bundle written into the clone: ${Object.keys(bundle).join(', ')}`);
           // The registered instances beside it: what a supplied dependency is
           // provided with decides which sections generate can author.
@@ -247,14 +249,17 @@ export function createRepoGuardGenerateTask(
           // stored is empty, so the baseline run it would chain into can only
           // clone and fail on "no scenarios" seconds later. Settle on the reason
           // the report carries instead — a refused run latches one, a failed
-          // author leaves an error — and end the chain here.
-          if (written === 0 && !report.noChanges && runnableScenarios(tree.dir) === 0) {
+          // author leaves an error — and end the chain here. A `noChanges`
+          // report is no exception: an empty set that stayed empty is still
+          // empty, and the count below is what tells that from an unchanged
+          // set with scenarios in it.
+          if (written === 0 && runnableScenarios(tree.dir) === 0) {
             const result: GuardGenerateJobResult = {
               repoFullName,
               status: 'nothing-written',
               written: 0,
               birthFindings: findings,
-              noChanges: false,
+              noChanges: report.noChanges,
               openConflicts: 0,
             };
             return {

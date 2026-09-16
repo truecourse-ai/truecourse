@@ -10,6 +10,7 @@
  *    is a caveat on an otherwise green verdict.
  */
 
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -80,6 +81,43 @@ describe('verifyProposal — the install/build failure report', () => {
     expect(verdict.reason).toContain('13 error code ELIFECYCLE')
     expect(verdict.reason).not.toContain('gone.log (tail)')
   }, 60_000)
+
+  // The pointer is whatever the install printed, and the install is the
+  // repository's own code: a path outside the checkout and the temp dir, or a
+  // thing that is not a regular file, is not read — a FIFO would otherwise
+  // block the process for good.
+  it('follows a pointer only to a regular file under the checkout or the temp dir', async () => {
+    const r = tempRepo()
+    const fifo = path.join(r, 'never-written.fifo')
+    execFileSync('mkfifo', [fifo])
+    const outside = path.join(os.homedir(), '.some-secret-file')
+
+    const verdict = await verifyProposal(r, {
+      build:
+        `echo "A complete log of this run can be found in: ${fifo}"; ` +
+        `echo "A complete log of this run can be found in: ${outside}"; ` +
+        `echo "A complete log of this run can be found in: /etc/hosts"; exit 1`,
+    })
+
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.reason).not.toContain('(tail)')
+  }, 60_000)
+
+  it('reads only the tail of a huge log', async () => {
+    const r = tempRepo()
+    const log = path.join(r, 'huge.log')
+    fs.writeFileSync(log, `${'x'.repeat(200)}\n`.repeat(5_000) + 'the last line\n')
+
+    const verdict = await verifyProposal(r, {
+      build: `echo "A complete log of this run can be found in: ${log}"; exit 1`,
+    })
+
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.reason).toContain('the last line')
+    expect(verdict.reason.length).toBeLessThan(13_000)
+  }, 60_000)
 })
 
 // ---------------------------------------------------------------------------
@@ -126,6 +164,21 @@ describe('the empty-schema caveat — how a migration step is spelled', () => {
     expect(verdict.warnings ?? []).toHaveLength(1)
     expect(verdict.warnings![0]).toContain('schema/migration')
   }, 60_000)
+
+  // `deploy` as a directory name or a hosting CLI's verb runs no migration.
+  const notMigrations = [
+    'echo docker compose -p acme -f deploy/docker-compose.yml up -d',
+    'echo pnpm deploy --filter api',
+    'echo vercel deploy',
+  ]
+  for (const up of notMigrations) {
+    it(`does not mistake \`${up}\` for the schema step`, async () => {
+      const verdict = await verifyProposal(tempRepo(), servicedProposal(up))
+      expect(verdict.ok).toBe(true)
+      if (!verdict.ok) return
+      expect(verdict.warnings ?? []).toHaveLength(1)
+    }, 60_000)
+  }
 })
 
 // ---------------------------------------------------------------------------

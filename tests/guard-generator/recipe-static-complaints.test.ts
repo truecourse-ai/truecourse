@@ -204,6 +204,49 @@ describe('staticProposalComplaints — the compose NAMESPACE rule (cal.diy 2026-
     expect(complaints.some((c) => c.includes('api.services.down'))).toBe(true)
   })
 
+  // `reset` is EXECUTED now — by verification before `up`, by the seed's cold
+  // proof — so an un-namespaced `down -v` reaches the developer's own stack
+  // exactly as an un-namespaced `up` does, volumes included.
+  it('holds `api.services.reset` to the namespace rule too', () => {
+    const complaints = staticProposalComplaints(
+      {
+        build: 'true',
+        api: {
+          ...serve,
+          services: {
+            up: 'docker compose -p acme-truecourse -f docker/development/compose.yml up -d --wait database',
+            down: 'docker compose -p acme-truecourse -f docker/development/compose.yml stop',
+            reset: 'docker compose down -v',
+          },
+        },
+      },
+      undefined,
+      composeRepo(),
+    )
+    expect(complaints).toHaveLength(1)
+    expect(complaints[0]).toContain('api.services.reset')
+    expect(complaints[0]).toContain('without an explicit project namespace')
+  })
+
+  it('suggests a reset that carries the `up` command\'s own project and file flags', () => {
+    const complaints = staticProposalComplaints(
+      {
+        build: 'true',
+        api: {
+          ...serve,
+          services: {
+            up: 'docker compose -p acme-truecourse -f docker/development/compose.yml up -d --wait database',
+            down: 'docker compose -p acme-truecourse -f docker/development/compose.yml stop',
+          },
+        },
+      },
+      undefined,
+      composeRepo(),
+    )
+    const hit = complaints.find((c) => c.includes('declares no `reset`'))
+    expect(hit).toContain('`docker compose -p acme-truecourse -f docker/development/compose.yml down -v`')
+  })
+
   it('accepts `-p <project>` — including the stdin `-f -` shape documenso used legitimately', () => {
     const complaints = staticProposalComplaints(
       {
@@ -316,10 +359,24 @@ describe('staticProposalComplaints — installs that skip lifecycle scripts', ()
       'npm ci',
       'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pnpm install --frozen-lockfile',
       'CYPRESS_INSTALL_BINARY=0 npm ci',
+      // The spellings that turn scripts back ON.
+      'npm ci --ignore-scripts=false',
+      'npm_config_ignore_scripts=false npm ci',
     ]
     for (const install of clean) {
       const complaints = staticProposalComplaints({ install, build: 'true', api: API })
       expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toEqual([])
     }
+  })
+
+  it('reads the same switch out of the repository\'s own manager config', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-static-npmrc-'))
+    dirs.push(r)
+    fs.writeFileSync(path.join(r, '.npmrc'), 'ignore-scripts=true\n')
+    const complaints = staticProposalComplaints({ install: 'npm ci', build: 'true', api: API }, undefined, r)
+    const hit = complaints.find((c) => c.includes('lifecycle scripts'))
+    expect(hit).toContain('`ignore-scripts=true` in .npmrc')
+    // A build is not an install: the rc file says nothing about it.
+    expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toHaveLength(1)
   })
 })

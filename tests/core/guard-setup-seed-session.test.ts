@@ -49,10 +49,7 @@ import {
   seedSessionDef,
   providesWarnings,
 } from '../../packages/core/src/services/guard-setup/seed-session';
-import {
-  SEED_COLD_PROOF_ENV,
-  coldProofEnabled,
-} from '../../packages/core/src/services/guard-setup/seed-cold-proof';
+import { seedColdCopiesDir } from '../../packages/core/src/services/guard-setup/seed-cold-proof';
 import type { GuardSetupSessionContext } from '../../packages/core/src/services/guard-setup/session-context';
 import { memoryPersistence, stubDriver, outcome, malformedFailure } from './spec-scan-session-stub';
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
@@ -63,16 +60,17 @@ const TARGET = '.truecourse/scenarios/guard-seed.mjs';
 const repos: string[] = [];
 beforeEach(() => {
   installMemoryKvCache();
-  // The fold's second gate — a full install+build+seed in a cold copy — has its
-  // own describe below; everywhere else it would only add a slow second run of
-  // the world these tests are asserting about.
-  process.env[SEED_COLD_PROOF_ENV] = '0';
 });
 afterEach(() => {
   resetKvCacheStore();
-  delete process.env[SEED_COLD_PROOF_ENV];
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
 });
+
+/** The session under test WITHOUT the fold's second gate — a full
+ *  install+build+seed in a cold copy — which has its own describe below;
+ *  everywhere else it would only add a slow second run of the world these
+ *  tests are asserting about. */
+const seedSession = (context: GuardSetupSessionContext) => buildSeedSession(context, { coldProof: false });
 
 const DOC = 'docs/orgs.md';
 
@@ -290,7 +288,7 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
     });
     const h = harness(stub.driver);
 
-    const result = await buildSeedSession(h.context)(seedInput(r));
+    const result = await seedSession(h.context)(seedInput(r));
 
     // During the session: the draft exists ONLY in scratch.
     expect(seen.targetDuringSession).toBe(false);
@@ -311,7 +309,7 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
       return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
 
     expect(result.status).toBe('ok');
     // The session's world, its draft run, the teardown — then a world that was
@@ -331,7 +329,7 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
       return outcome({ script, command: COMMAND, provides: PROVIDES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
 
     // …and the fold's fresh-world proof is what catches it.
     expect(result.status).toBe('failed');
@@ -351,7 +349,7 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
       return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
 
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.reason).toMatch(/already exists/);
@@ -366,7 +364,7 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
       return outcome({ script: goodScript(), command: 'node somewhere/else.mjs', provides: PROVIDES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
 
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.reason).toMatch(/does not run the target script/);
@@ -390,7 +388,7 @@ describe('buildSeedSession — builds the app before the world boots', () => {
       return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
 
     expect(result.status).toBe('ok');
     // ONE build, then the session's world, then the fold's fresh world — the
@@ -403,7 +401,7 @@ describe('buildSeedSession — builds the app before the world boots', () => {
     writeRecipe(r, {}, { build: "printf 'tsc: dist is on fire\\n' >&2 && false" });
     const h = harness(null); // any session start throws
 
-    const result = await buildSeedSession(h.context)(seedInput(r));
+    const result = await seedSession(h.context)(seedInput(r));
 
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.reason).toMatch(/`build` failed/);
@@ -454,16 +452,8 @@ const installsModule = (r: string, name: string): string =>
   `printf 'module.exports = 1\\n' > node_modules/${name}/index.js`;
 
 describe('buildSeedSession — the cold-clone proof', () => {
-  beforeEach(() => {
-    // The proof is ON by default; the rest of this file opts out of it.
-    delete process.env[SEED_COLD_PROOF_ENV];
-  });
-
-  it('is on by default and off only for an explicit `0`', () => {
-    expect(coldProofEnabled()).toBe(true);
-    expect(coldProofEnabled({ [SEED_COLD_PROOF_ENV]: '0' })).toBe(false);
-    expect(coldProofEnabled({ [SEED_COLD_PROOF_ENV]: '1' })).toBe(true);
-  });
+  // The proof is ON by default; the rest of this file opts out of it through
+  // the session option, which is the only switch there is.
 
   it('runs install, build and the seed in a copy that has no node_modules', async () => {
     const r = fixtureRepo();
@@ -526,8 +516,55 @@ describe('buildSeedSession — the cold-clone proof', () => {
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.reason).toMatch(/cold-clone proof refused the seed: install/);
     expect(result.status === 'failed' && result.reason).toMatch(/no lockfile for this tree/);
+    // A failing install is the RECIPE's defect, said so for setup to unsettle it.
+    expect(result).toMatchObject({ recipeDefect: true });
     expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
     expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
+  }, 120_000);
+
+  it('a seed the cold copy cannot run is not a recipe defect', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, { install: installsModule(r, 'x') });
+    plantModule(r, 'x');
+    plantModule(r, 'y');
+    const script = moduleSeedScript('y');
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script, command: COMMAND, provides: PROVIDES });
+      return outcome({ script, command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result.status).toBe('failed');
+    expect(result).not.toHaveProperty('recipeDefect');
+  }, 120_000);
+
+  it('restores the tree when the copy itself throws, so an unproven seed never ships', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {});
+    const recipeBefore = fs.readFileSync(recipePath(r), 'utf-8');
+    // A directory the copy cannot read — what a root-owned bind mount looks like.
+    const locked = path.join(r, 'locked');
+    fs.mkdirSync(locked);
+    fs.writeFileSync(path.join(locked, 'x'), 'x');
+    fs.chmodSync(locked, 0o000);
+    try {
+      const stub = stubDriver(async (call) => {
+        await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+        return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+      });
+
+      const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+      expect(result.status).toBe('failed');
+      expect(result.status === 'failed' && result.reason).toMatch(/cold-clone proof failed/);
+      expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+      expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
+      // And the half-made copy is gone.
+      expect(fs.readdirSync(seedColdCopiesDir()).filter((n) => n.startsWith('tc-seed-cold-'))).toEqual([]);
+    } finally {
+      fs.chmodSync(locked, 0o755);
+    }
   }, 120_000);
 });
 
@@ -582,7 +619,7 @@ describe('buildSeedSession — credential probes', () => {
       return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
     expect(result.status).toBe('ok');
   }, 60_000);
 
@@ -601,7 +638,7 @@ describe('buildSeedSession — credential probes', () => {
       return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
 
     expect(result).toMatchObject({ status: 'ok', scriptPath: TARGET, credentials: ['owner'] });
     // The probes are session-side verification, never part of the recipe.
@@ -632,7 +669,7 @@ describe('buildSeedSession — credential probes', () => {
       return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
     expect(result.status).toBe('ok');
   }, 60_000);
 
@@ -657,7 +694,7 @@ describe('buildSeedSession — credential probes', () => {
       return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
     expect(result.status).toBe('ok');
   }, 60_000);
 
@@ -676,7 +713,7 @@ describe('buildSeedSession — credential probes', () => {
       return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
 
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.reason).toMatch(/probe/);
@@ -716,7 +753,7 @@ describe('buildSeedSession — every authenticating surface must get a probed pr
       return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { securitySchemes: SCHEMES }),
     );
     expect(result).toMatchObject({ status: 'ok', credentials: ['owner'] });
@@ -738,7 +775,7 @@ describe('buildSeedSession — every authenticating surface must get a probed pr
       return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { securitySchemes: SCHEMES }),
     );
 
@@ -762,7 +799,7 @@ describe('buildSeedSession — every authenticating surface must get a probed pr
       return malformedFailure('budget exhausted after the principal draft');
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { securitySchemes: SCHEMES }),
     );
     expect(result).toMatchObject({ status: 'ok', salvaged: true, credentials: ['owner'] });
@@ -781,7 +818,7 @@ describe('buildSeedSession — every authenticating surface must get a probed pr
       return malformedFailure('budget exhausted with only a fixtures draft');
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { securitySchemes: SCHEMES }),
     );
     expect(result.status).toBe('failed');
@@ -802,7 +839,7 @@ describe('buildSeedSession — every authenticating surface must get a probed pr
     });
 
     // No security schemes, no roles, no login table: nothing requires a principal.
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
     expect(result).toMatchObject({ status: 'ok', fixtures: ['org'] });
   }, 60_000);
 });
@@ -869,7 +906,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
 
@@ -899,7 +936,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
     expect(result).toMatchObject({ status: 'ok', credentials: ['webSession'] });
@@ -928,7 +965,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
     expect(result).toMatchObject({ status: 'ok', credentials: ['webSession'] });
@@ -957,7 +994,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
     expect(result.status).toBe('ok');
@@ -987,7 +1024,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
     expect(result.status).toBe('ok');
@@ -1014,7 +1051,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
     expect(result.status).toBe('ok');
@@ -1041,7 +1078,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
     expect(result.status).toBe('ok');
@@ -1068,7 +1105,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
     expect(result.status).toBe('ok');
@@ -1096,7 +1133,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
     expect(result.status).toBe('ok');
@@ -1118,7 +1155,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
     expect(result.status).toBe('ok');
   }, 60_000);
 
@@ -1144,7 +1181,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
 
@@ -1184,10 +1221,41 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(
+    const result = await seedSession(harness(stub.driver).context)(
       seedInput(r, { database: PRINCIPAL_DATABASE }),
     );
     expect(result).toMatchObject({ status: 'ok', fixtures: ['org', 'sacrificialUser', 'webUser'] });
+  }, 60_000);
+
+  // The outcome's `provides` is what the fold writes, not the draft's — so a
+  // session that verified with the fixture and re-emitted its outcome without
+  // it is caught at the fold, where the rule is applied once more.
+  it('refuses an outcome that drops the sacrificial user its verified draft carried', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const recipeBefore = fs.readFileSync(recipePath(r), 'utf-8');
+    const withoutSpare = {
+      ...WEB_PROVIDES,
+      fixtures: { org: WEB_PROVIDES.fixtures.org, webUser: WEB_PROVIDES.fixtures.webUser },
+    };
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      expect(verdict.isError).toBeUndefined();
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: withoutSpare, probes: WEB_PROBES, findings: [] });
+    });
+
+    const result = await seedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result.status).toBe('failed');
+    expect(result.status === 'failed' && result.reason).toMatch(/sacrificialUser/);
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
   }, 60_000);
 });
 
@@ -1212,7 +1280,7 @@ describe('buildSeedSession — salvages the last verified draft when the session
       return malformedFailure('the model never produced an outcome');
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
 
     expect(result).toMatchObject({ status: 'ok', scriptPath: TARGET, command: COMMAND, salvaged: true });
     expect(fs.readFileSync(path.join(r, TARGET), 'utf-8')).toBe(goodScript());
@@ -1234,7 +1302,7 @@ describe('buildSeedSession — salvages the last verified draft when the session
       return malformedFailure();
     });
 
-    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
 
     expect(result.status).toBe('failed');
     expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
@@ -1278,7 +1346,7 @@ describe('buildSeedSession — minted credentials never enter a transcript', () 
     });
     const h = harness(stub.driver);
 
-    const result = await buildSeedSession(h.context)(seedInput(r));
+    const result = await seedSession(h.context)(seedInput(r));
 
     expect(result.status).toBe('ok');
     expect(readBack).toContain('«cred:owner»');
@@ -1300,7 +1368,7 @@ describe('buildSeedSession — the cache', () => {
       await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
       return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
     });
-    expect((await buildSeedSession(harness(stub.driver).context)(seedInput(r))).status).toBe('ok');
+    expect((await seedSession(harness(stub.driver).context)(seedInput(r))).status).toBe('ok');
     expect(stub.calls).toHaveLength(1);
 
     // Undo the WRITE, not the cache: the step would run again, and the only thing
@@ -1310,7 +1378,7 @@ describe('buildSeedSession — the cache', () => {
     fs.rmSync(path.join(r, 'services.log'));
     const second = harness(null); // any acquire throws
 
-    const again = await buildSeedSession(second.context)(seedInput(r));
+    const again = await seedSession(second.context)(seedInput(r));
 
     expect(again).toMatchObject({ status: 'ok', fromCache: true, scriptPath: TARGET });
     expect(second.acquires()).toBe(0);

@@ -595,6 +595,112 @@ describe('compose services', () => {
     )
   })
 
+  // What the app depends on IS its infrastructure: the mail catcher and the
+  // search engine come up beside the datastore instead of being dropped for
+  // not being one (linkwarden's meilisearch, documenso's inbucket).
+  it('brings up every sidecar the app depends on, not only the datastore', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      'docker-compose.yml': [
+        'services:',
+        '  app:',
+        '    build: .',
+        '    depends_on: [db, mail, search]',
+        '  db:',
+        '    image: postgres:16',
+        '  mail:',
+        '    image: axllent/mailpit',
+        '  search:',
+        '    image: getmeili/meilisearch:v1.8',
+        '',
+      ].join('\n'),
+    })
+
+    expect(proposal(repo).recipe.api?.services?.up).toBe(
+      `docker compose -p ${project(repo)} -f docker-compose.yml up -d --wait db mail search`,
+    )
+  })
+
+  it('leaves out a proxy in front of the app, which `up` would drag the app up with', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      'docker-compose.yml': [
+        'services:',
+        '  nginx:',
+        '    image: nginx:1.27',
+        '    depends_on: [app]',
+        '  app:',
+        '    build: .',
+        '    depends_on: [db]',
+        '  db:',
+        '    image: postgres:16',
+        '',
+      ].join('\n'),
+    })
+
+    expect(proposal(repo).recipe.api?.services?.up).toBe(
+      `docker compose -p ${project(repo)} -f docker-compose.yml up -d --wait db`,
+    )
+  })
+
+  it('leaves out the app when the compose file runs its published image', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      'docker-compose.yml': [
+        'services:',
+        '  app:',
+        '    image: ghcr.io/acme/svc:latest',
+        '    ports: ["3000:3000"]',
+        '    depends_on: [db]',
+        '  db:',
+        '    image: postgres:16',
+        '',
+      ].join('\n'),
+    })
+
+    expect(proposal(repo).recipe.api?.services?.up).toBe(
+      `docker compose -p ${project(repo)} -f docker-compose.yml up -d --wait db`,
+    )
+  })
+
+  // Naming the base file with `-f` switches off compose's default merge of the
+  // override sibling — where a repo keeps its dev ports and passwords — so the
+  // override is named too, and read too.
+  it('names and reads the override file beside the base', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      'docker-compose.yml': 'services:\n  app:\n    build: .\n    depends_on: [db]\n  db:\n    image: postgres:16\n',
+      'docker-compose.override.yml': 'services:\n  db:\n    ports: ["5432:5432"]\n  mail:\n    image: axllent/mailpit\n',
+    })
+
+    const services = proposal(repo).recipe.api?.services
+    const base = `docker compose -p ${project(repo)} -f docker-compose.yml -f docker-compose.override.yml`
+    expect(services).toEqual({
+      // `mail` exists only in the override; a root nobody depends on is not
+      // infrastructure, so only the datastore comes up — but through both files.
+      up: `${base} up -d --wait db`,
+      down: `${base} down`,
+      reset: `${base} down -v`,
+    })
+  })
+
+  it('names the compose project after the repository identity when one is given', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      'compose.yaml': 'services:\n  db:\n    image: postgres:16\n',
+    })
+
+    const out = proposeRecipe(repo, { securitySchemes: {}, repoKey: 'Acme/Widgets' })
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(out.recipe.api?.services?.up).toBe('docker compose -p truecourse-acme-widgets -f compose.yaml up -d --wait')
+  })
+
   it('reports an env_file the repository does not ship, and invents nothing', () => {
     const repo = repoOf({
       'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),

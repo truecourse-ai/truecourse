@@ -70,6 +70,7 @@ import {
   buildDocSectionIndex,
   runGuard,
   guardDecisionsPath,
+  guardWorldDirtyMarkerPath,
   indexRepoDocs,
   manifestPath,
   recipePath,
@@ -891,6 +892,57 @@ describe('the guard generate job', () => {
     // The report is still the record of WHY, so the guard surfaces can say it.
     const baseline = await readGuardBaselineCommit(REPO);
     expect(await readGuardResult(REPO, baseline!)).toMatchObject({ refusal });
+  }, 60_000);
+
+  // A generate that found nothing CHANGED over an empty set is still an empty
+  // set: the first generate refused every flow and stored a manifest with no
+  // scenario, and the re-run found every flow unchanged. `noChanges` says
+  // nothing about whether there is anything to run.
+  it('settles a warning and chains nothing when an unchanged generate stands over an empty set', async () => {
+    await saveSetupBundle();
+    const prior = makeTmpDir('tc-onboarding-gen-empty-');
+    fs.mkdirSync(scenariosDir(prior), { recursive: true });
+    const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
+    await saveScenarios(priorRef, scenariosDir(prior));
+    const refusal = { status: 'seed-failed', message: 'the seed script exited 1', flowIds: [] };
+    await writeGuardResult(priorRef, { ...okReport([]), generatedAt: '2026-01-01T00:00:00Z', refusal }, { baseline: true });
+
+    generateImpl = async (repoRoot) => {
+      writeCloneGuardResult(repoRoot, {
+        ...okReport([]),
+        generatedAt: '2026-03-03T00:00:00Z',
+        noChanges: true,
+        refusal,
+      });
+      return okResult([]);
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({
+      status: 'succeeded',
+      result: { status: 'nothing-written', written: 0, noChanges: true },
+    });
+    expect(enqueued).toEqual(['repo.guard-generate']);
+  }, 60_000);
+
+  // The clone is fresh but the compose project it boots is the repository's,
+  // shared with every earlier job — and the marker that records a mutated
+  // world died with the clone that wrote it. So the job declares the world
+  // dirty before the engine boots it, and the boot resets first.
+  it('marks the shared world dirty in the clone before the engine runs', async () => {
+    await saveSetupBundle();
+    let marker: string | null = null;
+    generateImpl = async (repoRoot, options) => {
+      marker = fs.existsSync(guardWorldDirtyMarkerPath(repoRoot))
+        ? fs.readFileSync(guardWorldDirtyMarkerPath(repoRoot), 'utf-8')
+        : null;
+      return authoring(repoRoot, options);
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect(marker).toMatch(/materialized/);
   }, 60_000);
 
   // The same empty generate over a set that already exists is NOT the same

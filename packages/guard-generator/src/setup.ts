@@ -159,6 +159,13 @@ export class SetupStepNotReadyError extends Error {
 
 export interface GuardSetupOptions {
   repoRoot: string
+  /**
+   * The repository's stable identity (`owner/repo`, `local/<folder>`), when
+   * the caller has one. Recipe discovery names the compose project after it,
+   * so every run of the repository shares one project whatever directory it
+   * was cloned into. Absent ⇒ the checkout directory's own name.
+   */
+  repoKey?: string
   /** Interface mapping seam — generate's provider shape, optionally extended
    *  with the mapping's run diagnostics; see {@link GuardSetupInterfaceProvider}. */
   interfaces?: GuardSetupInterfaceProvider
@@ -391,7 +398,18 @@ export type GuardSetupSeedSessionResult =
       /** The session died without an outcome and its last verified draft was folded. */
       salvaged?: boolean
     }
-  | { status: 'failed' | 'skipped'; reason: string; sessionRunId?: string }
+  | {
+      status: 'failed' | 'skipped'
+      reason: string
+      sessionRunId?: string
+      /**
+       * The failure is the RECIPE's, not the seed's: the cold-clone proof ran
+       * the recipe's own `install`/`build` in a fresh copy and one of them
+       * failed. Setup treats that as the recipe gate giving way — the recipe
+       * row is unsettled so the next run re-derives it, and the run fails.
+       */
+      recipeDefect?: boolean
+    }
 export interface GuardSetupPreparationSessionInput {
   repoRoot: string
   recipe: Recipe
@@ -538,6 +556,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     const discovery = await discoverRecipe(repoRoot, opts.recipeRunner, {
       ...(opts.refresh ? { ignoreExisting: true } : {}),
       ...(opts.repair ? { repair: opts.repair } : {}),
+      ...(opts.repoKey ? { repoKey: opts.repoKey } : {}),
       routes: async () => routesFromInterfaces((await mapOnce()).interfaces),
       database: async () => {
         const db = (await mapOnce()).database
@@ -930,6 +949,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const seedFpOf = (): string =>
     seedFingerprint(computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
   let seedStep: GuardSetupSeedStep | undefined
+  /** A recipe defect the seed's cold-clone proof surfaced: the run fails on it. */
+  let recipeFailure: string | undefined
   if (enter('seed')) {
     const seedFpPre = seedFpOf()
     if (replayed('seed')) {
@@ -993,6 +1014,28 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         inputFingerprint: seedFpOf(),
         ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
       })
+      // The cold-clone proof is the one place the recipe's `install`/`build`
+      // run in a tree that did not grow across the session's attempts. When
+      // they fail there, the recipe verified against a tree a fresh clone will
+      // not have — a recipe-gate failure found late. Reported as one: the
+      // recipe row is UNSETTLED (the next run re-derives instead of skipping
+      // on its unchanged manifests) and the run fails with the reason, so
+      // nothing chains a generate onto an install that does not work.
+      if (seedRun.recipeDefect && seedStep.reason) {
+        recipeFailure = seedStep.reason
+        const recipeRow = steps.findIndex((row) => row.key === 'recipe')
+        const row: GuardSetupTaxonomyStep = {
+          key: 'recipe',
+          status: 'failed',
+          reason: recipeFailure,
+          inputFingerprint: recipeInputFp,
+          ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
+        }
+        if (recipeRow >= 0) steps[recipeRow] = row
+        else steps.push(row)
+        recipeStep = { ...recipeStep, status: 'failed', reason: recipeFailure }
+        fact('recipe', `unsettled by the seed's cold-clone proof: ${firstReasonLine(recipeFailure)}`)
+      }
       fact('seed', seedOutcomeFact(seedStep, seedRun.fromCache === true))
       for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
       opts.onStepDone?.('seed', seedSummary(seedStep))
@@ -1082,8 +1125,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     recipe: reloadRecipe(repoRoot) ?? current,
     report: {
       ranAt: new Date().toISOString(),
-      status: preparationFailure ? 'failed' : 'ok',
-      ...(preparationFailure ? { reason: preparationFailure } : {}),
+      status: recipeFailure || preparationFailure ? 'failed' : 'ok',
+      ...(recipeFailure ? { reason: recipeFailure } : preparationFailure ? { reason: preparationFailure } : {}),
       steps: only ? mergeStepSpine(steps, prior) : steps,
       recipe: recipeStep,
       ...(externals ? { externals } : {}),
@@ -1611,7 +1654,7 @@ async function runSeedStep(args: {
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
   onPhase: (running: string, done: string) => void
-}): Promise<{ step: GuardSetupSeedStep; sessionRunId?: string; fromCache?: boolean }> {
+}): Promise<{ step: GuardSetupSeedStep; sessionRunId?: string; fromCache?: boolean; recipeDefect?: boolean }> {
   const { opts, recipe, database, routes, schemes } = args
   const existing = recipe.api?.seed
 
@@ -1718,6 +1761,7 @@ async function runSeedStep(args: {
   return {
     step: { status: result.status, reason: result.reason },
     ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
+    ...(result.recipeDefect ? { recipeDefect: true } : {}),
   }
 }
 

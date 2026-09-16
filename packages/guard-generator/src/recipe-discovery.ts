@@ -60,6 +60,8 @@ import {
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import {
   proposeRecipe,
+  browserAppEvidence,
+  defaultComposeFiles,
   detectEcosystems,
   DEV_SCRIPT_MARKERS,
   SHELL_OPERATORS,
@@ -88,6 +90,9 @@ const SERVICES_TIMEOUT_MS = DEFAULT_BUILD_TIMEOUT_MS
  *  many of a log file that output points at. */
 const FAILURE_TAIL_LINES = 40
 const LOG_POINTER_TAIL_LINES = 60
+/** How much of a pointed-at log file is READ — the tail lines come out of this
+ *  window, so a multi-megabyte npm log costs one bounded read, not the file. */
+const LOG_POINTER_READ_BYTES = 64 * 1024
 /** The whole report's bound — it travels in a verdict, a session briefing and a
  *  stored run record. */
 const FAILURE_REPORT_CAP = 12_000
@@ -101,11 +106,18 @@ const LOG_FILE_POINTER = /(?:logs? can be found here|complete log of this run ca
 /**
  * The failure text a rejected install/build/services step carries: the tail of
  * the command's own output, then the tail of every log file that output pointed
- * at and that exists on disk. A short tail is useless against a manager whose
- * last lines are only a path — the compiler's words live in the file, and a
- * reader who cannot open it re-proposes blind.
+ * at. A short tail is useless against a manager whose last lines are only a
+ * path — the compiler's words live in the file, and a reader who cannot open
+ * it re-proposes blind.
+ *
+ * The pointer is UNTRUSTED: it is whatever the install printed, and the install
+ * is the repository's own code running as this process's user. So a section is
+ * read only from a regular file inside the checkout or the temp dir (the two
+ * places a package manager writes its logs), and only its last bytes — a FIFO
+ * or a device would otherwise hang or flood the process, and a path into the
+ * home directory would ship its contents to the model.
  */
-function failureReport(output: string): string {
+export function failureReport(output: string, repoRoot: string): string {
   const sections = [buildOutputTail(output, FAILURE_TAIL_LINES)]
   const seen = new Set<string>()
   for (const match of output.matchAll(LOG_FILE_POINTER)) {
@@ -113,15 +125,46 @@ function failureReport(output: string): string {
     const file = (match[1] ?? '').replace(/[),.;:'"]+$/, '')
     if (!file || seen.has(file)) continue
     seen.add(file)
-    let body: string
-    try {
-      body = fs.readFileSync(file, 'utf-8')
-    } catch {
-      continue // A pointer to a file we cannot read is not worth a section.
-    }
+    const body = readLogTail(file, repoRoot)
+    if (body === null) continue
     sections.push(`--- ${file} (tail) ---\n${buildOutputTail(body, LOG_POINTER_TAIL_LINES)}`)
   }
   return sections.join('\n\n').slice(0, FAILURE_REPORT_CAP)
+}
+
+/** The last {@link LOG_POINTER_READ_BYTES} of a log file a failing command named,
+ *  or null when the path is not a regular file under the checkout or the temp
+ *  dir (or cannot be read at all). */
+function readLogTail(file: string, repoRoot: string): string | null {
+  const within = (root: string, target: string): boolean => {
+    const rel = path.relative(root, target)
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  }
+  // Real paths on both sides: a temp dir behind a symlink (macOS's /var) must
+  // compare equal to the file's own resolved location.
+  let real: string
+  let allowedRoots: string[]
+  try {
+    real = fs.realpathSync(path.resolve(repoRoot, file))
+    allowedRoots = [fs.realpathSync(repoRoot), fs.realpathSync(os.tmpdir())]
+  } catch {
+    return null
+  }
+  if (!allowedRoots.some((root) => within(root, real))) return null
+  let fd: number | null = null
+  try {
+    const stat = fs.statSync(real)
+    if (!stat.isFile()) return null
+    const length = Math.min(stat.size, LOG_POINTER_READ_BYTES)
+    const buffer = Buffer.alloc(length)
+    fd = fs.openSync(real, 'r')
+    fs.readSync(fd, buffer, 0, length, stat.size - length)
+    return buffer.toString('utf-8')
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) fs.closeSync(fd)
+  }
 }
 
 /** Which proposer produced the recipe that verified. */
@@ -244,6 +287,13 @@ export interface DiscoverRecipeOptions {
    */
   datastores?: () => Promise<readonly DatastoreUrlRef[]>
   /**
+   * The repository's stable identity (`owner/repo`, `local/<folder>`), when the
+   * caller has one. The deterministic proposal names its compose project after
+   * it, so every run of the repository shares one project whatever directory
+   * it was cloned into. Absent ⇒ the checkout directory's own name.
+   */
+  repoKey?: string
+  /**
    * Re-derive even when `recipe.json` already exists (`guard recipe --refresh`).
    * Not a "force write": discovery still writes only a proposal that VERIFIED, so
    * a refresh that fails leaves the existing recipe exactly as it was. Never set
@@ -357,6 +407,7 @@ export async function discoverRecipe(
     routes: options.routes ? [...(await options.routes())] : undefined,
     datastores: options.datastores ? [...(await options.datastores())] : undefined,
     ...(inputs.manifestApps ? { manifestApps: inputs.manifestApps } : {}),
+    ...(options.repoKey ? { repoKey: options.repoKey } : {}),
   })
   if (derived.ok) {
     // The generated datastore must be ON DISK before verification: the `services.up`
@@ -745,7 +796,7 @@ export async function verifyProposal(
       return {
         ok: false,
         stage: 'install',
-        reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}:\n${failureReport(install.output)}`,
+        reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}:\n${failureReport(install.output, repoRoot)}`,
       }
     }
   }
@@ -756,7 +807,7 @@ export async function verifyProposal(
     return {
       ok: false,
       stage: 'build',
-      reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}:\n${failureReport(build.output)}`,
+      reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}:\n${failureReport(build.output, repoRoot)}`,
     }
   }
 
@@ -794,7 +845,7 @@ export async function verifyProposal(
         return {
           ok: false,
           stage: 'web boot',
-          reason: `web build \`${web.build}\` failed${webBuild.timedOut ? ' (timed out)' : ''}:\n${failureReport(webBuild.output)}`,
+          reason: `web build \`${web.build}\` failed${webBuild.timedOut ? ' (timed out)' : ''}:\n${failureReport(webBuild.output, repoRoot)}`,
         }
       }
     }
@@ -846,12 +897,12 @@ export async function verifyProposal(
         if (!up.ok) {
           const wipe = reset
             ? `--- api.services.reset \`${api.services.reset}\` (ran first${reset.ok ? '' : ', and failed'}) ---\n` +
-              `${failureReport(reset.output)}\n\n`
+              `${failureReport(reset.output, repoRoot)}\n\n`
             : ''
           return {
             ok: false,
             stage: 'services',
-            reason: `services \`${api.services.up}\` failed${up.timedOut ? ' (timed out)' : ''}:\n${wipe}${failureReport(up.output)}`,
+            reason: `services \`${api.services.up}\` failed${up.timedOut ? ' (timed out)' : ''}:\n${wipe}${failureReport(up.output, repoRoot)}`,
           }
         }
         servicesUp = true
@@ -1022,10 +1073,9 @@ function proposalWarnings(proposal: VerifiableProposal, repoRoot: string): strin
 }
 
 /** The compose files a bring-up command actually reads: every `-f`/`--file` it
- *  names, or — when it names none — the default files the daemon picks up from
- *  the repo root. Absent a `docker compose` invocation there are none. */
-const DEFAULT_COMPOSE_FILES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
-
+ *  names, or — when it names none — the default file compose picks up from the
+ *  repo root together with its `*.override.*` sibling, which compose merges
+ *  over it. Absent a `docker compose` invocation there are none. */
 function composeFilesRead(command: string, repoRoot: string): string[] {
   const named: string[] = []
   let invocations = 0
@@ -1034,7 +1084,7 @@ function composeFilesRead(command: string, repoRoot: string): string[] {
     named.push(...composeFlags(match[1] ?? '').files)
   }
   if (invocations === 0) return []
-  const candidates = named.length > 0 ? named : DEFAULT_COMPOSE_FILES
+  const candidates = named.length > 0 ? named : defaultComposeFiles(repoRoot)
   return candidates.map((f) => path.resolve(repoRoot, f)).filter((f) => fs.existsSync(f))
 }
 
@@ -1090,7 +1140,8 @@ const SQL_DATASTORE_URL = /^(?:postgres(?:ql)?|mysql):\/\//i
  *  script or subcommand (`prisma deploy`, `prisma:deploy`, `db:deploy`,
  *  `npm run deploy`, `yarn workspace @x/prisma deploy`), which is how most
  *  repos spell `prisma migrate deploy` behind one token. */
-const MIGRATE_STEP = /migrat|db-deploy|db[:-]push|db\s+push|schema:sync|(?:^|[\s:"'])deploy\b/i
+const MIGRATE_STEP =
+  /migrat|db-deploy|db[:-]push|db\s+push|schema:sync|(?<!\b(?:pnpm|vercel|netlify|wrangler|fly|flyctl|gh|git))(?:^|[\s:"'])deploy\b(?!\/)/i
 
 /**
  * The guided failure text for a server that would not boot on a repo the analyzer
@@ -1204,10 +1255,32 @@ const COMPOSE_UP_SHELL = /\bdocker(?:\s+|-)compose\b[^|;&]*\bup\b/
  *  install wearing one finishes green here and leaves the tree unbuilt. */
 const SKIP_LIFECYCLE_SCRIPTS: { pattern: RegExp; what: string }[] = [
   { pattern: /--mode[=\s]+skip-build\b/, what: '`--mode=skip-build`' },
-  { pattern: /--ignore-scripts\b/, what: '`--ignore-scripts`' },
-  { pattern: /(?:^|[\s;&|])npm_config_ignore_scripts\s*=/i, what: 'an `npm_config_ignore_scripts=` env prefix' },
+  // `--ignore-scripts=false` is the spelling that turns them back ON.
+  { pattern: /--ignore-scripts(?:=(?!false\b)|\b(?!=))/, what: '`--ignore-scripts`' },
+  { pattern: /(?:^|[\s;&|])npm_config_ignore_scripts\s*=\s*(?!(?:false|0)\b)\S/i, what: 'an `npm_config_ignore_scripts=` env prefix' },
   { pattern: /(?:^|[\s;&|])YARN_ENABLE_SCRIPTS\s*=\s*(?:0|false)\b/i, what: 'a `YARN_ENABLE_SCRIPTS=0` env prefix' },
 ]
+
+/** The same switch, thrown in the repository's own manager config — an install
+ *  that names nothing still runs under it. */
+const RC_LIFECYCLE_SWITCHES: { file: string; pattern: RegExp; what: string }[] = [
+  { file: '.npmrc', pattern: /^\s*ignore-scripts\s*=\s*true\s*$/m, what: '`ignore-scripts=true` in .npmrc' },
+  { file: '.yarnrc.yml', pattern: /^\s*enableScripts\s*:\s*false\s*$/m, what: '`enableScripts: false` in .yarnrc.yml' },
+]
+
+/** The lifecycle switches the checkout's own manager config throws. */
+function rcLifecycleSwitches(repoRoot: string | undefined): string[] {
+  if (!repoRoot) return []
+  const found: string[] = []
+  for (const { file, pattern, what } of RC_LIFECYCLE_SWITCHES) {
+    try {
+      if (pattern.test(fs.readFileSync(path.join(repoRoot, file), 'utf-8'))) found.push(what)
+    } catch {
+      // No such file — nothing switched off there.
+    }
+  }
+  return found
+}
 
 /** Command fragments that mutate the HOST outside the repository. An
  *  install/build runs as a real shell in the working tree, so these execute for
@@ -1236,6 +1309,25 @@ const HOST_MUTATION_PATTERNS: { pattern: RegExp; what: string }[] = [
  *  lookbehind keeps `my-docker compose` wrappers from matching: the command must
  *  BE docker. */
 const DOCKER_COMPOSE_CALL = /(?<![\w-])docker(?:\s+|-)compose\b([^|;&]*)/g
+
+/** The `-p`/`-f` flags of a command's first compose invocation, verbatim and
+ *  trailing-space-terminated, so a suggested sibling command (`down -v` for an
+ *  `up`) addresses exactly the project the original does. Empty when it has
+ *  none — the namespace rule then refuses both. */
+function composeNamespaceFlags(command: string): string {
+  const args = new RegExp(DOCKER_COMPOSE_CALL.source).exec(command)?.[1] ?? ''
+  const tokens = args.trim().split(/\s+/).filter(Boolean)
+  const kept: string[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!
+    if (t === '-p' || t === '--project-name' || t === '-f' || t === '--file') {
+      const v = tokens[i + 1]
+      if (v) kept.push(t, v)
+      i++
+    } else if (t.startsWith('--project-name=') || t.startsWith('--file=')) kept.push(t)
+  }
+  return kept.length > 0 ? `${kept.join(' ')} ` : ''
+}
 
 /** Whether ONE compose invocation's argument text passes an explicit project,
  *  and which files it names — the two flags every compose rule here reads. */
@@ -1358,8 +1450,11 @@ export function staticProposalComplaints(
     }
     // Lifecycle scripts off is not a fix, it is a deferral: the postinstall that
     // would not run is what BUILDS the native modules, and nothing runs it later.
-    for (const { pattern, what } of SKIP_LIFECYCLE_SCRIPTS) {
-      if (!pattern.test(command)) continue
+    const switchedOff = [
+      ...SKIP_LIFECYCLE_SCRIPTS.filter(({ pattern }) => pattern.test(command)).map(({ what }) => what),
+      ...(label === 'install' ? rcLifecycleSwitches(repoRoot) : []),
+    ]
+    for (const what of switchedOff) {
       complaints.push(
         `${label} passes ${what}, which turns package lifecycle scripts OFF for every dependency — and those ` +
         `scripts are what BUILD the native modules an app needs at runtime (password hashing, image processing, ` +
@@ -1386,7 +1481,11 @@ export function staticProposalComplaints(
   // there too — bringing up the repo's own datastore never needs to escalate or
   // write outside the repo.
   const services = proposal.api?.services
-  for (const [label, command] of [['api.services.up', services?.up], ['api.services.down', services?.down]] as const) {
+  for (const [label, command] of [
+    ['api.services.up', services?.up],
+    ['api.services.down', services?.down],
+    ['api.services.reset', services?.reset],
+  ] as const) {
     if (!command) continue
     complaints.push(...composeNamespaceComplaints(label, command, repoRoot))
     for (const { pattern, what } of HOST_MUTATION_PATTERNS) {
@@ -1451,8 +1550,7 @@ export function staticProposalComplaints(
   // outright without one, so the omission silently blocks every credential/
   // deletion/config flow. `down -v` with the SAME compose file is the wipe.
   if (services?.up && /(?<![\w-])docker(?:\s+|-)compose\b/.test(services.up) && !services.reset) {
-    const composeFile = /-f\s+(\S+)/.exec(services.up)?.[1]
-    const suggested = composeFile ? `docker compose -f ${composeFile} down -v` : 'docker compose down -v'
+    const suggested = `docker compose ${composeNamespaceFlags(services.up)}down -v`
     complaints.push(
       `\`api.services.up\` manages docker compose services but declares no \`reset\` — without one the runner ` +
       `cannot restore the world after a \`world: mutates\` test, so every world-mutating scenario (credential ` +
@@ -1461,46 +1559,6 @@ export function staticProposalComplaints(
     )
   }
   return complaints
-}
-
-/**
- * The deterministic "a browser app exists" signal the web rule keys on: a
- * `next`/`remix` workspace app in the route-manifest inventory, or — for a
- * single-package repo the inventory cannot see — a browser framework in the
- * root package.json's dependencies. Returns human-readable evidence strings,
- * empty when nothing browser-shaped is found.
- */
-export function browserAppEvidence(
-  apps: readonly RecipeAppInventoryEntry[] | undefined,
-  repoRoot?: string,
-): string[] {
-  const evidence: string[] = []
-  for (const app of apps ?? []) {
-    if (app.framework === 'next' || app.framework === 'remix') {
-      evidence.push(`${app.dir} — ${app.framework}`)
-    }
-  }
-  if (evidence.length > 0 || repoRoot === undefined) return evidence
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')) as {
-      workspaces?: unknown
-      dependencies?: Record<string, string>
-      devDependencies?: Record<string, string>
-    }
-    // Single-package repos ONLY: a workspace root's dependencies are hoisted
-    // noise (a react-router in the root of a monorepo says nothing about which
-    // app ships it) — there the route-manifest inventory above is the signal.
-    if (pkg.workspaces !== undefined || fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml'))) {
-      return evidence
-    }
-    const deps = { ...pkg.dependencies, ...pkg.devDependencies }
-    for (const name of ['next', '@remix-run/react', 'react-router', 'react-router-dom']) {
-      if (deps[name]) return [`root package.json depends on ${name}`]
-    }
-  } catch {
-    // No readable root package.json — no browser evidence from it.
-  }
-  return evidence
 }
 
 function readDiscoveryInputs(repoRoot: string): {

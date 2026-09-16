@@ -45,7 +45,7 @@ import {
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
 import type { DatastoreUrlRef, Interface } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
-import { browserAppEvidence } from './recipe-discovery.js'
+import type { RecipeAppInventoryEntry } from './prompts.js'
 import { WORK_TREE_DIR, corpusFilePath } from '@truecourse/shared/work-tree'
 
 /** One operation of the derived api surface — all the health ranking needs. */
@@ -79,6 +79,14 @@ export interface ProposeRecipeInputs {
    * 2026-08-20 bench showed what the model does with nothing.
    */
   manifestApps?: readonly RouteManifestApp[]
+  /**
+   * The repository's stable identity (`owner/repo`, `local/<folder>`). The
+   * compose project the proposed `api.services` runs under is named after it,
+   * so every run of the repository shares one project — a hosted run works in
+   * a throwaway clone whose directory name is different every time. Absent ⇒
+   * the checkout directory's own name, which is stable for a developer's tree.
+   */
+  repoKey?: string
 }
 
 /** A deterministic proposal, or the reason the path refused to produce one. */
@@ -158,7 +166,24 @@ const DATABASE_IMAGES = new Set([
   'minio',
 ])
 
-const COMPOSE_FILES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
+/** The default compose file names, in the order compose itself prefers them. */
+const COMPOSE_FILES = ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml']
+
+/**
+ * The compose files a bare `docker compose` in `repoRoot` reads: the first
+ * default file that exists and, when one exists beside it, its `*.override.*`
+ * sibling — which compose merges over the base by default, and which is where
+ * a repository routinely keeps its dev-only ports and passwords. Naming the base
+ * with `-f` switches that merge OFF, so anything that names the base must name
+ * the override too. Empty when the repository ships no compose file.
+ */
+export function defaultComposeFiles(repoRoot: string): string[] {
+  const base = COMPOSE_FILES.find((f) => existsFile(repoRoot, f))
+  if (!base) return []
+  const stem = base.replace(/\.ya?ml$/, '')
+  const override = [`${stem}.override.yaml`, `${stem}.override.yml`].find((f) => existsFile(repoRoot, f))
+  return override ? [base, override] : [base]
+}
 
 // ---------------------------------------------------------------------------
 // The entry point
@@ -726,7 +751,7 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
     const schemes = inputs.securitySchemes ?? readCorpusSecuritySchemes(repoRoot)
     const { credentials, notes } = credentialStubs(schemes)
     todos.push(...notes)
-    const detected = detectComposeServices(repoRoot)
+    const detected = detectComposeServices(repoRoot, inputs.repoKey)
     let services: { up: string; down: string; reset?: string } | undefined = detected?.services
     if (detected) todos.push(...detected.notes)
     let apiEnv: Record<string, string> = { ...(signals.serveEnv ?? {}) }
@@ -820,15 +845,17 @@ export interface DetectedComposeServices {
 }
 
 /**
- * The compose PROJECT a recipe's services run under, derived from the repo dir.
- * Never the default project (the directory's own name): compose "resolves" a port
- * or config change by RECREATING the running container, so an un-namespaced
- * invocation reaches into the developer's live stack. The static compose rule in
- * `recipe-discovery.ts` refuses any proposal without this.
+ * The compose PROJECT a recipe's services run under, derived from the repository's
+ * identity (`owner/repo`, or the checkout's own directory name when nothing
+ * better is known). Never the default project (the directory's own name):
+ * compose "resolves" a port or config change by RECREATING the running
+ * container, so an un-namespaced invocation reaches into the developer's live
+ * stack. The static compose rule in `recipe-discovery.ts` refuses any proposal
+ * without this. One name per repository, so every run — whatever throwaway
+ * directory it clones into — addresses the same project and its volumes.
  */
-export function composeProjectName(repoRoot: string): string {
-  const squeezed = path
-    .basename(path.resolve(repoRoot))
+export function composeProjectName(identity: string): string {
+  const squeezed = identity
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '')
@@ -836,16 +863,20 @@ export function composeProjectName(repoRoot: string): string {
 }
 
 /**
- * `docker compose up -d --wait` / `down` / `down -v` when the root compose file
- * declares a datastore image. The repo's own file — the runner orchestrates
- * nothing itself, it just runs what the recipe names — but namespaced (`-p`) and
- * with the parsed file named explicitly (`-f`), so the command addresses exactly
- * the stack this derivation read and nothing the developer is running.
+ * `docker compose up -d --wait` / `down` / `down -v` when the repository's
+ * compose file declares a datastore image. The repo's own file(s) — the runner
+ * orchestrates nothing itself, it just runs what the recipe names — but
+ * namespaced (`-p`) and with every parsed file named explicitly (`-f`, the
+ * override sibling included), so the command addresses exactly the stack this
+ * derivation read and nothing the developer is running.
  *
- * `up` brings up the DATASTORES and whatever they depend on, never the app's own
- * container: a compose file that also declares the app would otherwise boot a
- * second copy of it on the port the recipe's `serve` is about to claim. A file
- * whose services are all datastores needs no service list at all.
+ * `up` brings up the app's INFRASTRUCTURE and never the app itself: a compose
+ * file that also declares the app would otherwise boot a second copy of it on
+ * the port the recipe's `serve` is about to claim. What counts as
+ * infrastructure is decided by exclusion (see {@link selectComposeServices}),
+ * so a mail catcher or a search engine the app depends on comes up beside the
+ * datastore instead of being dropped for not being one. A file whose services
+ * are all wanted needs no service list at all.
  *
  * `--wait` is not decoration: plain `up -d` returns as soon as the containers are
  * CREATED, and the server boots microseconds later against a Postgres that is not
@@ -854,23 +885,18 @@ export function composeProjectName(repoRoot: string): string {
  * file `--wait` blocks until the datastore is healthy; without one it costs nothing
  * (it waits for `running`, which `up -d` already reached).
  */
-export function detectComposeServices(repoRoot: string): DetectedComposeServices | undefined {
-  const file = COMPOSE_FILES.find((f) => fs.existsSync(path.join(repoRoot, f)))
-  if (!file) return undefined
-  let doc: unknown
-  try {
-    doc = yaml.load(fs.readFileSync(path.join(repoRoot, file), 'utf-8'))
-  } catch {
-    return undefined
-  }
-  const services = asRecord((doc as Record<string, unknown> | null)?.services)
+export function detectComposeServices(repoRoot: string, repoKey?: string): DetectedComposeServices | undefined {
+  const identity = repoKey ?? path.basename(path.resolve(repoRoot))
+  const files = defaultComposeFiles(repoRoot)
+  if (files.length === 0) return undefined
+  const services = mergedComposeServices(repoRoot, files)
+  if (!services) return undefined
   const names = Object.keys(services)
-  const datastores = names.filter((name) => isDatabaseImage(asRecord(services[name]).image))
-  if (datastores.length === 0) return undefined
+  const wanted = selectComposeServices(services)
+  if (![...wanted].some((name) => isDatabaseImage(asRecord(services[name]).image))) return undefined
 
-  const wanted = withComposeDependencies(services, datastores)
   const only = wanted.size === names.length ? [] : names.filter((name) => wanted.has(name))
-  const base = `docker compose -p ${composeProjectName(repoRoot)} -f ${file}`
+  const base = `docker compose -p ${composeProjectName(identity)} ${files.map((f) => `-f ${f}`).join(' ')}`
   return {
     // `reset` wipes the volumes so a `world: mutates` tail cannot leak damage into
     // the next run; `down` deliberately preserves them (stopping is not forgetting).
@@ -883,11 +909,83 @@ export function detectComposeServices(repoRoot: string): DetectedComposeServices
   }
 }
 
+/**
+ * The `services:` of the compose files as compose reads them: each later file's
+ * service entries merged over the earlier's, key by key — the override's
+ * `ports`, `environment` or `image` win, and a service only the override
+ * declares exists. Null when a file does not parse.
+ */
+function mergedComposeServices(repoRoot: string, files: readonly string[]): Record<string, unknown> | null {
+  const merged: Record<string, unknown> = {}
+  for (const file of files) {
+    let doc: unknown
+    try {
+      doc = yaml.load(fs.readFileSync(path.join(repoRoot, file), 'utf-8'))
+    } catch {
+      return null
+    }
+    for (const [name, service] of Object.entries(asRecord((doc as Record<string, unknown> | null)?.services))) {
+      merged[name] = { ...asRecord(merged[name]), ...asRecord(service) }
+    }
+  }
+  return merged
+}
+
+/**
+ * Which services the bring-up starts — the app's infrastructure, decided by
+ * EXCLUSION rather than by an allowlist of images:
+ *
+ *  1. Every datastore image, and everything it `depends_on`.
+ *  2. Everything a ROOT service (one nothing depends on) depends on, transitively.
+ *     A root that is not a datastore is the app or one of its one-shots — the
+ *     recipe's own `serve` and `build` are that — and what it depends on is the
+ *     infrastructure it needs: the mail catcher, the search engine, the auth
+ *     server, the datastore.
+ *  3. Minus every service BUILT from this repository (`build:`): that is the
+ *     app's own code by another door — unless a datastore cannot come up
+ *     without it (an init container), which keeps it.
+ *  4. Minus everything that depends on an excluded service: `up <name>` starts
+ *     the named service's dependencies too, so a proxy in front of the app
+ *     would drag the app up with it.
+ */
+function selectComposeServices(services: Record<string, unknown>): Set<string> {
+  const names = Object.keys(services)
+  const dependedOn = new Set(names.flatMap((name) => composeDependsOn(services[name])))
+  const datastores = names.filter((name) => isDatabaseImage(asRecord(services[name]).image))
+  const datastoreNeeds = withComposeDependencies(services, datastores)
+  const wanted = new Set(datastoreNeeds)
+  for (const root of names.filter((name) => !dependedOn.has(name) && !datastores.includes(name))) {
+    for (const dep of withComposeDependencies(services, composeDependsOn(services[root]))) wanted.add(dep)
+  }
+  for (const name of wanted) {
+    if (asRecord(services[name]).build !== undefined && !datastoreNeeds.has(name)) wanted.delete(name)
+  }
+  let pruned = true
+  while (pruned) {
+    pruned = false
+    for (const name of wanted) {
+      if (composeDependsOn(services[name]).some((dep) => dep in services && !wanted.has(dep))) {
+        wanted.delete(name)
+        pruned = true
+      }
+    }
+  }
+  return wanted
+}
+
 /** Is this compose service's `image` one of the datastore images? */
 function isDatabaseImage(image: unknown): boolean {
   if (typeof image !== 'string') return false
   const base = image.split('@')[0].split(':')[0].split('/').pop() ?? ''
   return DATABASE_IMAGES.has(base.toLowerCase())
+}
+
+/** A service's `depends_on`, in either of compose's two spellings. */
+function composeDependsOn(service: unknown): string[] {
+  const dependsOn = asRecord(service).depends_on
+  return Array.isArray(dependsOn)
+    ? dependsOn.filter((d): d is string => typeof d === 'string')
+    : Object.keys(asRecord(dependsOn))
 }
 
 /** The named services plus everything they `depends_on`, transitively — bringing a
@@ -898,11 +996,7 @@ function withComposeDependencies(services: Record<string, unknown>, roots: reado
   const visit = (name: string) => {
     if (wanted.has(name) || !(name in services)) return
     wanted.add(name)
-    const dependsOn = asRecord(services[name]).depends_on
-    const deps = Array.isArray(dependsOn)
-      ? dependsOn.filter((d): d is string => typeof d === 'string')
-      : Object.keys(asRecord(dependsOn))
-    for (const dep of deps) visit(dep)
+    for (const dep of composeDependsOn(services[name])) visit(dep)
   }
   for (const root of roots) visit(root)
   return wanted
@@ -936,6 +1030,47 @@ function composeEnvFileNotes(
 // ---------------------------------------------------------------------------
 // The web surface
 // ---------------------------------------------------------------------------
+
+/**
+ * The deterministic "a browser app exists" signal the web rule keys on: a
+ * `next`/`remix` workspace app in the route-manifest inventory, or — for a
+ * single-package repo the inventory cannot see — a browser framework in the
+ * root package.json's dependencies. Returns human-readable evidence strings,
+ * empty when nothing browser-shaped is found.
+ */
+export function browserAppEvidence(
+  apps: readonly RecipeAppInventoryEntry[] | undefined,
+  repoRoot?: string,
+): string[] {
+  const evidence: string[] = []
+  for (const app of apps ?? []) {
+    if (app.framework === 'next' || app.framework === 'remix') {
+      evidence.push(`${app.dir} — ${app.framework}`)
+    }
+  }
+  if (evidence.length > 0 || repoRoot === undefined) return evidence
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')) as {
+      workspaces?: unknown
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    // Single-package repos ONLY: a workspace root's dependencies are hoisted
+    // noise (a react-router in the root of a monorepo says nothing about which
+    // app ships it) — there the route-manifest inventory above is the signal.
+    if (pkg.workspaces !== undefined || fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml'))) {
+      return evidence
+    }
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+    for (const name of ['next', '@remix-run/react', 'react-router', 'react-router-dom']) {
+      if (deps[name]) return [`root package.json depends on ${name}`]
+    }
+  } catch {
+    // No readable root package.json — no browser evidence from it.
+  }
+  return evidence
+}
+
 
 /** Pages a browser app renders for an ANONYMOUS visitor, best first. `/` is the
  *  fallback and routinely redirects (or renders a shell that never settles), so a

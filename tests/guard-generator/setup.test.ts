@@ -421,6 +421,36 @@ describe('runGuardSetup — skip when settled', () => {
     expect(probe.calls).toBe(1)
   })
 
+  // The seed's cold-clone proof is where the recipe's `install`/`build` first
+  // run in a tree that did not grow across the session's attempts. A failure
+  // there is the RECIPE gate giving way, found late: the run fails on it and
+  // the recipe row is unsettled, so the next run re-derives instead of
+  // skipping on unchanged manifests and re-paying the same refused seed.
+  it('a recipe defect the seed proof surfaces fails the run and unsettles the recipe', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const probe = probeStub()
+    const defect = seedSeam({
+      status: 'failed',
+      reason: 'the cold-clone proof refused the seed: install — `npm ci` failed in a tree with no `node_modules`',
+      recipeDefect: true,
+    })
+
+    const first = await runAndPersist(r, { probe: probe.probe, seedSession: defect.seam })
+    expect(first.status).toBe('failed')
+    expect(first.reason).toContain('cold-clone proof refused the seed: install')
+    expect(statuses(first).recipe).toMatch(/^failed:/)
+    expect(first.recipe.status).toBe('failed')
+    expect(statuses(first).seed).toMatch(/^failed:/)
+
+    // The next run re-verifies the recipe (the probe boots again) rather than
+    // skipping it as settled.
+    const second = await runAndPersist(r, { probe: probe.probe, seedSession: seedSeam().seam })
+    expect(statuses(second).recipe).toBe('ok')
+    expect(probe.calls).toBe(2)
+    expect(second.status).toBe('ok')
+  })
+
   it('--refresh re-runs every step, re-deriving the recipe it already had', async () => {
     const r = fixtureRepo()
     writeRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } })

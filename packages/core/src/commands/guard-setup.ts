@@ -376,6 +376,10 @@ export async function guardSetupInProcess(
   try {
     const result: GuardSetupResult = await runGuardSetup({
       repoRoot,
+      // The repository's identity names the compose project, so every run —
+      // whatever directory it clones into — shares one; the sessions key IS
+      // that identity wherever a caller has one.
+      ...(options.sessionsKey ? { repoKey: options.sessionsKey } : {}),
       recipeRunner:
         options.recipeRunner ??
         spawnRecipeRunner({
