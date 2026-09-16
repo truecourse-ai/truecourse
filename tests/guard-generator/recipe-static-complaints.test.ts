@@ -36,6 +36,14 @@ function composeRepo(): string {
   return r
 }
 
+/** A repo carrying the manager config files under test. */
+function rcRepo(files: Record<string, string>): string {
+  const r = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-static-rc-'))
+  dirs.push(r)
+  for (const [name, body] of Object.entries(files)) fs.writeFileSync(path.join(r, name), body)
+  return r
+}
+
 const APPS: RecipeAppInventoryEntry[] = [
   { dir: 'apps/api/v2', pkg: '@calcom/api-v2', framework: 'nest', prefixes: ['/health', '/v2', '/v2/bookings'] },
   { dir: 'apps/web', pkg: '@calcom/web', framework: 'next', prefixes: ['/api', '/api/auth'] },
@@ -370,13 +378,40 @@ describe('staticProposalComplaints — installs that skip lifecycle scripts', ()
   })
 
   it('reads the same switch out of the repository\'s own manager config', () => {
-    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-static-npmrc-'))
-    dirs.push(r)
-    fs.writeFileSync(path.join(r, '.npmrc'), 'ignore-scripts=true\n')
+    const r = rcRepo({ '.npmrc': 'ignore-scripts=true\n' })
     const complaints = staticProposalComplaints({ install: 'npm ci', build: 'true', api: API }, undefined, r)
     const hit = complaints.find((c) => c.includes('lifecycle scripts'))
     expect(hit).toContain('`ignore-scripts=true` in .npmrc')
+    // The remedy has to be one a recipe can take: the rc file is committed, the
+    // install command is the recipe's own.
+    expect(hit).toContain('--ignore-scripts=false')
     // A build is not an install: the rc file says nothing about it.
     expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toHaveLength(1)
+  })
+
+  // A committed `ignore-scripts=true` is ordinary supply-chain hardening. Refusing
+  // every install it runs under refuses the OVERRIDE too, and a static complaint is
+  // a stage-zero refusal on every arrival path: the repair session then cannot
+  // propose anything that verifies, and setup fails permanently.
+  it('leaves an install that overrides the rc switch alone', () => {
+    const npm = rcRepo({ '.npmrc': 'ignore-scripts=true\n' })
+    for (const install of ['npm ci --ignore-scripts=false', 'npm ci --no-ignore-scripts', 'npm_config_ignore_scripts=false npm ci']) {
+      const complaints = staticProposalComplaints({ install, build: 'true', api: API }, undefined, npm)
+      expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toEqual([])
+    }
+
+    const yarn = rcRepo({ '.yarnrc.yml': 'enableScripts: false\n' })
+    expect(
+      staticProposalComplaints({ install: 'YARN_ENABLE_SCRIPTS=1 yarn install --immutable', build: 'true', api: API }, undefined, yarn)
+        .filter((c) => c.includes('lifecycle scripts')),
+    ).toEqual([])
+  })
+
+  it('holds a manager only to the config it actually reads', () => {
+    // Yarn berry never reads `.npmrc`, and a repository routinely ships one for
+    // its npm consumers.
+    const r = rcRepo({ '.npmrc': 'ignore-scripts=true\n', '.yarnrc.yml': 'nodeLinker: node-modules\n' })
+    const complaints = staticProposalComplaints({ install: 'yarn install --immutable', build: 'true', api: API }, undefined, r)
+    expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toEqual([])
   })
 })

@@ -14,8 +14,8 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, describe, it, expect } from 'vitest'
-import { verifyProposal, type VerifiableProposal } from '@truecourse/guard-generator'
+import { afterAll, afterEach, describe, it, expect } from 'vitest'
+import { failureReport, verifyProposal, type VerifiableProposal } from '@truecourse/guard-generator'
 import { FIXTURE_API_SERVER } from './helpers.js'
 
 const dirs: string[] = []
@@ -104,6 +104,59 @@ describe('verifyProposal — the install/build failure report', () => {
     expect(verdict.reason).not.toContain('(tail)')
   }, 60_000)
 
+  // npm writes its run log under the cache in the HOME the build child inherits
+  // (`BUILD_PASSTHROUGH` passes HOME and pins no npm cache), which is neither the
+  // checkout nor the temp dir — so until it was allowed, the npm branch of the
+  // pointer could never yield a tail and an install failure ended on a path with
+  // no cause. Tested at the REAL location, with HOME and TMPDIR moved so the
+  // checkout/temp allowance cannot be what passes it.
+  describe("npm's own log directory", () => {
+    const HOME = process.env.HOME
+    const TMPDIR = process.env.TMPDIR
+    afterEach(() => {
+      if (HOME === undefined) delete process.env.HOME
+      else process.env.HOME = HOME
+      if (TMPDIR === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = TMPDIR
+    })
+
+    /** A machine whose HOME, TMPDIR and checkout are three separate dirs. */
+    function machine(): { repo: string; home: string } {
+      const root = fs.realpathSync(tempRepo())
+      const repo = path.join(root, 'checkout')
+      const home = path.join(root, 'home')
+      fs.mkdirSync(repo)
+      fs.mkdirSync(path.join(home, '.npm', '_logs'), { recursive: true })
+      fs.mkdirSync(path.join(home, '.ssh'), { recursive: true })
+      fs.mkdirSync(path.join(root, 'tmp'))
+      process.env.HOME = home
+      process.env.TMPDIR = path.join(root, 'tmp')
+      return { repo, home }
+    }
+
+    it('follows the pointer into it', () => {
+      const { repo, home } = machine()
+      const log = path.join(home, '.npm', '_logs', '2026-09-16T10_00_00_000Z-debug-0.log')
+      fs.writeFileSync(log, ['13 verbose stack Error: gyp failed', '14 error code ELIFECYCLE'].join('\n'))
+
+      const report = failureReport(`npm error A complete log of this run can be found in: ${log}`, repo)
+
+      expect(report).toContain(`--- ${log} (tail) ---`)
+      expect(report).toContain('14 error code ELIFECYCLE')
+    })
+
+    it('reads nothing else out of the home directory', () => {
+      const { repo, home } = machine()
+      const key = path.join(home, '.ssh', 'id_rsa')
+      fs.writeFileSync(key, 'PRIVATE KEY MATERIAL')
+
+      const report = failureReport(`A complete log of this run can be found in: ${key}`, repo)
+
+      expect(report).not.toContain('PRIVATE KEY MATERIAL')
+      expect(report).not.toContain('(tail)')
+    })
+  })
+
   it('reads only the tail of a huge log', async () => {
     const r = tempRepo()
     const log = path.join(r, 'huge.log')
@@ -146,7 +199,6 @@ describe('the empty-schema caveat — how a migration step is spelled', () => {
     'echo yarn prisma:deploy',
     'echo yarn workspace @acme/prisma deploy',
     'echo prisma deploy',
-    'echo npm run deploy',
     'echo pnpm db:deploy',
     'echo prisma migrate deploy',
   ]
@@ -165,11 +217,16 @@ describe('the empty-schema caveat — how a migration step is spelled', () => {
     expect(verdict.warnings![0]).toContain('schema/migration')
   }, 60_000)
 
-  // `deploy` as a directory name or a hosting CLI's verb runs no migration.
+  // A `deploy` no datastore token owns runs no migration — a directory name, a
+  // hosting CLI's verb, a task runner's target, an asset pipeline.
   const notMigrations = [
     'echo docker compose -p acme -f deploy/docker-compose.yml up -d',
     'echo pnpm deploy --filter api',
     'echo vercel deploy',
+    'echo npm run deploy',
+    'echo turbo run deploy',
+    'echo npm run deploy:assets',
+    'echo ./deploy.sh',
   ]
   for (const up of notMigrations) {
     it(`does not mistake \`${up}\` for the schema step`, async () => {

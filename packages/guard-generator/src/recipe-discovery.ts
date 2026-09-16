@@ -112,10 +112,11 @@ const LOG_FILE_POINTER = /(?:logs? can be found here|complete log of this run ca
  *
  * The pointer is UNTRUSTED: it is whatever the install printed, and the install
  * is the repository's own code running as this process's user. So a section is
- * read only from a regular file inside the checkout or the temp dir (the two
- * places a package manager writes its logs), and only its last bytes — a FIFO
- * or a device would otherwise hang or flood the process, and a path into the
- * home directory would ship its contents to the model.
+ * read only from a regular file inside one of the three places a package manager
+ * writes its logs — the checkout, the temp dir, and npm's own `_logs` — and only
+ * its last bytes: a FIFO or a device would otherwise hang or flood the process,
+ * and a path anywhere else in the home directory would ship its contents to the
+ * model.
  */
 export function failureReport(output: string, repoRoot: string): string {
   const sections = [buildOutputTail(output, FAILURE_TAIL_LINES)]
@@ -132,9 +133,19 @@ export function failureReport(output: string, repoRoot: string): string {
   return sections.join('\n\n').slice(0, FAILURE_REPORT_CAP)
 }
 
+/** Where npm writes the run log its failure text points at: `_logs` under its
+ *  cache, which is `~/.npm` for the build child — it inherits the host's HOME and
+ *  no `npm_config_*` (see the runner's `BUILD_PASSTHROUGH`). Allowed for the same
+ *  reason the checkout and the temp dir are: it holds package-manager logs and
+ *  nothing else, so no pointer can walk out of it into the home directory. */
+function npmLogDir(): string | null {
+  const home = process.env.HOME ?? os.homedir()
+  return home ? path.join(home, '.npm', '_logs') : null
+}
+
 /** The last {@link LOG_POINTER_READ_BYTES} of a log file a failing command named,
- *  or null when the path is not a regular file under the checkout or the temp
- *  dir (or cannot be read at all). */
+ *  or null when the path is not a regular file under the checkout, the temp dir
+ *  or npm's log dir (or cannot be read at all). */
 function readLogTail(file: string, repoRoot: string): string | null {
   const within = (root: string, target: string): boolean => {
     const rel = path.relative(root, target)
@@ -143,12 +154,20 @@ function readLogTail(file: string, repoRoot: string): string | null {
   // Real paths on both sides: a temp dir behind a symlink (macOS's /var) must
   // compare equal to the file's own resolved location.
   let real: string
-  let allowedRoots: string[]
   try {
     real = fs.realpathSync(path.resolve(repoRoot, file))
-    allowedRoots = [fs.realpathSync(repoRoot), fs.realpathSync(os.tmpdir())]
   } catch {
     return null
+  }
+  const allowedRoots: string[] = []
+  for (const root of [repoRoot, os.tmpdir(), npmLogDir()]) {
+    if (root === null) continue
+    // A root that does not exist allows nothing, and never bars the others.
+    try {
+      allowedRoots.push(fs.realpathSync(root))
+    } catch {
+      continue
+    }
   }
   if (!allowedRoots.some((root) => within(root, real))) return null
   let fd: number | null = null
@@ -1136,12 +1155,13 @@ const SQL_DATASTORE_URL = /^(?:postgres(?:ql)?|mysql):\/\//i
 
 /** A schema/migration step by any of the common spellings — the word itself
  *  (`prisma migrate`, `knex migrate`, a `migrations` script), a push
- *  (`db:push`, `db push`), a sync (`schema:sync`), and `deploy` as a package
- *  script or subcommand (`prisma deploy`, `prisma:deploy`, `db:deploy`,
- *  `npm run deploy`, `yarn workspace @x/prisma deploy`), which is how most
- *  repos spell `prisma migrate deploy` behind one token. */
-const MIGRATE_STEP =
-  /migrat|db-deploy|db[:-]push|db\s+push|schema:sync|(?<!\b(?:pnpm|vercel|netlify|wrangler|fly|flyctl|gh|git))(?:^|[\s:"'])deploy\b(?!\/)/i
+ *  (`db:push`, `db push`), a sync (`schema:sync`), and a `deploy` a DATASTORE
+ *  token owns (`prisma:deploy`, `db:deploy`, `yarn workspace @x/prisma deploy`),
+ *  which is how most repos spell `prisma migrate deploy` behind one token. A bare
+ *  `deploy` is NOT one: `deploy:assets`, `deploy-docs` and `turbo run deploy`
+ *  ship something somewhere and migrate nothing, and reading them as the schema
+ *  step drops the empty-schema caveat on a recipe that never migrates. */
+const MIGRATE_STEP = /migrat|schema:sync|(?:db|database|prisma)[\s:._-]+(?:deploy|push)\b/i
 
 /**
  * The guided failure text for a server that would not boot on a repo the analyzer
@@ -1262,17 +1282,32 @@ const SKIP_LIFECYCLE_SCRIPTS: { pattern: RegExp; what: string }[] = [
 ]
 
 /** The same switch, thrown in the repository's own manager config — an install
- *  that names nothing still runs under it. */
-const RC_LIFECYCLE_SWITCHES: { file: string; pattern: RegExp; what: string }[] = [
-  { file: '.npmrc', pattern: /^\s*ignore-scripts\s*=\s*true\s*$/m, what: '`ignore-scripts=true` in .npmrc' },
-  { file: '.yarnrc.yml', pattern: /^\s*enableScripts\s*:\s*false\s*$/m, what: '`enableScripts: false` in .yarnrc.yml' },
+ *  that names nothing still runs under it. `readBy` is which managers obey the
+ *  file: yarn berry never reads `.npmrc`, and nothing but yarn reads `.yarnrc.yml`. */
+const RC_LIFECYCLE_SWITCHES: { file: string; pattern: RegExp; what: string; readBy: RegExp }[] = [
+  { file: '.npmrc', pattern: /^\s*ignore-scripts\s*=\s*true\s*$/m, what: '`ignore-scripts=true` in .npmrc', readBy: /\b(?:npm|npx|pnpm|pnpx)\b/ },
+  { file: '.yarnrc.yml', pattern: /^\s*enableScripts\s*:\s*false\s*$/m, what: '`enableScripts: false` in .yarnrc.yml', readBy: /\byarn\b/ },
 ]
 
-/** The lifecycle switches the checkout's own manager config throws. */
-function rcLifecycleSwitches(repoRoot: string | undefined): string[] {
-  if (!repoRoot) return []
+/** The spellings that turn lifecycle scripts back ON. A command that passes one
+ *  overrides the rc file it runs under — a CLI flag and an env var both beat the
+ *  config, which is what makes `npm ci --ignore-scripts=false` an honest install
+ *  in a repository that hardens its `.npmrc`. */
+const LIFECYCLE_SCRIPTS_ON: RegExp[] = [
+  /--ignore-scripts=false\b/,
+  /--no-ignore-scripts\b/,
+  /(?:^|[\s;&|])npm_config_ignore_scripts\s*=\s*(?:false|0)\b/i,
+  /(?:^|[\s;&|])YARN_ENABLE_SCRIPTS\s*=\s*(?:1|true)\b/i,
+]
+
+/** The lifecycle switches the checkout's own manager config throws at THIS
+ *  install — the rc file only counts when the command's manager reads it and the
+ *  command does not override it. */
+function rcLifecycleSwitches(repoRoot: string | undefined, command: string): string[] {
+  if (!repoRoot || LIFECYCLE_SCRIPTS_ON.some((pattern) => pattern.test(command))) return []
   const found: string[] = []
-  for (const { file, pattern, what } of RC_LIFECYCLE_SWITCHES) {
+  for (const { file, pattern, what, readBy } of RC_LIFECYCLE_SWITCHES) {
+    if (!readBy.test(command)) continue
     try {
       if (pattern.test(fs.readFileSync(path.join(repoRoot, file), 'utf-8'))) found.push(what)
     } catch {
@@ -1450,10 +1485,7 @@ export function staticProposalComplaints(
     }
     // Lifecycle scripts off is not a fix, it is a deferral: the postinstall that
     // would not run is what BUILDS the native modules, and nothing runs it later.
-    const switchedOff = [
-      ...SKIP_LIFECYCLE_SCRIPTS.filter(({ pattern }) => pattern.test(command)).map(({ what }) => what),
-      ...(label === 'install' ? rcLifecycleSwitches(repoRoot) : []),
-    ]
+    const switchedOff = SKIP_LIFECYCLE_SCRIPTS.filter(({ pattern }) => pattern.test(command)).map(({ what }) => what)
     for (const what of switchedOff) {
       complaints.push(
         `${label} passes ${what}, which turns package lifecycle scripts OFF for every dependency — and those ` +
@@ -1465,6 +1497,22 @@ export function staticProposalComplaints(
         `\`dependenciesMeta.<pkg>.built: false\` is a package.json edit, which a recipe may not make; name the ` +
         `failing package from the install report and switch that one off.`,
       )
+    }
+    // The same switch thrown in the repository's own manager config, which an
+    // install that names nothing still runs under. The file is committed and a
+    // recipe may not edit it, so the remedy here is the OVERRIDE, not the one
+    // the command-level complaint above names.
+    if (label === 'install' && switchedOff.length === 0) {
+      for (const what of rcLifecycleSwitches(repoRoot, command)) {
+        complaints.push(
+          `${label} runs under ${what}, which turns package lifecycle scripts OFF for every dependency — and ` +
+          `those scripts are what BUILD the native modules an app needs at runtime (password hashing, image ` +
+          `processing, database engines). Nothing runs them afterwards, so the recipe verifies green here and ` +
+          `then crashes the seed or the server in a fresh clone, on an error that names none of this. The file ` +
+          `is the repository's own and a recipe may not edit it — override it for this install instead: ` +
+          `\`--ignore-scripts=false\` for npm/pnpm, a \`YARN_ENABLE_SCRIPTS=1\` prefix for yarn.`,
+        )
+      }
     }
     // Host mutations: an install/build runs as a real shell in the working tree.
     for (const { pattern, what } of HOST_MUTATION_PATTERNS) {
