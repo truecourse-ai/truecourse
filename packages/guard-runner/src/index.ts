@@ -188,7 +188,7 @@ export {
   substitutePort,
   PORT_PLACEHOLDER,
 } from './api/server.js'
-export { allocateFreePort, releasePort, isPortHeld, listenEphemeral } from './ports.js'
+export { allocateFreePort, releasePort, isPortHeld, portIsFree, listenEphemeral } from './ports.js'
 export type {
   ApiServerHandle,
   ApiServerExit,
