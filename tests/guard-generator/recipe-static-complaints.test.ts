@@ -276,3 +276,50 @@ describe('staticProposalComplaints — the workspace inventory rule', () => {
     expect(staticProposalComplaints({ build: 'true', entry: ['node', 'bin.mjs'] })).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// The lifecycle-script rule: an install that buys its green by not running
+// postinstall builds nothing the seed or the server can use.
+// ---------------------------------------------------------------------------
+
+describe('staticProposalComplaints — installs that skip lifecycle scripts', () => {
+  const API = { serve: ['node', 'dist/server.js'], healthPath: '/health' }
+  const skipping = [
+    'yarn install --immutable --mode=skip-build',
+    'yarn install --immutable --mode skip-build',
+    'npm ci --ignore-scripts',
+    'pnpm install --frozen-lockfile --ignore-scripts',
+    'npm_config_ignore_scripts=true npm ci',
+    'YARN_ENABLE_SCRIPTS=0 yarn install --immutable',
+  ]
+
+  for (const install of skipping) {
+    it(`refuses \`${install}\``, () => {
+      const complaints = staticProposalComplaints({ install, build: 'true', api: API })
+      const hit = complaints.find((c) => c.includes('lifecycle scripts'))
+      expect(hit).toBeTruthy()
+      // Says WHY it is refused (the native modules nobody builds afterwards) and
+      // what to do instead (make the one failing postinstall succeed).
+      expect(hit).toContain('native modules')
+      expect(hit).toContain('PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1')
+    })
+  }
+
+  it('refuses the same flags in a build command', () => {
+    const complaints = staticProposalComplaints({ build: 'yarn workspaces focus --production --mode=skip-build', api: API })
+    expect(complaints.some((c) => c.includes('lifecycle scripts'))).toBe(true)
+  })
+
+  it('leaves an honest install alone, scoped skips included', () => {
+    const clean = [
+      'yarn install --immutable',
+      'npm ci',
+      'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pnpm install --frozen-lockfile',
+      'CYPRESS_INSTALL_BINARY=0 npm ci',
+    ]
+    for (const install of clean) {
+      const complaints = staticProposalComplaints({ install, build: 'true', api: API })
+      expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toEqual([])
+    }
+  })
+})

@@ -117,10 +117,15 @@ describe('discoverRecipe — the generated datastore', () => {
     expect(compose).toContain('postgres:16-alpine')
     expect(res.recipe.api?.services?.up).toBe(`docker compose -f ${GUARD_COMPOSE_FILE} up -d --wait`)
     expect(res.recipe.api?.env).toEqual({ DATABASE_URL: 'postgres://guard@localhost:5432/weather' })
-    // The server only answered because `up` ran FIRST and the file was already there.
+    // The wipe brackets the verification — a session verifies again and again in
+    // one sandbox, so the bring-up must not meet the world the last attempt left,
+    // and the last attempt must not leave one. In between, the server only
+    // answered because `up` ran FIRST and the file was already there.
     const invocations = fs.readFileSync(repo.log, 'utf-8').trim().split('\n')
-    expect(invocations[0]).toContain('up -d --wait')
-    expect(invocations[1]).toContain('down')
+    expect(invocations[0]).toContain('down -v')
+    expect(invocations[1]).toContain('up -d --wait')
+    expect(invocations[2]).toContain('down')
+    expect(invocations[3]).toContain('down -v')
     expect(fs.existsSync(repo.marker)).toBe(false)
   })
 
