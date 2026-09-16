@@ -64,6 +64,10 @@ export interface RecipeRepairSessionInput {
   /** The workspace app inventory the briefing shows — `check_recipe`/`verify_recipe`
    *  hold drafts to it (the entry-only-despite-HTTP-services refusal). */
   apps?: readonly RecipeAppInventoryEntry[];
+  /** The compose project every `docker compose` invocation must pass to `-p`.
+   *  Both recipe tools hold a draft to it, so the session cannot settle on a
+   *  world of its own invention. */
+  composeProject?: string;
 }
 
 export function recipeRepairSessionDef(input: RecipeRepairSessionInput): SessionDef<RecipeProposal> {
@@ -159,6 +163,13 @@ export function recipeRepairBriefing(ctx: RecipeRepairContext): string {
       ...ctx.datastoreUrls.slice(0, 6).map((ref) => `  ${JSON.stringify(ref)}`),
     );
   }
+  if (ctx.composeProject) {
+    lines.push(
+      '',
+      `The compose project this run's world lives in: ${ctx.composeProject}`,
+      `Every \`docker compose\` invocation in the recipe passes \`-p ${ctx.composeProject}\` — that exact name, in \`up\`, \`down\` and \`reset\` alike. It is the world's identity, not a label: its volumes are what \`reset\` wipes, and \`check_recipe\` refuses any other project as it refuses none at all.`,
+    );
+  }
   if (ctx.composeGenerated) {
     lines.push(
       '',
@@ -178,8 +189,8 @@ function buildRepairTools(input: RecipeRepairSessionInput): SessionTool[] {
     searchTool(input.repoRoot),
     sandboxExecTool(input.sandbox),
     sandboxShellTool(input.sandbox),
-    checkRecipeTool(input.repoRoot, input.apps),
-    verifyRecipeTool(input.repoRoot, input.apps),
+    checkRecipeTool(input.repoRoot, input.apps, input.composeProject),
+    verifyRecipeTool(input.repoRoot, input.apps, input.composeProject),
   ];
 }
 
@@ -252,7 +263,11 @@ function sandboxShellTool(sandbox: WorkingSandbox): SessionTool {
   });
 }
 
-function checkRecipeTool(repoRoot: string, apps?: readonly RecipeAppInventoryEntry[]): SessionTool {
+function checkRecipeTool(
+  repoRoot: string,
+  apps?: readonly RecipeAppInventoryEntry[],
+  composeProject?: string,
+): SessionTool {
   return defineSessionTool({
     name: 'check_recipe',
     description:
@@ -262,7 +277,7 @@ function checkRecipeTool(repoRoot: string, apps?: readonly RecipeAppInventoryEnt
     destructive: false,
     inputSchema: RecipeProposalSchema,
     async execute(args) {
-      const complaints = staticProposalComplaints(args, apps, repoRoot);
+      const complaints = staticProposalComplaints(args, apps, repoRoot, composeProject);
       if (complaints.length === 0) {
         return {
           content:
@@ -274,7 +289,11 @@ function checkRecipeTool(repoRoot: string, apps?: readonly RecipeAppInventoryEnt
   });
 }
 
-function verifyRecipeTool(repoRoot: string, apps?: readonly RecipeAppInventoryEntry[]): SessionTool {
+function verifyRecipeTool(
+  repoRoot: string,
+  apps?: readonly RecipeAppInventoryEntry[],
+  composeProject?: string,
+): SessionTool {
   return defineSessionTool({
     name: 'verify_recipe',
     description:
@@ -285,7 +304,10 @@ function verifyRecipeTool(repoRoot: string, apps?: readonly RecipeAppInventoryEn
     inputSchema: RecipeProposalSchema,
     async execute(args) {
       try {
-        const verdict = await verifyProposal(repoRoot, args, apps ? { apps } : {});
+        const verdict = await verifyProposal(repoRoot, args, {
+          ...(apps ? { apps } : {}),
+          ...(composeProject ? { composeProject } : {}),
+        });
         if (verdict.ok) {
           const caveats = verdict.warnings?.length
             ? `\n\nVERIFIED WITH CAVEATS — fix these before the outcome if you can:\n- ${verdict.warnings.join('\n- ')}`
@@ -340,6 +362,7 @@ export function buildRecipeRepair(
                   repoRoot: ctx.repoRoot,
                   sandbox,
                   ...(ctx.inputs.apps ? { apps: ctx.inputs.apps } : {}),
+                  ...(ctx.composeProject ? { composeProject: ctx.composeProject } : {}),
                 }),
               briefing: () => [recipeRepairBriefing(ctx)],
               driver,
@@ -422,7 +445,7 @@ A deterministic proposal derived from the repository's own manifests FAILED the 
 
 # The shape you produce
 
-One JSON object: optional \`install\` (shell), \`build\` (shell), optional \`entry\` (argv array — a CLI entrypoint), optional \`api\` (\`serve\` argv + optional \`healthPath\`/\`env\`/\`app\`/\`cwd\`/\`services\`, or a \`servers\` map + \`defaultServer\` for a multi-service workspace), optional \`web\` (the browser surface — see below), optional \`ownHosts\` (the product's OWN hostnames — "acme.com", "api.acme.com" — so detection stops reporting the app's own domains as external services; declare them when the repo's docs or env make them plain). A repo whose server needs a datastore declares the repo's OWN bring-up under \`api.services\` — \`{"up": "docker compose -p <project> -f <repo compose file> up -d --wait …", "down": "docker compose -p <project> -f … stop", "reset": "docker compose -p <project> -f … down -v"}\` — never inside \`build\`; the runner owns that lifecycle. \`reset\` is REQUIRED beside a compose-managed \`up\` (the static rules refuse its absence): it is the full wipe, volumes included, the runner restores the world with after a \`world: mutates\` test — without it every world-mutating scenario (credential changes, account deletion, global config) is barred. Namespace EVERY \`docker compose\` invocation with \`-p <dedicated-project>\`, the same project in every one of them: without it compose attaches to the project the working directory or the file's own \`name:\` gives, i.e. the developer's own running stack, and it is refused statically; a name or port collision with a running container is resolved by NAMESPACING YOUR OWN WORLD, never by touching theirs. When the app pins a SQL datastore, run the repo's schema/migration step inside \`api.services.up\` after the bring-up — a compose that only starts an empty database boots a server with no schema behind a green health probe. At least one of \`entry\`/\`api\`. \`\${PORT}\` in serve argv/env is substituted at boot. An argv is spawned WITHOUT a shell — no \`&&\`, no pipes; shell composition belongs in \`install\`/\`build\`. Never a dev/watch command as a server. A serve boots in a THROWAWAY directory by default — a workspace-mediated argv (\`yarn workspace …\`, \`npm run -w …\`) needs \`"cwd": "repo"\` to run from the repo root, never an argv hack.
+One JSON object: optional \`install\` (shell), \`build\` (shell), optional \`entry\` (argv array — a CLI entrypoint), optional \`api\` (\`serve\` argv + optional \`healthPath\`/\`env\`/\`app\`/\`cwd\`/\`services\`, or a \`servers\` map + \`defaultServer\` for a multi-service workspace), optional \`web\` (the browser surface — see below), optional \`ownHosts\` (the product's OWN hostnames — "acme.com", "api.acme.com" — so detection stops reporting the app's own domains as external services; declare them when the repo's docs or env make them plain). A repo whose server needs a datastore declares the repo's OWN bring-up under \`api.services\` — \`{"up": "docker compose -p <project> -f <repo compose file> up -d --wait …", "down": "docker compose -p <project> -f … stop", "reset": "docker compose -p <project> -f … down -v"}\` — never inside \`build\`; the runner owns that lifecycle. \`reset\` is REQUIRED beside a compose-managed \`up\` (the static rules refuse its absence): it is the full wipe, volumes included, the runner restores the world with after a \`world: mutates\` test — without it every world-mutating scenario (credential changes, account deletion, global config) is barred. Namespace EVERY \`docker compose\` invocation with \`-p <project>\`, the same project in every one of them — the one the briefing names when it names one, and any dedicated name of your own when it does not: without \`-p\` compose attaches to the project the working directory or the file's own \`name:\` gives, i.e. the developer's own running stack, and both that and a project other than the one you were given are refused statically; a name or port collision with a running container is resolved by NAMESPACING YOUR OWN WORLD, never by touching theirs. When the app pins a SQL datastore, run the repo's schema/migration step inside \`api.services.up\` after the bring-up — a compose that only starts an empty database boots a server with no schema behind a green health probe. At least one of \`entry\`/\`api\`. \`\${PORT}\` in serve argv/env is substituted at boot. An argv is spawned WITHOUT a shell — no \`&&\`, no pipes; shell composition belongs in \`install\`/\`build\`. Never a dev/watch command as a server. A serve boots in a THROWAWAY directory by default — a workspace-mediated argv (\`yarn workspace …\`, \`npm run -w …\`) needs \`"cwd": "repo"\` to run from the repo root, never an argv hack.
 
 Everything the recipe runs must be something THIS REPOSITORY ships. A hand-written stand-in — an inline \`node -e\` server, an entry that merely loads a module and exits, a build that builds nothing — is a WRONG answer even when verification passes: the point of the recipe is the app under test, and green on a stand-in tests nothing. When the workspace inventory lists apps with HTTP route prefixes, the recipe declares their server(s); when the real server will not boot, keep working THAT failure — a session that ends without a green proposal is an honest result the engine reports, while a green stand-in poisons every scenario built on it.
 

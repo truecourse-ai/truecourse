@@ -61,6 +61,7 @@ import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import {
   proposeRecipe,
   browserAppEvidence,
+  composeProjectName,
   defaultComposeFiles,
   detectEcosystems,
   DEV_SCRIPT_MARKERS,
@@ -262,6 +263,14 @@ export interface RecipeRepairContext {
    * it never re-advises what guard just tried.
    */
   composeGenerated: boolean
+  /**
+   * The compose project every `docker compose` invocation the recipe runs must
+   * pass to `-p`, when the caller named the world this repository's runs share.
+   * The session is TOLD it and held to it, so a hand-authored recipe cannot
+   * invent a project two workspaces could both land on. Absent (a developer's
+   * own tree) ⇒ any explicit project is accepted.
+   */
+  composeProject?: string
 }
 
 /** What the seam hands back: a proposal to fold-verify, or why there is none. */
@@ -399,11 +408,17 @@ export async function discoverRecipe(
   // Read once, before the deterministic pass: the model briefing needs it later,
   // and the static inventory rule holds EVERY proposal to it from the start.
   const inputs = readDiscoveryInputs(repoRoot)
+  // The one project every compose invocation of this recipe must name, derived
+  // from the world identity the caller gave. Without one (a developer's own
+  // tree) the deterministic proposal still names a project, but nothing else is
+  // held to that exact name.
+  const composeProject = options.composeKey ? composeProjectName(options.composeKey) : undefined
   const verifyContext: VerifyContext = {
     ...(options.database
       ? { database: () => (databaseOnce ??= Promise.resolve(options.database!()).catch(() => null)) }
       : {}),
     ...(inputs.apps ? { apps: inputs.apps } : {}),
+    ...(composeProject ? { composeProject } : {}),
   }
   // Verification reports the STAGE it is in; whether that is a re-verification is
   // discovery's own knowledge, so it is added on the way out. Built per call so each
@@ -490,6 +505,7 @@ export async function discoverRecipe(
       database,
       datastoreUrls,
       composeGenerated: verifyContext.composeGenerated === true,
+      ...(composeProject ? { composeProject } : {}),
     })
     const sessionRunId = repaired.sessionRunId
     if ('error' in repaired) {
@@ -534,6 +550,9 @@ export async function discoverRecipe(
     }
   }
 
+  // What the one-shot proposer reads: the same inputs, plus the project its
+  // compose commands must name (the static rule refuses any other).
+  const proposerInput = { ...inputs, ...(composeProject ? { composeProject } : {}) }
   // The LLM proposal is cached on the discovery-input fingerprint — unchanged
   // inputs reuse the prior proposal, but verification always re-runs.
   let proposal: RecipeProposal | null = null
@@ -544,7 +563,7 @@ export async function discoverRecipe(
   }
   if (!proposal) {
     options.onPhase?.({ kind: 'proposing', ...(deterministicStage ? { after: deterministicStage } : {}) })
-    const attempt = await proposeRecipeWithReask(inputs, runner, deterministicEvidence)
+    const attempt = await proposeRecipeWithReask(proposerInput, runner, deterministicEvidence)
     // An unreachable model must not ERASE what the engine already learned: when a
     // deterministic proposal was tried and rejected, its diagnostic (the actionable
     // one — it names the repo's own commands and, for a datastore repo, what to do
@@ -568,7 +587,7 @@ export async function discoverRecipe(
     // onwards. Nothing here reads the report: install, build, entry-file, and
     // entrypoint failures are one path, so a new failure kind needs no new code.
     options.onPhase?.({ kind: 'proposing', after: verdict.stage })
-    const retried = await proposeRecipeWithReask(inputs, runner, {
+    const retried = await proposeRecipeWithReask(proposerInput, runner, {
       proposal: JSON.stringify(proposal, null, 2),
       failure: verdict.reason,
     })
@@ -780,6 +799,9 @@ export type VerifyContext = {
    * is its HTTP services.
    */
   apps?: readonly RecipeAppInventoryEntry[]
+  /** The compose project every `docker compose` invocation must pass to `-p`;
+   *  absent ⇒ the static rule only demands that one be passed. */
+  composeProject?: string
 }
 
 /**
@@ -800,7 +822,7 @@ export async function verifyProposal(
   // accept is rejected before minutes of install/build run — and so EVERY path a
   // proposal can arrive by (deterministic, session outcome, one-shot, cache) is
   // held to the same rules, not just the session's `check_recipe` tool.
-  const complaints = staticProposalComplaints(proposal, context.apps, repoRoot)
+  const complaints = staticProposalComplaints(proposal, context.apps, repoRoot, context.composeProject)
   if (complaints.length > 0) {
     return {
       ok: false,
@@ -1394,24 +1416,25 @@ const DOCKER_COMPOSE_CALL = /(?<![\w-])docker(?:\s+|-)compose\b([^|;&]*)/g
 
 /**
  * ONE compose invocation's argument text, as every compose rule here reads it:
- * whether it passes an explicit project, which files it names, and those same
- * `-p`/`-f` flags VERBATIM, so a suggested sibling command (`down -v` for an
- * `up`) addresses exactly the project and files the original does.
+ * the project it passes (undefined when it passes none), which files it names,
+ * and those same `-p`/`-f` flags VERBATIM, so a suggested sibling command
+ * (`down -v` for an `up`) addresses exactly the project and files the original
+ * does.
  */
-function composeFlags(args: string): { project: boolean; files: string[]; flags: string } {
+function composeFlags(args: string): { project?: string; files: string[]; flags: string } {
   const tokens = args.trim().split(/\s+/).filter(Boolean)
-  let project = false
+  let project: string | undefined
   const files: string[] = []
   const kept: string[] = []
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!
     const value = tokens[i + 1]
-    if (t === '-p' || t === '--project-name') { project = true; if (value) kept.push(t, value); i++ }
-    else if (t.startsWith('--project-name=')) { project = true; kept.push(t) }
+    if (t === '-p' || t === '--project-name') { if (value) { project = value; kept.push(t, value) } i++ }
+    else if (t.startsWith('--project-name=')) { project = t.slice('--project-name='.length); kept.push(t) }
     else if (t === '-f' || t === '--file') { if (value) { files.push(value); kept.push(t, value) } i++ }
     else if (t.startsWith('--file=')) { files.push(t.slice('--file='.length)); kept.push(t) }
   }
-  return { project, files, flags: kept.length > 0 ? `${kept.join(' ')} ` : '' }
+  return { ...(project ? { project } : {}), files, flags: kept.length > 0 ? `${kept.join(' ')} ` : '' }
 }
 
 /** The first compose invocation of a whole shell command. */
@@ -1436,19 +1459,33 @@ function firstComposeFlags(command: string): ReturnType<typeof composeFlags> {
  * is exactly the stack a recipe must stay out of, and `-p` is also the one
  * spelling that overrides it.
  *
- * Returns one complaint per un-namespaced invocation.
+ * `required` is the one project this run's world lives in, derived from the
+ * caller's world identity. When there is one, a DIFFERENT project is refused
+ * too: an invented name is a world nothing else addresses, and two workspaces
+ * connected to one repository can invent the same one and then wipe each
+ * other's datastore. Without it (a developer's own tree) any explicit project
+ * passes.
+ *
+ * Returns one complaint per offending invocation.
  */
-function composeNamespaceComplaints(label: string, command: string): string[] {
+function composeNamespaceComplaints(label: string, command: string, required?: string): string[] {
   const complaints: string[] = []
   for (const match of command.matchAll(DOCKER_COMPOSE_CALL)) {
-    if (composeFlags(match[1] ?? '').project) continue
+    const project = composeFlags(match[1] ?? '').project
+    if (project && (!required || project === required)) continue
     complaints.push(
-      `${label} runs \`docker compose\` without an explicit project namespace (\`-p\`) — it attaches to the ` +
-      `project the working directory or the compose file names, i.e. the developer's own stack, where compose ` +
-      `resolves a port or config change by RECREATING a running container (this is how a verified recipe once ` +
-      `re-ported and stopped the developer's live redis) and the recipe's own \`reset\` would wipe their ` +
-      `volumes. Namespace it: pass \`-p <dedicated-project>\` on EVERY invocation. A top-level \`name:\` in ` +
-      `the file is not enough — that names the project whoever wrote the file runs it under.`,
+      project
+        ? `${label} runs \`docker compose -p ${project}\`, which is not this run's project — every compose ` +
+          `invocation of this recipe must pass \`-p ${required}\`. That project IS the world: its volumes are ` +
+          `what \`api.services.reset\` wipes, and a project nobody else addresses leaves the datastore the run ` +
+          `booted unreachable to the next one (and reachable to whoever else invents the same name).`
+        : `${label} runs \`docker compose\` without an explicit project namespace (\`-p\`) — it attaches to the ` +
+          `project the working directory or the compose file names, i.e. the developer's own stack, where compose ` +
+          `resolves a port or config change by RECREATING a running container (this is how a verified recipe once ` +
+          `re-ported and stopped the developer's live redis) and the recipe's own \`reset\` would wipe their ` +
+          `volumes. Namespace it: pass \`-p ${required ?? '<dedicated-project>'}\` on EVERY invocation. A ` +
+          `top-level \`name:\` in the file is not enough — that names the project whoever wrote the file runs ` +
+          `it under.`,
     )
   }
   return complaints
@@ -1460,6 +1497,9 @@ export function staticProposalComplaints(
   /** Grounds the rules that READ the checkout (the install's lifecycle switches,
    *  the browser-app evidence); absent ⇒ those rules stay quiet. */
   repoRoot?: string,
+  /** The project every `docker compose` invocation must pass to `-p`; absent ⇒
+   *  the namespace rule only demands that SOME project be passed. */
+  composeProject?: string,
 ): string[] {
   const complaints: string[] = []
   const argvs: { label: string; argv: readonly string[] }[] = []
@@ -1552,7 +1592,7 @@ export function staticProposalComplaints(
         )
       }
     }
-    complaints.push(...composeNamespaceComplaints(label, command))
+    complaints.push(...composeNamespaceComplaints(label, command, composeProject))
   }
   // `services.up`/`down` ARE the compose home, but the host-mutation rules hold
   // there too — bringing up the repo's own datastore never needs to escalate or
@@ -1564,7 +1604,7 @@ export function staticProposalComplaints(
     ['api.services.reset', services?.reset],
   ] as const) {
     if (!command) continue
-    complaints.push(...composeNamespaceComplaints(label, command))
+    complaints.push(...composeNamespaceComplaints(label, command, composeProject))
     for (const { pattern, what } of HOST_MUTATION_PATTERNS) {
       if (pattern.test(command)) {
         complaints.push(

@@ -199,4 +199,43 @@ describe('the namespace rule', () => {
 
     expect(complaints.some((c) => c.includes('project namespace'))).toBe(true)
   })
+
+  // A session that picks its own project picks a world nothing else addresses,
+  // and two workspaces on one repository can pick the same one. When the caller
+  // named the world, the derived project is the only one that passes.
+  it('refuses a project that is not the derived one, and names the one required', () => {
+    const project = composeProjectName('org_123/acme/widgets')
+    const complaints = staticProposalComplaints(
+      {
+        build: 'true',
+        api: {
+          ...serve,
+          services: {
+            up: 'docker compose -p acme-guard -f compose.yml up -d --wait',
+            down: `docker compose -p ${project} -f compose.yml down`,
+            reset: `docker compose -p ${project} -f compose.yml down -v`,
+          },
+        },
+      },
+      undefined,
+      undefined,
+      project,
+    )
+
+    expect(complaints).toHaveLength(1)
+    expect(complaints[0]).toContain('api.services.up')
+    expect(complaints[0]).toContain(`-p ${project}`)
+    expect(complaints[0]).toContain('acme-guard')
+  })
+
+  it('accepts the derived project, and still accepts any project when none is required', () => {
+    const project = composeProjectName('org_123/acme/widgets')
+    const services = (up: string) => ({
+      build: 'true',
+      api: { ...serve, services: { up, down: `${up} down`, reset: `${up} down -v` } },
+    })
+
+    expect(staticProposalComplaints(services(`docker compose -p ${project} up -d`), undefined, undefined, project)).toEqual([])
+    expect(staticProposalComplaints(services('docker compose -p acme-guard up -d'))).toEqual([])
+  })
 })
