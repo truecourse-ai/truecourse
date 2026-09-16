@@ -307,7 +307,7 @@ header.site.scrolled {
 .mobile-menu .row {
   display: flex;
   flex-direction: column;
-  padding: 8px 0 18px;
+  padding-block: 8px 18px;
 }
 @media (max-width: 860px) {
   .mobile-toggle {
@@ -758,13 +758,18 @@ header.site.scrolled {
   padding-block: clamp(48px, 7vw, 80px) 0;
   border-top: 1px solid var(--line);
 }
-/* The water runs under the words, edge to edge, down to the footer's line. */
+/* The water runs under the words, edge to edge, down to the footer's line.
+   A finger scrolls the page over it until a voyage is under way; then the
+   finger is the wind and the page holds still. */
 .cta .sea {
   position: relative;
   margin-top: 28px;
   height: clamp(240px, 26vw, 320px);
   touch-action: pan-y;
   cursor: crosshair;
+}
+.cta .sea.sailing {
+  touch-action: none;
 }
 .cta .sea canvas {
   position: absolute;

@@ -3,11 +3,15 @@ import { drawWind } from '@/lib/wind';
 
 type Phase = 'idle' | 'sailing' | 'docked' | 'lost';
 
-const SAY: Record<Phase, string> = {
-  idle: 'Click the water to set sail. Your cursor is the wind.',
-  sailing: 'Keep off the red rocks. The current pulls you down and off the map.',
-  docked: 'Docked. Click to sail again.',
-  lost: 'Lost at sea. Click to try again.',
+/** What the line under the buttons says, for a cursor and for a finger. */
+const SAY: Record<Phase, [mouse: string, touch: string]> = {
+  idle: ['Click the water to set sail. Your cursor is the wind.', 'Tap the water to set sail. Your finger is the wind.'],
+  sailing: [
+    'Keep off the red rocks. The current pulls you down and off the map.',
+    'Keep off the red rocks. The current pulls you down and off the map.',
+  ],
+  docked: ['Docked. Click to sail again.', 'Docked. Tap to sail again.'],
+  lost: ['Lost at sea. Click to try again.', 'Lost at sea. Tap to try again.'],
 };
 
 /** The wind's reach from the cursor, in px, and its push at the cursor itself. */
@@ -237,6 +241,15 @@ export function Voyage() {
   const sea = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [phase, setPhase] = useState<Phase>('idle');
+  const [touch, setTouch] = useState(false);
+
+  useEffect(() => {
+    const coarse = window.matchMedia('(hover: none) and (pointer: coarse)');
+    const read = () => setTouch(coarse.matches);
+    read();
+    coarse.addEventListener('change', read);
+    return () => coarse.removeEventListener('change', read);
+  }, []);
 
   useEffect(() => {
     const host = sea.current;
@@ -347,9 +360,9 @@ export function Voyage() {
   return (
     <>
       <p className="sea-say" aria-live="polite">
-        {SAY[phase]}
+        {SAY[phase][touch ? 1 : 0]}
       </p>
-      <div className="sea" ref={sea}>
+      <div className={`sea${phase === 'sailing' ? ' sailing' : ''}`} ref={sea}>
         <canvas ref={canvas} aria-label="A sailing game: blow the boat to the harbour with your cursor" />
       </div>
     </>
