@@ -87,7 +87,11 @@ function runOneSession(driver: SessionDriver, kind: string): void {
 /** A workspace on an API provider whose transport reports what a call spent. */
 function installBackend(): void {
   setWorkspaceLlmConfigStore({
-    getConfig: async () => ({ provider: 'anthropic', model: 'claude-opus-5', apiKey: 'sk-test' }),
+    getConfig: async () => ({ provider: 'anthropic' as const, model: 'claude-opus-5', apiKey: 'sk-test' }),
+    getSelection: async () => ({
+      kind: 'api' as const,
+      config: { provider: 'anthropic' as const, model: 'claude-opus-5', apiKey: 'sk-test' },
+    }),
     getView: async () => null,
     save: async () => {},
   });

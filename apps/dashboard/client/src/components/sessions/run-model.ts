@@ -46,6 +46,7 @@ export const RUN_STATUS_META: Record<WorkStatus, { word: string; dot: string }> 
   completed: { word: 'Finished', dot: 'bg-emerald-500' },
   failed: { word: 'Failed', dot: 'bg-red-500' },
   interrupted: { word: 'Interrupted', dot: 'bg-amber-500' },
+  paused: { word: 'Paused', dot: 'bg-amber-500' },
 };
 
 /** The step-dot palette: a pending step is an empty ring, never a fill; the

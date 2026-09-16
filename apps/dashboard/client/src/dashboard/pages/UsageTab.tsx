@@ -100,6 +100,7 @@ const OUTCOME: Record<JobStatus, { word: string; tone: StatusTone }> = {
   succeeded: { word: RUN_STATUS_META.completed.word, tone: RUN_STATUS_TONE.completed },
   failed: { word: RUN_STATUS_META.failed.word, tone: RUN_STATUS_TONE.failed },
   interrupted: { word: RUN_STATUS_META.interrupted.word, tone: RUN_STATUS_TONE.interrupted },
+  paused: { word: RUN_STATUS_META.paused.word, tone: RUN_STATUS_TONE.paused },
   cancelled: { word: 'Cancelled', tone: 'neutral' },
 };
 
@@ -107,6 +108,7 @@ const OUTCOME: Record<JobStatus, { word: string; tone: StatusTone }> = {
 const OUTCOME_ORDER: JobStatus[] = [
   'failed',
   'interrupted',
+  'paused',
   'cancelled',
   'running',
   'queued',

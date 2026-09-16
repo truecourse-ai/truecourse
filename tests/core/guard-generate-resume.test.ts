@@ -33,11 +33,11 @@ describe('guard generation resume boundaries', () => {
   });
 
   it.each(['running', 'completed'])('rejects a %s run', status => {
-    expect(() => guardGenerateResume(run([], status))).toThrow('Only interrupted or failed');
+    expect(() => guardGenerateResume(run([], status))).toThrow('Only interrupted, failed or paused');
   });
 
   it('rejects another command', () => {
-    expect(() => guardGenerateResume({ ...run([]), command: 'spec-scan' })).toThrow('Only interrupted or failed');
+    expect(() => guardGenerateResume({ ...run([]), command: 'spec-scan' })).toThrow('Only interrupted, failed or paused');
   });
 
   it('allows retrying an interruption before checkout established a commit', () => {

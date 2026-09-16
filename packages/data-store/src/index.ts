@@ -21,7 +21,7 @@ export { PgGuardStore } from './guard-store.js';
 export { PgGuardOverlayStore } from './guard-overlay-store.js';
 export { PgInviteLinkStore } from './invite-link-store.js';
 export { PgKvCacheStore } from './cache-store.js';
-export { PgLlmConfigStore } from './llm-config-store.js';
+export { PgLlmConfigStore, type StoredProviderSelection } from './llm-config-store.js';
 export { encryptSecret, decryptSecret, maskKey } from './crypto.js';
 export { purgeRepoData } from './repo-purge.js';
 export {
@@ -29,7 +29,9 @@ export {
   NotificationStore,
   ActiveJobExistsError,
   type OrphanedJob,
+  type PausedJob,
 } from './jobs-store.js';
 
 export { PgSessionRunStore } from './session-run-store.js';
 export { PgUsageStore } from './usage-store.js';
+export { PgCreditsStore } from './credits-store.js';

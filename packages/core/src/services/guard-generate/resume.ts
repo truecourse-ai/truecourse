@@ -11,8 +11,11 @@ export interface GuardGenerateResume {
 const STEPS = ['index', 'extract', 'interfaces', 'flows', 'match', 'author', 'validate'];
 
 export function guardGenerateResume(record: PublicRunRecord): GuardGenerateResume {
-  if (record.command !== 'guard-generate' || !['interrupted', 'failed'].includes(record.status)) {
-    throw new Error('Only interrupted or failed guard generation can be resumed.');
+  if (
+    record.command !== 'guard-generate' ||
+    !['interrupted', 'failed', 'paused'].includes(record.status)
+  ) {
+    throw new Error('Only interrupted, failed or paused guard generation can be resumed.');
   }
   const items = (record.display?.blocks.flatMap(block =>
     block.kind === 'checklist' && Array.isArray(block.items) ? block.items : []) ?? [])

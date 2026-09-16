@@ -15,6 +15,8 @@ import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions
 import capabilitiesRouter from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
 import { createUsageRouter } from './routes/usage.js';
+import { createCreditsRouter, createOperatorCreditsRouter } from './routes/credits.js';
+import { isLocalMode } from './mode.js';
 import { createAuthGate } from './middleware/auth.js';
 import { actorContext } from './middleware/actor.js';
 import type { GithubMount } from './github/index.js';
@@ -202,6 +204,14 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // What this workspace's runs spent at the model. Workspace-scoped and
   // read-only, so it sits beside the Models settings it accounts for.
   app.use('/api/usage', createUsageRouter({ repoLinks }));
+
+  // What it may spend of TrueCourse's own. Absent in local mode, where there is
+  // no operator to grant anything and no platform key to spend: the `/api`
+  // catch-all below answers those addresses as the routes they are not.
+  if (!isLocalMode()) {
+    app.use('/api/credits', createCreditsRouter());
+    app.use('/api/operator/credits', createOperatorCreditsRouter());
+  }
 
   // The job queue: the live event stream, job status, and the notifications
   // feed. Workspace-scoped like the Models settings, so they mount together.

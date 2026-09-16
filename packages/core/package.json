@@ -124,6 +124,11 @@
       "types": "./dist/lib/usage-store.d.ts",
       "import": "./dist/lib/usage-store.js"
     },
+    "./lib/credits-store": {
+      "truecourse-source": "./src/lib/credits-store.ts",
+      "types": "./dist/lib/credits-store.d.ts",
+      "import": "./dist/lib/credits-store.js"
+    },
     "./lib/context-ref": {
       "truecourse-source": "./src/lib/context-ref.ts",
       "types": "./dist/lib/context-ref.d.ts",

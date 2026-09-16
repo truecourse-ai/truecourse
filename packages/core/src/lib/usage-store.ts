@@ -101,8 +101,11 @@ export interface UsageFacetCell {
 }
 
 export interface UsageStore {
-  /** Fold one flush onto its (job, subject) row, creating it the first time. */
-  record(delta: UsageDelta): Promise<void>;
+  /**
+   * Fold one flush onto its (job, subject) row, creating it the first time.
+   * Answers the row's id, which is what a credit debit charges against.
+   */
+  record(delta: UsageDelta): Promise<string>;
   /** Name the run on every row of a job that was written before it opened. */
   attachRun(jobId: string, runId: string): Promise<void>;
   totals(query: UsageQuery): Promise<UsageTotalsRecord>;
@@ -122,7 +125,7 @@ class UninstalledUsageStore implements UsageStore {
   private fail(): never {
     throw new Error(NOT_INSTALLED);
   }
-  record(): Promise<void> {
+  record(): Promise<string> {
     this.fail();
   }
   attachRun(): Promise<void> {
@@ -161,7 +164,7 @@ export function usageStoreInstalled(): boolean {
   return active !== unavailable;
 }
 
-export const recordUsage = (delta: UsageDelta): Promise<void> => active.record(delta);
+export const recordUsage = (delta: UsageDelta): Promise<string> => active.record(delta);
 
 export const attachUsageRun = (jobId: string, runId: string): Promise<void> =>
   active.attachRun(jobId, runId);

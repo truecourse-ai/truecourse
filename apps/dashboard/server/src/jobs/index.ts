@@ -35,6 +35,7 @@ import {
 import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
 import type { Db } from '@truecourse/db';
+import type { PausedJob } from '@truecourse/data-store';
 import {
   createRepoGuardSetupTask,
   REPO_GUARD_SETUP_TASK,
@@ -77,7 +78,7 @@ import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
 import { openConflicts } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
-import { captureJobFinished, captureJobStarted } from '../observability/posthog.js';
+import { captureJobFinished, captureJobStarted, captureRunResumed } from '../observability/posthog.js';
 import { rippleLinksChanged, type RippleStart } from './context-ripple.js';
 import type { OnboardingJobRequest } from './tasks/onboarding.js';
 
@@ -113,6 +114,14 @@ export interface JobsMount extends Jobs {
    * settle — the caller must refuse the disconnect.
    */
   cancelRepoJobs(repoFullName: string, orgId: string): Promise<'stopped' | 'not-here'>;
+  /**
+   * Carry a paused job on: enqueue its stored payload — the enqueue request it
+   * was created with, plus whatever pointer it settled on — under the key and
+   * the lane it had. Answers the new job's id, or null when that key is already
+   * busy again. The paused row is then named with the job it became, so it is
+   * never carried on twice.
+   */
+  resumePaused(job: PausedJob): Promise<string | null>;
 }
 
 export interface LinksChangedRequest {
@@ -345,6 +354,29 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     return 'stopped';
   };
 
+  /**
+   * A paused job, carried on. The payload it stored IS its enqueue request (a
+   * resume pointer merged onto it when it paused), so this re-enqueues that —
+   * under the same key, and, for a heavy job, into the same workspace lane, so
+   * a resumed run queues behind whatever is running rather than beside it.
+   */
+  const resumePaused = async (job: PausedJob): Promise<string | null> => {
+    const { jobId: _row, ...request } = job.payload ?? {};
+    const jobId = await jobs.singleFlightEnqueue(
+      job.type,
+      job.workspaceOrgId,
+      job.key ?? `${job.type}:${job.id}`,
+      request,
+      HEAVY_TASKS.includes(job.type)
+        ? { queue: heavyJobQueue(job.workspaceOrgId) }
+        : undefined,
+    );
+    if (!jobId) return null;
+    await jobs.jobStore.markResumed(job.id, jobId);
+    captureRunResumed(job.workspaceOrgId, job.type, jobId);
+    return jobId;
+  };
+
   return Object.assign(jobs, {
     enqueueGuardSetup,
     enqueueGuardGenerate,
@@ -353,8 +385,16 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     enqueueContextScan,
     startForLinks,
     cancelRepoJobs,
+    resumePaused,
   });
 }
+
+/** The three that share a workspace's one lane. */
+const HEAVY_TASKS: readonly string[] = [
+  REPO_GUARD_SETUP_TASK,
+  REPO_GUARD_GENERATE_TASK,
+  REPO_GUARD_RUN_TASK,
+];
 
 /** The session-run commands the onboarding jobs run — what `repoIsWorking` reads.
  *  A run spends no sessions, so `guard-run` never has a record to find. */

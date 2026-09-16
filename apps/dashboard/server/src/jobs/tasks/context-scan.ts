@@ -31,7 +31,7 @@ import {
   startWorkspaceLlm,
   type WorkspaceLlm,
 } from '../../services/workspace-llm.service.js';
-import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
+import { createUsageMeter, withCredits, type UsageMeter } from '../../services/usage-meter.service.js';
 import { recordFailedWorkspaceScanRun } from '../../services/context-scan.service.js';
 import { emitContextChanged } from '../../services/context.service.js';
 import {
@@ -125,19 +125,26 @@ export function createContextScanTask(
           throw err;
         }
 
-        const result = await runScan({
-          workspaceOrgId: org,
-          repositories: await repositoriesOf(deps, org),
-          tracker: checklistTracker(ctx),
-          driver: llm.driver(),
-          transportMode: llm.mode,
-          onRunStarted: (info) => {
-            runIds.set(ctx.jobId, info.runId);
-            meter.setRunId(info.runId);
-            void ctx.notify({ level: 'started', title: 'Document scan started', data: { runId: info.runId } });
-          },
-          ...(ctx.signal ? { signal: ctx.signal } : {}),
-        });
+        // The scan owns its own run record (it opens one after the estimate
+        // gate), so the credits gate wraps the engine call itself: a scan that
+        // met an empty balance paused, whatever the engine called it.
+        const repositories = await repositoriesOf(deps, org);
+        const result = await withCredits(meter, () =>
+          runScan({
+            workspaceOrgId: org,
+            repositories,
+            tracker: checklistTracker(ctx),
+            driver: llm.driver(),
+            transportMode: llm.mode,
+            onRunStarted: (info) => {
+              runIds.set(ctx.jobId, info.runId);
+              meter.setRunId(info.runId);
+              ctx.resumeWith({ source: 'rescan' });
+              void ctx.notify({ level: 'started', title: 'Document scan started', data: { runId: info.runId } });
+            },
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+          }),
+        );
 
         const conflicts = openConflicts(result.corpus, result.decisions).length;
         await emitContextChanged(org, { change: 'documents' });

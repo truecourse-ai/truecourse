@@ -65,8 +65,8 @@ const TOKENS = sql`(${llmUsage.inputTokens} + ${llmUsage.outputTokens} + ${llmUs
 export class PgUsageStore implements UsageStore {
   constructor(private readonly db: Db) {}
 
-  async record(delta: UsageDelta): Promise<void> {
-    await this.db
+  async record(delta: UsageDelta): Promise<string> {
+    const [row] = await this.db
       .insert(llmUsage)
       .values({
         id: randomUUID(),
@@ -102,7 +102,11 @@ export class PgUsageStore implements UsageStore {
           startedAt: sql`least(${llmUsage.startedAt}, excluded.started_at)`,
           finishedAt: sql`greatest(${llmUsage.finishedAt}, excluded.finished_at)`,
         },
-      });
+      })
+      // The row's own id — the one the first flush minted, not this call's —
+      // because a credit debit charges the row this spend landed on.
+      .returning({ id: llmUsage.id });
+    return row.id;
   }
 
   async attachRun(jobId: string, runId: string): Promise<void> {

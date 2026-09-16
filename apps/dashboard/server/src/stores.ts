@@ -22,6 +22,7 @@ import { setGuardStore } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { setContextStore } from '@truecourse/core/lib/context-store';
 import { setUsageStore } from '@truecourse/core/lib/usage-store';
+import { setCreditsStore } from '@truecourse/core/lib/credits-store';
 import { setRegistryStore } from '@truecourse/core/config/registry';
 import { setSessionRunBackend } from '@truecourse/core/lib/sessions-store';
 import { setKvCacheStore } from '@truecourse/llm';
@@ -35,6 +36,7 @@ import {
   PgKvCacheStore,
   PgLlmConfigStore,
   PgUsageStore,
+  PgCreditsStore,
   purgeRepoData,
 } from '@truecourse/data-store';
 import { setShowResolvedStageModel, setShowStageUsage } from '@truecourse/core/commands/spec-in-process';
@@ -152,6 +154,10 @@ export function installDbStores(
   // What every run spent at the model, one row per (job, stage or session),
   // written while the run goes. Settings › Usage is the read side.
   setUsageStore(new PgUsageStore(db));
+  // What a workspace running on TrueCourse's own key may spend, and every
+  // movement of it. The platform key itself is never here: it is the server's
+  // environment, read per run.
+  setCreditsStore(new PgCreditsStore(db));
   // Each workspace names ONE model, and its transport ignores the per-stage
   // hint, so rendering the per-stage tiers would be a lie.
   setShowResolvedStageModel(false);

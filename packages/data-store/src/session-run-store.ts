@@ -384,6 +384,14 @@ export class PgSessionRunStore implements SessionRunBackend {
       finish(status, options) {
         record.status = status; record.finishedAt = new Date().toISOString(); delete record.endpoint;
         if (options?.error) record.error = options.error;
+        // A pause is a stop the run is carried on from, so its live sessions are
+        // parked rather than left reading as running — the same word the boot
+        // sweep gives the sessions of a run a dead process abandoned.
+        if (status === 'paused') {
+          for (const session of record.sessions) {
+            if (session.status === 'running' || session.status === 'waiting') session.status = 'parked';
+          }
+        }
         write();
       },
       persistence: {

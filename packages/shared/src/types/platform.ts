@@ -136,9 +136,30 @@ export const LLM_PROVIDER_KINDS = [
 
 export type LlmProviderKind = (typeof LLM_PROVIDER_KINDS)[number]
 
+/**
+ * Running on TrueCourse's own key, against a granted credit balance. It is a
+ * CHOICE on the Models page, never a provider block: the workspace stores no
+ * key, no model and no endpoint for it, and the platform key it runs on is
+ * read from the server's environment and never leaves the process.
+ */
+export const LLM_CREDITS_PROVIDER = 'truecourse'
+
+/** What a workspace can name on the Models page: a provider of its own, or credits. */
+export const LLM_PROVIDER_CHOICES = [
+  ...LLM_PROVIDER_KINDS,
+  LLM_CREDITS_PROVIDER,
+] as const
+
+export type LlmProviderChoice = (typeof LLM_PROVIDER_CHOICES)[number]
+
+/** Whether this choice is the platform's own key rather than the workspace's. */
+export function isCreditsProvider(choice: string): boolean {
+  return choice === LLM_CREDITS_PROVIDER
+}
+
 /** Masked, secret-free view of a workspace's LLM provider config. */
 export interface LlmProviderConfigView {
-  provider: LlmProviderKind
+  provider: LlmProviderChoice
   model: string
   fallbackModel: string | null
   baseURL: string | null
@@ -164,15 +185,19 @@ export interface LlmOperatorProvider {
 /** Response of GET /api/llm/config. */
 export interface LlmConfigResponse {
   config: LlmProviderConfigView | null
-  providers: LlmProviderKind[]
+  /** What this server offers. `truecourse` is absent when it holds no platform key. */
+  providers: LlmProviderChoice[]
   /** Present only on an instance running on its operator's Claude Code. */
   operator?: LlmOperatorProvider
+  /** The workspace's credit balance, when this server offers credits at all. */
+  credits?: { balance: number }
 }
 
 /** Body of PATCH /api/llm/config. */
 export interface LlmConfigUpdate {
-  provider: LlmProviderKind
-  model: string
+  provider: LlmProviderChoice
+  /** The provider's model id. Omitted for `truecourse`, whose model is the platform's. */
+  model?: string
   fallbackModel?: string
   /** Omit to keep the stored key (same provider only). */
   apiKey?: string

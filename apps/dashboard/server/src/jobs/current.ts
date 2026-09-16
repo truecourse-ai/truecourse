@@ -20,3 +20,12 @@ export function requireJobs(): JobsMount {
   }
   return mount;
 }
+
+/**
+ * The mount, or null when this process has no queue. For the readers that have
+ * something to say either way — a credits page still shows a balance on a
+ * server whose worker never came up.
+ */
+export function currentJobs(): JobsMount | null {
+  return mount;
+}

@@ -104,6 +104,9 @@ export function createRepoGuardGenerateTask(
           const { repoFullName } = ctx.payload;
           runIds.set(ctx.jobId, activityRun.runId);
           meter.setRunId(activityRun.runId);
+          // Where a resume starts from, declared the moment the run exists: a
+          // generate that pauses is carried on through its own record.
+          ctx.resumeWith({ resumeRunId: activityRun.runId });
           await ctx.notify({
             level: 'started',
             title: 'Flow generation started',
@@ -210,6 +213,10 @@ export function createRepoGuardGenerateTask(
             // A stop the user asked for: the harness settles the row cancelled, and
             // a store that never saw this run is exactly what a cancel means.
             if (ctx.signal?.aborted) return { notification: null };
+            // Out of credits: what the engine got through is partial, so it is
+            // NOT stored as this repository's baseline. The resume replays what
+            // the caches already hold and pays only for the rest.
+            meter.assertCredits();
             if (guard.status !== 'ok') {
               throw new Error(guard.reason ?? `guard generate ended ${guard.status}.`);
             }
@@ -270,7 +277,7 @@ export function createRepoGuardGenerateTask(
           } finally {
             tree.dispose();
           }
-        });
+        }, meter);
       } finally {
         // However the generate ended, what it spent up to that point is written.
         await meter.close();

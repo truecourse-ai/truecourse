@@ -40,6 +40,7 @@ import {
 import type { ContextDocument, ContextSource } from '@truecourse/shared';
 import { contextDocRef, parseContextDocRef } from '../lib/context-ref.js';
 import { log } from '../lib/logger.js';
+import { isCreditsExhausted } from '../lib/credits-store.js';
 import { openStoredSessionRun, workspaceSessionsKey } from '../lib/sessions-store.js';
 import {
   listContextDocuments,
@@ -181,10 +182,12 @@ export async function workspaceContextScanInProcess(
         noChanges,
       };
     } catch (err) {
+      // Out of credits is a PAUSE: the work is unfinished and nothing went
+      // wrong, and every curation it did settle is in the cache a resume reads.
       await closeRun(
         org,
         runId,
-        options.signal?.aborted ? 'interrupted' : 'failed',
+        isCreditsExhausted(err) ? 'paused' : options.signal?.aborted ? 'interrupted' : 'failed',
         err instanceof Error ? err.message : String(err),
       );
       throw err;
@@ -202,7 +205,7 @@ export async function workspaceContextScanInProcess(
 async function closeRun(
   org: string,
   runId: string | null,
-  status: 'completed' | 'failed' | 'interrupted',
+  status: 'completed' | 'failed' | 'interrupted' | 'paused',
   message?: string,
 ): Promise<void> {
   if (!runId) return;

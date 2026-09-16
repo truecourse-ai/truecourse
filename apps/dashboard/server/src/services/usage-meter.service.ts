@@ -16,11 +16,30 @@
  * the `assistant-turn` events it already emits — so a session is metered by
  * watching the transcript it writes anyway, with no second accounting path.
  *
- * Accounting must never break a run: every write here is caught and logged.
+ * AND IT IS ALSO THE TILL. A workspace running on TrueCourse's own key spends a
+ * granted balance, and this is the one place that sees every call and every
+ * turn — so the check sits here too, rather than in a second accounting path
+ * that would have to be kept in step with this one. The check is BEFORE (a call
+ * that is about to be made, a turn that is about to be taken) and the debit is
+ * after (one per flush, against the `llm_usage` row that flush landed on), so a
+ * balance goes below zero by at most the one call in flight.
+ *
+ * Accounting must never break a run: every write here is caught and logged. The
+ * CHECK is the one thing that does throw, and that is the point of it.
  */
 
-import type { SessionDriver, SessionEventBody, TurnUsage } from '@truecourse/agent-loop';
+import type {
+  DriverResult,
+  SessionDriver,
+  SessionEventBody,
+  SessionFailure,
+  SessionHandle,
+  SessionStatus,
+  TurnUsage,
+} from '@truecourse/agent-loop';
 import { log } from '@truecourse/core/lib/logger';
+import { CreditsExhaustedError } from '@truecourse/core/lib/credits-store';
+import { creditsOfUsd } from '@truecourse/shared';
 import {
   attachUsageRun,
   recordUsage,
@@ -54,14 +73,45 @@ export interface UsageMeterSubject {
   jobId: string;
 }
 
-export interface UsageMeter {
+/**
+ * The balance a run spends from, and how a flush is taken off it. Built by the
+ * credits service, which owns the ledger, the warnings and the analytics; the
+ * meter holds only the number it must check against.
+ */
+export interface CreditsAccount {
+  workspaceOrgId: string;
+  /** What the workspace had when the run started. */
+  balance: number;
+  /** Take one flush off the balance, against the usage row it landed on. Answers what is left. */
+  charge(credits: number, usageId: string): Promise<number>;
+}
+
+/** What a metered producer needs: somewhere to report, and the gate before spending. */
+export interface RunMeter {
   /** Hand the meter one call's or one turn's spend. */
   observe: RunUsageObserver;
+  /**
+   * Whether this workspace may spend right now. Answering `false` TRIPS the
+   * gate, so the job that met it pauses rather than reading as a failure — a
+   * caller asks this only when it is about to spend.
+   */
+  spendable(): boolean;
+  /** {@link spendable}, as the refusal a call site cannot ignore. */
+  check(): void;
+}
+
+export interface UsageMeter extends RunMeter {
   /**
    * Name the run this job opened. Rows already written are named too, so a job
    * whose run record arrives after the first call still points at it.
    */
   setRunId(runId: string): void;
+  /** Spend from here comes out of this account. */
+  chargeTo(account: CreditsAccount): void;
+  /** Whether the gate tripped at any point in this run. */
+  exhausted(): boolean;
+  /** Throws {@link CreditsExhaustedError} if the gate tripped — the job's pause. */
+  assertCredits(): void;
   /** Write what is buffered now. */
   flush(): Promise<void>;
   /** Stop the timer and write the last of it. */
@@ -86,6 +136,18 @@ interface Pending {
   finishedAt: string;
 }
 
+/**
+ * What one (job, subject) row has cost so far and what has been charged for it.
+ * Charging works off the CUMULATIVE cost rather than each flush's own, so
+ * rounding a flush to whole credits never drifts: the row is always charged
+ * `round(total × 100)` in the end, whatever the flushes were.
+ */
+interface Charged {
+  usageId: string;
+  costUsd: number;
+  credits: number;
+}
+
 export interface UsageMeterOptions {
   /** The flush interval; tests shorten it. */
   flushMs?: number;
@@ -99,9 +161,13 @@ export function createUsageMeter(
   const flushMs = opts.flushMs ?? FLUSH_MS;
   const now = opts.now ?? (() => new Date());
   const buffer = new Map<string, Pending>();
+  const charged = new Map<string, Charged>();
   let runId: string | null = null;
   let timer: NodeJS.Timeout | null = null;
   let closed = false;
+  let account: CreditsAccount | null = null;
+  let balance = 0;
+  let tripped = false;
 
   const arm = (): void => {
     if (timer || closed) return;
@@ -133,13 +199,32 @@ export function createUsageMeter(
     if (pending.finishedAt > held.finishedAt) held.finishedAt = pending.finishedAt;
   };
 
+  /**
+   * Charge this row up to what it has now cost. The difference between the
+   * credits its total is worth and the credits already taken for it is what
+   * this flush owes, so a run of sub-cent flushes still pays exactly what the
+   * usage row says it spent.
+   */
+  const chargeRow = async (key: string, usageId: string, costUsd: number): Promise<void> => {
+    if (!account) return;
+    const held = charged.get(key) ?? { usageId, costUsd: 0, credits: 0 };
+    held.usageId = usageId;
+    held.costUsd += costUsd;
+    const owed = creditsOfUsd(held.costUsd) - held.credits;
+    charged.set(key, held);
+    if (owed <= 0) return;
+    held.credits += owed;
+    balance = await account.charge(owed, usageId);
+    if (balance <= 0) tripped = true;
+  };
+
   const flushNow = async (): Promise<void> => {
     if (buffer.size === 0) return;
     const taken = [...buffer.entries()];
     buffer.clear();
     for (const [key, pending] of taken) {
       try {
-        await recordUsage({
+        const usageId = await recordUsage({
           workspaceOrgId: subject.workspaceOrgId,
           repoFullName: subject.repoFullName,
           jobType: subject.jobType,
@@ -158,6 +243,16 @@ export function createUsageMeter(
           startedAt: pending.startedAt,
           finishedAt: pending.finishedAt,
         });
+        // The debit follows the row it charges, so a ledger line and a usage
+        // line are the same money. A debit that could not be taken is logged
+        // and not retried: double-charging a run is worse than under-charging it.
+        try {
+          await chargeRow(key, usageId, pending.costUsd);
+        } catch (err) {
+          log.warn(
+            `[credits] could not charge ${subject.jobType} spend to ${subject.workspaceOrgId}: ${(err as Error).message}`,
+          );
+        }
       } catch (err) {
         restore(key, pending);
         log.warn(`[usage] could not record ${subject.jobType} spend: ${(err as Error).message}`);
@@ -210,8 +305,30 @@ export function createUsageMeter(
     arm();
   };
 
+  const spendable = (): boolean => {
+    if (!account || balance > 0) return true;
+    tripped = true;
+    return false;
+  };
+
+  const check = (): void => {
+    if (spendable()) return;
+    throw new CreditsExhaustedError(account!.workspaceOrgId, balance);
+  };
+
   return {
     observe,
+    spendable,
+    check,
+    exhausted: () => tripped,
+    chargeTo(next) {
+      account = next;
+      balance = next.balance;
+    },
+    assertCredits() {
+      if (!tripped || !account) return;
+      throw new CreditsExhaustedError(account.workspaceOrgId, balance);
+    },
     setRunId(next) {
       if (runId === next) return;
       runId = next;
@@ -236,25 +353,73 @@ export function createUsageMeter(
 }
 
 /**
- * The same driver, reporting what its sessions spend. Every `assistant-turn`
- * the driver emits carries the turn's four token buckets and its cost, so the
- * wrapper reads the transcript the session writes anyway and reports one spend
- * per turn, under the session's KIND — a pool of thirty flow workers is one
- * subject, not thirty.
+ * Run a job body under the gate. An engine whose every call met an empty
+ * balance reports that as its own kind of failure — a stage that lost every
+ * call, a session that never opened — and it is the balance that is the truth
+ * of it, so the gate is asked on BOTH paths and its answer replaces whatever
+ * the body said. Used by the two jobs that own no run record; the two that do
+ * hand the same gate to `dashboardActivity`, which settles the record with it.
  */
-export function meterDriver(driver: SessionDriver, observe: RunUsageObserver): SessionDriver {
+export async function withCredits<T>(meter: UsageMeter, run: () => Promise<T>): Promise<T> {
+  try {
+    const value = await run();
+    meter.assertCredits();
+    return value;
+  } catch (err) {
+    meter.assertCredits();
+    throw err;
+  }
+}
+
+/**
+ * How a session ends when the workspace may not spend. `blocked` is the shell's
+ * own word for "park loudly, never hammer": the session's index entry becomes
+ * `parked`, its journal stands, and nothing retries it — which is exactly a
+ * pause waiting on a grant.
+ */
+const OUT_OF_CREDITS: SessionFailure = {
+  kind: 'transport',
+  detail: 'out of credits',
+  class: 'permission',
+  retryability: 'blocked',
+};
+
+/**
+ * The same driver, reporting what its sessions spend and refusing to spend what
+ * is not there. Every `assistant-turn` the driver emits carries the turn's four
+ * token buckets and its cost, so the wrapper reads the transcript the session
+ * writes anyway and reports one spend per turn, under the session's KIND — a
+ * pool of thirty flow workers is one subject, not thirty.
+ *
+ * The gate sits at the two turn boundaries the wrapper can see: before the
+ * session opens at all, and after each turn is paid for. A session that meets
+ * an empty balance mid-way is interrupted at the end of the turn in flight and
+ * parks — unless that turn landed a valid outcome, in which case the work is
+ * done and completion wins, exactly as it does against the turn budget.
+ */
+export function meterDriver(
+  driver: SessionDriver,
+  meter: RunMeter,
+  provider = driver.attribution.provider,
+): SessionDriver {
   return {
     capabilities: driver.capabilities,
-    attribution: driver.attribution,
+    // The run says what it RAN ON, which for a credits workspace is TrueCourse
+    // and not the provider behind it: the platform's arrangement is the
+    // platform's, and the run record is read by the people paying in credits.
+    attribution: { ...driver.attribution, provider },
     runSession(input) {
-      return driver.runSession({
+      if (!meter.spendable()) return parkedHandle();
+      let inner: SessionHandle | null = null;
+      let stopped = false;
+      inner = driver.runSession({
         ...input,
         onEvent(event) {
           if (event.type === 'assistant-turn') {
-            observe({
+            meter.observe({
               subjectKind: 'session',
               subject: input.def.kind,
-              provider: driver.attribution.provider,
+              provider,
               model: turnModel(event, driver),
               inputTokens: event.usage.inputTokens,
               outputTokens: event.usage.outputTokens,
@@ -262,11 +427,40 @@ export function meterDriver(driver: SessionDriver, observe: RunUsageObserver): S
               cacheCreateTokens: event.usage.cacheCreateTokens,
               costUsd: event.usage.costUsd,
             });
+            // The debit lands on a later flush, so the balance the gate reads is
+            // the one the last flush left. A turn taken on credit is the
+            // overshoot the check-before-debit-after rule allows.
+            if (!meter.spendable()) {
+              stopped = true;
+              void inner?.interrupt();
+            }
           }
           input.onEvent(event);
         },
       });
+      const handle = inner;
+      return {
+        status: () => handle.status(),
+        steer: (message) => handle.steer(message),
+        interrupt: () => handle.interrupt(),
+        done: handle.done.then((result) =>
+          stopped && result.kind === 'failure'
+            ? { kind: 'failure', failure: OUT_OF_CREDITS, resumeCursor: result.resumeCursor }
+            : result,
+        ),
+      };
     },
+  };
+}
+
+/** A session that never opened, already parked: there was nothing to spend. */
+function parkedHandle(): SessionHandle {
+  const done: DriverResult = { kind: 'failure', failure: OUT_OF_CREDITS };
+  return {
+    done: Promise.resolve(done),
+    status: (): SessionStatus => 'parked',
+    steer: () => undefined,
+    interrupt: async () => undefined,
   };
 }
 

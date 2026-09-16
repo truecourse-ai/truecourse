@@ -31,6 +31,7 @@ import FlowsPage from './pages/FlowsPage';
 import HomePage from './pages/HomePage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
+import OperatorCreditsPage from './pages/OperatorCreditsPage';
 import SourcePage from './pages/SourcePage';
 import SourcesPage from './pages/SourcesPage';
 import RepoConsole from './repo/RepoConsole';
@@ -90,6 +91,9 @@ export function DashboardRoutes() {
       <Route path="settings" element={<SettingsPage />} />
       <Route path="settings/:tab" element={<SettingsPage />} />
       <Route path="notifications" element={<NotificationsPage />} />
+      {/* The operator's own surface: not in the sidebar, and the routes behind
+          it answer 404 to anyone who is not one. */}
+      <Route path="operator/credits" element={<OperatorCreditsPage />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   );

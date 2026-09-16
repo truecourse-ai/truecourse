@@ -14,6 +14,17 @@
  *      resolve ⇒ {@link LlmProbeFailedError} carrying the provider's own words.
  *      Once per start, never twice.
  *
+ * CREDITS are the other way a run reaches a model: a workspace that names
+ * `truecourse` on the Models page stores no key at all and runs on the
+ * PLATFORM's own OpenAI key, read from this server's environment
+ * (`TRUECOURSE_CREDITS_OPENAI_API_KEY` / `TRUECOURSE_CREDITS_MODEL`), against a
+ * granted credit balance. That key is built into a transport here and nowhere
+ * else: it is never stored, never answered with — masked or otherwise — and
+ * never written onto a run record, whose provider reads `truecourse`. With the
+ * environment unset the choice is not offered, and a workspace that had chosen
+ * it is told this server holds no credits provider rather than being run on
+ * something it did not pick.
+ *
  * OPERATOR MODE is the one exception: `TRUECOURSE_LLM_TRANSPORT=claude-code`
  * in the server's environment runs EVERY workspace on the operator's own
  * `claude` login — the self-hosted, single-operator deployment. The store is
@@ -29,7 +40,14 @@
 import type { Request } from 'express';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
-import type { LlmConfigUpdate, LlmOperatorProvider, LlmProviderConfigView } from '@truecourse/shared';
+import {
+  LLM_CREDITS_PROVIDER,
+  LLM_PROVIDER_KINDS,
+  type LlmConfigUpdate,
+  type LlmOperatorProvider,
+  type LlmProviderChoice,
+  type LlmProviderConfigView,
+} from '@truecourse/shared';
 import type { LlmTransport, TransportUsageObserver } from '@truecourse/shared/llm';
 import type { LlmApiConfig, LlmTransportMode } from '@truecourse/core/services/llm/provider-config';
 import {
@@ -42,7 +60,9 @@ import {
   SESSION_MODEL_CLAUDE_CODE,
 } from '@truecourse/core/services/llm/session-driver';
 import { probeApiConfig, probeClaudeCode } from '@truecourse/core/services/llm/probe';
-import { meterDriver, type RunUsageObserver, type UsageMeter } from './usage-meter.service.js';
+import { meterDriver, type RunMeter, type UsageMeter } from './usage-meter.service.js';
+import { openCreditsAccount } from './credits.service.js';
+import { isLocalMode } from '../mode.js';
 
 /**
  * Whether this instance runs on its operator's Claude Code. Read per call so a
@@ -58,13 +78,75 @@ export const OPERATOR_PROVIDER: LlmOperatorProvider = {
   model: SESSION_MODEL_CLAUDE_CODE,
 };
 
+/**
+ * What a workspace named. `credits` holds nothing of its own: the block a run
+ * is built from is the platform's, resolved at start time from the environment.
+ */
+export type WorkspaceProviderSelection =
+  | { kind: 'api'; config: LlmApiConfig }
+  | { kind: 'credits' };
+
 /** What the Models settings page and the pipeline entries need from storage. */
 export interface WorkspaceLlmConfigStore {
   /** Masked, secret-free view for the settings page. Null when unconfigured. */
   getView(orgId: string): Promise<LlmProviderConfigView | null>;
-  /** The decrypted block a run builds its transport from. Null when unconfigured. */
+  /**
+   * What this workspace runs on. Null when it has named nothing. A credits
+   * workspace answers `{ kind: 'credits' }` — there is no block to hand back,
+   * which is the point of it.
+   */
+  getSelection(orgId: string): Promise<WorkspaceProviderSelection | null>;
+  /**
+   * The API block it SAVED, or null when it saved none or runs on credits. The
+   * settings route builds its candidate from it; the pipeline reads
+   * {@link WorkspaceLlmConfigStore.getSelection} instead, because a credits
+   * workspace runs on something this answers nothing for.
+   */
   getConfig(orgId: string): Promise<LlmApiConfig | null>;
   save(orgId: string, input: LlmConfigUpdate): Promise<void>;
+}
+
+/** Whether this workspace spends TrueCourse's credits rather than its own key. */
+export async function workspaceOnCredits(orgId: string): Promise<boolean> {
+  if (operatorClaudeCode()) return false;
+  return (await workspaceLlmConfigStore().getSelection(orgId))?.kind === 'credits';
+}
+
+/**
+ * The platform's own provider block, read from the environment on every use so
+ * it is never held anywhere a dump could find it. Both variables are required:
+ * a key with no model would mean guessing which model a workspace's money buys.
+ */
+export function platformCreditsConfig(): LlmApiConfig | null {
+  const apiKey = process.env.TRUECOURSE_CREDITS_OPENAI_API_KEY?.trim();
+  const model = process.env.TRUECOURSE_CREDITS_MODEL?.trim();
+  if (!apiKey || !model) return null;
+  return { provider: 'openai', model, apiKey };
+}
+
+/**
+ * Whether this server can run a workspace on credits at all. Local mode never
+ * can: one developer on one machine has no operator to grant anything, and the
+ * whole surface is absent there.
+ */
+export function creditsOffered(): boolean {
+  return !isLocalMode() && !operatorClaudeCode() && platformCreditsConfig() !== null;
+}
+
+/** The provider choices this server offers, credits included only when it holds a key. */
+export function offeredProviderChoices(): LlmProviderChoice[] {
+  return creditsOffered() ? [...LLM_PROVIDER_KINDS, LLM_CREDITS_PROVIDER] : [...LLM_PROVIDER_KINDS];
+}
+
+/** The workspace chose credits, and this server holds no platform key to run them on. */
+export class CreditsProviderUnavailableError extends Error {
+  readonly code = 'credits-provider-unavailable';
+  constructor() {
+    super(
+      'This server has no credits provider configured. Set an API key of your own in Settings → Models.',
+    );
+    this.name = 'CreditsProviderUnavailableError';
+  }
 }
 
 let store: WorkspaceLlmConfigStore | null = null;
@@ -186,12 +268,12 @@ export function probeWorkspaceLlmConfig(config: LlmApiConfig): Promise<void> {
  * chose it.
  */
 function callObserver(
-  observe: RunUsageObserver | undefined,
+  meter: RunMeter | undefined,
   provider: string,
 ): TransportUsageObserver | undefined {
-  if (!observe) return undefined;
+  if (!meter) return undefined;
   return (usage) =>
-    observe({
+    meter.observe({
       subjectKind: 'stage',
       subject: usage.stage,
       provider,
@@ -217,36 +299,58 @@ function callObserver(
  * of this exists, which is what makes it a probe.
  */
 export async function startWorkspaceLlm(orgId: string, meter?: UsageMeter): Promise<WorkspaceLlm> {
-  const observe = meter?.observe;
   if (operatorClaudeCode()) {
     try {
       await backend.claudeCode.probe();
     } catch (err) {
       throw new LlmProbeFailedError(err);
     }
-    const onUsage = callObserver(observe, OPERATOR_PROVIDER.provider);
+    const onUsage = callObserver(meter, OPERATOR_PROVIDER.provider);
     return {
       mode: 'claude-code',
-      driver: () => metered(backend.claudeCode.driver(), observe),
+      driver: () => metered(backend.claudeCode.driver(), meter, OPERATOR_PROVIDER.provider),
       transport: () => backend.claudeCode.transport(onUsage),
     };
   }
-  const config = await workspaceLlmConfigStore().getConfig(orgId);
-  if (!config) throw new LlmNotConfiguredError();
+  const selection = await workspaceLlmConfigStore().getSelection(orgId);
+  if (!selection) throw new LlmNotConfiguredError();
+  // A credits workspace runs on the platform's block under the platform's NAME:
+  // the run record, the usage rows and the Models page all say `truecourse`,
+  // because that is what the workspace chose and what its balance pays for.
+  const credits = selection.kind === 'credits';
+  const config = credits ? platformCreditsConfig() : selection.config;
+  if (!config) throw new CreditsProviderUnavailableError();
+  if (credits && meter) meter.chargeTo(await openCreditsAccount(orgId));
   try {
     await backend.probe(config);
   } catch (err) {
     throw new LlmProbeFailedError(err);
   }
-  const onUsage = callObserver(observe, config.provider);
+  const provider = credits ? LLM_CREDITS_PROVIDER : config.provider;
+  const onUsage = callObserver(meter, provider);
   return {
     mode: 'api',
-    driver: () => metered(backend.driver(config), observe),
-    transport: () => backend.transport(config, onUsage),
+    driver: () => metered(backend.driver(config), meter, provider),
+    // The gate is in front of the call, never after it: a call that must not be
+    // paid for is a call that is not made.
+    transport: () => gated(backend.transport(config, onUsage), meter),
   };
 }
 
 /** The driver as it is, when nothing is accounting for this run. */
-function metered(driver: SessionDriver, observe: RunUsageObserver | undefined): SessionDriver {
-  return observe ? meterDriver(driver, observe) : driver;
+function metered(
+  driver: SessionDriver,
+  meter: RunMeter | undefined,
+  provider: string,
+): SessionDriver {
+  return meter ? meterDriver(driver, meter, provider) : driver;
+}
+
+/** The transport as it is, when nothing is accounting for this run. */
+function gated(transport: LlmTransport, meter: RunMeter | undefined): LlmTransport {
+  if (!meter) return transport;
+  return async (req) => {
+    meter.check();
+    return transport(req);
+  };
 }

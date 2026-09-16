@@ -39,7 +39,7 @@ import { buildOutputTail, runFailureMessage, type RunGuardResult } from '@trueco
 import type { GuardSummary } from '@truecourse/shared';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
-import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
+import { createUsageMeter, withCredits, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
 import { materializeStoredGuardState, persistGuardRun } from '../materialize-guard.js';
@@ -135,10 +135,15 @@ export function createRepoGuardRunTask(
         // to what was provided, and the runner reads that from the two overlay files.
         await materializeGuardOverlays(repoFullName, tree.dir);
 
-        const result = await runGuard(tree.dir, {
-          tracker: mirrorTracker(ctx, GUARD_RUN_STEPS),
-          ...(llm ? { visualJudge: createGuardVisualJudge(tree.dir, { transport: llm.transport() }) } : {}),
-        });
+        // The judge is the only thing here that spends, and it is annotation-only
+        // — but a run that could not afford its verdicts is a run whose board is
+        // missing them, so it pauses rather than storing a half-judged board.
+        const result = await withCredits(meter, () =>
+          runGuard(tree.dir, {
+            tracker: mirrorTracker(ctx, GUARD_RUN_STEPS),
+            ...(llm ? { visualJudge: createGuardVisualJudge(tree.dir, { transport: llm.transport() }) } : {}),
+          }),
+        );
         // A stop the user asked for: the harness settles the row cancelled, and
         // a store that never saw this run is exactly what a cancel means.
         if (ctx.signal?.aborted) return { notification: null };

@@ -77,7 +77,9 @@ const transport = (async () => '{}') as LlmTransport;
 /** An in-memory stand-in for the Postgres config store (that has its own suite). */
 function configStore(configs: Record<string, LlmApiConfig>): WorkspaceLlmConfigStore {
   return {
-    getConfig: async (orgId) => configs[orgId] ?? null,
+    getConfig: async (orgId: string) => configs[orgId] ?? null,
+    getSelection: async (orgId: string) =>
+      configs[orgId] ? ({ kind: 'api' as const, config: configs[orgId]! }) : null,
     getView: async () => null,
     save: async () => {},
   };

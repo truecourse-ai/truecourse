@@ -24,13 +24,25 @@
  * queued never runs its body, and one aborted mid-run settles `cancelled` with
  * no error and no notification — nobody is waiting to be told about work they
  * stopped themselves.
+ *
+ * And so is a PAUSE. A body that ran out of credits throws
+ * `CreditsExhaustedError`, and nothing about that is a failure: the row settles
+ * `paused` carrying the reason and whatever resume pointer the body declared
+ * through {@link JobContext.resumeWith}, the feed says so in a warning rather
+ * than an error, nothing is reported to the deployment's error sink, and the
+ * throw is not re-raised — there is nothing for the queue to retry, only
+ * something for a grant to carry on.
  */
 
 import type { Db } from '@truecourse/db';
 import type { JobStore, NotificationStore } from '@truecourse/data-store';
 import type { JobStep, JobView, NotificationLevel, ServerEvent } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
+import { isCreditsExhausted } from '@truecourse/core/lib/credits-store';
 import { JobStepTracker, type StepEmit } from './steps.js';
+
+/** Where a person goes to put credits back. */
+const CREDITS_HREF = '/settings/credits';
 
 /** The minimum every job payload carries: the tracked row it settles. */
 export interface JobPayload {
@@ -81,7 +93,7 @@ export interface JobStartedInfo {
 }
 
 /** How a job settled — handed to `onSettled` so outcome-keyed chains can branch. */
-export type JobOutcomeStatus = 'succeeded' | 'failed' | 'cancelled';
+export type JobOutcomeStatus = 'succeeded' | 'failed' | 'cancelled' | 'paused';
 
 /**
  * One settled job, as the runtime's observer sees it. Everything here is the
@@ -117,6 +129,13 @@ export interface JobContext<P> {
    * could not be written is logged, never thrown into the body.
    */
   notify(notification: JobNotification): Promise<void>;
+  /**
+   * Where a resume of this job must start from — the run record it opened, the
+   * step it reached. Merged onto the row's stored payload if the job pauses, so
+   * re-enqueuing it is re-enqueuing what it had got to. Called as soon as the
+   * pointer exists; the last call wins.
+   */
+  resumeWith(pointer: Record<string, unknown>): void;
   /**
    * Cancellation for the body's long-running work — a user cancel (disconnect,
    * supersede) or a worker shutdown. Bodies that spawn children or run pipelines
@@ -248,6 +267,7 @@ export async function executeJob<P extends JobPayload, M>(
     if (job) await publishProgress(job, snap.steps);
   };
   const tracker = new JobStepTracker([...def.steps], emit);
+  let resumePointer: Record<string, unknown> | undefined;
   const ctx: JobContext<P> = {
     payload,
     org,
@@ -255,6 +275,9 @@ export async function executeJob<P extends JobPayload, M>(
     tracker,
     phase: (key, detail) => tracker.advance(key, detail),
     detail: (key, detail) => tracker.detail(key, detail),
+    resumeWith: (pointer) => {
+      resumePointer = pointer;
+    },
     notify: async (notification) => {
       try {
         await postNotification(rt, org, def.type, jobId, notification, false);
@@ -285,6 +308,33 @@ export async function executeJob<P extends JobPayload, M>(
     if (cancelled) await publishProgress(cancelled);
   };
 
+  // Out of credits: the work is unfinished, nothing went wrong, and the row
+  // keeps what a resume must start from. The feed says so once, as news rather
+  // than an error, and points at where credits come from.
+  const settlePaused = async (): Promise<void> => {
+    outcomeStatus = 'paused';
+    runResult = undefined;
+    stampDuration();
+    const paused = await rt.jobStore.markPaused(jobId, {
+      reason: 'credits',
+      ...(resumePointer ? { resume: resumePointer } : {}),
+    });
+    if (paused) await publishProgress(paused);
+    await postNotification(
+      rt,
+      org,
+      def.type,
+      jobId,
+      {
+        level: 'warning',
+        title: 'Paused, out of credits',
+        body: `${def.title} stopped part-way. It carries on as soon as this workspace can spend again.`,
+        data: { reason: 'credits', href: CREDITS_HREF },
+      },
+      true,
+    );
+  };
+
   try {
     const outcome = await def.run(ctx);
     runResult = outcome.result;
@@ -299,7 +349,12 @@ export async function executeJob<P extends JobPayload, M>(
         await postNotification(rt, org, def.type, jobId, outcome.notification, true);
     }
   } catch (err) {
-    if (opts.signal?.aborted) {
+    // The pause is read BEFORE the abort: a body that ran out of credits and
+    // was then stopped is still out of credits, and that is what a resume has
+    // to know.
+    if (isCreditsExhausted(err)) {
+      await settlePaused();
+    } else if (opts.signal?.aborted) {
       await settleCancelled();
     } else {
       outcomeStatus = 'failed';

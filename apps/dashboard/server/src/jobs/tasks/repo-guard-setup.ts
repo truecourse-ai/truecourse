@@ -179,7 +179,7 @@ export function createRepoGuardSetupTask(
           } finally {
             tree.dispose();
           }
-        });
+        }, meter);
       } finally {
         // However setup ended, what it spent up to that point is written.
         await meter.close();

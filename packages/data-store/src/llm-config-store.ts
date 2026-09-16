@@ -1,19 +1,38 @@
 /**
  * The workspace's LLM provider config (Postgres/Drizzle) — one row per WorkOS
  * organization, the API key encrypted at rest. Two reads, deliberately
- * separate: a decrypted block the pipeline builds its transport/driver from,
- * and a masked, secret-free view for the settings page.
+ * separate: what the pipeline runs on, and a masked, secret-free view for the
+ * settings page.
  *
  * There is no process-wide provider here. A run reaches the model with the
  * credentials of the workspace that asked for it, which is why every read is
  * keyed by `orgId`.
+ *
+ * A workspace on TrueCourse's CREDITS stores a row with nothing in it but the
+ * word: no key, no model, no endpoint. The platform's block is the server's
+ * environment, resolved per run, so this table never holds it.
  */
 
 import { eq, sql } from 'drizzle-orm';
 import { llmProviderConfig, type Db } from '@truecourse/db';
-import type { LlmConfigUpdate, LlmProviderConfigView, LlmProviderKind } from '@truecourse/shared';
+import {
+  isCreditsProvider,
+  type LlmConfigUpdate,
+  type LlmProviderChoice,
+  type LlmProviderConfigView,
+  type LlmProviderKind,
+} from '@truecourse/shared';
 import type { LlmApiConfig } from '@truecourse/core/services/llm/provider-config';
 import { decryptSecret, encryptSecret, maskKey } from './crypto.js';
+
+/**
+ * What a workspace named. The credits choice holds nothing — no key, no model,
+ * no endpoint — so it answers as itself and the run resolves the platform's
+ * block from the environment.
+ */
+export type StoredProviderSelection =
+  | { kind: 'api'; config: LlmApiConfig }
+  | { kind: 'credits' };
 
 export class PgLlmConfigStore {
   constructor(
@@ -43,7 +62,7 @@ export class PgLlmConfigStore {
       }
     }
     return {
-      provider: row.provider as LlmProviderKind,
+      provider: row.provider as LlmProviderChoice,
       model: row.model,
       fallbackModel: row.fallbackModel,
       baseURL: row.baseUrl,
@@ -56,13 +75,15 @@ export class PgLlmConfigStore {
   }
 
   /**
-   * The decrypted API block a run builds its transport/session driver from, or
-   * null when this workspace has configured no provider. Never handed to a
-   * browser — it carries the key in clear.
+   * What this workspace runs on: the decrypted API block a run builds its
+   * transport/session driver from, the credits choice, or null when it has
+   * configured nothing. Never handed to a browser — a block carries its key in
+   * clear, and the credits choice deliberately carries nothing at all.
    */
-  async getConfig(orgId: string): Promise<LlmApiConfig | null> {
+  async getSelection(orgId: string): Promise<StoredProviderSelection | null> {
     const row = await this.getRow(orgId);
     if (!row) return null;
+    if (isCreditsProvider(row.provider)) return { kind: 'credits' };
     const secret = row.apiKeyEnc ? decryptSecret(row.apiKeyEnc, this.masterSecret) : undefined;
     const provider = row.provider as LlmProviderKind;
     const config: LlmApiConfig = {
@@ -79,7 +100,18 @@ export class PgLlmConfigStore {
     } else if (secret) {
       config.apiKey = secret;
     }
-    return config;
+    return { kind: 'api', config };
+  }
+
+  /**
+   * The API block this workspace SAVED, or null when it saved none or runs on
+   * credits. The settings route builds its candidate from it — a form that
+   * omitted the key means "keep the stored one", and there is nothing to keep
+   * behind a credits row.
+   */
+  async getConfig(orgId: string): Promise<LlmApiConfig | null> {
+    const selection = await this.getSelection(orgId);
+    return selection?.kind === 'api' ? selection.config : null;
   }
 
   /** Upsert the workspace's config. Omitting `apiKey` preserves the stored key. */
@@ -90,7 +122,8 @@ export class PgLlmConfigStore {
       .values({
         orgId,
         provider: input.provider,
-        model: input.model,
+        // Credits name no model of their own: the platform's block does.
+        model: input.model ?? '',
         fallbackModel: input.fallbackModel ?? null,
         apiKeyEnc,
         accessKeyId: input.accessKeyId ?? null,

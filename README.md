@@ -54,12 +54,35 @@ This needs the `claude` binary on your PATH and signed in. Every run then uses
 that login and the Models page is read-only; leave the variable out to save a
 provider and key on that page instead.
 
+## Run it on TrueCourse credits
+
+A hosted deployment can let a workspace run without bringing a key of its own.
+Set both of these in the repo-root `.env` and "TrueCourse credits" appears as a
+choice on the Models page:
+
+| Variable | What it does |
+| --- | --- |
+| `TRUECOURSE_CREDITS_OPENAI_API_KEY` | The platform's own OpenAI key. Read per run; never stored, logged or answered with. |
+| `TRUECOURSE_CREDITS_MODEL` | The OpenAI model id those runs use. |
+
+A workspace that picks it stores nothing — no key, no model — and spends a
+BALANCE instead: one credit is a cent of model spend at list price, with nothing
+added. Every call and every turn is checked against the balance before it is
+made and debited after, against the same `llm_usage` row the Usage tab reads, so
+Settings › Credits and Settings › Usage agree to the cent. A run that empties the
+balance PAUSES: its sessions park with their journals intact, the feed says
+"Paused, out of credits", and it carries on from where it got to when an
+operator grants more (`/operator/credits`), when the workspace saves a key of its
+own, or when somebody presses Resume. With either variable unset the choice is
+not offered, and local mode has no credits at all.
+
 ## Telemetry
 
 The app sends product analytics to PostHog. The server sends every product
 action: a repository connected or disconnected, a scan, setup, generation or run
 starting and finishing, a context source added, a conflict resolved, a finding
-dismissed, a provider saved, an invite link minted, a workspace created. Each
+dismissed, a provider saved, an invite link minted, a workspace created, credits
+granted or exhausted, a run paused or resumed. Each
 carries identifiers and kinds only, never a document, a key, a token or an
 invite URL. It reads `POSTHOG_DISABLED`, `POSTHOG_KEY` and `POSTHOG_HOST` from
 the repo-root `.env`.

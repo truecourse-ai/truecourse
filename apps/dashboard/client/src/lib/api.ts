@@ -32,6 +32,12 @@ import type {
   HomePeriod,
   HomeResponse,
   UsageResponse,
+  CreditsResponse,
+  CreditsResumeResponse,
+  CreditGrantRequest,
+  CreditAdjustRequest,
+  CreditMovementResponse,
+  OperatorCreditsResponse,
   JobsResponse,
   NotificationsResponse,
   AuthUser,
@@ -1166,6 +1172,41 @@ export function fetchHome(period: HomePeriod): Promise<HomeResponse> {
 export function fetchUsage(params: URLSearchParams): Promise<UsageResponse> {
   const query = params.toString();
   return fetchApi<UsageResponse>(`/api/usage${query ? `?${query}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Credits: what the workspace may spend of TrueCourse's own, and every movement
+// of it. The operator's three addresses answer 404 to anyone who is not one, so
+// a member's client reads them as absent rather than forbidden.
+// ---------------------------------------------------------------------------
+
+export function fetchCredits(): Promise<CreditsResponse> {
+  return fetchApi<CreditsResponse>('/api/credits');
+}
+
+/** Carry one paused run on. */
+export function resumePausedRun(jobId: string): Promise<CreditsResumeResponse> {
+  return fetchApi<CreditsResumeResponse>(`/api/credits/resume/${encodeURIComponent(jobId)}`, {
+    method: 'POST',
+  });
+}
+
+export function fetchOperatorCredits(): Promise<OperatorCreditsResponse> {
+  return fetchApi<OperatorCreditsResponse>('/api/operator/credits');
+}
+
+export function grantCredits(body: CreditGrantRequest): Promise<CreditMovementResponse> {
+  return fetchApi<CreditMovementResponse>('/api/operator/credits/grant', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function adjustCredits(body: CreditAdjustRequest): Promise<CreditMovementResponse> {
+  return fetchApi<CreditMovementResponse>('/api/operator/credits/adjust', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export interface SessionTranscriptPage {

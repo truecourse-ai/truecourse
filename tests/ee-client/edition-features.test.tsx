@@ -89,6 +89,7 @@ describe('Settings › Connections', () => {
       'Repositories',
       'Models',
       'Usage',
+      'Credits',
       'Connections',
     ]);
   });

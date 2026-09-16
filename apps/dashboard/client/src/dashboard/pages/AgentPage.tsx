@@ -434,8 +434,12 @@ function ConversationRoute({ runId }: { runId: string }) {
   if (!run) return null;
 
   // Only a repository's work can be started again from here: the workspace's
-  // own runs start on Context, which is where their subject lives.
-  const canRerun = run.repo !== null && (run.status === 'failed' || run.status === 'interrupted');
+  // own runs start on Context, which is where their subject lives. A run that
+  // PAUSED is the same affordance: it stopped with work still to do, and the
+  // resume picks it up — once the workspace can pay for it again.
+  const canRerun =
+    run.repo !== null &&
+    (run.status === 'failed' || run.status === 'interrupted' || run.status === 'paused');
   const canResume = run.command === 'guard-generate';
 
   return (
