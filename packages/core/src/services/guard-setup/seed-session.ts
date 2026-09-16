@@ -81,11 +81,13 @@ import {
   type Recipe,
   type ResolvedApiServer,
   type ResolvedCredential,
+  type SeedResult,
 } from '@truecourse/guard-runner';
 import { cachedSessionOutcome, promptFingerprint } from '../agent/session-cache.js';
 import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
+import { coldProofEnabled, proveSeedFromColdClone } from './seed-cold-proof.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
 
@@ -371,6 +373,36 @@ export function missingPrincipalSurfaces(
     }));
 }
 
+/** The fixture name a sacrificial principal is published under. */
+export const SACRIFICIAL_FIXTURE = 'sacrificialUser';
+
+/**
+ * A web surface needs TWO sign-in-capable users, not one. Scenarios that change
+ * a password, revoke a session or delete an account MUTATE the credentials they
+ * signed in with; run them against the shared principal and every later flow
+ * meets a login form that no longer accepts the published fixture. The second
+ * user is disposable by construction — the seed's converging exists path
+ * restores it every run — so those flows have something of their own to burn.
+ *
+ * The refusal is the draft tool's, not the fold's: it is a requirement on what a
+ * session AUTHORS, and it costs nothing to state before an execution is spent.
+ * Returns the reason, or null when nothing is missing.
+ */
+export function missingSacrificialUser(
+  provides: SeedProvidesProposal,
+  required: readonly RequiredPrincipalSurface[],
+): string | null {
+  if (!required.some((r) => r.surface === 'web')) return null;
+  if (Object.keys(provides.fixtures ?? {}).includes(SACRIFICIAL_FIXTURE)) return null;
+  return (
+    `the web surface requires a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` ` +
+    `(the same login fields as the web principal, its own stable email), and this draft publishes no such fixture — ` +
+    `credential-mutation flows (a password change, a session revocation, an account deletion) burn it instead of the ` +
+    `shared principal, whose published password they would otherwise invalidate for every flow that follows. ` +
+    `Create it in this same script and declare it under \`provides.fixtures\`; it needs no credential and no probe.`
+  );
+}
+
 // ---------------------------------------------------------------------------
 // The session
 // ---------------------------------------------------------------------------
@@ -525,6 +557,11 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
       : catalog.dependencies
           .map((d) => `- ${d.name} · ${d.class} · ${d.summary}`)
           .join('\n'),
+    ...(catalog.dependencies.some((d) => d.class === 'step-creatable')
+      ? [
+          'step-creatable means a scenario CAN create one; the seed must still publish ONE existing instance of each as a fixture (owned by the web principal) so read/update/share flows have something to act on.',
+        ]
+      : []),
     ...(machinery.length > 0
       ? [
           '',
@@ -570,6 +607,7 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
         `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as a credential (\`header: "Cookie"\`);`,
         `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page);`,
         `  4. when the login endpoint pairs a body token with a cookie (a CSRF double-submit — the login route compares \`body.csrfToken\` to a cookie a mint route set), add \`"csrf": {"path": "/<the csrf mint route>"}\` to the \`login\` block — the engine GETs it fresh before each login POST, carries its cookies, and injects the token into the body. NEVER publish a csrf token as a fixture: it is minted per exchange, and a static one can never validate.`,
+        `  5. also create a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` (same login fields, its own stable email); credential-mutation tests burn it. It needs no credential and no probe, and a draft that omits it is refused without running.`,
       );
     }
   }
@@ -1036,15 +1074,16 @@ function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
       // salvage path can only ever keep one that carries them (the documenso
       // incident inverted — the session spent its budget on fixtures, died at
       // the ceiling, and the folded partial declared zero credentials).
-      const missing = missingPrincipalSurfaces(
-        args.provides,
-        args.probes,
-        requiredPrincipalSurfaces(world.input),
-      );
+      const required = requiredPrincipalSurfaces(world.input);
+      const sacrificial = missingSacrificialUser(args.provides, required);
+      const missing = [
+        ...missingPrincipalSurfaces(args.provides, args.probes, required).map((m) => m.reason),
+        ...(sacrificial ? [sacrificial] : []),
+      ];
       if (missing.length > 0) {
         return {
           content:
-            `refused before running — principals come FIRST:\n- ${missing.map((m) => m.reason).join('\n- ')}\n` +
+            `refused before running — principals come FIRST:\n- ${missing.join('\n- ')}\n` +
             `Mint the principal(s) in this same script and declare them under \`provides.credentials\`, each with a probe on its surface ` +
             `(api: an endpoint that requires the credential; web: {"surface": "web", "path": "/<signed-in page>"} — proven by an authenticated page load). ` +
             `A draft with principals and thin fixtures is salvageable; the inverse is not.`,
@@ -1533,11 +1572,12 @@ async function foldSeedOutcome(
   // THE DONE-GATE: a FRESH world — down, up, the real runSeed (which validates
   // the manifest against the written `provides`). A cached or transcript-green
   // draft that cannot survive this is refused, and the tree is put back.
+  let proof: SeedResult;
   try {
     input.onPhase?.('proving the seed in a fresh world', 'fresh-world proof');
     await services.down();
     await services.up();
-    const proof = await runSeed({
+    proof = await runSeed({
       repoRoot: input.repoRoot,
       seed: written.seed,
       env: world.server.env,
@@ -1558,17 +1598,57 @@ async function foldSeedOutcome(
         return { reason: `the fresh-world credential probe refused the seed: ${probed.reason}` };
       }
     }
-    return {
-      fixtures: [...proof.fixtures.keys()].sort(),
-      credentials: [...proof.credentials.keys()].sort(),
-    };
   } catch (error) {
     restore();
     if (error instanceof SeedError) return { reason: `the fresh-world proof refused the seed: ${error.message}` };
     return { reason: `the fresh-world proof failed: ${message(error)}` };
   } finally {
+    // The warm world comes DOWN before the cold clone brings its own up: both
+    // address the same datastore (one compose project, one database URL), so
+    // two standing worlds would be one world with two owners.
     await services.down();
   }
+
+  // THE SECOND GATE: the same seed, proved again from a COLD COPY of the
+  // repository — the recipe's own `install` and `build`, then the services, the
+  // seed and the probes. What this tree's `node_modules` accumulated over the
+  // session's attempts is exactly what a generate's fresh clone will not have.
+  if (coldProofEnabled()) {
+    const probes = output.probes;
+    const webSurface = resolveWebSurface(input.recipe);
+    const needsWebBuild =
+      webSurface?.build !== undefined && requiredPrincipalSurfaces(input).some((s) => s.surface === 'web');
+    const cold = await proveSeedFromColdClone({
+      repoRoot: input.repoRoot,
+      recipe: input.recipe,
+      seed: written.seed,
+      env: world.server.env,
+      knownCredentials: world.secrets,
+      ...(needsWebBuild && webSurface?.build ? { webBuild: webSurface.build } : {}),
+      ...(world.signal ? { signal: world.signal } : {}),
+      ...(input.onPhase ? { onPhase: input.onPhase } : {}),
+      ...(probes
+        ? {
+            probe: async (copyRoot: string, seeded: SeedResult) => {
+              if (seeded.credentials.size === 0) return { ok: true as const };
+              // The copy's own repoRoot is what every boot parameter derives
+              // from, so the probes drive the clone, not the warm tree.
+              const coldWorld: SeedSessionWorld = { ...world, input: { ...input, repoRoot: copyRoot } };
+              return bootAndProbe(coldWorld, probes, seeded.credentials, seeded.fixtures, world.signal);
+            },
+          }
+        : {}),
+    });
+    if (!cold.ok) {
+      restore();
+      return { reason: cold.reason };
+    }
+  }
+
+  return {
+    fixtures: [...proof.fixtures.keys()].sort(),
+    credentials: [...proof.credentials.keys()].sort(),
+  };
 }
 
 function clip(text: string): string {
@@ -1602,7 +1682,7 @@ Data and auth are ONE artifact on purpose: a login token cannot be minted withou
 - Principals: one per role the app actually distinguishes; mint the secret the way the APP would (its own token issuance, or the same signing secret and algorithm it verifies with); the value must survive the seed process (stateless token or a session row — a secret held in memory authenticates nothing); the header value is injected VERBATIM ("Bearer <token>" ONLY if that is what the API's own verifier expects — read the verifier, do not assume the prefix).
 - A WEB SURFACE AUTHENTICATES BY SESSION, NOT HEADER: when the briefing requires a web principal, create the user with a known password and publish the login fields as a FIXTURE (scenarios fill the login form from them), mint a DURABLE session the app's own validator accepts, publish its full Cookie header value as a credential, and probe it with \`{"surface": "web", "path": …, "login": {…}}\` — the engine proves the LOGIN (the app's own JSON login endpoint must accept the published fixture values and refuse a corrupted password) and then the authenticated page load, refused anonymously (401/403 or a login redirect). The login proof is what catches a secret the world stored under an earlier run: a cookie that validates proves nothing about the password the fixture advertises. A login endpoint that pairs a body token with a cookie (CSRF double-submit) takes \`"csrf": {"path": "/<mint route>"}\` inside \`login\` — the engine runs the two-step itself; never publish a csrf token as a fixture, a static one can never validate.
 - IDEMPOTENCE CONVERGES SECRETS: an exists path that merely skips creation leaves an OLDER run's password live while your manifest publishes a new one — look up AND update the secret (with the app's own hashing) so the published value is always the live one; the login probe refuses exactly this drift.
-- MINT A SACRIFICIAL PRINCIPAL when the app cannot mint sign-in-capable accounts at RUNTIME (signup behind email verification, invite-only, admin-created accounts): one extra credential-bearing user beside the role principals, published as the fixture \`sacrificialUser\` with the same login fields as the primary web principal and its own stable email, its description stating it is DISPOSABLE. Credential-mutation tests (password change, session revocation, account deletion) burn IT instead of a shared principal, and your converging exists path restores it every run — without one, those tests have only the shared principal to mutate, and one such mutation once locked an entire run out of sign-in. No credential or probe needed: it is a fixture, and scenarios log in through the form.
+- MINT A SACRIFICIAL PRINCIPAL whenever the briefing requires a web principal — it is a requirement, not a judgement call, and a draft without it is refused before it runs: one extra sign-in-capable user beside the role principals, published as the fixture \`sacrificialUser\` with the same login fields as the primary web principal and its own stable email, its description stating it is DISPOSABLE. Credential-mutation tests (password change, session revocation, account deletion) burn IT instead of a shared principal, and your converging exists path restores it every run — without one, those tests have only the shared principal to mutate, and one such mutation once locked an entire run out of sign-in. No credential or probe needed: it is a fixture, and scenarios log in through the form.
 - CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one endpoint that REQUIRES it. The engine boots the credential's surface, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Probe endpoints are a LOOKUP, not a search: the briefing lists spec-derived candidates whose security requires a scheme — confirm one; do not spend turns hunting the route surface.
 
 # Your tools

@@ -49,6 +49,10 @@ import {
   seedSessionDef,
   providesWarnings,
 } from '../../packages/core/src/services/guard-setup/seed-session';
+import {
+  SEED_COLD_PROOF_ENV,
+  coldProofEnabled,
+} from '../../packages/core/src/services/guard-setup/seed-cold-proof';
 import type { GuardSetupSessionContext } from '../../packages/core/src/services/guard-setup/session-context';
 import { memoryPersistence, stubDriver, outcome, malformedFailure } from './spec-scan-session-stub';
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
@@ -59,9 +63,14 @@ const TARGET = '.truecourse/scenarios/guard-seed.mjs';
 const repos: string[] = [];
 beforeEach(() => {
   installMemoryKvCache();
+  // The fold's second gate — a full install+build+seed in a cold copy — has its
+  // own describe below; everywhere else it would only add a slow second run of
+  // the world these tests are asserting about.
+  process.env[SEED_COLD_PROOF_ENV] = '0';
 });
 afterEach(() => {
   resetKvCacheStore();
+  delete process.env[SEED_COLD_PROOF_ENV];
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
 });
 
@@ -405,6 +414,124 @@ describe('buildSeedSession — builds the app before the world boots', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The cold-clone proof — the seed is proved a second time from a copy of the
+// repository with no `node_modules`, so a script that only runs because THIS
+// tree accumulated something across the session's attempts is refused here
+// rather than in the fresh clone the next stage works in
+// ---------------------------------------------------------------------------
+
+/** A seed that resolves a module out of the tree's own `node_modules` — the
+ *  shape a native binding has: present only when an install produced it. */
+function moduleSeedScript(moduleName: string): string {
+  return [
+    '// Idempotent: the store is one JSON document, rewritten wholesale.',
+    "import fs from 'node:fs'",
+    "import { createRequire } from 'node:module'",
+    'const require = createRequire(import.meta.url)',
+    `require(${JSON.stringify(moduleName)})`,
+    "fs.appendFileSync(process.env.SERVICES_LOG, 'seed\\n')",
+    'const org = { id: 42, slug: "acme" }',
+    'fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org] }))',
+    'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({ fixtures: { org } }))',
+    '',
+  ].join('\n');
+}
+
+/** Leave a resolvable module in the tree the sessions worked in — what an
+ *  earlier, un-skipped install attempt would have built there. */
+function plantModule(r: string, name: string): void {
+  const dir = path.join(r, 'node_modules', name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, main: 'index.js' }));
+  fs.writeFileSync(path.join(dir, 'index.js'), 'module.exports = 1\n');
+}
+
+/** A recipe `install` that records whether it found a populated tree, then
+ *  produces exactly one module. */
+const installsModule = (r: string, name: string): string =>
+  `printf 'install-%s\\n' "$(test -d node_modules && echo warm || echo cold)" >> ${path.join(r, 'services.log')} && ` +
+  `mkdir -p node_modules/${name} && printf '{"name":"${name}","main":"index.js"}' > node_modules/${name}/package.json && ` +
+  `printf 'module.exports = 1\\n' > node_modules/${name}/index.js`;
+
+describe('buildSeedSession — the cold-clone proof', () => {
+  beforeEach(() => {
+    // The proof is ON by default; the rest of this file opts out of it.
+    delete process.env[SEED_COLD_PROOF_ENV];
+  });
+
+  it('is on by default and off only for an explicit `0`', () => {
+    expect(coldProofEnabled()).toBe(true);
+    expect(coldProofEnabled({ [SEED_COLD_PROOF_ENV]: '0' })).toBe(false);
+    expect(coldProofEnabled({ [SEED_COLD_PROOF_ENV]: '1' })).toBe(true);
+  });
+
+  it('runs install, build and the seed in a copy that has no node_modules', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, { install: installsModule(r, 'x') });
+    plantModule(r, 'x');
+    const script = moduleSeedScript('x');
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script, command: COMMAND, provides: PROVIDES });
+      return outcome({ script, command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result).toMatchObject({ status: 'ok', fixtures: ['org'] });
+    // The session's world, the fold's fresh one — then the cold clone, whose
+    // install found no dependency tree at all and had to build its own.
+    expect(servicesLog(r)).toEqual([
+      'up', 'seed', 'down',
+      'up', 'seed', 'down',
+      'install-cold', 'up', 'seed', 'down',
+    ]);
+  }, 120_000);
+
+  it('refuses a seed that only runs because this tree accumulated the module', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, { install: installsModule(r, 'x') });
+    plantModule(r, 'x');
+    // Left behind by an earlier attempt; the shipped install never produces it.
+    plantModule(r, 'y');
+    const recipeBefore = fs.readFileSync(recipePath(r), 'utf-8');
+    const script = moduleSeedScript('y');
+    const stub = stubDriver(async (call) => {
+      // The warm tree has it, so the session and the fresh-world proof are green…
+      const verdict = await callTool(call.input, 'run_seed_draft', { script, command: COMMAND, provides: PROVIDES });
+      expect(verdict.isError).toBeUndefined();
+      return outcome({ script, command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    // …and only the cold clone catches it.
+    expect(result.status).toBe('failed');
+    expect(result.status === 'failed' && result.reason).toMatch(/cold-clone proof refused the seed: seed/);
+    expect(result.status === 'failed' && result.reason).toMatch(/Cannot find module/);
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
+  }, 120_000);
+
+  it('names the failing stage and carries its output when the cold install fails', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, { install: "printf 'ERR no lockfile for this tree\\n' >&2 && false" });
+    const recipeBefore = fs.readFileSync(recipePath(r), 'utf-8');
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result.status).toBe('failed');
+    expect(result.status === 'failed' && result.reason).toMatch(/cold-clone proof refused the seed: install/);
+    expect(result.status === 'failed' && result.reason).toMatch(/no lockfile for this tree/);
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
+  }, 120_000);
+});
+
+// ---------------------------------------------------------------------------
 // Credential probes — a minted credential proves itself against the live server
 // (2026-08-23 bench: a `Bearer `-prefixed token sailed through two runs because
 // the verify never made an authenticated request)
@@ -694,10 +821,15 @@ function webMintingScript(stored = 'session=tok-web-1', emitted = stored, stored
     '// Idempotent: the store is one JSON document, rewritten wholesale.',
     "import fs from 'node:fs'",
     `const user = { id: 7, email: "owner@acme.test", password: ${JSON.stringify(storedPassword)} }`,
+    'const spare = { id: 8, email: "spare@acme.test", password: "pw-guard-2" }',
     'const org = { id: 42, slug: "acme" }',
-    `fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org], users: [user], sessions: [${JSON.stringify(stored)}] }))`,
+    `fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org], users: [user, spare], sessions: [${JSON.stringify(stored)}] }))`,
     'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({',
-    '  fixtures: { org: { id: org.id, slug: org.slug }, webUser: { email: user.email, password: "pw-guard-1" } },',
+    '  fixtures: {',
+    '    org: { id: org.id, slug: org.slug },',
+    '    webUser: { email: user.email, password: "pw-guard-1" },',
+    '    sacrificialUser: { email: spare.email, password: spare.password },',
+    '  },',
     `  credentials: { webSession: { value: ${JSON.stringify(emitted)} } },`,
     '}))',
     '',
@@ -705,7 +837,11 @@ function webMintingScript(stored = 'session=tok-web-1', emitted = stored, stored
 }
 
 const WEB_PROVIDES = {
-  fixtures: { org: ['id', 'slug'], webUser: ['email', 'password'] },
+  fixtures: {
+    org: ['id', 'slug'],
+    webUser: ['email', 'password'],
+    sacrificialUser: ['email', 'password'],
+  },
   credentials: { webSession: { header: 'Cookie', description: 'signed-in browser session' } },
 };
 const WEB_LOGIN = {
@@ -740,7 +876,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
     expect(result).toMatchObject({
       status: 'ok',
       credentials: ['webSession'],
-      fixtures: ['org', 'webUser'],
+      fixtures: ['org', 'sacrificialUser', 'webUser'],
     });
   }, 60_000);
 
@@ -1015,6 +1151,43 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.reason).toMatch(/web surface requires an authenticated principal/);
     expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
+  }, 60_000);
+
+  // A password change, a session revocation or an account deletion mutates the
+  // credentials it signed in with; run against the shared principal, one such
+  // flow locks every flow after it out of the login form.
+  it('refuses a web draft publishing no sacrificial user, and accepts the same draft with one', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const withoutSpare = {
+      ...WEB_PROVIDES,
+      fixtures: { org: WEB_PROVIDES.fixtures.org, webUser: WEB_PROVIDES.fixtures.webUser },
+    };
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: withoutSpare,
+        probes: WEB_PROBES,
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/sacrificialUser/);
+      expect(refusal.content).toMatch(/credential-mutation/);
+      // The same script, now declaring the fixture it already emits.
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      expect(verdict.isError).toBeUndefined();
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result).toMatchObject({ status: 'ok', fixtures: ['org', 'sacrificialUser', 'webUser'] });
   }, 60_000);
 });
 
@@ -1376,6 +1549,8 @@ describe('seedSessionBriefing — runnable surfaces and probe candidates', () =>
     expect(briefing).toContain('{{fixture:webUser.password}}');
     expect(briefing).toContain('"surface": "web"');
     expect(briefing).toContain('header: "Cookie"');
+    expect(briefing).toMatch(/5\. also create a SECOND sign-in-capable user/);
+    expect(briefing).toContain('`sacrificialUser`');
   });
 
   it('lists the spec-derived candidate probe endpoints as a lookup, not a search', () => {
@@ -1415,6 +1590,28 @@ describe('seedSessionBriefing — runnable surfaces and probe candidates', () =>
     // The grounding's AUTHENTICATION block is a mandate, not a question.
     expect(briefing).toMatch(/api surface AUTHENTICATES — the evidence:/);
     expect(briefing).not.toMatch(/decide whether a principal is needed at all/);
+  });
+
+  // A class the scenarios can create is still a class the read/update/share
+  // flows need one of on day one.
+  it('says a step-creatable class still needs one seeded instance', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const catalog = path.join(r, '.truecourse', 'scenarios', 'dependencies.json');
+    fs.mkdirSync(path.dirname(catalog), { recursive: true });
+    fs.writeFileSync(
+      catalog,
+      JSON.stringify({
+        dependencies: [
+          { name: 'collection', class: 'step-creatable', summary: 'a collection of records', obtain: 'the create form' },
+        ],
+      }),
+    );
+
+    const briefing = seedSessionBriefing(worldFor(r));
+
+    expect(briefing).toContain('- collection · step-creatable · a collection of records');
+    expect(briefing).toMatch(/step-creatable means a scenario CAN create one; the seed must still publish ONE existing instance/);
   });
 
   it('states the fixtures-only allowance when nothing authenticates', () => {
