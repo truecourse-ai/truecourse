@@ -50,7 +50,7 @@ import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import type { LlmApiConfig } from '@truecourse/core/services/llm/provider-config';
-import { createTestApp, stubJobs, TEST_ORG, type StubJobs } from '../helpers/test-app';
+import { createTestApp, stubJobs, TEST_ORG, TEST_USER, type StubJobs } from '../helpers/test-app';
 import {
   resetWorkspaceLlmBackend,
   resetWorkspaceLlmConfigStore,
@@ -194,7 +194,7 @@ describe('a configured, answering provider', () => {
     expect(probe).toHaveBeenCalledTimes(1);
     expect(probe.mock.calls[0][0]).toEqual(WORKSPACE_CONFIG);
     expect(res.body).toEqual({ jobId: 'job_test' });
-    expect(jobs.contextScans).toEqual([{ workspaceOrgId: TEST_ORG, source: 'manual' }]);
+    expect(jobs.contextScans).toEqual([{ workspaceOrgId: TEST_ORG, source: 'manual', requestedBy: TEST_USER }]);
   });
 
   it('answers 409 when a scan is already running', async () => {
@@ -215,6 +215,7 @@ describe('a configured, answering provider', () => {
         repoFullName: fixture.repoPath,
         workspaceOrgId: TEST_ORG,
         source: 'manual',
+        requestedBy: TEST_USER,
       },
     ]);
     // The job body, not the route, runs the engine on the workspace transport.

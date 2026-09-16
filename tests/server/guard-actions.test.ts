@@ -41,7 +41,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgGuardStore } from '../../packages/data-store/src/index';
-import { createTestApp, stubJobs, TEST_ORG, type StubJobs } from '../helpers/test-app';
+import { createTestApp, stubJobs, TEST_ORG, TEST_USER, type StubJobs } from '../helpers/test-app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
 import {
   estimateGuard,
@@ -136,7 +136,7 @@ describe('Guard action routes', () => {
     const res = await request(app).post(url('generate')).expect(202);
     expect(res.body).toEqual({ jobId: 'job_test' });
     expect(jobs.guardGenerates).toEqual([
-      { repoId: fixture.project.slug, repoFullName: root, workspaceOrgId: TEST_ORG, source: 'manual' },
+      { repoId: fixture.project.slug, repoFullName: root, workspaceOrgId: TEST_ORG, source: 'manual', requestedBy: TEST_USER },
     ]);
     // The queue owns the work: the route neither runs the engine nor announces a
     // completion of its own.
@@ -156,7 +156,7 @@ describe('Guard action routes', () => {
     const res = await request(app).post(url('run')).expect(202);
     expect(res.body).toEqual({ jobId: 'job_test' });
     expect(jobs.guardRuns).toEqual([
-      { repoId: fixture.project.slug, repoFullName: root, workspaceOrgId: TEST_ORG, source: 'manual' },
+      { repoId: fixture.project.slug, repoFullName: root, workspaceOrgId: TEST_ORG, source: 'manual', requestedBy: TEST_USER },
     ]);
     // The queue owns the work: the route neither runs the runner nor announces a
     // completion of its own.
