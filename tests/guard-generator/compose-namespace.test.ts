@@ -19,6 +19,7 @@ import yaml from 'js-yaml'
 import {
   composeProjectName,
   proposeRecipe,
+  recipeCacheKey,
   staticProposalComplaints,
   GUARD_COMPOSE_FILE,
 } from '@truecourse/guard-generator'
@@ -179,6 +180,20 @@ describe('which services the bring-up starts', () => {
     })
 
     expect(services(repo, 'org_123/acme/widgets').services?.up).toContain('up -d --wait db mail')
+  })
+})
+
+describe('the recipe cache key', () => {
+  // A cached proposal carries the `-p` it was authored with, so an entry keyed
+  // without the project would hand this run another workspace's world.
+  it('separates two runs that differ by compose project alone', () => {
+    const fingerprint = 'sha256:same-inputs'
+    const one = composeProjectName('org_123/acme/widgets')
+    const two = composeProjectName('org_456/acme/widgets')
+
+    expect(recipeCacheKey(fingerprint, one)).not.toBe(recipeCacheKey(fingerprint, two))
+    expect(recipeCacheKey(fingerprint, one)).not.toBe(recipeCacheKey(fingerprint))
+    expect(recipeCacheKey(fingerprint, one)).toBe(recipeCacheKey(fingerprint, one))
   })
 })
 

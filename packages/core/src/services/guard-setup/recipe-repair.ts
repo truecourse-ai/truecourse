@@ -18,9 +18,11 @@
  * session is not re-entered this run; resume is the next run's path.
  *
  * CACHE: the settled proposal keeps the legacy `guard/recipe` name AND key
- * (`recipeCacheKey(inputsFingerprint)`), via `cachedSessionOutcome` — a
- * proposal the one-shot era settled stays a hit, and verification always
- * re-runs on hits, today's semantics exactly.
+ * (`recipeCacheKey(inputsFingerprint, composeProject)`), via
+ * `cachedSessionOutcome` — a proposal the one-shot era settled stays a hit, and
+ * verification always re-runs on hits, today's semantics exactly. The run's
+ * compose project is part of the key because it is part of the proposal: the
+ * recipe carries it in every `-p`.
  */
 
 import { z } from 'zod';
@@ -348,7 +350,7 @@ export function buildRecipeRepair(
       const outcome = await cachedSessionOutcome<RecipeProposal>({
         repoRoot: ctx.repoRoot,
         cacheName: RECIPE_CACHE_NAME,
-        key: recipeCacheKey(ctx.inputsFingerprint),
+        key: recipeCacheKey(ctx.inputsFingerprint, ctx.composeProject),
         schema: RecipeProposalSchema,
         run: async () => {
           const { driver, persistence } = await context.acquire();

@@ -351,11 +351,21 @@ export interface DiscoverRecipeOptions {
   repair?: RecipeRepairFn
 }
 
-/** The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`.
- *  Exported so the repair session keeps the exact key: a
- *  proposal the one-shot era settled stays a hit in the session era. */
-export function recipeCacheKey(inputsFingerprint: string): string {
-  return createHash('sha256').update(`${RECIPE_PROMPT_FINGERPRINT}::${inputsFingerprint}`).digest('hex')
+/**
+ * The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`, plus
+ * the compose PROJECT when the caller named one. Exported so the repair session
+ * keeps the exact key: a proposal the one-shot era settled stays a hit in the
+ * session era.
+ *
+ * The project is part of the key because it is part of the ANSWER: a cached
+ * recipe carries the `-p` it was authored with, and replaying another
+ * workspace's entry would hand this run a recipe pointing at that workspace's
+ * world (which the static rule then refuses, turning a cache hit into a failed
+ * setup). A key with no project keys exactly as it always did.
+ */
+export function recipeCacheKey(inputsFingerprint: string, composeProject?: string): string {
+  const material = `${RECIPE_PROMPT_FINGERPRINT}::${inputsFingerprint}${composeProject ? `::${composeProject}` : ''}`
+  return createHash('sha256').update(material).digest('hex')
 }
 
 /**
@@ -556,7 +566,7 @@ export async function discoverRecipe(
   // The LLM proposal is cached on the discovery-input fingerprint — unchanged
   // inputs reuse the prior proposal, but verification always re-runs.
   let proposal: RecipeProposal | null = null
-  const cached = await getCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint))
+  const cached = await getCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint, composeProject))
   if (cached) {
     const parsed = RecipeProposalSchema.safeParse(cached)
     if (parsed.success) proposal = parsed.data
@@ -577,7 +587,7 @@ export async function discoverRecipe(
       }
     }
     proposal = attempt.proposal
-    await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
+    await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint, composeProject), proposal)
   }
 
   let verdict = await verifyProposal(repoRoot, proposal, verifying('model'))
@@ -600,7 +610,7 @@ export async function discoverRecipe(
       // The retry never gets a cache key of its own: a proposal that verified
       // REPLACES the rejected one under the round-1 key, so a later discovery over
       // the same inputs reuses what actually worked instead of re-paying the retry.
-      if (verdict.ok) await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
+      if (verdict.ok) await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint, composeProject), proposal)
     }
   }
   if (!verdict.ok) return { status: 'verify-failed', reason: verdict.reason, proposal }
