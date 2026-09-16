@@ -1,31 +1,35 @@
 #!/usr/bin/env bash
 #
-# Populate Key Vault with the bootstrap secrets the Container Apps reference.
-# Run AFTER foundation.bicep and BEFORE deploying the Container Apps.
+# Populate Key Vault with the secrets the VM release reads into
+# /etc/truecourse/app.json. Run AFTER foundation.bicep and BEFORE the first release.
 #
 # Values come from your shell env — NEVER commit them. Example:
 #
 #   export KEY_VAULT_NAME=<foundation output keyVaultName>
 #   export DATABASE_URL='postgres://tcadmin:<pw>@<pgFqdn>:5432/truecourse?sslmode=require'
 #   export TRUECOURSE_SECRET_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")"
-#   export WORKOS_API_KEY=... WORKOS_CLIENT_ID=... WORKOS_COOKIE_PASSWORD=... \
-#          WORKOS_REDIRECT_URI=https://<app-fqdn>/api/auth/callback WORKOS_APP_URL=https://<app-fqdn>
+#   export WORKOS_API_KEY=... WORKOS_CLIENT_ID=... WORKOS_COOKIE_PASSWORD=...
 #   export GITHUB_APP_ID=... GITHUB_APP_PRIVATE_KEY="$(base64 -i app.private-key.pem | tr -d '\n')" \
 #          GITHUB_APP_WEBHOOK_SECRET=... GITHUB_APP_SLUG=truecourse-gate
 #   ./infra/azure/set-secrets.sh
 #
-# Each name set here must match the containerapp.bicep `secretEnv` list (dashed).
+# Each name set here is the dashed form of a name in .github/scripts/vm-release.py
+# SECRET_NAMES; the release fails on a missing required one.
 set -euo pipefail
 
 KV="${KEY_VAULT_NAME:?set KEY_VAULT_NAME (foundation output keyVaultName)}"
 
-set_secret() { # dashed-name  value  [required]
-  local name="$1" value="${2:-}" required="${3:-optional}"
+set_secret() { # dashed-name  value  [required|optional|integer]
+  local name="$1" value="${2:-}" kind="${3:-optional}"
   if [ -z "$value" ]; then
-    if [ "$required" = required ]; then
+    if [ "$kind" = required ]; then
       echo "ERROR: $name is required but empty" >&2; exit 1
     fi
     echo "skip  $name (empty)"; return
+  fi
+  # Same rule as vm-release.py INTEGER_SECRETS; a bad value there fails every release.
+  if [ "$kind" = integer ] && ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: $name must be a positive integer, got '$value'" >&2; exit 1
   fi
   az keyvault secret set --vault-name "$KV" --name "$name" --value "$value" --output none
   echo "set   $name"
@@ -38,15 +42,15 @@ set_secret truecourse-secret-key    "${TRUECOURSE_SECRET_KEY:-}"    required
 set_secret workos-api-key           "${WORKOS_API_KEY:-}"           required
 set_secret workos-client-id         "${WORKOS_CLIENT_ID:-}"         required
 set_secret workos-cookie-password   "${WORKOS_COOKIE_PASSWORD:-}"   required
-set_secret workos-redirect-uri      "${WORKOS_REDIRECT_URI:-}"      required
-set_secret workos-app-url           "${WORKOS_APP_URL:-}"           required
 # GitHub App PR gate
 set_secret github-app-id            "${GITHUB_APP_ID:-}"            required
 set_secret github-app-private-key   "${GITHUB_APP_PRIVATE_KEY:-}"   required
 set_secret github-app-webhook-secret "${GITHUB_APP_WEBHOOK_SECRET:-}" required
 set_secret github-app-slug          "${GITHUB_APP_SLUG:-}"          required
 
-# Optional — to use this, also add the env name to containerapp.bicep `secretEnv`.
-set_secret sentry-dsn               "${SENTRY_DSN:-}"
+# Optional — absent means the app's default.
+set_secret sentry-dsn                    "${SENTRY_DSN:-}"
+set_secret truecourse-max-concurrency    "${TRUECOURSE_MAX_CONCURRENCY:-}"    integer
+set_secret truecourse-max-api-concurrency "${TRUECOURSE_MAX_API_CONCURRENCY:-}" integer
 
-echo "Done. Now deploy the Container Apps (see infra/azure/README.md)."
+echo "Done. Now provision or release the VM (see infra/azure/vm/DEPLOYMENT.md)."

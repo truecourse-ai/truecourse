@@ -163,8 +163,8 @@ resource nic 'Microsoft.Network/networkInterfaces@2024-05-01' = {
     }]
   }
 }
-// Add an explicit VM address without changing the server, backup policy,
-// storage auto-growth, or the existing Container Apps firewall rule.
+// Add an explicit VM address without changing the server, backup policy or
+// storage auto-growth. Operator addresses are hand-added rules beside this one.
 resource databaseFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = {
   parent: database
   name: '${name}-egress'
