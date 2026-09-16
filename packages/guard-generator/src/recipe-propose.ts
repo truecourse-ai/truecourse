@@ -43,6 +43,7 @@ import {
   type RouteManifestApp,
 } from '@truecourse/guard-runner'
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
+import { nextAppSegments, remixFlatSegments, REMIX_ROUTE_FILE } from '@truecourse/shared'
 import type { DatastoreUrlRef, Interface } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
 import type { RecipeAppInventoryEntry } from './prompts.js'
@@ -1081,10 +1082,9 @@ const WEB_HEALTH_PAGE_RANKING = ['/login', '/signin', '/sign-in', '/auth/login',
 const PAGE_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js', '.mjs']
 
 /**
- * The `web` block for a repo that serves a BROWSER app: the same process the api
- * block boots (a fullstack Next/Remix server is one server), addressed at a page
- * that renders without a session. Derived only when there IS a served process and
- * the repo shows browser evidence — the same evidence the static rule refuses the
+ * The `web` block for a repo that serves a BROWSER app, addressed at a page that
+ * renders without a session. Derived only when there IS a served process and the
+ * repo shows browser evidence — the same evidence the static rule refuses the
  * absent `web` block on, so this path stops paying for a repair session that only
  * ever restated the api block.
  *
@@ -1098,59 +1098,150 @@ function deriveWeb(
   inputs: ProposeRecipeInputs,
 ): Record<string, unknown> | undefined {
   if (!signals.serve) return undefined
-  const apps = (inputs.manifestApps ?? []).map((app) => ({
+  const manifestApps = inputs.manifestApps ?? []
+  const apps = manifestApps.map((app) => ({
     dir: app.dir,
     ...(app.pkg ? { pkg: app.pkg } : {}),
     framework: app.framework,
     prefixes: app.prefixes,
   }))
   if (browserAppEvidence(apps, repoRoot).length === 0) return undefined
+  const surface = webSurface(repoRoot, signals, manifestApps)
+  if (!surface) return undefined
   return {
-    serve: signals.serve,
-    ...(signals.serveApp ? { app: signals.serveApp, cwd: 'repo' } : {}),
-    healthPath: anonymousPageHealthPath(repoRoot, signals.serveApp),
+    serve: surface.serve,
+    ...(surface.app ? { app: surface.app, cwd: 'repo' } : {}),
+    healthPath: anonymousPageHealthPath(repoRoot, surface.app, surface.framework),
     ...(Object.keys(env).length > 0 ? { env } : {}),
   }
 }
 
+/**
+ * The process the `web` block boots: the SERVED one when it is itself the browser
+ * app (a fullstack Next/Remix server is one server), else the browser app's own
+ * serve — the api block crowns the most-routed member, which in an api+web
+ * monorepo is the api, and a web block aimed at that boots a second copy of the
+ * api and asks it for a page. Undefined when the browser app names no plain
+ * `start` of its own: guessing costs an install, a build and a boot before it
+ * fails, where no block at all leaves the static "declare a `web` block"
+ * complaint standing, which is free and actionable.
+ */
+function webSurface(
+  repoRoot: string,
+  signals: RecipeSignals,
+  apps: readonly RouteManifestApp[],
+): { serve: string[]; app?: string; framework?: BrowserFramework } | undefined {
+  const serve = signals.serve
+  if (!serve) return undefined
+  // No member dir ⇒ a single-package repo, where the one served process is the
+  // whole app and the browser evidence came off its own manifest; which browser
+  // framework it is stays unread, so the page lookup tries every convention.
+  if (!signals.serveApp) return { serve }
+  const browserFramework = (app: RouteManifestApp): BrowserFramework | null =>
+    app.framework === 'next' || app.framework === 'remix' ? app.framework : null
+  const served = apps.find((app) => app.dir === signals.serveApp)
+  const servedFramework = served ? browserFramework(served) : null
+  if (servedFramework) return { serve, app: signals.serveApp, framework: servedFramework }
+
+  const browser = apps.flatMap((app) => {
+    const framework = browserFramework(app)
+    return framework && !EXAMPLE_DIR.test(app.dir) ? [{ dir: app.dir, framework }] : []
+  })
+  if (browser.length !== 1) return undefined
+  const { dir, framework } = browser[0]!
+  const memberPkg = readJson(path.join(repoRoot, dir, 'package.json'))
+  const name = typeof memberPkg?.name === 'string' && memberPkg.name ? memberPkg.name : null
+  const start = asRecord(memberPkg?.scripts).start
+  if (!name || typeof start !== 'string' || !start.trim()) return undefined
+  if (DEV_SCRIPT_MARKERS.some((marker) => start.toLowerCase().includes(marker))) return undefined
+  return { serve: workspaceRunArgv(repoRoot, name), app: dir, framework }
+}
+
+/** The browser frameworks whose routing conventions the page lookup reads. */
+type BrowserFramework = 'next' | 'remix'
+
 /** The best-ranked anonymous page the SERVED app actually ships, else `/`. */
-function anonymousPageHealthPath(repoRoot: string, appDir?: string): string {
+function anonymousPageHealthPath(repoRoot: string, appDir?: string, framework?: BrowserFramework): string {
   const base = appDir ? path.join(repoRoot, appDir) : repoRoot
-  const found = WEB_HEALTH_PAGE_RANKING.find((candidate) => pageExists(base, candidate.slice(1).split('/')))
+  const found = WEB_HEALTH_PAGE_RANKING.find((candidate) => pageExists(base, candidate.slice(1).split('/'), framework))
   return found ?? '/'
 }
 
 /** Does the app under `base` declare a page at these path segments — in a Next
- *  pages router, a Next app router (route groups included) or Remix's flat routes?
- *  `src/` is checked alongside the app root, which is where both put them. */
-function pageExists(base: string, segments: readonly string[]): boolean {
+ *  pages router, a Next app router or Remix's flat routes? `src/` is checked
+ *  alongside the app root, which is where both put them. The address rules are
+ *  the frameworks' own, read from `@truecourse/shared`; a KNOWN framework is held
+ *  to its own, so a Next app's `app/routes/x/route.ts` handler is not read as a
+ *  remix page. */
+function pageExists(base: string, segments: readonly string[], framework?: BrowserFramework): boolean {
   for (const root of [base, path.join(base, 'src')]) {
-    const pagesFile = path.join(root, 'pages', ...segments)
-    if (withExtension(pagesFile) || withExtension(path.join(pagesFile, 'index'))) return true
-    if (appRouterPageExists(path.join(root, 'app'), segments)) return true
-    // Remix flattens nesting onto dots: `/auth/login` is `app/routes/auth.login`.
-    const remixFile = path.join(root, 'app', 'routes', segments.join('.'))
-    if (withExtension(remixFile) || withExtension(path.join(remixFile, 'route'))) return true
+    if (framework !== 'remix') {
+      const pagesFile = path.join(root, 'pages', ...segments)
+      if (withExtension(pagesFile) || withExtension(path.join(pagesFile, 'index'))) return true
+      if (appRouterPageExists(path.join(root, 'app'), segments)) return true
+    }
+    if (framework !== 'next' && remixRouteExists(path.join(root, 'app', 'routes'), segments)) return true
   }
   return false
 }
 
-/** `<dir>/<segments…>/page.<ext>`, stepping THROUGH Next's addressless dirs —
- *  route groups `(auth)` and parallel slots `@modal` are not part of the URL, so
- *  `app/(auth)/login/page.tsx` serves `/login`. */
+/** `<dir>/<segments…>/page.<ext>`, with each directory read by Next's own rule:
+ *  a route group contributes no segment and is stepped THROUGH, while a private
+ *  folder, a parallel slot and an interception declare no standalone address at
+ *  all (`app/@modal/login/page.tsx` does not serve `/login`). */
 function appRouterPageExists(dir: string, segments: readonly string[]): boolean {
   if (segments.length === 0) return withExtension(path.join(dir, 'page'))
-  const [head, ...rest] = segments
-  if (appRouterPageExists(path.join(dir, head), rest)) return true
-  let entries: fs.Dirent[]
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
+  for (const entry of subdirectories(dir)) {
+    const addressed = nextAppSegments([entry])
+    if (addressed === null) continue
+    const child = path.join(dir, entry)
+    if (addressed.length === 0) {
+      if (appRouterPageExists(child, segments)) return true
+      continue
+    }
+    if (addressed[0] === segments[0] && appRouterPageExists(child, segments.slice(1))) return true
+  }
+  return false
+}
+
+/** Does a flat route under `routesDir` address these segments? The grammar is
+ *  the shared one: a `+` directory groups tokens, any other directory addresses
+ *  itself through the `route` module it holds (`login/route.tsx` addresses what
+ *  `login.route.tsx` does) and colocates everything else. */
+function remixRouteExists(routesDir: string, segments: readonly string[]): boolean {
+  const addresses = (relative: readonly string[]): boolean => {
+    const addressed = remixFlatSegments(relative)
+    return addressed !== null && addressed.length === segments.length && addressed.every((s, i) => s === segments[i])
+  }
+  const walk = (dir: string, prefix: readonly string[]): boolean => {
+    for (const entry of dirEntries(dir)) {
+      if (entry.isDirectory()) {
+        if (entry.name.endsWith('+')) {
+          if (walk(path.join(dir, entry.name), [...prefix, entry.name])) return true
+          continue
+        }
+        if (withExtension(path.join(dir, entry.name, 'route')) && addresses([...prefix, `${entry.name}.route.tsx`])) {
+          return true
+        }
+        continue
+      }
+      if (REMIX_ROUTE_FILE.test(entry.name) && addresses([...prefix, entry.name])) return true
+    }
     return false
   }
-  return entries.some(
-    (entry) => entry.isDirectory() && /^[(@]/.test(entry.name) && appRouterPageExists(path.join(dir, entry.name), segments),
-  )
+  return walk(routesDir, [])
+}
+
+function dirEntries(dir: string): fs.Dirent[] {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+}
+
+function subdirectories(dir: string): string[] {
+  return dirEntries(dir).filter((entry) => entry.isDirectory()).map((entry) => entry.name)
 }
 
 /** The path with any route-module extension, when one of them is a file. */
