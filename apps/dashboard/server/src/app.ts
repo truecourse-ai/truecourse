@@ -14,6 +14,7 @@ import guardActionsRouter from './routes/guard-actions.js';
 import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions.js';
 import capabilitiesRouter from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
+import { createUsageRouter } from './routes/usage.js';
 import { createAuthGate } from './middleware/auth.js';
 import { actorContext } from './middleware/actor.js';
 import type { GithubMount } from './github/index.js';
@@ -197,6 +198,10 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // The workspace's Models settings — workspace-scoped, not repo-scoped, so it
   // sits beside the registry routes rather than behind the project resolver.
   app.use('/api/llm', llmRouter);
+
+  // What this workspace's runs spent at the model. Workspace-scoped and
+  // read-only, so it sits beside the Models settings it accounts for.
+  app.use('/api/usage', createUsageRouter({ repoLinks }));
 
   // The job queue: the live event stream, job status, and the notifications
   // feed. Workspace-scoped like the Models settings, so they mount together.

@@ -32,6 +32,7 @@ import {
 } from '@truecourse/core/commands/guard-setup';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
+import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { materializeStoredSpec, storedSliceSize } from '../materialize-spec.js';
 import { firstLine, type OnboardingJobRequest } from './onboarding.js';
@@ -52,7 +53,7 @@ export type GuardSetupJobPayload = GuardSetupJobRequest & JobPayload;
 export interface RepoGuardSetupTaskDeps {
   /** Enqueue the scenario generation a successful setup chains into. */
   chainGuardGenerate(request: OnboardingJobRequest): Promise<void>;
-  startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
+  startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runSetup?: typeof guardSetupInProcess;
   /** How many documents the repository reads right now (the store, not the clone). */
   sliceDocuments?: typeof storedSliceSize;
@@ -77,100 +78,112 @@ export function createRepoGuardSetupTask(
     traceMeta: (payload) => ({ repoFullName: payload.repoFullName }),
 
     async run(ctx) {
-      return dashboardActivity(ctx, 'guard-setup', GUARD_SETUP_STEPS, async (activityRun, activityTracker) => {
-        const { repoFullName, only, refresh } = ctx.payload;
-        runIds.set(ctx.jobId, activityRun.runId);
-        await ctx.notify({
-          level: 'started',
-          title: 'Flow setup started',
-          data: { repoFullName, runId: activityRun.runId },
-        });
-        const llm = await startLlm(ctx.payload.workspaceOrgId);
-
-        await ctx.phase('clone');
-        const tree = await acquireWorkTree(repoFullName);
-        try {
-          const commitSha = await resolveCommitSha(tree.dir);
-          activityRun.setGitRef?.(commitSha);
-          activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
-          const ref = { repoKey: repoFullName, commitSha };
-          // Setup runs with or without documents: the recipe, its dependencies
-          // and the interface catalog are derived from the CODE. A repository
-          // that reads nothing gets an empty corpus in its clone and is set up
-          // exactly the same; what it does NOT get is a generate (below).
-          const slice = await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
-          activityTracker.fact(
-            'clone',
-            slice.documents > 0
-              ? `the repository's slice of the workspace corpus written into the clone: ${slice.documents} document${slice.documents === 1 ? '' : 's'}`
-              : slice.hasWorkspaceCorpus
-                ? 'the repository reads no document of the workspace corpus: an empty corpus written into the clone'
-                : 'the workspace has no corpus yet: an empty corpus written into the clone',
-          );
-          // The NEWEST bundle, not this commit's: what carries the settle spine
-          // forward is the last setup that ran, whatever commit it ran on.
-          const stored = await loadGuardSetupBundle(repoFullName);
-          if (stored) {
-            materializeGuardSetupBundle(tree.dir, stored);
-            activityTracker.fact('clone', `the newest setup bundle written into the clone: ${Object.keys(stored).join(', ')}`);
-          } else {
-            activityTracker.fact('clone', 'no setup bundle stored yet: this is the first setup');
-          }
-          // The registered instances go in beside it, as the two gitignored files
-          // the engine reads them from. The bundle collected below never carries
-          // them: a secret enters only through the dashboard, never out of a clone.
-          if (await materializeGuardOverlays(repoFullName, tree.dir)) {
-            activityTracker.fact('clone', 'the registered instances written into the clone');
-          }
-          activityTracker.done('clone');
-
-          const { report } = await runSetup(tree.dir, {
-            driver: llm.driver(),
-            transport: llm.transport(),
-            transportMode: llm.mode,
-            sessionsKey: repoFullName,
-            sessionRun: activityRun,
-            eagerRun: true,
-            tracker: activityTracker,
-            ...(ctx.signal ? { signal: ctx.signal } : {}),
-            ...(only ? { only } : {}),
-            // A hosted refresh IS the consent to replace the seed: the script lives
-            // in the bundle, never in a hand-edited tree, and the request said so.
-            ...(refresh ? { refresh: true, confirmSeedReplace: async () => true } : {}),
-          });
-
-          const files = collectGuardSetupBundle(tree.dir);
-          if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files);
-
-          // Preserve the failed bundle above, then fail the job so its status
-          // agrees with Activity and it cannot chain into generation.
-          if (report.status !== 'ok') throw new Error(report.reason || 'Setup did not complete');
-          const reason = firstLine(report.reason);
-          // What the repository reads as of NOW, not as of the clone: on a
-          // connect the first Document scan runs beside this job, so the
-          // materialized slice can be older than the answer.
-          const documents = await sliceDocuments(repoFullName, ctx.payload.workspaceOrgId);
-          return {
-            result: {
-              repoFullName,
-              status: report.status,
-              documents,
-              ...(reason ? { reason } : {}),
-            },
-            notification: {
-              level: 'success',
-              title: 'Flow setup complete',
-              body:
-                documents === 0
-                  ? 'Set up. No documents linked yet.'
-                  : 'The recipe and its dependencies are ready.',
-              data: { repoFullName, runId: activityRun.runId, documents },
-            },
-          };
-        } finally {
-          tree.dispose();
-        }
+      const meter = createUsageMeter({
+        workspaceOrgId: ctx.payload.workspaceOrgId,
+        repoFullName: ctx.payload.repoFullName,
+        jobType: REPO_GUARD_SETUP_TASK,
+        jobId: ctx.jobId,
       });
+      try {
+        return await dashboardActivity(ctx, 'guard-setup', GUARD_SETUP_STEPS, async (activityRun, activityTracker) => {
+          const { repoFullName, only, refresh } = ctx.payload;
+          runIds.set(ctx.jobId, activityRun.runId);
+          meter.setRunId(activityRun.runId);
+          await ctx.notify({
+            level: 'started',
+            title: 'Flow setup started',
+            data: { repoFullName, runId: activityRun.runId },
+          });
+          const llm = await startLlm(ctx.payload.workspaceOrgId, meter);
+
+          await ctx.phase('clone');
+          const tree = await acquireWorkTree(repoFullName);
+          try {
+            const commitSha = await resolveCommitSha(tree.dir);
+            activityRun.setGitRef?.(commitSha);
+            activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
+            const ref = { repoKey: repoFullName, commitSha };
+            // Setup runs with or without documents: the recipe, its dependencies
+            // and the interface catalog are derived from the CODE. A repository
+            // that reads nothing gets an empty corpus in its clone and is set up
+            // exactly the same; what it does NOT get is a generate (below).
+            const slice = await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
+            activityTracker.fact(
+              'clone',
+              slice.documents > 0
+                ? `the repository's slice of the workspace corpus written into the clone: ${slice.documents} document${slice.documents === 1 ? '' : 's'}`
+                : slice.hasWorkspaceCorpus
+                  ? 'the repository reads no document of the workspace corpus: an empty corpus written into the clone'
+                  : 'the workspace has no corpus yet: an empty corpus written into the clone',
+            );
+            // The NEWEST bundle, not this commit's: what carries the settle spine
+            // forward is the last setup that ran, whatever commit it ran on.
+            const stored = await loadGuardSetupBundle(repoFullName);
+            if (stored) {
+              materializeGuardSetupBundle(tree.dir, stored);
+              activityTracker.fact('clone', `the newest setup bundle written into the clone: ${Object.keys(stored).join(', ')}`);
+            } else {
+              activityTracker.fact('clone', 'no setup bundle stored yet: this is the first setup');
+            }
+            // The registered instances go in beside it, as the two gitignored files
+            // the engine reads them from. The bundle collected below never carries
+            // them: a secret enters only through the dashboard, never out of a clone.
+            if (await materializeGuardOverlays(repoFullName, tree.dir)) {
+              activityTracker.fact('clone', 'the registered instances written into the clone');
+            }
+            activityTracker.done('clone');
+
+            const { report } = await runSetup(tree.dir, {
+              driver: llm.driver(),
+              transport: llm.transport(),
+              transportMode: llm.mode,
+              sessionsKey: repoFullName,
+              sessionRun: activityRun,
+              eagerRun: true,
+              tracker: activityTracker,
+              ...(ctx.signal ? { signal: ctx.signal } : {}),
+              ...(only ? { only } : {}),
+              // A hosted refresh IS the consent to replace the seed: the script lives
+              // in the bundle, never in a hand-edited tree, and the request said so.
+              ...(refresh ? { refresh: true, confirmSeedReplace: async () => true } : {}),
+            });
+
+            const files = collectGuardSetupBundle(tree.dir);
+            if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files);
+
+            // Preserve the failed bundle above, then fail the job so its status
+            // agrees with Activity and it cannot chain into generation.
+            if (report.status !== 'ok') throw new Error(report.reason || 'Setup did not complete');
+            const reason = firstLine(report.reason);
+            // What the repository reads as of NOW, not as of the clone: on a
+            // connect the first Document scan runs beside this job, so the
+            // materialized slice can be older than the answer.
+            const documents = await sliceDocuments(repoFullName, ctx.payload.workspaceOrgId);
+            return {
+              result: {
+                repoFullName,
+                status: report.status,
+                documents,
+                ...(reason ? { reason } : {}),
+              },
+              notification: {
+                level: 'success',
+                title: 'Flow setup complete',
+                body:
+                  documents === 0
+                    ? 'Set up. No documents linked yet.'
+                    : 'The recipe and its dependencies are ready.',
+                data: { repoFullName, runId: activityRun.runId, documents },
+              },
+            };
+          } finally {
+            tree.dispose();
+          }
+        });
+      } finally {
+        // However setup ended, what it spent up to that point is written.
+        await meter.close();
+      }
     },
 
     onError: (err, payload) => {

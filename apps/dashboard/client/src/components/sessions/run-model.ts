@@ -88,6 +88,25 @@ export function formatDuration(ms: number): string {
 }
 
 /**
+ * Money, as a page says it: two decimals once there is a cent to show, four
+ * below that, so a stage that cost a fraction of a cent reads as a number
+ * rather than as zero.
+ */
+export function formatUsd(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '$0.00';
+  return value >= 0.01 ? `$${value.toFixed(2)}` : `$${value.toFixed(4)}`;
+}
+
+/** Tokens at a glance: `1.2M`, `4.5K`, `812`. */
+export function formatTokens(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
+  if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (value >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
+  return String(Math.round(value));
+}
+
+/**
  * How long the run took, or has been going. A live run's elapsed is computed
  * at RENDER time rather than on a ticker: the socket pushes a fresh run record
  * on every store write, so a running run's number moves on its own without a

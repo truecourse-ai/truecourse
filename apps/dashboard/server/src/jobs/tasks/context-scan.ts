@@ -31,6 +31,7 @@ import {
   startWorkspaceLlm,
   type WorkspaceLlm,
 } from '../../services/workspace-llm.service.js';
+import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
 import { recordFailedWorkspaceScanRun } from '../../services/context-scan.service.js';
 import { emitContextChanged } from '../../services/context.service.js';
 import {
@@ -67,7 +68,7 @@ export interface ContextScanJobResult {
 }
 
 export interface ContextScanTaskDeps {
-  startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
+  startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runScan?: typeof workspaceContextScanInProcess;
   /** The ripple's collaborators, built by the mount (they need the enqueues). */
   ripple?: (org: string) => ContextRippleDeps;
@@ -100,69 +101,82 @@ export function createContextScanTask(
       // Stamped BEFORE anything is read, so a sync that lands mid-scan is
       // seen by the coalesce check even though the corpus it produced is older.
       const startedAt = now().toISOString();
-      let llm: WorkspaceLlm;
-      try {
-        llm = await startLlm(org);
-      } catch (err) {
-        // The probe died before the scan could open a run — create one carrying
-        // the reason, so the Agent page shows a failed scan instead of nothing.
-        if (err instanceof LlmProbeFailedError) {
-          const runId = await recordFailedWorkspaceScanRun(org, {
-            message: err.message,
-            kind: 'llm-probe',
-          });
-          if (runId) runIds.set(ctx.jobId, runId);
-        }
-        throw err;
-      }
-
-      const result = await runScan({
+      // The scan is the workspace's own work, so its spend names no repository.
+      const meter = createUsageMeter({
         workspaceOrgId: org,
-        repositories: await repositoriesOf(deps, org),
-        tracker: checklistTracker(ctx),
-        driver: llm.driver(),
-        transportMode: llm.mode,
-        onRunStarted: (info) => {
-          runIds.set(ctx.jobId, info.runId);
-          void ctx.notify({ level: 'started', title: 'Document scan started', data: { runId: info.runId } });
-        },
-        ...(ctx.signal ? { signal: ctx.signal } : {}),
+        repoFullName: null,
+        jobType: CONTEXT_SCAN_TASK,
+        jobId: ctx.jobId,
       });
+      try {
+        let llm: WorkspaceLlm;
+        try {
+          llm = await startLlm(org, meter);
+        } catch (err) {
+          // The probe died before the scan could open a run — create one carrying
+          // the reason, so the Agent page shows a failed scan instead of nothing.
+          if (err instanceof LlmProbeFailedError) {
+            const runId = await recordFailedWorkspaceScanRun(org, {
+              message: err.message,
+              kind: 'llm-probe',
+            });
+            if (runId) runIds.set(ctx.jobId, runId);
+          }
+          throw err;
+        }
 
-      const conflicts = openConflicts(result.corpus, result.decisions).length;
-      await emitContextChanged(org, { change: 'documents' });
-      rippleInputs.set(ctx.jobId, {
-        previousCorpus: result.previousCorpus,
-        corpus: result.corpus,
-        corpusChanged: result.corpusChanged,
-        openConflicts: conflicts,
-      });
+        const result = await runScan({
+          workspaceOrgId: org,
+          repositories: await repositoriesOf(deps, org),
+          tracker: checklistTracker(ctx),
+          driver: llm.driver(),
+          transportMode: llm.mode,
+          onRunStarted: (info) => {
+            runIds.set(ctx.jobId, info.runId);
+            meter.setRunId(info.runId);
+            void ctx.notify({ level: 'started', title: 'Document scan started', data: { runId: info.runId } });
+          },
+          ...(ctx.signal ? { signal: ctx.signal } : {}),
+        });
 
-      const jobResult: ContextScanJobResult = {
-        documents: result.documents,
-        areas: result.corpus.areas.length,
-        openConflicts: conflicts,
-        corpusChanged: result.corpusChanged,
-        startedAt,
-      };
-      const runId = runIds.get(ctx.jobId);
-      return {
-        result: jobResult,
-        notification:
-          conflicts > 0
-            ? {
-                level: 'warning',
-                title: 'Documents scanned, conflicts to resolve',
-                body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} curated, but ${conflicts} open conflict${conflicts === 1 ? '' : 's'} must be resolved before tests are regenerated.`,
-                data: { openConflicts: conflicts, ...(runId ? { runId } : {}) },
-              }
-            : {
-                level: 'success',
-                title: 'Documents scanned',
-                body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} in ${result.corpus.areas.length} area${result.corpus.areas.length === 1 ? '' : 's'}.`,
-                data: { documents: result.corpus.docs.length, ...(runId ? { runId } : {}) },
-              },
-      };
+        const conflicts = openConflicts(result.corpus, result.decisions).length;
+        await emitContextChanged(org, { change: 'documents' });
+        rippleInputs.set(ctx.jobId, {
+          previousCorpus: result.previousCorpus,
+          corpus: result.corpus,
+          corpusChanged: result.corpusChanged,
+          openConflicts: conflicts,
+        });
+
+        const jobResult: ContextScanJobResult = {
+          documents: result.documents,
+          areas: result.corpus.areas.length,
+          openConflicts: conflicts,
+          corpusChanged: result.corpusChanged,
+          startedAt,
+        };
+        const runId = runIds.get(ctx.jobId);
+        return {
+          result: jobResult,
+          notification:
+            conflicts > 0
+              ? {
+                  level: 'warning',
+                  title: 'Documents scanned, conflicts to resolve',
+                  body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} curated, but ${conflicts} open conflict${conflicts === 1 ? '' : 's'} must be resolved before tests are regenerated.`,
+                  data: { openConflicts: conflicts, ...(runId ? { runId } : {}) },
+                }
+              : {
+                  level: 'success',
+                  title: 'Documents scanned',
+                  body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} in ${result.corpus.areas.length} area${result.corpus.areas.length === 1 ? '' : 's'}.`,
+                  data: { documents: result.corpus.docs.length, ...(runId ? { runId } : {}) },
+                },
+        };
+      } finally {
+        // However the scan ended, what it spent up to that point is written.
+        await meter.close();
+      }
     },
 
     onError: (err, payload) => {

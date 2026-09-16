@@ -31,6 +31,7 @@ import type {
   ContextSourceView,
   HomePeriod,
   HomeResponse,
+  UsageResponse,
   JobsResponse,
   NotificationsResponse,
   AuthUser,
@@ -1155,6 +1156,16 @@ export function markNotificationsRead(
 
 export function fetchHome(period: HomePeriod): Promise<HomeResponse> {
   return fetchApi<HomeResponse>(`/api/home?period=${encodeURIComponent(period)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Usage: what the workspace's runs spent, over the chosen period and filters.
+// ---------------------------------------------------------------------------
+
+/** The address the page is at, minus everything `/api/usage` has no use for. */
+export function fetchUsage(params: URLSearchParams): Promise<UsageResponse> {
+  const query = params.toString();
+  return fetchApi<UsageResponse>(`/api/usage${query ? `?${query}` : ''}`);
 }
 
 export interface SessionTranscriptPage {

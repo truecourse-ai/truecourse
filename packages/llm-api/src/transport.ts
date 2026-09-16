@@ -15,7 +15,9 @@
  *
  * ACCOUNTING: every successful call reports its tokens to the shared per-stage
  * usage table, with a cost from the optional `pricing` hook — the same
- * ` · model · tokens · $cost` tags the claude-code backend produces.
+ * ` · model · tokens · $cost` tags the claude-code backend produces — and to
+ * the optional `onUsage` observer, which is how a run accounts for its own
+ * spend rather than reading a process-global table.
  *
  * OBSERVABILITY: the AI SDK's native OpenTelemetry emission is enabled
  * (`experimental_telemetry`), tagged with the ambient `currentTrace()` (org /
@@ -25,9 +27,11 @@
 import { generateText, generateObject, jsonSchema, type LanguageModel, type ModelMessage } from 'ai';
 import {
   recordStageUsage,
+  reportTransportUsage,
   resolveTimeoutScale,
   type LlmRequest,
   type LlmTransport,
+  type TransportUsageObserver,
 } from '@truecourse/shared/llm';
 import { buildModel } from './model.js';
 import {
@@ -59,6 +63,12 @@ export interface ApiTransportOptions {
    * fixes the model, and a stage's request carries a tier alias, not a model id.
    */
   honorRequestModel?: boolean;
+  /**
+   * One report per call that reached the model, for a caller that must account
+   * for what a run spends. A transport hands back text, so there is nothing to
+   * read usage off from outside: the observer is supplied at construction.
+   */
+  onUsage?: TransportUsageObserver;
 }
 
 /** Former name of {@link ApiTransportOptions}, kept for callers still on it. */
@@ -171,19 +181,20 @@ function recordUsage(
   req: LlmRequest,
   model: string,
   result: CapturedResult,
-  pricing: ApiTransportOptions['pricing'],
+  opts: ApiTransportOptions,
 ): void {
   const usage = callUsageOf(result.usage);
   let costUsd = 0;
-  if (pricing) {
+  if (opts.pricing) {
     try {
-      const priced = pricing(model, usage);
+      const priced = opts.pricing(model, usage);
       if (Number.isFinite(priced)) costUsd = priced;
     } catch {
       /* pricing is observational — an unpriceable call still reports tokens */
     }
   }
   recordStageUsage(req.stage, { model, ...usage, costUsd });
+  reportTransportUsage(opts.onUsage, { stage: req.stage ?? 'unknown', model, ...usage, costUsd });
 }
 
 /** Record without ever breaking the call: the store's failure must not throw out. */
@@ -301,7 +312,7 @@ export function createApiTransport(
         result = await run(fallback);
       }
       const model = usedFallback ? fallbackModelId : modelId;
-      recordUsage(req, model, result, opts.pricing);
+      recordUsage(req, model, result, opts);
       return result.text;
     } finally {
       cleanup();

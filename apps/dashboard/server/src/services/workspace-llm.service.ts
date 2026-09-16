@@ -30,7 +30,7 @@ import type { Request } from 'express';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
 import type { LlmConfigUpdate, LlmOperatorProvider, LlmProviderConfigView } from '@truecourse/shared';
-import type { LlmTransport } from '@truecourse/shared/llm';
+import type { LlmTransport, TransportUsageObserver } from '@truecourse/shared/llm';
 import type { LlmApiConfig, LlmTransportMode } from '@truecourse/core/services/llm/provider-config';
 import {
   createApiTransportFor,
@@ -42,6 +42,7 @@ import {
   SESSION_MODEL_CLAUDE_CODE,
 } from '@truecourse/core/services/llm/session-driver';
 import { probeApiConfig, probeClaudeCode } from '@truecourse/core/services/llm/probe';
+import { meterDriver, type RunUsageObserver, type UsageMeter } from './usage-meter.service.js';
 
 /**
  * Whether this instance runs on its operator's Claude Code. Read per call so a
@@ -118,12 +119,14 @@ export class LlmProbeFailedError extends Error {
 export interface WorkspaceLlmBackend {
   probe(config: LlmApiConfig): Promise<void>;
   driver(config: LlmApiConfig): SessionDriver;
-  transport(config: LlmApiConfig): LlmTransport;
+  /** `onUsage` is threaded in at construction: a transport answers with text,
+   *  so there is nothing to read a call's spend off from outside. */
+  transport(config: LlmApiConfig, onUsage?: TransportUsageObserver): LlmTransport;
   /** Operator mode: the server's own `claude` login. */
   claudeCode: {
     probe(): Promise<void>;
     driver(): SessionDriver;
-    transport(): LlmTransport;
+    transport(onUsage?: TransportUsageObserver): LlmTransport;
   };
 }
 
@@ -132,7 +135,11 @@ const REAL_BACKEND: WorkspaceLlmBackend = {
   driver: (config) => createApiSessionDriverFor(config).driver,
   // The workspace block names ONE model for every stage, so the per-stage tier
   // hints (Claude CLI aliases, meaningless to a provider API) are not honored.
-  transport: (config) => createApiTransportFor(config, { honorRequestModel: false }),
+  transport: (config, onUsage) =>
+    createApiTransportFor(config, {
+      honorRequestModel: false,
+      ...(onUsage ? { onUsage } : {}),
+    }),
   claudeCode: {
     probe: () => probeClaudeCode(),
     // No cwd: runs happen in ephemeral clones the driver never learns about, so
@@ -141,7 +148,7 @@ const REAL_BACKEND: WorkspaceLlmBackend = {
     driver: () => createClaudeCodeSessionDriver().driver,
     // The Agent SDK one-shot, on the same login; it honors the per-stage tier
     // aliases exactly as the CLI does.
-    transport: () => createClaudeCodeTransport(),
+    transport: (onUsage) => createClaudeCodeTransport(onUsage),
   },
 };
 
@@ -174,22 +181,54 @@ export function probeWorkspaceLlmConfig(config: LlmApiConfig): Promise<void> {
 }
 
 /**
+ * How a one-shot call's spend reaches the meter: the transport reports the
+ * stage, the tokens and the cost, and the PROVIDER is added here, by whoever
+ * chose it.
+ */
+function callObserver(
+  observe: RunUsageObserver | undefined,
+  provider: string,
+): TransportUsageObserver | undefined {
+  if (!observe) return undefined;
+  return (usage) =>
+    observe({
+      subjectKind: 'stage',
+      subject: usage.stage,
+      provider,
+      model: usage.model,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreateTokens: usage.cacheCreateTokens,
+      costUsd: usage.costUsd,
+    });
+}
+
+/**
  * The one entry every LLM step starts from: load the asking workspace's
  * provider and prove it answers. Throws {@link LlmNotConfiguredError} or
  * {@link LlmProbeFailedError}; the caller decides what that looks like on its
  * surface (a 409/502, or a failed run record).
+ *
+ * A job that must account for what it spends passes its METER, and both halves
+ * of the run it gets back report into it: the transport is built with the
+ * observer, and the driver is wrapped so every turn of every session is counted.
+ * The pre-flight probe itself is one tiny unmetered call — it runs before any
+ * of this exists, which is what makes it a probe.
  */
-export async function startWorkspaceLlm(orgId: string): Promise<WorkspaceLlm> {
+export async function startWorkspaceLlm(orgId: string, meter?: UsageMeter): Promise<WorkspaceLlm> {
+  const observe = meter?.observe;
   if (operatorClaudeCode()) {
     try {
       await backend.claudeCode.probe();
     } catch (err) {
       throw new LlmProbeFailedError(err);
     }
+    const onUsage = callObserver(observe, OPERATOR_PROVIDER.provider);
     return {
       mode: 'claude-code',
-      driver: () => backend.claudeCode.driver(),
-      transport: () => backend.claudeCode.transport(),
+      driver: () => metered(backend.claudeCode.driver(), observe),
+      transport: () => backend.claudeCode.transport(onUsage),
     };
   }
   const config = await workspaceLlmConfigStore().getConfig(orgId);
@@ -199,9 +238,15 @@ export async function startWorkspaceLlm(orgId: string): Promise<WorkspaceLlm> {
   } catch (err) {
     throw new LlmProbeFailedError(err);
   }
+  const onUsage = callObserver(observe, config.provider);
   return {
     mode: 'api',
-    driver: () => backend.driver(config),
-    transport: () => backend.transport(config),
+    driver: () => metered(backend.driver(config), observe),
+    transport: () => backend.transport(config, onUsage),
   };
+}
+
+/** The driver as it is, when nothing is accounting for this run. */
+function metered(driver: SessionDriver, observe: RunUsageObserver | undefined): SessionDriver {
+  return observe ? meterDriver(driver, observe) : driver;
 }

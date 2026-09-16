@@ -32,3 +32,4 @@ export {
 } from './jobs-store.js';
 
 export { PgSessionRunStore } from './session-run-store.js';
+export { PgUsageStore } from './usage-store.js';

@@ -1,7 +1,7 @@
 /**
  * Settings as a hub: the workspace's members, where its repositories are
- * connected from, the LLM provider, and whatever this edition registered
- * beside them. The sub-tab is in the URL, so a settings page is a place a link
+ * connected from, the LLM provider, what its runs spent on it, and whatever
+ * this edition registered beside them. The sub-tab is in the URL, so a settings page is a place a link
  * can point at.
  *
  * Everything here is the server's. There is no plan and no entitlement read yet,
@@ -30,6 +30,7 @@ import { fetchGithubStatus } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { MembersTab, type InviteKind } from '@/dashboard/pages/MembersTab';
+import { UsageTab } from '@/dashboard/pages/UsageTab';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { registeredSettingsTabs, type SettingsTab } from '@/dashboard/shell/registry';
 
@@ -443,7 +444,7 @@ function ModelsTab() {
 }
 
 /**
- * The sections of Settings: the three the product has, then whatever this
+ * The sections of Settings: the four the product has, then whatever this
  * edition registered. A bare `/settings` lands on the first.
  */
 function settingsTabs(
@@ -458,6 +459,7 @@ function settingsTabs(
     },
     { id: 'repositories', label: 'Repositories', render: () => <RepositoriesTab /> },
     { id: 'models', label: 'Models', render: () => <ModelsTab /> },
+    { id: 'usage', label: 'Usage', render: () => <UsageTab /> },
   ];
   return [...base, ...registeredSettingsTabs()];
 }

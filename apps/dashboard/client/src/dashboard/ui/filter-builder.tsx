@@ -5,7 +5,9 @@
  * value, in a DROPDOWN under the control (the list beneath never moves). Same
  * words and pills as {@link FilterBar}'s combobox; where that bar narrows one
  * dimension, this one narrows several without stacking a chip row per
- * dimension. Selected keys are `dimension:value`.
+ * dimension. Selected keys are `dimension:value`. A surface with a control of
+ * its own (a period picker) puts it in `lead`, at the head of the same row:
+ * one control row, whatever narrows the list.
  *
  * An applied pill carries the value's OWN size in the full set, the menu the
  * faceted count: a pill answers "how much does this filter keep", the menu
@@ -16,7 +18,7 @@
  * applies that reading; this control only edits the selection.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Plus, Search, X } from 'lucide-react';
 import type { FilterOption } from './filter-bar';
 
@@ -41,6 +43,12 @@ export interface FilterBuilderProps {
   /** The lead word: "Filter". */
   label: string;
   ariaLabel: string;
+  /**
+   * The surface's own controls at the head of the row — a period picker. One
+   * control row is the rule, so a surface that narrows along a dimension the
+   * builder does not own puts it here rather than on a second row.
+   */
+  lead?: ReactNode;
   dimensions: FilterDimension[];
   /** Selected keys, `dimension:value`; empty means everything shows. */
   selected: readonly string[];
@@ -65,7 +73,7 @@ const ROW = 'flex w-full items-center justify-between gap-2 px-3 py-1 text-left 
 /** Past this many values a dimension's list gets a type-to-narrow input. */
 const NARROW_FROM = 8;
 
-export function FilterBuilder({ label, ariaLabel, dimensions, selected, onChange }: FilterBuilderProps) {
+export function FilterBuilder({ label, ariaLabel, lead, dimensions, selected, onChange }: FilterBuilderProps) {
   const [open, setOpen] = useState(false);
   const [dimension, setDimension] = useState<FilterDimension | null>(null);
   const [query, setQuery] = useState('');
@@ -107,6 +115,7 @@ export function FilterBuilder({ label, ariaLabel, dimensions, selected, onChange
   return (
     <div ref={containerRef} role="group" aria-label={ariaLabel} className="shrink-0 border-b border-border">
       <div className="flex flex-wrap items-center gap-1 px-3 py-2">
+        {lead}
         <span className="mr-1 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
         {pills.map(({ key, dimension: dim, option }) => (
           <span key={key} className={PILL}>

@@ -39,6 +39,7 @@ import { buildOutputTail, runFailureMessage, type RunGuardResult } from '@trueco
 import type { GuardSummary } from '@truecourse/shared';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
+import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
 import { materializeStoredGuardState, persistGuardRun } from '../materialize-guard.js';
@@ -59,7 +60,7 @@ export interface GuardRunJobResult {
 
 /** The engines the body drives — production wires the real ones. */
 export interface RepoGuardRunTaskDeps {
-  startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
+  startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runGuard?: typeof guardRunInProcess;
 }
 
@@ -96,7 +97,16 @@ export function createRepoGuardRunTask(
       await ctx.notify({ level: 'started', title: 'Flow run started', data: { repoFullName } });
       // The judge is the run's only model call and it is parked by default, so
       // the workspace's provider is resolved only when it would actually be used.
-      const llm = guardVisualJudgeEnabled() ? await startLlm(ctx.payload.workspaceOrgId) : null;
+      // The meter exists either way and writes nothing when nothing spent.
+      const meter = createUsageMeter({
+        workspaceOrgId: ctx.payload.workspaceOrgId,
+        repoFullName,
+        jobType: REPO_GUARD_RUN_TASK,
+        jobId: ctx.jobId,
+      });
+      const llm = guardVisualJudgeEnabled()
+        ? await startLlm(ctx.payload.workspaceOrgId, meter)
+        : null;
 
       await ctx.phase('clone');
       const tree = await acquireWorkTree(repoFullName);
@@ -162,6 +172,8 @@ export function createRepoGuardRunTask(
         };
       } finally {
         tree.dispose();
+        // However the run ended, what the judge spent is written.
+        await meter.close();
       }
     },
 
