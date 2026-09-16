@@ -116,19 +116,7 @@ describe('once it is started', () => {
     expect(posthog.capture).toHaveBeenCalledWith('repo_connected', {
       repo: 'acme/orders',
       provider: 'github',
-    }, undefined);
-  });
-
-  it('sends an event the page is about to leave at once, over a beacon', async () => {
-    const mod = await load();
-    mod.initPostHog();
-    mod.trackEvent(mod.EVENTS.workspaceCreated, { workspaceName: 'Acme' }, { leaving: true });
-
-    expect(posthog.capture).toHaveBeenCalledWith(
-      'workspace_created',
-      { workspaceName: 'Acme' },
-      { send_instantly: true, transport: 'sendBeacon' },
-    );
+    });
   });
 
   it('sends a pageview as a full address', async () => {

@@ -118,6 +118,52 @@ describe('captureJobFinished — what leaves the process', () => {
   });
 });
 
+describe('captureWorkspaceCreated', () => {
+  it('is the person, under the id the browser identifies them by, with the workspace as the group', async () => {
+    const { captureWorkspaceCreated } = await load();
+    captureWorkspaceCreated({
+      userId: 'user_1',
+      email: 'dana@acme.dev',
+      name: 'Dana Rees',
+      workspaceId: 'org_new',
+      workspaceName: 'Acme Inc.',
+    });
+
+    expect(capturedEvent()).toEqual({
+      distinctId: 'user_1',
+      event: 'workspace_created',
+      properties: {
+        source: 'server',
+        workspaceId: 'org_new',
+        workspaceName: 'Acme Inc.',
+        $set: { email: 'dana@acme.dev', name: 'Dana Rees' },
+      },
+      groups: { workspace: 'org_new' },
+    });
+  });
+
+  it('sets no name on a person who has none', async () => {
+    const { captureWorkspaceCreated } = await load();
+    captureWorkspaceCreated({
+      userId: 'user_1',
+      email: 'dana@acme.dev',
+      workspaceId: 'org_new',
+      workspaceName: 'Acme Inc.',
+    });
+
+    expect((capturedEvent().properties as { $set: unknown }).$set).toEqual({ email: 'dana@acme.dev' });
+  });
+
+  it('sends nothing with the opt-out set', async () => {
+    vi.stubEnv('POSTHOG_DISABLED', '1');
+    const { captureWorkspaceCreated } = await load();
+    captureWorkspaceCreated({ userId: 'user_1', email: 'dana@acme.dev', workspaceId: 'org_new', workspaceName: 'Acme' });
+
+    expect(PostHog).not.toHaveBeenCalled();
+    expect(client.capture).not.toHaveBeenCalled();
+  });
+});
+
 describe('the deployment environment', () => {
   it('starts one client per process, on the shared project', async () => {
     const { captureJobFinished } = await load();

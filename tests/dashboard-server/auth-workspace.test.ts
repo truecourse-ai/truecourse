@@ -2,6 +2,13 @@ import express, { type Express } from 'express';
 import request from 'supertest';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createAuthRouter } from '../../apps/dashboard/server/src/auth/workos-auth';
+import { captureWorkspaceCreated } from '../../apps/dashboard/server/src/observability/posthog';
+
+// The signup event leaves through the analytics module; here it is a spy, so
+// the route's one call is asserted and nothing is sent.
+vi.mock('../../apps/dashboard/server/src/observability/posthog', () => ({
+  captureWorkspaceCreated: vi.fn(),
+}));
 
 /**
  * The public auth router (`/api/auth`): the self-serve workspace-creation
@@ -121,6 +128,7 @@ describe('POST /api/auth/workspace', () => {
   let app: Express;
 
   beforeEach(() => {
+    vi.mocked(captureWorkspaceCreated).mockClear();
     const m = makeWorkos();
     calls = m.calls;
     app = makeApp(m.workos);
@@ -142,6 +150,15 @@ describe('POST /api/auth/workspace', () => {
     expect(calls.getOrg).toEqual([]);
     // The re-minted session is written back as the session cookie.
     expect(res.headers['set-cookie']?.[0]).toContain('tc_session=sealed%3Aorg_new');
+    // The signup is reported once, as the person, for the workspace just named.
+    expect(captureWorkspaceCreated).toHaveBeenCalledTimes(1);
+    expect(captureWorkspaceCreated).toHaveBeenCalledWith({
+      userId: 'user_1',
+      email: 'u@acme.test',
+      name: undefined,
+      workspaceId: 'org_new',
+      workspaceName: 'Acme Inc.',
+    });
   });
 
   it('is idempotent: a user already in an org gets it back without creating a new one', async () => {
@@ -155,6 +172,7 @@ describe('POST /api/auth/workspace', () => {
     expect(m.calls.createOrg).toEqual([]); // no second org
     expect(m.calls.membership).toEqual([]);
     expect(res.body.user.organizationId).toBe('org_existing');
+    expect(captureWorkspaceCreated).not.toHaveBeenCalled();
   });
 
   it('moves a user who already has a membership into it instead of creating a second one', async () => {

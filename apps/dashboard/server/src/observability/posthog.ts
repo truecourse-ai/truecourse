@@ -15,6 +15,11 @@
  * the repository it was for. Never a payload, an error message, a key or a
  * token. `POSTHOG_DISABLED=1` and nothing is sent at all — no client is even
  * created.
+ *
+ * The one event here that IS a person's doing is `workspace_created`: it is
+ * sent from the route that creates the organization, because the browser
+ * reloads the moment the workspace exists and a capture sent from there races
+ * the unload — the same event delivered twice. The server has no such race.
  */
 
 import { PostHog } from 'posthog-node';
@@ -91,6 +96,37 @@ export function captureJobFinished(info: JobSettledInfo): void {
       $process_person_profile: false,
     },
     groups: { [GROUP]: info.org },
+  });
+}
+
+/** A new signup, as the server saw it: the person and the workspace they named. */
+export interface WorkspaceCreatedInfo {
+  userId: string;
+  email: string;
+  name?: string;
+  workspaceId: string;
+  workspaceName: string;
+}
+
+/**
+ * A self-serve signup named their workspace: the one moment a new customer
+ * appears. Sent as the person, under the same distinct id the client
+ * identifies them by, with the email and name set on the person so the
+ * destination reading it has them even before the browser's identify lands.
+ */
+export function captureWorkspaceCreated(info: WorkspaceCreatedInfo): void {
+  const posthog = analytics();
+  if (!posthog) return;
+  posthog.capture({
+    distinctId: info.userId,
+    event: 'workspace_created',
+    properties: {
+      source: SOURCE,
+      workspaceId: info.workspaceId,
+      workspaceName: info.workspaceName,
+      $set: { email: info.email, ...(info.name ? { name: info.name } : {}) },
+    },
+    groups: { [GROUP]: info.workspaceId },
   });
 }
 

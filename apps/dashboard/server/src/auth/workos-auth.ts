@@ -14,6 +14,7 @@ import type { AuthResult, AuthUser, AuthVerifier } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
 import type { WorkosConfig } from './config.js';
 import { parseCookies, serializeCookie } from './cookies.js';
+import { captureWorkspaceCreated } from '../observability/posthog.js';
 
 export const SESSION_COOKIE = 'tc_session';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -568,6 +569,13 @@ export function createAuthRouter(
       await workos.userManagement.createOrganizationMembership({
         organizationId: org.id,
         userId: authed.user.id,
+      });
+      captureWorkspaceCreated({
+        userId: authed.user.id,
+        email: authed.user.email,
+        name: [authed.user.firstName, authed.user.lastName].filter(Boolean).join(' ') || undefined,
+        workspaceId: org.id,
+        workspaceName: org.name,
       });
 
       // Re-mint the session INTO the new org so the next `/me` reflects it.

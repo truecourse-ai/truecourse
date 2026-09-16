@@ -21,7 +21,7 @@ import {
 import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@truecourse/shared';
 import { useServerMode } from '@/contexts/CapabilityContext';
-import { EVENTS, resetUser, trackEvent } from '@/lib/posthog';
+import { resetUser } from '@/lib/posthog';
 import { getServerUrl } from '@/lib/server-url';
 
 // The server's public auth router.
@@ -149,12 +149,6 @@ function CreateWorkspace() {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `Request failed (${res.status})`);
       }
-      const { user } = (await res.json()) as { user: AuthUser };
-      trackEvent(
-        EVENTS.workspaceCreated,
-        { workspaceId: user.organizationId, workspaceName: trimmed },
-        { leaving: true },
-      );
       // Session is now scoped to the new org → a reload IN PLACE re-probes
       // /me and drops the visitor on the page they were headed for.
       window.location.reload();
