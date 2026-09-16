@@ -220,6 +220,11 @@ export const FIXTURE_API_CRASH = fileURLToPath(
   new URL('../fixtures/guard-fixture-api/crash.mjs', import.meta.url),
 )
 
+/** Absolute path to the fixture server whose first boot loses its port to a squatter. */
+export const FIXTURE_API_LOSES_PORT = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/loses-port.mjs', import.meta.url),
+)
+
 /** Absolute path to the fixture seed command (`node seed.mjs`, env-driven manifest). */
 export const FIXTURE_API_SEED = fileURLToPath(
   new URL('../fixtures/guard-fixture-api/seed.mjs', import.meta.url),
