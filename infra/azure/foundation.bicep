@@ -1,10 +1,11 @@
 // Single-environment Azure foundation for TrueCourse hosting (resource-group
-// scoped). Creates everything EXCEPT the Container App: registry, Container Apps
-// environment, Key Vault, a user-assigned managed identity (ACR pull + KV read),
+// scoped): the managed services the VM host reuses — Log Analytics, container
+// registry, Key Vault, a user-assigned managed identity (ACR pull + KV read),
 // and a Postgres Flexible Server. Deploy ONCE PER ENVIRONMENT — each into its own
 // resource group (rg-truecourse-dev, rg-truecourse-prod) — so dev and prod never
 // share a database or secrets. Then set the Key Vault secrets
-// (infra/azure/set-secrets.sh) and deploy the Container App (containerapp.bicep).
+// (infra/azure/set-secrets.sh) and provision the VM host (vm.bicep, see
+// vm/DEPLOYMENT.md). Both environments are deployed; this file is the record.
 //
 //   az group create -n rg-truecourse-dev -l westus3
 //   az deployment group create -g rg-truecourse-dev -f infra/azure/foundation.bicep \
@@ -30,9 +31,6 @@ param postgresSku string = 'Standard_B1ms'
 
 param tags object = {}
 
-@description('Name for a new workload-profiles environment. Do not target an existing legacy environment.')
-param environmentName string = '${namePrefix}-cae'
-
 var acrName = toLower('${namePrefix}acr${uniqueString(resourceGroup().id)}')
 var kvName = take(toLower('${namePrefix}kv${uniqueString(resourceGroup().id)}'), 24)
 var pgName = toLower('${namePrefix}-pg-${uniqueString(resourceGroup().id)}')
@@ -44,16 +42,6 @@ resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   properties: {
     sku: { name: 'PerGB2018' }
     retentionInDays: 30
-  }
-}
-
-module env './environment.bicep' = {
-  name: 'container-apps-environment'
-  params: {
-    name: environmentName
-    location: location
-    tags: tags
-    logAnalyticsWorkspaceName: law.name
   }
 }
 
@@ -109,12 +97,8 @@ resource pgDb 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-06-01-pr
   properties: { charset: 'UTF8', collation: 'en_US.utf8' }
 }
 
-// Lets Container Apps reach the DB. Lock this to a VNet for production.
-resource pgFirewallAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-06-01-preview' = {
-  parent: pg
-  name: 'AllowAzureServices'
-  properties: { startIpAddress: '0.0.0.0', endIpAddress: '0.0.0.0' }
-}
+// No firewall rule here: vm.bicep adds the VM's own egress address, and any
+// operator address is added by hand. The server is otherwise closed.
 
 // Built-in role IDs.
 var acrPullRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
@@ -142,7 +126,6 @@ resource kvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 
 output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
-output environmentId string = env.outputs.environmentId
 output identityId string = identity.id
 output identityClientId string = identity.properties.clientId
 output keyVaultName string = kv.name

@@ -1,6 +1,6 @@
 # Deploying TrueCourse
 
-The release flow is the same shape as the Container App one it replaces:
+Each environment is one Ubuntu VM running the app under systemd behind Caddy. The release flow:
 
 | Action | Result |
 |---|---|
@@ -27,7 +27,7 @@ After a successful release the action applies [`../vm-monitoring.bicep`](../vm-m
 
 ## One-time manual setup
 
-Dev is provisioned at `https://truecourse-dev.westus3.cloudapp.azure.com`. Production has not been deployed. The deployment outputs are the record of each environment's address and SSH command.
+Both environments are provisioned: dev at `https://truecourse-dev.westus3.cloudapp.azure.com`, production at `https://app.truecourse.dev`. The deployment outputs are the record of each environment's address and SSH command. The steps below are what it took, kept for a rebuild.
 
 1. Review [`../vm.bicep`](../vm.bicep). It holds both environments' resource names and settings. Dev is `dev`, VM `truecourse-dev`, Azure hostname `truecourse-dev.westus3.cloudapp.azure.com`. Production is `prod`, VM `truecourse-production`, hostname `app.truecourse.dev`. Both use 4 vCPU / 16 GiB and 256 GiB Standard SSD in westus3.
 2. In Azure Monitor, create the environment's action group in its existing resource group: `truecourse-dev-operators` in `rg-truecourse-dev`, or `truecourse-production-operators` in `rg-truecourse-prod`. Configure and test email recipients in Azure only. The templates reference the group without reading, outputting or changing its recipients.
@@ -53,7 +53,7 @@ Dev is provisioned at `https://truecourse-dev.westus3.cloudapp.azure.com`. Produ
    Keep the deployment name shown here; GitHub reads its outputs. The template creates its monitoring resources through [`../vm-monitoring.bicep`](../vm-monitoring.bicep), with alerts disabled until the first successful release. SSH is restricted to the supplied IP as a /32. Provisioning installs Docker and Caddy; the application starts with the first release.
 4. Wait for cloud-init to finish: `sudo cloud-init status --wait` and `/var/lib/truecourse/deployment/bootstrap-complete`. Dev's Azure DNS record is created automatically. For production, use the static public IP printed by the deployment to create `app.truecourse.dev`'s A record. Caddy obtains and renews HTTPS certificates automatically; ports 80 and 443 must remain reachable. Until the first release Caddy answers 502.
 5. Update the corresponding WorkOS allowed callback to `https://<hostname>/api/auth/callback`, plus application/logout origins. Update that environment's GitHub App URLs, including `/api/github/setup` and `/api/github/webhook`.
-6. Stop the old Container App (`truecourse-dev` or `truecourse-prod`) before the first release. **The old and new workers must never run against the same database at the same time.** After the VM is verified, delete the old Container App compute if desired; keep the database, vault, registry, identity and logging workspace.
+6. **Only one worker may run against a database.** If a previous host of the same environment is still up, stop it before the first release; startup fails the jobs it left queued or running.
 7. Reuse the existing GitHub `dev` and `prod` environments and the OIDC variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`. Set `AZURE_VM_DEPLOYMENT_ENABLED=true` in the environment whose VM is ready; the action refuses to run without it.
 8. Release with the normal flow above. Check HTTPS health, sign-in, repository access and a real Guard run with Docker dependencies, then the alert emails.
 
