@@ -549,18 +549,75 @@ describe('health-path ranking', () => {
 // ---------------------------------------------------------------------------
 
 describe('compose services', () => {
-  it('proposes up/down when the root compose file declares a datastore', () => {
+  /** The namespace the proposal must run the repo's compose file under. */
+  const project = (repo: string) => `truecourse-${path.basename(repo).toLowerCase()}`
+
+  it('namespaces every command with -p and names the compose file it parsed', () => {
     const repo = repoOf({
       'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
       'server.js': '',
-      'docker-compose.yml': 'services:\n  db:\n    image: postgres:16\n  api:\n    build: .\n',
+      'compose.yaml': 'services:\n  db:\n    image: postgres:16\n  cache:\n    image: redis:7\n',
     })
 
+    // Un-namespaced, the commands attach to the developer's own stack — which is
+    // the static rule that used to refuse this proposal every time.
     expect(proposal(repo).recipe.api?.services).toEqual({
-      up: 'docker compose up -d --wait',
-      down: 'docker compose down',
-      reset: 'docker compose down -v',
+      up: `docker compose -p ${project(repo)} -f compose.yaml up -d --wait`,
+      down: `docker compose -p ${project(repo)} -f compose.yaml down`,
+      reset: `docker compose -p ${project(repo)} -f compose.yaml down -v`,
     })
+  })
+
+  it('brings up the datastores and their dependencies, never the app container', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      'docker-compose.yml': [
+        'services:',
+        '  api:',
+        '    build: .',
+        '    depends_on:',
+        '      - db',
+        '  db:',
+        '    image: postgres:16',
+        '    depends_on:',
+        '      - vault',
+        '  vault:',
+        '    build: ./vault',
+        '',
+      ].join('\n'),
+    })
+
+    // `api` would be a SECOND copy of the app, on the port `serve` is about to
+    // claim; `vault` rides along because the datastore cannot come up without it.
+    expect(proposal(repo).recipe.api?.services?.up).toBe(
+      `docker compose -p ${project(repo)} -f docker-compose.yml up -d --wait db vault`,
+    )
+  })
+
+  it('reports an env_file the repository does not ship, and invents nothing', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      'docker-compose.yml': 'services:\n  db:\n    image: postgres:16\n    env_file: .env\n',
+    })
+    const out = proposal(repo)
+
+    expect(out.todos).toHaveLength(1)
+    expect(out.todos[0]).toContain('create .env')
+    expect(out.todos[0]).toContain('"db"')
+    expect(json(out.recipe)).not.toContain('.env')
+  })
+
+  it('stays quiet about an env_file the repository does ship', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      '.env': 'POSTGRES_PASSWORD=local\n',
+      'docker-compose.yml': 'services:\n  db:\n    image: postgres:16\n    env_file:\n      - .env\n',
+    })
+
+    expect(proposal(repo).todos).toEqual([])
   })
 
   it('proposes nothing for a compose file with no datastore image', () => {
@@ -571,6 +628,77 @@ describe('compose services', () => {
     })
 
     expect(proposal(repo).recipe.api?.services).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The web surface
+// ---------------------------------------------------------------------------
+
+// The web block was the one recipe piece setup never authored deterministically,
+// and the static browser-app rule refuses a proposal without one — so a repo that
+// ships a Next/Remix app paid for a repair session that only restated the api
+// block. It is derived here now: the same served process, aimed at a page an
+// anonymous visitor can actually render.
+describe('proposeRecipe — web surface', () => {
+  const nextApp = (dir: string, routes: string[], pkg: string) => ({
+    dir,
+    pkg,
+    framework: 'next' as const,
+    routes,
+    prefixes: [],
+    opaque: false,
+    pathsShifted: false,
+  })
+
+  /** A pnpm monorepo whose only routed member is a Next app, plus whatever pages it ships. */
+  const nextWorkspace = (pages: Record<string, string>) =>
+    repoOf({
+      'package.json': json({ name: 'mono', workspaces: ['apps/*'] }),
+      'pnpm-lock.yaml': '',
+      'apps/web/package.json': json({ name: '@mono/web', scripts: { start: 'node server.js' } }),
+      ...pages,
+    })
+
+  const webOf = (repo: string) => {
+    const out = proposeRecipe(repo, { manifestApps: [nextApp('apps/web', ['/login', '/api/me'], '@mono/web')] })
+    if (!out.ok) throw new Error(`expected a proposal, got a bail: ${out.reason}`)
+    return out.recipe
+  }
+
+  it('serves the same process as the api block, aimed at the login page the app ships', () => {
+    const recipe = webOf(nextWorkspace({ 'apps/web/pages/login.tsx': 'export default function Login() {}' }))
+
+    expect(recipe.web).toEqual({
+      serve: ['pnpm', '--filter', '@mono/web', 'run', 'start'],
+      app: 'apps/web',
+      cwd: 'repo',
+      healthPath: '/login',
+    })
+    // One server, one argv — a fullstack app's web surface IS its api process.
+    expect(recipe.web?.serve).toEqual(recipe.api?.serve)
+  })
+
+  it('finds a sign-in page behind an app-router route group', () => {
+    const recipe = webOf(nextWorkspace({ 'apps/web/src/app/(auth)/sign-in/page.tsx': 'export default function In() {}' }))
+
+    // `(auth)` is addressless: the page serves `/sign-in`.
+    expect(recipe.web?.healthPath).toBe('/sign-in')
+  })
+
+  it('falls back to / when the app ships no anonymous sign-in page', () => {
+    const recipe = webOf(nextWorkspace({ 'apps/web/pages/dashboard.tsx': 'export default function Home() {}' }))
+
+    expect(recipe.web?.healthPath).toBe('/')
+  })
+
+  it('derives no web block for a repo with no browser evidence', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', dependencies: { express: '^4' }, scripts: { start: 'node server.js' } }),
+      'server.js': '',
+    })
+
+    expect(proposal(repo).recipe.web).toBeUndefined()
   })
 })
 

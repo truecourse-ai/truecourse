@@ -248,11 +248,13 @@ describe('proposeRecipe — when a datastore is generated', () => {
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.compose).toBeUndefined()
-    // The repo's own file, run the repo's own way — no `-f` override.
+    // The repo's OWN file — never the generated one — run under guard's own
+    // project so the commands cannot reach the developer's stack.
+    const namespaced = `docker compose -p truecourse-${path.basename(root).toLowerCase()} -f docker-compose.yml`
     expect(out.recipe.api?.services).toEqual({
-      up: 'docker compose up -d --wait',
-      down: 'docker compose down',
-      reset: 'docker compose down -v',
+      up: `${namespaced} up -d --wait`,
+      down: `${namespaced} down`,
+      reset: `${namespaced} down -v`,
     })
     expect(out.recipe.api?.env).toBeUndefined()
   })

@@ -45,6 +45,7 @@ import {
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
 import type { DatastoreUrlRef, Interface } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
+import { browserAppEvidence } from './recipe-discovery.js'
 import { WORK_TREE_DIR, corpusFilePath } from '@truecourse/shared/work-tree'
 
 /** One operation of the derived api surface — all the health ranking needs. */
@@ -725,7 +726,9 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
     const schemes = inputs.securitySchemes ?? readCorpusSecuritySchemes(repoRoot)
     const { credentials, notes } = credentialStubs(schemes)
     todos.push(...notes)
-    let services = detectComposeServices(repoRoot)
+    const detected = detectComposeServices(repoRoot)
+    let services: { up: string; down: string; reset?: string } | undefined = detected?.services
+    if (detected) todos.push(...detected.notes)
     let apiEnv: Record<string, string> = { ...(signals.serveEnv ?? {}) }
     // The repo declares a datastore in its source but ships no compose file to run
     // it: derive one. The compose file is not written here — this module
@@ -750,6 +753,8 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
       ...(services ? { services } : {}),
       ...(credentials ? { credentials } : {}),
     }
+    const web = deriveWeb(repoRoot, signals, apiEnv, inputs)
+    if (web) recipe.web = web
   }
 
   const parsed = RecipeSchema.safeParse(recipe)
@@ -807,10 +812,40 @@ function normalizeRoutePath(routePath: string): string {
   return withSlash.length > 1 ? withSlash.replace(/\/+$/, '') : withSlash
 }
 
+/** What {@link detectComposeServices} decides: the recipe's `api.services` block
+ *  and any human fill-in the compose file implies. */
+export interface DetectedComposeServices {
+  services: { up: string; down: string; reset: string }
+  notes: string[]
+}
+
 /**
- * `docker compose up -d --wait` / `down` when the root compose file declares a
- * datastore image. The repo's own commands — the runner orchestrates nothing
- * itself, it just runs what the recipe names.
+ * The compose PROJECT a recipe's services run under, derived from the repo dir.
+ * Never the default project (the directory's own name): compose "resolves" a port
+ * or config change by RECREATING the running container, so an un-namespaced
+ * invocation reaches into the developer's live stack. The static compose rule in
+ * `recipe-discovery.ts` refuses any proposal without this.
+ */
+export function composeProjectName(repoRoot: string): string {
+  const squeezed = path
+    .basename(path.resolve(repoRoot))
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `truecourse-${squeezed || 'repo'}`
+}
+
+/**
+ * `docker compose up -d --wait` / `down` / `down -v` when the root compose file
+ * declares a datastore image. The repo's own file — the runner orchestrates
+ * nothing itself, it just runs what the recipe names — but namespaced (`-p`) and
+ * with the parsed file named explicitly (`-f`), so the command addresses exactly
+ * the stack this derivation read and nothing the developer is running.
+ *
+ * `up` brings up the DATASTORES and whatever they depend on, never the app's own
+ * container: a compose file that also declares the app would otherwise boot a
+ * second copy of it on the port the recipe's `serve` is about to claim. A file
+ * whose services are all datastores needs no service list at all.
  *
  * `--wait` is not decoration: plain `up -d` returns as soon as the containers are
  * CREATED, and the server boots microseconds later against a Postgres that is not
@@ -819,29 +854,176 @@ function normalizeRoutePath(routePath: string): string {
  * file `--wait` blocks until the datastore is healthy; without one it costs nothing
  * (it waits for `running`, which `up -d` already reached).
  */
-export function detectComposeServices(
-  repoRoot: string,
-): { up: string; down: string; reset?: string } | undefined {
-  const file = COMPOSE_FILES.map((f) => path.join(repoRoot, f)).find((f) => fs.existsSync(f))
+export function detectComposeServices(repoRoot: string): DetectedComposeServices | undefined {
+  const file = COMPOSE_FILES.find((f) => fs.existsSync(path.join(repoRoot, f)))
   if (!file) return undefined
   let doc: unknown
   try {
-    doc = yaml.load(fs.readFileSync(file, 'utf-8'))
+    doc = yaml.load(fs.readFileSync(path.join(repoRoot, file), 'utf-8'))
   } catch {
     return undefined
   }
   const services = asRecord((doc as Record<string, unknown> | null)?.services)
-  const hasDatabase = Object.values(services).some((service) => {
-    const image = asRecord(service).image
-    if (typeof image !== 'string') return false
-    const base = image.split('@')[0].split(':')[0].split('/').pop() ?? ''
-    return DATABASE_IMAGES.has(base.toLowerCase())
+  const names = Object.keys(services)
+  const datastores = names.filter((name) => isDatabaseImage(asRecord(services[name]).image))
+  if (datastores.length === 0) return undefined
+
+  const wanted = withComposeDependencies(services, datastores)
+  const only = wanted.size === names.length ? [] : names.filter((name) => wanted.has(name))
+  const base = `docker compose -p ${composeProjectName(repoRoot)} -f ${file}`
+  return {
+    // `reset` wipes the volumes so a `world: mutates` tail cannot leak damage into
+    // the next run; `down` deliberately preserves them (stopping is not forgetting).
+    services: {
+      up: `${base} up -d --wait${only.length > 0 ? ` ${only.join(' ')}` : ''}`,
+      down: `${base} down`,
+      reset: `${base} down -v`,
+    },
+    notes: composeEnvFileNotes(repoRoot, services, wanted),
+  }
+}
+
+/** Is this compose service's `image` one of the datastore images? */
+function isDatabaseImage(image: unknown): boolean {
+  if (typeof image !== 'string') return false
+  const base = image.split('@')[0].split(':')[0].split('/').pop() ?? ''
+  return DATABASE_IMAGES.has(base.toLowerCase())
+}
+
+/** The named services plus everything they `depends_on`, transitively — bringing a
+ *  datastore up without its own sidecar (an init container, a proxy) starts a stack
+ *  that cannot become healthy. */
+function withComposeDependencies(services: Record<string, unknown>, roots: readonly string[]): Set<string> {
+  const wanted = new Set<string>()
+  const visit = (name: string) => {
+    if (wanted.has(name) || !(name in services)) return
+    wanted.add(name)
+    const dependsOn = asRecord(services[name]).depends_on
+    const deps = Array.isArray(dependsOn)
+      ? dependsOn.filter((d): d is string => typeof d === 'string')
+      : Object.keys(asRecord(dependsOn))
+    for (const dep of deps) visit(dep)
+  }
+  for (const root of roots) visit(root)
+  return wanted
+}
+
+/** A brought-up service reading an `env_file` the repository does not ship is a
+ *  boot that dies on a missing variable. Reported as a fill-in; the file's contents
+ *  are the user's to write, since guard never fabricates a secret. */
+function composeEnvFileNotes(
+  repoRoot: string,
+  services: Record<string, unknown>,
+  wanted: ReadonlySet<string>,
+): string[] {
+  const missing = new Map<string, string>()
+  for (const name of wanted) {
+    const declared = asRecord(services[name]).env_file
+    const entries = Array.isArray(declared) ? declared : [declared]
+    for (const entry of entries) {
+      // Compose takes a bare string or `{ path, required }`; both name one file.
+      const file = typeof entry === 'string' ? entry : typeof asRecord(entry).path === 'string' ? (asRecord(entry).path as string) : null
+      if (!file || existsFile(repoRoot, file)) continue
+      if (!missing.has(file)) missing.set(file, name)
+    }
+  }
+  return [...missing].map(
+    ([file, name]) =>
+      `create ${file} — the compose service "${name}" reads it as an \`env_file\` and this repository does not ship one; the datastore will not come up until the variables it names are set`,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// The web surface
+// ---------------------------------------------------------------------------
+
+/** Pages a browser app renders for an ANONYMOUS visitor, best first. `/` is the
+ *  fallback and routinely redirects (or renders a shell that never settles), so a
+ *  sign-in page the app actually ships outranks it. */
+const WEB_HEALTH_PAGE_RANKING = ['/login', '/signin', '/sign-in', '/auth/login', '/auth/signin']
+
+/** File extensions a Next/Remix route module is written in. */
+const PAGE_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js', '.mjs']
+
+/**
+ * The `web` block for a repo that serves a BROWSER app: the same process the api
+ * block boots (a fullstack Next/Remix server is one server), addressed at a page
+ * that renders without a session. Derived only when there IS a served process and
+ * the repo shows browser evidence — the same evidence the static rule refuses the
+ * absent `web` block on, so this path stops paying for a repair session that only
+ * ever restated the api block.
+ *
+ * No env is invented here. A surface that needs a variable to boot fails
+ * verification and the session adds it with the failure in front of it.
+ */
+function deriveWeb(
+  repoRoot: string,
+  signals: RecipeSignals,
+  env: Record<string, string>,
+  inputs: ProposeRecipeInputs,
+): Record<string, unknown> | undefined {
+  if (!signals.serve) return undefined
+  const apps = (inputs.manifestApps ?? []).map((app) => ({
+    dir: app.dir,
+    ...(app.pkg ? { pkg: app.pkg } : {}),
+    framework: app.framework,
+    prefixes: app.prefixes,
+  }))
+  if (browserAppEvidence(apps, repoRoot).length === 0) return undefined
+  return {
+    serve: signals.serve,
+    ...(signals.serveApp ? { app: signals.serveApp, cwd: 'repo' } : {}),
+    healthPath: anonymousPageHealthPath(repoRoot, signals.serveApp),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
+  }
+}
+
+/** The best-ranked anonymous page the SERVED app actually ships, else `/`. */
+function anonymousPageHealthPath(repoRoot: string, appDir?: string): string {
+  const base = appDir ? path.join(repoRoot, appDir) : repoRoot
+  const found = WEB_HEALTH_PAGE_RANKING.find((candidate) => pageExists(base, candidate.slice(1).split('/')))
+  return found ?? '/'
+}
+
+/** Does the app under `base` declare a page at these path segments — in a Next
+ *  pages router, a Next app router (route groups included) or Remix's flat routes?
+ *  `src/` is checked alongside the app root, which is where both put them. */
+function pageExists(base: string, segments: readonly string[]): boolean {
+  for (const root of [base, path.join(base, 'src')]) {
+    const pagesFile = path.join(root, 'pages', ...segments)
+    if (withExtension(pagesFile) || withExtension(path.join(pagesFile, 'index'))) return true
+    if (appRouterPageExists(path.join(root, 'app'), segments)) return true
+    // Remix flattens nesting onto dots: `/auth/login` is `app/routes/auth.login`.
+    const remixFile = path.join(root, 'app', 'routes', segments.join('.'))
+    if (withExtension(remixFile) || withExtension(path.join(remixFile, 'route'))) return true
+  }
+  return false
+}
+
+/** `<dir>/<segments…>/page.<ext>`, stepping THROUGH Next's addressless dirs —
+ *  route groups `(auth)` and parallel slots `@modal` are not part of the URL, so
+ *  `app/(auth)/login/page.tsx` serves `/login`. */
+function appRouterPageExists(dir: string, segments: readonly string[]): boolean {
+  if (segments.length === 0) return withExtension(path.join(dir, 'page'))
+  const [head, ...rest] = segments
+  if (appRouterPageExists(path.join(dir, head), rest)) return true
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return false
+  }
+  return entries.some(
+    (entry) => entry.isDirectory() && /^[(@]/.test(entry.name) && appRouterPageExists(path.join(dir, entry.name), segments),
+  )
+}
+
+/** The path with any route-module extension, when one of them is a file. */
+function withExtension(pathWithoutExtension: string): boolean {
+  return PAGE_EXTENSIONS.some((ext) => {
+    const abs = `${pathWithoutExtension}${ext}`
+    return fs.existsSync(abs) && fs.statSync(abs).isFile()
   })
-  // `reset` wipes the volumes so a `world: mutates` tail cannot leak damage into
-  // the next run; `down` deliberately preserves them (stopping is not forgetting).
-  return hasDatabase
-    ? { up: 'docker compose up -d --wait', down: 'docker compose down', reset: 'docker compose down -v' }
-    : undefined
 }
 
 /**
