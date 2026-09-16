@@ -60,9 +60,13 @@ local mode. GitLab and Azure DevOps are listed as coming soon.
 and nothing in the Dockerfile or a release script picks one; which edition a
 process is comes from whether `ee/` sits beside the open tree.
 
-The dependency runs ONE WAY, from `ee/` inward, so no open file names an `ee/`
-path except the one seam on each side (`tests/architecture/ee-import-boundary.test.ts`
-pins both):
+The dependency runs ONE WAY, from `ee/` inward: no open source file reaches
+into `ee/`, and the one seam on each side is pinned by
+`tests/architecture/ee-import-boundary.test.ts` — `main.tsx`'s `@edition`
+import on the client, `edition-loader.ts` on the server. The client's build
+config and stylesheet (`vite.config.ts`, `globals.css`) point the alias and
+Tailwind's source scan at the bundle by path; they sit outside the scanned
+source roots, so moving the bundle means moving those two lines by hand.
 
 - **Client** — `apps/dashboard/client/src/dashboard/shell/registry.ts` holds the
   three seams (a settings tab, a repository provider, the workspace switcher).
@@ -72,11 +76,14 @@ pins both):
   choice is made when the bundle is built.
 - **Server** — `apps/dashboard/server/src/features.ts` is the registry, and
   `apps/dashboard/server/src/index.ts` is the ONE process entry, for every
-  edition. Before booting it runs `edition-loader.ts`, which looks for
-  `ee/packages/server` beside its own tree (`dist/` built, `src/` under tsx and
-  the tests), registers the bundle's exported `eeServerFeatures` when it is
-  there, and registers nothing when it is not. A bundle that is present but
-  exports no feature list stops the boot.
+  edition. Boot's first step after the log is `edition-loader.ts`, which looks
+  for `ee/packages/server` beside its own tree (`dist/` built, `src/` under tsx
+  and the tests), registers the bundle's exported `eeServerFeatures` when it is
+  there, registers nothing when it is not, and logs which edition it found and
+  the path it probed either way. A bundle that is present but cannot load or
+  exports no feature list stops the boot, naming it. `GET /api/capabilities`
+  reports the result as `edition`, and the client's workspace switcher draws
+  only when the server says `enterprise`.
 
 ## Modes
 

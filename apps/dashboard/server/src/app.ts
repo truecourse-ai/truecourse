@@ -33,6 +33,9 @@ const GITHUB_NOT_CONFIGURED =
   'GitHub is not configured on this server. Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, ' +
   'GITHUB_APP_WEBHOOK_SECRET and GITHUB_APP_SLUG, then restart it.';
 
+/** What a request under /api that no router answered is told. */
+const API_ROUTE_NOT_FOUND = 'The server has no such route.';
+
 export interface CreateAppOptions {
   serveStatic?: boolean;
   /**
@@ -76,7 +79,8 @@ export interface CreateAppOptions {
   jobs: JobsMount | null;
   /**
    * Routers this edition adds, already built (see `features.ts`). The open
-   * edition has none; the enterprise bundle registers its own before boot.
+   * edition has none; boot builds the enterprise bundle's when the loader
+   * registered it.
    */
   featureRouters?: ServerRouterMount[];
 }
@@ -226,6 +230,13 @@ export function createApp(opts: CreateAppOptions): express.Express {
   app.use('/api/repos', projectResolver, guardRouter);
   app.use('/api/repos', projectResolver, guardActionsRouter);
   app.use('/api/repos', projectResolver, sessionsRouter);
+
+  // Nothing under /api answered: say so as JSON. Without this a GET here falls
+  // through to the SPA's index.html with a 200 and a POST to Express's HTML
+  // page, and the client shows a parse error instead of the refusal.
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: API_ROUTE_NOT_FOUND });
+  });
 
   app.use(errorHandler);
 

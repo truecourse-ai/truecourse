@@ -112,6 +112,29 @@ function specifiersOf(file: string, src: string): string[] {
   return found;
 }
 
+/** Every string literal in a file, in source order. Comments never count. */
+function stringLiteralsOf(file: string, src: string): string[] {
+  const source = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isStringLiteral(node) || ts.isTemplateLiteralToken(node)) found.push(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+/**
+ * Does this file's code spell the enterprise server package — as one path, or
+ * as the segments a `path.join` takes, which is how the loader reaches it?
+ */
+function namesEeServer(literals: string[]): boolean {
+  if (literals.some((text) => text.includes('ee/packages/server'))) return true;
+  return literals.some(
+    (text, i) => text === 'ee' && literals[i + 1] === 'packages' && literals[i + 2] === 'server',
+  );
+}
+
 /** Does this specifier name enterprise code? */
 function reachesEe(specifier: string): boolean {
   return (
@@ -217,7 +240,7 @@ describe('the open/enterprise line', () => {
     const namers: string[] = [];
     for (const file of ossFiles()) {
       const rel = path.relative(repoRoot, file).split(path.sep).join('/');
-      if (/ee\/packages\/server/.test(fs.readFileSync(file, 'utf8'))) namers.push(rel);
+      if (namesEeServer(stringLiteralsOf(rel, fs.readFileSync(file, 'utf8')))) namers.push(rel);
     }
     expect(namers).toEqual([SERVER_EDITION_LOADER]);
   });

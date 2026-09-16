@@ -60,6 +60,27 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The error a refused response becomes. Read once: the body is a stream, and a
+ * second read after a failed JSON parse throws. A route's own refusal is JSON
+ * with an `error` and is shown as written; anything else (a proxy's HTML page,
+ * a bare 404) is not for the user's eyes, so they see the status and the body
+ * rides on the error. The URL stays out of the message: an invite link's token
+ * is part of one.
+ */
+async function apiRefusal(res: Response): Promise<ApiError> {
+  const text = await res.text().catch(() => '');
+  let body: unknown = null;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = text || null;
+  }
+  const error = (body as { error?: unknown } | null)?.error;
+  const message = typeof error === 'string' && error ? error : `The server answered ${res.status}.`;
+  return new ApiError(res.status, message, body);
+}
+
 /** The client's one transport: JSON in, JSON out, `ApiError` on any non-2xx. */
 export async function fetchApi<T>(
   endpoint: string,
@@ -77,24 +98,7 @@ export async function fetchApi<T>(
     },
   });
 
-  if (!res.ok) {
-    // Read once: the body is a stream, and a second read after a failed JSON
-    // parse throws. A route's own refusal is JSON with an `error` and is shown
-    // as written; anything else (a proxy's HTML page, a bare 404) is not for
-    // the user's eyes, so they see the status and the body rides on the error.
-    const text = await res.text().catch(() => '');
-    let body: unknown = null;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = text || null;
-    }
-    const error = (body as { error?: unknown } | null)?.error;
-    const message = typeof error === 'string' && error
-      ? error
-      : `The server answered ${res.status} for ${options?.method ?? 'GET'} ${endpoint}`;
-    throw new ApiError(res.status, message, body);
-  }
+  if (!res.ok) throw await apiRefusal(res);
 
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -581,7 +585,7 @@ export async function getGuardEvidence(
   const res = await fetch(`${BASE_URL}/api/repos/${repoId}/guard/evidence?${params.toString()}`, {
     credentials: 'include',
   });
-  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
+  if (!res.ok) throw await apiRefusal(res);
   return res.text();
 }
 
@@ -643,7 +647,7 @@ export async function getGuardFindingEvidence(
   const res = await fetch(`${BASE_URL}/api/repos/${repoId}/guard/finding-evidence?${params.toString()}`, {
     credentials: 'include',
   });
-  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
+  if (!res.ok) throw await apiRefusal(res);
   return res.text();
 }
 

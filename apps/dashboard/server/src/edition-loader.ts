@@ -11,13 +11,15 @@
  * The bundle is found relative to THIS file, in the same tree it runs from:
  * `dist/` when built, `src/` under `tsx` and the test runner. That keeps the
  * dependency one-way — the open server declares no dependency on the bundle,
- * which depends on it — and is the only open file allowed to name an `ee/`
- * path (`tests/architecture/ee-import-boundary.test.ts` pins that).
+ * which depends on it — and is the only open source file that names the
+ * enterprise server package (`tests/architecture/ee-import-boundary.test.ts`
+ * pins that).
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { log } from '@truecourse/core/lib/logger';
 import { registerServerFeature, type ServerFeature } from './features.js';
 
 const here = fileURLToPath(import.meta.url);
@@ -41,20 +43,34 @@ function isServerFeature(value: unknown): value is ServerFeature {
 
 /**
  * Register the enterprise bundle's server features when the checkout has one.
- * Resolves to the features registered: empty for the open edition. A bundle
- * that is present but does not export `eeServerFeatures` throws — a broken
- * bundle must stop the boot, not silently produce the open edition.
+ * Resolves to the features registered: empty for the open edition. Which
+ * edition booted, and the path probed, go to the log either way, so a boot
+ * that looked in the wrong place is not mistaken for an open-edition boot. A
+ * bundle that is present but cannot load or does not export `eeServerFeatures`
+ * throws, naming the entry — a broken bundle must stop the boot, not silently
+ * produce the open edition.
  */
 export async function registerEditionFeatures(
   repoRoot: string = path.resolve(path.dirname(here), '..', '..', '..', '..'),
 ): Promise<readonly ServerFeature[]> {
   const entry = editionEntry(repoRoot);
-  if (!fs.existsSync(entry)) return [];
-  const bundle: unknown = await import(pathToFileURL(entry).href);
+  if (!fs.existsSync(entry)) {
+    log.info(`[Server] open edition: no enterprise bundle at ${entry}`);
+    return [];
+  }
+  let bundle: unknown;
+  try {
+    bundle = await import(pathToFileURL(entry).href);
+  } catch (err) {
+    throw new Error(`could not load the enterprise bundle at ${entry}: ${(err as Error).message}`, {
+      cause: err,
+    });
+  }
   const features = (bundle as { eeServerFeatures?: unknown }).eeServerFeatures;
   if (!Array.isArray(features) || !features.every(isServerFeature)) {
     throw new Error(`${entry} is not an edition bundle: it must export eeServerFeatures`);
   }
   for (const feature of features) registerServerFeature(feature);
+  log.info(`[Server] enterprise edition: ${features.map((f) => f.name).join(', ')} (${entry})`);
   return features;
 }

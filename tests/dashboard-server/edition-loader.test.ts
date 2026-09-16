@@ -43,6 +43,14 @@ describe('the edition loader', () => {
     expect(registeredServerFeatures()).toEqual([]);
   });
 
+  it('names the bundle it could not load', async () => {
+    const root = repoRootWith("import './missing.js';\nexport const eeServerFeatures = [];\n");
+    await expect(registerEditionFeatures(root)).rejects.toThrow(
+      /could not load the enterprise bundle at .*ee\/packages\/server\/src\/index\.ts/,
+    );
+    expect(registeredServerFeatures()).toEqual([]);
+  });
+
   it('refuses a bundle that is present but exports no feature list', async () => {
     const root = repoRootWith('export const somethingElse = 1;\n');
     await expect(registerEditionFeatures(root)).rejects.toThrow(/must export eeServerFeatures/);

@@ -24,9 +24,13 @@ local mode. GitLab and Azure DevOps are listed as coming soon.
 ## Boundary rule
 
 The dependency runs **one way, from `ee/` inward**. `ee/` may import open
-packages; no open file names an `ee/` path except the one seam on each side.
-Enterprise features REGISTER into seams the open shell owns rather than being
-imported by it, and `tests/architecture/ee-import-boundary.test.ts` pins that.
+packages; no open source file reaches into `ee/` except the one seam on each
+side. Enterprise features REGISTER into seams the open shell owns rather than
+being imported by it, and `tests/architecture/ee-import-boundary.test.ts` pins
+that. The client's build config and stylesheet (`vite.config.ts`,
+`globals.css`) point the `@edition` alias and Tailwind's source scan at
+`ee/packages/client` by path; they sit outside the scanned source roots, so
+moving the bundle means moving those two lines by hand.
 
 **One build, one image, one process entry.** Which edition a process is comes
 from whether `ee/` sits beside the open tree, never from a Dockerfile switch or
@@ -38,10 +42,11 @@ a release script.
   vite config points at `ee/packages/client/src/edition.tsx` when the checkout
   has an `ee/` tree and at the open edition's no-op when it does not.
 - **Server** — `apps/dashboard/server/src/features.ts` is the registry and
-  `apps/dashboard/server/src/index.ts` is the one process entry. Before booting
-  it runs `edition-loader.ts`, which looks for `ee/packages/server` beside its
-  own tree and registers this package's exported `eeServerFeatures` when it is
-  there. This package never starts the server itself.
+  `apps/dashboard/server/src/index.ts` is the one process entry. Boot's first
+  step after the log is `edition-loader.ts`, which looks for
+  `ee/packages/server` beside its own tree, registers this package's exported
+  `eeServerFeatures` when it is there, and logs which edition it found either
+  way. This package never starts the server itself.
 
 ## Packages
 
