@@ -14,10 +14,11 @@ let handle: DbHandle | null = null;
 export async function initDb(databaseUrl: string): Promise<DbHandle> {
   if (handle) return handle;
   handle = await createDb(databaseUrl, {
-    // An idle connection the backend dropped is one connection lost, not a crash:
-    // the pool has already discarded it and reconnects on the next checkout.
+    // A connection the backend dropped is one connection lost, not a crash: the
+    // query on it (if any) has already rejected, the pool discards the client and
+    // reconnects on the next checkout.
     onPoolError: (err, pool) =>
-      log.warn(`[db] idle Postgres client error on the ${pool} pool, connection dropped: ${err.message}`),
+      log.warn(`[db] Postgres client error on the ${pool} pool, connection dropped: ${err.message}`),
   });
   return handle;
 }

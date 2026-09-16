@@ -29,7 +29,7 @@ export const MIGRATIONS_DIR =
 
 export type Db = NodePgDatabase<typeof schema>;
 
-export type { Pool, PoolClient } from 'pg';
+export { Pool, type PoolClient } from 'pg';
 
 export interface DbHandle {
   db: Db;
@@ -47,28 +47,36 @@ export interface DbHandle {
 
 export interface CreateDbOptions {
   /**
-   * Called when an IDLE pooled connection errors (the backend closed it, a
-   * network drop, a protocol fault). The pool has already discarded that client
-   * and reconnects on demand; the caller only gets to log it. Defaults to stderr.
+   * Called when a pooled connection errors (the backend closed it, a network
+   * drop, a protocol fault) — idle in the pool or checked out by a query. The
+   * pool discards that client and reconnects on demand; the caller only gets to
+   * log it. Defaults to stderr.
    */
   onPoolError?: (err: Error, pool: 'main' | 'lock') => void;
 }
 
 /**
- * pg emits an idle client's error on the POOL, and an `error` event with no
- * listener is an uncaught exception: without this, one dropped connection
- * takes the whole process down.
+ * pg emits a client's socket error on the client, and an `error` event with no
+ * listener is an uncaught exception: without this, one dropped connection takes
+ * the whole process down. The pool listens on a client only while it is IDLE (it
+ * detaches at checkout and re-emits idle errors on the pool), so a connection
+ * that dies mid-transaction has no listener at all unless one is attached at
+ * connect time. That per-client listener is the one that reports; the pool-level
+ * one only exists so an idle error is not an unhandled `error` on the pool.
  */
-function watchIdleErrors(pool: Pool, name: 'main' | 'lock', onError: CreateDbOptions['onPoolError']): void {
-  pool.on('error', (err) => {
-    if (onError) onError(err, name);
-    else console.error(`[db] idle Postgres client error on the ${name} pool: ${err.message}`);
+export function watchClientErrors(pool: Pool, name: 'main' | 'lock', onError: CreateDbOptions['onPoolError']): void {
+  pool.on('connect', (client) => {
+    client.on('error', (err) => {
+      if (onError) onError(err, name);
+      else console.error(`[db] Postgres client error on the ${name} pool: ${err.message}`);
+    });
   });
+  pool.on('error', () => undefined);
 }
 
 export async function createDb(connectionString: string, options: CreateDbOptions = {}): Promise<DbHandle> {
   const pool = new Pool({ connectionString });
-  watchIdleErrors(pool, 'main', options.onPoolError);
+  watchClientErrors(pool, 'main', options.onPoolError);
   const db = drizzle(pool, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   // Dedicated lock pool (see DbHandle.lockPool). A generous `max` — concurrent
@@ -76,7 +84,7 @@ export async function createDb(connectionString: string, options: CreateDbOption
   // contention fails fast instead of hanging. Advisory locks are session-scoped,
   // so Postgres auto-releases them if a held connection ever drops.
   const lockPool = new Pool({ connectionString, max: 20, connectionTimeoutMillis: 30_000 });
-  watchIdleErrors(lockPool, 'lock', options.onPoolError);
+  watchClientErrors(lockPool, 'lock', options.onPoolError);
   return {
     db,
     lockPool,

@@ -1,10 +1,11 @@
 export * from './schema/index.js';
 export {
   createDb,
+  watchClientErrors,
   MIGRATIONS_DIR,
   type Db,
   type DbHandle,
   type CreateDbOptions,
-  type Pool,
+  Pool,
   type PoolClient,
 } from './db.js';
