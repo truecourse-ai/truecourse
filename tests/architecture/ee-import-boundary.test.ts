@@ -6,13 +6,14 @@
  * coming soon), and more than one workspace — which live in `ee/` and REGISTER
  * into the open shell's registries. The dependency runs one way: `ee/` imports
  * the open tree, never the reverse. So open code may not name an `ee/` path or
- * an `@truecourse/ee-*` package at all, and there is no loader making it
- * conditional.
+ * an `@truecourse/ee-*` package at all.
  *
- * The one seam that crosses is `@edition`, the module `main.tsx` imports before
- * rendering: the build points it at the enterprise bundle when the checkout has
- * one, and at the open edition's no-op when it does not. That alias is allowed
- * in exactly one file, which is asserted here.
+ * Two seams cross, one per side, each in exactly one file asserted here. The
+ * client's is `@edition`, the module `main.tsx` imports before rendering: the
+ * build points it at the enterprise bundle when the checkout has one, and at
+ * the open edition's no-op when it does not. The server's is `edition-loader.ts`,
+ * which looks for `ee/packages/server` beside its tree at boot and registers
+ * the bundle's features when it is there.
  *
  * The other two rules are vendor SDK homes: model and provider APIs belong in
  * `packages/llm-api`, and the Claude Agent SDK in `packages/llm-claude-agent`.
@@ -47,6 +48,9 @@ const EE_PACKAGES = ['ee/packages/client', 'ee/packages/server'];
 
 /** The one open file allowed to import the edition module. */
 const EDITION_IMPORTER = 'apps/dashboard/client/src/main.tsx';
+
+/** The one open file allowed to name the enterprise server package. */
+const SERVER_EDITION_LOADER = 'apps/dashboard/server/src/edition-loader.ts';
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', 'out', '.turbo']);
 const SOURCE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
@@ -209,6 +213,15 @@ describe('the open/enterprise line', () => {
     ).toEqual([]);
   });
 
+  it('the enterprise server package is named by exactly one open file, the loader', () => {
+    const namers: string[] = [];
+    for (const file of ossFiles()) {
+      const rel = path.relative(repoRoot, file).split(path.sep).join('/');
+      if (/ee\/packages\/server/.test(fs.readFileSync(file, 'utf8'))) namers.push(rel);
+    }
+    expect(namers).toEqual([SERVER_EDITION_LOADER]);
+  });
+
   it('the edition module is imported by exactly one open file', () => {
     const importers: string[] = [];
     for (const file of ossFiles()) {
@@ -248,7 +261,7 @@ describe('the open/enterprise line', () => {
       path.join(repoRoot, 'ee/packages/server/src/index.ts'),
       'utf8',
     );
-    expect(server).toContain('registerServerFeature');
+    expect(server).toContain('export { eeServerFeatures }');
   });
 
   it('the enterprise bundle may import the open tree (the dependency runs one way)', () => {

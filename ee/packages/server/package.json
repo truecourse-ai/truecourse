@@ -15,7 +15,6 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
-    "start": "node dist/main.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,9 +1,9 @@
 /**
  * Boot: everything the server is, assembled in order and started.
  *
- * Exported rather than run on import, so the enterprise bundle can register its
- * features (see `features.ts`) and then start the same server. `index.ts` is
- * the open edition's process entry and does nothing but call this.
+ * Exported rather than run on import, so the process entry (`index.ts`) can
+ * register the edition bundle's features first (see `edition-loader.ts`) and
+ * then start the one server.
  */
 
 import { createServer } from 'http';

@@ -49,7 +49,10 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
-    /** The refusal's JSON body as parsed, for a caller that reads more than `error`; null when there was none. */
+    /**
+     * The refusal's body, for a caller that reads more than `error`: parsed when
+     * it was JSON, the raw text otherwise, null when there was none.
+     */
     public body: unknown = null,
   ) {
     super(message);
@@ -75,15 +78,21 @@ export async function fetchApi<T>(
   });
 
   if (!res.ok) {
-    let message = 'Unknown error';
+    // Read once: the body is a stream, and a second read after a failed JSON
+    // parse throws. A route's own refusal is JSON with an `error` and is shown
+    // as written; anything else (a proxy's HTML page, a bare 404) is not for
+    // the user's eyes, so they see the status and the body rides on the error.
+    const text = await res.text().catch(() => '');
     let body: unknown = null;
     try {
-      body = await res.json();
-      const error = (body as { error?: unknown } | null)?.error;
-      message = typeof error === 'string' && error ? error : JSON.stringify(body);
+      body = JSON.parse(text);
     } catch {
-      message = await res.text().catch(() => 'Unknown error');
+      body = text || null;
     }
+    const error = (body as { error?: unknown } | null)?.error;
+    const message = typeof error === 'string' && error
+      ? error
+      : `The server answered ${res.status} for ${options?.method ?? 'GET'} ${endpoint}`;
     throw new ApiError(res.status, message, body);
   }
 
