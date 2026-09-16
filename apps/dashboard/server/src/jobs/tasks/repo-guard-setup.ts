@@ -33,6 +33,7 @@ import {
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
+import { markWorldStateUnknown } from '../materialize-guard.js';
 import { materializeStoredSpec, storedSliceSize } from '../materialize-spec.js';
 import { firstLine, type OnboardingJobRequest } from './onboarding.js';
 
@@ -122,6 +123,12 @@ export function createRepoGuardSetupTask(
           if (await materializeGuardOverlays(repoFullName, tree.dir)) {
             activityTracker.fact('clone', 'the registered instances written into the clone');
           }
+          // The recipe's compose project is the repository's, shared by every
+          // job of it: what a cancelled or crashed run left in its volumes is
+          // still standing, and setup's own world assertions would inherit it.
+          // The marker is what tells the engine to wipe before it brings the
+          // world up.
+          markWorldStateUnknown(tree.dir);
           activityTracker.done('clone');
 
           const { report } = await runSetup(tree.dir, {
@@ -129,6 +136,12 @@ export function createRepoGuardSetupTask(
             transport: llm.transport(),
             transportMode: llm.mode,
             sessionsKey: repoFullName,
+            // The docker world the recipe's compose project names. Two
+            // workspaces can be connected to one repository, and the heavy-job
+            // queue serializes per workspace, so their jobs run side by side on
+            // this host: the project has to separate them or one job's reset
+            // wipes the other's live datastore.
+            composeKey: `${ctx.payload.workspaceOrgId}/${repoFullName}`,
             sessionRun: activityRun,
             eagerRun: true,
             tracker: activityTracker,

@@ -174,6 +174,36 @@ describe('recipeRepairSessionDef', () => {
     expect(clean.content).toMatch(/verify_recipe/);
   });
 
+  // A session that invents its own compose project invents a world nothing else
+  // addresses, and two workspaces on one repository can invent the same one. The
+  // run's project is given in the briefing and held in the tool.
+  it('check_recipe holds a draft to the run\'s own compose project', async () => {
+    const sandbox = createWorkingSandbox();
+    cleanup.push(() => sandbox.cleanup());
+    const composeProject = 'truecourse-org-123-acme-widgets-ace2710c15';
+    const check = recipeRepairSessionDef({ repoRoot: process.cwd(), sandbox, composeProject }).tools.find(
+      (t) => t.name === 'check_recipe',
+    )!;
+    const withProject = (project: string): RecipeProposal => ({
+      ...GOOD,
+      api: {
+        serve: ['node', FIXTURE_BIN],
+        services: {
+          up: `docker compose -p ${project} -f compose.yml up -d --wait`,
+          down: `docker compose -p ${project} -f compose.yml down`,
+          reset: `docker compose -p ${project} -f compose.yml down -v`,
+        },
+      },
+    });
+
+    const invented = await check.execute(withProject('acme-guard'), ctx);
+    expect(invented.isError).toBe(true);
+    expect(invented.content).toContain(composeProject);
+
+    const given = await check.execute(withProject(composeProject), ctx);
+    expect(given.isError).toBeUndefined();
+  });
+
   // The 2026-08-20 bench rules, live in the session's own tools: the inventory
   // refusal fires in check_recipe with the briefing's own app list, and
   // verify_recipe refuses an inline-eval stand-in STATICALLY — one turn, not
@@ -243,6 +273,20 @@ describe('recipeRepairBriefing', () => {
     expect(text).toContain('the server never became healthy');
     expect(text).toMatch(/Do not advise adding a compose file/);
     expect(text).toMatch(/postgres/);
+  });
+
+  it('names the compose project the recipe must run under', () => {
+    const text = recipeRepairBriefing({
+      repoRoot: '/tmp/x',
+      inputs: { packageJson: '{}', presentInputs: ['package.json'] },
+      inputsFingerprint: 'sha256:abc',
+      database: null,
+      datastoreUrls: [],
+      composeGenerated: false,
+      composeProject: 'truecourse-org-123-acme-widgets-ace2710c15',
+    });
+
+    expect(text).toContain('-p truecourse-org-123-acme-widgets-ace2710c15');
   });
 
   it('says so when there was no prior proposal at all', () => {

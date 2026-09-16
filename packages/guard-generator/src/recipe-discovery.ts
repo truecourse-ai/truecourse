@@ -24,12 +24,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
+import yaml from 'js-yaml'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   loadRecipe,
   resolveEntry,
   runBuild,
   runInstall,
+  buildOutputTail,
   DEFAULT_BUILD_TIMEOUT_MS,
   computeRecipeFingerprint,
   recipePath,
@@ -58,6 +60,9 @@ import {
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import {
   proposeRecipe,
+  browserAppEvidence,
+  composeProjectName,
+  defaultComposeFiles,
   detectEcosystems,
   DEV_SCRIPT_MARKERS,
   SHELL_OPERATORS,
@@ -81,6 +86,106 @@ const PROBE_TIMEOUT_MS = 30_000
  *  (it runs it through `runBuild` with the run's build timeout), so a compose
  *  pull that is slow but fine at run time is not called hung here. */
 const SERVICES_TIMEOUT_MS = DEFAULT_BUILD_TIMEOUT_MS
+
+/** How many lines of a failing command's own output the report carries, and how
+ *  many of a log file that output points at. */
+const FAILURE_TAIL_LINES = 40
+const LOG_POINTER_TAIL_LINES = 60
+/** How much of a pointed-at log file is READ — the tail lines come out of this
+ *  window, so a multi-megabyte npm log costs one bounded read, not the file. */
+const LOG_POINTER_READ_BYTES = 64 * 1024
+/** The whole report's bound — it travels in a verdict, a session briefing and a
+ *  stored run record. */
+const FAILURE_REPORT_CAP = 12_000
+
+/** The package managers that print a PATH where the error should be: yarn berry
+ *  writes each failing package's build log to a temp file ("logs can be found
+ *  here: …"), npm writes the whole run's log ("A complete log of this run can be
+ *  found in: …"). Without the file, the report names a package and no cause. */
+const LOG_FILE_POINTER = /(?:logs? can be found here|complete log of this run can be found in)\s*:?\s*(\S+)/gi
+
+/**
+ * The failure text a rejected install/build/services step carries: the tail of
+ * the command's own output, then the tail of every log file that output pointed
+ * at. A short tail is useless against a manager whose last lines are only a
+ * path — the compiler's words live in the file, and a reader who cannot open
+ * it re-proposes blind.
+ *
+ * The pointer is UNTRUSTED: it is whatever the install printed, and the install
+ * is the repository's own code running as this process's user. So a section is
+ * read only from a regular file inside one of the three places a package manager
+ * writes its logs — the checkout, the temp dir, and npm's own `_logs` — and only
+ * its last bytes: a FIFO or a device would otherwise hang or flood the process,
+ * and a path anywhere else in the home directory would ship its contents to the
+ * model.
+ */
+export function failureReport(output: string, repoRoot: string): string {
+  const sections = [buildOutputTail(output, FAILURE_TAIL_LINES)]
+  const seen = new Set<string>()
+  for (const match of output.matchAll(LOG_FILE_POINTER)) {
+    // The path is usually printed inside prose — "(… here: /tmp/x/build.log)".
+    const file = (match[1] ?? '').replace(/[),.;:'"]+$/, '')
+    if (!file || seen.has(file)) continue
+    seen.add(file)
+    const body = readLogTail(file, repoRoot)
+    if (body === null) continue
+    sections.push(`--- ${file} (tail) ---\n${buildOutputTail(body, LOG_POINTER_TAIL_LINES)}`)
+  }
+  return sections.join('\n\n').slice(0, FAILURE_REPORT_CAP)
+}
+
+/** Where npm writes the run log its failure text points at: `_logs` under its
+ *  cache, which is `~/.npm` for the build child — it inherits the host's HOME and
+ *  no `npm_config_*` (see the runner's `BUILD_PASSTHROUGH`). Allowed for the same
+ *  reason the checkout and the temp dir are: it holds package-manager logs and
+ *  nothing else, so no pointer can walk out of it into the home directory. */
+function npmLogDir(): string | null {
+  const home = process.env.HOME ?? os.homedir()
+  return home ? path.join(home, '.npm', '_logs') : null
+}
+
+/** The last {@link LOG_POINTER_READ_BYTES} of a log file a failing command named,
+ *  or null when the path is not a regular file under the checkout, the temp dir
+ *  or npm's log dir (or cannot be read at all). */
+function readLogTail(file: string, repoRoot: string): string | null {
+  const within = (root: string, target: string): boolean => {
+    const rel = path.relative(root, target)
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  }
+  // Real paths on both sides: a temp dir behind a symlink (macOS's /var) must
+  // compare equal to the file's own resolved location.
+  let real: string
+  try {
+    real = fs.realpathSync(path.resolve(repoRoot, file))
+  } catch {
+    return null
+  }
+  const allowedRoots: string[] = []
+  for (const root of [repoRoot, os.tmpdir(), npmLogDir()]) {
+    if (root === null) continue
+    // A root that does not exist allows nothing, and never bars the others.
+    try {
+      allowedRoots.push(fs.realpathSync(root))
+    } catch {
+      continue
+    }
+  }
+  if (!allowedRoots.some((root) => within(root, real))) return null
+  let fd: number | null = null
+  try {
+    const stat = fs.statSync(real)
+    if (!stat.isFile()) return null
+    const length = Math.min(stat.size, LOG_POINTER_READ_BYTES)
+    const buffer = Buffer.alloc(length)
+    fd = fs.openSync(real, 'r')
+    fs.readSync(fd, buffer, 0, length, stat.size - length)
+    return buffer.toString('utf-8')
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) fs.closeSync(fd)
+  }
+}
 
 /** Which proposer produced the recipe that verified. */
 export type RecipeDiscoverySource = 'deterministic' | 'llm'
@@ -158,6 +263,14 @@ export interface RecipeRepairContext {
    * it never re-advises what guard just tried.
    */
   composeGenerated: boolean
+  /**
+   * The compose project every `docker compose` invocation the recipe runs must
+   * pass to `-p`, when the caller named the world this repository's runs share.
+   * The session is TOLD it and held to it, so a hand-authored recipe cannot
+   * invent a project two workspaces could both land on. Absent (a developer's
+   * own tree) ⇒ any explicit project is accepted.
+   */
+  composeProject?: string
 }
 
 /** What the seam hands back: a proposal to fold-verify, or why there is none. */
@@ -202,6 +315,15 @@ export interface DiscoverRecipeOptions {
    */
   datastores?: () => Promise<readonly DatastoreUrlRef[]>
   /**
+   * The identity of the docker WORLD this repository's runs share: the
+   * workspace and the repository together (`<org>/<owner>/<repo>`), when the
+   * caller has one. The deterministic proposal names its compose project after
+   * it, so every run of the pair shares one project whatever directory it was
+   * cloned into, and no other pair's `reset` reaches its volumes. Absent ⇒ the
+   * checkout directory's own name.
+   */
+  composeKey?: string
+  /**
    * Re-derive even when `recipe.json` already exists (`guard recipe --refresh`).
    * Not a "force write": discovery still writes only a proposal that VERIFIED, so
    * a refresh that fails leaves the existing recipe exactly as it was. Never set
@@ -229,11 +351,21 @@ export interface DiscoverRecipeOptions {
   repair?: RecipeRepairFn
 }
 
-/** The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`.
- *  Exported so the repair session keeps the exact key: a
- *  proposal the one-shot era settled stays a hit in the session era. */
-export function recipeCacheKey(inputsFingerprint: string): string {
-  return createHash('sha256').update(`${RECIPE_PROMPT_FINGERPRINT}::${inputsFingerprint}`).digest('hex')
+/**
+ * The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`, plus
+ * the compose PROJECT when the caller named one. Exported so the repair session
+ * keeps the exact key: a proposal the one-shot era settled stays a hit in the
+ * session era.
+ *
+ * The project is part of the key because it is part of the ANSWER: a cached
+ * recipe carries the `-p` it was authored with, and replaying another
+ * workspace's entry would hand this run a recipe pointing at that workspace's
+ * world (which the static rule then refuses, turning a cache hit into a failed
+ * setup). A key with no project keys exactly as it always did.
+ */
+export function recipeCacheKey(inputsFingerprint: string, composeProject?: string): string {
+  const material = `${RECIPE_PROMPT_FINGERPRINT}::${inputsFingerprint}${composeProject ? `::${composeProject}` : ''}`
+  return createHash('sha256').update(material).digest('hex')
 }
 
 /**
@@ -286,11 +418,17 @@ export async function discoverRecipe(
   // Read once, before the deterministic pass: the model briefing needs it later,
   // and the static inventory rule holds EVERY proposal to it from the start.
   const inputs = readDiscoveryInputs(repoRoot)
+  // The one project every compose invocation of this recipe must name, derived
+  // from the world identity the caller gave. Without one (a developer's own
+  // tree) the deterministic proposal still names a project, but nothing else is
+  // held to that exact name.
+  const composeProject = options.composeKey ? composeProjectName(options.composeKey) : undefined
   const verifyContext: VerifyContext = {
     ...(options.database
       ? { database: () => (databaseOnce ??= Promise.resolve(options.database!()).catch(() => null)) }
       : {}),
     ...(inputs.apps ? { apps: inputs.apps } : {}),
+    ...(composeProject ? { composeProject } : {}),
   }
   // Verification reports the STAGE it is in; whether that is a re-verification is
   // discovery's own knowledge, so it is added on the way out. Built per call so each
@@ -315,6 +453,7 @@ export async function discoverRecipe(
     routes: options.routes ? [...(await options.routes())] : undefined,
     datastores: options.datastores ? [...(await options.datastores())] : undefined,
     ...(inputs.manifestApps ? { manifestApps: inputs.manifestApps } : {}),
+    ...(options.composeKey ? { composeKey: options.composeKey } : {}),
   })
   if (derived.ok) {
     // The generated datastore must be ON DISK before verification: the `services.up`
@@ -376,6 +515,7 @@ export async function discoverRecipe(
       database,
       datastoreUrls,
       composeGenerated: verifyContext.composeGenerated === true,
+      ...(composeProject ? { composeProject } : {}),
     })
     const sessionRunId = repaired.sessionRunId
     if ('error' in repaired) {
@@ -420,17 +560,20 @@ export async function discoverRecipe(
     }
   }
 
+  // What the one-shot proposer reads: the same inputs, plus the project its
+  // compose commands must name (the static rule refuses any other).
+  const proposerInput = { ...inputs, ...(composeProject ? { composeProject } : {}) }
   // The LLM proposal is cached on the discovery-input fingerprint — unchanged
   // inputs reuse the prior proposal, but verification always re-runs.
   let proposal: RecipeProposal | null = null
-  const cached = await getCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint))
+  const cached = await getCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint, composeProject))
   if (cached) {
     const parsed = RecipeProposalSchema.safeParse(cached)
     if (parsed.success) proposal = parsed.data
   }
   if (!proposal) {
     options.onPhase?.({ kind: 'proposing', ...(deterministicStage ? { after: deterministicStage } : {}) })
-    const attempt = await proposeRecipeWithReask(inputs, runner, deterministicEvidence)
+    const attempt = await proposeRecipeWithReask(proposerInput, runner, deterministicEvidence)
     // An unreachable model must not ERASE what the engine already learned: when a
     // deterministic proposal was tried and rejected, its diagnostic (the actionable
     // one — it names the repo's own commands and, for a datastore repo, what to do
@@ -444,7 +587,7 @@ export async function discoverRecipe(
       }
     }
     proposal = attempt.proposal
-    await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
+    await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint, composeProject), proposal)
   }
 
   let verdict = await verifyProposal(repoRoot, proposal, verifying('model'))
@@ -454,7 +597,7 @@ export async function discoverRecipe(
     // onwards. Nothing here reads the report: install, build, entry-file, and
     // entrypoint failures are one path, so a new failure kind needs no new code.
     options.onPhase?.({ kind: 'proposing', after: verdict.stage })
-    const retried = await proposeRecipeWithReask(inputs, runner, {
+    const retried = await proposeRecipeWithReask(proposerInput, runner, {
       proposal: JSON.stringify(proposal, null, 2),
       failure: verdict.reason,
     })
@@ -467,7 +610,7 @@ export async function discoverRecipe(
       // The retry never gets a cache key of its own: a proposal that verified
       // REPLACES the rejected one under the round-1 key, so a later discovery over
       // the same inputs reuses what actually worked instead of re-paying the retry.
-      if (verdict.ok) await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
+      if (verdict.ok) await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint, composeProject), proposal)
     }
   }
   if (!verdict.ok) return { status: 'verify-failed', reason: verdict.reason, proposal }
@@ -562,9 +705,10 @@ export type VerifiableProposal = {
       { serve: readonly string[]; healthPath?: string; env?: Record<string, string>; cwd?: 'sandbox' | 'repo' }
     >
     /** The datastore bring-up/tear-down (compose-derived or model-proposed);
-     *  verification runs whatever the proposal carries. `reset` is not run here —
-     *  it is the runner's post-mutator restore, and a wipe has no place in a
-     *  verification pass. */
+     *  verification runs whatever the proposal carries. `reset` runs ONCE per
+     *  round, before the bring-up, so the round starts from a known-clean
+     *  datastore; the teardown stops the services and leaves the volumes for
+     *  the next round's reset to wipe. */
     services?: { up: string; down?: string; reset?: string }
   }
   /** The browser surface — booted and health-polled like any server. */
@@ -665,6 +809,9 @@ export type VerifyContext = {
    * is its HTTP services.
    */
   apps?: readonly RecipeAppInventoryEntry[]
+  /** The compose project every `docker compose` invocation must pass to `-p`;
+   *  absent ⇒ the static rule only demands that one be passed. */
+  composeProject?: string
 }
 
 /**
@@ -685,7 +832,7 @@ export async function verifyProposal(
   // accept is rejected before minutes of install/build run — and so EVERY path a
   // proposal can arrive by (deterministic, session outcome, one-shot, cache) is
   // held to the same rules, not just the session's `check_recipe` tool.
-  const complaints = staticProposalComplaints(proposal, context.apps, repoRoot)
+  const complaints = staticProposalComplaints(proposal, context.apps, repoRoot, context.composeProject)
   if (complaints.length > 0) {
     return {
       ok: false,
@@ -700,11 +847,10 @@ export async function verifyProposal(
     context.onPhase?.({ stage: 'install' })
     const install = await runInstall(repoRoot, proposal.install, proposal.env, INSTALL_TIMEOUT_MS)
     if (!install.ok) {
-      const tail = install.output.trimEnd().split('\n').slice(-5).join(' / ')
       return {
         ok: false,
         stage: 'install',
-        reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}: ${tail}`,
+        reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}:\n${failureReport(install.output, repoRoot)}`,
       }
     }
   }
@@ -712,11 +858,10 @@ export async function verifyProposal(
   context.onPhase?.({ stage: 'build' })
   const build = await runBuild(repoRoot, proposal.build, proposal.env, BUILD_TIMEOUT_MS)
   if (!build.ok) {
-    const tail = build.output.trimEnd().split('\n').slice(-5).join(' / ')
     return {
       ok: false,
       stage: 'build',
-      reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}: ${tail}`,
+      reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}:\n${failureReport(build.output, repoRoot)}`,
     }
   }
 
@@ -751,11 +896,10 @@ export async function verifyProposal(
       context.onPhase?.({ stage: 'web boot' })
       const webBuild = await runBuild(repoRoot, web.build, proposal.env, BUILD_TIMEOUT_MS)
       if (!webBuild.ok) {
-        const tail = webBuild.output.trimEnd().split('\n').slice(-5).join(' / ')
         return {
           ok: false,
           stage: 'web boot',
-          reason: `web build \`${web.build}\` failed${webBuild.timedOut ? ' (timed out)' : ''}: ${tail}`,
+          reason: `web build \`${web.build}\` failed${webBuild.timedOut ? ' (timed out)' : ''}:\n${failureReport(webBuild.output, repoRoot)}`,
         }
       }
     }
@@ -791,16 +935,28 @@ export async function verifyProposal(
     try {
       if (api.services) {
         context.onPhase?.({ stage: 'services' })
+        // The wipe BEFORE the bring-up. A repair session verifies again and again
+        // inside ONE sandbox, and a stop leaves the previous attempt's one-off
+        // containers and bound ports behind — the next `up` then collides with the
+        // world its predecessor left. A reset that fails is not a verdict (there is
+        // nothing to wipe on the first attempt), but it is part of the story when
+        // the bring-up fails after it.
+        const reset = api.services.reset
+          ? await runBuild(repoRoot, api.services.reset, proposal.env, SERVICES_TIMEOUT_MS)
+          : null
         const up = await runBuild(repoRoot, api.services.up, proposal.env, SERVICES_TIMEOUT_MS)
         // A services failure is NOT a boot failure and must not read like one: a
         // missing docker daemon, an occupied port, an unpullable image all die
         // here, and the command's own output is the whole diagnostic.
         if (!up.ok) {
-          const tail = up.output.trimEnd().split('\n').slice(-5).join(' / ')
+          const wipe = reset
+            ? `--- api.services.reset \`${api.services.reset}\` (ran first${reset.ok ? '' : ', and failed'}) ---\n` +
+              `${failureReport(reset.output, repoRoot)}\n\n`
+            : ''
           return {
             ok: false,
             stage: 'services',
-            reason: `services \`${api.services.up}\` failed${up.timedOut ? ' (timed out)' : ''}: ${tail}`,
+            reason: `services \`${api.services.up}\` failed${up.timedOut ? ' (timed out)' : ''}:\n${wipe}${failureReport(up.output, repoRoot)}`,
           }
         }
         servicesUp = true
@@ -872,13 +1028,17 @@ export async function verifyProposal(
       }
     } finally {
       // Teardown is best-effort and NEVER a verdict — a datastore that will not
-      // stop is a warning, not a reason to reject a recipe that booted.
-      if (servicesUp && api.services?.down) {
-        const down = await runBuild(repoRoot, api.services.down, proposal.env, SERVICES_TIMEOUT_MS)
-        if (!down.ok) {
+      // stop is a warning, not a reason to reject a recipe that booted. It STOPS
+      // and keeps the volumes: the clean start the next round needs is the reset
+      // that brackets its own bring-up, and wiping here would only make the
+      // round after this one pay a second initdb for the same guarantee.
+      const down = api.services?.down
+      if (servicesUp && down) {
+        const step = await runBuild(repoRoot, down, proposal.env, SERVICES_TIMEOUT_MS)
+        if (!step.ok) {
           // eslint-disable-next-line no-console -- verification's one advisory line.
           console.warn(
-            `[guard recipe] \`${api.services.down}\` failed after verification — the services it brought up may still be running.`,
+            `[guard recipe] \`${down}\` failed after verification — the services it brought up may still be running.`,
           )
         }
       }
@@ -893,7 +1053,7 @@ export async function verifyProposal(
       catch (error) { return { ok: false, stage: 'web boot', reason: `preparation "${profile}" failed verification: ${error instanceof Error ? error.message : String(error)}` } }
     }
   }
-  const warnings = proposalWarnings(proposal)
+  const warnings = proposalWarnings(proposal, repoRoot)
   return warnings.length > 0 ? { ok: true, warnings } : { ok: true }
 }
 
@@ -907,9 +1067,10 @@ const LOCAL_DATASTORE_URL = /^(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|a
  * is this machine's, not the recipe's (cal.diy 2026-08-20: the boot rode the
  * developer's already-running :5450 postgres).
  */
-function proposalWarnings(proposal: VerifiableProposal): string[] {
+function proposalWarnings(proposal: VerifiableProposal, repoRoot: string): string[] {
   const api = proposal.api
   if (!api) return []
+  const warnings: string[] = []
   const layers: Record<string, string>[] = [
     proposal.env ?? {},
     api.env ?? {},
@@ -925,13 +1086,14 @@ function proposalWarnings(proposal: VerifiableProposal): string[] {
     }
   }
   if (!api.services) {
-    if (urls.size === 0) return []
-    return [
+    if (urls.size === 0) return warnings
+    warnings.push(
       `the recipe points at localhost datastore(s) it never brings up (${[...urls].slice(0, 3).join(', ')}) and ` +
       `declares no \`api.services\` — the boot passed because something on THIS machine happened to be running. ` +
       `On a clean host it will die at boot. Declare the bring-up under \`api.services.up\`/\`down\` ` +
       `(a compose file the repo ships, or guard's generated one).`,
-    ]
+    )
+    return warnings
   }
   // Services declared, but no schema step among them: the sibling fragility
   // (cal.diy 2026-08-21). The compose brings the database container up, nothing
@@ -942,22 +1104,143 @@ function proposalWarnings(proposal: VerifiableProposal): string[] {
     .filter((c): c is string => typeof c === 'string')
     .join('\n')
   if (sqlUrls.size > 0 && !MIGRATE_STEP.test(commands)) {
-    return [
+    warnings.push(
       `\`api.services\` brings the datastore up but NO command anywhere in the recipe (install, build, ` +
       `services.up) runs a schema/migration step — the boot verified against whatever schema the datastore's ` +
       `volume already carried, and a clean host gets an EMPTY database behind a green health probe. Run the ` +
       `repo's migrate/deploy step inside \`api.services.up\` after the bring-up.`,
-    ]
+    )
   }
-  return []
+  // The bring-up's compose file may bind HOST directories into its containers.
+  const mounts = composeBindMounts(api.services.up, repoRoot)
+  if (mounts.length > 0) {
+    warnings.push(
+      `\`api.services.up\` brings its services up from a compose file that BIND MOUNTS host director(ies) ` +
+      `inside the checkout (${mounts.slice(0, 3).join(', ')}) — on Linux the container creates them owned by ` +
+      `root, so the next build's directory scan hits a tree it cannot read and the run dies on a permission ` +
+      `error nothing in the recipe explains. Point the bring-up at an override compose file that replaces each ` +
+      `of them with a named volume (declared under the top-level \`volumes:\`), which lives outside the tree.`,
+    )
+  }
+  return warnings
+}
+
+/** The compose files a bring-up command actually reads: every `-f`/`--file` it
+ *  names, or — when it names none — the default file compose picks up from the
+ *  repo root together with its `*.override.*` sibling, which compose merges
+ *  over it. Absent a `docker compose` invocation there are none. */
+function composeFilesRead(command: string, repoRoot: string): string[] {
+  const named: string[] = []
+  let invocations = 0
+  for (const match of command.matchAll(DOCKER_COMPOSE_CALL)) {
+    invocations++
+    named.push(...composeFlags(match[1] ?? '').files)
+  }
+  if (invocations === 0) return []
+  const candidates = named.length > 0 ? named : defaultComposeFiles(repoRoot)
+  return candidates.map((f) => path.resolve(repoRoot, f)).filter((f) => fs.existsSync(f))
+}
+
+/**
+ * The HOST bind mounts a bring-up's compose files declare — the short-form
+ * `host:container` entries and the long-form `{ type: bind, source }` ones whose
+ * host side is a path RELATIVE to the compose file, i.e. a directory compose
+ * creates inside the repository. A named volume (declared under the top-level
+ * `volumes:`) and an absolute path are neither.
+ *
+ * The files are read the way COMPOSE reads them, merged rather than one at a
+ * time: a mount an override replaces with a named volume is no longer declared,
+ * and warning about it would be warning about the very fix this recommends.
+ */
+function composeBindMounts(up: string, repoRoot: string): string[] {
+  const { volumesByService, namedVolumes } = mergedComposeVolumes(composeFilesRead(up, repoRoot))
+  const mounts: string[] = []
+  for (const volumes of volumesByService.values()) {
+    for (const { raw, host } of volumes.values()) {
+      // `$`-prefixed hosts are the user's own variable, absolute ones land
+      // outside the checkout, and a named volume is the fix, not the problem.
+      if (!host || host.startsWith('/') || host.startsWith('$') || namedVolumes.has(host)) continue
+      mounts.push(typeof raw === 'string' ? raw : host)
+    }
+  }
+  return mounts
+}
+
+/** One service volume as compose keys it: by its container-side TARGET, which is
+ *  what a later file's entry replaces. `host` is empty for anything that is not
+ *  a host path (a named or anonymous volume). */
+interface ComposeVolume {
+  raw: unknown
+  host: string
+}
+
+/**
+ * Every compose file's service volumes merged as compose merges them: service
+ * by service, and within a service by the volume's container-side target, the
+ * last file to declare a target winning it. The top-level `volumes:` keys are
+ * the union, since a named volume declared anywhere is declared.
+ */
+function mergedComposeVolumes(files: readonly string[]): {
+  volumesByService: Map<string, Map<string, ComposeVolume>>
+  namedVolumes: Set<string>
+} {
+  const volumesByService = new Map<string, Map<string, ComposeVolume>>()
+  const namedVolumes = new Set<string>()
+  for (const file of files) {
+    let doc: unknown
+    try {
+      doc = yaml.load(fs.readFileSync(file, 'utf-8'))
+    } catch {
+      continue // An unreadable/invalid compose file is the namespace rule's business, not this one's.
+    }
+    if (!doc || typeof doc !== 'object') continue
+    const root = doc as { services?: Record<string, unknown> | null; volumes?: Record<string, unknown> | null }
+    for (const name of Object.keys(root.volumes ?? {})) namedVolumes.add(name)
+    for (const [service, spec] of Object.entries(root.services ?? {})) {
+      const volumes = (spec as { volumes?: unknown } | null)?.volumes
+      if (!Array.isArray(volumes)) continue
+      const merged = volumesByService.get(service) ?? new Map<string, ComposeVolume>()
+      for (const entry of volumes) merged.set(volumeTarget(entry), { raw: entry, host: volumeHost(entry) })
+      volumesByService.set(service, merged)
+    }
+  }
+  return { volumesByService, namedVolumes }
+}
+
+/** The container-side path an entry mounts at — compose's key for the entry. */
+function volumeTarget(entry: unknown): string {
+  if (typeof entry === 'string') {
+    const parts = entry.split(':')
+    return (parts.length > 1 ? parts[1] : parts[0]) ?? ''
+  }
+  return typeof entry === 'object' && entry !== null ? String((entry as { target?: unknown }).target ?? '') : ''
+}
+
+/** The HOST side of an entry, or '' when it mounts no host path. */
+function volumeHost(entry: unknown): string {
+  if (typeof entry === 'string') {
+    const parts = entry.split(':')
+    return parts.length > 1 ? (parts[0] ?? '') : ''
+  }
+  return isBindMountEntry(entry) ? String(entry.source ?? '') : ''
+}
+
+function isBindMountEntry(entry: unknown): entry is { type?: string; source?: unknown } {
+  return typeof entry === 'object' && entry !== null && (entry as { type?: unknown }).type === 'bind'
 }
 
 /** SQL datastore URLs — the stores whose empty-schema state a health probe hides. */
 const SQL_DATASTORE_URL = /^(?:postgres(?:ql)?|mysql):\/\//i
 
-/** A schema/migration step by any of the common spellings (`prisma migrate`,
- *  `db-deploy`, `db:push`, `knex migrate`, plain `migrations` scripts…). */
-const MIGRATE_STEP = /migrat|db-deploy|db:deploy|db[:-]push|db\s+push|schema:sync/i
+/** A schema/migration step by any of the common spellings — the word itself
+ *  (`prisma migrate`, `knex migrate`, a `migrations` script), a push
+ *  (`db:push`, `db push`), a sync (`schema:sync`), and a `deploy` a DATASTORE
+ *  token owns (`prisma:deploy`, `db:deploy`, `yarn workspace @x/prisma deploy`),
+ *  which is how most repos spell `prisma migrate deploy` behind one token. A bare
+ *  `deploy` is NOT one: `deploy:assets`, `deploy-docs` and `turbo run deploy`
+ *  ship something somewhere and migrate nothing, and reading them as the schema
+ *  step drops the empty-schema caveat on a recipe that never migrates. */
+const MIGRATE_STEP = /migrat|schema:sync|(?:db|database|prisma)[\s:._-]+(?:deploy|push)\b/i
 
 /**
  * The guided failure text for a server that would not boot on a repo the analyzer
@@ -1067,6 +1350,52 @@ const INLINE_EVAL_SHELL = /^\s*(?:node|nodejs|bun|python3?|ruby|perl)\s+(?:-e|--
  *  (documenso 2026-08-20: a compose db container survived verification). */
 const COMPOSE_UP_SHELL = /\bdocker(?:\s+|-)compose\b[^|;&]*\bup\b/
 
+/** Flags and env prefixes that turn package LIFECYCLE SCRIPTS off wholesale. An
+ *  install wearing one finishes green here and leaves the tree unbuilt. */
+const SKIP_LIFECYCLE_SCRIPTS: { pattern: RegExp; what: string }[] = [
+  { pattern: /--mode[=\s]+skip-build\b/, what: '`--mode=skip-build`' },
+  // `--ignore-scripts=false` is the spelling that turns them back ON.
+  { pattern: /--ignore-scripts(?:=(?!false\b)|\b(?!=))/, what: '`--ignore-scripts`' },
+  { pattern: /(?:^|[\s;&|])npm_config_ignore_scripts\s*=\s*(?!(?:false|0)\b)\S/i, what: 'an `npm_config_ignore_scripts=` env prefix' },
+  { pattern: /(?:^|[\s;&|])YARN_ENABLE_SCRIPTS\s*=\s*(?:0|false)\b/i, what: 'a `YARN_ENABLE_SCRIPTS=0` env prefix' },
+]
+
+/** The same switch, thrown in the repository's own manager config — an install
+ *  that names nothing still runs under it. `readBy` is which managers obey the
+ *  file: yarn berry never reads `.npmrc`, and nothing but yarn reads `.yarnrc.yml`. */
+const RC_LIFECYCLE_SWITCHES: { file: string; pattern: RegExp; what: string; readBy: RegExp }[] = [
+  { file: '.npmrc', pattern: /^\s*ignore-scripts\s*=\s*true\s*$/m, what: '`ignore-scripts=true` in .npmrc', readBy: /\b(?:npm|npx|pnpm|pnpx)\b/ },
+  { file: '.yarnrc.yml', pattern: /^\s*enableScripts\s*:\s*false\s*$/m, what: '`enableScripts: false` in .yarnrc.yml', readBy: /\byarn\b/ },
+]
+
+/** The spellings that turn lifecycle scripts back ON. A command that passes one
+ *  overrides the rc file it runs under — a CLI flag and an env var both beat the
+ *  config, which is what makes `npm ci --ignore-scripts=false` an honest install
+ *  in a repository that hardens its `.npmrc`. */
+const LIFECYCLE_SCRIPTS_ON: RegExp[] = [
+  /--ignore-scripts=false\b/,
+  /--no-ignore-scripts\b/,
+  /(?:^|[\s;&|])npm_config_ignore_scripts\s*=\s*(?:false|0)\b/i,
+  /(?:^|[\s;&|])YARN_ENABLE_SCRIPTS\s*=\s*(?:1|true)\b/i,
+]
+
+/** The lifecycle switches the checkout's own manager config throws at THIS
+ *  install — the rc file only counts when the command's manager reads it and the
+ *  command does not override it. */
+function rcLifecycleSwitches(repoRoot: string | undefined, command: string): string[] {
+  if (!repoRoot || LIFECYCLE_SCRIPTS_ON.some((pattern) => pattern.test(command))) return []
+  const found: string[] = []
+  for (const { file, pattern, what, readBy } of RC_LIFECYCLE_SWITCHES) {
+    if (!readBy.test(command)) continue
+    try {
+      if (pattern.test(fs.readFileSync(path.join(repoRoot, file), 'utf-8'))) found.push(what)
+    } catch {
+      // No such file — nothing switched off there.
+    }
+  }
+  return found
+}
+
 /** Command fragments that mutate the HOST outside the repository. An
  *  install/build runs as a real shell in the working tree, so these execute for
  *  real — and a recipe commits every future run to them. */
@@ -1096,54 +1425,77 @@ const HOST_MUTATION_PATTERNS: { pattern: RegExp; what: string }[] = [
 const DOCKER_COMPOSE_CALL = /(?<![\w-])docker(?:\s+|-)compose\b([^|;&]*)/g
 
 /**
+ * ONE compose invocation's argument text, as every compose rule here reads it:
+ * the project it passes (undefined when it passes none), which files it names,
+ * and those same `-p`/`-f` flags VERBATIM, so a suggested sibling command
+ * (`down -v` for an `up`) addresses exactly the project and files the original
+ * does.
+ */
+function composeFlags(args: string): { project?: string; files: string[]; flags: string } {
+  const tokens = args.trim().split(/\s+/).filter(Boolean)
+  let project: string | undefined
+  const files: string[] = []
+  const kept: string[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!
+    const value = tokens[i + 1]
+    if (t === '-p' || t === '--project-name') { if (value) { project = value; kept.push(t, value) } i++ }
+    else if (t.startsWith('--project-name=')) { project = t.slice('--project-name='.length); kept.push(t) }
+    else if (t === '-f' || t === '--file') { if (value) { files.push(value); kept.push(t, value) } i++ }
+    else if (t.startsWith('--file=')) { files.push(t.slice('--file='.length)); kept.push(t) }
+  }
+  return { ...(project ? { project } : {}), files, flags: kept.length > 0 ? `${kept.join(' ')} ` : '' }
+}
+
+/** The first compose invocation of a whole shell command. */
+function firstComposeFlags(command: string): ReturnType<typeof composeFlags> {
+  return composeFlags(new RegExp(DOCKER_COMPOSE_CALL.source).exec(command)?.[1] ?? '')
+}
+
+/**
  * The compose NAMESPACE rule — the boundary the `docker rm/kill/stop` refusal
  * left open (cal.diy 2026-08-21): `docker compose up/stop` with no explicit
- * project attaches to the repository's DEFAULT compose project — the
- * developer's own live stack — and compose "resolves" a port or config change
- * by RECREATING the running container (a verified recipe re-ported the
+ * project attaches to whatever project the working directory or the file names
+ * — the developer's own live stack — and compose "resolves" a port or config
+ * change by RECREATING the running container (a verified recipe re-ported the
  * developer's running redis to a new port and left it stopped, through this
- * exact channel). A compose invocation in a recipe channel must therefore be
- * namespaced: `-p <project>`, or an `-f` file that pins a top-level `name:`
- * (the repo's dedicated test composes do; its dev compose does not).
+ * exact channel). Since the recipe's `reset` is EXECUTED (verification runs it
+ * before every bring-up, the runner after a mutator tail), an invocation that
+ * lands in someone else's project does not just recreate a container, it wipes
+ * its volumes.
  *
- * Returns one complaint per un-namespaced invocation. `repoRoot` grounds the
- * `-f` file check; without it (older callers, unit contexts) a file reference
- * cannot be verified and is treated as unpinned — conservative on purpose.
+ * So every compose invocation in a recipe channel carries `-p`, and only `-p`:
+ * a file's own top-level `name:` is the project its AUTHOR runs it under, which
+ * is exactly the stack a recipe must stay out of, and `-p` is also the one
+ * spelling that overrides it.
+ *
+ * `required` is the one project this run's world lives in, derived from the
+ * caller's world identity. When there is one, a DIFFERENT project is refused
+ * too: an invented name is a world nothing else addresses, and two workspaces
+ * connected to one repository can invent the same one and then wipe each
+ * other's datastore. Without it (a developer's own tree) any explicit project
+ * passes.
+ *
+ * Returns one complaint per offending invocation.
  */
-function composeNamespaceComplaints(label: string, command: string, repoRoot?: string): string[] {
+function composeNamespaceComplaints(label: string, command: string, required?: string): string[] {
   const complaints: string[] = []
   for (const match of command.matchAll(DOCKER_COMPOSE_CALL)) {
-    const tokens = (match[1] ?? '').trim().split(/\s+/).filter(Boolean)
-    let hasProject = false
-    const files: string[] = []
-    for (let i = 0; i < tokens.length; i++) {
-      const t = tokens[i]!
-      if (t === '-p' || t === '--project-name') { hasProject = true; i++ }
-      else if (t.startsWith('--project-name=')) hasProject = true
-      else if (t === '-f' || t === '--file') { const v = tokens[i + 1]; if (v) files.push(v); i++ }
-      else if (t.startsWith('--file=')) files.push(t.slice('--file='.length))
-    }
-    if (hasProject) continue
-    const pinsName = (file: string): boolean => {
-      if (file === '-') return false // stdin — nothing to inspect; demand `-p`
-      if (!repoRoot) return false
-      try {
-        return /^name:\s*\S/m.test(fs.readFileSync(path.resolve(repoRoot, file), 'utf-8'))
-      } catch {
-        return false
-      }
-    }
-    if (files.length > 0 && files.some(pinsName)) continue
-    const why =
-      files.length === 0
-        ? 'no `-f` file and no `-p` project'
-        : `the file(s) it names (${files.join(', ')}) pin no top-level \`name:\``
+    const project = composeFlags(match[1] ?? '').project
+    if (project && (!required || project === required)) continue
     complaints.push(
-      `${label} runs \`docker compose\` without an explicit project namespace (${why}) — it attaches to the ` +
-      `repository's DEFAULT compose project, i.e. the developer's own stack, and compose resolves a port or ` +
-      `config change by RECREATING a running container (this is how a verified recipe once re-ported and stopped ` +
-      `the developer's live redis). Namespace it: pass \`-p <dedicated-project>\`, or point \`-f\` at a compose ` +
-      `file that declares a top-level \`name:\` (a dedicated test compose, never the dev compose).`,
+      project
+        ? `${label} runs \`docker compose -p ${project}\`, which is not this run's project — every compose ` +
+          `invocation of this recipe must pass \`-p ${required}\`. That project IS the world: its volumes are ` +
+          `what \`api.services.reset\` wipes, and a project nobody else addresses leaves the datastore the run ` +
+          `booted unreachable to the next one (and reachable to whoever else invents the same name).`
+        : `${label} runs \`docker compose\` without an explicit project namespace (\`-p\`) — it attaches to the ` +
+          `project the working directory or the compose file names, i.e. the developer's own stack, where compose ` +
+          `resolves a port or config change by RECREATING a running container (this is how a verified recipe once ` +
+          `re-ported and stopped the developer's live redis) and the recipe's own \`reset\` would wipe their ` +
+          `volumes. Namespace it: pass \`-p ${required ?? '<dedicated-project>'}\` on EVERY invocation. A ` +
+          `top-level \`name:\` in the file is not enough — that names the project whoever wrote the file runs ` +
+          `it under.`,
     )
   }
   return complaints
@@ -1152,9 +1504,12 @@ function composeNamespaceComplaints(label: string, command: string, repoRoot?: s
 export function staticProposalComplaints(
   proposal: VerifiableProposal,
   apps?: readonly RecipeAppInventoryEntry[],
-  /** Grounds the compose-namespace rule's `-f` file check; absent ⇒ a file
-   *  reference cannot be verified and counts as unpinned (conservative). */
+  /** Grounds the rules that READ the checkout (the install's lifecycle switches,
+   *  the browser-app evidence); absent ⇒ those rules stay quiet. */
   repoRoot?: string,
+  /** The project every `docker compose` invocation must pass to `-p`; absent ⇒
+   *  the namespace rule only demands that SOME project be passed. */
+  composeProject?: string,
 ): string[] {
   const complaints: string[] = []
   const argvs: { label: string; argv: readonly string[] }[] = []
@@ -1207,6 +1562,37 @@ export function staticProposalComplaints(
         `left running by a ${label} is never torn down.`,
       )
     }
+    // Lifecycle scripts off is not a fix, it is a deferral: the postinstall that
+    // would not run is what BUILDS the native modules, and nothing runs it later.
+    const switchedOff = SKIP_LIFECYCLE_SCRIPTS.filter(({ pattern }) => pattern.test(command)).map(({ what }) => what)
+    for (const what of switchedOff) {
+      complaints.push(
+        `${label} passes ${what}, which turns package lifecycle scripts OFF for every dependency — and those ` +
+        `scripts are what BUILD the native modules an app needs at runtime (password hashing, image processing, ` +
+        `database engines). Nothing runs them afterwards, so the recipe verifies green here and then crashes the ` +
+        `seed or the server in a fresh clone, on an error that names none of this. Make the postinstall that ` +
+        `fails SUCCEED, or opt out of that ONE package instead of all of them — its own env switch where it has ` +
+        `one (\`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1\`, \`CYPRESS_INSTALL_BINARY=0\`, …). Yarn's ` +
+        `\`dependenciesMeta.<pkg>.built: false\` is a package.json edit, which a recipe may not make; name the ` +
+        `failing package from the install report and switch that one off.`,
+      )
+    }
+    // The same switch thrown in the repository's own manager config, which an
+    // install that names nothing still runs under. The file is committed and a
+    // recipe may not edit it, so the remedy here is the OVERRIDE, not the one
+    // the command-level complaint above names.
+    if (label === 'install' && switchedOff.length === 0) {
+      for (const what of rcLifecycleSwitches(repoRoot, command)) {
+        complaints.push(
+          `${label} runs under ${what}, which turns package lifecycle scripts OFF for every dependency — and ` +
+          `those scripts are what BUILD the native modules an app needs at runtime (password hashing, image ` +
+          `processing, database engines). Nothing runs them afterwards, so the recipe verifies green here and ` +
+          `then crashes the seed or the server in a fresh clone, on an error that names none of this. The file ` +
+          `is the repository's own and a recipe may not edit it — override it for this install instead: ` +
+          `\`--ignore-scripts=false\` for npm/pnpm, a \`YARN_ENABLE_SCRIPTS=1\` prefix for yarn.`,
+        )
+      }
+    }
     // Host mutations: an install/build runs as a real shell in the working tree.
     for (const { pattern, what } of HOST_MUTATION_PATTERNS) {
       if (pattern.test(command)) {
@@ -1216,15 +1602,19 @@ export function staticProposalComplaints(
         )
       }
     }
-    complaints.push(...composeNamespaceComplaints(label, command, repoRoot))
+    complaints.push(...composeNamespaceComplaints(label, command, composeProject))
   }
   // `services.up`/`down` ARE the compose home, but the host-mutation rules hold
   // there too — bringing up the repo's own datastore never needs to escalate or
   // write outside the repo.
   const services = proposal.api?.services
-  for (const [label, command] of [['api.services.up', services?.up], ['api.services.down', services?.down]] as const) {
+  for (const [label, command] of [
+    ['api.services.up', services?.up],
+    ['api.services.down', services?.down],
+    ['api.services.reset', services?.reset],
+  ] as const) {
     if (!command) continue
-    complaints.push(...composeNamespaceComplaints(label, command, repoRoot))
+    complaints.push(...composeNamespaceComplaints(label, command, composeProject))
     for (const { pattern, what } of HOST_MUTATION_PATTERNS) {
       if (pattern.test(command)) {
         complaints.push(
@@ -1287,8 +1677,7 @@ export function staticProposalComplaints(
   // outright without one, so the omission silently blocks every credential/
   // deletion/config flow. `down -v` with the SAME compose file is the wipe.
   if (services?.up && /(?<![\w-])docker(?:\s+|-)compose\b/.test(services.up) && !services.reset) {
-    const composeFile = /-f\s+(\S+)/.exec(services.up)?.[1]
-    const suggested = composeFile ? `docker compose -f ${composeFile} down -v` : 'docker compose down -v'
+    const suggested = `docker compose ${firstComposeFlags(services.up).flags}down -v`
     complaints.push(
       `\`api.services.up\` manages docker compose services but declares no \`reset\` — without one the runner ` +
       `cannot restore the world after a \`world: mutates\` test, so every world-mutating scenario (credential ` +
@@ -1297,46 +1686,6 @@ export function staticProposalComplaints(
     )
   }
   return complaints
-}
-
-/**
- * The deterministic "a browser app exists" signal the web rule keys on: a
- * `next`/`remix` workspace app in the route-manifest inventory, or — for a
- * single-package repo the inventory cannot see — a browser framework in the
- * root package.json's dependencies. Returns human-readable evidence strings,
- * empty when nothing browser-shaped is found.
- */
-export function browserAppEvidence(
-  apps: readonly RecipeAppInventoryEntry[] | undefined,
-  repoRoot?: string,
-): string[] {
-  const evidence: string[] = []
-  for (const app of apps ?? []) {
-    if (app.framework === 'next' || app.framework === 'remix') {
-      evidence.push(`${app.dir} — ${app.framework}`)
-    }
-  }
-  if (evidence.length > 0 || repoRoot === undefined) return evidence
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')) as {
-      workspaces?: unknown
-      dependencies?: Record<string, string>
-      devDependencies?: Record<string, string>
-    }
-    // Single-package repos ONLY: a workspace root's dependencies are hoisted
-    // noise (a react-router in the root of a monorepo says nothing about which
-    // app ships it) — there the route-manifest inventory above is the signal.
-    if (pkg.workspaces !== undefined || fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml'))) {
-      return evidence
-    }
-    const deps = { ...pkg.dependencies, ...pkg.devDependencies }
-    for (const name of ['next', '@remix-run/react', 'react-router', 'react-router-dom']) {
-      if (deps[name]) return [`root package.json depends on ${name}`]
-    }
-  } catch {
-    // No readable root package.json — no browser evidence from it.
-  }
-  return evidence
 }
 
 function readDiscoveryInputs(repoRoot: string): {

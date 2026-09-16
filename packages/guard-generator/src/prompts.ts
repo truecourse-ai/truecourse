@@ -1933,14 +1933,16 @@ Concretely:
   module, a build that builds nothing) — the engine refuses those statically, and
   a stand-in that passed would test nothing.
 - A server that needs a datastore declares the repo's OWN bring-up under
-  \`api.services\` (\`{"up": "docker compose -f <repo compose file> up -d --wait …",
-  "down": "docker compose -f … stop"}\`) — never inside \`build\` (statically
+  \`api.services\` (\`{"up": "docker compose -p <dedicated-project> -f <repo compose file> up -d --wait …",
+  "down": "docker compose -p <dedicated-project> -f … stop"}\`) — never inside \`build\` (statically
   refused: the runner owns the services lifecycle, and a build's leftovers leak).
-  Namespace EVERY \`docker compose\` invocation: pass \`-p <dedicated-project>\`, or
-  point \`-f\` at a compose file that declares a top-level \`name:\` (a dedicated
-  test compose). A bare \`docker compose up/stop\` attaches to the repository's
-  DEFAULT compose project — the developer's own running stack, whose containers
-  it would recreate or stop — and is refused statically. And when the app pins a
+  Namespace EVERY \`docker compose\` invocation with \`-p <project>\`, the same
+  project in every one of them: the one the message names when it names one,
+  and any dedicated name of your own when it does not. Without \`-p\` compose
+  attaches to the project the working directory or the file's own \`name:\`
+  gives — the developer's own running stack, whose containers it would recreate
+  or stop and whose volumes the recipe's \`reset\` would wipe — and both that
+  and a project other than the one you were given are refused statically. And when the app pins a
   SQL datastore, run the repo's schema/migration step inside \`api.services.up\`
   after the bring-up — a compose that only starts an empty database boots a
   server with no schema behind a green health probe.
@@ -1992,6 +1994,13 @@ export interface RecipeDiscoveryInput {
    * single-package repo, where the prompt is exactly what it always was.
    */
   apps?: RecipeAppInventoryEntry[]
+  /**
+   * The compose project every `docker compose` invocation in the proposal must
+   * pass to `-p`. It is the identity of the world this run's datastore lives
+   * in, so the engine refuses any other name; absent (a developer's own tree)
+   * the proposer picks a dedicated one itself.
+   */
+  composeProject?: string
   /** On the retry after the engine's verification rejected a proposal, its evidence. */
   retry?: RecipeRetryContext
   /** On a re-ask after invalid output, the prior output quoted back. */
@@ -2007,6 +2016,14 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
     input.packageJson,
     '"""',
   ]
+  if (input.composeProject) {
+    lines.push(
+      '',
+      `The compose project this run's world lives in: ${input.composeProject}`,
+      `Every \`docker compose\` invocation you write passes \`-p ${input.composeProject}\` — that exact name, in`,
+      'up, down and reset alike. Any other project is refused statically.',
+    )
+  }
   if (input.apps && input.apps.length > 0) {
     lines.push(
       '',

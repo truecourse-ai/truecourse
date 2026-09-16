@@ -30,6 +30,7 @@
  * unset variable. A secret is never fabricated.
  */
 
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
@@ -43,8 +44,10 @@ import {
   type RouteManifestApp,
 } from '@truecourse/guard-runner'
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
+import { nextAppSegments, remixFlatSegments, REMIX_ROUTE_FILE } from '@truecourse/shared'
 import type { DatastoreUrlRef, Interface } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
+import type { RecipeAppInventoryEntry } from './prompts.js'
 import { WORK_TREE_DIR, corpusFilePath } from '@truecourse/shared/work-tree'
 
 /** One operation of the derived api surface — all the health ranking needs. */
@@ -78,6 +81,15 @@ export interface ProposeRecipeInputs {
    * 2026-08-20 bench showed what the model does with nothing.
    */
   manifestApps?: readonly RouteManifestApp[]
+  /**
+   * The identity of the docker WORLD this repository's runs share, which the
+   * proposed `api.services` names its compose project after: the workspace and
+   * the repository together (`<org>/<owner>/<repo>`), because a project's
+   * volumes are what `reset` wipes and two workspaces connected to one
+   * repository run their jobs side by side on one host. Absent ⇒ the checkout
+   * directory's own name, which is stable for a developer's own tree.
+   */
+  composeKey?: string
 }
 
 /** A deterministic proposal, or the reason the path refused to produce one. */
@@ -157,7 +169,24 @@ const DATABASE_IMAGES = new Set([
   'minio',
 ])
 
-const COMPOSE_FILES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
+/** The default compose file names, in the order compose itself prefers them. */
+const COMPOSE_FILES = ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml']
+
+/**
+ * The compose files a bare `docker compose` in `repoRoot` reads: the first
+ * default file that exists and, when one exists beside it, its `*.override.*`
+ * sibling — which compose merges over the base by default, and which is where
+ * a repository routinely keeps its dev-only ports and passwords. Naming the base
+ * with `-f` switches that merge OFF, so anything that names the base must name
+ * the override too. Empty when the repository ships no compose file.
+ */
+export function defaultComposeFiles(repoRoot: string): string[] {
+  const base = COMPOSE_FILES.find((f) => existsFile(repoRoot, f))
+  if (!base) return []
+  const stem = base.replace(/\.ya?ml$/, '')
+  const override = [`${stem}.override.yaml`, `${stem}.override.yml`].find((f) => existsFile(repoRoot, f))
+  return override ? [base, override] : [base]
+}
 
 // ---------------------------------------------------------------------------
 // The entry point
@@ -725,13 +754,15 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
     const schemes = inputs.securitySchemes ?? readCorpusSecuritySchemes(repoRoot)
     const { credentials, notes } = credentialStubs(schemes)
     todos.push(...notes)
-    let services = detectComposeServices(repoRoot)
+    const detected = detectComposeServices(repoRoot, inputs.composeKey)
+    let services: { up: string; down: string; reset?: string } | undefined = detected?.services
+    if (detected) todos.push(...detected.notes)
     let apiEnv: Record<string, string> = { ...(signals.serveEnv ?? {}) }
     // The repo declares a datastore in its source but ships no compose file to run
     // it: derive one. The compose file is not written here — this module
     // proposes, the caller writes it and verifies it, and deletes it if it fails.
     if (!services) {
-      const generated = generateDatastore(repoRoot, inputs.datastores ?? [])
+      const generated = generateDatastore(repoRoot, inputs.datastores ?? [], composeProject(repoRoot, inputs.composeKey))
       if (generated) {
         services = generated.plan.services
         apiEnv = { ...apiEnv, ...generated.plan.env }
@@ -750,6 +781,8 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
       ...(services ? { services } : {}),
       ...(credentials ? { credentials } : {}),
     }
+    const web = deriveWeb(repoRoot, signals, apiEnv, inputs)
+    if (web) recipe.web = web
   }
 
   const parsed = RecipeSchema.safeParse(recipe)
@@ -777,9 +810,10 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
 function generateDatastore(
   repoRoot: string,
   datastores: readonly DatastoreUrlRef[],
+  project: string,
 ): { plan: ComposePlan; write: boolean } | undefined {
   if (datastores.length === 0) return undefined
-  const derived = deriveGuardCompose(datastores)
+  const derived = deriveGuardCompose(datastores, project)
   if (!derived.ok) return undefined
   return { plan: derived.plan, write: !guardComposeInUse(repoRoot) }
 }
@@ -807,10 +841,61 @@ function normalizeRoutePath(routePath: string): string {
   return withSlash.length > 1 ? withSlash.replace(/\/+$/, '') : withSlash
 }
 
+/** What {@link detectComposeServices} decides: the recipe's `api.services` block
+ *  and any human fill-in the compose file implies. */
+export interface DetectedComposeServices {
+  services: { up: string; down: string; reset: string }
+  notes: string[]
+}
+
+/** How much of the identity the project name spells out before the digest. */
+const PROJECT_SLUG_MAX = 32
+
 /**
- * `docker compose up -d --wait` / `down` when the root compose file declares a
- * datastore image. The repo's own commands — the runner orchestrates nothing
- * itself, it just runs what the recipe names.
+ * The compose PROJECT a recipe's services run under, derived from the identity
+ * of the world its runs share. Never the default project (the working
+ * directory's own name): compose "resolves" a port or config change by
+ * RECREATING the running container, so an un-namespaced invocation reaches into
+ * the developer's live stack. The static compose rule in `recipe-discovery.ts`
+ * refuses any proposal without this.
+ *
+ * Two properties the name has to hold at once, since it is baked into the
+ * stored recipe's `-p` and a project's volumes are what `reset` wipes:
+ *
+ *  - STABLE for one identity, so every run addresses the same project whatever
+ *    throwaway directory it cloned into;
+ *  - UNIQUE across identities, so no two of them ever wipe each other. The
+ *    readable head is truncated and squeezed, which collides; the digest of the
+ *    whole identity is what actually separates them.
+ */
+export function composeProjectName(identity: string): string {
+  const canonical = identity.toLowerCase()
+  const slug = canonical.replace(/[^a-z0-9]+/g, '-').slice(0, PROJECT_SLUG_MAX).replace(/^-+|-+$/g, '')
+  const digest = createHash('sha256').update(canonical).digest('hex').slice(0, 10)
+  return `truecourse-${slug || 'repo'}-${digest}`
+}
+
+/** The project both compose paths run under: the caller's world identity, else
+ *  the checkout's own directory name (stable for a developer's own tree). */
+function composeProject(repoRoot: string, composeKey: string | undefined): string {
+  return composeProjectName(composeKey ?? path.basename(path.resolve(repoRoot)))
+}
+
+/**
+ * `docker compose up -d --wait` / `down` / `down -v` when the repository's
+ * compose file declares a datastore image. The repo's own file(s) — the runner
+ * orchestrates nothing itself, it just runs what the recipe names — but
+ * namespaced (`-p`) and with every parsed file named explicitly (`-f`, the
+ * override sibling included), so the command addresses exactly the stack this
+ * derivation read and nothing the developer is running.
+ *
+ * `up` brings up the app's INFRASTRUCTURE and never the app itself: a compose
+ * file that also declares the app would otherwise boot a second copy of it on
+ * the port the recipe's `serve` is about to claim. What counts as
+ * infrastructure is {@link selectComposeServices}'s decision, so a mail catcher
+ * or a search engine comes up beside the datastore instead of being dropped for
+ * not being one. A file whose services are all wanted needs no service list at
+ * all.
  *
  * `--wait` is not decoration: plain `up -d` returns as soon as the containers are
  * CREATED, and the server boots microseconds later against a Postgres that is not
@@ -819,29 +904,376 @@ function normalizeRoutePath(routePath: string): string {
  * file `--wait` blocks until the datastore is healthy; without one it costs nothing
  * (it waits for `running`, which `up -d` already reached).
  */
-export function detectComposeServices(
-  repoRoot: string,
-): { up: string; down: string; reset?: string } | undefined {
-  const file = COMPOSE_FILES.map((f) => path.join(repoRoot, f)).find((f) => fs.existsSync(f))
-  if (!file) return undefined
-  let doc: unknown
-  try {
-    doc = yaml.load(fs.readFileSync(file, 'utf-8'))
-  } catch {
-    return undefined
+export function detectComposeServices(repoRoot: string, composeKey?: string): DetectedComposeServices | undefined {
+  const files = defaultComposeFiles(repoRoot)
+  if (files.length === 0) return undefined
+  const services = mergedComposeServices(repoRoot, files)
+  if (!services) return undefined
+  const names = Object.keys(services)
+  const wanted = selectComposeServices(services)
+  if (![...wanted].some((name) => isDatabaseImage(asRecord(services[name]).image))) return undefined
+
+  const only = wanted.size === names.length ? [] : names.filter((name) => wanted.has(name))
+  const base = `docker compose -p ${composeProject(repoRoot, composeKey)} ${files.map((f) => `-f ${f}`).join(' ')}`
+  return {
+    // `reset` wipes the volumes so a `world: mutates` tail cannot leak damage into
+    // the next run; `down` deliberately preserves them (stopping is not forgetting).
+    services: {
+      up: `${base} up -d --wait${only.length > 0 ? ` ${only.join(' ')}` : ''}`,
+      down: `${base} down`,
+      reset: `${base} down -v`,
+    },
+    notes: composeEnvFileNotes(repoRoot, services, wanted),
   }
-  const services = asRecord((doc as Record<string, unknown> | null)?.services)
-  const hasDatabase = Object.values(services).some((service) => {
-    const image = asRecord(service).image
-    if (typeof image !== 'string') return false
-    const base = image.split('@')[0].split(':')[0].split('/').pop() ?? ''
-    return DATABASE_IMAGES.has(base.toLowerCase())
+}
+
+/**
+ * The `services:` of the compose files as compose reads them: each later file's
+ * service entries merged over the earlier's, key by key — the override's
+ * `ports`, `environment` or `image` win, and a service only the override
+ * declares exists. Null when a file does not parse.
+ */
+function mergedComposeServices(repoRoot: string, files: readonly string[]): Record<string, unknown> | null {
+  const merged: Record<string, unknown> = {}
+  for (const file of files) {
+    let doc: unknown
+    try {
+      doc = yaml.load(fs.readFileSync(path.join(repoRoot, file), 'utf-8'))
+    } catch {
+      return null
+    }
+    for (const [name, service] of Object.entries(asRecord((doc as Record<string, unknown> | null)?.services))) {
+      merged[name] = { ...asRecord(merged[name]), ...asRecord(service) }
+    }
+  }
+  return merged
+}
+
+/**
+ * Which services the bring-up starts: the app's infrastructure, decided by what
+ * each service IS rather than by an allowlist of images.
+ *
+ *  1. Every datastore image, and everything it `depends_on`.
+ *  2. A ROOT service (one nothing depends on) that declares no `depends_on` of
+ *     its own stands alone, so it is infrastructure the app reaches for without
+ *     the compose file saying so: the mail catcher, the search engine
+ *     (linkwarden's meilisearch, documenso's inbucket). It comes up. Dropping
+ *     it boots an app whose mail or search backend is missing, and every
+ *     scenario that then fails reads as a product bug.
+ *  3. A root that DOES depend on other services is a composition on top of the
+ *     stack: the app itself (built here, or its published image) or a proxy in
+ *     front of it. Only what it depends on comes up, never the root: the
+ *     recipe's own `serve` is the app under test, and a second copy of it
+ *     claims the port that serve is about to bind.
+ *  4. Minus every service BUILT from this repository (`build:`): that is the
+ *     app's own code by another door — unless a datastore cannot come up
+ *     without it (an init container), which keeps it.
+ *  5. Minus everything that depends on an excluded service: `up <name>` starts
+ *     the named service's dependencies too, so a proxy in front of the app
+ *     would drag the app up with it.
+ */
+function selectComposeServices(services: Record<string, unknown>): Set<string> {
+  const names = Object.keys(services)
+  const dependedOn = new Set(names.flatMap((name) => composeDependsOn(services[name])))
+  const datastores = names.filter((name) => isDatabaseImage(asRecord(services[name]).image))
+  const datastoreNeeds = withComposeDependencies(services, datastores)
+  const wanted = new Set(datastoreNeeds)
+  for (const root of names.filter((name) => !dependedOn.has(name) && !datastores.includes(name))) {
+    const needs = composeDependsOn(services[root])
+    for (const dep of withComposeDependencies(services, needs.length > 0 ? needs : [root])) wanted.add(dep)
+  }
+  for (const name of wanted) {
+    if (asRecord(services[name]).build !== undefined && !datastoreNeeds.has(name)) wanted.delete(name)
+  }
+  let pruned = true
+  while (pruned) {
+    pruned = false
+    for (const name of wanted) {
+      if (composeDependsOn(services[name]).some((dep) => dep in services && !wanted.has(dep))) {
+        wanted.delete(name)
+        pruned = true
+      }
+    }
+  }
+  return wanted
+}
+
+/** Is this compose service's `image` one of the datastore images? */
+function isDatabaseImage(image: unknown): boolean {
+  if (typeof image !== 'string') return false
+  const base = image.split('@')[0].split(':')[0].split('/').pop() ?? ''
+  return DATABASE_IMAGES.has(base.toLowerCase())
+}
+
+/** A service's `depends_on`, in either of compose's two spellings. */
+function composeDependsOn(service: unknown): string[] {
+  const dependsOn = asRecord(service).depends_on
+  return Array.isArray(dependsOn)
+    ? dependsOn.filter((d): d is string => typeof d === 'string')
+    : Object.keys(asRecord(dependsOn))
+}
+
+/** The named services plus everything they `depends_on`, transitively — bringing a
+ *  datastore up without its own sidecar (an init container, a proxy) starts a stack
+ *  that cannot become healthy. */
+function withComposeDependencies(services: Record<string, unknown>, roots: readonly string[]): Set<string> {
+  const wanted = new Set<string>()
+  const visit = (name: string) => {
+    if (wanted.has(name) || !(name in services)) return
+    wanted.add(name)
+    for (const dep of composeDependsOn(services[name])) visit(dep)
+  }
+  for (const root of roots) visit(root)
+  return wanted
+}
+
+/** A brought-up service reading an `env_file` the repository does not ship is a
+ *  boot that dies on a missing variable. Reported as a fill-in; the file's contents
+ *  are the user's to write, since guard never fabricates a secret. */
+function composeEnvFileNotes(
+  repoRoot: string,
+  services: Record<string, unknown>,
+  wanted: ReadonlySet<string>,
+): string[] {
+  const missing = new Map<string, string>()
+  for (const name of wanted) {
+    const declared = asRecord(services[name]).env_file
+    const entries = Array.isArray(declared) ? declared : [declared]
+    for (const entry of entries) {
+      // Compose takes a bare string or `{ path, required }`; both name one file.
+      const file = typeof entry === 'string' ? entry : typeof asRecord(entry).path === 'string' ? (asRecord(entry).path as string) : null
+      if (!file || existsFile(repoRoot, file)) continue
+      if (!missing.has(file)) missing.set(file, name)
+    }
+  }
+  return [...missing].map(
+    ([file, name]) =>
+      `create ${file} — the compose service "${name}" reads it as an \`env_file\` and this repository does not ship one; the datastore will not come up until the variables it names are set`,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// The web surface
+// ---------------------------------------------------------------------------
+
+/**
+ * The deterministic "a browser app exists" signal the web rule keys on: a
+ * `next`/`remix` workspace app in the route-manifest inventory, or — for a
+ * single-package repo the inventory cannot see — a browser framework in the
+ * root package.json's dependencies. Returns human-readable evidence strings,
+ * empty when nothing browser-shaped is found.
+ */
+export function browserAppEvidence(
+  apps: readonly RecipeAppInventoryEntry[] | undefined,
+  repoRoot?: string,
+): string[] {
+  const evidence: string[] = []
+  for (const app of apps ?? []) {
+    if (app.framework === 'next' || app.framework === 'remix') {
+      evidence.push(`${app.dir} — ${app.framework}`)
+    }
+  }
+  if (evidence.length > 0 || repoRoot === undefined) return evidence
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')) as {
+      workspaces?: unknown
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    // Single-package repos ONLY: a workspace root's dependencies are hoisted
+    // noise (a react-router in the root of a monorepo says nothing about which
+    // app ships it) — there the route-manifest inventory above is the signal.
+    if (pkg.workspaces !== undefined || fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml'))) {
+      return evidence
+    }
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+    for (const name of ['next', '@remix-run/react', 'react-router', 'react-router-dom']) {
+      if (deps[name]) return [`root package.json depends on ${name}`]
+    }
+  } catch {
+    // No readable root package.json — no browser evidence from it.
+  }
+  return evidence
+}
+
+
+/** Pages a browser app renders for an ANONYMOUS visitor, best first. `/` is the
+ *  fallback and routinely redirects (or renders a shell that never settles), so a
+ *  sign-in page the app actually ships outranks it. */
+const WEB_HEALTH_PAGE_RANKING = ['/login', '/signin', '/sign-in', '/auth/login', '/auth/signin']
+
+/** File extensions a Next/Remix route module is written in. */
+const PAGE_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js', '.mjs']
+
+/**
+ * The `web` block for a repo that serves a BROWSER app, addressed at a page that
+ * renders without a session. Derived only when there IS a served process and the
+ * repo shows browser evidence — the same evidence the static rule refuses the
+ * absent `web` block on, so this path stops paying for a repair session that only
+ * ever restated the api block.
+ *
+ * No env is invented here. A surface that needs a variable to boot fails
+ * verification and the session adds it with the failure in front of it.
+ */
+function deriveWeb(
+  repoRoot: string,
+  signals: RecipeSignals,
+  env: Record<string, string>,
+  inputs: ProposeRecipeInputs,
+): Record<string, unknown> | undefined {
+  if (!signals.serve) return undefined
+  const manifestApps = inputs.manifestApps ?? []
+  const apps = manifestApps.map((app) => ({
+    dir: app.dir,
+    ...(app.pkg ? { pkg: app.pkg } : {}),
+    framework: app.framework,
+    prefixes: app.prefixes,
+  }))
+  if (browserAppEvidence(apps, repoRoot).length === 0) return undefined
+  const surface = webSurface(repoRoot, signals, manifestApps)
+  if (!surface) return undefined
+  return {
+    serve: surface.serve,
+    ...(surface.app ? { app: surface.app, cwd: 'repo' } : {}),
+    healthPath: anonymousPageHealthPath(repoRoot, surface.app, surface.framework),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
+  }
+}
+
+/**
+ * The process the `web` block boots: the SERVED one when it is itself the browser
+ * app (a fullstack Next/Remix server is one server), else the browser app's own
+ * serve — the api block crowns the most-routed member, which in an api+web
+ * monorepo is the api, and a web block aimed at that boots a second copy of the
+ * api and asks it for a page. Undefined when the browser app names no plain
+ * `start` of its own: guessing costs an install, a build and a boot before it
+ * fails, where no block at all leaves the static "declare a `web` block"
+ * complaint standing, which is free and actionable.
+ */
+function webSurface(
+  repoRoot: string,
+  signals: RecipeSignals,
+  apps: readonly RouteManifestApp[],
+): { serve: string[]; app?: string; framework?: BrowserFramework } | undefined {
+  const serve = signals.serve
+  if (!serve) return undefined
+  // No member dir ⇒ a single-package repo, where the one served process is the
+  // whole app and the browser evidence came off its own manifest; which browser
+  // framework it is stays unread, so the page lookup tries every convention.
+  if (!signals.serveApp) return { serve }
+  const browserFramework = (app: RouteManifestApp): BrowserFramework | null =>
+    app.framework === 'next' || app.framework === 'remix' ? app.framework : null
+  const served = apps.find((app) => app.dir === signals.serveApp)
+  const servedFramework = served ? browserFramework(served) : null
+  if (servedFramework) return { serve, app: signals.serveApp, framework: servedFramework }
+
+  const browser = apps.flatMap((app) => {
+    const framework = browserFramework(app)
+    return framework && !EXAMPLE_DIR.test(app.dir) ? [{ dir: app.dir, framework }] : []
   })
-  // `reset` wipes the volumes so a `world: mutates` tail cannot leak damage into
-  // the next run; `down` deliberately preserves them (stopping is not forgetting).
-  return hasDatabase
-    ? { up: 'docker compose up -d --wait', down: 'docker compose down', reset: 'docker compose down -v' }
-    : undefined
+  if (browser.length !== 1) return undefined
+  const { dir, framework } = browser[0]!
+  const memberPkg = readJson(path.join(repoRoot, dir, 'package.json'))
+  const name = typeof memberPkg?.name === 'string' && memberPkg.name ? memberPkg.name : null
+  const start = asRecord(memberPkg?.scripts).start
+  if (!name || typeof start !== 'string' || !start.trim()) return undefined
+  if (DEV_SCRIPT_MARKERS.some((marker) => start.toLowerCase().includes(marker))) return undefined
+  return { serve: workspaceRunArgv(repoRoot, name), app: dir, framework }
+}
+
+/** The browser frameworks whose routing conventions the page lookup reads. */
+type BrowserFramework = 'next' | 'remix'
+
+/** The best-ranked anonymous page the SERVED app actually ships, else `/`. */
+function anonymousPageHealthPath(repoRoot: string, appDir?: string, framework?: BrowserFramework): string {
+  const base = appDir ? path.join(repoRoot, appDir) : repoRoot
+  const found = WEB_HEALTH_PAGE_RANKING.find((candidate) => pageExists(base, candidate.slice(1).split('/'), framework))
+  return found ?? '/'
+}
+
+/** Does the app under `base` declare a page at these path segments — in a Next
+ *  pages router, a Next app router or Remix's flat routes? `src/` is checked
+ *  alongside the app root, which is where both put them. The address rules are
+ *  the frameworks' own, read from `@truecourse/shared`; a KNOWN framework is held
+ *  to its own, so a Next app's `app/routes/x/route.ts` handler is not read as a
+ *  remix page. */
+function pageExists(base: string, segments: readonly string[], framework?: BrowserFramework): boolean {
+  for (const root of [base, path.join(base, 'src')]) {
+    if (framework !== 'remix') {
+      const pagesFile = path.join(root, 'pages', ...segments)
+      if (withExtension(pagesFile) || withExtension(path.join(pagesFile, 'index'))) return true
+      if (appRouterPageExists(path.join(root, 'app'), segments)) return true
+    }
+    if (framework !== 'next' && remixRouteExists(path.join(root, 'app', 'routes'), segments)) return true
+  }
+  return false
+}
+
+/** `<dir>/<segments…>/page.<ext>`, with each directory read by Next's own rule:
+ *  a route group contributes no segment and is stepped THROUGH, while a private
+ *  folder, a parallel slot and an interception declare no standalone address at
+ *  all (`app/@modal/login/page.tsx` does not serve `/login`). */
+function appRouterPageExists(dir: string, segments: readonly string[]): boolean {
+  if (segments.length === 0) return withExtension(path.join(dir, 'page'))
+  for (const entry of subdirectories(dir)) {
+    const addressed = nextAppSegments([entry])
+    if (addressed === null) continue
+    const child = path.join(dir, entry)
+    if (addressed.length === 0) {
+      if (appRouterPageExists(child, segments)) return true
+      continue
+    }
+    if (addressed[0] === segments[0] && appRouterPageExists(child, segments.slice(1))) return true
+  }
+  return false
+}
+
+/** Does a flat route under `routesDir` address these segments? The grammar is
+ *  the shared one: a `+` directory groups tokens, any other directory addresses
+ *  itself through the `route` module it holds (`login/route.tsx` addresses what
+ *  `login.route.tsx` does) and colocates everything else. */
+function remixRouteExists(routesDir: string, segments: readonly string[]): boolean {
+  const addresses = (relative: readonly string[]): boolean => {
+    const addressed = remixFlatSegments(relative)
+    return addressed !== null && addressed.length === segments.length && addressed.every((s, i) => s === segments[i])
+  }
+  const walk = (dir: string, prefix: readonly string[]): boolean => {
+    for (const entry of dirEntries(dir)) {
+      if (entry.isDirectory()) {
+        if (entry.name.endsWith('+')) {
+          if (walk(path.join(dir, entry.name), [...prefix, entry.name])) return true
+          continue
+        }
+        if (withExtension(path.join(dir, entry.name, 'route')) && addresses([...prefix, `${entry.name}.route.tsx`])) {
+          return true
+        }
+        continue
+      }
+      if (REMIX_ROUTE_FILE.test(entry.name) && addresses([...prefix, entry.name])) return true
+    }
+    return false
+  }
+  return walk(routesDir, [])
+}
+
+function dirEntries(dir: string): fs.Dirent[] {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+}
+
+function subdirectories(dir: string): string[] {
+  return dirEntries(dir).filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+}
+
+/** The path with any route-module extension, when one of them is a file. */
+function withExtension(pathWithoutExtension: string): boolean {
+  return PAGE_EXTENSIONS.some((ext) => {
+    const abs = `${pathWithoutExtension}${ext}`
+    return fs.existsSync(abs) && fs.statSync(abs).isFile()
+  })
 }
 
 /**

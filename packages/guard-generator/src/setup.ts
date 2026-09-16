@@ -53,7 +53,9 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { promisify } from 'node:util'
 import {
   loadRecipe,
   recipePath,
@@ -78,6 +80,7 @@ import {
   type RecipeApiExternal,
 } from '@truecourse/guard-runner'
 import { parseSecuritySchemes, parseOpenApiSpec, type SecurityScheme } from '@truecourse/shared/openapi'
+import { WORK_TREE_DIR } from '@truecourse/shared/work-tree'
 import type {
   DatastoreUrlRef,
   DetectedExternalService,
@@ -92,6 +95,7 @@ import type {
   Interface,
   MapperDiagnostic,
 } from '@truecourse/shared'
+import { GUARD_COMPOSE_FILE } from './datastore-compose.js'
 import { discoverRecipe, type RecipeDiscoveryPhase, type RecipeRepairFn } from './recipe-discovery.js'
 import { detectEcosystems, routesFromInterfaces, type ApiRouteRef } from './recipe-propose.js'
 import { probeApiServers } from './endpoint-probe.js'
@@ -119,6 +123,8 @@ import {
 } from './seed-evidence.js'
 import type { InterfaceProvider } from './generate.js'
 import type { RecipeRunner } from './runners.js'
+
+const execFileAsync = promisify(execFile)
 
 /** How many spec docs the seed draft is shown, and how much of each. */
 const MAX_SPEC_EXCERPTS = 6
@@ -159,6 +165,15 @@ export class SetupStepNotReadyError extends Error {
 
 export interface GuardSetupOptions {
   repoRoot: string
+  /**
+   * The identity of the docker WORLD this repository's runs share: the
+   * workspace and the repository together (`<org>/<owner>/<repo>`), when the
+   * caller has one. Recipe discovery names the compose project after it, so
+   * every run of the pair shares one project whatever directory it was cloned
+   * into, and no other pair's `reset` reaches its volumes. Absent ⇒ the
+   * checkout directory's own name.
+   */
+  composeKey?: string
   /** Interface mapping seam — generate's provider shape, optionally extended
    *  with the mapping's run diagnostics; see {@link GuardSetupInterfaceProvider}. */
   interfaces?: GuardSetupInterfaceProvider
@@ -376,6 +391,16 @@ export interface GuardSetupSeedSessionInput {
   existingScript?: { scriptPath: string; scriptContent: string }
   /** The seed step's PRE-RUN input fingerprint — the session's cache key. */
   fingerprint: string
+  /**
+   * Whether setup was handed a FRESH CHECKOUT — a git repository carrying
+   * nothing git ignores beyond what the caller materialized into it. A cloned
+   * repository arrives that way and so does every run of it; a folder copied
+   * off this machine arrives with the developer's dependencies and build
+   * output, and a run of it does too. The seed's cold-clone proof runs only in
+   * the first case: it proves the seed against a clone, which is the tree a run
+   * gets only there.
+   */
+  freshCheckout: boolean
   /** The live phase line: what is running now, and what to call it when done. */
   onPhase?: (running: string, done: string) => void
 }
@@ -390,8 +415,25 @@ export type GuardSetupSeedSessionResult =
       fromCache?: boolean
       /** The session died without an outcome and its last verified draft was folded. */
       salvaged?: boolean
+      /**
+       * The cold-clone proof did NOT run, in one line saying why. The seed was
+       * proved in the warm tree alone, so the report says so rather than
+       * letting a reader assume a clone verified it.
+       */
+      coldProofSkipped?: string
     }
-  | { status: 'failed' | 'skipped'; reason: string; sessionRunId?: string }
+  | {
+      status: 'failed' | 'skipped'
+      reason: string
+      sessionRunId?: string
+      /**
+       * The failure is the RECIPE's, not the seed's: the cold-clone proof ran
+       * the recipe's own `install`/`build` in a fresh copy and one of them
+       * failed. Setup treats that as the recipe gate giving way — the recipe
+       * row is unsettled so the next run re-derives it, and the run fails.
+       */
+      recipeDefect?: boolean
+    }
 export interface GuardSetupPreparationSessionInput {
   repoRoot: string
   recipe: Recipe
@@ -468,11 +510,17 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const steps: GuardSetupTaxonomyStep[] = []
   const settled = settledFingerprints(repoRoot, opts.refresh === true)
 
+  // Asked BEFORE any step installs or builds anything: what this tree carries
+  // right now is what a run of this repository is handed, and the seed's
+  // cold-clone proof needs to know which kind of tree that is.
+  const freshCheckout = await isFreshCheckout(repoRoot)
+
+  const priorReport = readGuardSetup(repoRoot)
   // Single-step mode. `prior` is both the merge source and the evidence a soft
   // step ever ran — a step that ran and produced nothing legitimately left no
   // artifact behind, so the row is what says it happened.
   const only = opts.only
-  const prior = only ? readGuardSetup(repoRoot) : null
+  const prior = only ? priorReport : null
   const rank = (step: GuardSetupOnlyStep): number => GUARD_SETUP_ONLY_STEPS.indexOf(step)
   /** Prior to the chosen step: replay from disk, never spend. */
   const replayed = (step: GuardSetupOnlyStep): boolean => only !== undefined && rank(step) < rank(only)
@@ -505,6 +553,14 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // re-runs everything — the step re-derives when the repo moved.
   const recipeInputFp = ecosystemFingerprint(repoRoot)
   const preexisting = reloadRecipe(repoRoot)
+  // A recipe the last run FAILED is never reused. Discovery answers `exists`
+  // for whatever sits at the recipe path, and the recipe travels in the setup
+  // bundle, so without this the refused recipe is read back, re-folded and
+  // re-refused every run — each one paying the whole seed fold to reach the
+  // same verdict — until someone asks for a refresh by hand.
+  const rederive =
+    opts.refresh === true ||
+    (priorReport?.steps ?? []).some((row) => row.key === 'recipe' && row.status === 'failed')
   let recipe: Recipe
   let recipeStep: GuardSetupRecipeStep
   if (replayed('recipe')) {
@@ -528,16 +584,18 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     fact('recipe', 'unchanged since the last setup, from cache: neither re-derived nor re-probed')
     opts.onStepDone?.('recipe', 'unchanged — reused without re-verifying')
   } else {
-    // A REFRESH re-derives, and discovery writes what it derived — which knows nothing
-    // about the blocks it never proposes (`api.seed`, `api.externals`,
-    // `api.credentials`, `ownHosts`). Those are user- and setup-authored CAPABILITY
-    // declarations; losing them to a refresh would be silent data loss, and it would
-    // also defeat the seed confirmation below (a wiped `api.seed` is not a seed anyone
-    // is asked about replacing). Captured before, merged back after.
-    const authored = opts.refresh ? authoredBlocks(preexisting) : null
+    // A RE-DERIVATION (a refresh, or a recipe the last run failed) writes what
+    // discovery derived — which knows nothing about the blocks it never proposes
+    // (`api.seed`, `api.externals`, `api.credentials`, `ownHosts`). Those are user-
+    // and setup-authored CAPABILITY declarations; losing them would be silent data
+    // loss, and it would also defeat the seed confirmation below (a wiped `api.seed`
+    // is not a seed anyone is asked about replacing). Captured before, merged back
+    // after.
+    const authored = rederive ? authoredBlocks(preexisting) : null
     const discovery = await discoverRecipe(repoRoot, opts.recipeRunner, {
-      ...(opts.refresh ? { ignoreExisting: true } : {}),
+      ...(rederive ? { ignoreExisting: true } : {}),
       ...(opts.repair ? { repair: opts.repair } : {}),
+      ...(opts.composeKey ? { composeKey: opts.composeKey } : {}),
       routes: async () => routesFromInterfaces((await mapOnce()).interfaces),
       database: async () => {
         const db = (await mapOnce()).database
@@ -930,6 +988,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const seedFpOf = (): string =>
     seedFingerprint(computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
   let seedStep: GuardSetupSeedStep | undefined
+  /** A recipe defect the seed's cold-clone proof surfaced: the run fails on it. */
+  let recipeFailure: string | undefined
   if (enter('seed')) {
     const seedFpPre = seedFpOf()
     if (replayed('seed')) {
@@ -981,6 +1041,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         }),
         requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,
+        freshCheckout,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
       seedStep = seedRun.step
@@ -993,7 +1054,30 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         inputFingerprint: seedFpOf(),
         ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
       })
+      // The cold-clone proof is the one place the recipe's `install`/`build`
+      // run in a tree that did not grow across the session's attempts. When
+      // they fail there, the recipe verified against a tree a fresh clone will
+      // not have — a recipe-gate failure found late. Reported as one: the
+      // recipe row is UNSETTLED (the next run re-derives instead of skipping
+      // on its unchanged manifests) and the run fails with the reason, so
+      // nothing chains a generate onto an install that does not work.
+      if (seedRun.recipeDefect && seedStep.reason) {
+        recipeFailure = seedStep.reason
+        const recipeRow = steps.findIndex((row) => row.key === 'recipe')
+        const row: GuardSetupTaxonomyStep = {
+          key: 'recipe',
+          status: 'failed',
+          reason: recipeFailure,
+          inputFingerprint: recipeInputFp,
+          ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
+        }
+        if (recipeRow >= 0) steps[recipeRow] = row
+        else steps.push(row)
+        recipeStep = { ...recipeStep, status: 'failed', reason: recipeFailure }
+        fact('recipe', `unsettled by the seed's cold-clone proof: ${firstReasonLine(recipeFailure)}`)
+      }
       fact('seed', seedOutcomeFact(seedStep, seedRun.fromCache === true))
+      if (seedRun.coldProofSkipped) fact('seed', seedRun.coldProofSkipped)
       for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
       opts.onStepDone?.('seed', seedSummary(seedStep))
     }
@@ -1082,8 +1166,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     recipe: reloadRecipe(repoRoot) ?? current,
     report: {
       ranAt: new Date().toISOString(),
-      status: preparationFailure ? 'failed' : 'ok',
-      ...(preparationFailure ? { reason: preparationFailure } : {}),
+      status: recipeFailure || preparationFailure ? 'failed' : 'ok',
+      ...(recipeFailure ? { reason: recipeFailure } : preparationFailure ? { reason: preparationFailure } : {}),
       steps: only ? mergeStepSpine(steps, prior) : steps,
       recipe: recipeStep,
       ...(externals ? { externals } : {}),
@@ -1123,6 +1207,41 @@ function mergeStepSpine(
     if (row) out.push(row)
   }
   return out
+}
+
+/**
+ * Whether `repoRoot` is a FRESH CHECKOUT: a git repository whose working tree
+ * carries nothing git ignores except what a caller materialized into it. That
+ * is how a cloned repository arrives, and how every run of it arrives; a folder
+ * copied off this machine arrives with the developer's dependencies and build
+ * output instead.
+ *
+ * `false` for a tree git cannot read at all: without git there is no clone for a
+ * run's tree to be compared to.
+ */
+async function isFreshCheckout(repoRoot: string): Promise<boolean> {
+  // What a caller wrote into this tree before setup ran is not evidence of a
+  // warm one: the work tree, the datastore compose file guard generates, and
+  // the corpus's own documents, which land wherever their refs point (the
+  // workspace corpus a hosted job materializes writes them under `context/`).
+  const materialized = new Set<string>([WORK_TREE_DIR, GUARD_COMPOSE_FILE])
+  for (const ref of readCorpusAreaTags(repoRoot).keys()) {
+    const root = ref.split('/')[0]
+    if (root) materialized.add(root)
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', repoRoot, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'],
+      { maxBuffer: 64 * 1024 * 1024 },
+    )
+    return stdout
+      .split('\0')
+      .filter(Boolean)
+      .every((rel) => materialized.has(rel.replace(/\/$/, '')))
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -1610,8 +1729,17 @@ async function runSeedStep(args: {
   requiredResources: RequiredResource[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
+  /** Whether the tree setup was handed is a fresh checkout — the cold proof's gate. */
+  freshCheckout: boolean
   onPhase: (running: string, done: string) => void
-}): Promise<{ step: GuardSetupSeedStep; sessionRunId?: string; fromCache?: boolean }> {
+}): Promise<{
+  step: GuardSetupSeedStep
+  sessionRunId?: string
+  fromCache?: boolean
+  recipeDefect?: boolean
+  /** The cold-clone proof stood down, in the seam's own words. */
+  coldProofSkipped?: string
+}> {
   const { opts, recipe, database, routes, schemes } = args
   const existing = recipe.api?.seed
 
@@ -1694,6 +1822,7 @@ async function runSeedStep(args: {
         })()
       : {}),
     fingerprint: args.fingerprint,
+    freshCheckout: args.freshCheckout,
     onPhase: args.onPhase,
   })
 
@@ -1713,11 +1842,13 @@ async function runSeedStep(args: {
       },
       ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
       ...(result.fromCache ? { fromCache: true } : {}),
+      ...(result.coldProofSkipped ? { coldProofSkipped: result.coldProofSkipped } : {}),
     }
   }
   return {
     step: { status: result.status, reason: result.reason },
     ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
+    ...(result.recipeDefect ? { recipeDefect: true } : {}),
   }
 }
 

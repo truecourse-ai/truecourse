@@ -18,9 +18,11 @@ import { afterAll, describe, it, expect } from 'vitest'
 import { staticProposalComplaints, type RecipeAppInventoryEntry } from '@truecourse/guard-generator'
 
 /**
- * A repo whose compose files mirror the 2026-08-21 cal.diy/documenso layout:
- * a NAMESPACED test compose (top-level `name:`), the dev compose that pins
- * `container_name:` but no project name, and a namespaced reference compose.
+ * A repo whose compose files mirror the 2026-08-21 cal.diy/documenso layout: a
+ * test compose that pins its own top-level `name:`, the dev compose that pins
+ * `container_name:` and no project name, and a reference compose that pins a
+ * name too. None of them namespaces a RECIPE's invocation, since a file's
+ * `name:` is the project its author runs it under; only `-p` does.
  */
 const dirs: string[] = []
 afterAll(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }) })
@@ -33,6 +35,14 @@ function composeRepo(): string {
   fs.writeFileSync(path.join(r, 'docker/testing/compose.yml'), 'name: acme-testing\nservices:\n  database:\n    image: postgres\n')
   fs.writeFileSync(path.join(r, 'docker/development/compose.yml'), 'services:\n  database:\n    container_name: database\n    image: postgres\n')
   fs.writeFileSync(path.join(r, 'reference/seed/compose.yml'), 'name: tc-ref-acme\nservices:\n  database:\n    image: postgres\n')
+  return r
+}
+
+/** A repo carrying the manager config files under test. */
+function rcRepo(files: Record<string, string>): string {
+  const r = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-static-rc-'))
+  dirs.push(r)
+  for (const [name, body] of Object.entries(files)) fs.writeFileSync(path.join(r, name), body)
   return r
 }
 
@@ -103,7 +113,7 @@ describe('staticProposalComplaints — compose-in-build and host mutations', () 
     const complaints = staticProposalComplaints(
       {
         build:
-          'docker compose -f docker/testing/compose.yml up -d --wait database && npm run build',
+          'docker compose -p acme-truecourse -f docker/testing/compose.yml up -d --wait database && npm run build',
         api: { serve: ['node', 'server.mjs'], healthPath: '/health' },
       },
       undefined,
@@ -146,7 +156,7 @@ describe('staticProposalComplaints — compose-in-build and host mutations', () 
         api: {
           serve: ['node', 'server.mjs'],
           healthPath: '/health',
-          services: { up: 'docker compose -f docker/testing/compose.yml up -d --wait database', down: 'docker compose -f docker/testing/compose.yml stop', reset: 'docker compose -f docker/testing/compose.yml down -v' },
+          services: { up: 'docker compose -p acme-truecourse -f docker/testing/compose.yml up -d --wait database', down: 'docker compose -p acme-truecourse -f docker/testing/compose.yml stop', reset: 'docker compose -p acme-truecourse -f docker/testing/compose.yml down -v' },
         },
       },
       undefined,
@@ -197,11 +207,54 @@ describe('staticProposalComplaints — the compose NAMESPACE rule (cal.diy 2026-
       undefined,
       composeRepo(),
     )
-    // The namespaced reference-compose halves stay legal; the bare halves are
-    // refused in BOTH up and down.
-    expect(complaints.filter((c) => c.includes('project namespace'))).toHaveLength(2)
+    // Every invocation is refused, the bare halves and the ones that lean on the
+    // reference compose's own `name:` alike, in BOTH up and down.
+    expect(complaints.filter((c) => c.includes('project namespace'))).toHaveLength(4)
     expect(complaints.some((c) => c.includes('api.services.up'))).toBe(true)
     expect(complaints.some((c) => c.includes('api.services.down'))).toBe(true)
+  })
+
+  // `reset` is EXECUTED now — by verification before `up`, by the seed's cold
+  // proof — so an un-namespaced `down -v` reaches the developer's own stack
+  // exactly as an un-namespaced `up` does, volumes included.
+  it('holds `api.services.reset` to the namespace rule too', () => {
+    const complaints = staticProposalComplaints(
+      {
+        build: 'true',
+        api: {
+          ...serve,
+          services: {
+            up: 'docker compose -p acme-truecourse -f docker/development/compose.yml up -d --wait database',
+            down: 'docker compose -p acme-truecourse -f docker/development/compose.yml stop',
+            reset: 'docker compose down -v',
+          },
+        },
+      },
+      undefined,
+      composeRepo(),
+    )
+    expect(complaints).toHaveLength(1)
+    expect(complaints[0]).toContain('api.services.reset')
+    expect(complaints[0]).toContain('without an explicit project namespace')
+  })
+
+  it('suggests a reset that carries the `up` command\'s own project and file flags', () => {
+    const complaints = staticProposalComplaints(
+      {
+        build: 'true',
+        api: {
+          ...serve,
+          services: {
+            up: 'docker compose -p acme-truecourse -f docker/development/compose.yml up -d --wait database',
+            down: 'docker compose -p acme-truecourse -f docker/development/compose.yml stop',
+          },
+        },
+      },
+      undefined,
+      composeRepo(),
+    )
+    const hit = complaints.find((c) => c.includes('declares no `reset`'))
+    expect(hit).toContain('`docker compose -p acme-truecourse -f docker/development/compose.yml down -v`')
   })
 
   it('accepts `-p <project>` — including the stdin `-f -` shape documenso used legitimately', () => {
@@ -223,29 +276,20 @@ describe('staticProposalComplaints — the compose NAMESPACE rule (cal.diy 2026-
     expect(complaints).toEqual([])
   })
 
-  it('refuses `-f -` (stdin) without `-p`, and an `-f` file that pins no top-level name:', () => {
+  it('refuses an `-f` without `-p` whatever it names: stdin, the dev compose, the test compose', () => {
     const r = composeRepo()
-    const stdin = staticProposalComplaints(
-      { build: 'true', api: { ...serve, services: { up: 'cat c.yml | docker compose -f - up -d' } } },
-      undefined,
-      r,
-    )
-    expect(stdin.some((c) => c.includes('project namespace'))).toBe(true)
-
-    const devCompose = staticProposalComplaints(
-      { build: 'true', api: { ...serve, services: { up: 'docker compose -f docker/development/compose.yml up -d --wait database' } } },
-      undefined,
-      r,
-    )
-    expect(devCompose.some((c) => c.includes('project namespace') && c.includes('docker/development/compose.yml'))).toBe(true)
-  })
-
-  it('without a repoRoot an `-f` file cannot be verified and counts as unpinned', () => {
-    const complaints = staticProposalComplaints({
-      build: 'true',
-      api: { ...serve, services: { up: 'docker compose -f docker/testing/compose.yml up -d' } },
-    })
-    expect(complaints.some((c) => c.includes('project namespace'))).toBe(true)
+    for (const up of [
+      'cat c.yml | docker compose -f - up -d',
+      'docker compose -f docker/development/compose.yml up -d --wait database',
+      'docker compose -f docker/testing/compose.yml up -d --wait database',
+    ]) {
+      const complaints = staticProposalComplaints(
+        { build: 'true', api: { ...serve, services: { up } } },
+        undefined,
+        r,
+      )
+      expect(complaints.some((c) => c.includes('project namespace')), up).toBe(true)
+    }
   })
 })
 
@@ -274,5 +318,93 @@ describe('staticProposalComplaints — the workspace inventory rule', () => {
     const cliOnly: RecipeAppInventoryEntry[] = [{ dir: 'packages/cli', framework: 'other', prefixes: [] }]
     expect(staticProposalComplaints({ build: 'true', entry: ['node', 'bin.mjs'] }, cliOnly)).toEqual([])
     expect(staticProposalComplaints({ build: 'true', entry: ['node', 'bin.mjs'] })).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The lifecycle-script rule: an install that buys its green by not running
+// postinstall builds nothing the seed or the server can use.
+// ---------------------------------------------------------------------------
+
+describe('staticProposalComplaints — installs that skip lifecycle scripts', () => {
+  const API = { serve: ['node', 'dist/server.js'], healthPath: '/health' }
+  const skipping = [
+    'yarn install --immutable --mode=skip-build',
+    'yarn install --immutable --mode skip-build',
+    'npm ci --ignore-scripts',
+    'pnpm install --frozen-lockfile --ignore-scripts',
+    'npm_config_ignore_scripts=true npm ci',
+    'YARN_ENABLE_SCRIPTS=0 yarn install --immutable',
+  ]
+
+  for (const install of skipping) {
+    it(`refuses \`${install}\``, () => {
+      const complaints = staticProposalComplaints({ install, build: 'true', api: API })
+      const hit = complaints.find((c) => c.includes('lifecycle scripts'))
+      expect(hit).toBeTruthy()
+      // Says WHY it is refused (the native modules nobody builds afterwards) and
+      // what to do instead (make the one failing postinstall succeed).
+      expect(hit).toContain('native modules')
+      expect(hit).toContain('PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1')
+    })
+  }
+
+  it('refuses the same flags in a build command', () => {
+    const complaints = staticProposalComplaints({ build: 'yarn workspaces focus --production --mode=skip-build', api: API })
+    expect(complaints.some((c) => c.includes('lifecycle scripts'))).toBe(true)
+  })
+
+  it('leaves an honest install alone, scoped skips included', () => {
+    const clean = [
+      'yarn install --immutable',
+      'npm ci',
+      'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pnpm install --frozen-lockfile',
+      'CYPRESS_INSTALL_BINARY=0 npm ci',
+      // The spellings that turn scripts back ON.
+      'npm ci --ignore-scripts=false',
+      'npm_config_ignore_scripts=false npm ci',
+    ]
+    for (const install of clean) {
+      const complaints = staticProposalComplaints({ install, build: 'true', api: API })
+      expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toEqual([])
+    }
+  })
+
+  it('reads the same switch out of the repository\'s own manager config', () => {
+    const r = rcRepo({ '.npmrc': 'ignore-scripts=true\n' })
+    const complaints = staticProposalComplaints({ install: 'npm ci', build: 'true', api: API }, undefined, r)
+    const hit = complaints.find((c) => c.includes('lifecycle scripts'))
+    expect(hit).toContain('`ignore-scripts=true` in .npmrc')
+    // The remedy has to be one a recipe can take: the rc file is committed, the
+    // install command is the recipe's own.
+    expect(hit).toContain('--ignore-scripts=false')
+    // A build is not an install: the rc file says nothing about it.
+    expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toHaveLength(1)
+  })
+
+  // A committed `ignore-scripts=true` is ordinary supply-chain hardening. Refusing
+  // every install it runs under refuses the OVERRIDE too, and a static complaint is
+  // a stage-zero refusal on every arrival path: the repair session then cannot
+  // propose anything that verifies, and setup fails permanently.
+  it('leaves an install that overrides the rc switch alone', () => {
+    const npm = rcRepo({ '.npmrc': 'ignore-scripts=true\n' })
+    for (const install of ['npm ci --ignore-scripts=false', 'npm ci --no-ignore-scripts', 'npm_config_ignore_scripts=false npm ci']) {
+      const complaints = staticProposalComplaints({ install, build: 'true', api: API }, undefined, npm)
+      expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toEqual([])
+    }
+
+    const yarn = rcRepo({ '.yarnrc.yml': 'enableScripts: false\n' })
+    expect(
+      staticProposalComplaints({ install: 'YARN_ENABLE_SCRIPTS=1 yarn install --immutable', build: 'true', api: API }, undefined, yarn)
+        .filter((c) => c.includes('lifecycle scripts')),
+    ).toEqual([])
+  })
+
+  it('holds a manager only to the config it actually reads', () => {
+    // Yarn berry never reads `.npmrc`, and a repository routinely ships one for
+    // its npm consumers.
+    const r = rcRepo({ '.npmrc': 'ignore-scripts=true\n', '.yarnrc.yml': 'nodeLinker: node-modules\n' })
+    const complaints = staticProposalComplaints({ install: 'yarn install --immutable', build: 'true', api: API }, undefined, r)
+    expect(complaints.filter((c) => c.includes('lifecycle scripts'))).toEqual([])
   })
 })

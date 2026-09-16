@@ -15,10 +15,12 @@
  *    introspection of the session's own database; `check_provides` is the
  *    free static half.
  *  - the FOLD (the only repo writes): `writeSeedArtifacts` (script file +
- *    the `api.seed` patch, whole-recipe re-validated), THEN the done-gate —
- *    a FRESH world (`services.down` → `up`), the real `runSeed`, manifest
- *    validation. A gate failure restores both files byte-for-byte and the
- *    outcome is refused: the step fails with the SeedError, setup does not.
+ *    the `api.seed` patch, whole-recipe re-validated), THEN the two done-gates
+ *    — a FRESH world (`services.down` → the wipe → `up`), the real `runSeed`,
+ *    manifest validation and the credential probes; then the same seed proved
+ *    again from a COLD CLONE of the repository (`seed-cold-proof.ts`). A gate
+ *    failure restores both files byte-for-byte and the outcome is refused:
+ *    the step fails with the SeedError, setup does not.
  *
  * SCRATCH LIVES INSIDE THE TREE, deliberately: `.truecourse/.cache/guard/
  * seed-drafts/<id>/` (the run's scratch cache, deleted after the
@@ -69,6 +71,7 @@ import {
   SeedError,
   buildCredentialRedactor,
   guardSetupFindingsPath,
+  guardWorldDirtyMarkerPath,
   loadDependencyCatalog,
   PORT_PLACEHOLDER,
   preflightApiServer,
@@ -81,11 +84,13 @@ import {
   type Recipe,
   type ResolvedApiServer,
   type ResolvedCredential,
+  type SeedResult,
 } from '@truecourse/guard-runner';
 import { cachedSessionOutcome, promptFingerprint } from '../agent/session-cache.js';
 import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
+import { proveSeedFromColdClone } from './seed-cold-proof.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
 
@@ -371,6 +376,57 @@ export function missingPrincipalSurfaces(
     }));
 }
 
+/** The fixture name a sacrificial principal is published under. */
+export const SACRIFICIAL_FIXTURE = 'sacrificialUser';
+
+/**
+ * A web surface needs TWO sign-in-capable users, not one. Scenarios that change
+ * a password, revoke a session or delete an account MUTATE the credentials they
+ * signed in with; run them against the shared principal and every later flow
+ * meets a login form that no longer accepts the published fixture. The second
+ * user is disposable by construction — the seed's converging exists path
+ * restores it every run — so those flows have something of their own to burn.
+ *
+ * The draft tool refuses it FIRST, because it costs nothing to state before an
+ * execution is spent; the fold refuses it LAST, on the outcome, because the
+ * outcome's `provides` is what gets written and a session can re-emit one
+ * without the fixture its verified draft carried.
+ * Returns the reason, or null when nothing is missing.
+ */
+export function missingSacrificialUser(
+  provides: SeedProvidesProposal,
+  required: readonly RequiredPrincipalSurface[],
+): string | null {
+  if (!required.some((r) => r.surface === 'web')) return null;
+  if (Object.keys(provides.fixtures ?? {}).includes(SACRIFICIAL_FIXTURE)) return null;
+  return (
+    `the web surface requires a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` ` +
+    `(the same login fields as the web principal, its own stable email), and this draft publishes no such fixture — ` +
+    `credential-mutation flows (a password change, a session revocation, an account deletion) burn it instead of the ` +
+    `shared principal, whose published password they would otherwise invalidate for every flow that follows. ` +
+    `Create it in this same script and declare it under \`provides.fixtures\`; it needs no credential and no probe.`
+  );
+}
+
+/**
+ * Everything a declaration must carry before it can land: a probed principal on
+ * every runnable surface that requires one, and the sacrificial user a web
+ * surface needs. ONE list, applied twice — by `run_seed_draft` before an
+ * execution is spent on a draft that could never verify, and by the fold to the
+ * outcome that actually gets written.
+ */
+function principalRefusals(
+  provides: SeedProvidesProposal,
+  probes: Record<string, SeedCredentialProbe> | undefined,
+  required: readonly RequiredPrincipalSurface[],
+): string[] {
+  const sacrificial = missingSacrificialUser(provides, required);
+  return [
+    ...missingPrincipalSurfaces(provides, probes, required).map((m) => m.reason),
+    ...(sacrificial ? [sacrificial] : []),
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // The session
 // ---------------------------------------------------------------------------
@@ -525,6 +581,11 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
       : catalog.dependencies
           .map((d) => `- ${d.name} · ${d.class} · ${d.summary}`)
           .join('\n'),
+    ...(catalog.dependencies.some((d) => d.class === 'step-creatable')
+      ? [
+          'step-creatable means a scenario CAN create one; the seed must still publish ONE existing instance of each as a fixture (owned by the web principal) so read/update/share flows have something to act on.',
+        ]
+      : []),
     ...(machinery.length > 0
       ? [
           '',
@@ -570,6 +631,7 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
         `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as a credential (\`header: "Cookie"\`);`,
         `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page);`,
         `  4. when the login endpoint pairs a body token with a cookie (a CSRF double-submit — the login route compares \`body.csrfToken\` to a cookie a mint route set), add \`"csrf": {"path": "/<the csrf mint route>"}\` to the \`login\` block — the engine GETs it fresh before each login POST, carries its cookies, and injects the token into the body. NEVER publish a csrf token as a fixture: it is minted per exchange, and a static one can never validate.`,
+        `  5. also create a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` (same login fields, its own stable email); credential-mutation tests burn it. It needs no credential and no probe, and a draft that omits it is refused without running.`,
       );
     }
   }
@@ -1036,15 +1098,11 @@ function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
       // salvage path can only ever keep one that carries them (the documenso
       // incident inverted — the session spent its budget on fixtures, died at
       // the ceiling, and the folded partial declared zero credentials).
-      const missing = missingPrincipalSurfaces(
-        args.provides,
-        args.probes,
-        requiredPrincipalSurfaces(world.input),
-      );
+      const missing = principalRefusals(args.provides, args.probes, requiredPrincipalSurfaces(world.input));
       if (missing.length > 0) {
         return {
           content:
-            `refused before running — principals come FIRST:\n- ${missing.map((m) => m.reason).join('\n- ')}\n` +
+            `refused before running — principals come FIRST:\n- ${missing.join('\n- ')}\n` +
             `Mint the principal(s) in this same script and declare them under \`provides.credentials\`, each with a probe on its surface ` +
             `(api: an endpoint that requires the credential; web: {"surface": "web", "path": "/<signed-in page>"} — proven by an authenticated page load). ` +
             `A draft with principals and thin fixtures is salvageable; the inverse is not.`,
@@ -1232,16 +1290,34 @@ function checkProvidesTool(world: SeedSessionWorld): SessionTool {
 export interface BuildSeedSessionOptions {
   signal?: AbortSignal;
   onSessionEvent?: (workItem: string, event: SessionEvent) => void;
+  /**
+   * The fold's second gate — the seed proved again from a cold clone of the
+   * repository, through the recipe's own `install` and `build`. Always on;
+   * `false` is for a caller that must not pay a full install and build (the
+   * test suite), never for production, where what it catches is unrecoverable
+   * later.
+   */
+  coldProof?: boolean;
 }
 
-/** One `api.services` lifecycle handle — up/down through `runBuild`, exactly
- *  as `verifyProposal` runs them, teardown always safe to call twice. */
+/** One `api.services` lifecycle handle — up/down/reset through `runBuild`,
+ *  exactly as `verifyProposal` runs them, teardown always safe to call twice.
+ *
+ *  The FIRST bring-up wipes when the tree carries the world-dirty marker: the
+ *  compose project is named after the repository, so one shared world outlives
+ *  every job of it, and a run that was cancelled or crashed mid-scenario left
+ *  its rows behind for this setup's baseline assertions to inherit. */
 function servicesController(repoRoot: string, recipe: Recipe, signal?: AbortSignal) {
   const services = recipe.api?.services;
   let up = false;
   return {
     async up(): Promise<void> {
       if (!services) return;
+      const marker = guardWorldDirtyMarkerPath(repoRoot);
+      if (services.reset && fs.existsSync(marker)) {
+        await runBuild(repoRoot, services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
+        fs.rmSync(marker, { force: true });
+      }
       const result = await runBuild(repoRoot, services.up, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
       if (!result.ok) {
         throw new Error(
@@ -1254,6 +1330,13 @@ function servicesController(repoRoot: string, recipe: Recipe, signal?: AbortSign
       if (!services?.down || !up) return;
       up = false;
       await runBuild(repoRoot, services.down, recipe.env, DEFAULT_BUILD_TIMEOUT_MS);
+    },
+    /** The wipe (`down -v`), when the recipe declares one; a no-op otherwise.
+     *  Best-effort: a reset that fails is not a verdict, the `up` after it is. */
+    async reset(): Promise<void> {
+      if (!services?.reset) return;
+      up = false;
+      await runBuild(repoRoot, services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
     },
   };
 }
@@ -1426,9 +1509,14 @@ export function buildSeedSession(
         };
       }
 
-      const folded = await foldSeedOutcome(world, services, outcome.output);
+      const folded = await foldSeedOutcome(world, services, outcome.output, opts.coldProof !== false);
       if ('reason' in folded) {
-        return { status: 'failed', reason: folded.reason, ...(sessionRunId ? { sessionRunId } : {}) };
+        return {
+          status: 'failed',
+          reason: folded.reason,
+          ...(sessionRunId ? { sessionRunId } : {}),
+          ...(folded.recipeDefect ? { recipeDefect: true } : {}),
+        };
       }
       if (!outcome.fromCache && outcome.output.findings.length > 0) {
         appendFindingsLedger({
@@ -1449,6 +1537,7 @@ export function buildSeedSession(
         ...(sessionRunId ? { sessionRunId } : {}),
         ...(outcome.fromCache ? { fromCache: true } : {}),
         ...(world.salvaged ? { salvaged: true } : {}),
+        ...(folded.coldProofSkipped ? { coldProofSkipped: folded.coldProofSkipped } : {}),
       };
     } catch (error) {
       return {
@@ -1463,14 +1552,20 @@ export function buildSeedSession(
 }
 
 /**
- * THE FOLD: write the two artifacts, then the done-gate — a fresh world and
- * the real `runSeed` — restoring the tree byte-for-byte when the gate refuses.
+ * THE FOLD: write the two artifacts, then the done-gates — a fresh world and
+ * the real `runSeed`, then the same again from a cold clone of the repository —
+ * restoring the tree byte-for-byte when a gate refuses OR throws. A refusal
+ * whose cause is the recipe's own `install`/`build` says so (`recipeDefect`).
  */
 async function foldSeedOutcome(
   world: SeedSessionWorld,
   services: ReturnType<typeof servicesController>,
   output: SeedSessionOutcome,
-): Promise<{ fixtures: string[]; credentials: string[] } | { reason: string }> {
+  coldProof: boolean,
+): Promise<
+  | { fixtures: string[]; credentials: string[]; coldProofSkipped?: string }
+  | { reason: string; recipeDefect?: boolean }
+> {
   const { input, targetPath } = world;
   if (!output.command.includes(targetPath)) {
     return {
@@ -1491,14 +1586,14 @@ async function foldSeedOutcome(
   // The binding fitness check, re-applied to what actually lands: an outcome
   // (or a salvaged draft) that leaves a runnable surface without a probed
   // principal is a seed every authenticated test downstream will block on, so
-  // the step fails with the surface named rather than reporting success.
-  const missing = missingPrincipalSurfaces(
-    output.provides,
-    output.probes,
-    requiredPrincipalSurfaces(input),
-  );
+  // the step fails with the surface named rather than reporting success. The
+  // sacrificial user is held to the same rule: the draft tool refused its
+  // absence, but the outcome's `provides` is what is written, and a session
+  // can re-emit it without the fixture it verified with.
+  const required = requiredPrincipalSurfaces(input);
+  const missing = principalRefusals(output.provides, output.probes, required);
   if (missing.length > 0) {
-    return { reason: missing.map((m) => m.reason).join('; ') };
+    return { reason: missing.join('; ') };
   }
   const scriptAbs = path.resolve(input.repoRoot, targetPath);
   const scriptExisted = fs.existsSync(scriptAbs);
@@ -1530,14 +1625,18 @@ async function foldSeedOutcome(
     return { reason: written.status === 'failed' ? written.reason : written.reason };
   }
 
-  // THE DONE-GATE: a FRESH world — down, up, the real runSeed (which validates
+  // THE DONE-GATE: a FRESH world — down, the wipe when the recipe has one (a
+  // stopped world keeps its volumes, and the compose project is the
+  // repository's, shared by every run), up, the real runSeed (which validates
   // the manifest against the written `provides`). A cached or transcript-green
   // draft that cannot survive this is refused, and the tree is put back.
+  let proof: SeedResult;
   try {
     input.onPhase?.('proving the seed in a fresh world', 'fresh-world proof');
     await services.down();
+    await services.reset();
     await services.up();
-    const proof = await runSeed({
+    proof = await runSeed({
       repoRoot: input.repoRoot,
       seed: written.seed,
       env: world.server.env,
@@ -1558,17 +1657,81 @@ async function foldSeedOutcome(
         return { reason: `the fresh-world credential probe refused the seed: ${probed.reason}` };
       }
     }
-    return {
-      fixtures: [...proof.fixtures.keys()].sort(),
-      credentials: [...proof.credentials.keys()].sort(),
-    };
   } catch (error) {
     restore();
     if (error instanceof SeedError) return { reason: `the fresh-world proof refused the seed: ${error.message}` };
     return { reason: `the fresh-world proof failed: ${message(error)}` };
   } finally {
+    // The warm world comes DOWN before the cold clone brings its own up: both
+    // address the same datastore (one compose project, one database URL), so
+    // two standing worlds would be one world with two owners.
     await services.down();
   }
+
+  // THE SECOND GATE: the same seed, proved again from a COLD CLONE of the
+  // repository — the recipe's own `install` and `build`, then the services, the
+  // seed and the probes. What this tree's `node_modules` accumulated over the
+  // session's attempts is exactly what a generate's fresh clone will not have.
+  // A refusal AND a throw (a tree that cannot be cloned, a cancellation) put
+  // the tree back: an unproven seed must not ship in the setup bundle.
+  //
+  // Only for a repository whose runs really are handed a clone. A folder on
+  // this machine is copied whole into every run of it, dependencies and build
+  // output included, so a cold install there would refuse a seed over something
+  // no run of that repository ever does.
+  const coldProofSkipped =
+    coldProof && !input.freshCheckout
+      ? 'the cold-clone proof did not run: a run of this repository is handed the tree as it stands, dependencies and build output included, so a cold clone is not the tree it works in'
+      : undefined;
+  if (coldProof && coldProofSkipped === undefined) {
+    const probes = output.probes;
+    const webSurface = resolveWebSurface(input.recipe);
+    // The clone has no built client either, so the web build is paid exactly
+    // when a probe will load a page from it — which is what the OUTCOME's
+    // probes say, not what the surfaces require.
+    const needsWebBuild =
+      webSurface?.build !== undefined && Object.values(probes ?? {}).some((p) => p.surface === 'web');
+    try {
+      const cold = await proveSeedFromColdClone({
+        repoRoot: input.repoRoot,
+        recipe: input.recipe,
+        seed: written.seed,
+        env: world.server.env,
+        knownCredentials: world.secrets,
+        services: (copyRoot) => servicesController(copyRoot, input.recipe, world.signal),
+        ...(needsWebBuild && webSurface?.build ? { webBuild: webSurface.build } : {}),
+        ...(world.signal ? { signal: world.signal } : {}),
+        ...(input.onPhase ? { onPhase: input.onPhase } : {}),
+        ...(probes
+          ? {
+              probe: async (copyRoot: string, seeded: SeedResult) => {
+                if (seeded.credentials.size === 0) return { ok: true as const };
+                // The copy's own repoRoot is what every boot parameter derives
+                // from, so the probes drive the clone, not the warm tree.
+                const coldWorld: SeedSessionWorld = { ...world, input: { ...input, repoRoot: copyRoot } };
+                return bootAndProbe(coldWorld, probes, seeded.credentials, seeded.fixtures, world.signal);
+              },
+            }
+          : {}),
+      });
+      if (!cold.ok) {
+        restore();
+        // An install or build that fails in a fresh copy is the RECIPE's
+        // defect: it verified against a tree that had grown what it needs.
+        const recipeDefect = cold.stage === 'install' || cold.stage === 'build';
+        return { reason: cold.reason, ...(recipeDefect ? { recipeDefect: true } : {}) };
+      }
+    } catch (error) {
+      restore();
+      return { reason: `the cold-clone proof failed: ${message(error)}` };
+    }
+  }
+
+  return {
+    fixtures: [...proof.fixtures.keys()].sort(),
+    credentials: [...proof.credentials.keys()].sort(),
+    ...(coldProofSkipped ? { coldProofSkipped } : {}),
+  };
 }
 
 function clip(text: string): string {
@@ -1602,7 +1765,7 @@ Data and auth are ONE artifact on purpose: a login token cannot be minted withou
 - Principals: one per role the app actually distinguishes; mint the secret the way the APP would (its own token issuance, or the same signing secret and algorithm it verifies with); the value must survive the seed process (stateless token or a session row — a secret held in memory authenticates nothing); the header value is injected VERBATIM ("Bearer <token>" ONLY if that is what the API's own verifier expects — read the verifier, do not assume the prefix).
 - A WEB SURFACE AUTHENTICATES BY SESSION, NOT HEADER: when the briefing requires a web principal, create the user with a known password and publish the login fields as a FIXTURE (scenarios fill the login form from them), mint a DURABLE session the app's own validator accepts, publish its full Cookie header value as a credential, and probe it with \`{"surface": "web", "path": …, "login": {…}}\` — the engine proves the LOGIN (the app's own JSON login endpoint must accept the published fixture values and refuse a corrupted password) and then the authenticated page load, refused anonymously (401/403 or a login redirect). The login proof is what catches a secret the world stored under an earlier run: a cookie that validates proves nothing about the password the fixture advertises. A login endpoint that pairs a body token with a cookie (CSRF double-submit) takes \`"csrf": {"path": "/<mint route>"}\` inside \`login\` — the engine runs the two-step itself; never publish a csrf token as a fixture, a static one can never validate.
 - IDEMPOTENCE CONVERGES SECRETS: an exists path that merely skips creation leaves an OLDER run's password live while your manifest publishes a new one — look up AND update the secret (with the app's own hashing) so the published value is always the live one; the login probe refuses exactly this drift.
-- MINT A SACRIFICIAL PRINCIPAL when the app cannot mint sign-in-capable accounts at RUNTIME (signup behind email verification, invite-only, admin-created accounts): one extra credential-bearing user beside the role principals, published as the fixture \`sacrificialUser\` with the same login fields as the primary web principal and its own stable email, its description stating it is DISPOSABLE. Credential-mutation tests (password change, session revocation, account deletion) burn IT instead of a shared principal, and your converging exists path restores it every run — without one, those tests have only the shared principal to mutate, and one such mutation once locked an entire run out of sign-in. No credential or probe needed: it is a fixture, and scenarios log in through the form.
+- MINT A SACRIFICIAL PRINCIPAL whenever the briefing requires a web principal — it is a requirement, not a judgement call, and a draft without it is refused before it runs: one extra sign-in-capable user beside the role principals, published as the fixture \`sacrificialUser\` with the same login fields as the primary web principal and its own stable email, its description stating it is DISPOSABLE. Credential-mutation tests (password change, session revocation, account deletion) burn IT instead of a shared principal, and your converging exists path restores it every run — without one, those tests have only the shared principal to mutate, and one such mutation once locked an entire run out of sign-in. No credential or probe needed: it is a fixture, and scenarios log in through the form.
 - CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one endpoint that REQUIRES it. The engine boots the credential's surface, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Probe endpoints are a LOOKUP, not a search: the briefing lists spec-derived candidates whose security requires a scheme — confirm one; do not spend turns hunting the route surface.
 
 # Your tools

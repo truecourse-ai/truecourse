@@ -70,6 +70,7 @@ import {
   buildDocSectionIndex,
   runGuard,
   guardDecisionsPath,
+  guardWorldDirtyMarkerPath,
   indexRepoDocs,
   manifestPath,
   recipePath,
@@ -257,6 +258,10 @@ describe('the guard setup job', () => {
   const catalogCalls: string[] = [];
   /** Whether the clone held the dependencies overlay when the engine looked. */
   const overlaysSeen: boolean[] = [];
+  /** Whether the clone declared its world of unknown state when the engine looked. */
+  const worldDirtySeen: boolean[] = [];
+  /** Whether the seed seam was told the clone reads as a fresh checkout. */
+  const freshCheckoutSeen: boolean[] = [];
   let preparationError: string | undefined;
 
   /** A fresh clone of the fixture at a stable path, as a run really gets one. */
@@ -269,9 +274,12 @@ describe('the guard setup job', () => {
       // The suite hides the developer's global git config, so identity is per-repo.
       git(clone, 'config', 'user.name', 'Test');
       git(clone, 'config', 'user.email', 'test@example.com');
-      writeRecipe(clone);
+      // As a repository really ignores what the engine writes into it, so the
+      // work tree and the corpus the job materializes below are git-ignored.
+      fs.writeFileSync(path.join(clone, '.gitignore'), 'node_modules/\n.truecourse/\ncontext/\n');
       git(clone, 'add', '-A');
       git(clone, 'commit', '-m', 'one');
+      writeRecipe(clone);
       return {
         dir: clone,
         dispose: () => {
@@ -299,6 +307,8 @@ describe('the guard setup job', () => {
   beforeEach(async () => {
     catalogCalls.length = 0;
     overlaysSeen.length = 0;
+    worldDirtySeen.length = 0;
+    freshCheckoutSeen.length = 0;
     preparationError = undefined;
     installWorkTree();
     // Setup reads the curated doc universe, and the job materializes the
@@ -321,6 +331,7 @@ describe('the guard setup job', () => {
               overlaysSeen.push(
                 fs.existsSync(path.join(repoRoot, '.truecourse', 'scenarios', 'dependencies.local.json')),
               );
+              worldDirtySeen.push(fs.existsSync(guardWorldDirtyMarkerPath(repoRoot)));
               // The real mapping snapshots the derived catalog; the bundle
               // collects that file, so the stub writes it too.
               const snapshot = path.join(repoRoot, '.truecourse', 'guard', 'interfaces.json');
@@ -352,7 +363,10 @@ describe('the guard setup job', () => {
               return { status: 'ok', added: [], findings: [] };
             },
             authorInterfaces: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
-            seedSession: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
+            seedSession: async (input) => {
+              freshCheckoutSeen.push(input.freshCheckout);
+              return { status: 'skipped', reason: 'stubbed in this suite' };
+            },
             preparationSession: async () => preparationError
               ? { status: 'failed', reason: preparationError }
               : { status: 'skipped', reason: 'stubbed in this suite' },
@@ -416,6 +430,31 @@ describe('the guard setup job', () => {
     expect(Object.keys(bundle)).not.toContain('.truecourse/scenarios/dependencies.local.json');
     expect(Object.keys(bundle)).not.toContain('.truecourse/scenarios/externals.local.json');
     expect(JSON.stringify(bundle)).not.toContain('sk-test-not-real');
+  }, 60_000);
+
+  // The compose project is the repository's, so a cancelled or crashed run's
+  // volumes are still standing when the next setup boots the world: the clone
+  // says so, and the engine wipes before it brings the services up.
+  it('declares the shared world of unknown state in every clone', async () => {
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(worldDirtySeen).toEqual([true]);
+  }, 60_000);
+
+  // Everything the job writes into the clone before the engine runs — the work
+  // tree, the corpus's documents, the setup bundle with its compose file, the
+  // two overlay files — is the job's own, so the clone still reads as the fresh
+  // checkout it is and the seed's cold-clone proof still has a tree to compare.
+  it('leaves the clone reading as a fresh checkout, whatever it materialized', async () => {
+    await writeGuardOverlays(REPO, {
+      dependencies: { anthropic: { env: { ANTHROPIC_API_KEY: 'sk-test-not-real' } } },
+      externals: {},
+    });
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(freshCheckoutSeen).toEqual([true]);
   }, 60_000);
 
   it('replays the settled steps on a second run, from the stored bundle', async () => {
@@ -562,6 +601,38 @@ describe('the guard setup job', () => {
       { refresh: true, only: 'seed', consent: true },
       { refresh: undefined, only: undefined, consent: undefined },
     ]);
+  });
+
+  // The recipe names its compose project after this key, and a project's volumes
+  // are what `reset` wipes. Two workspaces can be connected to one repository and
+  // the heavy-job queue only serializes per workspace, so the WORKSPACE has to be
+  // in it or one job's reset reaches the other's live datastore.
+  it('hands the engine a compose key that carries the workspace as well as the repository', async () => {
+    await jobs.stop();
+    const keys: (string | undefined)[] = [];
+    jobs = createServerJobs({
+      db,
+      connectionString: 'postgres://unused',
+      hub,
+      startWorker: fakeWorker(['repo.guard-setup']),
+      guardSetup: {
+        startLlm: async () => testLlm,
+        runSetup: async (_repoRoot, options) => {
+          keys.push(options.composeKey);
+          return {
+            report: { ranAt: '2026-01-01T00:00:00Z', status: 'failed', reason: 'no recipe', steps: [] },
+            reportPath: '',
+            sessionsRunDirs: [],
+          } as never;
+        },
+      },
+    });
+    await jobs.start();
+
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(keys).toEqual([`${ORG}/${REPO}`]);
   });
 });
 
@@ -854,6 +925,170 @@ describe('the guard generate job', () => {
     expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
     expect(enqueuedPayloads[1]).toMatchObject({ repoFullName: REPO, workspaceOrgId: ORG, source: 'chain' });
   });
+
+  // A seed that crashed refuses every flow: the engine still ends `ok`, the
+  // report carries the refusal and NOTHING is authored. Chaining the baseline
+  // run on that hands it an empty scenario set to fail on seconds later, which
+  // reads as two failures for one cause and buries the reason.
+  it('settles a warning and chains nothing when the generate authored no scenario', async () => {
+    await saveSetupBundle();
+    const refusal = {
+      status: 'seed-failed',
+      message: 'the seed script exited 1\nECONNREFUSED 127.0.0.1:5432',
+      flowIds: [],
+    };
+    generateImpl = async (repoRoot) => {
+      writeCloneGuardResult(repoRoot, {
+        ...okReport([]),
+        generatedAt: '2026-02-02T00:00:00Z',
+        refusal,
+      });
+      return okResult([]);
+    };
+
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-generate');
+    expect(job).toMatchObject({ status: 'succeeded', result: { status: 'nothing-written', written: 0 } });
+    // The chain ends here — the run is never enqueued.
+    expect(enqueued).toEqual(['repo.guard-generate']);
+    const notes = await new NotificationStore(db).listForOrg(ORG);
+    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Flows generated nothing']]);
+    // The reason the report latched, first line only.
+    expect(notes[0]).toMatchObject({ body: 'the seed script exited 1' });
+    const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: run!.runId });
+    // The report is still the record of WHY, so the guard surfaces can say it.
+    const baseline = await readGuardBaselineCommit(REPO);
+    expect(await readGuardResult(REPO, baseline!)).toMatchObject({ refusal });
+  }, 60_000);
+
+  // A generate that found nothing CHANGED over an empty set is still an empty
+  // set: the first generate refused every flow and stored a manifest with no
+  // scenario, and the re-run found every flow unchanged. `noChanges` says
+  // nothing about whether there is anything to run.
+  it('settles a warning and chains nothing when an unchanged generate stands over an empty set', async () => {
+    await saveSetupBundle();
+    const prior = makeTmpDir('tc-onboarding-gen-empty-');
+    fs.mkdirSync(scenariosDir(prior), { recursive: true });
+    const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
+    await saveScenarios(priorRef, scenariosDir(prior));
+    const refusal = { status: 'seed-failed', message: 'the seed script exited 1', flowIds: [] };
+    await writeGuardResult(priorRef, { ...okReport([]), generatedAt: '2026-01-01T00:00:00Z', refusal }, { baseline: true });
+
+    generateImpl = async (repoRoot) => {
+      writeCloneGuardResult(repoRoot, {
+        ...okReport([]),
+        generatedAt: '2026-03-03T00:00:00Z',
+        noChanges: true,
+        refusal,
+      });
+      return okResult([]);
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({
+      status: 'succeeded',
+      result: { status: 'nothing-written', written: 0, noChanges: true },
+    });
+    expect(enqueued).toEqual(['repo.guard-generate']);
+  }, 60_000);
+
+  // The clone is fresh but the compose project it boots is the repository's,
+  // shared with every earlier job — and the marker that records a mutated
+  // world died with the clone that wrote it. So the job declares the world
+  // dirty before the engine boots it, and the boot resets first.
+  it('marks the shared world dirty in the clone before the engine runs', async () => {
+    await saveSetupBundle();
+    let marker: string | null = null;
+    generateImpl = async (repoRoot, options) => {
+      marker = fs.existsSync(guardWorldDirtyMarkerPath(repoRoot))
+        ? fs.readFileSync(guardWorldDirtyMarkerPath(repoRoot), 'utf-8')
+        : null;
+      return authoring(repoRoot, options);
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect(marker).toMatch(/materialized/);
+  }, 60_000);
+
+  // The same empty generate over a set that already exists is NOT the same
+  // thing: the run has the stored scenarios to work with, and the code under
+  // them may have moved since.
+  it('still chains the baseline run when a stored scenario set stands behind an empty generate', async () => {
+    await saveSetupBundle();
+    // What an earlier generate left, materialized into this run's clone before
+    // the engine is called.
+    const prior = makeTmpDir('tc-onboarding-gen-prior-');
+    const orgs = path.join(scenariosDir(prior), 'orgs');
+    fs.mkdirSync(orgs, { recursive: true });
+    fs.writeFileSync(
+      path.join(orgs, 'a1.yaml'),
+      [
+        'id: a1',
+        'title: create an org',
+        'binds:',
+        '  - doc: docs/orgs.md',
+        '    section: create',
+        '    fingerprint: "sha256:x"',
+        'steps:',
+        '  - run: ["--help"]',
+        '    expect:',
+        '      exit: 0',
+        '',
+      ].join('\n'),
+    );
+    const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
+    await saveScenarios(priorRef, scenariosDir(prior));
+    await writeGuardResult(priorRef, { ...okReport(['a1']), generatedAt: '2026-01-01T00:00:00Z' }, { baseline: true });
+
+    generateImpl = async (repoRoot) => {
+      writeCloneGuardResult(repoRoot, {
+        ...okReport([]),
+        generatedAt: '2026-03-03T00:00:00Z',
+        refusal: { status: 'seed-failed', message: 'the seed script exited 1', flowIds: [] },
+      });
+      return okResult([]);
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({
+      status: 'succeeded',
+      result: { status: 'ok', written: 0 },
+    });
+    expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
+  }, 60_000);
+
+  // A stored set of files the loader REJECTS is no set at all: the run would
+  // load zero scenarios and die on "no scenarios". Counting yaml files would
+  // call that a set and chain the run anyway.
+  it('chains nothing when the only stored scenarios are malformed', async () => {
+    await saveSetupBundle();
+    const prior = makeTmpDir('tc-onboarding-gen-malformed-');
+    const orgs = path.join(scenariosDir(prior), 'orgs');
+    fs.mkdirSync(orgs, { recursive: true });
+    fs.writeFileSync(path.join(orgs, 'a1.yaml'), 'guard: 2\nid: a1\n');
+    const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
+    await saveScenarios(priorRef, scenariosDir(prior));
+    await writeGuardResult(priorRef, { ...okReport(['a1']), generatedAt: '2026-01-01T00:00:00Z' }, { baseline: true });
+
+    generateImpl = async (repoRoot) => {
+      writeCloneGuardResult(repoRoot, { ...okReport([]), generatedAt: '2026-03-03T00:00:00Z' });
+      return okResult([]);
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({
+      status: 'succeeded',
+      result: { status: 'nothing-written', written: 0 },
+    });
+    expect(enqueued).toEqual(['repo.guard-generate']);
+  }, 60_000);
 
   it('saves partial extraction results but fails the job and Activity without chaining', async () => {
     await saveSetupBundle();

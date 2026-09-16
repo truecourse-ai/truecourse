@@ -326,6 +326,33 @@ describe('runGuardSetup — the step spine', () => {
     expect(report.steps.find((s) => s.key === 'preparations')?.reason).toBe(findings.join('; '))
   })
 
+  // A gate that did not run is reported, never assumed: the seam says the
+  // cold-clone proof stood down and the step's facts carry the line.
+  it('records the seam’s reason when the cold-clone proof did not run', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const facts: string[] = []
+
+    const { report } = await runGuardSetup(
+      baseOpts(r, {
+        seedSession: seedSeam({
+          status: 'ok',
+          scriptPath: 'scripts/guard-seed.mjs',
+          command: 'node scripts/guard-seed.mjs',
+          coldProofSkipped: 'the cold-clone proof did not run: a run of this repository is handed the tree as it stands',
+        }).seam,
+        onStepFact: (step, line) => {
+          if (step === 'seed') facts.push(line)
+        },
+      }),
+    )
+
+    expect(report.status).toBe('ok')
+    expect(facts).toContain(
+      'the cold-clone proof did not run: a run of this repository is handed the tree as it stands',
+    )
+  })
+
   it('retries unavailable preparation authoring when a session becomes available', async () => {
     const r = fixtureRepo(); writeRecipe(r);
     writeGuardSetup(r, (await runGuardSetup(baseOpts(r, { seedSession: seedSeam().seam }))).report);
@@ -420,6 +447,62 @@ describe('runGuardSetup — skip when settled', () => {
     })
     expect(probe.calls).toBe(1)
   })
+
+  // The seed's cold-clone proof is where the recipe's `install`/`build` first
+  // run in a tree that did not grow across the session's attempts. A failure
+  // there is the RECIPE gate giving way, found late: the run fails on it and
+  // the recipe row is unsettled, so the next run re-derives instead of
+  // skipping on unchanged manifests and re-paying the same refused seed.
+  it('a recipe defect the seed proof surfaces fails the run and unsettles the recipe', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const probe = probeStub()
+    const defect = seedSeam({
+      status: 'failed',
+      reason: 'the cold-clone proof refused the seed: install — `npm ci` failed in a tree with no `node_modules`',
+      recipeDefect: true,
+    })
+
+    const first = await runAndPersist(r, { probe: probe.probe, seedSession: defect.seam })
+    expect(first.status).toBe('failed')
+    expect(first.reason).toContain('cold-clone proof refused the seed: install')
+    expect(statuses(first).recipe).toMatch(/^failed:/)
+    expect(first.recipe.status).toBe('failed')
+    expect(statuses(first).seed).toMatch(/^failed:/)
+
+    // The next run RE-DERIVES the recipe rather than reading the refused one
+    // back off disk (or out of the bundle) and paying the whole fold to reach
+    // the same verdict again. The dependency-free fixture declares no start
+    // script, so discovery reaches the repair seam — that it is reached at all
+    // is the proof it ran with `ignoreExisting`.
+    let repairs = 0
+    const second = await runAndPersist(r, {
+      probe: probe.probe,
+      seedSession: seedSeam().seam,
+      repair: async () => {
+        repairs++
+        return {
+          proposal: {
+            build: 'true',
+            api: {
+              serve: ['node', path.join(r, 'server.mjs')],
+              healthPath: '/health',
+              env: { SEED_STORE: path.join(r, 'store.json') },
+            },
+          },
+        }
+      },
+    })
+    expect(repairs).toBe(1)
+    expect(statuses(second).recipe).toBe('ok')
+    expect(second.recipe.outcome).toBe('discovered')
+    expect(probe.calls).toBe(2)
+    expect(second.status).toBe('ok')
+
+    // And once it holds, the third run is back to skipping it.
+    const third = await runAndPersist(r, { probe: probe.probe, seedSession: seedSeam().seam })
+    expect(statuses(third).recipe).toBe('skipped:unchanged')
+  }, 120_000)
 
   it('--refresh re-runs every step, re-deriving the recipe it already had', async () => {
     const r = fixtureRepo()

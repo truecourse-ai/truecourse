@@ -892,9 +892,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         | { ok: false; stop: RunGuardResult }
       const bootWorld = async (): Promise<WorldBoot> => {
         if (api.services) {
-          // A prior run's mutator tail left the world dirty (a crash mid-tail,
-          // or a reset that was not declared then): restore before booting on
-          // top of the damage. A failed reset falls through to `up` — the up's
+          // The world's state is unknown: a prior run's mutator tail left it
+          // dirty (a crash mid-tail, or a reset that was not declared then), or
+          // the caller declared it unknown because this clone is a fresh view of
+          // a datastore earlier runs shared. Restore before booting on top of
+          // whatever is there. A failed reset falls through to `up` — the up's
           // own failure, or the run's results, are the honest signal.
           if (sharedDataNeeded && api.services.reset && fs.existsSync(guardWorldDirtyMarkerPath(repoRoot))) {
             const reset = await runBuild(

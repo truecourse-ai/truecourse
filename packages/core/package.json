@@ -194,6 +194,11 @@
       "types": "./dist/services/guard-setup/bundle.d.ts",
       "import": "./dist/services/guard-setup/bundle.js"
     },
+    "./services/guard-setup/seed-cold-proof": {
+      "truecourse-source": "./src/services/guard-setup/seed-cold-proof.ts",
+      "types": "./dist/services/guard-setup/seed-cold-proof.d.ts",
+      "import": "./dist/services/guard-setup/seed-cold-proof.js"
+    },
     "./services/interface": {
       "truecourse-source": "./src/services/interface.service.ts",
       "types": "./dist/services/interface.service.d.ts",
