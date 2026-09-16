@@ -236,7 +236,8 @@ interface SessionRuntime {
 /**
  * A tool is running, and for how long. Reported every second while it runs, so
  * a surface tailing the session shows the minutes a build or a probe takes
- * rather than silence. Ephemeral display only — never a transcript event,
+ * rather than silence. Whole seconds, since that is the resolution of both the
+ * tick and the display. Ephemeral display only — never a transcript event,
  * never a turn.
  */
 async function whileRunning<T>(
@@ -247,7 +248,7 @@ async function whileRunning<T>(
   if (!onProgress) return execute();
   const started = Date.now();
   const tick = (): void =>
-    onProgress({ kind: 'tool', ...call, phase: 'running', elapsedSeconds: (Date.now() - started) / 1000 });
+    onProgress({ kind: 'tool', ...call, phase: 'running', elapsedSeconds: Math.floor((Date.now() - started) / 1000) });
   tick();
   const timer = setInterval(tick, 1000);
   (timer as { unref?: () => void }).unref?.();
