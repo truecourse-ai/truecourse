@@ -45,8 +45,30 @@ export interface DbHandle {
   close: () => Promise<void>;
 }
 
-export async function createDb(connectionString: string): Promise<DbHandle> {
+export interface CreateDbOptions {
+  /**
+   * Called when an IDLE pooled connection errors (the backend closed it, a
+   * network drop, a protocol fault). The pool has already discarded that client
+   * and reconnects on demand; the caller only gets to log it. Defaults to stderr.
+   */
+  onPoolError?: (err: Error, pool: 'main' | 'lock') => void;
+}
+
+/**
+ * pg emits an idle client's error on the POOL, and an `error` event with no
+ * listener is an uncaught exception: without this, one dropped connection
+ * takes the whole process down.
+ */
+function watchIdleErrors(pool: Pool, name: 'main' | 'lock', onError: CreateDbOptions['onPoolError']): void {
+  pool.on('error', (err) => {
+    if (onError) onError(err, name);
+    else console.error(`[db] idle Postgres client error on the ${name} pool: ${err.message}`);
+  });
+}
+
+export async function createDb(connectionString: string, options: CreateDbOptions = {}): Promise<DbHandle> {
   const pool = new Pool({ connectionString });
+  watchIdleErrors(pool, 'main', options.onPoolError);
   const db = drizzle(pool, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   // Dedicated lock pool (see DbHandle.lockPool). A generous `max` — concurrent
@@ -54,6 +76,7 @@ export async function createDb(connectionString: string): Promise<DbHandle> {
   // contention fails fast instead of hanging. Advisory locks are session-scoped,
   // so Postgres auto-releases them if a held connection ever drops.
   const lockPool = new Pool({ connectionString, max: 20, connectionTimeoutMillis: 30_000 });
+  watchIdleErrors(lockPool, 'lock', options.onPoolError);
   return {
     db,
     lockPool,

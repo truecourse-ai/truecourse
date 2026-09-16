@@ -4,6 +4,7 @@ export {
   MIGRATIONS_DIR,
   type Db,
   type DbHandle,
+  type CreateDbOptions,
   type Pool,
   type PoolClient,
 } from './db.js';
