@@ -190,11 +190,11 @@ afterEach(() => {
 });
 
 describe('Settings › Credits', () => {
-  it('says the balance once, and what it is worth', async () => {
+  it('says the balance once', async () => {
     serve();
     renderAt('/settings/credits');
     expect(await screen.findByText('4,880')).toBeInTheDocument();
-    expect(screen.getByText(/credits, worth \$48\.80 of model spend/)).toBeInTheDocument();
+    expect(screen.queryByText(/of model spend/)).toBeNull();
     expect(screen.getByText(/5,000 on/)).toBeInTheDocument();
     expect(screen.getByText('TrueCourse credits')).toBeInTheDocument();
   });
@@ -245,20 +245,20 @@ describe('Settings › Credits', () => {
     expect(within(list).getByRole('button', { name: 'Resume' })).toBeDisabled();
   });
 
-  it('says where more credits come from, and where the spending is', async () => {
+  it('offers the ways to get more credits and the way to the spending, as actions', async () => {
     serve();
     renderAt('/settings/credits');
-    expect(await screen.findByRole('link', { name: 'Discord' })).toHaveAttribute(
+    const actions = await screen.findByRole('group', { name: 'Credits actions' });
+    expect(within(actions).getByRole('link', { name: 'Request credits' })).toHaveAttribute(
       'href',
       expect.stringContaining('discord.gg'),
     );
-    expect(screen.getByRole('link', { name: 'email' })).toHaveAttribute(
+    expect(within(actions).getByRole('link', { name: 'Email' })).toHaveAttribute(
       'href',
       'mailto:mushegh@truecourse.dev',
     );
-    // The side menu has a Usage link of its own; this is the one in the copy.
-    const copy = screen.getByRole('link', { name: 'email' }).closest('p')!;
-    expect(within(copy).getByRole('link', { name: 'Usage' })).toHaveAttribute(
+    // The side menu has a Usage link of its own; this is the one among the actions.
+    expect(within(actions).getByRole('link', { name: 'Usage' })).toHaveAttribute(
       'href',
       '/settings/usage',
     );

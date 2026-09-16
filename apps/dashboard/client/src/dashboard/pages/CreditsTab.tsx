@@ -16,14 +16,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Coins } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import {
-  usdOfCredits,
-  type CreditEntryView,
-  type CreditsResponse,
-  type PausedRunView,
-} from '@truecourse/shared';
+import type { CreditEntryView, CreditsResponse, PausedRunView } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
-import { formatUsd, startedLabel } from '@/components/sessions/run-model';
+import { startedLabel } from '@/components/sessions/run-model';
 import { fetchCredits, resumePausedRun } from '@/lib/api';
 import { EntityList } from '@/dashboard/ui/entity-list';
 import { DISCORD_INVITE_URL } from '@/dashboard/shell/DashboardShell';
@@ -100,9 +95,7 @@ export function CreditsTab() {
             value: (
               <span className="tabular-nums">
                 <span className="text-lg font-semibold">{credits(data.balance)}</span>
-                <span className="ml-2 text-[11px] text-muted-foreground">
-                  credits, worth {formatUsd(usdOfCredits(data.balance))} of model spend
-                </span>
+                <span className="ml-2 text-[11px] text-muted-foreground">credits</span>
               </span>
             ),
           },
@@ -119,29 +112,32 @@ export function CreditsTab() {
         ]}
       />
 
-      <p className="border-b border-border px-6 py-3 text-[11px] text-muted-foreground">
-        A credit is a cent of model spend at list price, with nothing added. Ask for more on{' '}
+      <div
+        role="group"
+        aria-label="Credits actions"
+        className="flex items-center gap-2 border-b border-border px-6 py-2"
+      >
         <a
           href={DISCORD_INVITE_URL}
           target="_blank"
           rel="noreferrer"
-          className="text-foreground underline underline-offset-2"
+          className="rounded border border-border px-2 py-0.5 text-[10px] font-medium text-foreground hover:bg-muted/60"
         >
-          Discord
-        </a>{' '}
-        or by{' '}
+          Request credits
+        </a>
         <a
           href={`mailto:${CONTACT_EMAIL}`}
-          className="text-foreground underline underline-offset-2"
+          className="rounded border border-border px-2 py-0.5 text-[10px] font-medium text-foreground hover:bg-muted/60"
         >
-          email
+          Email
         </a>
-        . What every run spent at the model, credits or not, is on the{' '}
-        <Link to="/settings/usage" className="text-foreground underline underline-offset-2">
+        <Link
+          to="/settings/usage"
+          className="ml-auto rounded border border-border px-2 py-0.5 text-[10px] font-medium text-foreground hover:bg-muted/60"
+        >
           Usage
-        </Link>{' '}
-        tab.
-      </p>
+        </Link>
+      </div>
 
       {error && (
         <p className="border-b border-border px-6 py-3 text-[11px] text-destructive">{error}</p>
