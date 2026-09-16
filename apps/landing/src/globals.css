@@ -335,7 +335,8 @@ header.site.scrolled {
 .hero {
   position: relative;
   padding-top: clamp(120px, 15vh, 176px);
-  padding-bottom: clamp(96px, 11vw, 140px);
+  /* Room for the 160px line box under the stage, at every width. */
+  padding-bottom: max(150px, 11vw);
   overflow: hidden;
   border-bottom: 1px solid var(--line);
   text-align: center;
