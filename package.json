@@ -41,6 +41,7 @@
     "js-yaml": "^4.1.0",
     "jsdom": "^26.0.0",
     "posthog-js": "^1.372.10",
+    "posthog-node": "^5.52.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.0",

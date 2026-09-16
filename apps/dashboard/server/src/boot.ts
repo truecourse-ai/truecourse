@@ -37,6 +37,7 @@ import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunsWatches } from './services/run-watch.service.js';
 import { getLogDir } from '@truecourse/core/config/runtime-dir';
 import { initSentry, flushSentry } from './observability/sentry.js';
+import { shutdownServerAnalytics } from './observability/posthog.js';
 import { ServerLogTransport } from './observability/log-transport.js';
 import { LOCAL_ORG_ID } from './auth/local.js';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
@@ -298,6 +299,8 @@ export async function startServer(): Promise<void> {
     httpServer.close();
     // Stop the queue before the pool it runs on.
     await jobs.stop();
+    // The queue is what analytics observes, so flush once it can produce no more.
+    await shutdownServerAnalytics();
     await closeDb();
     log.info('[Server] Closed');
     await closeLogger();

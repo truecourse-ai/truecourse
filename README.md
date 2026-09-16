@@ -68,6 +68,11 @@ Three build-time variables control it, read by the client when it is built:
 | `VITE_POSTHOG_KEY` | Send to your own PostHog project instead of TrueCourse's. |
 | `VITE_POSTHOG_HOST` | The PostHog host. Default: `https://us.i.posthog.com`. |
 
+The server sends the other half: one event per background job that finished (a
+scan, a setup, a generation, a run) with its outcome, how long it took and the
+repository it was for. It reads `POSTHOG_DISABLED`, `POSTHOG_KEY` and
+`POSTHOG_HOST` from its own environment, which do the same three things.
+
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the development setup, the project
