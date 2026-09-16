@@ -855,6 +855,77 @@ describe('the guard generate job', () => {
     expect(enqueuedPayloads[1]).toMatchObject({ repoFullName: REPO, workspaceOrgId: ORG, source: 'chain' });
   });
 
+  // A seed that crashed refuses every flow: the engine still ends `ok`, the
+  // report carries the refusal and NOTHING is authored. Chaining the baseline
+  // run on that hands it an empty scenario set to fail on seconds later, which
+  // reads as two failures for one cause and buries the reason.
+  it('settles a warning and chains nothing when the generate authored no scenario', async () => {
+    await saveSetupBundle();
+    const refusal = {
+      status: 'seed-failed',
+      message: 'the seed script exited 1\nECONNREFUSED 127.0.0.1:5432',
+      flowIds: [],
+    };
+    generateImpl = async (repoRoot) => {
+      writeCloneGuardResult(repoRoot, {
+        ...okReport([]),
+        generatedAt: '2026-02-02T00:00:00Z',
+        refusal,
+      });
+      return okResult([]);
+    };
+
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-generate');
+    expect(job).toMatchObject({ status: 'succeeded', result: { status: 'nothing-written', written: 0 } });
+    // The chain ends here — the run is never enqueued.
+    expect(enqueued).toEqual(['repo.guard-generate']);
+    const notes = await new NotificationStore(db).listForOrg(ORG);
+    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Flows generated nothing']]);
+    // The reason the report latched, first line only.
+    expect(notes[0]).toMatchObject({ body: 'the seed script exited 1' });
+    const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: run!.runId });
+    // The report is still the record of WHY, so the guard surfaces can say it.
+    const baseline = await readGuardBaselineCommit(REPO);
+    expect(await readGuardResult(REPO, baseline!)).toMatchObject({ refusal });
+  }, 60_000);
+
+  // The same empty generate over a set that already exists is NOT the same
+  // thing: the run has the stored scenarios to work with, and the code under
+  // them may have moved since.
+  it('still chains the baseline run when a stored scenario set stands behind an empty generate', async () => {
+    await saveSetupBundle();
+    // What an earlier generate left, materialized into this run's clone before
+    // the engine is called.
+    const prior = makeTmpDir('tc-onboarding-gen-prior-');
+    const orgs = path.join(scenariosDir(prior), 'orgs');
+    fs.mkdirSync(orgs, { recursive: true });
+    fs.writeFileSync(path.join(orgs, 'a1.yaml'), 'guard: 2\nid: a1\ntitle: create an org\n');
+    const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
+    await saveScenarios(priorRef, scenariosDir(prior));
+    await writeGuardResult(priorRef, { ...okReport(['a1']), generatedAt: '2026-01-01T00:00:00Z' }, { baseline: true });
+
+    generateImpl = async (repoRoot) => {
+      writeCloneGuardResult(repoRoot, {
+        ...okReport([]),
+        generatedAt: '2026-03-03T00:00:00Z',
+        refusal: { status: 'seed-failed', message: 'the seed script exited 1', flowIds: [] },
+      });
+      return okResult([]);
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({
+      status: 'succeeded',
+      result: { status: 'ok', written: 0 },
+    });
+    expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
+  }, 60_000);
+
   it('saves partial extraction results but fails the job and Activity without chaining', async () => {
     await saveSetupBundle();
     const extractionFailures = [{ doc: 'docs/app.md', reason: 'outcome failed schema: invalid web verification method' }];

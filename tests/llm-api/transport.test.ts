@@ -489,6 +489,97 @@ describe('createApiTransport — TRUECOURSE_LLM_TIMEOUT_SCALE', () => {
   });
 });
 
+/**
+ * A timeout is the one failure that says nothing about the request — only about
+ * the minutes the provider spent not answering it. A leaf stage gets ONE call,
+ * so an expiry there is a stage's worth of the run gone; it is worth spending a
+ * second clock on before giving up.
+ */
+describe('createApiTransport — the timeout retry', () => {
+  const SCALE_ENV = 'TRUECOURSE_LLM_TIMEOUT_SCALE';
+  const orig = process.env[SCALE_ENV];
+  beforeEach(() => delete process.env[SCALE_ENV]);
+  afterEach(() => {
+    if (orig === undefined) delete process.env[SCALE_ENV];
+    else process.env[SCALE_ENV] = orig;
+  });
+
+  /** No fallback model: every call the stub sees is an attempt on the primary. */
+  const solo = { provider: 'anthropic' as const, model: 'primary-model', apiKey: 'test' };
+
+  /**
+   * A model that hangs until its deadline aborts it — `hangs` times over, then
+   * answers. Counts the calls, which is what "one more attempt" is read from.
+   */
+  function hangingModel(hangs: number, text = 'OK') {
+    let calls = 0;
+    const model = {
+      ...stubModel({ text }),
+      async doGenerate(opts: { abortSignal?: AbortSignal }) {
+        if (++calls <= hangs) {
+          await new Promise<never>((_resolve, reject) => {
+            opts.abortSignal?.addEventListener('abort', () => reject(opts.abortSignal!.reason));
+          });
+        }
+        return {
+          content: [{ type: 'text', text }],
+          finishReason: 'stop',
+          usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
+          warnings: [],
+        };
+      },
+    };
+    return { model, calls: () => calls };
+  }
+
+  it('tries a timed-out call once more, and says so', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const hanging = hangingModel(1);
+    buildModelMock.mockReturnValue(hanging.model);
+
+    const out = await createApiTransport(solo)({
+      id: 'a:b',
+      stage: 'realization-match',
+      system: 'S',
+      user: 'U',
+      timeoutMs: 40,
+    });
+
+    expect(out).toBe('OK');
+    expect(hanging.calls()).toBe(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('realization-match'));
+    warn.mockRestore();
+  });
+
+  it('surfaces the timeout unchanged once the second deadline expires too', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const hanging = hangingModel(2);
+    buildModelMock.mockReturnValue(hanging.model);
+
+    await expect(
+      createApiTransport(solo)({ id: 'a:b', stage: 'slow', system: 'S', user: 'U', timeoutMs: 40 }),
+    ).rejects.toThrow('[llm-api] timed out after 40ms');
+    expect(hanging.calls()).toBe(2);
+    warn.mockRestore();
+  });
+
+  it('spends no second attempt on a failure that is not the clock', async () => {
+    let calls = 0;
+    buildModelMock.mockImplementation(() => ({
+      ...stubModel({ throws: new Error('provider is down') }),
+      async doGenerate() {
+        calls += 1;
+        throw new Error('provider is down');
+      },
+    }));
+
+    await expect(
+      createApiTransport(solo)({ id: 'a:b', stage: 'slow', system: 'S', user: 'U', timeoutMs: 40 }),
+    ).rejects.toThrow('provider is down');
+    expect(calls).toBe(1);
+  });
+});
+
 describe('createAiSdkTransport alias', () => {
   it('is the same factory as createApiTransport (ee imports keep working)', () => {
     expect(createAiSdkTransport).toBe(createApiTransport);

@@ -19,7 +19,10 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  *
  * A generate that produced a scenario set chains into the BASELINE RUN — the
  * last link of onboarding — so every connected repository ends up with a run
- * on record, not just a set of scenarios.
+ * on record, not just a set of scenarios. A generate that settled no flow and
+ * had no prior set to fall back on produced NOTHING to run, so it ends the
+ * chain with a warning naming the reason rather than handing the run an empty
+ * scenario set to fail on.
  */
 
 import { log } from '@truecourse/core/lib/logger';
@@ -36,6 +39,7 @@ import {
   GUARD_GENERATE_STEPS,
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
+import { scenariosDir, walkScenarioRelFiles } from '@truecourse/guard-runner';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
@@ -50,6 +54,17 @@ import { firstLine, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_GENERATE_TASK = 'repo.guard-generate';
 
+/**
+ * Scenarios the RUNNER would find in this tree — what the baseline run has to
+ * work with, counted the way the runner counts it rather than inferred from
+ * the report. The tree at this point holds the prior baseline set as well as
+ * whatever this generate authored, so zero here means zero for the run: the
+ * inherited set is empty too, not merely unchanged.
+ */
+function runnableScenarios(treeDir: string): number {
+  return walkScenarioRelFiles(scenariosDir(treeDir)).filter((rel) => /\.ya?ml$/i.test(rel)).length;
+}
+
 export type GuardGenerateJobRequest = OnboardingJobRequest & { resumeRunId?: string };
 
 export type GuardGenerateJobPayload = GuardGenerateJobRequest & JobPayload;
@@ -57,7 +72,12 @@ export type GuardGenerateJobPayload = GuardGenerateJobRequest & JobPayload;
 /** What the job row records about a generate that ran. */
 export interface GuardGenerateJobResult {
   repoFullName: string;
-  status: 'ok' | 'open-conflicts';
+  /**
+   * `nothing-written` — the generate ran but settled no flow, and no earlier
+   * scenario set stands behind it. Not a failure (the report is the record of
+   * why) and not a success either: there is nothing to run, so the chain stops.
+   */
+  status: 'ok' | 'open-conflicts' | 'nothing-written';
   /** Scenarios authored this run (0 when nothing changed). */
   written: number;
   birthFindings: number;
@@ -222,6 +242,35 @@ export function createRepoGuardGenerateTask(
 
           const written = report.written.length;
           const findings = report.birthFindings.length;
+
+          // Nothing authored, nothing inherited: the scenario set this run just
+          // stored is empty, so the baseline run it would chain into can only
+          // clone and fail on "no scenarios" seconds later. Settle on the reason
+          // the report carries instead — a refused run latches one, a failed
+          // author leaves an error — and end the chain here.
+          if (written === 0 && !report.noChanges && runnableScenarios(tree.dir) === 0) {
+            const result: GuardGenerateJobResult = {
+              repoFullName,
+              status: 'nothing-written',
+              written: 0,
+              birthFindings: findings,
+              noChanges: false,
+              openConflicts: 0,
+            };
+            return {
+              result,
+              notification: {
+                level: 'warning',
+                title: 'Flows generated nothing',
+                body:
+                  firstLine(report.refusal?.message) ||
+                  firstLine(report.errors[0]?.message) ||
+                  'no flow settled',
+                data: { repoFullName, runId: activityRun.runId },
+              },
+            };
+          }
+
           const result: GuardGenerateJobResult = {
             repoFullName,
             status: 'ok',
@@ -280,9 +329,10 @@ export function createRepoGuardGenerateTask(
       // however the generate ended.
       await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-generate');
       // Only a generate that left a scenario set has anything to run: a blocked
-      // corpus ends the chain here (its notification already says why), and so
-      // does a failure or a cancel. An unchanged set still runs — the code under
-      // it may have moved, and the baseline run is what says so.
+      // corpus and a generate that settled no flow end the chain here (their
+      // notifications already say why), and so does a failure or a cancel. An
+      // unchanged set still runs — the code under it may have moved, and the
+      // baseline run is what says so.
       if (outcome !== 'succeeded') return;
       if ((result as { status?: string } | undefined)?.status !== 'ok') return;
       try {

@@ -111,15 +111,26 @@ export function callUsageOf(usage: CapturedResult['usage']): CallUsage {
 function deadline(timeoutMs: number | undefined): {
   signal: AbortSignal | undefined;
   cleanup: () => void;
+  /** Did this deadline fire? The only abort this transport retries is its own. */
+  expired: () => boolean;
+  /** The ceiling actually applied, scale folded in. Undefined when there is none. */
+  effectiveMs: number | undefined;
 } {
-  if (!timeoutMs) return { signal: undefined, cleanup: () => {} };
+  if (!timeoutMs)
+    return { signal: undefined, cleanup: () => {}, expired: () => false, effectiveMs: undefined };
   const effectiveMs = timeoutMs * resolveTimeoutScale();
   const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(new Error(`[llm-api] timed out after ${effectiveMs}ms`)),
+  let fired = false;
+  const timer = setTimeout(() => {
+    fired = true;
+    controller.abort(new Error(`[llm-api] timed out after ${effectiveMs}ms`));
+  }, effectiveMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timer),
+    expired: () => fired,
     effectiveMs,
-  );
-  return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
+  };
 }
 
 /**
@@ -190,6 +201,12 @@ function recordUsage(
 /**
  * Build an `LlmTransport` for `cfg`. Runs on the primary model; on a non-abort
  * error, retries once on the fallback (never after the signal aborts).
+ *
+ * A call the DEADLINE killed is tried once more, whole — a fresh clock, the
+ * same request. A timeout says nothing about the request, only about the
+ * minutes the provider took not to answer it, and a leaf stage that loses its
+ * one call is a stage's worth of the run gone. Everything else surfaces on the
+ * first failure, and a second expiry throws exactly what the first would have.
  */
 export function createApiTransport(
   cfg: ProviderConfig,
@@ -229,7 +246,6 @@ export function createApiTransport(
         : undefined;
     const jsonMode = rawSchema !== undefined && !enforced;
     if (jsonMode && !isObjectRootedSchema(rawSchema)) throw new NonObjectRootSchemaError(req.stage);
-    const { signal, cleanup } = deadline(req.timeoutMs);
     const modelId = requested(req.model) ?? cfg.model;
     const fallbackId = requested(req.fallbackModel) ?? cfg.fallbackModel;
     const fallbackModelId = fallbackId ?? modelId;
@@ -247,7 +263,10 @@ export function createApiTransport(
       functionId: req.stage ?? 'llm.call',
       metadata: telemetryMeta(req, ctx),
     };
-    const run = async (model: LanguageModel): Promise<CapturedResult> => {
+    const run = async (
+      model: LanguageModel,
+      signal: AbortSignal | undefined,
+    ): Promise<CapturedResult> => {
       if (enforced) {
         const r = await generateObject({
           model,
@@ -290,22 +309,46 @@ export function createApiTransport(
       };
     };
 
-    try {
-      let result: Awaited<ReturnType<typeof run>>;
-      let usedFallback = false;
+    /**
+     * One whole attempt on a deadline of its own: the primary model, then the
+     * fallback when the primary failed for any reason but the clock. An expiry
+     * comes back as a value rather than a throw, carrying the error it would
+     * have thrown, so the caller decides whether to spend another attempt.
+     */
+    type Attempt =
+      | { expired: false; result: CapturedResult; model: string }
+      | { expired: true; error: unknown; afterMs: number | undefined };
+    const attempt = async (): Promise<Attempt> => {
+      const { signal, cleanup, expired, effectiveMs } = deadline(req.timeoutMs);
       try {
-        result = await run(primary);
+        let result: CapturedResult;
+        let usedFallback = false;
+        try {
+          result = await run(primary, signal);
+        } catch (err) {
+          if (!fallback || signal?.aborted) throw err;
+          usedFallback = true;
+          result = await run(fallback, signal);
+        }
+        return { expired: false, result, model: usedFallback ? fallbackModelId : modelId };
       } catch (err) {
-        if (!fallback || signal?.aborted) throw err;
-        usedFallback = true;
-        result = await run(fallback);
+        if (expired()) return { expired: true, error: err, afterMs: effectiveMs };
+        throw err;
+      } finally {
+        cleanup();
       }
-      const model = usedFallback ? fallbackModelId : modelId;
-      recordUsage(req, model, result, opts.pricing);
-      return result.text;
-    } finally {
-      cleanup();
+    };
+
+    let outcome = await attempt();
+    if (outcome.expired) {
+      console.warn(
+        `[llm-api] ${req.stage ?? 'llm.call'} timed out after ${outcome.afterMs}ms — trying once more`,
+      );
+      outcome = await attempt();
+      if (outcome.expired) throw outcome.error;
     }
+    recordUsage(req, outcome.model, outcome.result, opts.pricing);
+    return outcome.result.text;
   };
 }
 
