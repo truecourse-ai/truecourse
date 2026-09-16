@@ -50,12 +50,18 @@ for a rebuild. Do not redeploy the foundation over a live environment.
 
 ### 1. Resource groups + foundation (once per environment)
 
+One environment at a time, and `what-if` before `create`: the foundation
+derives its resource names from the resource group, so a deployment against a
+group that already has one targets its live Postgres server and resets the
+admin password.
+
 ```bash
-for E in dev prod; do
-  az group create -n rg-truecourse-$E -l westus3
-  az deployment group create -g rg-truecourse-$E -f infra/azure/foundation.bicep \
-    -p postgresAdminPassword='<a-distinct-password-per-env>'
-done
+E=dev   # or prod, with its own password
+az group create -n rg-truecourse-$E -l westus3
+FOUNDATION_ARGS=(-g rg-truecourse-$E -f infra/azure/foundation.bicep
+  -p postgresAdminPassword='<password-for-this-env>')
+az deployment group what-if "${FOUNDATION_ARGS[@]}"
+az deployment group create "${FOUNDATION_ARGS[@]}"
 ```
 
 Grab each env's outputs (you'll reuse them):

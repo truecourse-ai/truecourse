@@ -19,13 +19,17 @@ set -euo pipefail
 
 KV="${KEY_VAULT_NAME:?set KEY_VAULT_NAME (foundation output keyVaultName)}"
 
-set_secret() { # dashed-name  value  [required]
-  local name="$1" value="${2:-}" required="${3:-optional}"
+set_secret() { # dashed-name  value  [required|optional|integer]
+  local name="$1" value="${2:-}" kind="${3:-optional}"
   if [ -z "$value" ]; then
-    if [ "$required" = required ]; then
+    if [ "$kind" = required ]; then
       echo "ERROR: $name is required but empty" >&2; exit 1
     fi
     echo "skip  $name (empty)"; return
+  fi
+  # Same rule as vm-release.py INTEGER_SECRETS; a bad value there fails every release.
+  if [ "$kind" = integer ] && ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: $name must be a positive integer, got '$value'" >&2; exit 1
   fi
   az keyvault secret set --vault-name "$KV" --name "$name" --value "$value" --output none
   echo "set   $name"
@@ -46,7 +50,7 @@ set_secret github-app-slug          "${GITHUB_APP_SLUG:-}"          required
 
 # Optional — absent means the app's default.
 set_secret sentry-dsn                    "${SENTRY_DSN:-}"
-set_secret truecourse-max-concurrency    "${TRUECOURSE_MAX_CONCURRENCY:-}"
-set_secret truecourse-max-api-concurrency "${TRUECOURSE_MAX_API_CONCURRENCY:-}"
+set_secret truecourse-max-concurrency    "${TRUECOURSE_MAX_CONCURRENCY:-}"    integer
+set_secret truecourse-max-api-concurrency "${TRUECOURSE_MAX_API_CONCURRENCY:-}" integer
 
 echo "Done. Now provision or release the VM (see infra/azure/vm/DEPLOYMENT.md)."
