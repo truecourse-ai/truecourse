@@ -24,9 +24,9 @@
  * a seed over an install no run of that repository ever performs would be a
  * verdict about nothing.
  *
- * The proof is on by default. `TRUECOURSE_SEED_COLD_PROOF=0` is the operator's
- * opt-out (it costs one install and one build per setup); the seed session's
- * `coldProof: false` option is the test suite's.
+ * The proof always runs in production; the seed session's `coldProof: false`
+ * option exists for the test suite, which must not pay an install and a build
+ * per case.
  */
 
 import { execFile } from 'node:child_process';
@@ -61,18 +61,6 @@ const CLONE_TIMEOUT_MS = 10 * 60 * 1000;
 /** The dir the copies are made in, created on demand. */
 export function seedColdCopiesDir(): string {
   return path.join(getRuntimeDir(), COLD_COPIES_DIR);
-}
-
-/**
- * Whether the proof runs at all. On unless an operator turned it off for this
- * process (`TRUECOURSE_SEED_COLD_PROOF=0`) or a caller opted out in code, which
- * the test suite does and production never should: what the proof catches is
- * unrecoverable by the time a generate's own clone meets it.
- */
-export function seedColdProofEnabled(option: boolean | undefined): boolean {
-  if (option === false) return false;
-  const value = process.env.TRUECOURSE_SEED_COLD_PROOF?.trim().toLowerCase();
-  return value !== '0' && value !== 'false';
 }
 
 /**

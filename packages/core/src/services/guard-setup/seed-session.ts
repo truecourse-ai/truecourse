@@ -90,7 +90,7 @@ import { cachedSessionOutcome, promptFingerprint } from '../agent/session-cache.
 import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
-import { proveSeedFromColdClone, seedColdProofEnabled } from './seed-cold-proof.js';
+import { proveSeedFromColdClone } from './seed-cold-proof.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
 
@@ -1292,11 +1292,10 @@ export interface BuildSeedSessionOptions {
   onSessionEvent?: (workItem: string, event: SessionEvent) => void;
   /**
    * The fold's second gate — the seed proved again from a cold clone of the
-   * repository, through the recipe's own `install` and `build`. On by default,
-   * and an operator turns it off for a whole process with
-   * `TRUECOURSE_SEED_COLD_PROOF=0`; `false` here is for a caller that must not
-   * pay a full install and build (the test suite), never for production, where
-   * what it catches is unrecoverable later.
+   * repository, through the recipe's own `install` and `build`. Always on;
+   * `false` is for a caller that must not pay a full install and build (the
+   * test suite), never for production, where what it catches is unrecoverable
+   * later.
    */
   coldProof?: boolean;
 }
@@ -1510,7 +1509,7 @@ export function buildSeedSession(
         };
       }
 
-      const folded = await foldSeedOutcome(world, services, outcome.output, seedColdProofEnabled(opts.coldProof));
+      const folded = await foldSeedOutcome(world, services, outcome.output, opts.coldProof !== false);
       if ('reason' in folded) {
         return {
           status: 'failed',
@@ -1680,12 +1679,11 @@ async function foldSeedOutcome(
   // this machine is copied whole into every run of it, dependencies and build
   // output included, so a cold install there would refuse a seed over something
   // no run of that repository ever does.
-  const coldProofSkipped = !coldProof
-    ? 'the cold-clone proof did not run: it is turned off for this process (TRUECOURSE_SEED_COLD_PROOF)'
-    : !input.freshCheckout
+  const coldProofSkipped =
+    coldProof && !input.freshCheckout
       ? 'the cold-clone proof did not run: a run of this repository is handed the tree as it stands, dependencies and build output included, so a cold clone is not the tree it works in'
       : undefined;
-  if (coldProofSkipped === undefined) {
+  if (coldProof && coldProofSkipped === undefined) {
     const probes = output.probes;
     const webSurface = resolveWebSurface(input.recipe);
     // The clone has no built client either, so the web build is paid exactly

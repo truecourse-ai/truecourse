@@ -683,25 +683,6 @@ describe('buildSeedSession — the cold-clone proof', () => {
     // takes the seed for one a clone proved.
     expect(result.status === 'ok' && result.coldProofSkipped).toMatch(/the tree as it stands/);
   }, 120_000);
-
-  it('an operator turns the proof off for the whole process', async () => {
-    const r = committedRepo();
-    writeRecipe(r, {}, { install: "printf 'ERR no lockfile for this tree\\n' >&2 && false" });
-    const stub = stubDriver(async (call) => {
-      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
-      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
-    });
-    process.env.TRUECOURSE_SEED_COLD_PROOF = '0';
-    try {
-      const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
-
-      expect(result).toMatchObject({ status: 'ok' });
-      expect(servicesLog(r)).toEqual(['up', 'seed', 'down', 'up', 'seed', 'down']);
-      expect(result.status === 'ok' && result.coldProofSkipped).toMatch(/TRUECOURSE_SEED_COLD_PROOF/);
-    } finally {
-      delete process.env.TRUECOURSE_SEED_COLD_PROOF;
-    }
-  }, 120_000);
 });
 
 // ---------------------------------------------------------------------------
