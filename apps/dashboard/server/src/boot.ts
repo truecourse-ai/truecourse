@@ -1,9 +1,9 @@
 /**
  * Boot: everything the server is, assembled in order and started.
  *
- * Exported rather than run on import, so the enterprise bundle can register its
- * features (see `features.ts`) and then start the same server. `index.ts` is
- * the open edition's process entry and does nothing but call this.
+ * Exported rather than run on import, so the process entry (`index.ts`) can
+ * register the edition bundle's features first (see `edition-loader.ts`) and
+ * then start the one server.
  */
 
 import { createServer } from 'http';
@@ -38,6 +38,7 @@ import { stopAllRunsWatches } from './services/run-watch.service.js';
 import { getLogDir } from '@truecourse/core/config/runtime-dir';
 import { initSentry, flushSentry } from './observability/sentry.js';
 import { ServerLogTransport } from './observability/log-transport.js';
+import { registerEditionFeatures } from './edition-loader.js';
 import { LOCAL_ORG_ID } from './auth/local.js';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, FileLogTransport, setLogTransport, log } from '@truecourse/core/lib/logger';
@@ -63,7 +64,13 @@ export async function startServer(): Promise<void> {
     ),
   );
 
-  // 2. Postgres. All server state lives there — there is no file fallback, so
+  // 2. The edition. Whatever bundle sits beside this tree registers its
+  //    features now, before the auth and the routers below are built from
+  //    them. After the log transport, so which edition booted is the first
+  //    thing the log says and a broken bundle fails through the one catch.
+  await registerEditionFeatures();
+
+  // 3. Postgres. All server state lives there — there is no file fallback, so
   //    DATABASE_URL is required and createDb applies the migrations at boot.
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -97,7 +104,7 @@ export async function startServer(): Promise<void> {
     log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
   }
 
-  // 3. Session auth. Hosted: WorkOS, throwing if the WORKOS_* env is
+  // 4. Session auth. Hosted: WorkOS, throwing if the WORKOS_* env is
   //    incomplete — the server boots authenticated or not at all. Local: the
   //    one implicit session, with no identity provider at all.
   const auth = createAuth(mode, {
@@ -115,7 +122,7 @@ export async function startServer(): Promise<void> {
   // the doc reader needs to know whose workspace a repository reads.
   setRepoWorkspaceLookup(async (repoKey) => (await repoLinks.getRepo(repoKey))?.workspaceOrgId ?? null);
 
-  // 4. Background job queue. Long-running work runs here instead of inside the
+  // 5. Background job queue. Long-running work runs here instead of inside the
   //    request that asked for it. Built BEFORE the GitHub connection, whose
   //    link hook enqueues the connected repository's Flow setup, and started
   //    after — the task bodies read seams (the work-tree provider) the
@@ -135,7 +142,7 @@ export async function startServer(): Promise<void> {
     publish: (org, event) => publishEvent(getDb(), org, event),
   });
 
-  // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
+  // 6. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
   const github = createGithubConnection({
     repos: repoLinks,
@@ -226,7 +233,7 @@ export async function startServer(): Promise<void> {
     );
   }
 
-  // 6. This edition's own routers, built once from what boot already has. The
+  // 7. This edition's own routers, built once from what boot already has. The
   //    open edition has none — nobody registered any.
   const featureRouters: ServerRouterMount[] = [];
   for (const feature of registeredServerFeatures()) {
@@ -236,7 +243,7 @@ export async function startServer(): Promise<void> {
     log.info(`[Server] ${feature.name} enabled`);
   }
 
-  // 7. Setup Express app + socket.io
+  // 8. Setup Express app + socket.io
   const app = createApp({
     authVerifier: auth.verify,
     authRouter: auth.router,
@@ -250,7 +257,7 @@ export async function startServer(): Promise<void> {
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
-  // 8. Start listening
+  // 9. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {

@@ -1,15 +1,14 @@
 /**
- * What an edition bundle is built against: the registry it adds its routers to,
- * and the server it then starts. This is the ONLY module of this server another
- * package imports.
+ * What an edition bundle is built against: the shapes of the features it
+ * exports for the open server's entry to register. This is the ONLY module of
+ * this server another package imports, and only for types — the bundle never
+ * starts the server or reaches its registry itself.
  */
 
-export { runServer, startServer } from './boot.js';
-export {
-  registerServerFeature,
-  type ServerFeature,
-  type ServerFeatureContext,
-  type ServerRouterMount,
+export type {
+  ServerFeature,
+  ServerFeatureContext,
+  ServerRouterMount,
 } from './features.js';
 export type {
   MintedSession,
