@@ -71,7 +71,9 @@ Three build-time variables control it, read by the client when it is built:
 The server sends the other half: one event per background job that finished (a
 scan, a setup, a generation, a run) with its outcome, how long it took and the
 repository it was for. It reads `POSTHOG_DISABLED`, `POSTHOG_KEY` and
-`POSTHOG_HOST` from its own environment, which do the same three things.
+`POSTHOG_HOST` from the same repo-root `.env`, which do the same three things.
+`POSTHOG_DISABLED=1` there turns off both halves at once, so a development
+machine sends nothing.
 
 ## Contributing
 
