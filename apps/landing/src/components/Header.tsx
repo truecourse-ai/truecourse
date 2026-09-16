@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { SiGithub } from 'react-icons/si';
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { cn } from '@/lib/cn';
 import { AppLink } from './AppLink';
 import { DiscordIcon } from './DiscordIcon';
@@ -11,6 +11,7 @@ const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
 
 const NAV = [
   { href: '/#how', label: 'How it works' },
+  { href: '/#sandbox', label: 'Sandbox' },
   { href: '/#enterprise', label: 'Enterprise' },
   { href: '/#blog', label: 'Blog' },
 ];
@@ -18,9 +19,10 @@ const NAV = [
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const { pathname } = useLocation();
-  const onHome = pathname === '/';
-  const onBlog = pathname.startsWith('/blog');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const onHome = location.pathname === '/';
+  const onBlog = location.pathname.startsWith('/blog');
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -31,7 +33,7 @@ export function Header() {
 
   useEffect(() => {
     setOpen(false);
-  }, [pathname]);
+  }, [location.pathname]);
 
   // Off the home page there's no hero behind the header, so keep the blurred
   // surface always on.
@@ -45,6 +47,7 @@ export function Header() {
           onClick={(e) => {
             if (onHome) {
               e.preventDefault();
+              if (location.hash || location.search) navigate('/', { replace: true });
               window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
             }
           }}

@@ -13,6 +13,7 @@ import {
   PageHeader,
   Screen,
   SearchBox,
+  SentenceHighlight,
   Sidebar,
   SIDEBAR_W,
   TableHead,
@@ -23,7 +24,7 @@ import {
   cellX,
   type Col,
 } from './primitives';
-import { baseline, textWidth, ui } from './theme';
+import { baseline, ui } from './theme';
 import { useCompact } from './use-compact';
 
 interface IconAt {
@@ -173,11 +174,9 @@ function Requirement({
   lineH: number;
   lit: boolean;
 }) {
-  const w = textWidth(REQUIREMENT[0]!, size) + 12;
-  const h = (REQUIREMENT.length - 1) * lineH + size + 10;
   return (
     <g className={lit ? 'sc-in sc-hl' : undefined}>
-      {lit && <rect x={x - 6} y={y - size - 1} width={w} height={h} rx={4} fill={ui.highlight} />}
+      {lit && <SentenceHighlight x={x} y={y} size={size} lines={REQUIREMENT} lineH={lineH} />}
       {REQUIREMENT.map((line, i) => (
         <Txt key={line} x={x} y={y + i * lineH} size={size}>
           {line}
@@ -295,10 +294,10 @@ function Full() {
 
 function Compact() {
   const W = 500;
-  const H = 480;
+  const H = 420;
   const textX = 16;
   const bodySize = 11.5;
-  const requirementY = 372;
+  const requirementY = 304;
   return (
     <Screen width={W} height={H} label={LABEL} className="screen-context">
       <PageHeader x={0} right={W} title="Context" titleX={16} />
@@ -332,10 +331,10 @@ function Compact() {
         approval from finance.
       </Txt>
       <CompactRequirement x={textX} y={requirementY} size={bodySize} lit={false} />
-      <Txt x={textX} y={400} size={bodySize}>
+      <Txt x={textX} y={334} size={bodySize}>
         A refunded invoice keeps its number and receives a
       </Txt>
-      <Txt x={textX} y={420} size={bodySize}>
+      <Txt x={textX} y={354} size={bodySize}>
         credit note.
       </Txt>
 
@@ -353,7 +352,7 @@ function CompactRequirement({ x, y, size, lit }: { x: number; y: number; size: n
   const line = REQUIREMENT.join(' ');
   return (
     <g className={lit ? 'sc-in sc-hl' : undefined}>
-      {lit && <rect x={x - 6} y={y - size - 1} width={textWidth(line, size) + 12} height={size + 10} rx={4} fill={ui.highlight} />}
+      {lit && <SentenceHighlight x={x} y={y} size={size} lines={[line]} />}
       <Txt x={x} y={y} size={size}>
         {line}
       </Txt>

@@ -10,7 +10,7 @@ import {
   Settings,
   type LucideIcon,
 } from 'lucide-react';
-import { TONE, baseline, textWidth, ui, type Tone } from './theme';
+import { TONE, UI_ASCENT, UI_DESCENT, baseline, textWidth, uiWidth, ui, type Tone } from './theme';
 
 export function Screen({
   width,
@@ -169,6 +169,37 @@ export function Button({
       </Txt>
     </g>
   );
+}
+
+/**
+ * The requirement the story follows, lit where it is quoted. The text never
+ * moves: the box grows outward from it, 8px left of the first character and
+ * right of the widest line, 4px above the first line's ascent and below the
+ * last line's descent. `x` is the text's own x, `y` the first line's baseline.
+ */
+export function SentenceHighlight({
+  x,
+  y,
+  size,
+  lines,
+  lineH = size * 1.36,
+}: {
+  x: number;
+  y: number;
+  size: number;
+  lines: readonly string[];
+  lineH?: number;
+}) {
+  const padX = 8;
+  const padY = 4;
+  const textTop = y - size * UI_ASCENT;
+  const textBottom = y + (lines.length - 1) * lineH + size * UI_DESCENT;
+  const textW = Math.max(...lines.map((line) => uiWidth(line, size)));
+  const top = textTop - padY;
+  const h = textBottom - textTop + 2 * padY;
+  const left = x - padX;
+  const w = textW + 2 * padX;
+  return <rect x={left} y={top} width={w} height={h} rx={3} fill={ui.failTint} />;
 }
 
 /** A neutral capsule: a driver name, a marker. Never a status. */

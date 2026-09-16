@@ -124,6 +124,16 @@ footer {
   color: var(--accent);
 }
 
+/* The one line that says what this is, above a headline. Sentence case, no
+   tracking, no marker: it reads as a sentence, not a label. */
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--accent);
+  margin: 0 0 16px;
+}
+
 section.band {
   padding-block: clamp(64px, 9vw, 112px);
   border-bottom: 1px solid var(--line);
@@ -325,7 +335,7 @@ header.site.scrolled {
 .hero {
   position: relative;
   padding-top: clamp(120px, 15vh, 176px);
-  padding-bottom: clamp(64px, 9vw, 112px);
+  padding-bottom: clamp(96px, 11vw, 140px);
   overflow: hidden;
   border-bottom: 1px solid var(--line);
   text-align: center;
@@ -360,24 +370,50 @@ header.site.scrolled {
   z-index: 0;
   pointer-events: none;
 }
-.hero-line path {
+.hero-line > path {
   fill: none;
   stroke: var(--accent);
   stroke-width: 1;
   opacity: 0.32;
 }
 /* Drawn once, when the line itself scrolls into view, edge to edge. */
-.js .hero-line path {
+.js .hero-line > path {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
 }
-.js .hero-line.visible path {
+.js .hero-line.visible > path {
   animation: line-draw 1.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 @keyframes line-draw {
   to {
     stroke-dashoffset: 0;
   }
+}
+/* The wind's streaks, on a sheet over the whole hero. */
+.hero-wind {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+}
+/* The boat on the line, placed by the script once the line is drawn. */
+.js .hero-boat {
+  opacity: 0;
+}
+.boat-main {
+  fill: var(--fg);
+}
+.boat-jib {
+  fill: var(--accent);
+}
+.boat-hull {
+  fill: none;
+  stroke: var(--fg);
+}
+.boat-clear {
+  fill: var(--bg);
 }
 .hero-inner {
   position: relative;
@@ -409,17 +445,62 @@ header.site.scrolled {
   gap: 12px;
   margin-top: 32px;
 }
-/* The hero's stage: two windows drawn in one SVG, each with its own shadow and
-   border, so the wrapper carries none and lets the shadows past its edge. */
+/* The hero's stage: the dashboard, toured. */
 .hero-stage {
   margin: clamp(40px, 6vw, 64px) auto 0;
   max-width: 1000px;
 }
-.hero-stage svg {
-  width: 100%;
-  height: auto;
+.tour-stage {
+  position: relative;
+}
+/* Without JS one scene stands, the still; with it the scenes stack and
+   cross-fade, and the stage keeps its height from its aspect ratio. */
+.tour-scene {
+  display: none;
+}
+.tour-scene.still {
   display: block;
-  overflow: visible;
+}
+.js .tour-scene {
+  display: block;
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  pointer-events: none;
+}
+.js .tour-scene.on {
+  opacity: 1;
+}
+/* The dots drive the tour, so they exist only where the tour plays. */
+.tour-dots {
+  display: none;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.js .tour-dots {
+  display: flex;
+}
+.tour-dots button {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--line-strong);
+  cursor: pointer;
+  transition:
+    width 0.3s ease,
+    background 0.3s ease;
+}
+.tour-dots button.on {
+  width: 24px;
+  background: var(--accent);
+}
+.tour-dots button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 /* ---------- how it works ----------
@@ -430,6 +511,7 @@ header.site.scrolled {
   --steps-gap: clamp(44px, 6vw, 80px);
   --edge: 28px;
   --dot: 9px;
+  position: relative;
   list-style: none;
   margin: clamp(36px, 5vw, 56px) 0 0;
   padding: 0 0 0 var(--edge);
@@ -437,8 +519,27 @@ header.site.scrolled {
   flex-direction: column;
   gap: var(--steps-gap);
 }
-/* The text is a short block; the screen below it gets the whole column, the
-   same width as the hero's. */
+/* The boat on the course: centred on the line, docked on the current step's
+   dot, sailing to the next as the reader scrolls to it. */
+.course-boat {
+  position: absolute;
+  left: calc(var(--dot) / 2);
+  top: 0;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, calc(-50% + 10px));
+  pointer-events: none;
+}
+.course-boat svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.js .course-boat {
+  transition: transform 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* The text is a short block in one measure, heading and body on the same
+   left edge; the screen below it gets the whole column. */
 .step {
   position: relative;
   display: grid;
@@ -447,7 +548,7 @@ header.site.scrolled {
   align-items: start;
 }
 .step-text {
-  max-width: 640px;
+  max-width: 58ch;
 }
 .step-n {
   position: relative;
@@ -474,7 +575,8 @@ header.site.scrolled {
   left: calc(-1 * var(--edge) + var(--dot) / 2);
   top: 16px;
   width: 1px;
-  height: calc(100% - 16px + var(--steps-gap));
+  /* From under this step's dot to the centre of the next step's, 10px into it. */
+  height: calc(100% - 16px + var(--steps-gap) + 10px);
   background: var(--accent);
   opacity: 0.55;
   transform-origin: top;
@@ -482,7 +584,7 @@ header.site.scrolled {
 @media (max-width: 860px) {
   .step-seg {
     top: 10px;
-    height: calc(100% - 10px + var(--steps-gap));
+    height: calc(100% + var(--steps-gap));
   }
 }
 .js .step-seg {
@@ -509,9 +611,24 @@ header.site.scrolled {
   line-height: 1.55;
   color: var(--fg-dim);
   margin: 12px 0 0;
-  max-width: 34ch;
 }
 
+/* ---------- under the hood ---------- */
+.hood-text p {
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--fg-dim);
+  margin: 14px 0 0;
+  max-width: 58ch;
+}
+.diagram {
+  margin-top: clamp(36px, 5vw, 56px);
+}
+.diagram svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
 /* ---------- integrations strip ---------- */
 .strip {
   padding-block: 26px;
@@ -638,7 +755,29 @@ header.site.scrolled {
   text-align: center;
   position: relative;
   overflow: hidden;
-  padding-block: clamp(80px, 12vw, 140px);
+  padding-block: clamp(48px, 7vw, 80px) 0;
+  border-top: 1px solid var(--line);
+}
+/* The water runs under the words, edge to edge, down to the footer's line. */
+.cta .sea {
+  position: relative;
+  margin-top: 28px;
+  height: clamp(240px, 26vw, 320px);
+  touch-action: pan-y;
+  cursor: crosshair;
+}
+.cta .sea canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.cta .sea-say {
+  margin: 20px 0 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--muted);
 }
 .cta h2 {
   font-family: var(--font-mono);
@@ -652,7 +791,9 @@ header.site.scrolled {
 .cta h2 .hl {
   color: var(--accent);
 }
-
+.cta .cta-row {
+  margin-top: 28px;
+}
 /* ---------- footer ---------- */
 footer.site {
   padding-block: 56px 36px;
@@ -759,19 +900,30 @@ footer.site {
    .reveal wrapper becomes visible. Each element reads `--at` (its start),
    `--i` (its place in a stagger) and `--step` (the stagger interval).
    `.sc-beat` shows for a moment and goes; its end state is gone. */
-.js .reveal .sc-in {
+.js .reveal .sc-in,
+.js .tour-scene .sc-in {
   opacity: 0;
 }
-.js .reveal.visible .sc-in {
+.js .reveal.visible .sc-in,
+.js .tour-scene.on .sc-in {
   animation: sc-fade 0.45s cubic-bezier(0.16, 0.84, 0.3, 1) both;
   animation-delay: calc(var(--at, 0ms) + var(--i, 0) * var(--step, 70ms));
 }
-.js .reveal.visible .sc-rise {
+.js .reveal.visible .sc-rise,
+.js .tour-scene.on .sc-rise {
   animation-name: sc-rise;
 }
-.js .reveal.visible .sc-flip {
+.js .reveal.visible .sc-flip,
+.js .tour-scene.on .sc-flip {
   animation-name: sc-flip;
   animation-duration: 0.3s;
+}
+/* A scene that has played keeps its end state while it fades away. */
+.js .tour-scene.done .sc-in {
+  opacity: 1;
+}
+.js .tour-scene.done .sc-out {
+  opacity: 0;
 }
 .sc-rise,
 .sc-flip {
@@ -781,10 +933,12 @@ footer.site {
 .sc-out {
   opacity: 0;
 }
-.js .reveal .sc-out {
+.js .reveal .sc-out,
+.js .tour-scene .sc-out {
   opacity: 1;
 }
-.js .reveal.visible .sc-out {
+.js .reveal.visible .sc-out,
+.js .tour-scene.on .sc-out {
   animation: sc-out 0.2s ease both;
   animation-delay: calc(var(--at, 0ms) + var(--i, 0) * var(--step, 70ms));
 }
@@ -846,12 +1000,76 @@ footer.site {
   }
 }
 
-/* The document's sections settle one by one, top to bottom, once the chart
-   is under way. */
-.screen-home .hd-grey,
-.screen-home .hd-lit {
-  --at: 900ms;
-  --step: 260ms;
+/* The tour, scene by scene. Home: the chart wipes, then the pointer walks to
+   the failed band and clicks it. */
+.tour-pointer {
+  opacity: 0;
+  transform: translate(var(--x0), var(--y0));
+}
+.js .tour-scene.on .tour-pointer {
+  animation: tour-pointer 1.4s cubic-bezier(0.4, 0, 0.2, 1) var(--pointer-at, 1300ms) both;
+}
+.js .tour-scene.done .tour-pointer {
+  opacity: 1;
+  transform: translate(var(--x1), var(--y1));
+}
+@keyframes tour-pointer {
+  0% {
+    opacity: 0;
+    transform: translate(var(--x0), var(--y0));
+  }
+  30% {
+    opacity: 1;
+    transform: translate(var(--x0), var(--y0));
+  }
+  100% {
+    opacity: 1;
+    transform: translate(var(--x1), var(--y1));
+  }
+}
+.tour-click {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.js .tour-scene.on .tour-click {
+  animation: tour-click 0.5s ease-out var(--click-at, 2750ms) both;
+}
+@keyframes tour-click {
+  from {
+    opacity: 0.9;
+    transform: scale(0.3);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.2);
+  }
+}
+/* The requirement: the sections settle one by one, the sentence lights, the
+   tally lands, and the pointer walks to the failed one and clicks it. */
+.screen-tour .hd-grey,
+.screen-tour .hd-lit {
+  --at: 300ms;
+  --step: 220ms;
+}
+.screen-tour .hd-hl {
+  --at: 1500ms;
+}
+.screen-tour .hd-tally {
+  --at: 1700ms;
+}
+/* The run: the pictures, then the steps, then the transcript. */
+.screen-tour .rn-tile {
+  --at: 200ms;
+  --step: 110ms;
+}
+.screen-tour .rn-step {
+  --at: 700ms;
+  --step: 70ms;
+}
+.screen-tour .rn-line {
+  --at: 1000ms;
+  --step: 90ms;
 }
 /* Context's story: the dialog rises, its button is pressed and syncs, the
    dialog and the shade go, and the sentence lights on the clean page. */
@@ -881,6 +1099,8 @@ footer.site {
 .js .reveal.visible .sc-spin {
   animation: spin 0.8s linear infinite;
 }
+/* Connect's story: the dialog rises, Connect is pressed and connects, the
+   dialog goes, and the repository's interfaces fill in. */
 .screen-connect .sc-dim {
   --at: 400ms;
 }
@@ -888,12 +1108,51 @@ footer.site {
   --at: 500ms;
   --rise: 10px;
 }
+.screen-connect .sc-press {
+  --at: 1000ms;
+}
+.screen-connect .sc-done {
+  --at: 1500ms;
+}
+.screen-connect .sc-leave {
+  --at: 1900ms;
+}
+.screen-connect .sc-page {
+  --at: 1950ms;
+}
+.screen-connect .sc-row {
+  --at: 2050ms;
+  --step: 55ms;
+}
+.screen-connect .sc-tally {
+  --at: 2500ms;
+}
+/* Flows' story: the rows land, the refund row last and lit, the list goes
+   and its run opens with the pictures and the transcript. */
 .screen-flows .sc-row {
-  --at: 350ms;
-  --step: 60ms;
+  --at: 300ms;
+  --step: 55ms;
 }
 .screen-flows .sc-beat {
-  --at: 710ms;
+  --at: 700ms;
+}
+.screen-flows .fl-leave {
+  --at: 1450ms;
+}
+.screen-flows .fl-run {
+  --at: 1500ms;
+}
+.screen-flows .rn-tile {
+  --at: 1600ms;
+  --step: 100ms;
+}
+.screen-flows .rn-step {
+  --at: 1950ms;
+  --step: 70ms;
+}
+.screen-flows .rn-line {
+  --at: 2250ms;
+  --step: 80ms;
 }
 .screen-pr .pr-pass {
   --at: 300ms;
@@ -917,6 +1176,26 @@ footer.site {
 .screen-pr .pr-foot {
   --at: 1380ms;
 }
+/* Claude Code's story: the prompt, the flow read over MCP, the fix, the run,
+   and the check flipping green. */
+.screen-cc .cc-beat-0 {
+  --at: 300ms;
+}
+.screen-cc .cc-beat-1 {
+  --at: 700ms;
+}
+.screen-cc .cc-beat-2 {
+  --at: 1200ms;
+}
+.screen-cc .cc-beat-3 {
+  --at: 1800ms;
+}
+.screen-cc .cc-beat-4 {
+  --at: 2200ms;
+}
+.screen-cc .cc-flip {
+  --at: 2400ms;
+}
 
 @media (prefers-reduced-motion: reduce) {
   html {
@@ -927,20 +1206,36 @@ footer.site {
     transform: none !important;
     transition: none !important;
   }
-  .js .reveal .sc-in {
+  .js .reveal .sc-in,
+  .js .tour-scene .sc-in {
     opacity: 1 !important;
     animation: none !important;
   }
   .js .reveal .sc-out,
-  .js .reveal .sc-beat {
+  .js .reveal .sc-beat,
+  .js .tour-scene .sc-out {
     opacity: 0 !important;
     animation: none !important;
+  }
+  .js .tour-scene {
+    transition: none !important;
+  }
+  .js .tour-scene .tour-pointer,
+  .js .tour-scene .tour-click {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+  .tour-dots button {
+    transition: none !important;
   }
   .js .step-seg {
     transform: none !important;
     transition: none !important;
   }
-  .js .hero-line path {
+  .js .course-boat {
+    transition: none !important;
+  }
+  .js .hero-line > path {
     stroke-dashoffset: 0 !important;
     animation: none !important;
   }

@@ -1,3 +1,4 @@
+import { FLOW_ID, RunView } from './evidence';
 import {
   Chip,
   HEADER_H,
@@ -28,31 +29,34 @@ interface Flow {
 }
 
 const FLOWS: Flow[] = [
-  { title: 'refund-returns-to-original-method', tone: 'failure', word: 'Failed', drivers: ['API'], sections: 2 },
+  { title: FLOW_ID, tone: 'failure', word: 'Failed', drivers: ['Web'], sections: 2 },
   { title: 'invoice-totals-are-integer-cents', tone: 'success', word: 'Succeeded', drivers: ['API'], sections: 1 },
   { title: 'partial-refund-within-ninety-days', tone: 'success', word: 'Succeeded', drivers: ['API'], sections: 2 },
   { title: 'overdue-invoice-sends-reminder', tone: 'blocked', word: 'Blocked', drivers: ['API', 'Web'], sections: 1 },
   { title: 'credit-note-reverses-invoice', tone: 'success', word: 'Succeeded', drivers: ['API'], sections: 3 },
   { title: 'vat-applied-per-customer-country', tone: 'success', word: 'Succeeded', drivers: ['API'], sections: 2 },
   { title: 'trial-ends-without-a-card-on-file', tone: 'unproven', word: 'Never run', drivers: ['Web'], sections: 1 },
+  { title: 'invoice-due-date-follows-terms', tone: 'success', word: 'Succeeded', drivers: ['API'], sections: 1 },
+  { title: 'reminder-sent-three-days-before-due', tone: 'success', word: 'Succeeded', drivers: ['API'], sections: 2 },
+  { title: 'credit-note-emails-the-customer', tone: 'success', word: 'Succeeded', drivers: ['Web'], sections: 1 },
 ];
 
 const TALLY = [
   { tone: 'failure' as const, count: 1, word: 'Failed' },
   { tone: 'blocked' as const, count: 1, word: 'Blocked' },
   { tone: 'unproven' as const, count: 1, word: 'Never run' },
-  { tone: 'success' as const, count: 4, word: 'Succeeded' },
+  { tone: 'success' as const, count: 7, word: 'Succeeded' },
 ];
 
 /** The order the rows arrive in: the refund flow, the story's row, lands last. */
 const ROW_ORDER: number[] = (() => {
-  const story = FLOWS.findIndex((flow) => flow.title === 'refund-returns-to-original-method');
+  const story = FLOWS.findIndex((flow) => flow.title === FLOW_ID);
   const rest = FLOWS.map((_, i) => i).filter((i) => i !== story);
   const sequence = [...rest, story];
   return FLOWS.map((_, i) => sequence.indexOf(i));
 })();
 
-/** The highlight the story's row wears for a beat as it lands. */
+/** The highlight the failed row wears for a beat as it lands, and is opened on. */
 function Beat({ x, top, title }: { x: number; top: number; title: string }) {
   return (
     <rect
@@ -62,7 +66,7 @@ function Beat({ x, top, title }: { x: number; top: number; title: string }) {
       width={textWidth(title, 12) + 16}
       height={ROW_H - 12}
       rx={4}
-      fill={ui.highlight}
+      fill={ui.failTint}
     />
   );
 }
@@ -71,7 +75,7 @@ const FILTER_Y = 80;
 const HEAD_Y = 112;
 const ROW_H = 36;
 const LABEL =
-  'The Flows page of the TrueCourse dashboard filtered to northwind/billing: seven flows with their status, driver, repository and the number of doc sections each one covers';
+  'The Flows page of the TrueCourse dashboard filtered to northwind/billing: seven flows with their status, then the run of refund-returns-to-original-method opened from its row: a replay tile and step screenshots of the Northwind billing app, the failing one marked, and the transcript ending in found Issued as store credit';
 
 /** The filter row: the label, the one selected pill, the dashed Add filter control. */
 function FilterRow({ x, right }: { x: number; right: number }) {
@@ -119,6 +123,10 @@ function Drivers({ x, cy, drivers }: { x: number; cy: number; drivers: string[] 
   );
 }
 
+/**
+ * Step 3's story: the flows of northwind/billing land, the refund flow last
+ * and lit, and its run opens in place with its step screenshots and transcript.
+ */
 export function FlowsScreen() {
   const compact = useCompact();
   return compact ? <Compact /> : <Full />;
@@ -126,7 +134,7 @@ export function FlowsScreen() {
 
 function Full() {
   const W = 1040;
-  const H = 440;
+  const H = 560;
   const cols: Col[] = [
     { label: 'Flow', left: SIDEBAR_W + 12, right: 580 },
     { label: 'Status', left: 580, right: 690 },
@@ -139,40 +147,43 @@ function Full() {
     <Screen width={W} height={H} label={LABEL} className="screen-flows">
       <Sidebar height={H} active="Flows" />
       <PageHeader x={SIDEBAR_W} right={W} title="Flows" />
-      <SearchBox x={SIDEBAR_W + 24} y={HEADER_H + 8} width={W - SIDEBAR_W - 48} placeholder="Search flows" />
-      <FilterRow x={SIDEBAR_W + 24} right={W} />
-      <TableHead y={HEAD_Y} columns={cols} />
-      {FLOWS.map((row, i) => {
-        const top = HEAD_Y + 28 + i * ROW_H;
-        const cy = top + ROW_H / 2;
-        return (
-          <g key={row.title}>
-            {ROW_ORDER[i] === FLOWS.length - 1 && <Beat x={cellX(flow)} top={top} title={row.title} />}
-            <g className="sc-in sc-row" style={order(ROW_ORDER[i]!)}>
-              <Txt x={cellX(flow)} y={baseline(cy, 12)} size={12}>
-                {row.title}
-              </Txt>
-              <StatusWord x={cellX(status)} cy={cy} tone={row.tone} word={row.word} />
-              <Drivers x={cellX(drivers)} cy={cy} drivers={row.drivers} />
-              <Txt x={cellX(repo)} y={baseline(cy, 11)} size={11} fill={ui.muted}>
-                northwind/billing
-              </Txt>
-              <Txt x={cellX(sections)} y={baseline(cy, 12)} size={12} anchor="end">
-                {String(row.sections)}
-              </Txt>
+      <g className="sc-out fl-leave">
+        <SearchBox x={SIDEBAR_W + 24} y={HEADER_H + 8} width={W - SIDEBAR_W - 48} placeholder="Search flows" />
+        <FilterRow x={SIDEBAR_W + 24} right={W} />
+        <TableHead y={HEAD_Y} columns={cols} />
+        {FLOWS.map((row, i) => {
+          const top = HEAD_Y + 28 + i * ROW_H;
+          const cy = top + ROW_H / 2;
+          return (
+            <g key={row.title}>
+              {ROW_ORDER[i] === FLOWS.length - 1 && <Beat x={cellX(flow)} top={top} title={row.title} />}
+              <g className="sc-in sc-row" style={order(ROW_ORDER[i]!)}>
+                <Txt x={cellX(flow)} y={baseline(cy, 12)} size={12}>
+                  {row.title}
+                </Txt>
+                <StatusWord x={cellX(status)} cy={cy} tone={row.tone} word={row.word} />
+                <Drivers x={cellX(drivers)} cy={cy} drivers={row.drivers} />
+                <Txt x={cellX(repo)} y={baseline(cy, 11)} size={11} fill={ui.muted}>
+                  northwind/billing
+                </Txt>
+                <Txt x={cellX(sections)} y={baseline(cy, 12)} size={12} anchor="end">
+                  {String(row.sections)}
+                </Txt>
+              </g>
+              <HLine y={top + ROW_H} x0={SIDEBAR_W} x1={W} color="#f0f0f0" />
             </g>
-            <HLine y={top + ROW_H} x0={SIDEBAR_W} x1={W} color="#f0f0f0" />
-          </g>
-        );
-      })}
-      <Tally y={H - 36} x={SIDEBAR_W + 24} right={W} items={TALLY} total="7 of 52" />
+          );
+        })}
+        <Tally y={H - 36} x={SIDEBAR_W + 24} right={W} items={TALLY} total="10 of 52" />
+      </g>
+      <RunView W={W} x0={SIDEBAR_W} compact={false} id="flows" cls="sc-in fl-run" />
     </Screen>
   );
 }
 
 function Compact() {
   const W = 500;
-  const H = 430;
+  const H = 560;
   const cols: Col[] = [
     { label: 'Flow', left: 4, right: 340 },
     { label: 'Status', left: 340, right: W },
@@ -181,26 +192,29 @@ function Compact() {
   return (
     <Screen width={W} height={H} label={LABEL} className="screen-flows">
       <PageHeader x={0} right={W} title="Flows" titleX={16} />
-      <SearchBox x={16} y={HEADER_H + 8} width={W - 32} placeholder="Search flows" />
-      <FilterRow x={16} right={W} />
-      <TableHead y={HEAD_Y} columns={cols} />
-      {FLOWS.map((row, i) => {
-        const top = HEAD_Y + 28 + i * ROW_H;
-        const cy = top + ROW_H / 2;
-        return (
-          <g key={row.title}>
-            {ROW_ORDER[i] === FLOWS.length - 1 && <Beat x={cellX(flow)} top={top} title={row.title} />}
-            <g className="sc-in sc-row" style={order(ROW_ORDER[i]!)}>
-              <Txt x={cellX(flow)} y={baseline(cy, 12)} size={12}>
-                {row.title}
-              </Txt>
-              <StatusWord x={cellX(status)} cy={cy} tone={row.tone} word={row.word} />
+      <g className="sc-out fl-leave">
+        <SearchBox x={16} y={HEADER_H + 8} width={W - 32} placeholder="Search flows" />
+        <FilterRow x={16} right={W} />
+        <TableHead y={HEAD_Y} columns={cols} />
+        {FLOWS.map((row, i) => {
+          const top = HEAD_Y + 28 + i * ROW_H;
+          const cy = top + ROW_H / 2;
+          return (
+            <g key={row.title}>
+              {ROW_ORDER[i] === FLOWS.length - 1 && <Beat x={cellX(flow)} top={top} title={row.title} />}
+              <g className="sc-in sc-row" style={order(ROW_ORDER[i]!)}>
+                <Txt x={cellX(flow)} y={baseline(cy, 12)} size={12}>
+                  {row.title}
+                </Txt>
+                <StatusWord x={cellX(status)} cy={cy} tone={row.tone} word={row.word} />
+              </g>
+              <HLine y={top + ROW_H} x0={0} x1={W} color="#f0f0f0" />
             </g>
-            <HLine y={top + ROW_H} x0={0} x1={W} color="#f0f0f0" />
-          </g>
-        );
-      })}
-      <Tally y={H - 36} x={16} right={W} items={TALLY} total="7 of 52" />
+          );
+        })}
+        <Tally y={H - 36} x={16} right={W} items={TALLY} total="10 of 52" />
+      </g>
+      <RunView W={W} x0={0} compact id="flows" cls="sc-in fl-run" />
     </Screen>
   );
 }

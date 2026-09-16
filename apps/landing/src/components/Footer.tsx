@@ -9,6 +9,7 @@ type LinkItem = { href: string; label: string };
 
 const PRODUCT: LinkItem[] = [
   { href: '/#how', label: 'How it works' },
+  { href: '/#sandbox', label: 'Sandbox' },
   { href: '/#integrations', label: 'Integrations' },
   { href: '/#enterprise', label: 'Enterprise' },
 ];
