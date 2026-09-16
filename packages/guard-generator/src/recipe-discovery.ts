@@ -306,12 +306,14 @@ export interface DiscoverRecipeOptions {
    */
   datastores?: () => Promise<readonly DatastoreUrlRef[]>
   /**
-   * The repository's stable identity (`owner/repo`, `local/<folder>`), when the
+   * The identity of the docker WORLD this repository's runs share: the
+   * workspace and the repository together (`<org>/<owner>/<repo>`), when the
    * caller has one. The deterministic proposal names its compose project after
-   * it, so every run of the repository shares one project whatever directory
-   * it was cloned into. Absent ⇒ the checkout directory's own name.
+   * it, so every run of the pair shares one project whatever directory it was
+   * cloned into, and no other pair's `reset` reaches its volumes. Absent ⇒ the
+   * checkout directory's own name.
    */
-  repoKey?: string
+  composeKey?: string
   /**
    * Re-derive even when `recipe.json` already exists (`guard recipe --refresh`).
    * Not a "force write": discovery still writes only a proposal that VERIFIED, so
@@ -426,7 +428,7 @@ export async function discoverRecipe(
     routes: options.routes ? [...(await options.routes())] : undefined,
     datastores: options.datastores ? [...(await options.datastores())] : undefined,
     ...(inputs.manifestApps ? { manifestApps: inputs.manifestApps } : {}),
-    ...(options.repoKey ? { repoKey: options.repoKey } : {}),
+    ...(options.composeKey ? { composeKey: options.composeKey } : {}),
   })
   if (derived.ok) {
     // The generated datastore must be ON DISK before verification: the `services.up`
@@ -674,9 +676,10 @@ export type VerifiableProposal = {
       { serve: readonly string[]; healthPath?: string; env?: Record<string, string>; cwd?: 'sandbox' | 'repo' }
     >
     /** The datastore bring-up/tear-down (compose-derived or model-proposed);
-     *  verification runs whatever the proposal carries. `reset` is not run here —
-     *  it is the runner's post-mutator restore, and a wipe has no place in a
-     *  verification pass. */
+     *  verification runs whatever the proposal carries. `reset` runs ONCE per
+     *  round, before the bring-up, so the round starts from a known-clean
+     *  datastore; the teardown stops the services and leaves the volumes for
+     *  the next round's reset to wipe. */
     services?: { up: string; down?: string; reset?: string }
   }
   /** The browser surface — booted and health-polled like any server. */
@@ -993,19 +996,18 @@ export async function verifyProposal(
       }
     } finally {
       // Teardown is best-effort and NEVER a verdict — a datastore that will not
-      // stop is a warning, not a reason to reject a recipe that booted. The wipe
-      // follows the stop so the NEXT verification in this sandbox starts from an
-      // empty world instead of whatever this one left bound.
-      if (servicesUp) {
-        for (const command of [api.services?.down, api.services?.reset]) {
-          if (!command) continue
-          const step = await runBuild(repoRoot, command, proposal.env, SERVICES_TIMEOUT_MS)
-          if (!step.ok) {
-            // eslint-disable-next-line no-console -- verification's one advisory line.
-            console.warn(
-              `[guard recipe] \`${command}\` failed after verification — the services it brought up may still be running.`,
-            )
-          }
+      // stop is a warning, not a reason to reject a recipe that booted. It STOPS
+      // and keeps the volumes: the clean start the next round needs is the reset
+      // that brackets its own bring-up, and wiping here would only make the
+      // round after this one pay a second initdb for the same guarantee.
+      const down = api.services?.down
+      if (servicesUp && down) {
+        const step = await runBuild(repoRoot, down, proposal.env, SERVICES_TIMEOUT_MS)
+        if (!step.ok) {
+          // eslint-disable-next-line no-console -- verification's one advisory line.
+          console.warn(
+            `[guard recipe] \`${down}\` failed after verification — the services it brought up may still be running.`,
+          )
         }
       }
     }
@@ -1113,10 +1115,46 @@ function composeFilesRead(command: string, repoRoot: string): string[] {
  * host side is a path RELATIVE to the compose file, i.e. a directory compose
  * creates inside the repository. A named volume (declared under the top-level
  * `volumes:`) and an absolute path are neither.
+ *
+ * The files are read the way COMPOSE reads them, merged rather than one at a
+ * time: a mount an override replaces with a named volume is no longer declared,
+ * and warning about it would be warning about the very fix this recommends.
  */
 function composeBindMounts(up: string, repoRoot: string): string[] {
+  const { volumesByService, namedVolumes } = mergedComposeVolumes(composeFilesRead(up, repoRoot))
   const mounts: string[] = []
-  for (const file of composeFilesRead(up, repoRoot)) {
+  for (const volumes of volumesByService.values()) {
+    for (const { raw, host } of volumes.values()) {
+      // `$`-prefixed hosts are the user's own variable, absolute ones land
+      // outside the checkout, and a named volume is the fix, not the problem.
+      if (!host || host.startsWith('/') || host.startsWith('$') || namedVolumes.has(host)) continue
+      mounts.push(typeof raw === 'string' ? raw : host)
+    }
+  }
+  return mounts
+}
+
+/** One service volume as compose keys it: by its container-side TARGET, which is
+ *  what a later file's entry replaces. `host` is empty for anything that is not
+ *  a host path (a named or anonymous volume). */
+interface ComposeVolume {
+  raw: unknown
+  host: string
+}
+
+/**
+ * Every compose file's service volumes merged as compose merges them: service
+ * by service, and within a service by the volume's container-side target, the
+ * last file to declare a target winning it. The top-level `volumes:` keys are
+ * the union, since a named volume declared anywhere is declared.
+ */
+function mergedComposeVolumes(files: readonly string[]): {
+  volumesByService: Map<string, Map<string, ComposeVolume>>
+  namedVolumes: Set<string>
+} {
+  const volumesByService = new Map<string, Map<string, ComposeVolume>>()
+  const namedVolumes = new Set<string>()
+  for (const file of files) {
     let doc: unknown
     try {
       doc = yaml.load(fs.readFileSync(file, 'utf-8'))
@@ -1125,25 +1163,34 @@ function composeBindMounts(up: string, repoRoot: string): string[] {
     }
     if (!doc || typeof doc !== 'object') continue
     const root = doc as { services?: Record<string, unknown> | null; volumes?: Record<string, unknown> | null }
-    const namedVolumes = new Set(Object.keys(root.volumes ?? {}))
-    for (const service of Object.values(root.services ?? {})) {
-      const volumes = (service as { volumes?: unknown } | null)?.volumes
+    for (const name of Object.keys(root.volumes ?? {})) namedVolumes.add(name)
+    for (const [service, spec] of Object.entries(root.services ?? {})) {
+      const volumes = (spec as { volumes?: unknown } | null)?.volumes
       if (!Array.isArray(volumes)) continue
-      for (const entry of volumes) {
-        const host =
-          typeof entry === 'string'
-            ? (entry.split(':')[0] ?? '')
-            : isBindMountEntry(entry)
-              ? String(entry.source ?? '')
-              : ''
-        // `$`-prefixed hosts are the user's own variable, absolute ones land
-        // outside the checkout, and a named volume is the fix, not the problem.
-        if (!host || host.startsWith('/') || host.startsWith('$') || namedVolumes.has(host)) continue
-        mounts.push(typeof entry === 'string' ? entry : host)
-      }
+      const merged = volumesByService.get(service) ?? new Map<string, ComposeVolume>()
+      for (const entry of volumes) merged.set(volumeTarget(entry), { raw: entry, host: volumeHost(entry) })
+      volumesByService.set(service, merged)
     }
   }
-  return mounts
+  return { volumesByService, namedVolumes }
+}
+
+/** The container-side path an entry mounts at — compose's key for the entry. */
+function volumeTarget(entry: unknown): string {
+  if (typeof entry === 'string') {
+    const parts = entry.split(':')
+    return (parts.length > 1 ? parts[1] : parts[0]) ?? ''
+  }
+  return typeof entry === 'object' && entry !== null ? String((entry as { target?: unknown }).target ?? '') : ''
+}
+
+/** The HOST side of an entry, or '' when it mounts no host path. */
+function volumeHost(entry: unknown): string {
+  if (typeof entry === 'string') {
+    const parts = entry.split(':')
+    return parts.length > 1 ? (parts[0] ?? '') : ''
+  }
+  return isBindMountEntry(entry) ? String(entry.source ?? '') : ''
 }
 
 function isBindMountEntry(entry: unknown): entry is { type?: string; source?: unknown } {
@@ -1345,81 +1392,63 @@ const HOST_MUTATION_PATTERNS: { pattern: RegExp; what: string }[] = [
  *  BE docker. */
 const DOCKER_COMPOSE_CALL = /(?<![\w-])docker(?:\s+|-)compose\b([^|;&]*)/g
 
-/** The `-p`/`-f` flags of a command's first compose invocation, verbatim and
- *  trailing-space-terminated, so a suggested sibling command (`down -v` for an
- *  `up`) addresses exactly the project the original does. Empty when it has
- *  none — the namespace rule then refuses both. */
-function composeNamespaceFlags(command: string): string {
-  const args = new RegExp(DOCKER_COMPOSE_CALL.source).exec(command)?.[1] ?? ''
-  const tokens = args.trim().split(/\s+/).filter(Boolean)
-  const kept: string[] = []
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i]!
-    if (t === '-p' || t === '--project-name' || t === '-f' || t === '--file') {
-      const v = tokens[i + 1]
-      if (v) kept.push(t, v)
-      i++
-    } else if (t.startsWith('--project-name=') || t.startsWith('--file=')) kept.push(t)
-  }
-  return kept.length > 0 ? `${kept.join(' ')} ` : ''
-}
-
-/** Whether ONE compose invocation's argument text passes an explicit project,
- *  and which files it names — the two flags every compose rule here reads. */
-function composeFlags(args: string): { project: boolean; files: string[] } {
+/**
+ * ONE compose invocation's argument text, as every compose rule here reads it:
+ * whether it passes an explicit project, which files it names, and those same
+ * `-p`/`-f` flags VERBATIM, so a suggested sibling command (`down -v` for an
+ * `up`) addresses exactly the project and files the original does.
+ */
+function composeFlags(args: string): { project: boolean; files: string[]; flags: string } {
   const tokens = args.trim().split(/\s+/).filter(Boolean)
   let project = false
   const files: string[] = []
+  const kept: string[] = []
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!
-    if (t === '-p' || t === '--project-name') { project = true; i++ }
-    else if (t.startsWith('--project-name=')) project = true
-    else if (t === '-f' || t === '--file') { const v = tokens[i + 1]; if (v) files.push(v); i++ }
-    else if (t.startsWith('--file=')) files.push(t.slice('--file='.length))
+    const value = tokens[i + 1]
+    if (t === '-p' || t === '--project-name') { project = true; if (value) kept.push(t, value); i++ }
+    else if (t.startsWith('--project-name=')) { project = true; kept.push(t) }
+    else if (t === '-f' || t === '--file') { if (value) { files.push(value); kept.push(t, value) } i++ }
+    else if (t.startsWith('--file=')) { files.push(t.slice('--file='.length)); kept.push(t) }
   }
-  return { project, files }
+  return { project, files, flags: kept.length > 0 ? `${kept.join(' ')} ` : '' }
+}
+
+/** The first compose invocation of a whole shell command. */
+function firstComposeFlags(command: string): ReturnType<typeof composeFlags> {
+  return composeFlags(new RegExp(DOCKER_COMPOSE_CALL.source).exec(command)?.[1] ?? '')
 }
 
 /**
  * The compose NAMESPACE rule — the boundary the `docker rm/kill/stop` refusal
  * left open (cal.diy 2026-08-21): `docker compose up/stop` with no explicit
- * project attaches to the repository's DEFAULT compose project — the
- * developer's own live stack — and compose "resolves" a port or config change
- * by RECREATING the running container (a verified recipe re-ported the
+ * project attaches to whatever project the working directory or the file names
+ * — the developer's own live stack — and compose "resolves" a port or config
+ * change by RECREATING the running container (a verified recipe re-ported the
  * developer's running redis to a new port and left it stopped, through this
- * exact channel). A compose invocation in a recipe channel must therefore be
- * namespaced: `-p <project>`, or an `-f` file that pins a top-level `name:`
- * (the repo's dedicated test composes do; its dev compose does not).
+ * exact channel). Since the recipe's `reset` is EXECUTED (verification runs it
+ * before every bring-up, the runner after a mutator tail), an invocation that
+ * lands in someone else's project does not just recreate a container, it wipes
+ * its volumes.
  *
- * Returns one complaint per un-namespaced invocation. `repoRoot` grounds the
- * `-f` file check; without it (older callers, unit contexts) a file reference
- * cannot be verified and is treated as unpinned — conservative on purpose.
+ * So every compose invocation in a recipe channel carries `-p`, and only `-p`:
+ * a file's own top-level `name:` is the project its AUTHOR runs it under, which
+ * is exactly the stack a recipe must stay out of, and `-p` is also the one
+ * spelling that overrides it.
+ *
+ * Returns one complaint per un-namespaced invocation.
  */
-function composeNamespaceComplaints(label: string, command: string, repoRoot?: string): string[] {
+function composeNamespaceComplaints(label: string, command: string): string[] {
   const complaints: string[] = []
   for (const match of command.matchAll(DOCKER_COMPOSE_CALL)) {
-    const { project: hasProject, files } = composeFlags(match[1] ?? '')
-    if (hasProject) continue
-    const pinsName = (file: string): boolean => {
-      if (file === '-') return false // stdin — nothing to inspect; demand `-p`
-      if (!repoRoot) return false
-      try {
-        return /^name:\s*\S/m.test(fs.readFileSync(path.resolve(repoRoot, file), 'utf-8'))
-      } catch {
-        return false
-      }
-    }
-    if (files.length > 0 && files.some(pinsName)) continue
-    const why =
-      files.length === 0
-        ? 'no `-f` file and no `-p` project'
-        : `the file(s) it names (${files.join(', ')}) pin no top-level \`name:\``
+    if (composeFlags(match[1] ?? '').project) continue
     complaints.push(
-      `${label} runs \`docker compose\` without an explicit project namespace (${why}) — it attaches to the ` +
-      `repository's DEFAULT compose project, i.e. the developer's own stack, and compose resolves a port or ` +
-      `config change by RECREATING a running container (this is how a verified recipe once re-ported and stopped ` +
-      `the developer's live redis). Namespace it: pass \`-p <dedicated-project>\`, or point \`-f\` at a compose ` +
-      `file that declares a top-level \`name:\` (a dedicated test compose, never the dev compose).`,
+      `${label} runs \`docker compose\` without an explicit project namespace (\`-p\`) — it attaches to the ` +
+      `project the working directory or the compose file names, i.e. the developer's own stack, where compose ` +
+      `resolves a port or config change by RECREATING a running container (this is how a verified recipe once ` +
+      `re-ported and stopped the developer's live redis) and the recipe's own \`reset\` would wipe their ` +
+      `volumes. Namespace it: pass \`-p <dedicated-project>\` on EVERY invocation. A top-level \`name:\` in ` +
+      `the file is not enough — that names the project whoever wrote the file runs it under.`,
     )
   }
   return complaints
@@ -1428,8 +1457,8 @@ function composeNamespaceComplaints(label: string, command: string, repoRoot?: s
 export function staticProposalComplaints(
   proposal: VerifiableProposal,
   apps?: readonly RecipeAppInventoryEntry[],
-  /** Grounds the compose-namespace rule's `-f` file check; absent ⇒ a file
-   *  reference cannot be verified and counts as unpinned (conservative). */
+  /** Grounds the rules that READ the checkout (the install's lifecycle switches,
+   *  the browser-app evidence); absent ⇒ those rules stay quiet. */
   repoRoot?: string,
 ): string[] {
   const complaints: string[] = []
@@ -1523,7 +1552,7 @@ export function staticProposalComplaints(
         )
       }
     }
-    complaints.push(...composeNamespaceComplaints(label, command, repoRoot))
+    complaints.push(...composeNamespaceComplaints(label, command))
   }
   // `services.up`/`down` ARE the compose home, but the host-mutation rules hold
   // there too — bringing up the repo's own datastore never needs to escalate or
@@ -1535,7 +1564,7 @@ export function staticProposalComplaints(
     ['api.services.reset', services?.reset],
   ] as const) {
     if (!command) continue
-    complaints.push(...composeNamespaceComplaints(label, command, repoRoot))
+    complaints.push(...composeNamespaceComplaints(label, command))
     for (const { pattern, what } of HOST_MUTATION_PATTERNS) {
       if (pattern.test(command)) {
         complaints.push(
@@ -1598,7 +1627,7 @@ export function staticProposalComplaints(
   // outright without one, so the omission silently blocks every credential/
   // deletion/config flow. `down -v` with the SAME compose file is the wipe.
   if (services?.up && /(?<![\w-])docker(?:\s+|-)compose\b/.test(services.up) && !services.reset) {
-    const suggested = `docker compose ${composeNamespaceFlags(services.up)}down -v`
+    const suggested = `docker compose ${firstComposeFlags(services.up).flags}down -v`
     complaints.push(
       `\`api.services.up\` manages docker compose services but declares no \`reset\` — without one the runner ` +
       `cannot restore the world after a \`world: mutates\` test, so every world-mutating scenario (credential ` +

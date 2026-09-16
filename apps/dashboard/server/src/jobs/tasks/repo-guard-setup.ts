@@ -129,6 +129,12 @@ export function createRepoGuardSetupTask(
             transport: llm.transport(),
             transportMode: llm.mode,
             sessionsKey: repoFullName,
+            // The docker world the recipe's compose project names. Two
+            // workspaces can be connected to one repository, and the heavy-job
+            // queue serializes per workspace, so their jobs run side by side on
+            // this host: the project has to separate them or one job's reset
+            // wipes the other's live datastore.
+            composeKey: `${ctx.payload.workspaceOrgId}/${repoFullName}`,
             sessionRun: activityRun,
             eagerRun: true,
             tracker: activityTracker,

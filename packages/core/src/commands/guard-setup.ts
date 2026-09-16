@@ -118,6 +118,16 @@ export interface GuardSetupInProcessOptions {
    * `repoRoot`.
    */
   sessionsKey?: string;
+  /**
+   * The identity of the docker WORLD this repository's runs share, which the
+   * recipe's compose project is named after: the workspace and the repository
+   * together (`<org>/<owner>/<repo>`). It is NOT the sessions key: transcripts
+   * are keyed per repository, while a compose project's volumes are what
+   * `reset` wipes, and two workspaces connected to one repository run their
+   * jobs side by side on one host. Absent ⇒ the clone directory's own name,
+   * which is stable only for a developer's own tree.
+   */
+  composeKey?: string;
   /** Hosted lifecycle owns this run and its final result persistence. */
   sessionRun?: SessionRunStore;
   /**
@@ -376,10 +386,7 @@ export async function guardSetupInProcess(
   try {
     const result: GuardSetupResult = await runGuardSetup({
       repoRoot,
-      // The repository's identity names the compose project, so every run —
-      // whatever directory it clones into — shares one; the sessions key IS
-      // that identity wherever a caller has one.
-      ...(options.sessionsKey ? { repoKey: options.sessionsKey } : {}),
+      ...(options.composeKey ? { composeKey: options.composeKey } : {}),
       recipeRunner:
         options.recipeRunner ??
         spawnRecipeRunner({

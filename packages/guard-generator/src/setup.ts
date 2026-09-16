@@ -160,12 +160,14 @@ export class SetupStepNotReadyError extends Error {
 export interface GuardSetupOptions {
   repoRoot: string
   /**
-   * The repository's stable identity (`owner/repo`, `local/<folder>`), when
-   * the caller has one. Recipe discovery names the compose project after it,
-   * so every run of the repository shares one project whatever directory it
-   * was cloned into. Absent ⇒ the checkout directory's own name.
+   * The identity of the docker WORLD this repository's runs share: the
+   * workspace and the repository together (`<org>/<owner>/<repo>`), when the
+   * caller has one. Recipe discovery names the compose project after it, so
+   * every run of the pair shares one project whatever directory it was cloned
+   * into, and no other pair's `reset` reaches its volumes. Absent ⇒ the
+   * checkout directory's own name.
    */
-  repoKey?: string
+  composeKey?: string
   /** Interface mapping seam — generate's provider shape, optionally extended
    *  with the mapping's run diagnostics; see {@link GuardSetupInterfaceProvider}. */
   interfaces?: GuardSetupInterfaceProvider
@@ -556,7 +558,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     const discovery = await discoverRecipe(repoRoot, opts.recipeRunner, {
       ...(opts.refresh ? { ignoreExisting: true } : {}),
       ...(opts.repair ? { repair: opts.repair } : {}),
-      ...(opts.repoKey ? { repoKey: opts.repoKey } : {}),
+      ...(opts.composeKey ? { composeKey: opts.composeKey } : {}),
       routes: async () => routesFromInterfaces((await mapOnce()).interfaces),
       database: async () => {
         const db = (await mapOnce()).database

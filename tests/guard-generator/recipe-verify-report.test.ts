@@ -269,7 +269,7 @@ describe('the host bind-mount caveat', () => {
 
   it('warns about a relative host path in the compose file `-f` names', async () => {
     const r = composeRepo(BIND)
-    const verdict = await verifyProposal(r, proposal('echo docker compose -f compose.yml up -d'))
+    const verdict = await verifyProposal(r, proposal('echo docker compose -p acme-guard -f compose.yml up -d'))
 
     expect(verdict.ok).toBe(true)
     if (!verdict.ok) return
@@ -290,7 +290,22 @@ describe('the host bind-mount caveat', () => {
 
   it('stays quiet for a named volume', async () => {
     const r = composeRepo(NAMED)
-    const verdict = await verifyProposal(r, proposal('echo docker compose -f compose.yml up -d'))
+    const verdict = await verifyProposal(r, proposal('echo docker compose -p acme-guard -f compose.yml up -d'))
+
+    expect(verdict).toEqual({ ok: true })
+  }, 60_000)
+
+  // Compose merges a service's volumes by their container-side TARGET, so a base
+  // bind mount an override replaces with a named volume is not declared any
+  // more. Reading the files one at a time would report it, which is reporting
+  // the very fix the caveat asks for.
+  it('stays quiet when an override replaces the bind mount with a named volume', async () => {
+    const r = composeRepo(BIND)
+    fs.writeFileSync(
+      path.join(r, 'override.yml'),
+      ['volumes:', '  pgdata:', 'services:', '  database:', '    volumes:', '      - pgdata:/var/lib/postgresql/data', ''].join('\n'),
+    )
+    const verdict = await verifyProposal(r, proposal('echo docker compose -p acme-guard -f compose.yml -f override.yml up -d'))
 
     expect(verdict).toEqual({ ok: true })
   }, 60_000)

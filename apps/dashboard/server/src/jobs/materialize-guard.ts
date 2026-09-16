@@ -105,12 +105,12 @@ export async function materializeStoredGuardState(
 
 /**
  * Tell the engine the world it is about to boot is of UNKNOWN state. The
- * recipe's compose project is named after the repository, so every job of the
- * repository shares one project and its volumes — and the marker that records a
- * mutated world lives in the clone, which the job that mutated it took with it.
- * A fresh clone therefore starts dirty by declaration: the engine's boot runs
- * `api.services.reset` before `up` when the recipe has one, and a run never
- * inherits what an interrupted one left in the datastore.
+ * recipe's compose project is named after the (workspace, repository) pair, so
+ * every job of that pair shares one project and its volumes — and the marker
+ * that records a mutated world lives in the clone, which the job that mutated it
+ * took with it. A fresh clone therefore starts dirty by declaration: the
+ * engine's boot runs `api.services.reset` before `up` when the recipe has one,
+ * and a run never inherits what an interrupted one left in the datastore.
  */
 export function markWorldStateUnknown(treeDir: string): void {
   writeFile(guardWorldDirtyMarkerPath(treeDir), 'materialized: the shared world may carry an earlier job\'s state\n');

@@ -17,7 +17,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import yaml from 'js-yaml'
-import { deriveGuardCompose, GUARD_COMPOSE_FILE, proposeRecipe } from '@truecourse/guard-generator'
+import { composeProjectName, deriveGuardCompose, GUARD_COMPOSE_FILE, proposeRecipe } from '@truecourse/guard-generator'
 import type { DatastoreUrlRef } from '@truecourse/shared'
 
 const dirs: string[] = []
@@ -40,20 +40,30 @@ function services(content: string): Record<string, any> {
   return (yaml.load(content) as { services: Record<string, any> }).services
 }
 
+/** The compose project the caller names. Every derivation below is indifferent
+ *  to it except the file's own `name:` and the commands that pass it. */
+const PROJECT = 'truecourse-acme-widgets-d782c87440'
+
+/** {@link deriveGuardCompose} under that project. */
+function derive(refs: readonly DatastoreUrlRef[]) {
+  return deriveGuardCompose(refs, PROJECT)
+}
+
 describe('deriveGuardCompose', () => {
   it('a user-less URL pins the neutral user AND carries the explicit URL in api.env', () => {
     // The speced-api case: `postgres://localhost:5432/weather` would resolve to
     // whoever runs the app, which is a different user on every machine.
-    const derived = deriveGuardCompose([ref('postgres://localhost:5432/weather', 'DATABASE_URL')])
+    const derived = derive([ref('postgres://localhost:5432/weather', 'DATABASE_URL')])
 
     expect(derived.ok).toBe(true)
     if (!derived.ok) return
     expect(derived.plan.env).toEqual({ DATABASE_URL: 'postgres://guard@localhost:5432/weather' })
     expect(derived.plan.services).toEqual({
-      up: 'docker compose -f docker-compose.guard.yml up -d --wait',
-      down: 'docker compose -f docker-compose.guard.yml down',
-      reset: 'docker compose -f docker-compose.guard.yml down -v',
+      up: `docker compose -p ${PROJECT} -f docker-compose.guard.yml up -d --wait`,
+      down: `docker compose -p ${PROJECT} -f docker-compose.guard.yml down`,
+      reset: `docker compose -p ${PROJECT} -f docker-compose.guard.yml down -v`,
     })
+    expect(yaml.load(derived.plan.content)).toMatchObject({ name: PROJECT })
     const db = services(derived.plan.content).postgres
     expect(db.image).toBe('postgres:16-alpine')
     expect(db.ports).toEqual(['5432:5432'])
@@ -72,7 +82,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('a CREDENTIALED URL is carried verbatim and needs no api.env at all', () => {
-    const derived = deriveGuardCompose([ref('postgres://app:s3cret@localhost:5432/orders', 'DATABASE_URL')])
+    const derived = derive([ref('postgres://app:s3cret@localhost:5432/orders', 'DATABASE_URL')])
 
     expect(derived.ok).toBe(true)
     if (!derived.ok) return
@@ -87,7 +97,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('a non-default port is published as the app wrote it', () => {
-    const derived = deriveGuardCompose([ref('postgres://localhost:55432/weather', 'DATABASE_URL')])
+    const derived = derive([ref('postgres://localhost:55432/weather', 'DATABASE_URL')])
 
     expect(derived.ok).toBe(true)
     if (!derived.ok) return
@@ -96,7 +106,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('a URL with no port falls back to the engine default', () => {
-    const derived = deriveGuardCompose([ref('postgres://localhost/weather', 'DATABASE_URL')])
+    const derived = derive([ref('postgres://localhost/weather', 'DATABASE_URL')])
 
     expect(derived.ok).toBe(true)
     if (!derived.ok) return
@@ -104,7 +114,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('derives EVERY detected engine into the one file', () => {
-    const derived = deriveGuardCompose([
+    const derived = derive([
       ref('postgres://localhost:5432/weather', 'DATABASE_URL'),
       ref('redis://localhost:6379', 'CACHE_URL'),
       ref('mongodb://localhost:27017/events', 'MONGO_URL'),
@@ -122,7 +132,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('mysql with no credentials is served by root with an empty password', () => {
-    const derived = deriveGuardCompose([ref('mysql://localhost:3306/shop', 'DB_URL')])
+    const derived = derive([ref('mysql://localhost:3306/shop', 'DB_URL')])
 
     expect(derived.ok).toBe(true)
     if (!derived.ok) return
@@ -134,7 +144,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('REFUSES a mysql user with no password rather than inventing one', () => {
-    const derived = deriveGuardCompose([ref('mysql://app@localhost:3306/shop', 'DB_URL')])
+    const derived = derive([ref('mysql://app@localhost:3306/shop', 'DB_URL')])
 
     expect(derived.ok).toBe(false)
     if (derived.ok) return
@@ -142,7 +152,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('REFUSES an engine with no image mapping', () => {
-    const derived = deriveGuardCompose([ref('rediss://localhost:6379', 'CACHE_URL')])
+    const derived = derive([ref('rediss://localhost:6379', 'CACHE_URL')])
 
     expect(derived.ok).toBe(false)
     if (derived.ok) return
@@ -150,14 +160,14 @@ describe('deriveGuardCompose', () => {
   })
 
   it('SKIPS a remote URL — a database on another machine is not guard’s to build', () => {
-    const remoteOnly = deriveGuardCompose([ref('postgres://db.prod.internal:5432/app', 'DATABASE_URL')])
+    const remoteOnly = derive([ref('postgres://db.prod.internal:5432/app', 'DATABASE_URL')])
     expect(remoteOnly.ok).toBe(false)
     if (remoteOnly.ok) return
     expect(remoteOnly.reason).toContain('no local datastore connection URL')
 
     // …and it never poisons the local one that IS derivable (a test fixture's URL,
     // the shape the speced-api bench actually has).
-    const mixed = deriveGuardCompose([
+    const mixed = derive([
       ref('postgres://localhost:5432/weather', 'DATABASE_URL'),
       ref('postgres://unused.test/weather', undefined, '/repo/tests/helpers.ts'),
     ])
@@ -167,7 +177,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('REFUSES two local URLs of one engine when neither is the configured one', () => {
-    const derived = deriveGuardCompose([
+    const derived = derive([
       ref('postgres://localhost:5432/a'),
       ref('postgres://localhost:5433/b'),
     ])
@@ -178,7 +188,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('picks the CONFIGURED URL when a second local one is an unbound literal', () => {
-    const derived = deriveGuardCompose([
+    const derived = derive([
       ref('postgres://localhost:5433/fixture', undefined, '/repo/tests/helpers.ts'),
       ref('postgres://localhost:5432/weather', 'DATABASE_URL'),
     ])
@@ -190,7 +200,7 @@ describe('deriveGuardCompose', () => {
 
   it('REFUSES when the derivation must deviate and no variable can carry it', () => {
     // A user-less URL needs the explicit form, and nothing binds a variable to it.
-    const derived = deriveGuardCompose([ref('postgres://localhost:5432/weather')])
+    const derived = derive([ref('postgres://localhost:5432/weather')])
 
     expect(derived.ok).toBe(false)
     if (derived.ok) return
@@ -198,7 +208,7 @@ describe('deriveGuardCompose', () => {
   })
 
   it('is empty-safe', () => {
-    expect(deriveGuardCompose([])).toEqual({ ok: false, reason: 'no local datastore connection URL is written in the source' })
+    expect(derive([])).toEqual({ ok: false, reason: 'no local datastore connection URL is written in the source' })
   })
 })
 
@@ -250,7 +260,7 @@ describe('proposeRecipe — when a datastore is generated', () => {
     expect(out.compose).toBeUndefined()
     // The repo's OWN file — never the generated one — run under guard's own
     // project so the commands cannot reach the developer's stack.
-    const namespaced = `docker compose -p truecourse-${path.basename(root).toLowerCase()} -f docker-compose.yml`
+    const namespaced = `docker compose -p ${composeProjectName(path.basename(root))} -f docker-compose.yml`
     expect(out.recipe.api?.services).toEqual({
       up: `${namespaced} up -d --wait`,
       down: `${namespaced} down`,

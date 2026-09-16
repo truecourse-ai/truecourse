@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
+  composeProjectName,
   proposeRecipe,
   rankHealthPath,
   credentialStubs,
@@ -549,8 +550,9 @@ describe('health-path ranking', () => {
 // ---------------------------------------------------------------------------
 
 describe('compose services', () => {
-  /** The namespace the proposal must run the repo's compose file under. */
-  const project = (repo: string) => `truecourse-${path.basename(repo).toLowerCase()}`
+  /** The namespace the proposal must run the repo's compose file under: with no
+   *  identity given, the checkout's own directory name. */
+  const project = (repo: string) => composeProjectName(path.basename(repo))
 
   it('namespaces every command with -p and names the compose file it parsed', () => {
     const repo = repoOf({
@@ -680,25 +682,27 @@ describe('compose services', () => {
     const services = proposal(repo).recipe.api?.services
     const base = `docker compose -p ${project(repo)} -f docker-compose.yml -f docker-compose.override.yml`
     expect(services).toEqual({
-      // `mail` exists only in the override; a root nobody depends on is not
-      // infrastructure, so only the datastore comes up — but through both files.
-      up: `${base} up -d --wait db`,
+      // `mail` exists only in the override, and it comes up: a service nothing
+      // depends on and that depends on nothing is standing infrastructure.
+      up: `${base} up -d --wait db mail`,
       down: `${base} down`,
       reset: `${base} down -v`,
     })
   })
 
-  it('names the compose project after the repository identity when one is given', () => {
+  it('names the compose project after the world identity when one is given', () => {
     const repo = repoOf({
       'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
       'server.js': '',
       'compose.yaml': 'services:\n  db:\n    image: postgres:16\n',
     })
 
-    const out = proposeRecipe(repo, { securitySchemes: {}, repoKey: 'Acme/Widgets' })
+    const out = proposeRecipe(repo, { securitySchemes: {}, composeKey: 'org_123/Acme/Widgets' })
     expect(out.ok).toBe(true)
     if (!out.ok) return
-    expect(out.recipe.api?.services?.up).toBe('docker compose -p truecourse-acme-widgets -f compose.yaml up -d --wait')
+    expect(out.recipe.api?.services?.up).toBe(
+      `docker compose -p ${composeProjectName('org_123/acme/widgets')} -f compose.yaml up -d --wait`,
+    )
   })
 
   it('reports an env_file the repository does not ship, and invents nothing', () => {

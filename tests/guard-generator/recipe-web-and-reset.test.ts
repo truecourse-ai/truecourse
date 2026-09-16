@@ -190,7 +190,9 @@ describe('verifyProposal — the services reset', () => {
     }
   }
 
-  it('wipes the world before the bring-up and again after the teardown', async () => {
+  // ONE wipe per round, and it OPENS the round: the teardown only stops, so a
+  // repair loop's next round pays one initdb for its clean datastore, not two.
+  it('wipes the world before the bring-up and only stops after it', async () => {
     const r = tempRepo()
     const log = path.join(r, 'services.log')
     const proposal: RecipeProposal = {
@@ -201,7 +203,7 @@ describe('verifyProposal — the services reset', () => {
     const verdict = await verifyProposal(r, proposal)
 
     expect(verdict.ok).toBe(true)
-    expect(fs.readFileSync(log, 'utf-8').trim().split('\n')).toEqual(['reset', 'up', 'down', 'reset'])
+    expect(fs.readFileSync(log, 'utf-8').trim().split('\n')).toEqual(['reset', 'up', 'down'])
   }, 60_000)
 
   it('a reset that fails is never the verdict, and its output rides an up failure', async () => {

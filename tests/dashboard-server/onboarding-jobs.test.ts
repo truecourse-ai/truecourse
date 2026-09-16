@@ -564,6 +564,38 @@ describe('the guard setup job', () => {
       { refresh: undefined, only: undefined, consent: undefined },
     ]);
   });
+
+  // The recipe names its compose project after this key, and a project's volumes
+  // are what `reset` wipes. Two workspaces can be connected to one repository and
+  // the heavy-job queue only serializes per workspace, so the WORKSPACE has to be
+  // in it or one job's reset reaches the other's live datastore.
+  it('hands the engine a compose key that carries the workspace as well as the repository', async () => {
+    await jobs.stop();
+    const keys: (string | undefined)[] = [];
+    jobs = createServerJobs({
+      db,
+      connectionString: 'postgres://unused',
+      hub,
+      startWorker: fakeWorker(['repo.guard-setup']),
+      guardSetup: {
+        startLlm: async () => testLlm,
+        runSetup: async (_repoRoot, options) => {
+          keys.push(options.composeKey);
+          return {
+            report: { ranAt: '2026-01-01T00:00:00Z', status: 'failed', reason: 'no recipe', steps: [] },
+            reportPath: '',
+            sessionsRunDirs: [],
+          } as never;
+        },
+      },
+    });
+    await jobs.start();
+
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(keys).toEqual([`${ORG}/${REPO}`]);
+  });
 });
 
 // ---------------------------------------------------------------------------

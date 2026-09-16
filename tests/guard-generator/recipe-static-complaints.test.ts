@@ -18,9 +18,11 @@ import { afterAll, describe, it, expect } from 'vitest'
 import { staticProposalComplaints, type RecipeAppInventoryEntry } from '@truecourse/guard-generator'
 
 /**
- * A repo whose compose files mirror the 2026-08-21 cal.diy/documenso layout:
- * a NAMESPACED test compose (top-level `name:`), the dev compose that pins
- * `container_name:` but no project name, and a namespaced reference compose.
+ * A repo whose compose files mirror the 2026-08-21 cal.diy/documenso layout: a
+ * test compose that pins its own top-level `name:`, the dev compose that pins
+ * `container_name:` and no project name, and a reference compose that pins a
+ * name too. None of them namespaces a RECIPE's invocation, since a file's
+ * `name:` is the project its author runs it under; only `-p` does.
  */
 const dirs: string[] = []
 afterAll(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }) })
@@ -111,7 +113,7 @@ describe('staticProposalComplaints — compose-in-build and host mutations', () 
     const complaints = staticProposalComplaints(
       {
         build:
-          'docker compose -f docker/testing/compose.yml up -d --wait database && npm run build',
+          'docker compose -p acme-truecourse -f docker/testing/compose.yml up -d --wait database && npm run build',
         api: { serve: ['node', 'server.mjs'], healthPath: '/health' },
       },
       undefined,
@@ -154,7 +156,7 @@ describe('staticProposalComplaints — compose-in-build and host mutations', () 
         api: {
           serve: ['node', 'server.mjs'],
           healthPath: '/health',
-          services: { up: 'docker compose -f docker/testing/compose.yml up -d --wait database', down: 'docker compose -f docker/testing/compose.yml stop', reset: 'docker compose -f docker/testing/compose.yml down -v' },
+          services: { up: 'docker compose -p acme-truecourse -f docker/testing/compose.yml up -d --wait database', down: 'docker compose -p acme-truecourse -f docker/testing/compose.yml stop', reset: 'docker compose -p acme-truecourse -f docker/testing/compose.yml down -v' },
         },
       },
       undefined,
@@ -205,9 +207,9 @@ describe('staticProposalComplaints — the compose NAMESPACE rule (cal.diy 2026-
       undefined,
       composeRepo(),
     )
-    // The namespaced reference-compose halves stay legal; the bare halves are
-    // refused in BOTH up and down.
-    expect(complaints.filter((c) => c.includes('project namespace'))).toHaveLength(2)
+    // Every invocation is refused, the bare halves and the ones that lean on the
+    // reference compose's own `name:` alike, in BOTH up and down.
+    expect(complaints.filter((c) => c.includes('project namespace'))).toHaveLength(4)
     expect(complaints.some((c) => c.includes('api.services.up'))).toBe(true)
     expect(complaints.some((c) => c.includes('api.services.down'))).toBe(true)
   })
@@ -274,29 +276,20 @@ describe('staticProposalComplaints — the compose NAMESPACE rule (cal.diy 2026-
     expect(complaints).toEqual([])
   })
 
-  it('refuses `-f -` (stdin) without `-p`, and an `-f` file that pins no top-level name:', () => {
+  it('refuses an `-f` without `-p` whatever it names: stdin, the dev compose, the test compose', () => {
     const r = composeRepo()
-    const stdin = staticProposalComplaints(
-      { build: 'true', api: { ...serve, services: { up: 'cat c.yml | docker compose -f - up -d' } } },
-      undefined,
-      r,
-    )
-    expect(stdin.some((c) => c.includes('project namespace'))).toBe(true)
-
-    const devCompose = staticProposalComplaints(
-      { build: 'true', api: { ...serve, services: { up: 'docker compose -f docker/development/compose.yml up -d --wait database' } } },
-      undefined,
-      r,
-    )
-    expect(devCompose.some((c) => c.includes('project namespace') && c.includes('docker/development/compose.yml'))).toBe(true)
-  })
-
-  it('without a repoRoot an `-f` file cannot be verified and counts as unpinned', () => {
-    const complaints = staticProposalComplaints({
-      build: 'true',
-      api: { ...serve, services: { up: 'docker compose -f docker/testing/compose.yml up -d' } },
-    })
-    expect(complaints.some((c) => c.includes('project namespace'))).toBe(true)
+    for (const up of [
+      'cat c.yml | docker compose -f - up -d',
+      'docker compose -f docker/development/compose.yml up -d --wait database',
+      'docker compose -f docker/testing/compose.yml up -d --wait database',
+    ]) {
+      const complaints = staticProposalComplaints(
+        { build: 'true', api: { ...serve, services: { up } } },
+        undefined,
+        r,
+      )
+      expect(complaints.some((c) => c.includes('project namespace')), up).toBe(true)
+    }
   })
 })
 

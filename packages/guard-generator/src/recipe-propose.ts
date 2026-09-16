@@ -30,6 +30,7 @@
  * unset variable. A secret is never fabricated.
  */
 
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
@@ -81,13 +82,14 @@ export interface ProposeRecipeInputs {
    */
   manifestApps?: readonly RouteManifestApp[]
   /**
-   * The repository's stable identity (`owner/repo`, `local/<folder>`). The
-   * compose project the proposed `api.services` runs under is named after it,
-   * so every run of the repository shares one project — a hosted run works in
-   * a throwaway clone whose directory name is different every time. Absent ⇒
-   * the checkout directory's own name, which is stable for a developer's tree.
+   * The identity of the docker WORLD this repository's runs share, which the
+   * proposed `api.services` names its compose project after: the workspace and
+   * the repository together (`<org>/<owner>/<repo>`), because a project's
+   * volumes are what `reset` wipes and two workspaces connected to one
+   * repository run their jobs side by side on one host. Absent ⇒ the checkout
+   * directory's own name, which is stable for a developer's own tree.
    */
-  repoKey?: string
+  composeKey?: string
 }
 
 /** A deterministic proposal, or the reason the path refused to produce one. */
@@ -752,7 +754,7 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
     const schemes = inputs.securitySchemes ?? readCorpusSecuritySchemes(repoRoot)
     const { credentials, notes } = credentialStubs(schemes)
     todos.push(...notes)
-    const detected = detectComposeServices(repoRoot, inputs.repoKey)
+    const detected = detectComposeServices(repoRoot, inputs.composeKey)
     let services: { up: string; down: string; reset?: string } | undefined = detected?.services
     if (detected) todos.push(...detected.notes)
     let apiEnv: Record<string, string> = { ...(signals.serveEnv ?? {}) }
@@ -760,7 +762,7 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
     // it: derive one. The compose file is not written here — this module
     // proposes, the caller writes it and verifies it, and deletes it if it fails.
     if (!services) {
-      const generated = generateDatastore(repoRoot, inputs.datastores ?? [])
+      const generated = generateDatastore(repoRoot, inputs.datastores ?? [], composeProject(repoRoot, inputs.composeKey))
       if (generated) {
         services = generated.plan.services
         apiEnv = { ...apiEnv, ...generated.plan.env }
@@ -808,9 +810,10 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
 function generateDatastore(
   repoRoot: string,
   datastores: readonly DatastoreUrlRef[],
+  project: string,
 ): { plan: ComposePlan; write: boolean } | undefined {
   if (datastores.length === 0) return undefined
-  const derived = deriveGuardCompose(datastores)
+  const derived = deriveGuardCompose(datastores, project)
   if (!derived.ok) return undefined
   return { plan: derived.plan, write: !guardComposeInUse(repoRoot) }
 }
@@ -845,22 +848,37 @@ export interface DetectedComposeServices {
   notes: string[]
 }
 
+/** How much of the identity the project name spells out before the digest. */
+const PROJECT_SLUG_MAX = 32
+
 /**
- * The compose PROJECT a recipe's services run under, derived from the repository's
- * identity (`owner/repo`, or the checkout's own directory name when nothing
- * better is known). Never the default project (the directory's own name):
- * compose "resolves" a port or config change by RECREATING the running
- * container, so an un-namespaced invocation reaches into the developer's live
- * stack. The static compose rule in `recipe-discovery.ts` refuses any proposal
- * without this. One name per repository, so every run — whatever throwaway
- * directory it clones into — addresses the same project and its volumes.
+ * The compose PROJECT a recipe's services run under, derived from the identity
+ * of the world its runs share. Never the default project (the working
+ * directory's own name): compose "resolves" a port or config change by
+ * RECREATING the running container, so an un-namespaced invocation reaches into
+ * the developer's live stack. The static compose rule in `recipe-discovery.ts`
+ * refuses any proposal without this.
+ *
+ * Two properties the name has to hold at once, since it is baked into the
+ * stored recipe's `-p` and a project's volumes are what `reset` wipes:
+ *
+ *  - STABLE for one identity, so every run addresses the same project whatever
+ *    throwaway directory it cloned into;
+ *  - UNIQUE across identities, so no two of them ever wipe each other. The
+ *    readable head is truncated and squeezed, which collides; the digest of the
+ *    whole identity is what actually separates them.
  */
 export function composeProjectName(identity: string): string {
-  const squeezed = identity
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  return `truecourse-${squeezed || 'repo'}`
+  const canonical = identity.toLowerCase()
+  const slug = canonical.replace(/[^a-z0-9]+/g, '-').slice(0, PROJECT_SLUG_MAX).replace(/^-+|-+$/g, '')
+  const digest = createHash('sha256').update(canonical).digest('hex').slice(0, 10)
+  return `truecourse-${slug || 'repo'}-${digest}`
+}
+
+/** The project both compose paths run under: the caller's world identity, else
+ *  the checkout's own directory name (stable for a developer's own tree). */
+function composeProject(repoRoot: string, composeKey: string | undefined): string {
+  return composeProjectName(composeKey ?? path.basename(path.resolve(repoRoot)))
 }
 
 /**
@@ -874,10 +892,10 @@ export function composeProjectName(identity: string): string {
  * `up` brings up the app's INFRASTRUCTURE and never the app itself: a compose
  * file that also declares the app would otherwise boot a second copy of it on
  * the port the recipe's `serve` is about to claim. What counts as
- * infrastructure is decided by exclusion (see {@link selectComposeServices}),
- * so a mail catcher or a search engine the app depends on comes up beside the
- * datastore instead of being dropped for not being one. A file whose services
- * are all wanted needs no service list at all.
+ * infrastructure is {@link selectComposeServices}'s decision, so a mail catcher
+ * or a search engine comes up beside the datastore instead of being dropped for
+ * not being one. A file whose services are all wanted needs no service list at
+ * all.
  *
  * `--wait` is not decoration: plain `up -d` returns as soon as the containers are
  * CREATED, and the server boots microseconds later against a Postgres that is not
@@ -886,8 +904,7 @@ export function composeProjectName(identity: string): string {
  * file `--wait` blocks until the datastore is healthy; without one it costs nothing
  * (it waits for `running`, which `up -d` already reached).
  */
-export function detectComposeServices(repoRoot: string, repoKey?: string): DetectedComposeServices | undefined {
-  const identity = repoKey ?? path.basename(path.resolve(repoRoot))
+export function detectComposeServices(repoRoot: string, composeKey?: string): DetectedComposeServices | undefined {
   const files = defaultComposeFiles(repoRoot)
   if (files.length === 0) return undefined
   const services = mergedComposeServices(repoRoot, files)
@@ -897,7 +914,7 @@ export function detectComposeServices(repoRoot: string, repoKey?: string): Detec
   if (![...wanted].some((name) => isDatabaseImage(asRecord(services[name]).image))) return undefined
 
   const only = wanted.size === names.length ? [] : names.filter((name) => wanted.has(name))
-  const base = `docker compose -p ${composeProjectName(identity)} ${files.map((f) => `-f ${f}`).join(' ')}`
+  const base = `docker compose -p ${composeProject(repoRoot, composeKey)} ${files.map((f) => `-f ${f}`).join(' ')}`
   return {
     // `reset` wipes the volumes so a `world: mutates` tail cannot leak damage into
     // the next run; `down` deliberately preserves them (stopping is not forgetting).
@@ -933,19 +950,25 @@ function mergedComposeServices(repoRoot: string, files: readonly string[]): Reco
 }
 
 /**
- * Which services the bring-up starts — the app's infrastructure, decided by
- * EXCLUSION rather than by an allowlist of images:
+ * Which services the bring-up starts: the app's infrastructure, decided by what
+ * each service IS rather than by an allowlist of images.
  *
  *  1. Every datastore image, and everything it `depends_on`.
- *  2. Everything a ROOT service (one nothing depends on) depends on, transitively.
- *     A root that is not a datastore is the app or one of its one-shots — the
- *     recipe's own `serve` and `build` are that — and what it depends on is the
- *     infrastructure it needs: the mail catcher, the search engine, the auth
- *     server, the datastore.
- *  3. Minus every service BUILT from this repository (`build:`): that is the
+ *  2. A ROOT service (one nothing depends on) that declares no `depends_on` of
+ *     its own stands alone, so it is infrastructure the app reaches for without
+ *     the compose file saying so: the mail catcher, the search engine
+ *     (linkwarden's meilisearch, documenso's inbucket). It comes up. Dropping
+ *     it boots an app whose mail or search backend is missing, and every
+ *     scenario that then fails reads as a product bug.
+ *  3. A root that DOES depend on other services is a composition on top of the
+ *     stack: the app itself (built here, or its published image) or a proxy in
+ *     front of it. Only what it depends on comes up, never the root: the
+ *     recipe's own `serve` is the app under test, and a second copy of it
+ *     claims the port that serve is about to bind.
+ *  4. Minus every service BUILT from this repository (`build:`): that is the
  *     app's own code by another door — unless a datastore cannot come up
  *     without it (an init container), which keeps it.
- *  4. Minus everything that depends on an excluded service: `up <name>` starts
+ *  5. Minus everything that depends on an excluded service: `up <name>` starts
  *     the named service's dependencies too, so a proxy in front of the app
  *     would drag the app up with it.
  */
@@ -956,7 +979,8 @@ function selectComposeServices(services: Record<string, unknown>): Set<string> {
   const datastoreNeeds = withComposeDependencies(services, datastores)
   const wanted = new Set(datastoreNeeds)
   for (const root of names.filter((name) => !dependedOn.has(name) && !datastores.includes(name))) {
-    for (const dep of withComposeDependencies(services, composeDependsOn(services[root]))) wanted.add(dep)
+    const needs = composeDependsOn(services[root])
+    for (const dep of withComposeDependencies(services, needs.length > 0 ? needs : [root])) wanted.add(dep)
   }
   for (const name of wanted) {
     if (asRecord(services[name]).build !== undefined && !datastoreNeeds.has(name)) wanted.delete(name)

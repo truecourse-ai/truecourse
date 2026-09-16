@@ -1933,14 +1933,14 @@ Concretely:
   module, a build that builds nothing) — the engine refuses those statically, and
   a stand-in that passed would test nothing.
 - A server that needs a datastore declares the repo's OWN bring-up under
-  \`api.services\` (\`{"up": "docker compose -f <repo compose file> up -d --wait …",
-  "down": "docker compose -f … stop"}\`) — never inside \`build\` (statically
+  \`api.services\` (\`{"up": "docker compose -p <dedicated-project> -f <repo compose file> up -d --wait …",
+  "down": "docker compose -p <dedicated-project> -f … stop"}\`) — never inside \`build\` (statically
   refused: the runner owns the services lifecycle, and a build's leftovers leak).
-  Namespace EVERY \`docker compose\` invocation: pass \`-p <dedicated-project>\`, or
-  point \`-f\` at a compose file that declares a top-level \`name:\` (a dedicated
-  test compose). A bare \`docker compose up/stop\` attaches to the repository's
-  DEFAULT compose project — the developer's own running stack, whose containers
-  it would recreate or stop — and is refused statically. And when the app pins a
+  Namespace EVERY \`docker compose\` invocation with \`-p <dedicated-project>\`,
+  the same project in every one of them. Without \`-p\` compose attaches to the
+  project the working directory or the file's own \`name:\` gives — the
+  developer's own running stack, whose containers it would recreate or stop and
+  whose volumes the recipe's \`reset\` would wipe — and it is refused statically. And when the app pins a
   SQL datastore, run the repo's schema/migration step inside \`api.services.up\`
   after the bring-up — a compose that only starts an empty database boots a
   server with no schema behind a green health probe.
