@@ -33,6 +33,7 @@ import {
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
+  buildOutputTail,
   readGuardResult,
   readManifest,
   sourceGuardRunInputs,
@@ -977,7 +978,8 @@ export async function guardRunInProcess(
     const n = result.latest.summary.total;
     tracker?.done('run', `${n} scenario${n === 1 ? '' : 's'}`);
   } else if (result.status === 'build-failed') {
-    tracker?.error('build', `Build failed (\`${result.build.command}\`)${result.build.timedOut ? ' — timed out' : ''}`);
+    const tail = buildOutputTail(result.build.output, 3).split('\n').join(' | ').slice(0, 300);
+    tracker?.error('build', `Build failed (\`${result.build.command}\`)${result.build.timedOut ? ' — timed out' : ''}${tail ? `: ${tail}` : ''}`);
   } else if (result.status === 'entry-preflight-failed') {
     // Build succeeded but the entry can't start — the run never began; mark the build
     // phase (where the entry is prepared) errored so the popup shows the sticky error.

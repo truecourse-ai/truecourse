@@ -14,6 +14,23 @@ import { armChildKill } from './child-kill.js'
 export const DEFAULT_BUILD_TIMEOUT_MS = 600_000
 export const DEFAULT_INSTALL_TIMEOUT_MS = 600_000
 
+/** ANSI escape sequences a toolchain may still emit despite `NO_COLOR`. */
+const ANSI_SEQUENCE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
+
+/**
+ * The last `maxLines` non-empty lines of a build's captured output, colour codes
+ * stripped — what a failure message carries so the reader sees the compiler's
+ * own words instead of only the command that ran.
+ */
+export function buildOutputTail(output: string, maxLines = 40): string {
+  const lines = output
+    .replace(ANSI_SEQUENCE, '')
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0)
+  return lines.slice(-maxLines).join('\n')
+}
+
 export interface BuildResult {
   ok: boolean
   command: string

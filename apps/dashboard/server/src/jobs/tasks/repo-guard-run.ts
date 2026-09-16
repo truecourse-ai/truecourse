@@ -20,8 +20,9 @@
  * is switched on; it is parked by default.
  *
  * A run that could not start (no recipe, no scenarios, a build that failed)
- * persists nothing and fails the job with the runner's own message. A
- * cancelled run leaves the store exactly as it found it.
+ * persists nothing and fails the job with the runner's own message, a failed
+ * build's or install's output tail behind it. A cancelled run leaves the store
+ * exactly as it found it.
  */
 
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
@@ -34,7 +35,7 @@ import {
   guardVisualJudgeEnabled,
 } from '@truecourse/core/services/llm/guard-visual-judge';
 import { guardRunInProcess, GUARD_RUN_STEPS } from '@truecourse/core/commands/guard-in-process';
-import { runFailureMessage } from '@truecourse/guard-runner';
+import { buildOutputTail, runFailureMessage, type RunGuardResult } from '@truecourse/guard-runner';
 import type { GuardSummary } from '@truecourse/shared';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
@@ -60,6 +61,20 @@ export interface GuardRunJobResult {
 export interface RepoGuardRunTaskDeps {
   startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
   runGuard?: typeof guardRunInProcess;
+}
+
+/**
+ * The runner's reason for a run that never started, with a failed build's (or
+ * install's) own output behind it. The first line is what the notification shows:
+ * the summary plus the last three output lines. The job row keeps the whole tail.
+ */
+function runFailureReason(result: Exclude<RunGuardResult, { status: 'ok' }>): string {
+  const message = runFailureMessage(result);
+  if (result.status !== 'build-failed') return message;
+  const tail = buildOutputTail(result.build.output);
+  if (!tail) return message;
+  const last = buildOutputTail(result.build.output, 3).split('\n').join(' | ').slice(0, 300);
+  return `${message} Last output: ${last}\n\n${tail}`;
 }
 
 export function createRepoGuardRunTask(
@@ -117,7 +132,7 @@ export function createRepoGuardRunTask(
         // A stop the user asked for: the harness settles the row cancelled, and
         // a store that never saw this run is exactly what a cancel means.
         if (ctx.signal?.aborted) return { notification: null };
-        if (result.status !== 'ok') throw new Error(runFailureMessage(result));
+        if (result.status !== 'ok') throw new Error(runFailureReason(result));
 
         await persistGuardRun(ref, tree.dir, result.latest);
 
