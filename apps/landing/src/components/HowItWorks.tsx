@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ComponentType } from 'react';
 import { Reveal } from './Reveal';
 import { BoatGlyph } from './Sailboat';
+import { WaveRule } from './WaveRule';
 import { ContextScreen } from '@/screens/ContextScreen';
 import { ConnectScreen } from '@/screens/ConnectScreen';
 import { FlowsScreen } from '@/screens/FlowsScreen';
@@ -87,13 +88,16 @@ export function HowItWorks() {
   return (
     <section className="band" id="how">
       <div className="wrap">
-        <h2 className="eyebrow">How it works</h2>
+        <h2 className="section-h">How it works</h2>
         <ol className="steps" ref={list}>
           {STEPS.map((step, i) => (
             <Reveal as="li" className="step" key={step.n} threshold={0.4}>
               <div className="step-text">
                 <span className="step-n">{step.n}</span>
-                <h3>{step.title}</h3>
+                <div className="titled">
+                  <h3>{step.title}</h3>
+                  <WaveRule />
+                </div>
                 <p>{step.body}</p>
               </div>
               <div className="screen">

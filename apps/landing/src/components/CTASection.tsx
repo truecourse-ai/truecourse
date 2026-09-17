@@ -7,13 +7,10 @@ export function CTASection() {
   return (
     <section className="cta" id="cta">
       <div className="wrap">
-        <p className="kicker">The IDE for product owners</p>
-        <h2>
-          Put your docs <span className="hl">to the test.</span>
-        </h2>
+        <h2>Put your docs to the test.</h2>
         <div className="cta-row">
           <AppLink className="btn btn-primary" placement="cta">
-            Get started <span className="arr">→</span>
+            Get started
           </AppLink>
           <a className="btn" href={GITHUB_URL} target="_blank" rel="noreferrer">
             View on GitHub

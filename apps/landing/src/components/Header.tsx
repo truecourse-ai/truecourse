@@ -8,12 +8,14 @@ import { DiscordIcon } from './DiscordIcon';
 
 const DISCORD_URL = 'https://discord.gg/TanxB63arz';
 const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
+const DOCS_URL = 'https://docs.truecourse.dev/';
 
 const NAV = [
-  { href: '/#how', label: 'How it works' },
+  { href: '/#how', label: 'Product' },
   { href: '/#sandbox', label: 'Sandbox' },
   { href: '/#enterprise', label: 'Enterprise' },
-  { href: '/#blog', label: 'Blog' },
+  { href: DOCS_URL, label: 'Docs' },
+  { href: '/blog', label: 'Blog' },
 ];
 
 export function Header() {
@@ -39,6 +41,22 @@ export function Header() {
   // surface always on.
   const showSurface = scrolled || !onHome;
 
+  const navLink = (item: (typeof NAV)[number]) =>
+    item.href.startsWith('/') ? (
+      <Link
+        key={item.href}
+        to={item.href}
+        onClick={() => setOpen(false)}
+        style={item.href === '/blog' && onBlog ? { color: 'var(--fg)' } : undefined}
+      >
+        {item.label}
+      </Link>
+    ) : (
+      <a key={item.href} href={item.href} target="_blank" rel="noreferrer">
+        {item.label}
+      </a>
+    );
+
   return (
     <header className={cn('site', showSurface && 'scrolled')} id="site-header">
       <div className="wrap nav">
@@ -57,39 +75,14 @@ export function Header() {
           TrueCourse
         </Link>
 
-        <nav className="nav-links">
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              to={item.href}
-              style={item.href === '/#blog' && onBlog ? { color: 'var(--fg)' } : undefined}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        <nav className="nav-links">{NAV.map(navLink)}</nav>
 
         <div className="nav-actions">
-          <a
-            className="icon-btn desktop-only"
-            href={DISCORD_URL}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Discord"
-          >
-            <DiscordIcon />
-          </a>
-          <a
-            className="icon-btn desktop-only"
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="GitHub"
-          >
-            <SiGithub />
-          </a>
+          <AppLink className="nav-signin desktop-only" placement="header">
+            Sign in
+          </AppLink>
           <AppLink className="btn btn-primary btn-sm" placement="header">
-            Sign in <span className="arr">→</span>
+            Get started
           </AppLink>
           <button
             type="button"
@@ -106,11 +99,8 @@ export function Header() {
       {open && (
         <div className="mobile-menu">
           <div className="wrap row">
-            {NAV.map((item) => (
-              <Link key={item.href} to={item.href} onClick={() => setOpen(false)}>
-                {item.label}
-              </Link>
-            ))}
+            {NAV.map(navLink)}
+            <AppLink placement="header">Sign in</AppLink>
             <a href={GITHUB_URL} target="_blank" rel="noreferrer">
               <SiGithub /> GitHub
             </a>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { drawWind } from '@/lib/wind';
+import { Shore } from './Shore';
 
 type Phase = 'idle' | 'sailing' | 'docked' | 'lost';
 
@@ -7,8 +8,8 @@ type Phase = 'idle' | 'sailing' | 'docked' | 'lost';
 const SAY: Record<Phase, [mouse: string, touch: string]> = {
   idle: ['Click the water to set sail. Your cursor is the wind.', 'Tap the water to set sail. Your finger is the wind.'],
   sailing: [
-    'Keep off the red rocks. The current pulls you down and off the map.',
-    'Keep off the red rocks. The current pulls you down and off the map.',
+    'Keep off the rocks. The current pulls you down and off the map.',
+    'Keep off the rocks. The current pulls you down and off the map.',
   ],
   docked: ['Docked. Click to sail again.', 'Docked. Tap to sail again.'],
   lost: ['Lost at sea. Click to try again.', 'Lost at sea. Tap to try again.'],
@@ -32,6 +33,8 @@ interface Rock {
   y: number;
   r: number;
   speed: number;
+  /** The outline, as a radius multiplier per point around it. */
+  shape: number[];
 }
 
 interface Ripple {
@@ -56,9 +59,10 @@ interface World {
 function newWorld(w: number, h: number): World {
   const rocks: Rock[] = Array.from({ length: ROCKS }, (_, i) => ({
     x: w * (0.28 + (i / ROCKS) * 0.58) + (Math.random() - 0.5) * w * 0.08,
-    y: h * (0.16 + Math.random() * 0.68),
-    r: 8 + Math.random() * 6,
+    y: h * (0.3 + Math.random() * 0.56),
+    r: 9 + Math.random() * 7,
     speed: 22 + Math.random() * 22,
+    shape: Array.from({ length: 9 }, () => 0.72 + Math.random() * 0.4),
   }));
   return {
     w,
@@ -130,35 +134,91 @@ interface Palette {
   bg: string;
 }
 
-function drawBoat(ctx: CanvasRenderingContext2D, x: number, y: number, heading: number, p: Palette) {
+/** The hull from above, bow along +x: a point forward, a square-ish stern. */
+function hull(ctx: CanvasRenderingContext2D, k: number) {
+  ctx.beginPath();
+  ctx.moveTo(17 * k, 0);
+  ctx.quadraticCurveTo(7 * k, -7.5 * k, -10 * k, -6 * k);
+  ctx.lineTo(-13 * k, -4 * k);
+  ctx.quadraticCurveTo(-15 * k, 0, -13 * k, 4 * k);
+  ctx.lineTo(-10 * k, 6 * k);
+  ctx.quadraticCurveTo(7 * k, 7.5 * k, 17 * k, 0);
+  ctx.closePath();
+}
+
+/**
+ * The boat seen from above: a dark hull with a light deck, the mast a dot
+ * and the sail a green crescent trailing aft of it, and a wake behind when
+ * it has way on.
+ */
+function drawBoat(ctx: CanvasRenderingContext2D, x: number, y: number, heading: number, speed: number, p: Palette) {
   ctx.save();
   ctx.translate(x, y);
-  ctx.rotate(heading + Math.PI / 2);
-  const k = 0.3;
-  ctx.scale(k, k);
-  ctx.translate(-50, -50);
+  ctx.rotate(heading);
+  ctx.scale(1.35, 1.35);
+  if (speed > 15) {
+    // The wake: two arms of foam opening astern, fading as they go.
+    const len = Math.min(70, speed * 0.32);
+    const spread = 3 + len * 0.18;
+    const fade = ctx.createLinearGradient(-13, 0, -13 - len, 0);
+    fade.addColorStop(0, 'rgba(255, 255, 255, 0.7)');
+    fade.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = fade;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(-12, side * 2.5);
+      ctx.lineTo(-13 - len, side * spread);
+      ctx.lineTo(-13 - len, side * (spread + 2.5));
+      ctx.lineTo(-13, side * 5.5);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
   ctx.fillStyle = p.fg;
-  ctx.beginPath();
-  ctx.moveTo(46, 8);
-  ctx.lineTo(46, 66);
-  ctx.lineTo(14, 66);
-  ctx.closePath();
+  hull(ctx, 1);
+  ctx.fill();
+  ctx.fillStyle = '#f9fafb';
+  hull(ctx, 0.66);
   ctx.fill();
   ctx.fillStyle = p.accent;
   ctx.beginPath();
-  ctx.moveTo(54, 22);
-  ctx.lineTo(54, 66);
-  ctx.lineTo(82, 66);
+  ctx.moveTo(3, 0);
+  ctx.quadraticCurveTo(-5, -6, -12, -2.5);
+  ctx.quadraticCurveTo(-5, -2.2, 3, 0);
   ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = p.fg;
-  ctx.lineWidth = 7;
-  ctx.lineCap = 'round';
+  ctx.fillStyle = p.fg;
   ctx.beginPath();
-  ctx.moveTo(26, 80);
-  ctx.lineTo(74, 80);
-  ctx.stroke();
+  ctx.arc(3, 0, 1.6, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
+}
+
+/** A rock in the water from above: foam around it, a grey mass, a lit top. */
+function drawRock(ctx: CanvasRenderingContext2D, rock: Rock) {
+  const outline = (scale: number, dx: number, dy: number) => {
+    ctx.beginPath();
+    rock.shape.forEach((m, i) => {
+      const a = (i / rock.shape.length) * Math.PI * 2;
+      const r = rock.r * m * scale;
+      const px = rock.x + dx + Math.cos(a) * r;
+      const py = rock.y + dy + Math.sin(a) * r * 0.85;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+  };
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  outline(1.45, 0, 0);
+  ctx.stroke();
+  ctx.fillStyle = '#6b7280';
+  outline(1, 0, 0);
+  ctx.fill();
+  ctx.fillStyle = '#9ca3af';
+  outline(0.55, -1.5, -2);
+  ctx.fill();
 }
 
 function draw(ctx: CanvasRenderingContext2D, world: World, p: Palette) {
@@ -192,17 +252,7 @@ function draw(ctx: CanvasRenderingContext2D, world: World, p: Palette) {
   // The wind itself, while it reaches the boat.
   if (world.cursor && world.phase === 'sailing') drawWind(ctx, world.cursor, boat, world.t, WIND_REACH, p.fg);
 
-  // The rocks: the red the failed requirement wears.
-  for (const rock of world.rocks) {
-    ctx.beginPath();
-    ctx.arc(rock.x, rock.y, rock.r + 6, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(rock.x, rock.y, rock.r, 0, Math.PI * 2);
-    ctx.fillStyle = '#ef4444';
-    ctx.fill();
-  }
+  for (const rock of world.rocks) drawRock(ctx, rock);
 
   // The harbour: the green of a proved one, its ring breathing.
   const pulse = 1 + Math.sin(world.t * 2.2) * 0.12;
@@ -218,7 +268,7 @@ function draw(ctx: CanvasRenderingContext2D, world: World, p: Palette) {
   ctx.fillStyle = '#10b981';
   ctx.fill();
 
-  if (world.phase !== 'lost') drawBoat(ctx, boat.x, boat.y, boat.heading, p);
+  if (world.phase !== 'lost') drawBoat(ctx, boat.x, boat.y, boat.heading, Math.hypot(boat.vx, boat.vy), p);
 }
 
 function palette(): Palette {
@@ -363,6 +413,7 @@ export function Voyage() {
         {SAY[phase][touch ? 1 : 0]}
       </p>
       <div className={`sea${phase === 'sailing' ? ' sailing' : ''}`} ref={sea}>
+        <Shore />
         <canvas ref={canvas} aria-label="A sailing game: blow the boat to the harbour with your cursor" />
       </div>
     </>

@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { AppLink } from './AppLink';
 import { Reveal } from './Reveal';
 import { BoatGlyph } from './Sailboat';
+import { Clouds } from './Clouds';
+import { WAVE, Waves } from './Waves';
 import { useReveal } from '@/lib/useReveal';
 import { drawWind } from '@/lib/wind';
 import { HomeTour } from '@/screens/HomeTour';
@@ -10,7 +12,7 @@ const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
 
 /** The baseline's drawing space: stretched to the hero's width, 160px tall. */
 const LINE_W = 1440;
-const LINE = 'M0 108 C 380 108, 600 74, 840 94 S 1240 138, 1440 116';
+const LINE = WAVE;
 /** The boat's size on the line, in px per glyph unit. */
 const BOAT_K = 0.42;
 /** The boat's own way, px/s along the line, and the most the wind adds. */
@@ -30,8 +32,8 @@ export function Hero() {
   // The tour starts on the same signal as the stage's settle-in.
   const stage = useReveal<HTMLDivElement>();
 
-  // The boat rides the drawn line: it appears once the line is drawn and
-  // makes its slow way across, bobbing, heeled to the water under it. The
+  // The boat rides the line from the first paint and, once the line is in
+  // view, makes its slow way across, bobbing, heeled to the water under it. The
   // cursor is the wind: near the boat it pushes it on from behind or holds it
   // back from ahead, its streaks drawn on a sheet over the hero. The line is
   // stretched to the hero's width, so the glyph is counter-scaled to keep its
@@ -65,7 +67,6 @@ export function Hero() {
     };
     if (still) {
       place(0.3, 0, 0);
-      hull.style.opacity = '1';
       return;
     }
     const onMove = (e: PointerEvent) => {
@@ -127,9 +128,7 @@ export function Hero() {
       u += ((DRIFT + way) * dt) / Math.max(1, rect.width);
       if (u > 1) u -= 1;
       if (u < 0) u += 1;
-      const edge = Math.min(1, Math.min(u, 1 - u) * 14);
-      const arrived = Math.min(1, Math.max(0, (t - 1200) / 900));
-      hull.style.opacity = String(edge * arrived);
+      hull.style.opacity = String(Math.min(1, Math.min(u, 1 - u) * 14));
       at = place(0.04 + u * 0.92, t, way);
     };
     raf = requestAnimationFrame(tick);
@@ -142,8 +141,7 @@ export function Hero() {
 
   return (
     <section className="hero" id="top" ref={hero}>
-      <div className="hero-grid" />
-      <div className="hero-glow" />
+      <Clouds className="hero-clouds" />
       <svg
         ref={line.ref}
         className={`hero-line${line.visible ? ' visible' : ''}`}
@@ -151,6 +149,7 @@ export function Hero() {
         preserveAspectRatio="none"
         aria-hidden="true"
       >
+        <Waves />
         <path d={LINE} pathLength={1} />
         <g ref={boat} className="hero-boat" transform="translate(472 92) scale(0.42) translate(-50 -80)">
           <BoatGlyph />
@@ -162,15 +161,14 @@ export function Hero() {
           The IDE for product owners
         </Reveal>
         <Reveal as="h1" delay={60} rise>
-          Know which of your requirements hold.
+          AI writes the code. You own what it does.
         </Reveal>
         <Reveal as="p" className="sub" delay={140} rise>
-          Every requirement you wrote, proven against the running product and kept current as it
-          changes.
+          Every requirement you wrote, proven on every pull request before a bug reaches anyone.
         </Reveal>
         <Reveal className="cta-row" delay={220} rise>
           <AppLink className="btn btn-primary" placement="hero">
-            Get started <span className="arr">→</span>
+            Get started
           </AppLink>
           <a className="btn" href={GITHUB_URL} target="_blank" rel="noreferrer">
             View on GitHub

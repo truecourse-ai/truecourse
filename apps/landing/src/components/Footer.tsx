@@ -4,6 +4,7 @@ import { DiscordIcon } from './DiscordIcon';
 
 const DISCORD_URL = 'https://discord.gg/TanxB63arz';
 const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
+const CONTACT_URL = 'mailto:mushegh@truecourse.dev';
 
 type LinkItem = { href: string; label: string };
 
@@ -15,11 +16,15 @@ const PRODUCT: LinkItem[] = [
 ];
 
 const RESOURCES: LinkItem[] = [
+  { href: 'https://docs.truecourse.dev/', label: 'Documentation' },
+  { href: '/blog', label: 'Blog' },
   { href: GITHUB_URL, label: 'GitHub' },
   { href: DISCORD_URL, label: 'Discord' },
-  { href: 'https://github.com/truecourse-ai/truecourse#readme', label: 'Documentation' },
-  { href: '/blog', label: 'Blog' },
-  { href: 'mailto:mushegh@truecourse.dev', label: 'Contact' },
+];
+
+const COMPANY: LinkItem[] = [
+  { href: CONTACT_URL, label: 'Contact' },
+  { href: `${CONTACT_URL}?subject=TrueCourse%20for%20our%20team`, label: 'Talk to sales' },
 ];
 
 const LEGAL: LinkItem[] = [
@@ -43,7 +48,7 @@ export function Footer() {
               <span className="mark" aria-hidden />
               TrueCourse
             </Link>
-            <p>Your documentation, checked on every pull request.</p>
+            <p>Your requirements, proven on every pull request.</p>
             <div className="foot-social">
               <a
                 className="icon-btn"
@@ -63,7 +68,7 @@ export function Footer() {
               >
                 <DiscordIcon />
               </a>
-              <a className="icon-btn" href="mailto:mushegh@truecourse.dev" aria-label="Email">
+              <a className="icon-btn" href={CONTACT_URL} aria-label="Email">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M2 5h20v14H2z" fill="none" stroke="currentColor" strokeWidth="1.6" />
                   <path d="M3 6l9 7 9-7" fill="none" stroke="currentColor" strokeWidth="1.6" />
@@ -74,17 +79,13 @@ export function Footer() {
 
           <Column title="Product" links={PRODUCT} />
           <Column title="Resources" links={RESOURCES} />
+          <Column title="Company" links={COMPANY} />
           <Column title="Legal" links={LEGAL} />
         </div>
 
         <div className="foot-bottom">
-          <span>
-            © {new Date().getFullYear()} TrueCourse AI, Inc. · 2261 Market Street STE
-            88087, San Francisco, CA 94114
-          </span>
-          <span>
-            Built with <span className="heart">♥</span> for engineers shipping with AI.
-          </span>
+          <span>© {new Date().getFullYear()} TrueCourse AI, Inc.</span>
+          <span>2261 Market Street STE 88087, San Francisco, CA 94114</span>
         </div>
       </div>
     </footer>
