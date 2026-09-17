@@ -190,8 +190,10 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       deps.clientId,
     )}&state=${encodeURIComponent(state)}`;
 
-  // Install on a GitHub account that does not have the App yet. With user
-  // authorization on, GitHub returns to the same callback with a code.
+  // Install on a GitHub account that does not have the App yet: where the
+  // callback sends a person whose reachable installations are all attached
+  // already, or who has none. With user authorization on, GitHub returns to
+  // the same callback with a code.
   const buildInstallUrl = (state: string): string =>
     `https://github.com/apps/${deps.appSlug}/installations/new?state=${encodeURIComponent(state)}`;
 
@@ -291,7 +293,6 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       const empty: GithubConnectStatusResponse = {
         configured: true,
         connectUrl: '',
-        installUrl: '',
         installations: [],
         repos: [],
       };
@@ -313,7 +314,6 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     const body: GithubConnectStatusResponse = {
       configured: true,
       connectUrl: buildConnectUrl(state),
-      installUrl: buildInstallUrl(state),
       installations: installations.map(toInstallationSummary),
       repos: repos.map(toRepoSummary),
       ...(offer ? { offered: offer.installations.map(toInstallationSummary) } : {}),
@@ -459,7 +459,16 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     );
     const candidates = reachable.filter((i) => !held.has(i.installationId));
     if (candidates.length === 0) {
-      settle('nothing-new', 'every reachable installation is attached already');
+      // Everything the person can reach is attached already, so the only
+      // account left to add is one that has no App yet: on to the install
+      // page, which returns here. Only a plain authorize forwards there; a
+      // return from that page with nothing new settles instead of looping.
+      if (setupAction) {
+        settle('none', 'back from the install page with every reachable installation attached already');
+        return;
+      }
+      log.info(`[github] connect callback: every reachable installation is attached to ${orgId}; on to install`);
+      res.redirect(buildInstallUrl(stateFor(user, orgId, origin)));
       return;
     }
     // A choice the person has not made yet: GitHub's list, signed, for the

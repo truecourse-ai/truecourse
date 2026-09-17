@@ -66,7 +66,6 @@ interface LinkBody {
   defaultBranch?: string;
 }
 
-const INSTALL_URL = 'https://github.com/apps/truecourse/installations/new?state=signed';
 const CONNECT_URL = 'https://github.com/login/oauth/authorize?client_id=Iv1.app&state=signed';
 
 const realFetch = window.fetch;
@@ -94,7 +93,6 @@ function status(partial: Partial<GithubConnectStatusResponse> = {}): GithubConne
   return {
     configured: true,
     connectUrl: CONNECT_URL,
-    installUrl: INSTALL_URL,
     installations: [{ installationId: 42, accountLogin: 'linkwarden', accountType: 'Organization' }],
     repos: [],
     ...partial,

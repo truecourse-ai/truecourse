@@ -223,7 +223,7 @@ function serve(over: Partial<World> = {}) {
     }
     if (url.pathname === '/api/repos') return json(state.repos);
     if (url.pathname === '/api/github/status') {
-      return json({ configured: true, connectUrl: '', installUrl: '', installations: state.installations, repos: [] });
+      return json({ configured: true, connectUrl: '', installations: state.installations, repos: [] });
     }
     const installationRepos = /^\/api\/github\/installations\/(\d+)\/repos$/.exec(url.pathname);
     if (installationRepos) {

@@ -101,13 +101,12 @@ beforeEach(() => {
 const seedInstallation = (orgs: string[]) => seed(store, 100, orgs);
 
 describe('connect router', () => {
-  it('returns a connect URL and an install URL, both carrying a signed state, and the workspace installations', async () => {
+  it('returns a connect URL carrying a signed state, and the workspace installations', async () => {
     await seedInstallation(['org_A']);
     const res = await request(app).get('/api/ee/github/status').expect(200);
     const body = res.body as GithubConnectStatusResponse;
     expect(body.configured).toBe(true);
     expect(body.connectUrl).toContain('https://github.com/login/oauth/authorize?client_id=Iv1.client&state=');
-    expect(body.installUrl).toContain('apps/tc-gate/installations/new?state=');
     // The state is opaque: the workspace id does not travel in the clear.
     expect(body.connectUrl).not.toContain('org_A');
     expect(body.installations.map((i) => i.installationId)).toEqual([100]);
@@ -119,7 +118,6 @@ describe('connect router', () => {
     const res = await request(app).get('/api/ee/github/status').expect(200);
     const body = res.body as GithubConnectStatusResponse;
     expect(body.connectUrl).toBe('');
-    expect(body.installUrl).toBe('');
     expect(body.installations).toEqual([]);
   });
 
@@ -298,7 +296,7 @@ describe('the connect callback', () => {
     expect(lookupAccount).not.toHaveBeenCalled();
   });
 
-  it('offers only what the workspace does not hold, and says so when that is nothing', async () => {
+  it('offers only what the workspace does not hold, and sends the person on to install when that is nothing', async () => {
     await seedInstallation(['org_A']);
     userInstallations.mockResolvedValue([ACME, OCTO]);
     const res = await request(app)
@@ -311,13 +309,22 @@ describe('the connect callback', () => {
       .expect(200);
     expect((status.body as GithubConnectStatusResponse).offered?.map((i) => i.installationId)).toEqual([200]);
 
+    // Everything reachable is attached: the only account left to add is one
+    // without the App, so the trip goes on to GitHub's install page with a
+    // fresh state that remembers where it started.
     userInstallations.mockResolvedValue([ACME]);
+    const onward = await request(app)
+      .get('/api/ee/github/callback')
+      .query({ code: 'c0de', state: stateFor('org_A', 'u1', 'code-connect') })
+      .expect(302);
+    expect(onward.headers.location).toMatch(/^https:\/\/github\.com\/apps\/tc-gate\/installations\/new\?state=/);
+    expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
+    // A return from that page with nothing new does not go round again.
     await request(app)
       .get('/api/ee/github/callback')
-      .query({ code: 'c0de', state: stateFor('org_A') })
+      .query({ code: 'c0de', setup_action: 'install', state: stateFor('org_A', 'u1', 'code-connect') })
       .expect(302)
-      .expect('location', settledAt('nothing-new'));
-    expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
+      .expect('location', settledAt('none', 'code-connect'));
   });
 
   it('lets a second workspace attach the same installation, keeping the first', async () => {

@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { Unlink } from 'lucide-react';
 import {
   GITHUB_CONNECT_OUTCOMES,
   GITHUB_INSTALL_ORIGINS,
@@ -48,13 +49,11 @@ import { registeredSettingsTabs, type SettingsTab } from '@/dashboard/shell/regi
 type GithubProviderState = {
   installations: GithubInstallationSummary[];
   /**
-   * Connect: authorize with GitHub, which attaches the installations this
-   * person can reach, or sends them on to install. Absent on a server that
-   * has no App configured.
+   * The one door in: authorize with GitHub, which offers the installations
+   * this person can reach and the workspace does not hold, or sends them on
+   * to install. Absent on a server that has no App configured.
    */
   connectUrl: string | null;
-  /** The App's install page, for an account that does not have it yet. */
-  installUrl: string | null;
   /** The repositories linked to this workspace, per installation. */
   linked: GithubRepoSummary[];
   /**
@@ -88,12 +87,6 @@ function toastConnectOutcome(outcome: Exclude<GithubConnectOutcome, 'pick'>): vo
     case 'updated':
       toast('Repository access updated on GitHub');
       return;
-    case 'nothing-new':
-      toast('Nothing new to connect', {
-        description:
-          'Every GitHub account you have access to is already connected to this workspace. To add another, install the App on it first.',
-      });
-      return;
     case 'requested':
       toast('Install requested on GitHub', {
         description: "The account's owners have to approve it. Connect again once they have.",
@@ -101,7 +94,8 @@ function toastConnectOutcome(outcome: Exclude<GithubConnectOutcome, 'pick'>): vo
       return;
     case 'none':
       toast.error('Nothing to connect', {
-        description: 'The App is installed on no GitHub account you have access to. Nothing was added.',
+        description:
+          'No GitHub account you have access to has the App and is not connected here already. Nothing was added.',
       });
       return;
     case 'expired':
@@ -134,13 +128,15 @@ function outcomeOf(raw: string | null): GithubConnectOutcome | null {
  * one line each.
  *
  * GitHub is the real one: its accounts are the App's installations the server
- * reports, each line naming the account, its type and how many repositories
- * this workspace has linked through it, and connecting is a top-level
- * navigation to GitHub's authorize page. An install comes back attached; a
- * plain authorize comes back HERE with the accounts the person can reach and
- * this workspace does not hold, offered for them to pick, since nothing is
- * attached without a choice. Every trip that did not attach lands here too,
- * saying how it ended, wherever it started. On a local server the folders of this
+ * reports, one line each naming the account, its type and how many
+ * repositories this workspace has linked through it, with its two actions on
+ * the line. Adding one is ONE button, a top-level navigation to GitHub's
+ * authorize page: it comes back HERE with the accounts the person can reach
+ * and this workspace does not hold, offered as rows of the same list for them
+ * to pick (nothing is attached without a choice), or goes on to GitHub's
+ * install page when there is nothing to offer, and an install comes back
+ * attached. Every trip that did not attach lands here too, told as a toast,
+ * wherever it started. On a local server the folders of this
  * machine are real too, each line naming the repository and the path behind it,
  * and connecting one is the connect dialog, where the path is typed. Every
  * other provider is listed and says Coming soon: hiding one would make the page
@@ -186,7 +182,6 @@ function RepositoriesTab() {
       apply({
         installations: status.installations,
         connectUrl: status.connectUrl || null,
-        installUrl: status.installUrl || null,
         linked: status.repos,
         offered: status.offered ?? null,
       });
@@ -194,7 +189,6 @@ function RepositoriesTab() {
       apply({
         installations: [],
         connectUrl: null,
-        installUrl: null,
         linked: [],
         offered: null,
         reason: error instanceof Error ? error.message : 'GitHub could not be reached',
@@ -307,6 +301,8 @@ function RepositoriesTab() {
   }, [mode]);
 
   const installations = github?.installations ?? [];
+  /** The accounts a pick landing offers, once the server has confirmed the offer. */
+  const offered = outcome === 'pick' ? (github?.offered ?? []) : [];
 
   return (
     <ul className="divide-y divide-border border-b border-border" aria-label="Providers">
@@ -335,60 +331,29 @@ function RepositoriesTab() {
               {isGithub && github?.reason && (
                 <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
               )}
-              {isGithub && outcome === 'pick' && github && (
-                github.offered && github.offered.length > 0 ? (
-                  <div className="mt-1">
-                    <p className="text-[11px] text-muted-foreground">
-                      GitHub named {github.offered.length} account
-                      {github.offered.length === 1 ? '' : 's'} this workspace does not hold. Pick the ones to connect.
-                    </p>
-                    <ul className="mt-1 space-y-1" aria-label="Offered GitHub accounts">
-                      {github.offered.map((i) => {
-                        const name = i.accountLogin || `#${i.installationId}`;
-                        return (
-                          <li key={i.installationId}>
-                            <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                              <input
-                                type="checkbox"
-                                checked={chosen.includes(i.installationId)}
-                                onChange={(e) => togglePick(i.installationId, e.target.checked)}
-                                disabled={attaching}
-                              />
-                              <span className="text-foreground">{name}</span>
-                              {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''}
-                            </label>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <button
-                      type="button"
-                      onClick={() => void attachPicked()}
-                      disabled={attaching || chosen.length === 0}
-                      className="mt-1 rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                    >
-                      {attaching ? 'Connecting' : 'Connect selected'}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="mt-1 text-[11px] text-destructive">
-                    That offer expired. Connect again to get a fresh one.
-                  </p>
-                )
+              {isGithub && outcome === 'pick' && github && !offered.length && (
+                <p className="mt-1 text-[11px] text-destructive">
+                  That offer expired. Connect again to get a fresh one.
+                </p>
               )}
-              {isGithub && installations.length > 0 && (
-                <ul className="mt-1 space-y-1" aria-label="GitHub installations">
+              {/* One list: the accounts held, one line each with its two
+                  actions, and under them the accounts a trip just offered,
+                  each with a checkbox in place of the actions. */}
+              {isGithub && (installations.length > 0 || offered.length > 0) && (
+                <ul className="mt-2 divide-y divide-border border-y border-border" aria-label="GitHub accounts">
                   {installations.map((i) => {
                     const linked = (github?.linked ?? []).filter(
                       (r) => r.installationId === i.installationId,
                     ).length;
                     const name = i.accountLogin || `#${i.installationId}`;
                     return (
-                      <li key={i.installationId} className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                        <span className="min-w-0 truncate">
+                      <li key={i.installationId} className="flex items-center gap-3 py-1.5 text-xs">
+                        <span className="min-w-0 flex-1 truncate">
                           <span className="text-foreground">{name}</span>
-                          {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} ·{' '}
-                          {linked} repositor{linked === 1 ? 'y' : 'ies'} linked
+                          <span className="text-muted-foreground">
+                            {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} · {linked} repositor
+                            {linked === 1 ? 'y' : 'ies'}
+                          </span>
                         </span>
                         {/* Which repositories the App can see is GitHub's
                             setting, on the installation's own page there. */}
@@ -397,31 +362,57 @@ function RepositoriesTab() {
                           target="_blank"
                           rel="noreferrer"
                           aria-label={`Manage ${name} on GitHub`}
-                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                          className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground"
                         >
                           Manage on GitHub
                         </a>
+                        {/* Unlink, not delete: the installation stays on
+                            GitHub, this workspace lets go of it. */}
                         <button
                           type="button"
                           onClick={() => void detach(i)}
                           disabled={detaching !== null}
                           aria-label={`Remove ${name}`}
-                          className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                          title="Remove from this workspace"
+                          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-50"
                         >
-                          {detaching === i.installationId ? 'Removing' : 'Remove'}
+                          <Unlink className="h-3.5 w-3.5" aria-hidden />
                         </button>
                       </li>
                     );
                   })}
+                  {offered.map((i) => {
+                    const name = i.accountLogin || `#${i.installationId}`;
+                    return (
+                      <li key={`offer-${i.installationId}`} className="flex items-center gap-3 py-1.5 text-xs">
+                        <label className="flex min-w-0 flex-1 items-center gap-2 truncate">
+                          <input
+                            type="checkbox"
+                            checked={chosen.includes(i.installationId)}
+                            onChange={(e) => togglePick(i.installationId, e.target.checked)}
+                            disabled={attaching}
+                          />
+                          <span className="text-foreground">{name}</span>
+                          <span className="text-muted-foreground">
+                            {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} · offered by GitHub
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                  {offered.length > 0 && (
+                    <li className="flex justify-end py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void attachPicked()}
+                        disabled={attaching || chosen.length === 0}
+                        className="rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                      >
+                        {attaching ? 'Connecting' : 'Connect selected'}
+                      </button>
+                    </li>
+                  )}
                 </ul>
-              )}
-              {isGithub && installations.length > 0 && github?.installUrl && (
-                <a
-                  href={github.installUrl}
-                  className="mt-1 inline-block text-[11px] text-muted-foreground hover:text-foreground"
-                >
-                  Install on another GitHub account
-                </a>
               )}
               {isLocal && (folders ?? []).length > 0 && (
                 <ul className="mt-1 space-y-1" aria-label="Connected folders">

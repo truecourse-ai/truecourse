@@ -113,11 +113,9 @@ export type GithubInstallOrigin = (typeof GITHUB_INSTALL_ORIGINS)[number];
 export const GITHUB_CONNECT_OUTCOMES = [
   /** GitHub named accounts this workspace does not hold; `offer` carries them for the person to pick from. */
   'pick',
-  /** Every account the person can reach is attached already. */
-  'nothing-new',
   /** The person asked an account's owners to install the App; nothing to attach until they approve. */
   'requested',
-  /** Back from the install page with the App still installed nowhere the person can reach. */
+  /** Back from the install page with nothing new: no reachable installation, or every one attached already. */
   'none',
   /** The trip took too long, or came back to a session other than the one that started it. */
   'expired',
@@ -134,14 +132,12 @@ export interface GithubConnectStatusResponse {
   /** Whether the GitHub App is configured server-side. */
   configured: boolean
   /**
-   * Connect: authorize with GitHub, which offers the installations of the App
-   * the person can reach and this workspace does not hold yet, or sends them
-   * on to install when there is none. Carries a signed `state` for this
-   * workspace and user.
+   * The one door in: authorize with GitHub, which offers the installations
+   * of the App the person can reach and this workspace does not hold yet, or
+   * sends them on to GitHub's install page when there is nothing to offer.
+   * Carries a signed `state` for this workspace and user.
    */
   connectUrl: string
-  /** Install the App on a GitHub account that does not have it yet (same `state`). */
-  installUrl: string
   installations: GithubInstallationSummary[]
   repos: GithubRepoSummary[]
   /**

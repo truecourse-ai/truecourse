@@ -35,7 +35,6 @@ if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = (() => {}) as Element['scrollTo'];
 }
 
-const INSTALL_URL = 'https://github.com/apps/truecourse/installations/new?state=signed';
 const CONNECT_URL = 'https://github.com/login/oauth/authorize?client_id=Iv1.app&state=signed';
 const realFetch = window.fetch;
 
@@ -61,7 +60,6 @@ function status(over: Partial<GithubConnectStatusResponse> = {}): GithubConnectS
   return {
     configured: true,
     connectUrl: CONNECT_URL,
-    installUrl: INSTALL_URL,
     installations: [{ installationId: 42, accountLogin: 'linkwarden', accountType: 'Organization' }],
     repos: [linkedRepo('linkwarden/linkwarden', 42), linkedRepo('linkwarden/docs', 42)],
     ...over,
@@ -126,25 +124,25 @@ describe('Settings › Repositories', () => {
 
     const github = providerRow('GitHub');
     expect(await within(github).findByText('Connected')).toBeInTheDocument();
-    const installations = within(github).getByRole('list', { name: 'GitHub installations' });
-    const rows = within(installations).getAllByRole('listitem');
+    const accounts = within(github).getByRole('list', { name: 'GitHub accounts' });
+    const rows = within(accounts).getAllByRole('listitem');
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toHaveTextContent('linkwarden · organization · 2 repositories linked');
-    // Adding an account is GitHub's authorize page, nothing the client invents;
-    // installing on an account that has no App yet is the secondary link.
+    expect(rows[0]).toHaveTextContent('linkwarden · organization · 2 repositories');
+    // Adding an account is ONE door, GitHub's authorize page; the server
+    // sends the person on to install from there when there is nothing to offer.
     expect(within(github).getByRole('link', { name: 'Add account' })).toHaveAttribute(
       'href',
       CONNECT_URL,
     );
-    expect(
-      within(github).getByRole('link', { name: 'Install on another GitHub account' }),
-    ).toHaveAttribute('href', INSTALL_URL);
+    expect(within(github).queryByRole('link', { name: /Install on another/ })).toBeNull();
     // Which repositories the App sees is changed on GitHub, on the
     // installation's own settings page: an organization's, under the org.
     expect(within(rows[0]!).getByRole('link', { name: 'Manage linkwarden on GitHub' })).toHaveAttribute(
       'href',
       'https://github.com/organizations/linkwarden/settings/installations/42',
     );
+    // Remove is the line's icon button, named for the reader.
+    expect(within(rows[0]!).getByRole('button', { name: 'Remove linkwarden' })).toBeEnabled();
   });
 
   it("links a user account's installation to the user's own settings page", async () => {
@@ -196,8 +194,7 @@ describe('Settings › Repositories', () => {
     const github = providerRow('GitHub');
     expect(await within(github).findByText('Not connected')).toBeInTheDocument();
     expect(within(github).getByRole('link', { name: 'Connect' })).toHaveAttribute('href', CONNECT_URL);
-    expect(within(github).queryByRole('link', { name: 'Install on another GitHub account' })).toBeNull();
-    expect(within(github).queryByRole('list', { name: 'GitHub installations' })).toBeNull();
+    expect(within(github).queryByRole('list', { name: 'GitHub accounts' })).toBeNull();
   });
 
   it('toasts a return from an installation’s settings page on GitHub, once, and leaves the row alone', async () => {
@@ -234,7 +231,7 @@ describe('Settings › Repositories', () => {
     // The word replaced the lock: no icon carries the meaning.
     expect(within(row).queryByText('Team plan')).toBeNull();
     // GitHub's accounts are GitHub's: a provider with nothing connected lists none.
-    expect(within(row).queryByRole('list', { name: 'GitHub installations' })).toBeNull();
+    expect(within(row).queryByRole('list', { name: 'GitHub accounts' })).toBeNull();
     expect(within(row).queryByText(/repositor(y|ies) linked/)).toBeNull();
   });
 
@@ -258,7 +255,6 @@ describe('Settings › Repositories', () => {
     serve((url) =>
       json(
         status({
-          installations: [],
           repos: [],
           ...(url.searchParams.get('offer') === 'signed-offer'
             ? {
@@ -274,13 +270,17 @@ describe('Settings › Repositories', () => {
     renderAt('/settings/repositories?github=pick&offer=signed-offer&from=code-connect');
 
     const github = providerRow('GitHub');
-    const offered = await within(github).findByRole('list', { name: 'Offered GitHub accounts' });
-    const boxes = within(offered).getAllByRole('checkbox');
+    // The offered accounts are rows of the same list as the held one, a
+    // checkbox where the held one has its actions.
+    const accounts = await within(github).findByRole('list', { name: 'GitHub accounts' });
+    await within(accounts).findByLabelText(/octo/);
+    expect(within(accounts).getByText('linkwarden')).toBeInTheDocument();
+    const boxes = within(accounts).getAllByRole('checkbox');
     expect(boxes).toHaveLength(2);
     // Every offered account starts ticked; the person unticks what is not theirs to add.
     expect(boxes.every((box) => (box as HTMLInputElement).checked)).toBe(true);
-    await user.click(within(offered).getByLabelText(/octo/));
-    await user.click(within(github).getByRole('button', { name: 'Connect selected' }));
+    await user.click(within(accounts).getByLabelText(/octo/));
+    await user.click(within(accounts).getByRole('button', { name: 'Connect selected' }));
 
     await waitFor(() => expect(attached).toEqual([{ offer: 'signed-offer', installationIds: [100] }]));
     // On to the Code connect dialog, the pick made.
@@ -293,7 +293,7 @@ describe('Settings › Repositories', () => {
 
     const github = providerRow('GitHub');
     expect(await within(github).findByText(/That offer expired/)).toBeInTheDocument();
-    expect(within(github).queryByRole('list', { name: 'Offered GitHub accounts' })).toBeNull();
+    expect(within(github).queryByRole('list', { name: 'GitHub accounts' })).toBeNull();
   });
 
   it('has no Connections tab and no provider beyond the two', async () => {
