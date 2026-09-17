@@ -245,7 +245,7 @@ describe('Settings › Credits', () => {
     expect(within(list).getByRole('button', { name: 'Resume' })).toBeDisabled();
   });
 
-  it('offers the ways to get more credits and the way to the spending, as actions', async () => {
+  it('offers the one way to ask for credits, and says who they are for', async () => {
     serve();
     renderAt('/settings/credits');
     const actions = await screen.findByRole('group', { name: 'Credits actions' });
@@ -253,15 +253,12 @@ describe('Settings › Credits', () => {
       'href',
       expect.stringContaining('discord.gg'),
     );
-    expect(within(actions).getByRole('link', { name: 'Email' })).toHaveAttribute(
-      'href',
-      'mailto:mushegh@truecourse.dev',
-    );
-    // The side menu has a Usage link of its own; this is the one among the actions.
-    expect(within(actions).getByRole('link', { name: 'Usage' })).toHaveAttribute(
-      'href',
-      '/settings/usage',
-    );
+    expect(
+      within(actions).getByText('Credits are granted to open source repositories.'),
+    ).toBeInTheDocument();
+    expect(within(actions).queryByRole('link', { name: 'Email' })).toBeNull();
+    // The side menu has a Usage link of its own; among the actions there is none.
+    expect(within(actions).queryByRole('link', { name: 'Usage' })).toBeNull();
   });
 
   it('says so plainly when nothing has been granted or spent', async () => {

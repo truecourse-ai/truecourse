@@ -15,7 +15,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Coins } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import type { CreditEntryView, CreditsResponse, PausedRunView } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { startedLabel } from '@/components/sessions/run-model';
@@ -24,9 +23,6 @@ import { EntityList } from '@/dashboard/ui/entity-list';
 import { DISCORD_INVITE_URL } from '@/dashboard/shell/DashboardShell';
 import { Facts } from '@/dashboard/ui/bits';
 import { StatusWord } from '@/dashboard/ui/status-word';
-
-/** Where a request for more credits goes. */
-const CONTACT_EMAIL = 'mushegh@truecourse.dev';
 
 /** What a line of the ledger is called. */
 const KIND_WORD: Record<CreditEntryView['kind'], string> = {
@@ -125,18 +121,9 @@ export function CreditsTab() {
         >
           Request credits
         </a>
-        <a
-          href={`mailto:${CONTACT_EMAIL}`}
-          className="rounded border border-border px-2 py-0.5 text-[10px] font-medium text-foreground hover:bg-muted/60"
-        >
-          Email
-        </a>
-        <Link
-          to="/settings/usage"
-          className="ml-auto rounded border border-border px-2 py-0.5 text-[10px] font-medium text-foreground hover:bg-muted/60"
-        >
-          Usage
-        </Link>
+        <span className="text-[11px] text-muted-foreground">
+          Credits are granted to open source repositories.
+        </span>
       </div>
 
       {error && (
