@@ -33,7 +33,7 @@ export function Hero() {
   const stage = useReveal<HTMLDivElement>();
 
   // The boat rides the line from the first paint and, once the line is in
-  // view, makes its slow way across, bobbing, heeled to the water under it. The
+  // view, makes its slow way across and back, coming about at each end, bobbing, heeled to the water under it. The
   // cursor is the wind: near the boat it pushes it on from behind or holds it
   // back from ahead, its streaks drawn on a sheet over the hero. The line is
   // stretched to the hero's width, so the glyph is counter-scaled to keep its
@@ -50,7 +50,7 @@ export function Hero() {
     const total = path.getTotalLength();
     const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let cursor: { x: number; y: number } | null = null;
-    const place = (u: number, t: number, way: number) => {
+    const place = (u: number, t: number, way: number, dir: number) => {
       const rect = svg.getBoundingClientRect();
       const sx = LINE_W / Math.max(1, rect.width);
       const l = u * total;
@@ -61,12 +61,12 @@ export function Hero() {
       const roll = still ? 0 : Math.sin(t / 1400) * 2.5 + way / 30;
       hull.setAttribute(
         'transform',
-        `translate(${p.x} ${p.y + bob}) scale(${sx} 1) rotate(${heel + roll}) scale(${BOAT_K}) translate(-50 -80)`,
+        `translate(${p.x} ${p.y + bob}) scale(${sx} 1) rotate(${heel + roll}) scale(${dir * BOAT_K} ${BOAT_K}) translate(-50 -80)`,
       );
       return { x: rect.left + p.x / sx, y: rect.top + p.y };
     };
     if (still) {
-      place(0.3, 0, 0);
+      place(0.3, 0, 0, 1);
       return;
     }
     const onMove = (e: PointerEvent) => {
@@ -106,8 +106,9 @@ export function Hero() {
     const t0 = performance.now();
     let last = t0;
     let u = 0.3;
+    let dir = 1;
     let way = 0;
-    let at = place(u, 0, 0);
+    let at = place(u, 0, 0, dir);
     let raf = 0;
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
@@ -124,13 +125,19 @@ export function Hero() {
       }
       blow(t, at);
       way *= Math.exp(-1.6 * dt);
-      // Wind from ahead holds the boat back; it never sails it backwards.
-      way = Math.max(2 - DRIFT, Math.min(TOP_SPEED, way));
-      u += ((DRIFT + way) * dt) / Math.max(1, rect.width);
-      if (u > 1) u -= 1;
-      if (u < 0) u += 1;
-      hull.style.opacity = String(Math.min(1, Math.min(u, 1 - u) * 14));
-      at = place(0.04 + u * 0.92, t, way);
+      way = Math.max(-TOP_SPEED, Math.min(TOP_SPEED, way));
+      u += ((DRIFT * dir + way) * dt) / Math.max(1, rect.width);
+      // At either end the boat comes about and sails the other way.
+      if (u > 1) {
+        u = 1;
+        dir = -1;
+        way = -Math.abs(way);
+      } else if (u < 0) {
+        u = 0;
+        dir = 1;
+        way = Math.abs(way);
+      }
+      at = place(0.04 + u * 0.92, t, way, dir);
     };
     raf = requestAnimationFrame(tick);
     return () => {

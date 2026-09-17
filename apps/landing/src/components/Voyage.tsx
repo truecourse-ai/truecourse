@@ -20,8 +20,10 @@ const CURRENT = { x: -14, y: 34 };
 const DRAG = 1.8;
 const TOP_SPEED = 150;
 const BOAT_R = 11;
-/** How far the hull reaches from the boat's centre, bow first, at the size it is drawn. */
-const HULL_REACH = 26;
+/** How far from an edge the boat comes about, well clear of its bow's reach. */
+const HULL_REACH = 40;
+/** The least way it has on after coming about, so the turn is a turn. */
+const TURN_SPEED = 45;
 /** Where the water starts, as a share of the sea's height: below the shoreline. */
 const SHORE_Y = 0.3;
 const DOCK_R = 26;
@@ -112,17 +114,20 @@ function step(world: World, dt: number) {
   const bottom = world.h - HULL_REACH;
   if (boat.x < HULL_REACH) {
     boat.x = HULL_REACH;
-    boat.vx = Math.abs(boat.vx) * 0.8;
+    boat.vx = Math.max(TURN_SPEED, Math.abs(boat.vx) * 0.8);
   } else if (boat.x > world.w - HULL_REACH) {
     boat.x = world.w - HULL_REACH;
-    boat.vx = -Math.abs(boat.vx) * 0.8;
+    boat.vx = -Math.max(TURN_SPEED, Math.abs(boat.vx) * 0.8);
   }
   if (boat.y < top) {
     boat.y = top;
-    boat.vy = Math.abs(boat.vy) * 0.8;
+    boat.vy = Math.max(TURN_SPEED, Math.abs(boat.vy) * 0.8);
   } else if (boat.y > bottom) {
     boat.y = bottom;
-    boat.vy = -Math.abs(boat.vy) * 0.8;
+    boat.vy = -Math.max(TURN_SPEED, Math.abs(boat.vy) * 0.8);
+  }
+  if (boat.x === HULL_REACH || boat.x === world.w - HULL_REACH || boat.y === top || boat.y === bottom) {
+    boat.heading = Math.atan2(boat.vy, boat.vx);
   }
 
   for (const rock of world.rocks) {
