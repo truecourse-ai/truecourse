@@ -17,6 +17,18 @@
  * The job posts ONE notification. What the corpus change means for the
  * repositories is the RIPPLE (`../context-ripple.js`), run from the settle hook
  * so the single-flight key is already free.
+ *
+ * NOTHING PARTIAL IS STORED, and that is deliberate. A scan that stops
+ * part-way — an empty balance, a killed process — has curated some documents
+ * and not others, and its corpus is a WHOLE: the areas are settled across every
+ * kept document, the pointers are re-anchored against all of them, and the
+ * ripple compares the stored corpus with the one before it to decide which
+ * repositories are stale. Storing half of one would shrink the workspace corpus
+ * to the documents that happened to finish, cut every repository's slice down
+ * with it, and ripple generates against a spec nobody wrote. So the scan pauses
+ * with the last complete corpus standing, and the resumed job scans again —
+ * paying only for what moved, because the per-document judgments are already in
+ * the LLM cache and a cached document costs nothing to curate a second time.
  */
 
 import { log } from '@truecourse/core/lib/logger';
@@ -139,6 +151,9 @@ export function createContextScanTask(
             onRunStarted: (info) => {
               runIds.set(ctx.jobId, info.runId);
               meter.setRunId(info.runId);
+              // A resumed scan scans again — there is no half corpus to carry
+              // on from — so it opens a run of its own rather than reviving
+              // this one, and names itself a rescan.
               ctx.resumeWith({ source: 'rescan' });
               void ctx.notify({ level: 'started', title: 'Document scan started', data: { runId: info.runId } });
             },

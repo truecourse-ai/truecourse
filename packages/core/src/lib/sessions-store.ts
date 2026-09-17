@@ -187,6 +187,13 @@ export interface SessionRunBackend {
   subscribeRepo(repoKey: string, notify: () => void): () => void;
   create(repoKey: string, opts: CreateSessionRunOptions): Promise<SessionRunStore>;
   open(repoKey: string, command: SessionCommand, runId: string): Promise<SessionRunStore>;
+  /**
+   * Take a settled run back over and carry it on: the record reads `running`
+   * again, this process holds the writer's lease, and everything already in
+   * the journal stands. What a resumed job writes lands in the conversation it
+   * stopped in rather than a second one beside it.
+   */
+  resume(repoKey: string, command: SessionCommand, runId: string): Promise<SessionRunStore>;
   list(repoKey: string, command?: SessionCommand): Promise<RunRecord[]>;
   listForRepos(repoKeys: string[], opts: SessionRunQuery): Promise<RepoRunRecord[]>;
 }
@@ -209,6 +216,10 @@ export async function createStoredSessionRun(repoKey: string, opts: CreateSessio
 }
 export async function openStoredSessionRun(repoKey: string, command: SessionCommand, runId: string): Promise<SessionRunStore> {
   return store().open(repoKey, command, runId);
+}
+/** Carry a settled run on: see {@link SessionRunBackend.resume}. */
+export async function resumeStoredSessionRun(repoKey: string, command: SessionCommand, runId: string): Promise<SessionRunStore> {
+  return store().resume(repoKey, command, runId);
 }
 export async function listStoredSessionRuns(repoKey: string, command?: SessionCommand): Promise<RunRecord[]> {
   return store().list(repoKey, command);

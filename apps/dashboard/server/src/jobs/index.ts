@@ -115,11 +115,11 @@ export interface JobsMount extends Jobs {
    */
   cancelRepoJobs(repoFullName: string, orgId: string): Promise<'stopped' | 'not-here'>;
   /**
-   * Carry a paused job on: enqueue its stored payload — the enqueue request it
-   * was created with, plus whatever pointer it settled on — under the key and
-   * the lane it had. Answers the new job's id, or null when that key is already
-   * busy again. The paused row is then named with the job it became, so it is
-   * never carried on twice.
+   * Carry a paused job on: the SAME row goes back to `queued` and the queue is
+   * handed the payload it paused with — the enqueue request it was created
+   * with, plus whatever pointer it settled on — under the key and the lane it
+   * had. Answers that job's id (it keeps the one it has), or null when the row
+   * was already carried on or its key is busy again.
    */
   resumePaused(job: PausedJob): Promise<string | null>;
 }
@@ -355,26 +355,41 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   };
 
   /**
-   * A paused job, carried on. The payload it stored IS its enqueue request (a
-   * resume pointer merged onto it when it paused), so this re-enqueues that —
-   * under the same key, and, for a heavy job, into the same workspace lane, so
-   * a resumed run queues behind whatever is running rather than beside it.
+   * A paused job, carried on. The ROW itself goes back to `queued` and the
+   * queue is handed the payload it paused with — its enqueue request plus the
+   * resume pointer its body merged onto it — under the same key and, for a
+   * heavy job, into the same workspace lane, so a resumed run queues behind
+   * whatever is running rather than beside it.
+   *
+   * ONE row from beginning to end: a resume is the same job carrying on, so
+   * there is never a second row with the same payload, and nothing is left
+   * sitting at `paused` next to a running twin. Null when the row was already
+   * carried on or its key is active again; it stays paused for the next try.
    */
   const resumePaused = async (job: PausedJob): Promise<string | null> => {
-    const { jobId: _row, ...request } = job.payload ?? {};
-    const jobId = await jobs.singleFlightEnqueue(
-      job.type,
-      job.workspaceOrgId,
-      job.key ?? `${job.type}:${job.id}`,
-      request,
-      HEAVY_TASKS.includes(job.type)
-        ? { queue: heavyJobQueue(job.workspaceOrgId) }
-        : undefined,
-    );
-    if (!jobId) return null;
-    await jobs.jobStore.markResumed(job.id, jobId);
-    captureRunResumed(job.workspaceOrgId, job.type, jobId);
-    return jobId;
+    const revived = await jobs.jobStore.markRequeued(job.id);
+    if (!revived) return null;
+    const key = job.key ?? `${job.type}:${job.id}`;
+    try {
+      await jobs.addJob(
+        job.type,
+        { ...(job.payload ?? {}), jobId: job.id },
+        key,
+        HEAVY_TASKS.includes(job.type)
+          ? { queue: heavyJobQueue(job.workspaceOrgId) }
+          : undefined,
+      );
+    } catch (err) {
+      // No graphile job exists to run the row we just revived, and a `queued`
+      // row holds the single-flight key until the next boot sweep. Put it back
+      // where it was — paused, and offered again — then say why.
+      await jobs.jobStore
+        .markPaused(job.id, { reason: job.reason ?? 'credits' })
+        .catch(() => undefined);
+      throw err;
+    }
+    captureRunResumed(job.workspaceOrgId, job.type, job.id);
+    return job.id;
   };
 
   return Object.assign(jobs, {

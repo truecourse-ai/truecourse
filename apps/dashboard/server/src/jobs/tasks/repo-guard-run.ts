@@ -23,6 +23,14 @@
  * persists nothing and fails the job with the runner's own message, a failed
  * build's or install's output tail behind it. A cancelled run leaves the store
  * exactly as it found it.
+ *
+ * NOTHING PARTIAL IS STORED, and that is deliberate. What a run saves becomes
+ * the repository's BASELINE — the board Home's trend counts, the coverage every
+ * later run is compared against — so a board missing the judge's verdicts on
+ * its failing steps would be read as the truth about the repository and
+ * diffed against for as long as it stood. The whole thing is deterministic
+ * apart from that one annotation, so there is nothing expensive to salvage:
+ * the resumed job runs the scenarios again and stores a board that is complete.
  */
 
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';

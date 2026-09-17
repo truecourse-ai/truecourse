@@ -10,8 +10,9 @@
  *
  * A PAUSED JOB IS A ROW, not a thing held in memory: it settled `paused` with
  * the resume pointer its body declared merged onto its payload, so carrying it
- * on is enqueuing that payload again. Two things do that — an operator's grant,
- * and a workspace saving a key of its own — and a member may do it by hand once
+ * on is putting THAT ROW back on the queue — one job from beginning to end,
+ * never a fresh one beside it. Two things do that — an operator's grant, and a
+ * workspace saving a key of its own — and a member may do it by hand once
  * either has happened. They all go through {@link resumeWorkspaceJobs}, in the
  * order the jobs paused, so a workspace that stopped four runs starts them
  * again in the order it stopped them.
@@ -144,9 +145,28 @@ export async function pausedRuns(orgId: string): Promise<PausedRunView[]> {
     jobType: job.type,
     title: usageJobTypeWord(job.type),
     repository: (job.payload?.repoFullName as string | undefined) ?? null,
-    runId: (job.payload?.resumeRunId as string | undefined) ?? null,
+    // The conversation it stopped in, when it had opened one: the record a
+    // resume carries on, else the one a generate replays from.
+    runId:
+      (job.payload?.carryOnRunId as string | undefined) ??
+      (job.payload?.resumeRunId as string | undefined) ??
+      null,
     pausedAt: job.pausedAt ?? '',
   }));
+}
+
+/**
+ * The paused job waiting on THIS run, if any — what a conversation offers its
+ * Resume against, so the page carries the run on rather than starting a second
+ * one beside it. Null when nothing of this workspace is paused there.
+ */
+export async function pausedJobOfRun(orgId: string, runId: string): Promise<string | null> {
+  const jobs = currentJobs();
+  if (!jobs) return null;
+  const paused = (await jobs.jobStore.listPaused(orgId)).find(
+    (job) => job.payload?.carryOnRunId === runId || job.payload?.resumeRunId === runId,
+  );
+  return paused?.id ?? null;
 }
 
 /**

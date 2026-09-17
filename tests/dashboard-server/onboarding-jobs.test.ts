@@ -65,6 +65,7 @@ import {
   setSessionRunBackend,
 } from '@truecourse/core/lib/sessions-store';
 import { guardSetupInProcess } from '@truecourse/core/commands/guard-setup';
+import { CreditsExhaustedError } from '@truecourse/core/lib/credits-store';
 import { OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import {
   buildDocSectionIndex,
@@ -271,7 +272,11 @@ describe('the guard setup job', () => {
   const worldDirtySeen: boolean[] = [];
   /** Whether the seed seam was told the clone reads as a fresh checkout. */
   const freshCheckoutSeen: boolean[] = [];
+  /** Every seed session the engine opened — what a skipped step did not do. */
+  const seedCalls: string[] = [];
   let preparationError: string | undefined;
+  /** The step whose session meets an empty balance, the way the meter's gate leaves one. */
+  let exhaustAt: 'catalog' | 'seed' | null = null;
 
   /** A fresh clone of the fixture at a stable path, as a run really gets one. */
   function installWorkTree(): void {
@@ -318,7 +323,9 @@ describe('the guard setup job', () => {
     overlaysSeen.length = 0;
     worldDirtySeen.length = 0;
     freshCheckoutSeen.length = 0;
+    seedCalls.length = 0;
     preparationError = undefined;
+    exhaustAt = null;
     installWorkTree();
     // Setup reads the curated doc universe, and the job materializes the
     // repository's slice of the workspace corpus into the clone.
@@ -369,11 +376,14 @@ describe('the guard setup job', () => {
             },
             catalogSession: async () => {
               catalogCalls.push(repoRoot);
+              if (exhaustAt === 'catalog') throw new CreditsExhaustedError(ORG, 0);
               return { status: 'ok', added: [], findings: [] };
             },
             authorInterfaces: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
             seedSession: async (input) => {
               freshCheckoutSeen.push(input.freshCheckout);
+              seedCalls.push(repoRoot);
+              if (exhaustAt === 'seed') throw new CreditsExhaustedError(ORG, 0);
               return { status: 'skipped', reason: 'stubbed in this suite' };
             },
             preparationSession: async () => preparationError
@@ -488,6 +498,75 @@ describe('the guard setup job', () => {
     });
     // The catalog session settled on the first run and never ran again.
     expect(catalogCalls).toHaveLength(1);
+  }, 60_000);
+
+  // The money bug: a setup stopped part-way by an empty balance used to throw
+  // out of the engine before its bundle was collected, so every step it had
+  // already paid for was bought again on the resume.
+  it('keeps what it settled when the balance stops it part-way', async () => {
+    exhaustAt = 'seed';
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    const [setup] = await jobsOfType('repo.guard-setup');
+    expect(setup).toMatchObject({ status: 'paused', pauseReason: 'credits', error: null });
+    // The clone is gone, so the spine can only have come out of the bundle.
+    expect(fs.existsSync(clone)).toBe(false);
+    const bundle = (await loadGuardSetupBundle(REPO)) ?? {};
+    const report = JSON.parse(bundle['.truecourse/guard/setup.json'] as string) as {
+      steps: { key: string; status: string }[];
+    };
+    // Everything up to the step the balance stopped, and nothing past it.
+    expect(report.steps.map((s) => s.key)).toEqual(['recipe', 'detect', 'catalog', 'interfaces']);
+    expect(report.steps.every((s) => s.status !== 'failed')).toBe(true);
+    // And the recipe it derived travels too — the expensive half of the step.
+    expect(Object.keys(bundle)).toContain('.truecourse/scenarios/recipe.json');
+  }, 60_000);
+
+  it('carries the paused setup on as the same job and the same conversation, paying only for the rest', async () => {
+    exhaustAt = 'seed';
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+    running = [];
+    const [paused] = await jobs.jobStore.listPaused(ORG);
+    expect(paused?.type).toBe('repo.guard-setup');
+
+    exhaustAt = null;
+    expect(await jobs.resumePaused(paused!)).toBe(paused!.id);
+    await Promise.all(running);
+
+    // ONE job row, carried on rather than started again beside itself.
+    const rows = await jobsOfType('repo.guard-setup');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: paused!.id, status: 'succeeded', pauseReason: null });
+    // ONE conversation: the record it paused in is the record it finished in.
+    const runs = await listStoredSessionRuns(REPO, 'guard-setup');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe('completed');
+    // The steps the first attempt settled were skipped; the one it was stopped
+    // in is the one that ran again.
+    expect(catalogCalls).toHaveLength(1);
+    expect(seedCalls).toHaveLength(2);
+    // And nothing of this workspace is still waiting on a grant.
+    expect(await jobs.jobStore.listPaused(ORG)).toEqual([]);
+  }, 60_000);
+
+  it('drops the paused row when the same setup is started again by hand', async () => {
+    exhaustAt = 'seed';
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+    running = [];
+    expect(await jobs.jobStore.listPaused(ORG)).toHaveLength(1);
+
+    exhaustAt = null;
+    await jobs.enqueueGuardSetup({ ...request, source: 'manual' });
+    await Promise.all(running);
+
+    // The new job does that work, so the old row is superseded rather than
+    // left on the Credits page for a grant to run a second time.
+    expect(await jobs.jobStore.listPaused(ORG)).toEqual([]);
+    const rows = await jobsOfType('repo.guard-setup');
+    expect(rows.map((r) => r.status).sort()).toEqual(['cancelled', 'succeeded']);
   }, 60_000);
 
   it('chains scenario generation once the recipe gate held', async () => {
@@ -892,6 +971,54 @@ describe('the guard generate job', () => {
     expect(resumed).toBe(true);
     expect((await jobsOfType('repo.guard-generate')).map(job => job.status).sort()).toEqual(['failed', 'succeeded']);
     expect((await openStoredSessionRun(REPO, 'guard-generate', source.runId)).record().status).toBe('failed');
+  });
+
+  it('carries a paused generate on in its own conversation, replaying what it had authored', async () => {
+    const savedTree = path.join(makeTmpDir('tc-paused-generate-'), 'tree');
+    generateImpl = async (repoRoot, options) => {
+      fs.cpSync(repoRoot, savedTree, { recursive: true });
+      for (const key of ['index', 'extract', 'interfaces', 'flows', 'match']) options?.tracker?.done(key);
+      options?.tracker?.start('author');
+      throw new CreditsExhaustedError(ORG, 0);
+    };
+    await saveSetupBundle();
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+    running = [];
+
+    const [job] = await jobsOfType('repo.guard-generate');
+    expect(job).toMatchObject({ status: 'paused', pauseReason: 'credits', error: null });
+    // Nothing partial became the repository's baseline — a half-authored
+    // scenario set would be read as the truth about it and diffed against.
+    expect(await readGuardBaselineCommit(REPO)).toBeNull();
+    const [stopped] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(stopped?.status).toBe('paused');
+
+    // The grant the resumed run is handed is what it does NOT pay for again.
+    setWorkTreeProvider('github', async () => {
+      fs.cpSync(savedTree, clone, { recursive: true });
+      return { dir: clone, dispose: () => fs.rmSync(clone, { recursive: true, force: true }) };
+    });
+    generateImpl = async (repoRoot, options) => {
+      expect(options?.resume).toEqual({
+        runId: stopped!.runId,
+        gitRef: stopped!.gitRef,
+        completedSteps: ['index', 'extract', 'interfaces', 'flows', 'match'],
+      });
+      return authoring(repoRoot, options);
+    };
+    const [paused] = await jobs.jobStore.listPaused(ORG);
+    expect(await jobs.resumePaused(paused!)).toBe(job!.id);
+    await Promise.all(running);
+
+    // One job row, one conversation, and the scenario set stored at the end.
+    expect(await jobsOfType('repo.guard-generate')).toHaveLength(1);
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({ status: 'succeeded' });
+    const runs = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ runId: stopped!.runId, status: 'completed' });
+    expect(await readGuardBaselineCommit(REPO)).not.toBeNull();
+    expect(await jobs.jobStore.listPaused(ORG)).toEqual([]);
   });
 
   it('refuses a resume at a different commit before generation runs', async () => {
@@ -1466,6 +1593,39 @@ describe('the guard run job', () => {
     expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, guardRunId: RUN_ID });
     expect(notes[0]?.data).not.toHaveProperty('runId');
     expect(fs.existsSync(clone)).toBe(false);
+  }, 60_000);
+
+  // A DELIBERATE decision not to store anything partial: what a run saves
+  // becomes the repository's BASELINE, and a board missing the judge's verdicts
+  // would be read as the truth about it and diffed against for as long as it
+  // stood. The whole run is deterministic apart from that one annotation, so
+  // there is nothing expensive to salvage — the resumed job runs it again.
+  it('a run stopped by an empty balance stores no board at all, and is carried on as one job', async () => {
+    await storeGeneratedSet();
+    await saveSetupBundle();
+    let attempts = 0;
+    runImpl = async (repoRoot, options) => {
+      attempts += 1;
+      if (attempts === 1) throw new CreditsExhaustedError(ORG, 0);
+      return failingRun(repoRoot, options);
+    };
+
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+    running = [];
+
+    const [job] = await jobsOfType('repo.guard-run');
+    expect(job).toMatchObject({ status: 'paused', pauseReason: 'credits', error: null });
+    expect(await readGuardLatest(REPO)).toBeNull();
+
+    const [paused] = await jobs.jobStore.listPaused(ORG);
+    expect(await jobs.resumePaused(paused!)).toBe(job!.id);
+    await Promise.all(running);
+
+    expect(await jobsOfType('repo.guard-run')).toHaveLength(1);
+    expect((await jobsOfType('repo.guard-run'))[0]).toMatchObject({ status: 'succeeded' });
+    expect((await readGuardLatest(REPO))?.run.runId).toBe(RUN_ID);
+    expect(await jobs.jobStore.listPaused(ORG)).toEqual([]);
   }, 60_000);
 
   it('a run that could not start fails with the runner’s reason and stores nothing', async () => {

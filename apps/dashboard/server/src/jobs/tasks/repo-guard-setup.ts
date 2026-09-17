@@ -8,7 +8,10 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  * state durable: materialize the stored spec and the newest setup BUNDLE into
  * the clone before running, and save the clone's bundle back under its commit
  * after. That bundle is what carries the per-step fingerprints forward, so a
- * re-run over unchanged inputs settles every step without spending.
+ * re-run over unchanged inputs settles every step without spending — and it is
+ * saved HOWEVER the run ended, including the throw an empty balance raises, so
+ * a paused setup is carried on from the step it reached instead of being paid
+ * for twice.
  *
  * A setup whose recipe gate held chains straight into `repo.guard-generate`.
  */
@@ -90,6 +93,11 @@ export function createRepoGuardSetupTask(
           const { repoFullName, only, refresh } = ctx.payload;
           runIds.set(ctx.jobId, activityRun.runId);
           meter.setRunId(activityRun.runId);
+          // Where a resume carries on from, declared the moment the run exists:
+          // the revived job re-opens this record rather than starting a second
+          // conversation beside it, and setup's own step spine — stored in the
+          // bundle however this run ends — is what it skips from.
+          ctx.resumeWith({ carryOnRunId: activityRun.runId });
           await ctx.notify({
             level: 'started',
             title: 'Flow setup started',
@@ -140,32 +148,54 @@ export function createRepoGuardSetupTask(
             markWorldStateUnknown(tree.dir);
             activityTracker.done('clone');
 
-            const { report } = await runSetup(tree.dir, {
-              driver: llm.driver(),
-              transport: llm.transport(),
-              transportMode: llm.mode,
-              sessionsKey: repoFullName,
-              // The docker world the recipe's compose project names. Two
-              // workspaces can be connected to one repository, and the heavy-job
-              // queue serializes per workspace, so their jobs run side by side on
-              // this host: the project has to separate them or one job's reset
-              // wipes the other's live datastore.
-              composeKey: `${ctx.payload.workspaceOrgId}/${repoFullName}`,
-              sessionRun: activityRun,
-              eagerRun: true,
-              tracker: activityTracker,
-              ...(ctx.signal ? { signal: ctx.signal } : {}),
-              ...(only ? { only } : {}),
-              // A hosted refresh IS the consent to replace the seed: the script lives
-              // in the bundle, never in a hand-edited tree, and the request said so.
-              ...(refresh ? { refresh: true, confirmSeedReplace: async () => true } : {}),
-            });
+            // However setup ends — finished, refused, cancelled, or stopped
+            // part-way by an empty balance — what it settled is stored. The
+            // engine writes its step spine as each step settles, so the bundle
+            // collected here carries the fingerprints that let the next attempt
+            // skip them; without this the work a paused run paid for would be
+            // bought a second time. Best-effort: a bundle that could not be
+            // saved is logged, never allowed to replace the reason the run
+            // stopped.
+            const preserveBundle = async (): Promise<void> => {
+              try {
+                const files = collectGuardSetupBundle(tree.dir);
+                if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files);
+              } catch (err) {
+                log.warn(
+                  `[jobs] could not save the setup bundle for ${repoFullName}: ${(err as Error).message}`,
+                );
+              }
+            };
 
-            const files = collectGuardSetupBundle(tree.dir);
-            if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files);
+            let report: Awaited<ReturnType<typeof runSetup>>['report'];
+            try {
+              ({ report } = await runSetup(tree.dir, {
+                driver: llm.driver(),
+                transport: llm.transport(),
+                transportMode: llm.mode,
+                sessionsKey: repoFullName,
+                // The docker world the recipe's compose project names. Two
+                // workspaces can be connected to one repository, and the heavy-job
+                // queue serializes per workspace, so their jobs run side by side on
+                // this host: the project has to separate them or one job's reset
+                // wipes the other's live datastore.
+                composeKey: `${ctx.payload.workspaceOrgId}/${repoFullName}`,
+                sessionRun: activityRun,
+                eagerRun: true,
+                tracker: activityTracker,
+                ...(ctx.signal ? { signal: ctx.signal } : {}),
+                ...(only ? { only } : {}),
+                // A hosted refresh IS the consent to replace the seed: the script lives
+                // in the bundle, never in a hand-edited tree, and the request said so.
+                ...(refresh ? { refresh: true, confirmSeedReplace: async () => true } : {}),
+              }));
+            } finally {
+              await preserveBundle();
+            }
 
-            // Preserve the failed bundle above, then fail the job so its status
-            // agrees with Activity and it cannot chain into generation.
+            // The bundle is preserved above whatever happened, so a refused
+            // setup keeps its work; fail the job so its status agrees with
+            // Activity and it cannot chain into generation.
             if (report.status !== 'ok') throw new Error(report.reason || 'Setup did not complete');
             const reason = firstLine(report.reason);
             // What the repository reads as of NOW, not as of the clone: on a

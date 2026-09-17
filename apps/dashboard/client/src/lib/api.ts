@@ -812,9 +812,18 @@ export function listWorkspaceRuns(query: {
   );
 }
 
-/** One run by id, from whichever repository of the workspace owns it. */
-export function getWorkspaceRun(runId: string): Promise<{ run: WorkspaceRun }> {
-  return fetchApi<{ run: WorkspaceRun }>(`/api/sessions/runs/${encodeURIComponent(runId)}`);
+/**
+ * One run by id, from whichever repository of the workspace owns it.
+ * `pausedJobId` names the job waiting to carry this run on, when it stopped for
+ * credits — what a Resume acts on, so the run continues instead of a second one
+ * starting beside it.
+ */
+export function getWorkspaceRun(
+  runId: string,
+): Promise<{ run: WorkspaceRun; pausedJobId: string | null }> {
+  return fetchApi<{ run: WorkspaceRun; pausedJobId: string | null }>(
+    `/api/sessions/runs/${encodeURIComponent(runId)}`,
+  );
 }
 
 /**

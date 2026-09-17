@@ -94,7 +94,7 @@ describe('a job that ran out of credits', () => {
     });
     const seen: JobOutcomeStatus[] = [];
     const def = pausingJob(async (ctx) => {
-      ctx.resumeWith({ resumeRunId: 'run_77' });
+      ctx.resumeWith({ carryOnRunId: 'run_77' });
       throw new CreditsExhaustedError(ORG, 0);
     }, seen);
 
@@ -110,12 +110,12 @@ describe('a job that ran out of credits', () => {
     expect(seen).toEqual(['paused']);
     expect(settled.map((info) => info.outcome)).toEqual(['paused']);
 
-    // The stored payload is what a resume re-enqueues: identity plus the pointer.
+    // The stored payload is what the row carries on with: identity plus the pointer.
     const [stored] = await db.query.jobs.findMany();
     expect(stored?.payload).toEqual({
       repoFullName: 'acme/api',
       workspaceOrgId: ORG,
-      resumeRunId: 'run_77',
+      carryOnRunId: 'run_77',
     });
   });
 
@@ -212,16 +212,80 @@ describe('the paused rows a resume reads', () => {
     await store.markRunning(first.id);
     await store.markPaused(first.id, { reason: 'credits' });
     await store.markRunning(second.id);
-    await store.markPaused(second.id, { reason: 'credits', resume: { resumeRunId: 'run_9' } });
+    await store.markPaused(second.id, { reason: 'credits', resume: { carryOnRunId: 'run_9' } });
 
     const paused = await store.listPaused(ORG);
     expect(paused.map((row) => row.type)).toEqual(['context.scan', 'repo.guard-run']);
-    expect(paused[1]?.payload).toEqual({ b: 2, resumeRunId: 'run_9' });
+    expect(paused[1]?.payload).toEqual({ b: 2, carryOnRunId: 'run_9' });
     expect(paused[0]?.reason).toBe('credits');
 
-    await store.markResumed(first.id, 'job_new');
+    await store.markRequeued(first.id);
     expect((await store.listPaused(ORG)).map((row) => row.type)).toEqual(['repo.guard-run']);
     expect(await store.pausedCounts([ORG, 'org_B'])).toEqual(new Map([[ORG, 1]]));
+  });
+
+  it('carries a paused row on as ITSELF: one row, queued again, still holding its payload', async () => {
+    const store = new JobStore(db);
+    const job = await store.create({
+      org: ORG,
+      type: 'repo.guard-setup',
+      key: 'repo.guard-setup:acme/api',
+      payload: { repoFullName: 'acme/api', workspaceOrgId: ORG },
+    });
+    await store.markRunning(job.id);
+    await store.markPaused(job.id, { reason: 'credits', resume: { carryOnRunId: 'run_3' } });
+
+    const revived = await store.markRequeued(job.id);
+    expect(revived).toMatchObject({ id: job.id, status: 'queued', pauseReason: null });
+    // The same row, with what it paused holding: there is no twin to run twice.
+    expect(await db.query.jobs.findMany()).toHaveLength(1);
+    expect(revived?.finishedAt).toBeNull();
+    const [row] = await db.query.jobs.findMany();
+    expect(row?.payload).toEqual({
+      repoFullName: 'acme/api',
+      workspaceOrgId: ORG,
+      carryOnRunId: 'run_3',
+    });
+    // And it is claimable again, which is what makes it run.
+    expect((await store.markRunning(job.id))?.status).toBe('running');
+  });
+
+  it('refuses to carry one on twice, and leaves it alone when its key is active again', async () => {
+    const store = new JobStore(db);
+    const key = 'repo.guard-setup:acme/api';
+    const job = await store.create({ org: ORG, type: 'repo.guard-setup', key });
+    await store.markRunning(job.id);
+    await store.markPaused(job.id, { reason: 'credits' });
+
+    // Somebody started the same work by hand while this one sat paused.
+    const started = await store.create({ org: ORG, type: 'repo.guard-setup', key });
+    expect(await store.markRequeued(job.id)).toBeNull();
+    expect((await store.get(job.id))?.status).toBe('paused');
+
+    // Once that one is out of the way the paused row carries on — once.
+    await store.markCancelled(started.id);
+    expect((await store.markRequeued(job.id))?.status).toBe('queued');
+    expect(await store.markRequeued(job.id)).toBeNull();
+  });
+
+  // The Credits page must not offer work somebody has already started again:
+  // carrying such a row on would run it a second time.
+  it('supersedes what is paused under a key a new job just took', async () => {
+    const store = new JobStore(db);
+    const key = 'repo.guard-setup:acme/api';
+    const first = await store.create({ org: ORG, type: 'repo.guard-setup', key });
+    await store.markRunning(first.id);
+    await store.markPaused(first.id, { reason: 'credits' });
+    // Another workspace's paused row of the same key is nobody else's business.
+    const other = await store.create({ org: 'org_B', type: 'repo.guard-setup', key });
+    await store.markRunning(other.id);
+    await store.markPaused(other.id, { reason: 'credits' });
+
+    expect(await store.supersedePaused(ORG, key)).toBe(1);
+    expect((await store.get(first.id))?.status).toBe('cancelled');
+    expect((await store.get(first.id))?.pauseReason).toBeNull();
+    expect(await store.listPaused(ORG)).toEqual([]);
+    expect((await store.listPaused('org_B')).map((row) => row.id)).toEqual([other.id]);
   });
 
   it('only pauses a row that was still active', async () => {

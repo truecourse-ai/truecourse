@@ -88,7 +88,7 @@ export interface CreditsResponse extends CreditBalanceView {
 
 /** `POST /api/credits/resume/:jobId`. */
 export interface CreditsResumeResponse {
-  /** The new job the paused one carried on as. */
+  /** The job carrying on — the paused one itself, back on the queue. */
   jobId: string;
 }
 

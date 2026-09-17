@@ -122,23 +122,27 @@ export function createRepoGuardGenerateTask(
         jobId: ctx.jobId,
       });
       try {
+        // Read at execution time, and BEFORE the record is carried on: the
+        // queue payload carries identity, never client-supplied completed steps
+        // or a trusted snapshot of status, and the grant is read off a record
+        // that has stopped — which the one this job continues is about to stop
+        // being.
+        const resume = ctx.payload.resumeRunId
+          ? await readGuardGenerateResume(ctx.payload.repoFullName, ctx.payload.resumeRunId)
+          : undefined;
         return await dashboardActivity(ctx, 'guard-generate', GUARD_GENERATE_STEPS, async (activityRun, activityTracker) => {
           const { repoFullName } = ctx.payload;
           runIds.set(ctx.jobId, activityRun.runId);
           meter.setRunId(activityRun.runId);
           // Where a resume starts from, declared the moment the run exists: a
-          // generate that pauses is carried on through its own record.
-          ctx.resumeWith({ resumeRunId: activityRun.runId });
+          // generate that pauses is carried on IN this record, replaying what
+          // it had already authored out of it.
+          ctx.resumeWith({ carryOnRunId: activityRun.runId, resumeRunId: activityRun.runId });
           await ctx.notify({
             level: 'started',
             title: 'Flow generation started',
             data: { repoFullName, runId: activityRun.runId },
           });
-          // Re-read at execution time as well: the queue payload carries identity,
-          // never client-supplied completed steps or a trusted snapshot of status.
-          const resume = ctx.payload.resumeRunId
-            ? await readGuardGenerateResume(repoFullName, ctx.payload.resumeRunId)
-            : undefined;
           const llm = await startLlm(ctx.payload.workspaceOrgId, meter);
 
           await ctx.phase('clone');

@@ -60,7 +60,7 @@ function pausedJob(over: Partial<PausedJob> = {}): PausedJob {
     workspaceOrgId: TEST_ORG,
     type: 'repo.guard-generate',
     key: 'repo.guard-generate:acme/api',
-    payload: { repoFullName: 'acme/api', resumeRunId: 'run_9' },
+    payload: { repoFullName: 'acme/api', carryOnRunId: 'run_9' },
     reason: 'credits',
     pausedAt: '2026-03-01T10:00:00.000Z',
     ...over,
@@ -74,12 +74,13 @@ function appWith(overrides: Parameters<typeof createTestApp>[0] = {}): Express {
       listPaused: async (org: string) => (org === TEST_ORG ? paused : []),
       pausedCounts: async (orgs: readonly string[]) =>
         new Map(orgs.map((org) => [org, org === TEST_ORG ? paused.length : 0])),
-      markResumed: async () => {},
     },
+    // The real one revives the paused row, so it answers that row's own id and
+    // the row is no longer waiting.
     resumePaused: async (job: PausedJob) => {
       resumed.push(job);
       paused = paused.filter((row) => row.id !== job.id);
-      return `job_new_${resumed.length}`;
+      return job.id;
     },
   });
   const app = createTestApp({ jobs: jobs as never, ...overrides });
@@ -201,7 +202,7 @@ describe('POST /api/credits/resume/:jobId', () => {
     await installed.store.grant({ workspaceOrgId: TEST_ORG, credits: 100, actorUserId: OPERATOR });
     paused = [pausedJob()];
     const res = await request(appWith()).post('/api/credits/resume/job_paused').expect(202);
-    expect(res.body).toEqual({ jobId: 'job_new_1' });
+    expect(res.body).toEqual({ jobId: 'job_paused' });
     expect(resumed.map((job) => job.id)).toEqual(['job_paused']);
   });
 
