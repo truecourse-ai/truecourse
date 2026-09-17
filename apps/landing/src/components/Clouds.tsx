@@ -3,7 +3,15 @@
  * blue, drifting so slowly the eye only catches it on a second look, and the
  * wind crossing it left to right as thin streaks.
  */
-const CLOUDS: { x: number; y: number; s: number; cls: string }[] = [
+interface Cloud {
+  x: number;
+  y: number;
+  s: number;
+  cls: string;
+}
+
+/** The wide sky, 1440 by 420: clouds high, lower at the sides. */
+const WIDE: Cloud[] = [
   { x: 170, y: 120, s: 1.05, cls: 'cloud-a' },
   { x: 1220, y: 90, s: 1.3, cls: 'cloud-b' },
   { x: 720, y: 70, s: 0.65, cls: 'cloud-c' },
@@ -11,6 +19,16 @@ const CLOUDS: { x: number; y: number; s: number; cls: string }[] = [
   { x: 1040, y: 230, s: 0.9, cls: 'cloud-a' },
   { x: -30, y: 320, s: 0.7, cls: 'cloud-c' },
   { x: 1400, y: 340, s: 0.6, cls: 'cloud-a' },
+];
+
+/** The narrow sky, 400 by 800, a phone's shape: clouds down both sides. */
+const NARROW: Cloud[] = [
+  { x: 70, y: 100, s: 0.95, cls: 'cloud-a' },
+  { x: 360, y: 190, s: 1.05, cls: 'cloud-b' },
+  { x: 0, y: 350, s: 0.75, cls: 'cloud-c' },
+  { x: 400, y: 450, s: 0.85, cls: 'cloud-a' },
+  { x: 130, y: 590, s: 0.7, cls: 'cloud-b' },
+  { x: 350, y: 710, s: 0.75, cls: 'cloud-c' },
 ];
 
 /**
@@ -33,14 +51,12 @@ interface Gust {
   lines: Streak[];
 }
 
-function gusts(): Gust[] {
-  let seed = 11;
+function gusts(rows: number[], seed: number): Gust[] {
   const rand = () => {
     seed = (seed * 9301 + 49297) % 233280;
     return seed / 233280;
   };
   const out: Gust[] = [];
-  const rows = [60, 140, 215, 290, 360, 420];
   for (const y of rows) {
     const count = rand() < 0.4 ? 2 : 3;
     const base = 11 + rand() * 10;
@@ -59,22 +75,31 @@ function gusts(): Gust[] {
   }
   return out;
 }
-const GUSTS = gusts();
+const WIDE_GUSTS = gusts([60, 140, 215, 290, 360, 420], 11);
+const NARROW_GUSTS = gusts([60, 210, 360, 500, 640, 760], 23);
 
 function streak(len: number, amp: number): string {
   const a = len / 4;
   return `M0 0 C ${a} ${-amp}, ${a * 2} ${amp}, ${a * 3} 0 S ${len} ${-amp * 0.7}, ${len} 0`;
 }
 
-export function Clouds({ className = '' }: { className?: string }) {
+export function Clouds({ className = '', layout = 'wide' }: { className?: string; layout?: 'wide' | 'narrow' }) {
+  const wide = layout === 'wide';
+  const clouds = wide ? WIDE : NARROW;
+  const gustsHere = wide ? WIDE_GUSTS : NARROW_GUSTS;
   return (
-    <svg className={`clouds ${className}`} viewBox="0 0 1440 420" preserveAspectRatio="xMidYMin slice" aria-hidden="true">
+    <svg
+      className={`clouds ${className} ${layout}`}
+      viewBox={wide ? '0 0 1440 420' : '0 0 400 800'}
+      preserveAspectRatio="xMidYMin slice"
+      aria-hidden="true"
+    >
       <defs>
-        <filter id="cloud-soft" x="-30%" y="-60%" width="160%" height="220%">
+        <filter id={`cloud-soft-${layout}`} x="-30%" y="-60%" width="160%" height="220%">
           <feGaussianBlur stdDeviation="14" />
         </filter>
       </defs>
-      {GUSTS.map((g) => (
+      {gustsHere.map((g) => (
         <g key={g.y} transform={`translate(0 ${g.y})`}>
           {g.lines.map((l, i) => (
             <path
@@ -88,8 +113,8 @@ export function Clouds({ className = '' }: { className?: string }) {
           ))}
         </g>
       ))}
-      {CLOUDS.map((c) => (
-        <g key={`${c.x}-${c.y}`} className={`cloud ${c.cls}`} transform={`translate(${c.x} ${c.y}) scale(${c.s})`} filter="url(#cloud-soft)">
+      {clouds.map((c) => (
+        <g key={`${c.x}-${c.y}`} className={`cloud ${c.cls}`} transform={`translate(${c.x} ${c.y}) scale(${c.s})`} filter={`url(#cloud-soft-${layout})`}>
           <ellipse cx="0" cy="0" rx="120" ry="30" />
           <ellipse cx="-50" cy="-14" rx="70" ry="34" />
           <ellipse cx="40" cy="-22" rx="80" ry="40" />

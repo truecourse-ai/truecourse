@@ -7,10 +7,7 @@ type Phase = 'idle' | 'sailing' | 'docked' | 'lost';
 /** What the line under the buttons says, for a cursor and for a finger. */
 const SAY: Record<Phase, [mouse: string, touch: string]> = {
   idle: ['Click the water to set sail. Your cursor is the wind.', 'Tap the water to set sail. Your finger is the wind.'],
-  sailing: [
-    'Keep off the rocks. The current pulls you down and off the map.',
-    'Keep off the rocks. The current pulls you down and off the map.',
-  ],
+  sailing: ['Keep off the rocks. The current pulls you down.', 'Keep off the rocks. The current pulls you down.'],
   docked: ['Docked. Click to sail again.', 'Docked. Tap to sail again.'],
   lost: ['Lost at sea. Click to try again.', 'Lost at sea. Tap to try again.'],
 };
@@ -23,6 +20,8 @@ const CURRENT = { x: -14, y: 34 };
 const DRAG = 1.8;
 const TOP_SPEED = 150;
 const BOAT_R = 11;
+/** Where the water starts, as a share of the sea's height: below the shoreline. */
+const SHORE_Y = 0.3;
 const DOCK_R = 26;
 const ROCKS = 5;
 /** Where the boat waits, as a share of the sea. */
@@ -59,7 +58,7 @@ interface World {
 function newWorld(w: number, h: number): World {
   const rocks: Rock[] = Array.from({ length: ROCKS }, (_, i) => ({
     x: w * (0.28 + (i / ROCKS) * 0.58) + (Math.random() - 0.5) * w * 0.08,
-    y: h * (0.3 + Math.random() * 0.56),
+    y: h * (SHORE_Y + 0.06 + Math.random() * (0.9 - SHORE_Y - 0.06)),
     r: 9 + Math.random() * 7,
     speed: 22 + Math.random() * 22,
     shape: Array.from({ length: 9 }, () => 0.72 + Math.random() * 0.4),
@@ -68,7 +67,7 @@ function newWorld(w: number, h: number): World {
     w,
     h,
     boat: { x: START.x * w, y: START.y * h, vx: 0, vy: 0, heading: 0 },
-    harbour: { x: w - Math.max(72, w * 0.07), y: h * 0.4 },
+    harbour: { x: w - Math.max(72, w * 0.07), y: h * 0.45 },
     rocks,
     ripples: [],
     cursor: null,
@@ -105,17 +104,23 @@ function step(world: World, dt: number) {
   if (speed > 12) boat.heading = Math.atan2(boat.vy, boat.vx);
   boat.x += boat.vx * dt;
   boat.y += boat.vy * dt;
-  // The top and the sides hold the boat; only the bottom lets it go.
+  // The water's edges turn the boat back: the shoreline above, the bottom
+  // of the sea below, and the sides.
+  const top = world.h * SHORE_Y + BOAT_R;
+  const bottom = world.h - BOAT_R;
   if (boat.x < BOAT_R) {
     boat.x = BOAT_R;
-    boat.vx = 0;
+    boat.vx = Math.abs(boat.vx) * 0.8;
   } else if (boat.x > world.w - BOAT_R) {
     boat.x = world.w - BOAT_R;
-    boat.vx = 0;
+    boat.vx = -Math.abs(boat.vx) * 0.8;
   }
-  if (boat.y < BOAT_R) {
-    boat.y = BOAT_R;
-    boat.vy = 0;
+  if (boat.y < top) {
+    boat.y = top;
+    boat.vy = Math.abs(boat.vy) * 0.8;
+  } else if (boat.y > bottom) {
+    boat.y = bottom;
+    boat.vy = -Math.abs(boat.vy) * 0.8;
   }
 
   for (const rock of world.rocks) {
@@ -124,7 +129,6 @@ function step(world: World, dt: number) {
   }
   if (Math.hypot(boat.x - world.harbour.x, boat.y - world.harbour.y) < DOCK_R) world.phase = 'docked';
   else if (world.rocks.some((r) => Math.hypot(boat.x - r.x, boat.y - r.y) < r.r + BOAT_R - 2)) world.phase = 'lost';
-  else if (boat.y > world.h + BOAT_R) world.phase = 'lost';
 }
 
 interface Palette {
@@ -284,7 +288,7 @@ function palette(): Palette {
 /**
  * The sea below the closing words: the boat from the hero, the cursor as the
  * wind, a harbour to reach and rocks to miss. It waits for a click, then the
- * current pulls, so standing still loses too. Touch works the
+ * current pulls it down toward the rocks. The water's edges turn it back. Touch works the
  * same way, the finger for the cursor.
  */
 export function Voyage() {

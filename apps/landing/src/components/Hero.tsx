@@ -124,7 +124,8 @@ export function Hero() {
       }
       blow(t, at);
       way *= Math.exp(-1.6 * dt);
-      way = Math.max(-TOP_SPEED, Math.min(TOP_SPEED, way));
+      // Wind from ahead holds the boat back; it never sails it backwards.
+      way = Math.max(2 - DRIFT, Math.min(TOP_SPEED, way));
       u += ((DRIFT + way) * dt) / Math.max(1, rect.width);
       if (u > 1) u -= 1;
       if (u < 0) u += 1;
@@ -142,6 +143,7 @@ export function Hero() {
   return (
     <section className="hero" id="top" ref={hero}>
       <Clouds className="hero-clouds" />
+      <Clouds className="hero-clouds" layout="narrow" />
       <svg
         ref={line.ref}
         className={`hero-line${line.visible ? ' visible' : ''}`}

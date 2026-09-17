@@ -413,6 +413,22 @@ header.site.scrolled {
 .hero-clouds {
   top: 0;
 }
+/* One sheet per shape of hero: the wide one on desktop, the tall one on a
+   phone, where it covers the sky down past the buttons. */
+.hero-clouds.narrow {
+  display: none;
+}
+.hero-clouds.narrow .cloud {
+  opacity: 0.95;
+}
+@media (max-width: 640px) {
+  .hero-clouds.wide {
+    display: none;
+  }
+  .hero-clouds.narrow {
+    display: block;
+  }
+}
 .cloud {
   fill: #fff;
   opacity: 0.85;
