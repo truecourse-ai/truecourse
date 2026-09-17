@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import type { GithubConnectStatusResponse, GithubRepoSummary } from '@truecourse/shared';
 import DashboardApp from '@/dashboard/DashboardApp';
 
@@ -95,6 +96,7 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/*" element={<DashboardApp />} />
       </Routes>
+      <Toaster />
     </MemoryRouter>,
   );
 }
@@ -198,14 +200,16 @@ describe('Settings › Repositories', () => {
     expect(within(github).queryByRole('list', { name: 'GitHub installations' })).toBeNull();
   });
 
-  it('notes a return from an installation’s settings page on GitHub quietly, as news rather than a refusal', async () => {
+  it('toasts a return from an installation’s settings page on GitHub, once, and leaves the row alone', async () => {
     serve();
     renderAt('/settings/repositories?github=updated&from=settings');
 
+    expect(await screen.findByText('Repository access updated on GitHub')).toBeInTheDocument();
+    // An event on the way back, not a state of the page: nothing is drawn in the row.
     const github = providerRow('GitHub');
-    const note = await within(github).findByText('Repository access updated on GitHub.');
-    expect(note).toHaveClass('text-muted-foreground');
-    expect(note).not.toHaveClass('text-destructive');
+    await within(github).findByText('Connected');
+    expect(within(github).queryByText(/updated on GitHub/)).toBeNull();
+    expect(screen.getAllByText('Repository access updated on GitHub')).toHaveLength(1);
   });
 
   it('says why GitHub could not be read, in the server’s own words', async () => {
@@ -234,13 +238,13 @@ describe('Settings › Repositories', () => {
     expect(within(row).queryByText(/repositor(y|ies) linked/)).toBeNull();
   });
 
-  it('says how a trip to GitHub ended, in words that fit the outcome, wherever it started', async () => {
+  it('toasts how a trip to GitHub ended, as a refusal when it was one, wherever it started', async () => {
     serve(() => json(status({ installations: [], repos: [] })));
     renderAt('/settings/repositories?github=expired&from=code-connect');
 
-    const github = providerRow('GitHub');
+    expect(await screen.findByText('Connecting to GitHub did not finish')).toBeInTheDocument();
     expect(
-      await within(github).findByText(/The trip to GitHub took too long, or came back to another session/),
+      screen.getByText('The trip took too long, or came back to another session. Nothing was added. Try again.'),
     ).toBeInTheDocument();
     // The retry from here goes back where the trip started.
     const statusReads = vi.mocked(window.fetch).mock.calls

@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import {
   GITHUB_CONNECT_OUTCOMES,
   GITHUB_INSTALL_ORIGINS,
@@ -76,22 +77,50 @@ const RETURN_TO: Record<GithubInstallOrigin, string> = {
   'context-add': '/context?add=repository',
 };
 
-/** What each outcome says. `pick` draws the offer instead of a line. */
-const OUTCOME_NOTE: Record<Exclude<GithubConnectOutcome, 'pick'>, string> = {
-  'nothing-new':
-    'Every GitHub account you can reach is connected here already. Install on another account to add one.',
-  requested:
-    "Your request to install the App was sent to the account's owners. Connect again once they approve it.",
-  none: 'The App is installed on no GitHub account you can reach. Nothing was added.',
-  expired:
-    'The trip to GitHub took too long, or came back to another session. Nothing was added. Try again.',
-  denied: 'GitHub did not complete the authorization. Nothing was added. Try again.',
-  unreachable: 'GitHub did not confirm your access to that installation. Nothing was added.',
-  updated: 'Repository access updated on GitHub.',
-};
-
-/** The outcomes that are news, not a refusal: drawn quietly. */
-const QUIET_OUTCOMES: ReadonlySet<GithubConnectOutcome> = new Set(['updated', 'nothing-new', 'requested']);
+/**
+ * How a trip to GitHub ended, told once, as a toast: it is an event on the
+ * way back, not a state of the page, so it is drawn the way every other
+ * one-off outcome in the app is. `pick` is not here — it needs an answer, so
+ * it is drawn inline. The title names the event; a refusal is an error toast.
+ */
+function toastConnectOutcome(outcome: Exclude<GithubConnectOutcome, 'pick'>): void {
+  switch (outcome) {
+    case 'updated':
+      toast('Repository access updated on GitHub');
+      return;
+    case 'nothing-new':
+      toast('Nothing new to connect', {
+        description:
+          'Every GitHub account you have access to is already connected to this workspace. To add another, install the App on it first.',
+      });
+      return;
+    case 'requested':
+      toast('Install requested on GitHub', {
+        description: "The account's owners have to approve it. Connect again once they have.",
+      });
+      return;
+    case 'none':
+      toast.error('Nothing to connect', {
+        description: 'The App is installed on no GitHub account you have access to. Nothing was added.',
+      });
+      return;
+    case 'expired':
+      toast.error('Connecting to GitHub did not finish', {
+        description: 'The trip took too long, or came back to another session. Nothing was added. Try again.',
+      });
+      return;
+    case 'denied':
+      toast.error('GitHub did not complete the authorization', {
+        description: 'Nothing was added. Try again.',
+      });
+      return;
+    case 'unreachable':
+      toast.error('GitHub did not confirm your access to that installation', {
+        description: 'Nothing was added.',
+      });
+      return;
+  }
+}
 
 function outcomeOf(raw: string | null): GithubConnectOutcome | null {
   return raw && (GITHUB_CONNECT_OUTCOMES as readonly string[]).includes(raw)
@@ -134,8 +163,9 @@ function RepositoriesTab() {
   const [detaching, setDetaching] = useState<number | null>(null);
   const [params, setParams] = useSearchParams();
   const from = installOriginOf(params.get('from'));
-  // A trip to GitHub that did not attach lands here saying how it ended; a
-  // `pick` carries the offer of accounts the person can choose from.
+  // A trip to GitHub that did not attach lands here flagged with how it
+  // ended, told as a toast; a `pick` carries the offer of accounts the person
+  // can choose from, drawn inline.
   const outcome = outcomeOf(params.get('github'));
   const offer = outcome === 'pick' ? params.get('offer') : null;
   /** The offered accounts still ticked; null until the person touches one, meaning all of them. */
@@ -178,6 +208,23 @@ function RepositoriesTab() {
       readSeq.current += 1;
     };
   }, [readGithub]);
+
+  // Tell how the trip ended, once, then drop the flag from the address so a
+  // reload does not tell it again. `from` stays: the Connect link minted for
+  // this page still returns there. The landing is a fresh page, and this
+  // effect runs before the app's Toaster has subscribed to the toast store,
+  // which keeps no history — so the toast waits a tick for it.
+  const told = useRef(false);
+  useEffect(() => {
+    if (!outcome || outcome === 'pick' || told.current) return;
+    told.current = true;
+    // Not cleared on cleanup: dropping the flag re-runs this effect at once,
+    // and the toast has to outlive that.
+    setTimeout(() => toastConnectOutcome(outcome), 0);
+    const next = new URLSearchParams(params);
+    next.delete('github');
+    setParams(next, { replace: true });
+  }, [outcome, params, setParams]);
 
   const chosen = picked ?? (github?.offered ?? []).map((i) => i.installationId);
   const togglePick = (installationId: number, on: boolean) =>
@@ -287,15 +334,6 @@ function RepositoriesTab() {
               </div>
               {isGithub && github?.reason && (
                 <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
-              )}
-              {isGithub && outcome && outcome !== 'pick' && (
-                <p
-                  className={`mt-1 text-[11px] ${
-                    QUIET_OUTCOMES.has(outcome) ? 'text-muted-foreground' : 'text-destructive'
-                  }`}
-                >
-                  {OUTCOME_NOTE[outcome]}
-                </p>
               )}
               {isGithub && outcome === 'pick' && github && (
                 github.offered && github.offered.length > 0 ? (
