@@ -141,9 +141,12 @@ export class PgUsageStore implements UsageStore {
   }
 
   async series(query: UsageQuery, bucket: 'day' | 'week'): Promise<UsageSeriesRecord[]> {
-    // The bucket's first day in UTC, as the date the page draws. `week` truncates
-    // to the Monday, which is Postgres's own week.
-    const at = sql<string>`to_char(date_trunc(${bucket}, ${llmUsage.startedAt} at time zone 'UTC'), 'YYYY-MM-DD')`;
+    // The bucket's first day where the READER is, as the date the page draws, so
+    // the chart names the same day the run's own row does. The zone is bound
+    // like every other value, never spelled into the statement. `week` truncates
+    // to the Monday, which is Postgres's own week, cut at the reader's Monday.
+    const zone = query.timeZone ?? 'UTC';
+    const at = sql<string>`to_char(date_trunc(${bucket}, ${llmUsage.startedAt} at time zone ${zone}), 'YYYY-MM-DD')`;
     const rows = await this.db
       .select({
         at,

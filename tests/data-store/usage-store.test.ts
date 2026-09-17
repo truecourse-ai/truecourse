@@ -2,8 +2,8 @@
  * The usage store: a flush ADDS to the (job, subject) row rather than replacing
  * it, the row's interval widens to cover every flush, a run id only ever
  * arrives, the reads add up what the period holds, the trend buckets by day and
- * by week, a run's row is its whole job with the model that did most of it, and
- * one workspace never sees another's spend.
+ * by week IN THE READER'S ZONE, a run's row is its whole job with the model that
+ * did most of it, and one workspace never sees another's spend.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
@@ -155,6 +155,32 @@ describe('PgUsageStore', () => {
     const weeks = await store.series(ALL, 'week');
     expect(weeks.map((row) => row.at)).toEqual(['2026-06-01', '2026-06-01']);
     expect(weeks.reduce((sum, row) => sum + row.costUsd, 0)).toBe(7);
+  });
+
+  it('files a day where the READER is, and in UTC when nobody said where', async () => {
+    // 03:17 UTC on the 17th is 20:17 on the 16th in California, and already
+    // midday on the 17th in Tokyo.
+    await store.record(delta({ jobId: 'j1', startedAt: '2026-09-17T03:17:00.000Z' }));
+
+    const day = async (timeZone?: string): Promise<string[]> =>
+      (await store.series({ ...ALL, ...(timeZone ? { timeZone } : {}) }, 'day')).map((row) => row.at);
+
+    expect(await day('America/Los_Angeles')).toEqual(['2026-09-16']);
+    expect(await day('UTC')).toEqual(['2026-09-17']);
+    expect(await day('Asia/Tokyo')).toEqual(['2026-09-17']);
+    expect(await day()).toEqual(['2026-09-17']);
+  });
+
+  it('cuts the week at the reader’s Monday', async () => {
+    // Monday 03:17 UTC is still Sunday evening in California, which belongs to
+    // the week before where they are.
+    await store.record(delta({ jobId: 'w1', startedAt: '2026-09-14T03:17:00.000Z' }));
+
+    const week = async (timeZone: string): Promise<string[]> =>
+      (await store.series({ ...ALL, timeZone }, 'week')).map((row) => row.at);
+
+    expect(await week('America/Los_Angeles')).toEqual(['2026-09-07']);
+    expect(await week('UTC')).toEqual(['2026-09-14']);
   });
 
   it('answers the runs list newest first, with the job outcome and the busiest model', async () => {

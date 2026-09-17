@@ -50,6 +50,12 @@ export interface UsageQuery {
   from: string;
   /** Exclusive ISO instant. */
   to: string;
+  /**
+   * The reader's IANA zone, which is what a day and a week are truncated to.
+   * Absent is UTC. The name must be one the tz database has: a zone Postgres
+   * does not know fails the query rather than falling back.
+   */
+  timeZone?: string;
   repoFullName?: string;
   jobType?: string;
 }
@@ -68,7 +74,7 @@ export interface UsageTotalsRecord {
 
 /** One bucket's spend under one job type. */
 export interface UsageSeriesRecord {
-  /** The bucket's first day, `YYYY-MM-DD` in UTC. */
+  /** The bucket's first day, `YYYY-MM-DD` in the query's zone. */
   at: string;
   jobType: string;
   costUsd: number;

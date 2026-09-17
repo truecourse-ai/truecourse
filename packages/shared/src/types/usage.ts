@@ -75,7 +75,7 @@ export interface UsageAmount {
 
 /** One point of the trend: a day, or the week that starts on it. */
 export interface UsageSeriesPoint {
-  /** The bucket's first day, `YYYY-MM-DD` in UTC. */
+  /** The bucket's first day, `YYYY-MM-DD` where the reader is. */
   at: string;
   costUsd: number;
   tokens: number;

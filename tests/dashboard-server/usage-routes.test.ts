@@ -3,9 +3,10 @@
  *
  * What is pinned here is what the ADDRESS means: the default period, a stale
  * period word falling back rather than refusing, a custom range refused when it
- * cannot be read, a repository named by its slug — and another workspace's
- * repository, or one this workspace never connected, answering not found rather
- * than someone else's spend.
+ * cannot be read, `tz` cutting the period and the trend into the reader's own
+ * days, a repository named by its slug — and another workspace's repository, or
+ * one this workspace never connected, answering not found rather than someone
+ * else's spend.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -42,6 +43,30 @@ let installed: InstalledUsageStore;
 /** Minutes back from now, so every seeded row sits inside the default period. */
 const minutesAgo = (minutes: number): string =>
   new Date(Date.now() - minutes * 60_000).toISOString();
+
+/** How a zone reads an instant, as `YYYY-MM-DD HH:mm`. */
+function wallIn(timeZone: string, at: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(at);
+  const of = (type: string): string => parts.find((part) => part.type === type)!.value;
+  return `${of('year')}-${of('month')}-${of('day')} ${of('hour')}:${of('minute')}`;
+}
+
+/** The day a zone is having right now, as the trend's right edge spells it. */
+const today = (timeZone: string): string => wallIn(timeZone, new Date()).slice(0, 10);
+
+/** The day after one, by the calendar and nothing else. */
+function nextDay(day: string): string {
+  const [year, month, date] = day.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
+}
 
 function delta(over: Partial<UsageDelta> = {}): UsageDelta {
   return {
@@ -120,6 +145,29 @@ describe('GET /api/usage', () => {
 
     expect(res.status).toBe(200);
     expect((res.body as UsageResponse).period.key).toBe('30d');
+  });
+
+  it('cuts the trend into the reader’s days, and into UTC’s for a zone it does not know', async () => {
+    await installed.store.record(delta());
+
+    const west = await request(app).get('/api/usage?period=7d&tz=America%2FLos_Angeles');
+    expect(west.status).toBe(200);
+    const body = west.body as UsageResponse;
+    // The right edge is their today, and the period ends at midnight there.
+    expect(body.series[body.series.length - 1]!.at).toBe(today('America/Los_Angeles'));
+    expect(wallIn('America/Los_Angeles', new Date(body.period.to))).toBe(
+      `${nextDay(today('America/Los_Angeles'))} 00:00`,
+    );
+
+    // A zone neither Postgres nor Intl has never reaches the query: the read
+    // answers, in UTC's days.
+    const nowhere = await request(app).get('/api/usage?period=7d&tz=Mars%2FOlympus');
+    expect(nowhere.status).toBe(200);
+    const fallback = nowhere.body as UsageResponse;
+    expect(fallback.series[fallback.series.length - 1]!.at).toBe(today('UTC'));
+    expect(fallback.period).toEqual(
+      ((await request(app).get('/api/usage?period=7d')).body as UsageResponse).period,
+    );
   });
 
   it('refuses a custom range it cannot read', async () => {

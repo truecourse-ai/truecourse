@@ -9,9 +9,12 @@
  * names what the store only keys (`owner/repo` becomes the slug a row opens by,
  * a job type becomes its word).
  *
- * The period is HALF-OPEN and anchored on whole UTC days: `7d` is the seven
- * calendar days ending today, so the trend's right edge is today and no point
- * is a fraction of a day.
+ * The period is HALF-OPEN and anchored on the READER's whole days: `7d` is the
+ * seven calendar days ending today where they are, so the trend's right edge is
+ * their today and no point is a fraction of a day. Their zone rides the request
+ * as `tz`, and the store truncates its buckets to it, so the chart and the runs
+ * beneath it name the same day for the same run. An absent or unknown zone is
+ * UTC.
  */
 
 import { createAppError } from '@truecourse/core/lib/errors';
@@ -63,6 +66,8 @@ export interface UsageRequest {
   from?: string;
   /** `YYYY-MM-DD`, inclusive: the period ends at the end of this day. */
   to?: string;
+  /** The reader's IANA zone, as `tz` on the address. Unknown or absent is UTC. */
+  timeZone?: string;
   /** The repository's slug, as the address spells it. */
   repo?: string;
   jobType?: string;
@@ -78,25 +83,118 @@ export function isUsageJobType(value: unknown): value is string {
   return typeof value === 'string' && (USAGE_JOB_TYPES as readonly string[]).includes(value);
 }
 
-function startOfUtcDay(at: Date): number {
-  return Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate());
+/**
+ * The reader's zone. Postgres and `Intl` must both know the name, since the
+ * store truncates by it and a name neither has would fail the query mid-read,
+ * so anything else is UTC rather than a refusal: a stale link still opens.
+ */
+export function usageTimeZone(value: string | undefined): string {
+  if (!value || !/^[A-Za-z0-9_+\-/]{1,64}$/.test(value)) return 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return value;
+  } catch {
+    return 'UTC';
+  }
 }
 
-/** `YYYY-MM-DD` as the start of that UTC day, or null when it is not a date. */
-function parseDay(value: string | undefined): number | null {
+/** One zone's formatter, kept: a 90-day walk reads the calendar a hundred times. */
+const CLOCKS = new Map<string, Intl.DateTimeFormat>();
+
+function clock(zone: string): Intl.DateTimeFormat {
+  let held = CLOCKS.get(zone);
+  if (!held) {
+    held = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    CLOCKS.set(zone, held);
+  }
+  return held;
+}
+
+/** What the zone's own calendar and clock read at an instant. */
+interface Wall {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+function wall(at: number, zone: string): Wall {
+  const parts = clock(zone).formatToParts(new Date(at));
+  const read = (type: string): number =>
+    Number(parts.find((part) => part.type === type)?.value ?? '0');
+  const hour = read('hour');
+  return {
+    year: read('year'),
+    month: read('month'),
+    day: read('day'),
+    // Midnight reads as 24 on some builds; it is the day's first hour, not its last.
+    hour: hour === 24 ? 0 : hour,
+    minute: read('minute'),
+    second: read('second'),
+  };
+}
+
+/** How far ahead of UTC the zone is at `at`, which a DST transition moves. */
+function offset(at: number, zone: string): number {
+  const it = wall(at, zone);
+  const clocked = Date.UTC(it.year, it.month - 1, it.day, it.hour, it.minute, it.second);
+  return clocked - Math.floor(at / 1000) * 1000;
+}
+
+/**
+ * The instant a calendar day begins at in the zone. The offset is read twice
+ * because the first reading is taken on the wrong side of a transition when the
+ * clocks moved that day; `day` may overflow its month, which is how a walk adds
+ * a day without assuming one is 24 hours long.
+ */
+function startOf(year: number, month: number, day: number, zone: string): number {
+  const clocked = Date.UTC(year, month - 1, day);
+  const guess = clocked - offset(clocked, zone);
+  return clocked - offset(guess, zone);
+}
+
+/** `YYYY-MM-DD` as the start of that day where the reader is, or null for a non-date. */
+function parseDay(value: string | undefined, zone: string): number | null {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const at = Date.parse(`${value}T00:00:00.000Z`);
-  return Number.isFinite(at) ? at : null;
+  const [year, month, day] = value.split('-').map(Number) as [number, number, number];
+  const at = startOf(year, month, day, zone);
+  // A day the calendar does not have (February 31, or one a zone skipped
+  // entirely) comes back as some other day, and is no date at all.
+  return dayLabel(at, zone) === value ? at : null;
 }
 
-function dayLabel(at: number): string {
-  return new Date(at).toISOString().slice(0, 10);
+function dayLabel(at: number, zone: string): string {
+  const it = wall(at, zone);
+  return `${String(it.year).padStart(4, '0')}-${String(it.month).padStart(2, '0')}-${String(it.day).padStart(2, '0')}`;
 }
 
-/** The Monday of `at`'s UTC week, which is where Postgres truncates a week to. */
-function startOfUtcWeek(at: number): number {
-  const day = new Date(at).getUTCDay();
-  return at - ((day + 6) % 7) * DAY_MS;
+/** The start of the day `days` calendar days from `at`'s, walked as days rather than as hours. */
+function addDays(at: number, days: number, zone: string): number {
+  const it = wall(at, zone);
+  return startOf(it.year, it.month, it.day + days, zone);
+}
+
+/** The Monday of `at`'s week where the reader is, which is where Postgres truncates a week to. */
+function startOfWeek(at: number, zone: string): number {
+  const it = wall(at, zone);
+  const weekday = new Date(Date.UTC(it.year, it.month - 1, it.day)).getUTCDay();
+  return startOf(it.year, it.month, it.day - ((weekday + 6) % 7), zone);
+}
+
+/** Whole days across a period. A day the clocks moved is short or long, and still one day. */
+function daysBetween(from: number, to: number): number {
+  return Math.round((to - from) / DAY_MS);
 }
 
 /**
@@ -105,26 +203,28 @@ function startOfUtcWeek(at: number): number {
  * page must not be handed a trend nobody can read.
  */
 export function resolveUsagePeriod(request: UsageRequest, now: Date = new Date()): UsagePeriodView {
+  const zone = usageTimeZone(request.timeZone);
   if (request.period !== 'custom') {
-    const to = startOfUtcDay(now) + DAY_MS;
-    const from = to - PERIOD_DAYS[request.period] * DAY_MS;
+    // The end of the reader's today, which is the start of their tomorrow.
+    const to = addDays(now.getTime(), 1, zone);
+    const from = addDays(to, -PERIOD_DAYS[request.period], zone);
     return view(request.period, from, to);
   }
-  const from = parseDay(request.from);
-  const last = parseDay(request.to);
+  const from = parseDay(request.from, zone);
+  const last = parseDay(request.to, zone);
   if (from === null || last === null) {
     throw createAppError('A custom period needs `from` and `to` as `YYYY-MM-DD` dates.', 400);
   }
   if (last < from) throw createAppError('A custom period ends before it begins.', 400);
-  const to = last + DAY_MS;
-  if ((to - from) / DAY_MS > MAX_CUSTOM_DAYS) {
+  const to = addDays(last, 1, zone);
+  if (daysBetween(from, to) > MAX_CUSTOM_DAYS) {
     throw createAppError(`A custom period covers at most ${MAX_CUSTOM_DAYS} days.`, 400);
   }
   return view('custom', from, to);
 }
 
 function view(key: UsagePeriod, from: number, to: number): UsagePeriodView {
-  const days = (to - from) / DAY_MS;
+  const days = daysBetween(from, to);
   return {
     key,
     from: new Date(from).toISOString(),
@@ -133,16 +233,20 @@ function view(key: UsagePeriod, from: number, to: number): UsagePeriodView {
   };
 }
 
-/** Every bucket label of the period, oldest first, so a gap reads as a zero. */
-function bucketLabels(period: UsagePeriodView): string[] {
+/**
+ * Every bucket label of the period, oldest first, so a gap reads as a zero. The
+ * walk is the reader's calendar, not a count of 86,400,000s: the day the clocks
+ * move is one point like any other.
+ */
+function bucketLabels(period: UsagePeriodView, zone: string): string[] {
   const from = Date.parse(period.from);
   const to = Date.parse(period.to);
   const labels: string[] = [];
-  const step = period.bucket === 'week' ? 7 * DAY_MS : DAY_MS;
-  let at = period.bucket === 'week' ? startOfUtcWeek(from) : from;
+  const step = period.bucket === 'week' ? 7 : 1;
+  let at = period.bucket === 'week' ? startOfWeek(from, zone) : from;
   while (at < to) {
-    labels.push(dayLabel(at));
-    at += step;
+    labels.push(dayLabel(at, zone));
+    at = addDays(at, step, zone);
   }
   return labels;
 }
@@ -167,6 +271,7 @@ export function usageQuery(
     workspaceOrgId: request.workspaceOrgId,
     from: period.from,
     to: period.to,
+    timeZone: usageTimeZone(request.timeZone),
   };
   if (request.repo !== undefined) {
     const entry = repos.find((repo) => repo.slug === request.repo);
@@ -205,7 +310,10 @@ export async function usageSeries(
 ): Promise<UsageSeriesPoint[]> {
   const rows = await readUsageSeries(query, period.bucket);
   const points = new Map<string, UsageSeriesPoint>(
-    bucketLabels(period).map((at) => [at, { at, costUsd: 0, tokens: 0, byJobType: {} }]),
+    bucketLabels(period, usageTimeZone(query.timeZone)).map((at) => [
+      at,
+      { at, costUsd: 0, tokens: 0, byJobType: {} },
+    ]),
   );
   for (const row of rows) {
     // A row the labels do not cover cannot happen for a period the query was

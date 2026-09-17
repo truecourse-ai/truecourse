@@ -148,12 +148,17 @@ function useUsage(query: string): { usage: UsageResponse | null; error: string |
   return { usage, error };
 }
 
+/** A date as the day the reader calls it, which is the day they are picking. */
+function dayOf(at: Date): string {
+  const month = String(at.getMonth() + 1).padStart(2, '0');
+  return `${at.getFullYear()}-${month}-${String(at.getDate()).padStart(2, '0')}`;
+}
+
 /** Today, and the day 29 days before it, for the custom range's first opening. */
 function defaultRange(): { from: string; to: string } {
   const today = new Date();
-  const to = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-  const from = new Date(to.getTime() - 29 * 86_400_000);
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+  const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29);
+  return { from: dayOf(from), to: dayOf(today) };
 }
 
 export function UsageTab() {
@@ -166,13 +171,18 @@ export function UsageTab() {
     : '30d';
 
   // The address as the server reads it: this page's own parameters and no
-  // other tab's, so a leftover `?from=context-add` never reaches it.
+  // other tab's, so a leftover `?from=context-add` never reaches it. The
+  // reader's zone rides along without being on the address, because it is
+  // whoever is looking rather than anything a link should carry: the chart's
+  // days are cut in it, the way the runs beneath are already written in it.
   const query = useMemo(() => {
     const own = new URLSearchParams();
     for (const key of OWN_PARAMS) {
       const value = params.get(key);
       if (value) own.set(key, value);
     }
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (zone) own.set('tz', zone);
     return own.toString();
   }, [params]);
 

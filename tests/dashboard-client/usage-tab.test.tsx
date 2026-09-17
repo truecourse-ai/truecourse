@@ -179,6 +179,13 @@ function renderUsage(path = '/settings/usage') {
 const address = () => screen.getByTestId('address').textContent;
 const lastCall = (state: World) => state.calls[state.calls.length - 1];
 
+/** What the last read asked for, `tz` and all. */
+const asked = (state: World): URLSearchParams =>
+  new URLSearchParams(new URL(lastCall(state)!, 'http://x').search);
+
+/** The zone the browser is in, which is the one the page is expected to send. */
+const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 beforeEach(() => {
   window.history.replaceState({}, '', '/');
 });
@@ -252,10 +259,26 @@ describe('Settings › Usage', () => {
     renderUsage();
 
     await screen.findByRole('region', { name: 'Spend over time' });
-    expect(lastCall(state)).toBe('/api/usage');
+    expect(asked(state).get('period')).toBeNull();
 
     await userEvent.click(screen.getByRole('button', { name: '7 days' }));
-    await waitFor(() => expect(lastCall(state)).toBe('/api/usage?period=7d'));
+    await waitFor(() => expect(asked(state).get('period')).toBe('7d'));
+    expect(address()).toBe('/settings/usage?period=7d');
+  });
+
+  it('sends the reader’s own zone, and keeps it off the address', async () => {
+    const state = serve();
+    renderUsage();
+
+    await screen.findByRole('region', { name: 'Spend over time' });
+    // The chart's days are cut in the zone the reader is in, the way the runs
+    // beneath it are already written in it.
+    expect(asked(state).get('tz')).toBe(ZONE);
+    expect(address()).toBe('/settings/usage');
+
+    await userEvent.click(screen.getByRole('button', { name: '7 days' }));
+    await waitFor(() => expect(asked(state).get('period')).toBe('7d'));
+    expect(asked(state).get('tz')).toBe(ZONE);
     expect(address()).toBe('/settings/usage?period=7d');
   });
 
@@ -264,10 +287,10 @@ describe('Settings › Usage', () => {
     renderUsage('/settings/usage?period=90d&repo=web&jobType=repo.guard-generate');
 
     await screen.findByRole('region', { name: 'Spend over time' });
-    const asked = new URLSearchParams(new URL(lastCall(state)!, 'http://x').search);
-    expect(asked.get('period')).toBe('90d');
-    expect(asked.get('repo')).toBe('web');
-    expect(asked.get('jobType')).toBe('repo.guard-generate');
+    const sent = asked(state);
+    expect(sent.get('period')).toBe('90d');
+    expect(sent.get('repo')).toBe('web');
+    expect(sent.get('jobType')).toBe('repo.guard-generate');
     // The applied filters read as pills, in the words the server gave them.
     const filters = screen.getByRole('group', { name: 'Filter usage' });
     expect(within(filters).getByText('acme/web')).toBeInTheDocument();
@@ -284,7 +307,7 @@ describe('Settings › Usage', () => {
     await userEvent.click(screen.getByRole('option', { name: /acme\/web/ }));
 
     await waitFor(() => expect(address()).toBe('/settings/usage?repo=web'));
-    expect(lastCall(state)).toBe('/api/usage?repo=web');
+    expect(asked(state).get('repo')).toBe('web');
   });
 
   it('asks for two dates once the period is custom', async () => {
@@ -296,10 +319,11 @@ describe('Settings › Usage', () => {
 
     expect(screen.getByLabelText('From')).toBeInTheDocument();
     expect(screen.getByLabelText('To')).toBeInTheDocument();
-    const asked = new URLSearchParams(new URL(lastCall(state)!, 'http://x').search);
-    expect(asked.get('period')).toBe('custom');
-    expect(asked.get('from')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(asked.get('to')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const sent = asked(state);
+    expect(sent.get('period')).toBe('custom');
+    expect(sent.get('from')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // The days it opens on are the reader's own, so today is today where they are.
+    expect(sent.get('to')).toBe(new Date().toLocaleDateString('sv-SE'));
   });
 
   it('says when the record began, when the period holds nothing', async () => {
