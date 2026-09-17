@@ -447,6 +447,29 @@ describe('connecting a repository through the GitHub App', () => {
     expect(screen.getByRole('button', { name: /linkwarden\/docs/ })).toBeEnabled();
   });
 
+  it("points at the installation's GitHub settings when a repository is not listed, and re-reads on reload", async () => {
+    const repos: Record<number, Array<{ fullName: string; defaultBranch: string; private: boolean; connectedElsewhere: boolean }>> = {
+      42: [],
+    };
+    const { fetchMock } = serve({ installationRepos: repos });
+
+    const dialog = await openGithubRepos();
+    expect(await within(dialog).findByText('This installation can see no repositories.')).toBeInTheDocument();
+    // Which repositories the App sees is GitHub's setting, on the installation's own page.
+    expect(
+      within(dialog).getByRole('link', { name: /Change which repositories linkwarden lets the App see/ }),
+    ).toHaveAttribute('href', 'https://github.com/organizations/linkwarden/settings/installations/42');
+
+    // Access granted on GitHub, the reload lists what the installation now sees.
+    repos[42] = [{ fullName: 'linkwarden/docs', defaultBranch: 'main', private: true, connectedElsewhere: false }];
+    await userEvent.click(within(dialog).getByRole('button', { name: 'reload' }));
+    expect(await within(dialog).findByRole('button', { name: /linkwarden\/docs/ })).toBeEnabled();
+    const listings = fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .filter((href) => href.includes('/api/github/installations/42/repos'));
+    expect(listings).toHaveLength(2);
+  });
+
   it('keeps the dialog open and names the repository the server refused', async () => {
     const { posted } = serve({
       installationRepos: {

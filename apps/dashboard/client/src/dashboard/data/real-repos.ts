@@ -26,6 +26,7 @@ import type {
   GithubConnectStatusResponse,
   GithubInstallableRepo,
   GithubInstallationReposResponse,
+  GithubInstallationSummary,
   GithubInstallOrigin,
 } from '@truecourse/shared';
 import type { Repo } from './types';
@@ -54,6 +55,22 @@ export async function attachGithubInstallations(request: GithubAttachRequest): P
     method: 'POST',
     body: JSON.stringify(request),
   });
+}
+
+/**
+ * GitHub's settings page for one installation: where the repositories the App
+ * can see are granted and revoked. A user's installation lives under the
+ * user's settings and an organization's under the organization's; an account
+ * of any other kind (an enterprise, a row nothing named) goes to the person's
+ * own installations list, which GitHub filters to what they can reach.
+ */
+export function installationSettingsUrl(installation: GithubInstallationSummary): string {
+  const { accountType, accountLogin, installationId } = installation;
+  if (accountType === 'Organization' && accountLogin) {
+    return `https://github.com/organizations/${encodeURIComponent(accountLogin)}/settings/installations/${installationId}`;
+  }
+  if (accountType === 'User') return `https://github.com/settings/installations/${installationId}`;
+  return 'https://github.com/settings/installations';
 }
 
 /** Everything one installation can see, linked or not. */

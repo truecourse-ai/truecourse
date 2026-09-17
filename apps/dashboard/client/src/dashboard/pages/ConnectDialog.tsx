@@ -58,6 +58,7 @@ import { listContextSources, putRepoContextBindings } from '@/lib/api';
 import {
   fetchGithubStatus,
   fetchInstallationRepos,
+  installationSettingsUrl,
   linkGithubRepo,
 } from '@/dashboard/data/real-repos';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
@@ -193,7 +194,9 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     };
   }, [open]);
 
-  // What the selected installation can see.
+  // What the selected installation can see. Re-read on demand: the person
+  // may have just changed the App's repository access on GitHub.
+  const [reposRead, setReposRead] = useState(0);
   useEffect(() => {
     if (installationId === null) return;
     let live = true;
@@ -211,7 +214,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     return () => {
       live = false;
     };
-  }, [installationId]);
+  }, [installationId, reposRead]);
 
   const installations = github.kind === 'ready' ? github.installations : [];
   const chosen = installations.find((i) => i.installationId === installationId) ?? null;
@@ -481,7 +484,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               {reposError && <li className="px-3 py-6 text-center text-xs text-destructive">{reposError}</li>}
               {installationRepos?.length === 0 && !reposError && (
                 <li className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  This installation can see no repositories. Grant the app access on GitHub.
+                  This installation can see no repositories.
                 </li>
               )}
               {(installationRepos ?? []).map((r) => {
@@ -524,6 +527,28 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                 );
               })}
             </ul>
+            {chosen && (
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Not listed?{' '}
+                <a
+                  href={installationSettingsUrl(chosen)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-foreground hover:underline"
+                >
+                  Change which repositories {nameOf(chosen)} lets the App see
+                </a>{' '}
+                on GitHub, then{' '}
+                <button
+                  type="button"
+                  onClick={() => setReposRead((n) => n + 1)}
+                  className="text-foreground hover:underline"
+                >
+                  reload
+                </button>
+                .
+              </p>
+            )}
           </div>
         )}
 

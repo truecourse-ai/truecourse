@@ -35,6 +35,7 @@ import {
   attachGithubInstallations,
   detachGithubInstallation,
   fetchGithubStatus,
+  installationSettingsUrl,
 } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
@@ -341,6 +342,17 @@ function RepositoriesTab() {
                           {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} ·{' '}
                           {linked} repositor{linked === 1 ? 'y' : 'ies'} linked
                         </span>
+                        {/* Which repositories the App can see is GitHub's
+                            setting, on the installation's own page there. */}
+                        <a
+                          href={installationSettingsUrl(i)}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`Manage ${name} on GitHub`}
+                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                        >
+                          Manage on GitHub
+                        </a>
                         <button
                           type="button"
                           onClick={() => void detach(i)}

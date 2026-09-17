@@ -137,6 +137,29 @@ describe('Settings › Repositories', () => {
     expect(
       within(github).getByRole('link', { name: 'Install on another GitHub account' }),
     ).toHaveAttribute('href', INSTALL_URL);
+    // Which repositories the App sees is changed on GitHub, on the
+    // installation's own settings page: an organization's, under the org.
+    expect(within(rows[0]!).getByRole('link', { name: 'Manage linkwarden on GitHub' })).toHaveAttribute(
+      'href',
+      'https://github.com/organizations/linkwarden/settings/installations/42',
+    );
+  });
+
+  it("links a user account's installation to the user's own settings page", async () => {
+    serve(() =>
+      json(
+        status({
+          installations: [{ installationId: 7, accountLogin: 'spiderhands', accountType: 'User' }],
+          repos: [],
+        }),
+      ),
+    );
+    renderAt('/settings/repositories');
+    const github = providerRow('GitHub');
+    expect(await within(github).findByRole('link', { name: 'Manage spiderhands on GitHub' })).toHaveAttribute(
+      'href',
+      'https://github.com/settings/installations/7',
+    );
   });
 
   it('asks for an install link that returns to where the user came from', async () => {
