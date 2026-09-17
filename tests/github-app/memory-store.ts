@@ -16,38 +16,69 @@ import { slugify } from '@truecourse/core/config/registry';
 import type {
   InstallationStore,
   InstallationRecord,
+  InstallationAccount,
 } from '../../packages/github-app/src/store/types';
 
 export class MemoryInstallationStore implements InstallationStore, RepositoryStore {
-  private installations = new Map<number, InstallationRecord>();
+  private installations = new Map<number, InstallationAccount>();
+  /** installation id → the workspaces attached, in attach order. */
+  private links = new Map<number, string[]>();
   private repos = new Map<string, RepositoryRecord>();
 
-  async saveInstallation(rec: InstallationRecord): Promise<void> {
-    this.installations.set(rec.installationId, { ...rec });
+  private record(account: InstallationAccount): InstallationRecord {
+    return { ...account, workspaceOrgIds: [...(this.links.get(account.installationId) ?? [])] };
+  }
+
+  async saveInstallation(rec: InstallationAccount): Promise<void> {
+    const { installationId, accountLogin, accountType, createdAt, updatedAt } = rec;
+    // As the Postgres upsert does: an empty name never unnames a known row,
+    // and a row that exists keeps its createdAt.
+    const existing = this.installations.get(installationId);
+    this.installations.set(installationId, {
+      installationId,
+      accountLogin: accountLogin || existing?.accountLogin || '',
+      accountType: accountType || existing?.accountType || '',
+      createdAt: existing?.createdAt ?? createdAt,
+      updatedAt,
+    });
   }
 
   async getInstallation(installationId: number): Promise<InstallationRecord | null> {
-    return this.installations.get(installationId) ?? null;
+    const account = this.installations.get(installationId);
+    return account ? this.record(account) : null;
   }
 
   async removeInstallation(installationId: number): Promise<void> {
     this.installations.delete(installationId);
+    this.links.delete(installationId);
   }
 
   async linkInstallationToWorkspace(
     installationId: number,
     workspaceOrgId: string,
   ): Promise<void> {
-    const existing = this.installations.get(installationId);
-    if (existing) existing.workspaceOrgId = workspaceOrgId;
+    if (!this.installations.has(installationId)) return;
+    const held = this.links.get(installationId) ?? [];
+    if (!held.includes(workspaceOrgId)) this.links.set(installationId, [...held, workspaceOrgId]);
+  }
+
+  async unlinkInstallationFromWorkspace(
+    installationId: number,
+    workspaceOrgId: string,
+  ): Promise<void> {
+    const held = this.links.get(installationId) ?? [];
+    this.links.set(
+      installationId,
+      held.filter((org) => org !== workspaceOrgId),
+    );
   }
 
   async listInstallationsForWorkspace(
     workspaceOrgId: string,
   ): Promise<InstallationRecord[]> {
-    return [...this.installations.values()].filter(
-      (i) => i.workspaceOrgId === workspaceOrgId,
-    );
+    return [...this.installations.values()]
+      .filter((account) => (this.links.get(account.installationId) ?? []).includes(workspaceOrgId))
+      .map((account) => this.record(account));
   }
 
   /** Mints the slug the way the Postgres store does: against the workspace's own slugs. */
@@ -82,10 +113,42 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
     );
   }
 
+  async moveReposToAccount(
+    provider: RepositoryProviderId,
+    fromAccountId: string,
+    toAccountId: string,
+  ): Promise<RepositoryRecord[]> {
+    const moved: RepositoryRecord[] = [];
+    for (const [name, r] of this.repos) {
+      if (r.provider !== provider || r.accountId !== fromAccountId) continue;
+      const next = { ...r, accountId: toAccountId, updatedAt: new Date().toISOString() };
+      this.repos.set(name, next);
+      moved.push(next);
+    }
+    return moved;
+  }
+
   /** Every repository row, regardless of workspace — what a derived registry reads. */
   async listRepos(): Promise<RepositoryRecord[]> {
     return [...this.repos.values()];
   }
+}
+
+/** An installation attached to the given workspaces, as the callback writes one. */
+export async function seedInstallation(
+  store: MemoryInstallationStore,
+  installationId: number,
+  workspaceOrgIds: string[],
+  account: Partial<Pick<InstallationAccount, 'accountLogin' | 'accountType'>> = {},
+): Promise<void> {
+  await store.saveInstallation({
+    installationId,
+    accountLogin: account.accountLogin ?? 'acme',
+    accountType: account.accountType ?? 'Organization',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+  for (const org of workspaceOrgIds) await store.linkInstallationToWorkspace(installationId, org);
 }
 
 /** A connected GitHub repository, as the connect flow writes one. */

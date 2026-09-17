@@ -5,10 +5,23 @@
  * local machine. `provider_accounts` is what a provider that has accounts
  * records — a GitHub App installation is one — and a provider with none (a
  * folder on this machine) writes no row here at all, which is why a
- * repository's account is nullable.
+ * repository's account is nullable. An account belongs to as many workspaces
+ * as have attached it (`provider_account_links`): GitHub allows one
+ * installation per GitHub account, so two workspaces reading the same account
+ * share the row. The repositories themselves are still one workspace each.
  */
 
-import { pgTable, text, boolean, timestamp, jsonb, index, primaryKey, unique } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  text,
+  boolean,
+  timestamp,
+  jsonb,
+  index,
+  primaryKey,
+  unique,
+  foreignKey,
+} from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
@@ -22,13 +35,29 @@ export const providerAccounts = pgTable(
     accountId: text('account_id').notNull(),
     accountLogin: text('account_login').notNull(),
     accountType: text('account_type').notNull(),
-    workspaceOrgId: text('workspace_org_id'),
     createdAt: ts('created_at').notNull(),
     updatedAt: ts('updated_at').notNull(),
   },
+  (t) => [primaryKey({ columns: [t.provider, t.accountId] })],
+);
+
+/** Which workspaces may list and connect an account's repositories. */
+export const providerAccountLinks = pgTable(
+  'provider_account_links',
+  {
+    provider: text('provider').notNull(),
+    accountId: text('account_id').notNull(),
+    workspaceOrgId: text('workspace_org_id').notNull(),
+    createdAt: ts('created_at').notNull(),
+  },
   (t) => [
-    primaryKey({ columns: [t.provider, t.accountId] }),
-    index('provider_accounts_workspace_idx').on(t.workspaceOrgId),
+    primaryKey({ columns: [t.provider, t.accountId, t.workspaceOrgId] }),
+    foreignKey({
+      columns: [t.provider, t.accountId],
+      foreignColumns: [providerAccounts.provider, providerAccounts.accountId],
+      name: 'provider_account_links_account_fk',
+    }).onDelete('cascade'),
+    index('provider_account_links_workspace_idx').on(t.workspaceOrgId),
   ],
 );
 

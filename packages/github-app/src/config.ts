@@ -1,9 +1,10 @@
 /**
  * GitHub App configuration, read from the environment.
  *
- * Missing vars return `null` rather than throwing, so a deployment that doesn't
- * connect GitHub at all just runs without it (the `github-gate` capability
- * simply stays off).
+ * With none of the GITHUB_APP_* vars set the App is simply not configured and
+ * `null` comes back, so a deployment that doesn't connect GitHub at all just
+ * runs without it. With SOME of them set the boot fails, naming the missing
+ * ones: a half-configured App would accept installs it cannot verify.
  */
 
 export interface GithubAppConfig {
@@ -15,9 +16,26 @@ export interface GithubAppConfig {
   webhookSecret: string;
   /** App slug, used to build the install URL (github.com/apps/<slug>). */
   appSlug: string;
+  /**
+   * The App's OAuth client, for "Request user authorization (OAuth) during
+   * installation": the code GitHub sends back is exchanged for a user token
+   * that proves which installations the person can reach.
+   */
+  clientId: string;
+  clientSecret: string;
   /** Postgres connection string; when set, the hosted Postgres store is used. */
   databaseUrl: string | null;
 }
+
+/** The env vars an App needs, all of them or none. */
+export const GITHUB_APP_ENV_VARS = [
+  'GITHUB_APP_ID',
+  'GITHUB_APP_PRIVATE_KEY',
+  'GITHUB_APP_WEBHOOK_SECRET',
+  'GITHUB_APP_SLUG',
+  'GITHUB_APP_CLIENT_ID',
+  'GITHUB_APP_CLIENT_SECRET',
+] as const;
 
 /**
  * Accept the private key either as a raw PEM (possibly with escaped `\n`
@@ -36,18 +54,21 @@ function decodePrivateKey(raw: string): string {
 }
 
 export function loadGithubAppConfig(): GithubAppConfig | null {
-  const appId = process.env.GITHUB_APP_ID;
-  const privateKeyRaw = process.env.GITHUB_APP_PRIVATE_KEY;
-  const webhookSecret = process.env.GITHUB_APP_WEBHOOK_SECRET;
-  const appSlug = process.env.GITHUB_APP_SLUG;
-
-  if (!appId || !privateKeyRaw || !webhookSecret || !appSlug) return null;
+  const missing = GITHUB_APP_ENV_VARS.filter((name) => !process.env[name]);
+  if (missing.length === GITHUB_APP_ENV_VARS.length) return null;
+  if (missing.length > 0) {
+    throw new Error(
+      `GitHub App configuration is incomplete: set ${missing.join(', ')} (all of ${GITHUB_APP_ENV_VARS.join(', ')} together, or none of them).`,
+    );
+  }
 
   return {
-    appId,
-    privateKey: decodePrivateKey(privateKeyRaw),
-    webhookSecret,
-    appSlug,
+    appId: process.env.GITHUB_APP_ID!,
+    privateKey: decodePrivateKey(process.env.GITHUB_APP_PRIVATE_KEY!),
+    webhookSecret: process.env.GITHUB_APP_WEBHOOK_SECRET!,
+    appSlug: process.env.GITHUB_APP_SLUG!,
+    clientId: process.env.GITHUB_APP_CLIENT_ID!,
+    clientSecret: process.env.GITHUB_APP_CLIENT_SECRET!,
     databaseUrl: process.env.DATABASE_URL ?? null,
   };
 }

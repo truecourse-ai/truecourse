@@ -69,7 +69,7 @@ function serve(mode: ServerMode) {
     if (pathname === '/api/repos') return json([]);
     if (pathname === '/api/sessions/runs') return json({ runs: [] });
     if (pathname === '/api/llm/config') return json({ config: null, providers: ['anthropic'] });
-    if (pathname === '/api/github/status') return json({ installations: [], installUrl: '', repos: [] });
+    if (pathname === '/api/github/status') return json({ installations: [], connectUrl: '', repos: [] });
     if (pathname === '/api/workspace/members') return json({ members: [], invitations: [] });
     return json({ error: 'not found' }, 404);
   }) as unknown as typeof window.fetch;

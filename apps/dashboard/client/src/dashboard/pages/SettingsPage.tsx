@@ -10,10 +10,18 @@
  * decides it.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { GITHUB_INSTALL_ORIGINS, LLM_PROVIDER_KINDS } from '@truecourse/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
+import { Unlink } from 'lucide-react';
+import {
+  GITHUB_CONNECT_OUTCOMES,
+  GITHUB_INSTALL_ORIGINS,
+  LLM_PROVIDER_KINDS,
+} from '@truecourse/shared';
 import type {
+  GithubConnectOutcome,
+  GithubInstallationAccessResponse,
   GithubInstallationSummary,
   GithubRepoSummary,
   LlmConfigResponse,
@@ -22,11 +30,25 @@ import type {
   GithubInstallOrigin,
   LocalRepositorySummary,
 } from '@truecourse/shared';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { StatusWord } from '@/dashboard/ui/status-word';
 import { Facts, ProviderIcon, PageHeader, SideMenu } from '@/dashboard/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/dashboard/data/llm-config';
 import { offeredRepositoryProviders } from '@/dashboard/data/providers';
-import { fetchGithubStatus } from '@/dashboard/data/real-repos';
+import {
+  attachGithubInstallations,
+  detachGithubInstallation,
+  fetchGithubStatus,
+  fetchInstallationAccess,
+  installationSettingsUrl,
+} from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { MembersTab, type InviteKind } from '@/dashboard/pages/MembersTab';
@@ -36,13 +58,256 @@ import { registeredSettingsTabs, type SettingsTab } from '@/dashboard/shell/regi
 /** What '/api/github/status' said; null while the read is in flight. */
 type GithubProviderState = {
   installations: GithubInstallationSummary[];
-  /** Where the App is installed. Absent on a server that has no App configured. */
-  installUrl: string | null;
+  /**
+   * The one door in: authorize with GitHub, which offers the installations
+   * this person can reach and the workspace does not hold, or sends them on
+   * to install. Absent on a server that has no App configured.
+   */
+  connectUrl: string | null;
   /** The repositories linked to this workspace, per installation. */
   linked: GithubRepoSummary[];
+  /**
+   * What a `pick` landing's offer names, when the server still honours it;
+   * null when it does not (expired, or another session's).
+   */
+  offered: GithubInstallationSummary[] | null;
   /** Why the read failed, when it did. */
   reason?: string;
 };
+
+/**
+ * Where a trip that started elsewhere continues once its pick is made. The
+ * same table the server lands a trip that attached on; a pick lands here
+ * first because the choice is made here.
+ */
+const RETURN_TO: Record<GithubInstallOrigin, string> = {
+  settings: '/settings/repositories',
+  'code-connect': '/code?connect=1',
+  'context-add': '/context?add=repository',
+};
+
+/**
+ * How a trip to GitHub ended, told once, as a toast: it is an event on the
+ * way back, not a state of the page, so it is drawn the way every other
+ * one-off outcome in the app is. `pick` is not here — it needs an answer, so
+ * it is drawn inline. The title names the event; a refusal is an error toast.
+ */
+function toastConnectOutcome(
+  outcome: Exclude<GithubConnectOutcome, 'pick'>,
+  params: URLSearchParams,
+): void {
+  switch (outcome) {
+    case 'attached': {
+      const accounts = (params.get('accounts') ?? '').split(',').filter(Boolean);
+      toast(accounts.length > 0 ? `Connected ${accounts.join(', ')}` : 'GitHub account connected');
+      return;
+    }
+    case 'updated':
+      toast('Repository access updated on GitHub');
+      return;
+    case 'requested':
+      toast('Install requested on GitHub', {
+        description: "The account's owners have to approve it. Connect again once they have.",
+      });
+      return;
+    case 'none':
+      toast.error('Nothing to connect', {
+        description:
+          'No GitHub account you have access to has the App and is not connected here already. Nothing was added.',
+      });
+      return;
+    case 'expired':
+      toast.error('Connecting to GitHub did not finish', {
+        description: 'The trip took too long, or came back to another session. Nothing was added. Try again.',
+      });
+      return;
+    case 'denied':
+      toast.error('GitHub did not complete the authorization', {
+        description: 'Nothing was added. Try again.',
+      });
+      return;
+    case 'unreachable':
+      toast.error('GitHub did not confirm your access to that installation', {
+        description: 'Nothing was added.',
+      });
+      return;
+  }
+}
+
+function outcomeOf(raw: string | null): GithubConnectOutcome | null {
+  return raw && (GITHUB_CONNECT_OUTCOMES as readonly string[]).includes(raw)
+    ? (raw as GithubConnectOutcome)
+    : null;
+}
+
+/** What GitHub said an account lets the App see, or that it could not be asked. */
+type InstallationAccess = GithubInstallationAccessResponse | 'unknown';
+
+/** The access as the account line says it; empty while GitHub is still being asked. */
+function accessWords(access: InstallationAccess | undefined): string {
+  if (!access) return '';
+  if (access === 'unknown') return 'access unknown';
+  if (!access.installed) return 'no longer installed';
+  if (access.repositorySelection === 'all') return 'all repositories';
+  if (access.repositories === 0) return 'no repositories';
+  return `${access.repositories} repositor${access.repositories === 1 ? 'y' : 'ies'}`;
+}
+
+/**
+ * The pick: a trip to GitHub came back naming two or more accounts the
+ * person can reach and this workspace does not hold, and none is attached
+ * until they say which. A dialog over the page, every account ticked, one
+ * button that says how many; Cancel attaches nothing.
+ */
+function ConnectAccountsDialog({
+  offered,
+  busy,
+  onCancel,
+  onConnect,
+}: {
+  offered: GithubInstallationSummary[];
+  busy: boolean;
+  onCancel: () => void;
+  onConnect: (installationIds: number[]) => void;
+}) {
+  const [picked, setPicked] = useState<number[]>(() => offered.map((i) => i.installationId));
+  const toggle = (id: number, on: boolean) =>
+    setPicked((prev) => (on ? [...new Set([...prev, id])] : prev.filter((p) => p !== id)));
+  return (
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Connect GitHub accounts</DialogTitle>
+          <DialogDescription>
+            GitHub named {offered.length} accounts you have access to that this workspace does not use yet.
+          </DialogDescription>
+        </DialogHeader>
+        <ul className="divide-y divide-border rounded-md border border-border" aria-label="Offered GitHub accounts">
+          {offered.map((i) => {
+            const name = i.accountLogin || `#${i.installationId}`;
+            const sees =
+              i.repositorySelection === 'all'
+                ? 'All repositories'
+                : i.repositorySelection === 'selected'
+                  ? 'Selected repositories'
+                  : '';
+            return (
+              <li key={i.installationId}>
+                <label className="flex cursor-pointer items-center gap-3 px-3 py-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={picked.includes(i.installationId)}
+                    onChange={(e) => toggle(i.installationId, e.target.checked)}
+                    disabled={busy}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="text-foreground">{name}</span>
+                    {i.accountType ? (
+                      <span className="text-muted-foreground"> · {i.accountType.toLowerCase()}</span>
+                    ) : null}
+                    {sees && <span className="block text-[11px] text-muted-foreground">{sees}</span>}
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        <DialogFooter className="mt-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onConnect(picked)}
+            disabled={busy || picked.length === 0}
+            className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {busy
+              ? 'Connecting'
+              : `Connect ${picked.length} account${picked.length === 1 ? '' : 's'}`}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The one destructive action on the page asks first, in the app's own dialog:
+ * what leaves with the account (its repositories connected here, the Context
+ * sources reading through it), then Remove or not. When this is the LAST
+ * workspace holding the installation, removing it uninstalls the App from
+ * the account on GitHub too, and the dialog says so: the next Connect then
+ * starts from GitHub's install page, repositories picked afresh.
+ */
+function RemoveAccountDialog({
+  installation,
+  linked,
+  onCancel,
+  onConfirm,
+}: {
+  installation: GithubInstallationSummary | null;
+  linked: GithubRepoSummary[];
+  onCancel: () => void;
+  onConfirm: (installation: GithubInstallationSummary) => void;
+}) {
+  const name = installation ? installation.accountLogin || `#${installation.installationId}` : '';
+  const others = Math.max((installation?.workspaces ?? 1) - 1, 0);
+  const last = others === 0;
+  return (
+    <Dialog open={installation !== null} onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{last ? `Remove ${name} and uninstall the App?` : `Remove ${name} from this workspace?`}</DialogTitle>
+          <DialogDescription>
+            {last
+              ? `No other workspace uses ${name}, so the App will be uninstalled from it on GitHub. Connecting it again means installing the App again and picking its repositories.`
+              : `${others} other workspace${others === 1 ? '' : 's'} keep${others === 1 ? 's' : ''} it. The App stays installed on GitHub.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 text-xs text-muted-foreground">
+          {linked.length > 0 ? (
+            <p>
+              {linked.length} repositor{linked.length === 1 ? 'y' : 'ies'} connected through it will be
+              disconnected, with {linked.length === 1 ? 'its' : 'their'} runs and evidence:
+            </p>
+          ) : (
+            <p>No repository is connected through it.</p>
+          )}
+          {linked.length > 0 && (
+            <ul className="font-mono text-foreground">
+              {linked.map((r) => (
+                <li key={r.repoFullName}>{r.repoFullName}</li>
+              ))}
+            </ul>
+          )}
+          <p>Context sources that read through it stop syncing until it is connected again.</p>
+        </div>
+        <DialogFooter className="mt-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => installation && onConfirm(installation)}
+            className="rounded bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground hover:opacity-90"
+          >
+            {last ? 'Remove and uninstall' : 'Remove'}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 /**
  * Repositories: where they are connected FROM. One row per source-control
@@ -50,9 +315,14 @@ type GithubProviderState = {
  * one line each.
  *
  * GitHub is the real one: its accounts are the App's installations the server
- * reports, each line naming the account, its type and how many repositories
- * this workspace has linked through it, and connecting is a top-level
- * navigation to the App's install page. On a local server the folders of this
+ * reports, one line each naming the account, its type and what it lets the
+ * App see (asked of GitHub, since this page is about the connection, not
+ * what Code has used), with its two actions on the line. Adding one is ONE
+ * button, a top-level navigation to GitHub's authorize page: one new account
+ * comes back attached, two or more come back HERE as a pick in a dialog
+ * (nothing is attached without a choice), none goes on to GitHub's install
+ * page, and an install comes back attached. Every trip that did not attach
+ * lands here too, told as a toast, wherever it started. On a local server the folders of this
  * machine are real too, each line naming the repository and the path behind it,
  * and connecting one is the connect dialog, where the path is typed. Every
  * other provider is listed and says Coming soon: hiding one would make the page
@@ -68,35 +338,168 @@ function installOriginOf(raw: string | null): GithubInstallOrigin {
 
 function RepositoriesTab() {
   const mode = useServerMode();
+  const navigate = useNavigate();
+  const { refreshRealRepos } = useDashboardState();
   const [github, setGithub] = useState<GithubProviderState | null>(null);
   const [folders, setFolders] = useState<LocalRepositorySummary[] | null>(null);
-  const [params] = useSearchParams();
+  const [detaching, setDetaching] = useState<number | null>(null);
+  const [params, setParams] = useSearchParams();
   const from = installOriginOf(params.get('from'));
+  // A trip to GitHub that did not attach lands here flagged with how it
+  // ended, told as a toast; a `pick` carries the offer of accounts the person
+  // can choose from, drawn inline.
+  const outcome = outcomeOf(params.get('github'));
+  const offer = outcome === 'pick' ? params.get('offer') : null;
+  const [attaching, setAttaching] = useState(false);
+
+  // Reads race: a slower earlier read (another `from`, or the effect's read
+  // overlapping a detach's) must not overwrite a newer answer, nor land after
+  // the tab is gone. Only the latest read applies.
+  const readSeq = useRef(0);
+  const readGithub = useCallback(async () => {
+    const seq = ++readSeq.current;
+    const apply = (next: GithubProviderState) => {
+      if (seq === readSeq.current) setGithub(next);
+    };
+    try {
+      const status = await fetchGithubStatus(from, offer ?? undefined);
+      apply({
+        installations: status.installations,
+        connectUrl: status.connectUrl || null,
+        linked: status.repos,
+        offered: status.offered ?? null,
+      });
+    } catch (error: unknown) {
+      apply({
+        installations: [],
+        connectUrl: null,
+        linked: [],
+        offered: null,
+        reason: error instanceof Error ? error.message : 'GitHub could not be reached',
+      });
+    }
+  }, [from, offer]);
 
   useEffect(() => {
-    let live = true;
-    void fetchGithubStatus(from)
-      .then((status) => {
-        if (!live) return;
-        setGithub({
-          installations: status.installations,
-          installUrl: status.installUrl || null,
-          linked: status.repos,
-        });
-      })
-      .catch((error: unknown) => {
-        if (!live) return;
-        setGithub({
-          installations: [],
-          installUrl: null,
-          linked: [],
-          reason: error instanceof Error ? error.message : 'GitHub could not be reached',
-        });
+    void readGithub();
+    return () => {
+      readSeq.current += 1;
+    };
+  }, [readGithub]);
+
+  // Tell how the trip ended, once, then drop the flag from the address so a
+  // reload does not tell it again. `from` stays: the Connect link minted for
+  // this page still returns there. The landing is a fresh page, and this
+  // effect runs before the app's Toaster has subscribed to the toast store,
+  // which keeps no history — so the toast waits a tick for it.
+  const told = useRef(false);
+  useEffect(() => {
+    if (!outcome || outcome === 'pick' || told.current) return;
+    told.current = true;
+    // Not cleared on cleanup: dropping the flag re-runs this effect at once,
+    // and the toast has to outlive that.
+    setTimeout(() => toastConnectOutcome(outcome, params), 0);
+    const next = new URLSearchParams(params);
+    next.delete('github');
+    setParams(next, { replace: true });
+  }, [outcome, params, setParams]);
+
+  /** Drop the landing's flags: the pick is over, one way or the other. */
+  const closePick = () => setParams(new URLSearchParams(), { replace: true });
+
+  // The pick: attach what is ticked, then carry on where the trip started —
+  // or, for a trip started here, drop the landing's flags and read afresh.
+  const attachPicked = async (installationIds: number[]) => {
+    if (!offer || installationIds.length === 0) return;
+    setAttaching(true);
+    try {
+      await attachGithubInstallations({ offer, installationIds });
+      if (from !== 'settings') {
+        navigate(RETURN_TO[from]);
+        return;
+      }
+      closePick();
+    } catch (error: unknown) {
+      toast.error('Could not connect the accounts', {
+        description: error instanceof Error ? error.message : undefined,
       });
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  // An offer the server no longer honours (expired, or another session's)
+  // is told like any other outcome and dropped from the address.
+  const offerRefused = outcome === 'pick' && github !== null && github.offered === null;
+  useEffect(() => {
+    if (!offerRefused) return;
+    setTimeout(() => toast.error('That offer expired', { description: 'Connect again to get a fresh one.' }), 0);
+    closePick();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerRefused]);
+
+  // What each account lets the App see, asked of GitHub one account at a
+  // time once the accounts are known. The Settings page is about the
+  // connection, so this is the count it draws, not what Code has used.
+  const [access, setAccess] = useState<Record<number, InstallationAccess>>({});
+  useEffect(() => {
+    if (!github) return;
+    let live = true;
+    for (const installation of github.installations) {
+      const id = installation.installationId;
+      if (access[id]) continue;
+      void fetchInstallationAccess(id)
+        .then((answer) => {
+          if (live) setAccess((prev) => ({ ...prev, [id]: answer }));
+        })
+        .catch(() => {
+          if (live) setAccess((prev) => ({ ...prev, [id]: 'unknown' }));
+        });
+    }
     return () => {
       live = false;
     };
-  }, [from]);
+    // Only a new account needs asking; a re-read of the same accounts does not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [github]);
+
+  // Detach an installation from this workspace: the repositories connected
+  // through it here go with it, so the person is shown which before it does.
+  // A detach the server could only half do is re-read either way, so the page
+  // shows what is actually left and the reason beside it.
+  const [removing, setRemoving] = useState<GithubInstallationSummary | null>(null);
+  const detach = useCallback(
+    async (installation: GithubInstallationSummary) => {
+      setRemoving(null);
+      setDetaching(installation.installationId);
+      const name = installation.accountLogin || `#${installation.installationId}`;
+      let failure: string | null = null;
+      try {
+        const answer = await detachGithubInstallation(installation.installationId);
+        // Told as it went: gone from GitHub too, still on GitHub because
+        // GitHub refused (the one thing left to do by hand), or kept for
+        // the other workspaces.
+        if (answer.uninstall === 'done') {
+          toast(`Removed ${name}`, { description: 'The App was uninstalled from it on GitHub.' });
+        } else if (answer.uninstall === 'failed') {
+          toast.error(`Removed ${name} here, but the App is still installed on GitHub`, {
+            description: `${answer.reason ?? 'GitHub refused the uninstall.'} Uninstall it on GitHub.`,
+          });
+        } else {
+          toast(`Removed ${name} from this workspace`);
+        }
+      } catch (error: unknown) {
+        failure = error instanceof Error ? error.message : 'Could not remove the account';
+      }
+      await Promise.all([readGithub(), refreshRealRepos()]);
+      if (failure) {
+        const reason = failure;
+        setGithub((prev) => (prev ? { ...prev, reason } : prev));
+      }
+      setDetaching(null);
+    },
+    [readGithub, refreshRealRepos],
+  );
 
   // The folders this machine has connected. Only a local server has any, and
   // only a local server has the route to ask.
@@ -116,8 +519,25 @@ function RepositoriesTab() {
   }, [mode]);
 
   const installations = github?.installations ?? [];
+  /** The accounts a pick landing offers, once the server has confirmed the offer. */
+  const offered = outcome === 'pick' ? (github?.offered ?? []) : [];
 
   return (
+    <>
+    {offered.length > 0 && (
+      <ConnectAccountsDialog
+        offered={offered}
+        busy={attaching}
+        onCancel={closePick}
+        onConnect={(ids) => void attachPicked(ids)}
+      />
+    )}
+    <RemoveAccountDialog
+      installation={removing}
+      linked={(github?.linked ?? []).filter((r) => r.installationId === removing?.installationId)}
+      onCancel={() => setRemoving(null)}
+      onConfirm={(installation) => void detach(installation)}
+    />
     <ul className="divide-y divide-border border-b border-border" aria-label="Providers">
       {offeredRepositoryProviders(mode).map((provider) => {
         const { id, name } = provider;
@@ -144,17 +564,44 @@ function RepositoriesTab() {
               {isGithub && github?.reason && (
                 <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
               )}
+              {/* The accounts held, one line each with its two actions. */}
               {isGithub && installations.length > 0 && (
-                <ul className="mt-1 space-y-1" aria-label="GitHub installations">
+                <ul className="mt-2 divide-y divide-border border-y border-border" aria-label="GitHub accounts">
                   {installations.map((i) => {
-                    const linked = (github?.linked ?? []).filter(
-                      (r) => r.installationId === i.installationId,
-                    ).length;
+                    const name = i.accountLogin || `#${i.installationId}`;
+                    const sees = accessWords(access[i.installationId]);
                     return (
-                      <li key={i.installationId} className="truncate text-[11px] text-muted-foreground">
-                        <span className="text-foreground">{i.accountLogin || `#${i.installationId}`}</span>
-                        {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} ·{' '}
-                        {linked} repositor{linked === 1 ? 'y' : 'ies'} linked
+                      <li key={i.installationId} className="flex items-center gap-3 py-1.5 text-xs">
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="text-foreground">{name}</span>
+                          <span className="text-muted-foreground">
+                            {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''}
+                            {sees ? ` · ${sees}` : ''}
+                          </span>
+                        </span>
+                        {/* Which repositories the App can see is GitHub's
+                            setting, on the installation's own page there. */}
+                        <a
+                          href={installationSettingsUrl(i)}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`Manage ${name} on GitHub`}
+                          className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground"
+                        >
+                          Manage on GitHub
+                        </a>
+                        {/* Unlink, not delete: the installation stays on
+                            GitHub, this workspace lets go of it. */}
+                        <button
+                          type="button"
+                          onClick={() => setRemoving(i)}
+                          disabled={detaching !== null}
+                          aria-label={`Remove ${name}`}
+                          title="Remove from this workspace"
+                          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-50"
+                        >
+                          <Unlink className="h-3.5 w-3.5" aria-hidden />
+                        </button>
                       </li>
                     );
                   })}
@@ -170,9 +617,9 @@ function RepositoriesTab() {
                 </ul>
               )}
             </div>
-            {isGithub && github?.installUrl && (
+            {isGithub && github?.connectUrl && (
               <a
-                href={github.installUrl}
+                href={github.connectUrl}
                 className={`shrink-0 rounded px-2.5 py-1.5 text-xs font-medium ${
                   installations.length === 0
                     ? 'bg-primary text-primary-foreground hover:opacity-90'
@@ -198,6 +645,7 @@ function RepositoriesTab() {
         );
       })}
     </ul>
+    </>
   );
 }
 

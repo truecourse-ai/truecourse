@@ -43,7 +43,6 @@ function json(body: unknown, status = 200): Response {
 
 const STATUS: GithubConnectStatusResponse = {
   configured: true,
-  installUrl: 'https://github.com/apps/truecourse/installations/new?state=org_1',
   installations: [],
   repos: [],
 };

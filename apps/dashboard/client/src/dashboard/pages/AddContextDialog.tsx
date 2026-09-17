@@ -173,6 +173,7 @@ export function AddContextDialog({
               fullName: folder.repoFullName,
               defaultBranch: '',
               private: true,
+              connectedElsewhere: false,
             })),
           );
         })

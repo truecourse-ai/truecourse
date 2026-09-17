@@ -22,9 +22,13 @@
 
 import { deleteRepo, fetchApi, getRepos, type RepoResponse } from '@/lib/api';
 import type {
+  GithubAttachRequest,
   GithubConnectStatusResponse,
+  GithubDetachResponse,
   GithubInstallableRepo,
+  GithubInstallationAccessResponse,
   GithubInstallationReposResponse,
+  GithubInstallationSummary,
   GithubInstallOrigin,
 } from '@truecourse/shared';
 import type { Repo } from './types';
@@ -33,10 +37,51 @@ import type { Repo } from './types';
  * The App's installations on this workspace, the repositories already linked,
  * and the App's status for the connect surfaces. `from` names where an install
  * started from this page would return to (it rides the install link's state).
+ * `offer` is the token a `pick` landing carries: the read answers the
+ * installations it names, when it is still good for this session.
  */
-export function fetchGithubStatus(from?: GithubInstallOrigin): Promise<GithubConnectStatusResponse> {
-  const query = from ? `?from=${encodeURIComponent(from)}` : '';
-  return fetchApi<GithubConnectStatusResponse>(`/api/github/status${query}`);
+export function fetchGithubStatus(
+  from?: GithubInstallOrigin,
+  offer?: string,
+): Promise<GithubConnectStatusResponse> {
+  const query = new URLSearchParams({
+    ...(from ? { from } : {}),
+    ...(offer ? { offer } : {}),
+  }).toString();
+  return fetchApi<GithubConnectStatusResponse>(`/api/github/status${query ? `?${query}` : ''}`);
+}
+
+/** Attach the installations picked out of an offer. Rejects with the server's reason. */
+export async function attachGithubInstallations(request: GithubAttachRequest): Promise<void> {
+  await fetchApi<{ ok: boolean }>('/api/github/installations/attach', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+/**
+ * GitHub's settings page for one installation: where the repositories the App
+ * can see are granted and revoked. A user's installation lives under the
+ * user's settings and an organization's under the organization's; an account
+ * of any other kind (an enterprise, a row nothing named) goes to the person's
+ * own installations list, which GitHub filters to what they can reach.
+ */
+export function installationSettingsUrl(installation: GithubInstallationSummary): string {
+  const { accountType, accountLogin, installationId } = installation;
+  if (accountType === 'Organization' && accountLogin) {
+    return `https://github.com/organizations/${encodeURIComponent(accountLogin)}/settings/installations/${installationId}`;
+  }
+  if (accountType === 'User') return `https://github.com/settings/installations/${installationId}`;
+  return 'https://github.com/settings/installations';
+}
+
+/** What the App may see through one installation, as GitHub reports it. */
+export function fetchInstallationAccess(
+  installationId: number,
+): Promise<GithubInstallationAccessResponse> {
+  return fetchApi<GithubInstallationAccessResponse>(
+    `/api/github/installations/${installationId}/access`,
+  );
 }
 
 /** Everything one installation can see, linked or not. */
@@ -47,6 +92,18 @@ export async function fetchInstallationRepos(
     `/api/github/installations/${installationId}/repos`,
   );
   return body.repos;
+}
+
+/**
+ * Detach an installation from this workspace. The repositories connected
+ * through it here are disconnected with it; other workspaces keep theirs.
+ * Rejects with the server's reason, which may be a repository that would not
+ * disconnect: the rest are gone and the account stays, so a retry finishes.
+ */
+export function detachGithubInstallation(installationId: number): Promise<GithubDetachResponse> {
+  return fetchApi<GithubDetachResponse>(`/api/github/installations/${installationId}`, {
+    method: 'DELETE',
+  });
 }
 
 /** Link one repository. The row is the connection — the onboarding scan clones

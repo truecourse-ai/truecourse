@@ -54,5 +54,7 @@ export function observeRepositories(store: RepositoryStore): RepositoryStore {
     getRepo: (repoFullName) => store.getRepo(repoFullName),
     listReposForWorkspace: (workspaceOrgId) => store.listReposForWorkspace(workspaceOrgId),
     listReposForAccount: (provider, accountId) => store.listReposForAccount(provider, accountId),
+    // A move keeps every connection: nothing was connected or disconnected.
+    moveReposToAccount: (provider, from, to) => store.moveReposToAccount(provider, from, to),
   };
 }
