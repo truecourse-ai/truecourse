@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
  * Adds the `visible` class to the returned ref's element once it scrolls into view.
  * Pair with `.reveal` in globals.css to fade-up the element. Triggers once.
  */
-export function useReveal<T extends HTMLElement = HTMLDivElement>(opts?: {
+export function useReveal<T extends Element = HTMLDivElement>(opts?: {
   rootMargin?: string;
   threshold?: number;
 }) {

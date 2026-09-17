@@ -111,7 +111,11 @@ export function callUsageOf(usage: CapturedResult['usage']): CallUsage {
 /**
  * Turn a per-call timeout into an abort deadline. The AI SDK has no first-class
  * timeout, so we drive it via abortSignal. (`LlmRequest` carries no external
- * signal, so the timeout is the only cancellation source.)
+ * signal, so the timeout is the only cancellation source, and nothing can cut a
+ * call short once its deadline is spent.) ONE deadline covers the whole call,
+ * the fallback model included: `timeoutMs` is the wall clock a caller is
+ * promised, which is what lets the config probe fail fast and a long stage name
+ * a ceiling that means what it says.
  *
  * The request's ceiling is multiplied by `resolveTimeoutScale()` — the same
  * `TRUECOURSE_LLM_TIMEOUT_SCALE` knob the cli and agent backends apply — so one
@@ -302,7 +306,7 @@ export function createApiTransport(
     };
 
     try {
-      let result: Awaited<ReturnType<typeof run>>;
+      let result: CapturedResult;
       let usedFallback = false;
       try {
         result = await run(primary);

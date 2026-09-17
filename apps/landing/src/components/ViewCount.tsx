@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 /**
  * Live view counter for a blog post, fed by /api/blog-views (PostHog pageview
  * counts, edge-cached ~60s). Shows a small spinner while loading, then the
- * count; hides entirely on error or zero — locally there is no /api, so dev
+ * count; hides entirely on error or zero. Locally there is no /api, so dev
  * settles to hidden.
  */
 export function ViewCount({ path }: { path: string }) {

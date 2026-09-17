@@ -32,7 +32,7 @@ export function initPostHog(): void {
 
   posthog.init(KEY, {
     api_host: HOST,
-    capture_pageview: true,    // initial page load — route changes are handled manually below
+    capture_pageview: true,    // initial page load; route changes are handled manually below
     capture_pageleave: true,
     autocapture: true,         // clicks, form submits, etc.
     persistence: 'localStorage+cookie',
@@ -53,7 +53,7 @@ export function trackPageview(path: string): void {
 }
 
 /**
- * Generic event capture. Safe to call before init — silently drops if PostHog
+ * Generic event capture. Safe to call before init: silently drops if PostHog
  * isn't initialized.
  */
 export function trackEvent(event: string, properties?: Record<string, unknown>): void {

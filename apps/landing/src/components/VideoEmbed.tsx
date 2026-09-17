@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 /**
- * Click-to-play video. At rest it shows only a play button on a clean panel —
+ * Click-to-play video. At rest it shows only a play button on a clean panel:
  * no poster frame, chrome, or captions. On click it mounts a self-hosted
  * <video> with native controls (no third-party branding).
  */

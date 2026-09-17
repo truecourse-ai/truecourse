@@ -15,7 +15,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { discoverRecipe, GUARD_COMPOSE_FILE, type RecipeRunner } from '@truecourse/guard-generator'
+import { composeProjectName, discoverRecipe, GUARD_COMPOSE_FILE, type RecipeRunner } from '@truecourse/guard-generator'
 import type { DatastoreUrlRef } from '@truecourse/shared'
 
 const dirs: string[] = []
@@ -115,12 +115,19 @@ describe('discoverRecipe — the generated datastore', () => {
     // The compose file stays: the recipe's `services.up` names it.
     const compose = fs.readFileSync(path.join(repo.root, GUARD_COMPOSE_FILE), 'utf-8')
     expect(compose).toContain('postgres:16-alpine')
-    expect(res.recipe.api?.services?.up).toBe(`docker compose -f ${GUARD_COMPOSE_FILE} up -d --wait`)
+    const project = composeProjectName(path.basename(repo.root))
+    expect(res.recipe.api?.services?.up).toBe(`docker compose -p ${project} -f ${GUARD_COMPOSE_FILE} up -d --wait`)
     expect(res.recipe.api?.env).toEqual({ DATABASE_URL: 'postgres://guard@localhost:5432/weather' })
-    // The server only answered because `up` ran FIRST and the file was already there.
+    // The wipe OPENS the round: a session verifies again and again in one
+    // sandbox, so the bring-up must not meet the world the last attempt left.
+    // The teardown then stops the services and keeps the volumes, which the next
+    // round's own wipe is what clears. In between, the server only answered
+    // because `up` ran FIRST and the file was already there.
     const invocations = fs.readFileSync(repo.log, 'utf-8').trim().split('\n')
-    expect(invocations[0]).toContain('up -d --wait')
-    expect(invocations[1]).toContain('down')
+    expect(invocations[0]).toContain('down -v')
+    expect(invocations[1]).toContain('up -d --wait')
+    expect(invocations[2]).toMatch(/down$/)
+    expect(invocations).toHaveLength(3)
     expect(fs.existsSync(repo.marker)).toBe(false)
   })
 

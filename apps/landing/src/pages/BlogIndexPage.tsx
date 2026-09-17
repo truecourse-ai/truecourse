@@ -6,7 +6,7 @@ import { posts } from '@/blog';
 export const meta = () =>
   pageMeta({
     title: 'Blog · TrueCourse',
-    description: 'Notes on specs, drift, and verification — from the team building TrueCourse.',
+    description: 'Notes on specs, drift, and verification from the team building TrueCourse.',
     path: '/blog',
   });
 

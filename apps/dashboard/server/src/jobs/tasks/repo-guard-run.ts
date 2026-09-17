@@ -42,7 +42,7 @@ import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-l
 import { createUsageMeter, withCredits, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
-import { materializeStoredGuardState, persistGuardRun } from '../materialize-guard.js';
+import { markWorldStateUnknown, materializeStoredGuardState, persistGuardRun } from '../materialize-guard.js';
 import { firstLine, mirrorTracker, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_RUN_TASK = 'repo.guard-run';
@@ -131,6 +131,7 @@ export function createRepoGuardRunTask(
           );
         }
         materializeGuardSetupBundle(tree.dir, bundle);
+        markWorldStateUnknown(tree.dir);
         // The registered instances beside it: a supplied dependency binds only
         // to what was provided, and the runner reads that from the two overlay files.
         await materializeGuardOverlays(repoFullName, tree.dir);

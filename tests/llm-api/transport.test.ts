@@ -489,6 +489,77 @@ describe('createApiTransport — TRUECOURSE_LLM_TIMEOUT_SCALE', () => {
   });
 });
 
+/**
+ * `timeoutMs` is the ceiling on the WHOLE transport call, not on one provider
+ * request: callers size it as the wall clock they are willing to block for (the
+ * config probe fails fast on a bad key, a leaf stage bounds a long call), and
+ * nothing outside can cut a call short, so a transport that spent a second
+ * clock of its own would silently double every one of those ceilings.
+ */
+describe('createApiTransport — one deadline for the whole call', () => {
+  const SCALE_ENV = 'TRUECOURSE_LLM_TIMEOUT_SCALE';
+  const orig = process.env[SCALE_ENV];
+  beforeEach(() => delete process.env[SCALE_ENV]);
+  afterEach(() => {
+    if (orig === undefined) delete process.env[SCALE_ENV];
+    else process.env[SCALE_ENV] = orig;
+  });
+
+  /**
+   * A model that hangs until its deadline aborts it — `hangs` times over, then
+   * answers. Counts the calls, which is how many clocks were spent.
+   */
+  function hangingModel(hangs: number, text = 'OK') {
+    let calls = 0;
+    const model = {
+      ...stubModel({ text }),
+      async doGenerate(opts: { abortSignal?: AbortSignal }) {
+        if (++calls <= hangs) {
+          await new Promise<never>((_resolve, reject) => {
+            opts.abortSignal?.addEventListener('abort', () => reject(opts.abortSignal!.reason));
+          });
+        }
+        return {
+          content: [{ type: 'text', text }],
+          finishReason: 'stop',
+          usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
+          warnings: [],
+        };
+      },
+    };
+    return { model, calls: () => calls };
+  }
+
+  /** No fallback model: every call the stub sees is an attempt on the primary. */
+  const solo = { provider: 'anthropic' as const, model: 'primary-model', apiKey: 'test' };
+
+  it('spends one clock on a timed-out call, not a second', async () => {
+    const hanging = hangingModel(1);
+    buildModelMock.mockReturnValue(hanging.model);
+
+    await expect(
+      createApiTransport(solo)({ id: 'a:b', stage: 'slow', system: 'S', user: 'U', timeoutMs: 40 }),
+    ).rejects.toThrow('[llm-api] timed out after 40ms');
+    expect(hanging.calls()).toBe(1);
+  });
+
+  it('leaves the fallback model out of a call the clock killed', async () => {
+    const hanging = hangingModel(1);
+    const fallbackCall = vi.fn();
+    buildModelMock.mockImplementation((_cfg: unknown, id: string) =>
+      id === cfg.fallbackModel
+        ? { ...stubModel({ text: 'FB' }), doGenerate: fallbackCall }
+        : hanging.model,
+    );
+
+    await expect(
+      createApiTransport(cfg)({ id: 'a:b', stage: 'slow', system: 'S', user: 'U', timeoutMs: 40 }),
+    ).rejects.toThrow('[llm-api] timed out after 40ms');
+    expect(hanging.calls()).toBe(1);
+    expect(fallbackCall).not.toHaveBeenCalled();
+  });
+});
+
 describe('createAiSdkTransport alias', () => {
   it('is the same factory as createApiTransport (ee imports keep working)', () => {
     expect(createAiSdkTransport).toBe(createApiTransport);

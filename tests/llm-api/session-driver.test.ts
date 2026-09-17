@@ -812,13 +812,23 @@ describe('api session driver provider cache strategy', () => {
     expect(calls[0].providerOptions).toEqual({ anthropic: { disableParallelToolUse: true } });
   });
 
-  it('openai: a per-request prompt cache key and no parallel tool calls', async () => {
+  it('openai: a per-request prompt cache key, no parallel tool calls, a stateless replay', async () => {
     const calls = await callsFor({ provider: 'openai', model: 'gpt-5', apiKey: 't' });
 
     // The cache is keyed per REQUEST here, so no message is marked at all.
     expect(messageOptions(calls[0].prompt).every((o) => o === undefined)).toBe(true);
     expect(calls[0].providerOptions).toEqual({
-      openai: { promptCacheKey: expect.any(String), parallelToolCalls: false },
+      openai: {
+        promptCacheKey: expect.any(String),
+        parallelToolCalls: false,
+        // The driver resends the whole history every turn, so a replayed
+        // reasoning part must carry itself rather than point at an item the
+        // endpoint is expected to be holding — see the wire shapes this option
+        // decides between in `openai-reasoning-replay.test.ts`. The encrypted
+        // content it asks back for is the SDK's to request, on the models that
+        // have any; asking here would reach the ones that reject it too.
+        store: false,
+      },
     });
     expect(calls[0].providerOptions?.openai?.promptCacheKey).not.toBe('');
   });

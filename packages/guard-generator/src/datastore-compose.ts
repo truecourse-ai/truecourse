@@ -15,7 +15,7 @@
  *
  *  1. **It is pure.** No I/O, no probing (a port collision is verification's to
  *     find, honestly, not propose-time's to guess at), no LLM. Given the same
- *     literals it derives the same file on every machine.
+ *     literals and the same project it derives the same file on every machine.
  *  2. **It never invents a secret and never pins a machine-local identity.** A URL
  *     with no user resolves, at RUNTIME, to the OS user — which differs per machine,
  *     so pinning the proposing machine's user into the file would break every
@@ -114,8 +114,15 @@ interface Endpoint {
 /**
  * Derive a compose file (plus its `api.services` / `api.env`) from the connection
  * URLs the app writes down, or explain why not.
+ *
+ * `project` is the compose PROJECT the file and its commands are namespaced to.
+ * It comes from the caller because it is the identity of the world these runs
+ * share, which no literal in this repository's source knows: two repositories
+ * whose apps both default to `postgres://localhost/app` derive the very same
+ * file, and a project read off that would put one repository's `down -v` on the
+ * other's datastore.
  */
-export function deriveGuardCompose(refs: readonly DatastoreUrlRef[]): ComposeDerivation {
+export function deriveGuardCompose(refs: readonly DatastoreUrlRef[], project: string): ComposeDerivation {
   const endpoints: Endpoint[] = []
   for (const ref of dedupeByUrl(refs)) {
     const parsed = parseEndpoint(ref)
@@ -185,12 +192,12 @@ export function deriveGuardCompose(refs: readonly DatastoreUrlRef[]): ComposeDer
     ok: true,
     plan: {
       file: GUARD_COMPOSE_FILE,
-      content: renderCompose(services, chosen),
+      content: renderCompose(services, chosen, project),
       services: {
-        up: `docker compose -f ${GUARD_COMPOSE_FILE} up -d --wait`,
-        down: `docker compose -f ${GUARD_COMPOSE_FILE} down`,
+        up: `docker compose -p ${project} -f ${GUARD_COMPOSE_FILE} up -d --wait`,
+        down: `docker compose -p ${project} -f ${GUARD_COMPOSE_FILE} down`,
         // Volumes included: the world restore a `world: mutates` tail runs after.
-        reset: `docker compose -f ${GUARD_COMPOSE_FILE} down -v`,
+        reset: `docker compose -p ${project} -f ${GUARD_COMPOSE_FILE} down -v`,
       },
       env,
       notes,
@@ -401,14 +408,19 @@ function rebuildUrl(endpoint: Endpoint, user: string): string {
  * services. It is a normal, readable compose file — guard only ever regenerates
  * it while the recipe does not yet reference it.
  */
-function renderCompose(services: readonly DerivedService[], endpoints: readonly Endpoint[]): string {
+function renderCompose(
+  services: readonly DerivedService[],
+  endpoints: readonly Endpoint[],
+  project: string,
+): string {
   const body = yaml.dump(
     {
-      // The project NAMESPACE (compose top-level `name:`): without it the file
-      // runs under the directory's default project — the developer's own stack,
-      // which the static compose-namespace rule refuses (cal.diy 2026-08-21).
-      // Derived from the app's own literals to keep this module pure.
-      name: projectName(endpoints),
+      // The project NAMESPACE (compose top-level `name:`), so the file reads as
+      // what it is even when someone runs it by hand. Every command the recipe
+      // carries passes the same project with `-p`, which is what actually binds
+      // it: without one, compose runs the file under the working directory's
+      // default project, i.e. the developer's own stack.
+      name: project,
       services: Object.fromEntries(services.map((s) => [s.name, s.spec])),
     },
     { lineWidth: 120, noRefs: true, quotingType: '"' },
@@ -420,7 +432,7 @@ function renderCompose(services: readonly DerivedService[], endpoints: readonly 
     "# connection URL(s) the app itself declares in its source:",
     ...endpoints.map((e) => `#   ${e.url}${e.envVar ? `  (overridable via ${e.envVar})` : ''}`),
     '#',
-    `# The recipe's \`api.services\` runs it (\`docker compose -f ${GUARD_COMPOSE_FILE} up -d --wait\`).`,
+    `# The recipe's \`api.services\` runs it (\`docker compose -p ${project} -f ${GUARD_COMPOSE_FILE} up -d --wait\`).`,
     '# It is yours now: review it, edit it, and commit it. Guard regenerates this file',
     '# only while no recipe references it, so your edits are safe.',
     '#',
@@ -431,11 +443,3 @@ function renderCompose(services: readonly DerivedService[], endpoints: readonly 
   return `${header}\n${body}`
 }
 
-/** `tc-guard-<database>` (first named database, else the first engine), squeezed
- *  into compose's project-name alphabet. Deterministic from the same literals the
- *  rest of the file is derived from. */
-function projectName(endpoints: readonly Endpoint[]): string {
-  const seed = endpoints.find((e) => e.database)?.database ?? endpoints[0]?.engine ?? 'datastore'
-  const squeezed = seed.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '')
-  return `tc-guard-${squeezed || 'datastore'}`
-}

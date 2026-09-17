@@ -112,6 +112,23 @@ export interface JobSettledInfo {
   meta?: { repoFullName?: string | null; commitSha?: string | null };
 }
 
+/**
+ * One settled job, as the runtime's observer sees it. Everything here is the
+ * row's own fact or the definition's trace metadata, so an observer that reports
+ * outside the process never has to read a payload to learn what happened.
+ */
+export interface JobSettledInfo {
+  type: string;
+  jobId: string;
+  org: string;
+  outcome: JobOutcomeStatus;
+  /** Wall time from the row being claimed to its terminal mark. */
+  durationMs: number;
+  payload: JobPayload;
+  /** The definition's `traceMeta`, undefined when it declares none. */
+  meta?: { repoFullName?: string | null; commitSha?: string | null };
+}
+
 /** The world a job body runs in: its payload + the stepped-progress API. */
 export interface JobContext<P> {
   payload: P;

@@ -178,3 +178,75 @@ describe('verifyProposal — the web boot stage', () => {
     }
   }, 60_000)
 })
+
+describe('verifyProposal — the services reset', () => {
+  /** A services block whose every command appends its own name to one file, so
+   *  the file IS the order they ran in. */
+  function loggingServices(log: string, overrides: { up?: string; reset?: string } = {}) {
+    return {
+      up: overrides.up ?? `echo up >> "${log}"`,
+      down: `echo down >> "${log}"`,
+      reset: overrides.reset ?? `echo reset >> "${log}"`,
+    }
+  }
+
+  // ONE wipe per round, and it OPENS the round: the teardown only stops, so a
+  // repair loop's next round pays one initdb for its clean datastore, not two.
+  it('wipes the world before the bring-up and only stops after it', async () => {
+    const r = tempRepo()
+    const log = path.join(r, 'services.log')
+    const proposal: RecipeProposal = {
+      build: 'true',
+      api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health', services: loggingServices(log) },
+    }
+
+    const verdict = await verifyProposal(r, proposal)
+
+    expect(verdict.ok).toBe(true)
+    expect(fs.readFileSync(log, 'utf-8').trim().split('\n')).toEqual(['reset', 'up', 'down'])
+  }, 60_000)
+
+  it('a reset that fails is never the verdict, and its output rides an up failure', async () => {
+    const r = tempRepo()
+    const log = path.join(r, 'services.log')
+    const proposal: RecipeProposal = {
+      build: 'true',
+      api: {
+        serve: ['node', FIXTURE_API_SERVER],
+        healthPath: '/health',
+        services: loggingServices(log, {
+          reset: `echo "no such project: acme" >&2; exit 1`,
+          up: `echo "port 5432 is already allocated" >&2; exit 1`,
+        }),
+      },
+    }
+
+    const verdict = await verifyProposal(r, proposal)
+
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.stage).toBe('services')
+    expect(verdict.reason).toContain('port 5432 is already allocated')
+    // The wipe that ran first is part of the story — a session reading only the
+    // up failure cannot tell whether the stale world was cleared.
+    expect(verdict.reason).toContain('no such project: acme')
+  }, 60_000)
+
+  it('a proposal with no reset runs exactly what it declared', async () => {
+    const r = tempRepo()
+    const log = path.join(r, 'services.log')
+    const proposal: RecipeProposal = {
+      build: 'true',
+      api: {
+        serve: ['node', FIXTURE_API_SERVER],
+        healthPath: '/health',
+        services: { up: `echo up >> "${log}"`, down: `echo down >> "${log}"` },
+      },
+    }
+
+    const verdict = await verifyProposal(r, proposal)
+
+    expect(verdict.ok).toBe(true)
+    expect(fs.readFileSync(log, 'utf-8').trim().split('\n')).toEqual(['up', 'down'])
+  }, 60_000)
+})

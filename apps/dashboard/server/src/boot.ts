@@ -32,6 +32,7 @@ import { setContextEventPublisher } from './services/context.service.js';
 import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepRunClones } from './services/run-clone.service.js';
+import { sweepSeedColdCopies } from '@truecourse/core/services/guard-setup/seed-cold-proof';
 import { setRepoJobsCanceller } from './services/repo-removal.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunsWatches } from './services/run-watch.service.js';
@@ -100,9 +101,10 @@ export async function startServer(): Promise<void> {
   installDbStores(getDbHandle(), { masterSecret });
   // What a dead process left behind: its runs settle `interrupted` (the jobs
   // queue settles its abandoned rows the same way when it starts), and its
-  // half-written clones go.
+  // half-written clones and cold copies go.
   await reconcileStoredRuns();
   sweepRunClones();
+  sweepSeedColdCopies();
   if (operatorClaudeCode()) {
     log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
   }

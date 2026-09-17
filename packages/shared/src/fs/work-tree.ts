@@ -171,9 +171,11 @@ export function guardFindingsReportPath(workDir: string): string {
 }
 
 /**
- * The marker written before a `world: mutates` tail runs and cleared by a
- * successful `api.services.reset`. One that survives means the world still
- * carries the tail's damage, so the next boot resets before `up`.
+ * The marker that says the datastore's state is UNKNOWN, so the next boot runs
+ * `api.services.reset` before `up`. A successful reset clears it. Two writers
+ * put it there: a run about to execute a `world: mutates` tail (one that
+ * survives means the tail's damage was never undone), and a job materializing a
+ * fresh clone of a world earlier jobs of this repository shared.
  */
 export function guardWorldDirtyMarkerPath(workDir: string): string {
   return path.join(guardDir(workDir), WORLD_DIRTY_FILE);

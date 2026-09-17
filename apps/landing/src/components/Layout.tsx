@@ -18,7 +18,7 @@ export default function Layout() {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [pathname, hash]);
 
-  // PostHog SPA pageview — fires on every react-router pathname change.
+  // PostHog SPA pageview, fired on every react-router pathname change.
   // Initial pageview is captured automatically by posthog.init.
   useEffect(() => {
     trackPageview(pathname + hash);

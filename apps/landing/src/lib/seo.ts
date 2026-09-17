@@ -7,8 +7,8 @@ import type { MetaDescriptor } from 'react-router';
 const SITE_URL = (import.meta.env.VITE_SITE_URL as string | undefined) ?? 'https://truecourse.dev';
 
 /**
- * Builds the per-route `<head>` descriptors — title, description, canonical, and
- * Open Graph / Twitter tags — for a route module's `meta` export. Rendered into
+ * Builds the per-route `<head>` descriptors (title, description, canonical, and
+ * Open Graph / Twitter tags) for a route module's `meta` export. Rendered into
  * the pre-rendered HTML at build time and kept in sync on client navigation.
  */
 export function pageMeta(opts: {
