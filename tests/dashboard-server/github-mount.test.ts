@@ -526,7 +526,7 @@ describe('the connect callback', () => {
       .set('Cookie', `tc_session=${ORG}`)
       .query({ code: 'c0de', installation_id: '99', setup_action: 'install', state: state() })
       .expect(302)
-      .expect('location', 'http://localhost:3000/settings/repositories');
+      .expect('location', 'http://localhost:3000/settings/repositories?github=attached&accounts=octo&from=settings');
 
     expect(codes).toEqual(['c0de']);
     expect(await store.getInstallation(99)).toMatchObject({
@@ -620,7 +620,7 @@ describe('the connect callback', () => {
       .set('Cookie', `tc_session=${ORG}`)
       .query({ code: 'c0de', state: state() })
       .expect(302)
-      .expect('location', 'http://localhost:3000/settings/repositories');
+      .expect('location', 'http://localhost:3000/settings/repositories?github=attached&accounts=acme&from=settings');
 
     expect(await store.getInstallation(INSTALLATION_ID)).toBeNull();
     expect((await store.getInstallation(4242))?.workspaceOrgIds).toEqual([ORG]);

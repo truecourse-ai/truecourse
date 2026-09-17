@@ -31,6 +31,9 @@ let currentUser = 'u1';
 let lookupAccount: Mock<AccountLookup>;
 // What GitHub says the person behind an OAuth code can reach.
 let userInstallations: Mock<UserInstallations>;
+// The App uninstalling itself from an account, once no workspace holds it.
+type Uninstall = NonNullable<ConnectDeps['uninstallInstallation']>;
+let uninstall: Mock<Uninstall>;
 // Repos the stubbed installation client returns (the connect router paginates it).
 let installRepos: Array<{ full_name: string; default_branch: string; private: boolean }>;
 // What the stubbed installation says of its access: the selection mode GitHub
@@ -87,6 +90,7 @@ function mount(deps: Partial<ConnectDeps> = {}): Express {
       octokitFor: () => stubOctokit,
       userInstallationsFor: userInstallations,
       lookupInstallationAccount: lookupAccount,
+      uninstallInstallation: uninstall,
       ...deps,
     }),
   );
@@ -97,6 +101,7 @@ beforeEach(() => {
   store = new MemoryInstallationStore();
   currentOrg = 'org_A';
   currentUser = 'u1';
+  uninstall = vi.fn<Uninstall>(async () => {});
   installRepos = [
     { full_name: 'acme/api', default_branch: 'main', private: true },
     { full_name: 'acme/web', default_branch: 'develop', private: false },
@@ -424,6 +429,15 @@ describe('the connect callback', () => {
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
   });
 
+  it('tells a trip started from Settings what it attached, since nothing else there shows it', async () => {
+    userInstallations.mockResolvedValue([ACME]);
+    await request(app)
+      .get('/api/ee/github/callback')
+      .query({ code: 'c0de', state: stateFor('org_A', 'u1', 'settings') })
+      .expect(302)
+      .expect('location', `${SETTINGS}?github=attached&accounts=acme&from=settings`);
+  });
+
   it('heals an App reinstalled on an account already held: the new id takes over its repositories and links', async () => {
     // The old installation of acme, held by two workspaces with a repository
     // each; GitHub has since given acme a new id and forgotten the old one.
@@ -680,12 +694,43 @@ describe('detaching an installation from a workspace', () => {
     });
 
     const res = await request(server).delete('/api/ee/github/installations/100').expect(200);
-    expect(res.body).toEqual({ ok: true, disconnected: ['acme/api'] });
+    expect(res.body).toEqual({ ok: true, disconnected: ['acme/api'], uninstall: 'kept' });
     expect(cleaned).toEqual(['acme/api']);
     expect(await store.getRepo('acme/api')).toBeNull();
     expect((await store.getRepo('acme/web'))?.workspaceOrgId).toBe('org_B');
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_B']);
     expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
+    // Another workspace still holds it: the App stays on GitHub.
+    expect(uninstall).not.toHaveBeenCalled();
+  });
+
+  it('uninstalls the App from the account when the last workspace lets go, and drops the row', async () => {
+    await seedInstallation(['org_A']);
+    const res = await request(app).delete('/api/ee/github/installations/100').expect(200);
+    expect(res.body).toEqual({ ok: true, disconnected: [], uninstall: 'done' });
+    expect(uninstall).toHaveBeenCalledWith(100);
+    expect(await store.getInstallation(100)).toBeNull();
+  });
+
+  it('says when GitHub refused the uninstall, the row gone all the same', async () => {
+    await seedInstallation(['org_A']);
+    uninstall.mockRejectedValue(new Error('Resource not accessible by integration'));
+    const res = await request(app).delete('/api/ee/github/installations/100').expect(200);
+    expect(res.body).toEqual({
+      ok: true,
+      disconnected: [],
+      uninstall: 'failed',
+      reason: 'Resource not accessible by integration',
+    });
+    expect(await store.getInstallation(100)).toBeNull();
+  });
+
+  it('tells the status read how many workspaces hold each installation', async () => {
+    await seedInstallation(['org_A', 'org_B', 'org_C']);
+    const res = await request(app).get('/api/ee/github/status').expect(200);
+    expect((res.body as GithubConnectStatusResponse).installations).toEqual([
+      { installationId: 100, accountLogin: 'acme', accountType: 'Organization', workspaces: 3 },
+    ]);
   });
 
   it('keeps the link when a repository’s cleanup fails, disconnects the rest, and names both so a retry finishes', async () => {
@@ -709,7 +754,7 @@ describe('detaching an installation from a workspace', () => {
 
     busy = false;
     const retry = await request(server).delete('/api/ee/github/installations/100').expect(200);
-    expect(retry.body).toEqual({ ok: true, disconnected: ['acme/web'] });
+    expect(retry.body).toEqual({ ok: true, disconnected: ['acme/web'], uninstall: 'done' });
     expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
   });
 
@@ -761,7 +806,7 @@ describe('the account behind an installation', () => {
 
     const first = await request(app).get('/api/ee/github/status').expect(200);
     expect((first.body as GithubConnectStatusResponse).installations).toEqual([
-      { installationId: 157207108, accountLogin: 'octo-org', accountType: 'Organization' },
+      { installationId: 157207108, accountLogin: 'octo-org', accountType: 'Organization', workspaces: 1 },
     ]);
     // Persisted, so the next read is already named and costs no API call.
     expect(await store.getInstallation(157207108)).toMatchObject({

@@ -24,6 +24,7 @@ import { deleteRepo, fetchApi, getRepos, type RepoResponse } from '@/lib/api';
 import type {
   GithubAttachRequest,
   GithubConnectStatusResponse,
+  GithubDetachResponse,
   GithubInstallableRepo,
   GithubInstallationAccessResponse,
   GithubInstallationReposResponse,
@@ -99,8 +100,8 @@ export async function fetchInstallationRepos(
  * Rejects with the server's reason, which may be a repository that would not
  * disconnect: the rest are gone and the account stays, so a retry finishes.
  */
-export async function detachGithubInstallation(installationId: number): Promise<void> {
-  await fetchApi<{ ok: boolean }>(`/api/github/installations/${installationId}`, {
+export function detachGithubInstallation(installationId: number): Promise<GithubDetachResponse> {
+  return fetchApi<GithubDetachResponse>(`/api/github/installations/${installationId}`, {
     method: 'DELETE',
   });
 }

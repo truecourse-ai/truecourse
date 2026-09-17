@@ -92,8 +92,16 @@ const RETURN_TO: Record<GithubInstallOrigin, string> = {
  * one-off outcome in the app is. `pick` is not here — it needs an answer, so
  * it is drawn inline. The title names the event; a refusal is an error toast.
  */
-function toastConnectOutcome(outcome: Exclude<GithubConnectOutcome, 'pick'>): void {
+function toastConnectOutcome(
+  outcome: Exclude<GithubConnectOutcome, 'pick'>,
+  params: URLSearchParams,
+): void {
   switch (outcome) {
+    case 'attached': {
+      const accounts = (params.get('accounts') ?? '').split(',').filter(Boolean);
+      toast(accounts.length > 0 ? `Connected ${accounts.join(', ')}` : 'GitHub account connected');
+      return;
+    }
     case 'updated':
       toast('Repository access updated on GitHub');
       return;
@@ -232,7 +240,10 @@ function ConnectAccountsDialog({
 /**
  * The one destructive action on the page asks first, in the app's own dialog:
  * what leaves with the account (its repositories connected here, the Context
- * sources reading through it), then Remove or not.
+ * sources reading through it), then Remove or not. When this is the LAST
+ * workspace holding the installation, removing it uninstalls the App from
+ * the account on GitHub too, and the dialog says so: the next Connect then
+ * starts from GitHub's install page, repositories picked afresh.
  */
 function RemoveAccountDialog({
   installation,
@@ -246,13 +257,17 @@ function RemoveAccountDialog({
   onConfirm: (installation: GithubInstallationSummary) => void;
 }) {
   const name = installation ? installation.accountLogin || `#${installation.installationId}` : '';
+  const others = Math.max((installation?.workspaces ?? 1) - 1, 0);
+  const last = others === 0;
   return (
     <Dialog open={installation !== null} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Remove {name} from this workspace?</DialogTitle>
+          <DialogTitle>{last ? `Remove ${name} and uninstall the App?` : `Remove ${name} from this workspace?`}</DialogTitle>
           <DialogDescription>
-            The account stays installed on GitHub. Other workspaces keep it.
+            {last
+              ? `No other workspace uses ${name}, so the App will be uninstalled from it on GitHub. Connecting it again means installing the App again and picking its repositories.`
+              : `${others} other workspace${others === 1 ? '' : 's'} keep${others === 1 ? 's' : ''} it. The App stays installed on GitHub.`}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2 text-xs text-muted-foreground">
@@ -286,7 +301,7 @@ function RemoveAccountDialog({
             onClick={() => installation && onConfirm(installation)}
             className="rounded bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground hover:opacity-90"
           >
-            Remove
+            {last ? 'Remove and uninstall' : 'Remove'}
           </button>
         </DialogFooter>
       </DialogContent>
@@ -383,7 +398,7 @@ function RepositoriesTab() {
     told.current = true;
     // Not cleared on cleanup: dropping the flag re-runs this effect at once,
     // and the toast has to outlive that.
-    setTimeout(() => toastConnectOutcome(outcome), 0);
+    setTimeout(() => toastConnectOutcome(outcome, params), 0);
     const next = new URLSearchParams(params);
     next.delete('github');
     setParams(next, { replace: true });
@@ -457,9 +472,22 @@ function RepositoriesTab() {
     async (installation: GithubInstallationSummary) => {
       setRemoving(null);
       setDetaching(installation.installationId);
+      const name = installation.accountLogin || `#${installation.installationId}`;
       let failure: string | null = null;
       try {
-        await detachGithubInstallation(installation.installationId);
+        const answer = await detachGithubInstallation(installation.installationId);
+        // Told as it went: gone from GitHub too, still on GitHub because
+        // GitHub refused (the one thing left to do by hand), or kept for
+        // the other workspaces.
+        if (answer.uninstall === 'done') {
+          toast(`Removed ${name}`, { description: 'The App was uninstalled from it on GitHub.' });
+        } else if (answer.uninstall === 'failed') {
+          toast.error(`Removed ${name} here, but the App is still installed on GitHub`, {
+            description: `${answer.reason ?? 'GitHub refused the uninstall.'} Uninstall it on GitHub.`,
+          });
+        } else {
+          toast(`Removed ${name} from this workspace`);
+        }
       } catch (error: unknown) {
         failure = error instanceof Error ? error.message : 'Could not remove the account';
       }

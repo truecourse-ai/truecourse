@@ -36,6 +36,7 @@ export {
   installationOctokit,
   appOctokit,
   fetchInstallationAccount,
+  uninstallApp,
   splitRepo,
   type OctokitClient,
   type RepoCoords,

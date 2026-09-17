@@ -34,6 +34,7 @@ import {
   PostgresInstallationStore,
   reachableInstallations,
   splitRepo,
+  uninstallApp,
   type InstallationStore,
   type GithubAuth,
   type OctokitClient,
@@ -84,6 +85,8 @@ export interface GithubConnectionOverrides {
   userInstallationsFor?: (code: string) => Promise<UserInstallation[]>;
   /** Signs the connect `state`. Default: `TRUECOURSE_SECRET_KEY`. */
   stateSecret?: string;
+  /** Uninstall the App from an account. Default: the App API (app-level auth). */
+  uninstallInstallation?: (installationId: number) => Promise<void>;
   /** Per-run work trees. Default: a token clone into the workspace's run dir. */
   workTree?: WorkTreeProvider;
   /**
@@ -253,6 +256,9 @@ export function createGithubConnection(
     lookupInstallationAccount:
       overrides.lookupInstallationAccount ??
       ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
+    uninstallInstallation:
+      overrides.uninstallInstallation ??
+      ((installationId: number) => uninstallApp(cfg, installationId)),
     onRepoLinked: async (link: RepositoryRecord) => {
       // Connecting starts the repository's Flow setup, which derives its recipe,
       // dependencies and interfaces from the CODE. What the repository reads is

@@ -19,6 +19,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import type {
   GithubConnectStatusResponse,
+  GithubDetachResponse,
   GithubInstallationAccessResponse,
   GithubRepoSummary,
 } from '@truecourse/shared';
@@ -72,14 +73,16 @@ function status(over: Partial<GithubConnectStatusResponse> = {}): GithubConnectS
 
 /** The attach requests the page posted, body by body. */
 let attached: unknown[] = [];
-/** The installations the page asked to detach. */
+/** The installations the page asked to detach, and what the server answers. */
 let detached: number[] = [];
+let detachAnswer: GithubDetachResponse = { ok: true, disconnected: [], uninstall: 'done' };
 /** What GitHub says each installation may see; unanswered ids 404. */
 let access: Record<number, GithubInstallationAccessResponse> = {};
 
 function serve(githubStatus: (url: URL) => Response = () => json(status())) {
   attached = [];
   detached = [];
+  detachAnswer = { ok: true, disconnected: [], uninstall: 'done' };
   access = { 42: { installed: true, repositorySelection: 'selected', repositories: 5 } };
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -99,7 +102,7 @@ function serve(githubStatus: (url: URL) => Response = () => json(status())) {
     const detach = /^\/api\/github\/installations\/(\d+)$/.exec(pathname);
     if (detach && init?.method === 'DELETE') {
       detached.push(Number(detach[1]));
-      return json({ ok: true, disconnected: [] });
+      return json(detachAnswer);
     }
     if (pathname === '/api/llm/config') return json({ config: null, providers: ['anthropic'] });
     if (pathname === '/api/sessions/runs') return json({ runs: [] });
@@ -200,15 +203,24 @@ describe('Settings › Repositories', () => {
     await within(rows[2]!).findByText(/access unknown/);
   });
 
-  it('asks before removing an account, in its own dialog, naming what leaves with it', async () => {
+  it('asks before removing the last workspace’s account, saying the App will be uninstalled, and tells how it went', async () => {
     const user = userEvent.setup();
-    serve();
+    serve(() =>
+      json(
+        status({
+          installations: [
+            { installationId: 42, accountLogin: 'linkwarden', accountType: 'Organization', workspaces: 1 },
+          ],
+        }),
+      ),
+    );
     renderAt('/settings/repositories');
     const github = providerRow('GitHub');
     await user.click(await within(github).findByRole('button', { name: 'Remove linkwarden' }));
 
     const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveTextContent('Remove linkwarden from this workspace?');
+    expect(dialog).toHaveTextContent('Remove linkwarden and uninstall the App?');
+    expect(dialog).toHaveTextContent('No other workspace uses linkwarden, so the App will be uninstalled from it on GitHub.');
     expect(dialog).toHaveTextContent('2 repositories connected through it will be disconnected');
     expect(dialog).toHaveTextContent('linkwarden/linkwarden');
     expect(dialog).toHaveTextContent('linkwarden/docs');
@@ -218,9 +230,59 @@ describe('Settings › Repositories', () => {
     expect(detached).toEqual([]);
 
     await user.click(within(github).getByRole('button', { name: 'Remove linkwarden' }));
-    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove and uninstall' }),
+    );
     await waitFor(() => expect(detached).toEqual([42]));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(await screen.findByText('Removed linkwarden')).toBeInTheDocument();
+    expect(screen.getByText('The App was uninstalled from it on GitHub.')).toBeInTheDocument();
+  });
+
+  it('says other workspaces keep an account they share, and that the App stays on GitHub', async () => {
+    const user = userEvent.setup();
+    serve(() =>
+      json(
+        status({
+          installations: [
+            { installationId: 42, accountLogin: 'linkwarden', accountType: 'Organization', workspaces: 3 },
+          ],
+        }),
+      ),
+    );
+    detachAnswer = { ok: true, disconnected: [], uninstall: 'kept' };
+    renderAt('/settings/repositories');
+    const github = providerRow('GitHub');
+    await user.click(await within(github).findByRole('button', { name: 'Remove linkwarden' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Remove linkwarden from this workspace?');
+    expect(dialog).toHaveTextContent('2 other workspaces keep it. The App stays installed on GitHub.');
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(detached).toEqual([42]));
+    expect(await screen.findByText('Removed linkwarden from this workspace')).toBeInTheDocument();
+  });
+
+  it('says when GitHub refused the uninstall, and what is left to do by hand', async () => {
+    const user = userEvent.setup();
+    serve();
+    detachAnswer = { ok: true, disconnected: [], uninstall: 'failed', reason: 'GitHub is down.' };
+    renderAt('/settings/repositories');
+    const github = providerRow('GitHub');
+    await user.click(await within(github).findByRole('button', { name: 'Remove linkwarden' }));
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove and uninstall' }),
+    );
+    expect(
+      await screen.findByText('Removed linkwarden here, but the App is still installed on GitHub'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('GitHub is down. Uninstall it on GitHub.')).toBeInTheDocument();
+  });
+
+  it('toasts what a trip started here attached', async () => {
+    serve();
+    renderAt('/settings/repositories?github=attached&accounts=acme%2Cocto&from=settings');
+    expect(await screen.findByText('Connected acme, octo')).toBeInTheDocument();
   });
 
   it('asks for an install link that returns to where the user came from', async () => {

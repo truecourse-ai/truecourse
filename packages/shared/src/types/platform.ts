@@ -63,6 +63,26 @@ export interface GithubInstallationSummary {
    * offered account, which the workspace cannot ask GitHub about yet.
    */
   repositorySelection?: 'all' | 'selected'
+  /**
+   * How many workspaces hold the installation, this one included. Carried on
+   * a held account: at 1, removing it here uninstalls the App on GitHub.
+   */
+  workspaces?: number
+}
+
+/**
+ * `DELETE /api/github/installations/:id`: the workspace let go of the
+ * installation. An installation no workspace holds any more is uninstalled
+ * from GitHub by the App itself (`done`), or stays there when GitHub refused
+ * (`failed`, with the reason) — the row is gone either way; one other
+ * workspaces still hold is `kept` on GitHub.
+ */
+export interface GithubDetachResponse {
+  ok: true
+  /** The repositories this workspace had connected through it, now disconnected. */
+  disconnected: string[]
+  uninstall: 'done' | 'failed' | 'kept'
+  reason?: string
 }
 
 /**
@@ -111,12 +131,14 @@ export const GITHUB_INSTALL_ORIGINS = ['settings', 'code-connect', 'context-add'
 export type GithubInstallOrigin = (typeof GITHUB_INSTALL_ORIGINS)[number];
 
 /**
- * How a trip to GitHub ended when it did not simply attach what it set out to:
- * the `github=<outcome>` flag the callback lands Settings › Repositories with,
- * beside `from=<origin>` naming where the trip started. A trip that attached
- * lands back at its origin with no flag at all.
+ * How a trip to GitHub ended: the `github=<outcome>` flag the callback lands
+ * Settings › Repositories with, beside `from=<origin>` naming where the trip
+ * started. A trip that attached lands back at its origin, flagged only when
+ * that origin is Settings itself; the other origins show what arrived.
  */
 export const GITHUB_CONNECT_OUTCOMES = [
+  /** Attached, on a trip started from Settings; `accounts` names what, comma-separated. */
+  'attached',
   /** GitHub named accounts this workspace does not hold; `offer` carries them for the person to pick from. */
   'pick',
   /** The person asked an account's owners to install the App; nothing to attach until they approve. */

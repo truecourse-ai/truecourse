@@ -37,6 +37,7 @@ import type {
   AuthUser,
   GithubAttachRequest,
   GithubConnectStatusResponse,
+  GithubDetachResponse,
   GithubInstallableRepo,
   GithubInstallationAccessResponse,
   GithubInstallationReposResponse,
@@ -71,11 +72,13 @@ function toInstallationSummary(
   r: InstallationRecord | UserInstallation,
 ): GithubInstallationSummary {
   const selection = 'repositorySelection' in r ? r.repositorySelection : undefined;
+  const workspaces = 'workspaceOrgIds' in r ? r.workspaceOrgIds.length : undefined;
   return {
     installationId: r.installationId,
     accountLogin: r.accountLogin,
     accountType: r.accountType,
     ...(selection ? { repositorySelection: selection } : {}),
+    ...(workspaces === undefined ? {} : { workspaces }),
   };
 }
 
@@ -175,6 +178,12 @@ export interface ConnectDeps {
   onRepoUnlinked?: OnRepoUnlinked;
   /** Post-replacement hook; see {@link OnInstallationReplaced}. Best-effort: its failure is logged. */
   onInstallationReplaced?: OnInstallationReplaced;
+  /**
+   * Uninstall the App from an account, as the App itself: what the last
+   * workspace letting go of an installation does. A throw is GitHub's
+   * refusal, answered as such; the row goes either way.
+   */
+  uninstallInstallation?: (installationId: number) => Promise<void>;
 }
 
 /** An error's own HTTP status if it carries one, else a bad-gateway default. */
@@ -353,6 +362,18 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     }
     return healed;
   };
+
+  /**
+   * Where a trip that attached lands. Back where it started; a trip started
+   * from Settings is told what arrived, since nothing else on that page
+   * shows it, and the other origins show the new account in their own lists.
+   */
+  const landAttached = (origin: GithubInstallOrigin | null, attached: UserInstallation[]): string =>
+    origin === 'settings'
+      ? settled(origin, 'attached', {
+          accounts: attached.map((i) => i.accountLogin || `#${i.installationId}`).join(','),
+        })
+      : landing(origin);
 
   /** The offer behind a token, when it is this session's; null otherwise. */
   const offerFor = (raw: unknown, user: AuthUser, orgId: string) => {
@@ -547,7 +568,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
         return;
       }
       await attach([installed], orgId);
-      res.redirect(landing(origin));
+      res.redirect(landAttached(origin, [installed]));
       return;
     }
 
@@ -575,7 +596,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     const candidates = named.filter((i) => !healed.has(i.installationId));
     if (candidates.length === 0) {
       if (healed.size > 0) {
-        res.redirect(landing(origin));
+        res.redirect(landAttached(origin, named.filter((i) => healed.has(i.installationId))));
         return;
       }
       // Everything the person can reach is attached already, so the only
@@ -593,7 +614,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     if (candidates.length === 1) {
       // One possible answer to Add account is the answer: attach it.
       await attach(candidates, orgId);
-      res.redirect(landing(origin));
+      res.redirect(landAttached(origin, candidates));
       return;
     }
     // A choice the person has not made yet: GitHub's list, signed, for the
@@ -695,7 +716,29 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     log.info(
       `[github] installation ${installationId} detached from workspace ${orgId} (${mine.length} repositor${mine.length === 1 ? 'y' : 'ies'} disconnected)`,
     );
-    res.json({ ok: true, disconnected });
+    const left = (await deps.store.getInstallation(installationId))?.workspaceOrgIds ?? [];
+    if (left.length > 0) {
+      const kept: GithubDetachResponse = { ok: true, disconnected, uninstall: 'kept' };
+      res.json(kept);
+      return;
+    }
+    // The last workspace let go: the App leaves the account on GitHub too,
+    // so the next Connect starts from GitHub's install page rather than
+    // re-attaching an installation nobody asked for. The row goes whatever
+    // GitHub says; an uninstall it refused is reported, not retried.
+    let body: GithubDetachResponse;
+    try {
+      if (!deps.uninstallInstallation) throw new Error('this server cannot uninstall the App');
+      await deps.uninstallInstallation(installationId);
+      log.info(`[github] installation ${installationId} uninstalled from GitHub: no workspace held it`);
+      body = { ok: true, disconnected, uninstall: 'done' };
+    } catch (err) {
+      const reason = (err as Error).message;
+      log.warn(`[github] installation ${installationId} could not be uninstalled from GitHub: ${reason}`);
+      body = { ok: true, disconnected, uninstall: 'failed', reason };
+    }
+    await deps.store.removeInstallation(installationId);
+    res.json(body);
   });
 
   router.post('/repos/link', async (req: Request, res: Response) => {
