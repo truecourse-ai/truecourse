@@ -89,8 +89,8 @@ export function useGuardDecisions(
     [decisions],
   );
 
-  // ONE write tail for both tiers: run the route, land the decisions it answers
-  // with. A disabled hook writes nothing at all.
+  // ONE write tail for both tiers: run the route and land the decisions it
+  // answers with. A disabled hook writes nothing at all.
   const write = useCallback(
     async (run: (repoId: string) => Promise<GuardDecisions>) => {
       if (!repoId || !enabled) return;

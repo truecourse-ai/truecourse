@@ -77,8 +77,24 @@ import {
   orgOf,
   startWorkspaceLlm,
 } from '../services/workspace-llm.service.js';
+import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
 
 const router: Router = Router();
+
+/** The person who asked, as a job payload carries them. */
+const requestedBy = (req: Request): { requestedBy?: string } =>
+  req.user?.id ? { requestedBy: req.user.id } : {};
+
+/** A ruling that landed: one flow or one claim is out of testing. */
+function reportDismissal(req: Request, kind: 'claim' | 'flow'): void {
+  const who = actorOf(req);
+  if (who) {
+    captureAction(EVENTS.findingDismissed, {
+      ...who,
+      properties: { kind, repoId: req.params.id as string },
+    });
+  }
+}
 
 // Shared write tail for the decisions mutations: run the write, the optional
 // post-write side effect (the hosted regen dispatch on the last dismissal), then
@@ -199,6 +215,7 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
       repoFullName: repo.path,
       workspaceOrgId: orgOf(req),
       source: 'manual',
+      ...requestedBy(req),
       ...(resume ? { resumeRunId: resume.runId } : {}),
     });
     if (outcome.status === 'busy') {
@@ -235,6 +252,7 @@ router.post('/:id/guard/setup', async (req: Request, res: Response, next: NextFu
       repoFullName: repo.path,
       workspaceOrgId: orgOf(req),
       source: 'manual',
+      ...requestedBy(req),
       ...(only ? { only } : {}),
       ...(body.refresh ? { refresh: true } : {}),
     });
@@ -261,6 +279,7 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
       repoFullName: repo.path,
       workspaceOrgId: orgOf(req),
       source: 'manual',
+      ...requestedBy(req),
     });
     if (outcome.status === 'busy') {
       res.status(409).json({ error: 'A guard job is already running for this repo.' });
@@ -299,6 +318,7 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
         }),
       () => regenerateIfLastFindingDismissed(repo.path),
     );
+    reportDismissal(req, 'claim');
   } catch (e) {
     next(e);
   }
@@ -349,6 +369,7 @@ router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next
         ...(note ? { note } : {}),
       }),
     );
+    reportDismissal(req, 'flow');
   } catch (e) {
     next(e);
   }

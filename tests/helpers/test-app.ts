@@ -31,11 +31,13 @@ import {
 } from '../../apps/dashboard/server/src/services/workspace-llm.service';
 
 export const TEST_ORG = 'org_test';
+/** The signed-in person every route test runs as. */
+export const TEST_USER = 'user_test';
 
 export const testAuthVerifier =
   (orgId: string = TEST_ORG): AuthVerifier =>
   async () => ({
-    user: { id: 'user_test', email: 'test@example.com', organizationId: orgId },
+    user: { id: TEST_USER, email: 'test@example.com', organizationId: orgId },
   });
 
 /**

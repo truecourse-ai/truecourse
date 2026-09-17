@@ -32,6 +32,7 @@ import {
 } from '@truecourse/shared';
 import type { WorkosConfig } from './config.js';
 import { forgetMembership } from './workos-auth.js';
+import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
 
 /** How long an invitation stands before it expires; a link's lifetime is the inviter's pick. */
 const INVITATION_DAYS = 7;
@@ -276,6 +277,8 @@ export function createWorkspaceMembersRouter(
         inviterName: caller.name,
         expiresAt: new Date(Date.now() + days * DAY_MS).toISOString(),
       });
+      const who = actorOf(req);
+      if (who) captureAction(EVENTS.inviteLinkCreated, { ...who, properties: { days } });
       res.status(201).json({ link: toInviteLink(link, cfg.appUrl) });
     } catch (err) {
       upstreamFailed(res, `creating an invite link for ${caller.org}`, err);

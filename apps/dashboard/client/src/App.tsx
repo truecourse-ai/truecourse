@@ -4,12 +4,16 @@
  * {@link DashboardApp}, behind the auth gate — except the invite page, which a
  * person who is not signed in yet has to be able to open. A local server has
  * nobody to invite, so there it is not a route at all.
+ *
+ * {@link Analytics} rides inside the router and outside the gate: it needs the
+ * address to report a pageview, and a visit counts before a session does.
  */
 
 import type { ReactNode } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useDarkMode } from './hooks/useDarkMode';
+import { Analytics } from './lib/analytics';
 import { AppProvider, useServerMode } from './contexts/CapabilityContext';
 import { AuthProvider, AuthGate } from './auth/AuthContext';
 import { InvitePage } from './auth/InvitePage';
@@ -35,6 +39,7 @@ export default function App() {
     <AppProvider>
       <AuthProvider>
         <BrowserRouter>
+          <Analytics />
           <AppRoutes>
             <AuthGate>
               <DashboardApp />

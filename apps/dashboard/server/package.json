@@ -31,6 +31,7 @@
     "chokidar": "^4.0.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
+    "posthog-node": "^5.52.4",
     "socket.io": "^4.8.0",
     "ai": "^6.0.0"
   },

@@ -1,24 +1,23 @@
-import { Link } from 'react-router';
-import { Reveal } from './Reveal';
+import { AppLink } from './AppLink';
+import { Voyage } from './Voyage';
+
+const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
 
 export function CTASection() {
   return (
     <section className="cta" id="cta">
-      <div className="hero-glow" />
       <div className="wrap">
-        <Reveal as="h2">
-          Verify at <span className="hl">AI speed.</span>
-        </Reveal>
-        <Reveal as="p" delay={80}>
-          AI made writing fast; review is the bottleneck. Every change checked against what
-          your team decided, before it ships.
-        </Reveal>
-        <Reveal className="cta-row" delay={160}>
-          <Link className="btn btn-primary" to="/request-access">
-            Request access <span className="arr">→</span>
-          </Link>
-        </Reveal>
+        <h2>Put your docs to the test.</h2>
+        <div className="cta-row">
+          <AppLink className="btn btn-primary" placement="cta">
+            Get started
+          </AppLink>
+          <a className="btn" href={GITHUB_URL} target="_blank" rel="noreferrer">
+            View on GitHub
+          </a>
+        </div>
       </div>
+      <Voyage />
     </section>
   );
 }

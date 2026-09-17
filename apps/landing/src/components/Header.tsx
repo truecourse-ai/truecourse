@@ -1,29 +1,30 @@
 import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { SiGithub } from 'react-icons/si';
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { cn } from '@/lib/cn';
+import { AppLink } from './AppLink';
 import { DiscordIcon } from './DiscordIcon';
 
 const DISCORD_URL = 'https://discord.gg/TanxB63arz';
 const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
+const DOCS_URL = 'https://docs.truecourse.dev/';
 
 const NAV = [
-  { href: '/#why-now', label: 'Why now' },
-  { href: '/#approach', label: 'Approach' },
-  { href: '/#run', label: 'Where it runs' },
-  { href: '/#integrations', label: 'Integrations' },
+  { href: '/#how', label: 'Product' },
+  { href: '/#sandbox', label: 'Sandbox' },
   { href: '/#enterprise', label: 'Enterprise' },
-  { href: '/#blog', label: 'Blog' },
+  { href: DOCS_URL, label: 'Docs' },
+  { href: '/blog', label: 'Blog' },
 ];
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const { pathname } = useLocation();
-  const onHome = pathname === '/';
-  const onRequestAccess = pathname === '/request-access';
-  const onBlog = pathname.startsWith('/blog');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const onHome = location.pathname === '/';
+  const onBlog = location.pathname.startsWith('/blog');
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -34,11 +35,27 @@ export function Header() {
 
   useEffect(() => {
     setOpen(false);
-  }, [pathname]);
+  }, [location.pathname]);
 
   // Off the home page there's no hero behind the header, so keep the blurred
-  // surface always on (mirrors the request-access prototype).
+  // surface always on.
   const showSurface = scrolled || !onHome;
+
+  const navLink = (item: (typeof NAV)[number]) =>
+    item.href.startsWith('/') ? (
+      <Link
+        key={item.href}
+        to={item.href}
+        onClick={() => setOpen(false)}
+        style={item.href === '/blog' && onBlog ? { color: 'var(--fg)' } : undefined}
+      >
+        {item.label}
+      </Link>
+    ) : (
+      <a key={item.href} href={item.href} target="_blank" rel="noreferrer">
+        {item.label}
+      </a>
+    );
 
   return (
     <header className={cn('site', showSurface && 'scrolled')} id="site-header">
@@ -48,6 +65,7 @@ export function Header() {
           onClick={(e) => {
             if (onHome) {
               e.preventDefault();
+              if (location.hash || location.search) navigate('/', { replace: true });
               window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
             }
           }}
@@ -57,46 +75,15 @@ export function Header() {
           TrueCourse
         </Link>
 
-        <nav className="nav-links">
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              to={item.href}
-              style={item.href === '/#blog' && onBlog ? { color: 'var(--fg)' } : undefined}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        <nav className="nav-links">{NAV.map(navLink)}</nav>
 
         <div className="nav-actions">
-          <a
-            className="icon-btn desktop-only"
-            href={DISCORD_URL}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Discord"
-          >
-            <DiscordIcon />
-          </a>
-          <a
-            className="icon-btn desktop-only"
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="GitHub"
-          >
-            <SiGithub />
-          </a>
-          {onRequestAccess ? (
-            <Link className="btn btn-sm" to="/">
-              <span className="arr">←</span> Back
-            </Link>
-          ) : (
-            <Link className="btn btn-primary btn-sm" to="/request-access">
-              Request access
-            </Link>
-          )}
+          <AppLink className="nav-signin desktop-only" placement="header">
+            Sign in
+          </AppLink>
+          <AppLink className="btn btn-primary btn-sm" placement="header">
+            Get started
+          </AppLink>
           <button
             type="button"
             className="icon-btn mobile-toggle"
@@ -112,11 +99,8 @@ export function Header() {
       {open && (
         <div className="mobile-menu">
           <div className="wrap row">
-            {NAV.map((item) => (
-              <Link key={item.href} to={item.href} onClick={() => setOpen(false)}>
-                {item.label}
-              </Link>
-            ))}
+            {NAV.map(navLink)}
+            <AppLink placement="header">Sign in</AppLink>
             <a href={GITHUB_URL} target="_blank" rel="noreferrer">
               <SiGithub /> GitHub
             </a>

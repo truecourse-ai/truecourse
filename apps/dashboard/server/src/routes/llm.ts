@@ -28,6 +28,7 @@ import {
   probeWorkspaceLlmConfig,
   workspaceLlmConfigStore,
 } from '../services/workspace-llm.service.js';
+import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
 
 const OPERATOR_MESSAGE =
   "This instance runs on the operator's Claude Code (TRUECOURSE_LLM_TRANSPORT=claude-code); the workspace provider is not used.";
@@ -134,6 +135,13 @@ router.patch('/config', async (req: Request, res: Response) => {
 
   await store.save(orgId, input);
   log.info(`[LLM] provider updated for ${orgId} → ${candidate.provider} (${candidate.model})`);
+  const who = actorOf(req);
+  if (who) {
+    captureAction(EVENTS.llmProviderSaved, {
+      ...who,
+      properties: { provider: input.provider, model: input.model },
+    });
+  }
   res.json({ config: await store.getView(orgId), providers: LLM_PROVIDER_KINDS });
 });
 

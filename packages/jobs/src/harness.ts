@@ -16,6 +16,9 @@
  *   - post the standardized success/failure notification (durable feed + toast),
  *     moving the row the job posted when it began rather than adding a second
  *   - report the failure through the runtime's `onException` seam and re-throw
+ *   - hand every CLAIMED job to the runtime's `onStarted` observer and every
+ *     SETTLED one — whatever its outcome — to its `onSettled` observer, which
+ *     is how a deployment watches its own work
  *
  * Cancellation is a first-class outcome, not a failure: a job cancelled while
  * queued never runs its body, and one aborted mid-run settles `cancelled` with
@@ -32,6 +35,11 @@ import { JobStepTracker, type StepEmit } from './steps.js';
 /** The minimum every job payload carries: the tracked row it settles. */
 export interface JobPayload {
   jobId: string;
+  /**
+   * The user id of the person whose request enqueued it. Unset when nobody
+   * asked directly: a chain, a webhook, the scheduler.
+   */
+  requestedBy?: string;
 }
 
 /** A single phase in a job's stepped checklist. */
@@ -56,8 +64,41 @@ export interface JobOutcome {
   notification: JobNotification | null;
 }
 
+/**
+ * One claimed job, as the runtime's observer sees it — the counterpart of
+ * {@link JobSettledInfo}, at the moment the row went `running` and the body is
+ * about to begin.
+ */
+export interface JobStartedInfo {
+  type: string;
+  jobId: string;
+  org: string;
+  payload: JobPayload;
+  /** The definition's `traceMeta`, undefined when it declares none. */
+  meta?: { repoFullName?: string | null; commitSha?: string | null };
+  /** Who asked for it, when a request did — the payload's own `requestedBy`. */
+  requestedBy?: string;
+}
+
 /** How a job settled — handed to `onSettled` so outcome-keyed chains can branch. */
 export type JobOutcomeStatus = 'succeeded' | 'failed' | 'cancelled';
+
+/**
+ * One settled job, as the runtime's observer sees it. Everything here is the
+ * row's own fact or the definition's trace metadata, so an observer that reports
+ * outside the process never has to read a payload to learn what happened.
+ */
+export interface JobSettledInfo {
+  type: string;
+  jobId: string;
+  org: string;
+  outcome: JobOutcomeStatus;
+  /** Wall time from the row being claimed to its terminal mark. */
+  durationMs: number;
+  payload: JobPayload;
+  /** The definition's `traceMeta`, undefined when it declares none. */
+  meta?: { repoFullName?: string | null; commitSha?: string | null };
+}
 
 /** The world a job body runs in: its payload + the stepped-progress API. */
 export interface JobContext<P> {
@@ -130,6 +171,20 @@ export interface JobRuntime<M = Record<string, unknown>> {
    * declares none.
    */
   onException?(err: unknown, meta: M | undefined): void;
+  /**
+   * Observe every job whose row was CLAIMED, before its body runs. Best-effort
+   * in the same way {@link JobRuntime.onSettled} is: a throwing observer is
+   * logged and the job proceeds. A row that could not be claimed never reaches
+   * it, so what it sees is work that actually began.
+   */
+  onStarted?(info: JobStartedInfo): void;
+  /**
+   * Observe every job that reached a terminal state — succeeded, failed OR
+   * cancelled — after the definition's own settle hook. Best-effort by
+   * construction: a throwing observer is logged and changes neither the job's
+   * outcome nor whether a failure rethrows.
+   */
+  onSettled?(info: JobSettledInfo): void;
 }
 
 /**
@@ -162,6 +217,22 @@ export async function executeJob<P extends JobPayload, M>(
     // Either way the graphile job is consumed here, so say so.
     log.info(`[jobs] ${def.type} ${jobId}: row is not queued — skipping the body`);
     return;
+  }
+  const claimedAt = Date.now();
+  // The claim is the start: from here a body runs, so this is where a watcher
+  // learns the work began. Same contract as the settled observer — a watcher,
+  // never a participant.
+  try {
+    rt.onStarted?.({
+      type: def.type,
+      jobId,
+      org,
+      payload,
+      meta: def.traceMeta?.(payload),
+      ...(payload.requestedBy ? { requestedBy: payload.requestedBy } : {}),
+    });
+  } catch (err) {
+    log.warn(`[jobs] ${def.type} ${jobId}: started observer failed: ${(err as Error).message}`);
   }
   // Seed the whole plan (all pending) so the popup shows every upcoming step from
   // the start, not just steps that already ran.
@@ -197,12 +268,19 @@ export async function executeJob<P extends JobPayload, M>(
   let failure: unknown = null;
   let runResult: unknown = undefined;
   let outcomeStatus: JobOutcomeStatus = 'succeeded';
+  // Stamped at the terminal mark in every path, so the observed duration is the
+  // job's own time rather than the notification's and the settle hook's.
+  let durationMs = 0;
+  const stampDuration = (): void => {
+    durationMs = Date.now() - claimedAt;
+  };
   // A stop the user asked for settles quietly: no error text, no toast, nothing
   // reported, and no result for the settled hook to chain off — whether the body
   // unwound on the abort or ran to completion despite it.
   const settleCancelled = async (): Promise<void> => {
     outcomeStatus = 'cancelled';
     runResult = undefined;
+    stampDuration();
     const cancelled = await rt.jobStore.markCancelled(jobId);
     if (cancelled) await publishProgress(cancelled);
   };
@@ -214,6 +292,7 @@ export async function executeJob<P extends JobPayload, M>(
       await settleCancelled();
     } else {
       // Terminal job state first (clears the client's activeJobs), then the toast.
+      stampDuration();
       const done = await rt.jobStore.markSucceeded(jobId, outcome.result ?? {});
       if (done) await publishProgress(done);
       if (outcome.notification)
@@ -225,6 +304,7 @@ export async function executeJob<P extends JobPayload, M>(
     } else {
       outcomeStatus = 'failed';
       const message = (err as Error).message;
+      stampDuration();
       const failed = await rt.jobStore.markFailed(jobId, message);
       if (failed) await publishProgress(failed);
       await postNotification(rt, org, def.type, jobId, def.onError(err as Error, payload), true);
@@ -239,6 +319,21 @@ export async function executeJob<P extends JobPayload, M>(
   // unless the run succeeded). A failure still rethrows after (jobs run with
   // maxAttempts:1 ⇒ permanent fail, and graphile records it).
   await def.onSettled?.(ctx, outcomeStatus, runResult);
+  // Then the runtime's observer, which is a watcher and not a participant: what
+  // a deployment does with a settled job must not be able to change the job.
+  try {
+    rt.onSettled?.({
+      type: def.type,
+      jobId,
+      org,
+      outcome: outcomeStatus,
+      durationMs,
+      payload,
+      meta: def.traceMeta?.(payload),
+    });
+  } catch (err) {
+    log.warn(`[jobs] ${def.type} ${jobId}: settled observer failed: ${(err as Error).message}`);
+  }
   if (failure) throw failure;
 }
 

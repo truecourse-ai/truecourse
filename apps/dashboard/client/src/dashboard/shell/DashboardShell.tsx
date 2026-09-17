@@ -3,7 +3,7 @@
  *
  * Top to bottom: the workspace the session is in, then Home, Context, Code,
  * Flows, Agent, Notifications (with the unread badge) and Settings, then the
- * user menu.
+ * user menu, which also holds the way out to the community.
  *
  * There is ONE workspace, so the block at the top names it and offers no way
  * out of it. An edition with more than one registers a switcher that replaces
@@ -36,6 +36,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { Brand } from '@/components/brand';
+import { DiscordIcon } from '@/components/DiscordIcon';
+import { EVENTS, trackEvent } from '@/lib/posthog';
 import { useEdition, useServerMode } from '@/contexts/CapabilityContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { useDashboardState } from './dashboard-state';
@@ -54,6 +56,9 @@ const NAV: { to: string; label: string; icon: LucideIcon; disabled?: boolean }[]
   { to: '/notifications', label: 'Notifications', icon: Bell },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
+
+/** The community's front door, the same invitation the README and the site give. */
+export const DISCORD_INVITE_URL = 'https://discord.gg/TanxB63arz';
 
 function rowClass(active: boolean, collapsed: boolean): string {
   return `relative flex items-center rounded-md text-sm font-medium transition-colors ${
@@ -291,6 +296,19 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
             {isDark ? 'Light mode' : 'Dark mode'}
           </button>
+          <a
+            href={DISCORD_INVITE_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => {
+              setOpen(false);
+              trackEvent(EVENTS.discordJoinClicked);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          >
+            <DiscordIcon className="h-3.5 w-3.5" />
+            Join Discord
+          </a>
           {signedIn && (
             <button
               type="button"

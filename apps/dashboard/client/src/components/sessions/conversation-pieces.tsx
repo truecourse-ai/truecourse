@@ -144,8 +144,11 @@ function FindingResolveFooter({
     setBusy(verdict);
     setError(null);
     try {
-      if (verdict === 'undo') await ctx.undo(dispute);
-      else await ctx.resolve(dispute, verdict);
+      if (verdict === 'undo') {
+        await ctx.undo(dispute);
+      } else {
+        await ctx.resolve(dispute, verdict);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

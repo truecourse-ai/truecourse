@@ -11,16 +11,24 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { JobStep, JobView, ServerEvent } from '@truecourse/shared';
 import { JobStore, NotificationStore } from '@truecourse/data-store';
-import { executeJob, type JobDefinition, type JobRuntime } from '@truecourse/jobs';
+import {
+  executeJob,
+  type JobDefinition,
+  type JobRuntime,
+  type JobSettledInfo,
+  type JobStartedInfo,
+} from '@truecourse/jobs';
 
 const ORG = 'org_A';
-type Payload = { jobId: string; org: string };
+type Payload = { jobId: string; org: string; requestedBy?: string };
 type ErrorMeta = { component: string; orgId?: string };
 
 let client: PGlite;
 let db: Db;
 let published: Array<{ org: string; event: ServerEvent }>;
 let captured: Array<{ err: unknown; meta: ErrorMeta | undefined }>;
+let started: JobStartedInfo[];
+let settled: JobSettledInfo[];
 
 beforeEach(async () => {
   client = new PGlite();
@@ -28,13 +36,22 @@ beforeEach(async () => {
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   published = [];
   captured = [];
+  started = [];
+  settled = [];
 });
 
 afterEach(async () => {
   await client.close();
 });
 
-function runtime(): JobRuntime<ErrorMeta> & { jobStore: JobStore; notifications: NotificationStore } {
+function runtime(
+  onSettled: JobRuntime<ErrorMeta>['onSettled'] = (info) => {
+    settled.push(info);
+  },
+  onStarted: JobRuntime<ErrorMeta>['onStarted'] = (info) => {
+    started.push(info);
+  },
+): JobRuntime<ErrorMeta> & { jobStore: JobStore; notifications: NotificationStore } {
   return {
     db,
     jobStore: new JobStore(db),
@@ -45,6 +62,8 @@ function runtime(): JobRuntime<ErrorMeta> & { jobStore: JobStore; notifications:
     onException: (err, meta) => {
       captured.push({ err, meta });
     },
+    onStarted,
+    onSettled,
   };
 }
 
@@ -361,5 +380,195 @@ describe('executeJob — onSettled hook', () => {
     );
 
     expect((await rt.jobStore.get(job.id))?.status).toBe('succeeded');
+  });
+});
+
+/**
+ * The runtime's own STARTED observer — the claim, which is where a deployment
+ * learns that work actually began. A row nobody could claim runs no body, so it
+ * must not be reported as a start.
+ */
+describe('executeJob — the runtime started observer', () => {
+  const observedDef = (): JobDefinition<Payload, ErrorMeta> => ({
+    type: 'test.job',
+    title: 'Testing',
+    steps: [{ key: 'a', label: 'Step A' }],
+    org: (p) => p.org,
+    traceMeta: () => ({ repoFullName: 'acme/app', commitSha: 'c0ffee' }),
+    run: async () => ({ result: { ok: true }, notification: null }),
+    onError: (err) => ({ level: 'error', title: 'Failed', body: err.message }),
+  });
+
+  it('reports the claim once, with the trace metadata and who asked', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:s1' });
+
+    await executeJob(rt, observedDef(), { jobId: job.id, org: ORG, requestedBy: 'user_1' });
+
+    expect(started).toHaveLength(1);
+    expect(started[0]).toEqual({
+      type: 'test.job',
+      jobId: job.id,
+      org: ORG,
+      payload: { jobId: job.id, org: ORG, requestedBy: 'user_1' },
+      meta: { repoFullName: 'acme/app', commitSha: 'c0ffee' },
+      requestedBy: 'user_1',
+    });
+  });
+
+  it('names no requester for a job nobody asked for directly', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:s2' });
+
+    await executeJob(rt, observedDef(), { jobId: job.id, org: ORG });
+
+    expect(started).toHaveLength(1);
+    expect(started[0]?.requestedBy).toBeUndefined();
+  });
+
+  it('does not report a job whose row was never claimable', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:s3' });
+    await rt.jobStore.markCancelled(job.id);
+
+    await executeJob(rt, observedDef(), { jobId: job.id, org: ORG });
+
+    expect(started).toEqual([]);
+  });
+
+  it('an observer that throws leaves the job untouched', async () => {
+    const thrower = vi.fn(() => {
+      throw new Error('observer down');
+    });
+    const rt = runtime(undefined, thrower);
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:s4' });
+
+    await executeJob(rt, observedDef(), { jobId: job.id, org: ORG });
+
+    expect(thrower).toHaveBeenCalledTimes(1);
+    expect((await rt.jobStore.get(job.id))?.status).toBe('succeeded');
+    expect(settled).toHaveLength(1);
+  });
+});
+
+/**
+ * The runtime's own settled observer — what a deployment watches jobs with
+ * (product analytics), as opposed to the definition's chaining hook. Every
+ * outcome reports, and the observer is a watcher: it can neither change how the
+ * job settled nor swallow its failure.
+ */
+describe('executeJob — the runtime settled observer', () => {
+  const observedDef = (
+    run: JobDefinition<Payload, ErrorMeta>['run'],
+  ): JobDefinition<Payload, ErrorMeta> => ({
+    type: 'test.job',
+    title: 'Testing',
+    steps: [{ key: 'a', label: 'Step A' }],
+    org: (p) => p.org,
+    traceMeta: () => ({ repoFullName: 'acme/app', commitSha: 'c0ffee' }),
+    run,
+    onError: (err) => ({ level: 'error', title: 'Failed', body: err.message }),
+  });
+
+  it('reports a success, with the definition trace metadata and a measured duration', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:o1' });
+
+    await executeJob(rt, observedDef(async () => ({ result: { ok: true }, notification: null })), {
+      jobId: job.id,
+      org: ORG,
+    });
+
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({
+      type: 'test.job',
+      jobId: job.id,
+      org: ORG,
+      outcome: 'succeeded',
+      payload: { jobId: job.id, org: ORG },
+      meta: { repoFullName: 'acme/app', commitSha: 'c0ffee' },
+    });
+    expect(settled[0]?.durationMs).toBeTypeOf('number');
+    expect(settled[0]?.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('reports a failure', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:o2' });
+
+    await expect(
+      executeJob(
+        rt,
+        observedDef(async () => {
+          throw new Error('boom');
+        }),
+        { jobId: job.id, org: ORG },
+      ),
+    ).rejects.toThrow('boom');
+
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({ jobId: job.id, outcome: 'failed' });
+    expect(settled[0]?.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('reports a cancellation', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:o3' });
+    const stop = new AbortController();
+
+    await executeJob(
+      rt,
+      observedDef(async () => {
+        stop.abort();
+        return { result: { ok: true }, notification: { level: 'success', title: 'Done' } };
+      }),
+      { jobId: job.id, org: ORG },
+      { signal: stop.signal },
+    );
+
+    expect((await rt.jobStore.get(job.id))?.status).toBe('cancelled');
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({ jobId: job.id, outcome: 'cancelled' });
+  });
+
+  it('does not report a job whose row was never claimable', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:o4' });
+    await rt.jobStore.markCancelled(job.id);
+
+    await executeJob(rt, observedDef(async () => ({ notification: null })), {
+      jobId: job.id,
+      org: ORG,
+    });
+
+    expect(settled).toEqual([]);
+  });
+
+  it('an observer that throws changes neither the outcome nor the rethrow', async () => {
+    const thrower = vi.fn(() => {
+      throw new Error('observer down');
+    });
+
+    const okRt = runtime(thrower);
+    const ok = await okRt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:o5' });
+    await executeJob(okRt, observedDef(async () => ({ result: {}, notification: null })), {
+      jobId: ok.id,
+      org: ORG,
+    });
+    expect((await okRt.jobStore.get(ok.id))?.status).toBe('succeeded');
+
+    const badRt = runtime(thrower);
+    const bad = await badRt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:o6' });
+    await expect(
+      executeJob(
+        badRt,
+        observedDef(async () => {
+          throw new Error('boom');
+        }),
+        { jobId: bad.id, org: ORG },
+      ),
+    ).rejects.toThrow('boom');
+    expect((await badRt.jobStore.get(bad.id))?.status).toBe('failed');
+    expect(thrower).toHaveBeenCalledTimes(2);
   });
 });

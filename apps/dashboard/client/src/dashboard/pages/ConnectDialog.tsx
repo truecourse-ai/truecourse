@@ -292,7 +292,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
    */
   const connectThroughProvider = async () => {
     const connect = provider?.connect;
-    if (!connect || linking !== null) return;
+    if (!provider || !connect || linking !== null) return;
     const asked = named.trim();
     setLinkErrors({});
     setLinking(0);

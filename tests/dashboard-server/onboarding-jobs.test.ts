@@ -22,7 +22,7 @@
  * setup sessions come in through their seams and the driver is scripted.
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -81,6 +81,7 @@ import {
 import { GUARD_FORMAT_VERSION, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
+import { captureJobStarted } from '../../apps/dashboard/server/src/observability/posthog';
 import type { RepoGuardGenerateTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-generate';
 import type { RepoGuardRunTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-run';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
@@ -90,6 +91,13 @@ import {
 } from '../../apps/dashboard/server/src/services/repo-removal.service';
 import type { WorkspaceLlm } from '../../apps/dashboard/server/src/services/workspace-llm.service';
 import { forbiddenDriver } from '../core/spec-scan-session-stub';
+
+// A claimed job is reported from the queue's started seam; here it is a spy, so
+// what the runner observes is asserted and nothing is sent.
+vi.mock('../../apps/dashboard/server/src/observability/posthog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../apps/dashboard/server/src/observability/posthog')>()),
+  captureJobStarted: vi.fn(),
+}));
 
 const ORG = 'org_A';
 const REPO = 'acme/widgets';
@@ -161,6 +169,7 @@ function fakeWorker(only?: readonly string[]): StartWorker<Record<string, unknow
 const hub = { start: async () => {}, stop: async () => {}, subscribe: () => () => {} };
 
 beforeEach(async () => {
+  vi.mocked(captureJobStarted).mockClear();
   client = new PGlite();
   db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
@@ -489,6 +498,30 @@ describe('the guard setup job', () => {
     const [generate] = await jobsOfType('repo.guard-generate');
     expect(generate).toMatchObject({ status: 'queued', key: `repo.guard-generate:${REPO}` });
     expect(enqueuedPayloads[1]).toMatchObject({ jobId: generate?.id, repoFullName: REPO, source: 'chain' });
+  }, 60_000);
+
+  it('reports the claimed setup once, as the person who asked for it', async () => {
+    await jobs.enqueueGuardSetup({ ...request, requestedBy: 'user_1' });
+    await Promise.all(running);
+    const [setup] = await jobsOfType('repo.guard-setup');
+
+    // Only the setup body runs here; the chained generate never leaves the queue.
+    expect(vi.mocked(captureJobStarted)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(captureJobStarted).mock.calls[0]?.[0]).toMatchObject({
+      type: 'repo.guard-setup',
+      jobId: setup?.id,
+      org: ORG,
+      requestedBy: 'user_1',
+      meta: { repoFullName: REPO },
+    });
+  }, 60_000);
+
+  it('names nobody on a setup the queue started itself', async () => {
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(vi.mocked(captureJobStarted)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(captureJobStarted).mock.calls[0]?.[0]?.requestedBy).toBeUndefined();
   }, 60_000);
 
   // A connected repository always onboards, documents or not: setup derives its

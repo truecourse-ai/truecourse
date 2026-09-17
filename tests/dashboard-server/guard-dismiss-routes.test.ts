@@ -1,11 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
+import {
+  captureAction,
+  EVENTS,
+} from '../../apps/dashboard/server/src/observability/posthog';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+
+// A dismissal is reported from the route that writes it; here the analytics
+// module's one capture is a spy, so the call is asserted and nothing is sent.
+vi.mock('../../apps/dashboard/server/src/observability/posthog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../apps/dashboard/server/src/observability/posthog')>()),
+  captureAction: vi.fn(),
+}));
 
 /**
  * Guard dismiss + finding-evidence routes — persisting a user's dismissal and
@@ -27,6 +38,7 @@ describe('Guard dismiss + finding-evidence routes', () => {
   const decisionsFile = () => path.join(root, '.truecourse', 'scenarios', 'decisions.json');
 
   beforeEach(async () => {
+    vi.mocked(captureAction).mockClear();
     installWorkTreeGuardStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
@@ -62,6 +74,34 @@ describe('Guard dismiss + finding-evidence routes', () => {
     // Undismiss removes it.
     const undismissed = await request(app).post(url('undismiss')).send(claim).expect(200);
     expect(undismissed.body.dismissedClaims).toEqual([]);
+
+    // Reported once, for the dismissal alone: a reversal is not a ruling.
+    expect(captureAction).toHaveBeenCalledTimes(1);
+    expect(captureAction).toHaveBeenCalledWith(EVENTS.findingDismissed, {
+      userId: 'user_test',
+      workspaceId: TEST_ORG,
+      properties: { kind: 'claim', repoId: fixture.project.slug },
+    });
+  });
+
+  it('dismissing a flow writes it and reports the ruling as a flow', async () => {
+    const res = await request(app)
+      .post(url('flows/dismiss'))
+      .send({ flowId: 'flow-1', title: 'Release a version' })
+      .expect(200);
+    expect(res.body.dismissedFlows).toHaveLength(1);
+
+    expect(captureAction).toHaveBeenCalledTimes(1);
+    expect(captureAction).toHaveBeenCalledWith(EVENTS.findingDismissed, {
+      userId: 'user_test',
+      workspaceId: TEST_ORG,
+      properties: { kind: 'flow', repoId: fixture.project.slug },
+    });
+  });
+
+  it('reports nothing for a body the route refuses', async () => {
+    await request(app).post(url('dismiss')).send({ doc: DOC }).expect(400);
+    expect(captureAction).not.toHaveBeenCalled();
   });
 
   it('dismiss rejects a body missing doc/anchor/title', async () => {
