@@ -38,6 +38,7 @@ import type {
   GithubAttachRequest,
   GithubConnectStatusResponse,
   GithubInstallableRepo,
+  GithubInstallationAccessResponse,
   GithubInstallationReposResponse,
   GithubInstallationSummary,
   GithubRepoSummary,
@@ -319,6 +320,35 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       ...(offer ? { offered: offer.installations.map(toInstallationSummary) } : {}),
     };
     res.json(body);
+  });
+
+  // What the App may see through the installation, as GitHub reports it:
+  // the selection mode and the count, one call with one item, no paging.
+  // What the Settings page draws beside an account, since the connection is
+  // what that page manages.
+  router.get('/installations/:installationId/access', async (req: Request, res: Response) => {
+    const orgId = orgIdOf(req);
+    const installationId = Number(req.params.installationId);
+    if (!orgId || !Number.isInteger(installationId)) {
+      res.status(400).json({ error: 'installationId required' });
+      return;
+    }
+    if (!(await heldBy(installationId, orgId))) {
+      res.status(403).json({ error: 'installation not in your workspace' });
+      return;
+    }
+    try {
+      const { data } = await deps
+        .octokitFor(installationId)
+        .apps.listReposAccessibleToInstallation({ per_page: 1 });
+      const body: GithubInstallationAccessResponse = {
+        repositorySelection: data.repository_selection === 'all' ? 'all' : 'selected',
+        repositories: data.total_count,
+      };
+      res.json(body);
+    } catch (err) {
+      res.status(502).json({ error: `could not read repository access: ${(err as Error).message}` });
+    }
   });
 
   // Repos the installation can access — populates the connect drawer's repo

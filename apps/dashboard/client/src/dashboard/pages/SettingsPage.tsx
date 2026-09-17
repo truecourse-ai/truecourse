@@ -21,6 +21,7 @@ import {
 } from '@truecourse/shared';
 import type {
   GithubConnectOutcome,
+  GithubInstallationAccessResponse,
   GithubInstallationSummary,
   GithubRepoSummary,
   LlmConfigResponse,
@@ -29,6 +30,14 @@ import type {
   GithubInstallOrigin,
   LocalRepositorySummary,
 } from '@truecourse/shared';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { StatusWord } from '@/dashboard/ui/status-word';
 import { Facts, ProviderIcon, PageHeader, SideMenu } from '@/dashboard/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/dashboard/data/llm-config';
@@ -37,6 +46,7 @@ import {
   attachGithubInstallations,
   detachGithubInstallation,
   fetchGithubStatus,
+  fetchInstallationAccess,
   installationSettingsUrl,
 } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
@@ -122,15 +132,92 @@ function outcomeOf(raw: string | null): GithubConnectOutcome | null {
     : null;
 }
 
+/** What GitHub said an account lets the App see, or that it could not be asked. */
+type InstallationAccess = GithubInstallationAccessResponse | 'unknown';
+
+/** The access as the account line says it; empty while GitHub is still being asked. */
+function accessWords(access: InstallationAccess | undefined): string {
+  if (!access) return '';
+  if (access === 'unknown') return 'access unknown';
+  if (access.repositorySelection === 'all') return 'all repositories';
+  if (access.repositories === 0) return 'no repositories';
+  return `${access.repositories} repositor${access.repositories === 1 ? 'y' : 'ies'}`;
+}
+
+/**
+ * The one destructive action on the page asks first, in the app's own dialog:
+ * what leaves with the account (its repositories connected here, the Context
+ * sources reading through it), then Remove or not.
+ */
+function RemoveAccountDialog({
+  installation,
+  linked,
+  onCancel,
+  onConfirm,
+}: {
+  installation: GithubInstallationSummary | null;
+  linked: GithubRepoSummary[];
+  onCancel: () => void;
+  onConfirm: (installation: GithubInstallationSummary) => void;
+}) {
+  const name = installation ? installation.accountLogin || `#${installation.installationId}` : '';
+  return (
+    <Dialog open={installation !== null} onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Remove {name} from this workspace?</DialogTitle>
+          <DialogDescription>
+            The account stays installed on GitHub. Other workspaces keep it.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 text-xs text-muted-foreground">
+          {linked.length > 0 ? (
+            <p>
+              {linked.length} repositor{linked.length === 1 ? 'y' : 'ies'} connected through it will be
+              disconnected, with {linked.length === 1 ? 'its' : 'their'} runs and evidence:
+            </p>
+          ) : (
+            <p>No repository is connected through it.</p>
+          )}
+          {linked.length > 0 && (
+            <ul className="font-mono text-foreground">
+              {linked.map((r) => (
+                <li key={r.repoFullName}>{r.repoFullName}</li>
+              ))}
+            </ul>
+          )}
+          <p>Context sources that read through it stop syncing until it is connected again.</p>
+        </div>
+        <DialogFooter className="mt-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => installation && onConfirm(installation)}
+            className="rounded bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground hover:opacity-90"
+          >
+            Remove
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /**
  * Repositories: where they are connected FROM. One row per source-control
  * provider — its mark, its name, a status word, and the accounts under it,
  * one line each.
  *
  * GitHub is the real one: its accounts are the App's installations the server
- * reports, one line each naming the account, its type and how many
- * repositories this workspace has linked through it, with its two actions on
- * the line. Adding one is ONE button, a top-level navigation to GitHub's
+ * reports, one line each naming the account, its type and what it lets the
+ * App see (asked of GitHub, since this page is about the connection, not
+ * what Code has used), with its two actions on the line. Adding one is ONE button, a top-level navigation to GitHub's
  * authorize page: it comes back HERE with the accounts the person can reach
  * and this workspace does not hold, offered as rows of the same list for them
  * to pick (nothing is attached without a choice), or goes on to GitHub's
@@ -248,24 +335,39 @@ function RepositoriesTab() {
     }
   };
 
+  // What each account lets the App see, asked of GitHub one account at a
+  // time once the accounts are known. The Settings page is about the
+  // connection, so this is the count it draws, not what Code has used.
+  const [access, setAccess] = useState<Record<number, InstallationAccess>>({});
+  useEffect(() => {
+    if (!github) return;
+    let live = true;
+    for (const installation of github.installations) {
+      const id = installation.installationId;
+      if (access[id]) continue;
+      void fetchInstallationAccess(id)
+        .then((answer) => {
+          if (live) setAccess((prev) => ({ ...prev, [id]: answer }));
+        })
+        .catch(() => {
+          if (live) setAccess((prev) => ({ ...prev, [id]: 'unknown' }));
+        });
+    }
+    return () => {
+      live = false;
+    };
+    // Only a new account needs asking; a re-read of the same accounts does not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [github]);
+
   // Detach an installation from this workspace: the repositories connected
-  // through it here go with it, so the person is told how many before it does.
+  // through it here go with it, so the person is shown which before it does.
   // A detach the server could only half do is re-read either way, so the page
   // shows what is actually left and the reason beside it.
+  const [removing, setRemoving] = useState<GithubInstallationSummary | null>(null);
   const detach = useCallback(
     async (installation: GithubInstallationSummary) => {
-      const linked = (github?.linked ?? []).filter(
-        (r) => r.installationId === installation.installationId,
-      );
-      const name = installation.accountLogin || `#${installation.installationId}`;
-      const repos =
-        linked.length === 0
-          ? ''
-          : ` ${linked.length} repositor${linked.length === 1 ? 'y' : 'ies'} connected through it will be disconnected: ${linked
-              .map((r) => r.repoFullName)
-              .join(', ')}.`;
-      const warning = `Remove ${name} from this workspace?${repos} Context sources that read through it will stop syncing until it is connected again.`;
-      if (!window.confirm(warning)) return;
+      setRemoving(null);
       setDetaching(installation.installationId);
       let failure: string | null = null;
       try {
@@ -280,7 +382,7 @@ function RepositoriesTab() {
       }
       setDetaching(null);
     },
-    [github, readGithub, refreshRealRepos],
+    [readGithub, refreshRealRepos],
   );
 
   // The folders this machine has connected. Only a local server has any, and
@@ -305,6 +407,13 @@ function RepositoriesTab() {
   const offered = outcome === 'pick' ? (github?.offered ?? []) : [];
 
   return (
+    <>
+    <RemoveAccountDialog
+      installation={removing}
+      linked={(github?.linked ?? []).filter((r) => r.installationId === removing?.installationId)}
+      onCancel={() => setRemoving(null)}
+      onConfirm={(installation) => void detach(installation)}
+    />
     <ul className="divide-y divide-border border-b border-border" aria-label="Providers">
       {offeredRepositoryProviders(mode).map((provider) => {
         const { id, name } = provider;
@@ -342,17 +451,15 @@ function RepositoriesTab() {
               {isGithub && (installations.length > 0 || offered.length > 0) && (
                 <ul className="mt-2 divide-y divide-border border-y border-border" aria-label="GitHub accounts">
                   {installations.map((i) => {
-                    const linked = (github?.linked ?? []).filter(
-                      (r) => r.installationId === i.installationId,
-                    ).length;
                     const name = i.accountLogin || `#${i.installationId}`;
+                    const sees = accessWords(access[i.installationId]);
                     return (
                       <li key={i.installationId} className="flex items-center gap-3 py-1.5 text-xs">
                         <span className="min-w-0 flex-1 truncate">
                           <span className="text-foreground">{name}</span>
                           <span className="text-muted-foreground">
-                            {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} · {linked} repositor
-                            {linked === 1 ? 'y' : 'ies'}
+                            {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''}
+                            {sees ? ` · ${sees}` : ''}
                           </span>
                         </span>
                         {/* Which repositories the App can see is GitHub's
@@ -370,7 +477,7 @@ function RepositoriesTab() {
                             GitHub, this workspace lets go of it. */}
                         <button
                           type="button"
-                          onClick={() => void detach(i)}
+                          onClick={() => setRemoving(i)}
                           disabled={detaching !== null}
                           aria-label={`Remove ${name}`}
                           title="Remove from this workspace"
@@ -452,6 +559,7 @@ function RepositoriesTab() {
         );
       })}
     </ul>
+    </>
   );
 }
 

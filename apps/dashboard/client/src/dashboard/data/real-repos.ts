@@ -25,6 +25,7 @@ import type {
   GithubAttachRequest,
   GithubConnectStatusResponse,
   GithubInstallableRepo,
+  GithubInstallationAccessResponse,
   GithubInstallationReposResponse,
   GithubInstallationSummary,
   GithubInstallOrigin,
@@ -71,6 +72,15 @@ export function installationSettingsUrl(installation: GithubInstallationSummary)
   }
   if (accountType === 'User') return `https://github.com/settings/installations/${installationId}`;
   return 'https://github.com/settings/installations';
+}
+
+/** What the App may see through one installation, as GitHub reports it. */
+export function fetchInstallationAccess(
+  installationId: number,
+): Promise<GithubInstallationAccessResponse> {
+  return fetchApi<GithubInstallationAccessResponse>(
+    `/api/github/installations/${installationId}/access`,
+  );
 }
 
 /** Everything one installation can see, linked or not. */

@@ -163,6 +163,18 @@ export interface GithubInstallableRepo {
   connectedElsewhere: boolean
 }
 
+/**
+ * `GET /api/github/installations/:id/access`: what the App is allowed to see
+ * on GitHub through one installation, as GitHub reports it. The setting
+ * itself is changed on GitHub, on the installation's page.
+ */
+export interface GithubInstallationAccessResponse {
+  /** `all`: every repository of the account, now and later; `selected`: the ones picked. */
+  repositorySelection: 'all' | 'selected'
+  /** How many repositories the installation can see today. */
+  repositories: number
+}
+
 export interface GithubInstallationReposResponse {
   repos: GithubInstallableRepo[]
 }

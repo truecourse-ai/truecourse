@@ -17,7 +17,11 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import type { GithubConnectStatusResponse, GithubRepoSummary } from '@truecourse/shared';
+import type {
+  GithubConnectStatusResponse,
+  GithubInstallationAccessResponse,
+  GithubRepoSummary,
+} from '@truecourse/shared';
 import DashboardApp from '@/dashboard/DashboardApp';
 
 vi.mock('@/lib/socket', () => {
@@ -68,9 +72,15 @@ function status(over: Partial<GithubConnectStatusResponse> = {}): GithubConnectS
 
 /** The attach requests the page posted, body by body. */
 let attached: unknown[] = [];
+/** The installations the page asked to detach. */
+let detached: number[] = [];
+/** What GitHub says each installation may see; unanswered ids 404. */
+let access: Record<number, GithubInstallationAccessResponse> = {};
 
 function serve(githubStatus: (url: URL) => Response = () => json(status())) {
   attached = [];
+  detached = [];
+  access = { 42: { repositorySelection: 'selected', repositories: 5 } };
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
@@ -80,6 +90,16 @@ function serve(githubStatus: (url: URL) => Response = () => json(status())) {
     if (pathname === '/api/github/installations/attach' && init?.method === 'POST') {
       attached.push(JSON.parse(String(init.body)));
       return json({ ok: true, attached: [] });
+    }
+    const seen = /^\/api\/github\/installations\/(\d+)\/access$/.exec(pathname);
+    if (seen) {
+      const answer = access[Number(seen[1])];
+      return answer ? json(answer) : json({ error: 'GitHub could not be reached' }, 502);
+    }
+    const detach = /^\/api\/github\/installations\/(\d+)$/.exec(pathname);
+    if (detach && init?.method === 'DELETE') {
+      detached.push(Number(detach[1]));
+      return json({ ok: true, disconnected: [] });
     }
     if (pathname === '/api/llm/config') return json({ config: null, providers: ['anthropic'] });
     if (pathname === '/api/sessions/runs') return json({ runs: [] });
@@ -127,7 +147,10 @@ describe('Settings › Repositories', () => {
     const accounts = within(github).getByRole('list', { name: 'GitHub accounts' });
     const rows = within(accounts).getAllByRole('listitem');
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toHaveTextContent('linkwarden · organization · 2 repositories');
+    // What the account lets the App see is GitHub's answer, asked per
+    // account; what Code has connected through it is Code's business.
+    await within(rows[0]!).findByText(/5 repositories/);
+    expect(rows[0]).toHaveTextContent('linkwarden · organization · 5 repositories');
     // Adding an account is ONE door, GitHub's authorize page; the server
     // sends the person on to install from there when there is nothing to offer.
     expect(within(github).getByRole('link', { name: 'Add account' })).toHaveAttribute(
@@ -145,21 +168,59 @@ describe('Settings › Repositories', () => {
     expect(within(rows[0]!).getByRole('button', { name: 'Remove linkwarden' })).toBeEnabled();
   });
 
-  it("links a user account's installation to the user's own settings page", async () => {
+  it("links a user account's installation to the user's own settings page, and says what it lets the App see", async () => {
     serve(() =>
       json(
         status({
-          installations: [{ installationId: 7, accountLogin: 'spiderhands', accountType: 'User' }],
+          installations: [
+            { installationId: 7, accountLogin: 'spiderhands', accountType: 'User' },
+            { installationId: 8, accountLogin: 'octo', accountType: 'User' },
+            { installationId: 9, accountLogin: 'nine', accountType: 'User' },
+          ],
           repos: [],
         }),
       ),
     );
+    access = {
+      7: { repositorySelection: 'all', repositories: 12 },
+      8: { repositorySelection: 'selected', repositories: 0 },
+    };
     renderAt('/settings/repositories');
     const github = providerRow('GitHub');
     expect(await within(github).findByRole('link', { name: 'Manage spiderhands on GitHub' })).toHaveAttribute(
       'href',
       'https://github.com/settings/installations/7',
     );
+    const accounts = within(github).getByRole('list', { name: 'GitHub accounts' });
+    const rows = within(accounts).getAllByRole('listitem');
+    // Every repository of the account, now and later; a selection of none;
+    // and an account GitHub could not be asked about.
+    await within(rows[0]!).findByText(/all repositories/);
+    await within(rows[1]!).findByText(/no repositories/);
+    await within(rows[2]!).findByText(/access unknown/);
+  });
+
+  it('asks before removing an account, in its own dialog, naming what leaves with it', async () => {
+    const user = userEvent.setup();
+    serve();
+    renderAt('/settings/repositories');
+    const github = providerRow('GitHub');
+    await user.click(await within(github).findByRole('button', { name: 'Remove linkwarden' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Remove linkwarden from this workspace?');
+    expect(dialog).toHaveTextContent('2 repositories connected through it will be disconnected');
+    expect(dialog).toHaveTextContent('linkwarden/linkwarden');
+    expect(dialog).toHaveTextContent('linkwarden/docs');
+    // Cancel asks nothing of the server.
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(detached).toEqual([]);
+
+    await user.click(within(github).getByRole('button', { name: 'Remove linkwarden' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(detached).toEqual([42]));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('asks for an install link that returns to where the user came from', async () => {

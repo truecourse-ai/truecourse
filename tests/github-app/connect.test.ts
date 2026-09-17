@@ -33,8 +33,19 @@ let lookupAccount: Mock<AccountLookup>;
 let userInstallations: Mock<UserInstallations>;
 // Repos the stubbed installation client returns (the connect router paginates it).
 let installRepos: Array<{ full_name: string; default_branch: string; private: boolean }>;
+// What the stubbed installation says of its access: the selection mode GitHub
+// reports, and the count, on the one-item call the access route makes.
+let repositorySelection: 'all' | 'selected' = 'selected';
 const stubOctokit = {
-  apps: { listReposAccessibleToInstallation: () => undefined },
+  apps: {
+    listReposAccessibleToInstallation: async () => ({
+      data: {
+        total_count: installRepos.length,
+        repository_selection: repositorySelection,
+        repositories: installRepos.slice(0, 1),
+      },
+    }),
+  },
   paginate: async () => installRepos,
 } as unknown as OctokitClient;
 
@@ -147,6 +158,20 @@ describe('connect router', () => {
   it('refuses to list repos for an installation in another workspace', async () => {
     await seedInstallation(['org_OTHER']);
     await request(app).get('/api/ee/github/installations/100/repos').expect(403);
+  });
+
+  it("reports an installation's repository access as GitHub sees it, to this workspace only", async () => {
+    await seedInstallation(['org_A']);
+    let res = await request(app).get('/api/ee/github/installations/100/access').expect(200);
+    expect(res.body).toEqual({ repositorySelection: 'selected', repositories: 2 });
+
+    repositorySelection = 'all';
+    res = await request(app).get('/api/ee/github/installations/100/access').expect(200);
+    expect(res.body).toEqual({ repositorySelection: 'all', repositories: 2 });
+    repositorySelection = 'selected';
+
+    currentOrg = 'org_OTHER';
+    await request(app).get('/api/ee/github/installations/100/access').expect(403);
   });
 
   it('refuses to link a repo whose installation is not in the workspace', async () => {
