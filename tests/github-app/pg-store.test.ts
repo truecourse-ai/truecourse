@@ -68,10 +68,14 @@ describe('PostgresInstallationStore (Drizzle, validated against pglite)', () => 
   });
 
   it('lists a workspace’s installations in the order it attached them, each with every workspace’s link', async () => {
+    // Links are ordered by the millisecond they were made; keep each on its own.
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 2));
     await store.saveInstallation(installation(1));
     await store.saveInstallation(installation(2));
     await store.linkInstallationToWorkspace(2, 'org_B');
+    await tick();
     await store.linkInstallationToWorkspace(2, 'org_A');
+    await tick();
     await store.linkInstallationToWorkspace(1, 'org_A');
     const listed = await store.listInstallationsForWorkspace('org_A');
     expect(listed.map((i) => [i.installationId, i.workspaceOrgIds])).toEqual([

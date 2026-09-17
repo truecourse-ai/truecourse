@@ -125,6 +125,8 @@ export const GITHUB_CONNECT_OUTCOMES = [
   'denied',
   /** The installation the trip came back with is not one the person can reach. */
   'unreachable',
+  /** Back from an installation's settings page on GitHub, where its repository access was changed. */
+  'updated',
 ] as const;
 export type GithubConnectOutcome = (typeof GITHUB_CONNECT_OUTCOMES)[number];
 

@@ -198,6 +198,16 @@ describe('Settings › Repositories', () => {
     expect(within(github).queryByRole('list', { name: 'GitHub installations' })).toBeNull();
   });
 
+  it('notes a return from an installation’s settings page on GitHub quietly, as news rather than a refusal', async () => {
+    serve();
+    renderAt('/settings/repositories?github=updated&from=settings');
+
+    const github = providerRow('GitHub');
+    const note = await within(github).findByText('Repository access updated on GitHub.');
+    expect(note).toHaveClass('text-muted-foreground');
+    expect(note).not.toHaveClass('text-destructive');
+  });
+
   it('says why GitHub could not be read, in the server’s own words', async () => {
     const missing = 'GitHub is not configured on this server. Set GITHUB_APP_ID, then restart it.';
     serve(() => json({ error: missing }, 503));

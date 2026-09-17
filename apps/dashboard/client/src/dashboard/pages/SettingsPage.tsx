@@ -87,7 +87,11 @@ const OUTCOME_NOTE: Record<Exclude<GithubConnectOutcome, 'pick'>, string> = {
     'The trip to GitHub took too long, or came back to another session. Nothing was added. Try again.',
   denied: 'GitHub did not complete the authorization. Nothing was added. Try again.',
   unreachable: 'GitHub did not confirm your access to that installation. Nothing was added.',
+  updated: 'Repository access updated on GitHub.',
 };
+
+/** The outcomes that are news, not a refusal: drawn quietly. */
+const QUIET_OUTCOMES: ReadonlySet<GithubConnectOutcome> = new Set(['updated', 'nothing-new', 'requested']);
 
 function outcomeOf(raw: string | null): GithubConnectOutcome | null {
   return raw && (GITHUB_CONNECT_OUTCOMES as readonly string[]).includes(raw)
@@ -285,7 +289,13 @@ function RepositoriesTab() {
                 <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
               )}
               {isGithub && outcome && outcome !== 'pick' && (
-                <p className="mt-1 text-[11px] text-destructive">{OUTCOME_NOTE[outcome]}</p>
+                <p
+                  className={`mt-1 text-[11px] ${
+                    QUIET_OUTCOMES.has(outcome) ? 'text-muted-foreground' : 'text-destructive'
+                  }`}
+                >
+                  {OUTCOME_NOTE[outcome]}
+                </p>
               )}
               {isGithub && outcome === 'pick' && github && (
                 github.offered && github.offered.length > 0 ? (

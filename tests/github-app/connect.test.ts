@@ -432,6 +432,19 @@ describe('the connect callback', () => {
     expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
   });
 
+  it('takes the return from an installation’s settings page on GitHub, which carries no state and no code', async () => {
+    await seedInstallation(['org_A']);
+    // An App set to redirect on update: repository access changed, and GitHub
+    // sends the browser back naming the installation and nothing else.
+    await request(app)
+      .get('/api/ee/github/callback')
+      .query({ installation_id: '100', setup_action: 'update' })
+      .expect(302)
+      .expect('location', settledAt('updated'));
+    expect(userInstallations).not.toHaveBeenCalled();
+    expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
+  });
+
   it('refuses a state for another workspace, another user, an expired one, or none', async () => {
     await request(app)
       .get('/api/ee/github/callback')

@@ -391,14 +391,22 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       settle('expired', 'no workspace on the session');
       return;
     }
+    // GitHub's own word for what its page did: `install`, `request` when a
+    // non-admin asked the account's owners to install, or `update` when an
+    // installation's repository access was changed on its settings page.
+    const setupAction = typeof req.query.setup_action === 'string' ? req.query.setup_action : null;
+    if (setupAction === 'update') {
+      // An App set to redirect on update sends the browser here with the
+      // installation id and neither a code nor a state: no trip of ours
+      // started it, and there is nothing to attach, so nothing to prove.
+      // The webhook has already carried the access change.
+      settle('updated', `installation ${String(req.query.installation_id)} updated on GitHub`);
+      return;
+    }
     if (!state || state.orgId !== orgId || state.userId !== user.id) {
       settle('expired', state ? 'state belongs to another session' : 'state missing, expired or unsigned');
       return;
     }
-    // GitHub's own word for what its page did: `install`, or `request` when a
-    // non-admin asked the account's owners to install. Present only on a
-    // return from the install page.
-    const setupAction = typeof req.query.setup_action === 'string' ? req.query.setup_action : null;
     if (setupAction === 'request') {
       settle('requested', 'the install was requested, not made');
       return;
