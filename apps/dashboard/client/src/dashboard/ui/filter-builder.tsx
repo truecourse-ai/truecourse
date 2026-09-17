@@ -18,7 +18,7 @@
  * applies that reading; this control only edits the selection.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Plus, Search, X } from 'lucide-react';
 import type { FilterOption } from './filter-bar';
 
@@ -77,8 +77,12 @@ export function FilterBuilder({ label, ariaLabel, lead, dimensions, selected, on
   const [open, setOpen] = useState(false);
   const [dimension, setDimension] = useState<FilterDimension | null>(null);
   const [query, setQuery] = useState('');
+  /** The dropdown hangs off the button's right edge instead of its left. */
+  const [alignRight, setAlignRight] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const close = () => {
     setOpen(false);
@@ -94,6 +98,23 @@ export function FilterBuilder({ label, ariaLabel, lead, dimensions, selected, on
     };
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  // The control sits wherever the pills leave it, so the dropdown under it can
+  // run off the right of the window. Measured on open and on a resize while
+  // open: when the panel opened at the button's left edge would pass the
+  // window's right edge, it hangs off the button's right edge instead.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const button = buttonRef.current?.getBoundingClientRect();
+      const panel = panelRef.current?.getBoundingClientRect();
+      if (!button || !panel) return;
+      setAlignRight(button.left + panel.width > window.innerWidth - 16);
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
   }, [open]);
 
   useEffect(() => {
@@ -131,90 +152,99 @@ export function FilterBuilder({ label, ariaLabel, lead, dimensions, selected, on
             </button>
           </span>
         ))}
-        <span className="relative inline-flex">
-          <button
-            type="button"
-            aria-expanded={open}
-            aria-haspopup="listbox"
-            onClick={() => (open ? close() : setOpen(true))}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-foreground/40 hover:text-foreground"
-          >
-            <Plus className="h-2.5 w-2.5" />
-            Add filter
-          </button>
-          {open && (
-            <div className="absolute left-0 top-full z-50 mt-1 w-64 overflow-hidden rounded-md border border-border bg-popover shadow-lg">
-              {!dimension ? (
-                <div className="py-1" role="listbox" aria-label="Filter by">
-                  {dimensions.map((d) => (
-                    <button key={d.key} type="button" role="option" aria-selected={false} onClick={() => setDimension(d)} className={ROW}>
-                      <span className="truncate">{d.label}</span>
-                      <span className="shrink-0 text-[10px]">{d.options.length}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5 text-[11px]">
-                    <button type="button" onClick={() => setDimension(null)} className="text-muted-foreground hover:text-foreground hover:underline">
-                      Filter by
-                    </button>
-                    <span className="text-muted-foreground">›</span>
-                    <span className="font-medium text-foreground">{dimension.label}</span>
-                  </div>
-                  {dimension.options.length > NARROW_FROM && (
-                    <div className="flex items-center gap-1 border-b border-border/60 px-3 py-1.5">
-                      <Search className="h-3 w-3 shrink-0 text-muted-foreground" />
-                      <input
-                        ref={inputRef}
-                        value={query}
-                        aria-label={`Type to narrow ${dimension.label}`}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Type to narrow…"
-                        className="w-full bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
-                      />
-                    </div>
-                  )}
-                  <div className="max-h-48 overflow-y-auto py-1" role="listbox" aria-label={dimension.label}>
-                    {values.map((o) => (
-                      <button
-                        key={o.key}
-                        type="button"
-                        role="option"
-                        aria-selected={false}
-                        onClick={() => {
-                          onChange([...selected, o.key]);
-                          close();
-                        }}
-                        className={ROW}
-                      >
-                        <span className="truncate">{o.label}</span>
-                        {o.count != null && <span className="shrink-0 text-[10px]">{o.count}</span>}
+        {/* The control and the clear link travel together at the end of the
+            pills: when the pills wrap, the pair stays one unit rather than the
+            link landing alone on a line of its own. */}
+        <span className="inline-flex shrink-0 items-center gap-2">
+          <span className="relative inline-flex">
+            <button
+              ref={buttonRef}
+              type="button"
+              aria-expanded={open}
+              aria-haspopup="listbox"
+              onClick={() => (open ? close() : setOpen(true))}
+              className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+            >
+              <Plus className="h-2.5 w-2.5" />
+              Add filter
+            </button>
+            {open && (
+              <div
+                ref={panelRef}
+                className={`absolute top-full z-50 mt-1 w-64 overflow-hidden rounded-md border border-border bg-popover shadow-lg ${alignRight ? 'right-0' : 'left-0'}`}
+              >
+                {!dimension ? (
+                  <div className="py-1" role="listbox" aria-label="Filter by">
+                    {dimensions.map((d) => (
+                      <button key={d.key} type="button" role="option" aria-selected={false} onClick={() => setDimension(d)} className={ROW}>
+                        <span className="truncate">{d.label}</span>
+                        <span className="shrink-0 text-[10px]">{d.options.length}</span>
                       </button>
                     ))}
-                    {values.length === 0 && (
-                      <div className="px-3 py-2 text-[11px] text-muted-foreground/70">
-                        {q ? `Nothing matches “${query}”.` : 'Every value is already selected.'}
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5 text-[11px]">
+                      <button type="button" onClick={() => setDimension(null)} className="text-muted-foreground hover:text-foreground hover:underline">
+                        Filter by
+                      </button>
+                      <span className="text-muted-foreground">›</span>
+                      <span className="font-medium text-foreground">{dimension.label}</span>
+                    </div>
+                    {dimension.options.length > NARROW_FROM && (
+                      <div className="flex items-center gap-1 border-b border-border/60 px-3 py-1.5">
+                        <Search className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        <input
+                          ref={inputRef}
+                          value={query}
+                          aria-label={`Type to narrow ${dimension.label}`}
+                          onChange={(e) => setQuery(e.target.value)}
+                          placeholder="Type to narrow…"
+                          className="w-full bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
+                        />
                       </div>
                     )}
-                  </div>
-                </>
-              )}
-            </div>
+                    <div className="max-h-48 overflow-y-auto py-1" role="listbox" aria-label={dimension.label}>
+                      {values.map((o) => (
+                        <button
+                          key={o.key}
+                          type="button"
+                          role="option"
+                          aria-selected={false}
+                          onClick={() => {
+                            onChange([...selected, o.key]);
+                            close();
+                          }}
+                          className={ROW}
+                        >
+                          <span className="truncate">{o.label}</span>
+                          {o.count != null && <span className="shrink-0 text-[10px]">{o.count}</span>}
+                        </button>
+                      ))}
+                      {values.length === 0 && (
+                        <div className="px-3 py-2 text-[11px] text-muted-foreground/70">
+                          {q ? `Nothing matches “${query}”.` : 'Every value is already selected.'}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </span>
+          {selected.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                onChange([]);
+                close();
+              }}
+              className="shrink-0 text-[10px] text-muted-foreground underline hover:text-foreground"
+            >
+              clear
+            </button>
           )}
         </span>
-        {selected.length > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              onChange([]);
-              close();
-            }}
-            className="ml-auto shrink-0 text-[10px] text-muted-foreground underline hover:text-foreground"
-          >
-            clear
-          </button>
-        )}
       </div>
     </div>
   );
