@@ -20,6 +20,8 @@ const CURRENT = { x: -14, y: 34 };
 const DRAG = 1.8;
 const TOP_SPEED = 150;
 const BOAT_R = 11;
+/** How far the hull reaches from the boat's centre, bow first, at the size it is drawn. */
+const HULL_REACH = 26;
 /** Where the water starts, as a share of the sea's height: below the shoreline. */
 const SHORE_Y = 0.3;
 const DOCK_R = 26;
@@ -106,13 +108,13 @@ function step(world: World, dt: number) {
   boat.y += boat.vy * dt;
   // The water's edges turn the boat back: the shoreline above, the bottom
   // of the sea below, and the sides.
-  const top = world.h * SHORE_Y + BOAT_R;
-  const bottom = world.h - BOAT_R;
-  if (boat.x < BOAT_R) {
-    boat.x = BOAT_R;
+  const top = world.h * SHORE_Y + HULL_REACH;
+  const bottom = world.h - HULL_REACH;
+  if (boat.x < HULL_REACH) {
+    boat.x = HULL_REACH;
     boat.vx = Math.abs(boat.vx) * 0.8;
-  } else if (boat.x > world.w - BOAT_R) {
-    boat.x = world.w - BOAT_R;
+  } else if (boat.x > world.w - HULL_REACH) {
+    boat.x = world.w - HULL_REACH;
     boat.vx = -Math.abs(boat.vx) * 0.8;
   }
   if (boat.y < top) {
