@@ -149,8 +149,15 @@ export async function pausedRuns(orgId: string): Promise<PausedRunView[]> {
   }));
 }
 
+/**
+ * One workspace's ledger as the operator's page lists it, bar the NAME: who a
+ * workspace is belongs to the identity provider, which this service has no
+ * client for and no business holding. The route composes the name on top.
+ */
+export type OperatorCreditsLedgerRow = Omit<OperatorCreditsRow, 'workspaceName'>;
+
 /** Every workspace as the operator's page lists it. */
-export async function operatorCredits(): Promise<OperatorCreditsRow[]> {
+export async function operatorCredits(): Promise<OperatorCreditsLedgerRow[]> {
   const since = new Date(Date.now() - RECENT_SPEND_DAYS * 86_400_000).toISOString();
   const workspaces = await readCreditWorkspaces(since);
   const jobs = currentJobs();

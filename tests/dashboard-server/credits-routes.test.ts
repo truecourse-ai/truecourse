@@ -239,6 +239,8 @@ describe('the operator’s credits', () => {
     expect(body.workspaces).toEqual([
       {
         workspaceOrgId: TEST_ORG,
+        // No identity provider to ask on this server, so the page has an id.
+        workspaceName: null,
         balance: 900,
         lastGrantCredits: 900,
         lastGrantAt: expect.any(String),
@@ -246,6 +248,43 @@ describe('the operator’s credits', () => {
         pausedRuns: 2,
       },
     ]);
+  });
+
+  it('names each workspace the way the identity provider does', async () => {
+    await installed.store.grant({ workspaceOrgId: TEST_ORG, credits: 900, actorUserId: OPERATOR });
+    const asked: string[] = [];
+    const app = appWith({
+      authVerifier: asOperator,
+      workspaceNames: async (organizationId: string) => {
+        asked.push(organizationId);
+        return 'Acme Inc.';
+      },
+    });
+    const body = (await request(app).get('/api/operator/credits').expect(200))
+      .body as OperatorCreditsResponse;
+    expect(asked).toEqual([TEST_ORG]);
+    expect(body.workspaces[0]).toMatchObject({
+      workspaceOrgId: TEST_ORG,
+      workspaceName: 'Acme Inc.',
+      balance: 900,
+    });
+  });
+
+  it('still answers when the name cannot be looked up, and the row keeps its id', async () => {
+    await installed.store.grant({ workspaceOrgId: TEST_ORG, credits: 900, actorUserId: OPERATOR });
+    const app = appWith({
+      authVerifier: asOperator,
+      workspaceNames: async () => {
+        throw new Error('WorkOS refused');
+      },
+    });
+    const body = (await request(app).get('/api/operator/credits').expect(200))
+      .body as OperatorCreditsResponse;
+    expect(body.workspaces[0]).toMatchObject({
+      workspaceOrgId: TEST_ORG,
+      workspaceName: null,
+      balance: 900,
+    });
   });
 
   it('grants, and carries on what the workspace had paused, oldest first', async () => {

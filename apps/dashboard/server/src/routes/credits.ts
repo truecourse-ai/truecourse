@@ -29,6 +29,7 @@ import {
 import { createAppError } from '@truecourse/core/lib/errors';
 import type { CreditStatementRecord } from '@truecourse/core/lib/credits-store';
 import { readCreditBalance } from '@truecourse/core/lib/credits-store';
+import { log } from '@truecourse/core/lib/logger';
 import {
   adjustWorkspaceCredits,
   creditStatement,
@@ -166,13 +167,71 @@ function operatorOnly(req: Request, _res: Response, next: NextFunction): void {
   next(createAppError('The server has no such route.', 404));
 }
 
-export function createOperatorCreditsRouter(): Router {
+/** What the operator's side is built from beyond the ledger itself. */
+export interface OperatorCreditsRouterOptions {
+  /**
+   * An organization's display name, as the identity provider knows it: the
+   * auth layer's cached lookup (`WorkspaceSessionTools.organizationName`).
+   * Absent on a server with no identity provider, and then every row is listed
+   * by its id.
+   */
+  workspaceName?: (organizationId: string) => Promise<string | undefined>;
+}
+
+/**
+ * Ids already complained about, so a provider that will not name a workspace
+ * costs the log ONE line rather than one per read of the page.
+ */
+const unnamed = new Set<string>();
+
+/**
+ * A workspace's name, or null. A lookup that fails never fails the page: the
+ * operator is reading balances, and a row without a name is still a row. It
+ * simply goes back to being an id.
+ */
+async function resolveWorkspaceName(
+  lookup: OperatorCreditsRouterOptions['workspaceName'],
+  organizationId: string,
+): Promise<string | null> {
+  if (!lookup) return null;
+  try {
+    const name = await lookup(organizationId);
+    if (name) {
+      unnamed.delete(organizationId);
+      return name;
+    }
+    warnUnnamed(organizationId, 'the identity provider has no name for it');
+  } catch (e) {
+    warnUnnamed(organizationId, (e as Error).message);
+  }
+  return null;
+}
+
+function warnUnnamed(organizationId: string, why: string): void {
+  if (unnamed.has(organizationId)) return;
+  unnamed.add(organizationId);
+  log.warn(`[credits] could not name ${organizationId}: ${why}`);
+}
+
+export function createOperatorCreditsRouter(
+  opts: OperatorCreditsRouterOptions = {},
+): Router {
   const router: Router = Router();
   router.use(operatorOnly);
 
+  // The ledger is one read; the names are one lookup each, all at once, and
+  // mostly cached. A row nobody could name keeps its id.
   router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
     try {
-      const body: OperatorCreditsResponse = { workspaces: await operatorCredits() };
+      const rows = await operatorCredits();
+      const body: OperatorCreditsResponse = {
+        workspaces: await Promise.all(
+          rows.map(async (row) => ({
+            ...row,
+            workspaceName: await resolveWorkspaceName(opts.workspaceName, row.workspaceOrgId),
+          })),
+        ),
+      };
       res.json(body);
     } catch (e) {
       next(e);

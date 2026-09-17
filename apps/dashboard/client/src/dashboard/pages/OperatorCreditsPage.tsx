@@ -191,8 +191,12 @@ export default function OperatorCreditsPage() {
           renderRow={(row) => (
             <>
               <span className="flex w-full items-center gap-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium text-foreground">
-                  {row.workspaceOrgId}
+                <span
+                  className={`min-w-0 flex-1 truncate text-[13px] font-medium text-foreground${
+                    row.workspaceName ? '' : ' font-mono'
+                  }`}
+                >
+                  {row.workspaceName ?? row.workspaceOrgId}
                 </span>
                 {row.pausedRuns > 0 && (
                   <StatusWord tone="attention" word="Paused" count={row.pausedRuns} />
@@ -203,6 +207,12 @@ export default function OperatorCreditsPage() {
               </span>
               <span className="flex w-full items-center gap-2 text-[11px] text-muted-foreground">
                 <span className="min-w-0 truncate tabular-nums">
+                  {row.workspaceName && (
+                    <>
+                      <span className="font-mono">{row.workspaceOrgId}</span>
+                      {' · '}
+                    </>
+                  )}
                   {formatUsd(usdOfCredits(row.balance))} left · {credits(row.spent30d)} spent in 30 days
                   {row.lastGrantAt
                     ? ` · last grant ${credits(row.lastGrantCredits)} on ${startedLabel(row.lastGrantAt)}`

@@ -97,6 +97,12 @@ export interface CreditsResumeResponse {
 /** One workspace as the operator's Credits page lists it. */
 export interface OperatorCreditsRow {
   workspaceOrgId: string;
+  /**
+   * The workspace's name as the identity provider knows it, and null when it
+   * cannot be resolved. An operator reads a customer, not an id, and a name
+   * nobody could give up is no reason to withhold the balance.
+   */
+  workspaceName: string | null;
   balance: number;
   lastGrantCredits: number;
   lastGrantAt: string | null;

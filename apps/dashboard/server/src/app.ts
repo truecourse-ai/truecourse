@@ -87,6 +87,13 @@ export interface CreateAppOptions {
    * registered it.
    */
   featureRouters?: ServerRouterMount[];
+  /**
+   * An organization's display name, as the identity provider knows it: the
+   * auth layer's cached lookup. The operator's Credits page lists a workspace
+   * by it rather than by its id; absent (local mode, a test) every row is its
+   * id, which is what the page falls back to.
+   */
+  workspaceNames?: (organizationId: string) => Promise<string | undefined>;
 }
 
 export function createApp(opts: CreateAppOptions): express.Express {
@@ -210,7 +217,12 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // catch-all below answers those addresses as the routes they are not.
   if (!isLocalMode()) {
     app.use('/api/credits', createCreditsRouter());
-    app.use('/api/operator/credits', createOperatorCreditsRouter());
+    app.use(
+      '/api/operator/credits',
+      createOperatorCreditsRouter(
+        opts.workspaceNames ? { workspaceName: opts.workspaceNames } : {},
+      ),
+    );
   }
 
   // The job queue: the live event stream, job status, and the notifications

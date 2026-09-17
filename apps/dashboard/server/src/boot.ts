@@ -273,6 +273,11 @@ export async function startServer(): Promise<void> {
     localRouter: local?.router ?? null,
     jobs,
     featureRouters,
+    // Who a workspace IS, for the operator's Credits page. Local mode has no
+    // identity provider to ask, and no operator routes to ask for.
+    ...(auth.workspaceSession
+      ? { workspaceNames: auth.workspaceSession.organizationName }
+      : {}),
   });
   const httpServer = createServer(app);
   setupSocket(httpServer);

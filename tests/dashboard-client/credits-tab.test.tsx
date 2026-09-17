@@ -88,6 +88,7 @@ const OPERATOR_CREDITS: OperatorCreditsResponse = {
   workspaces: [
     {
       workspaceOrgId: 'org_acme',
+      workspaceName: 'Acme Inc.',
       balance: 4880,
       lastGrantCredits: 5000,
       lastGrantAt: '2026-09-01T09:00:00.000Z',
@@ -95,7 +96,9 @@ const OPERATOR_CREDITS: OperatorCreditsResponse = {
       pausedRuns: 1,
     },
     {
+      // Nobody could name this one, so it is listed by its id and nothing else.
       workspaceOrgId: 'org_beta',
+      workspaceName: null,
       balance: 0,
       lastGrantCredits: 0,
       lastGrantAt: null,
@@ -290,6 +293,18 @@ describe('the operator’s Credits page', () => {
     expect(within(rows[0]!).getByText(/120 spent in 30 days/)).toBeInTheDocument();
     expect(within(rows[0]!).getByText(/last grant 5,000 on/)).toBeInTheDocument();
     expect(within(rows[1]!).getByText(/never granted/)).toBeInTheDocument();
+  });
+
+  it('says whose workspace it is, with the id under the name', async () => {
+    serve({ user: { id: 'op', email: 'ops@truecourse.dev', organizationId: 'org_acme', isOperator: true } });
+    renderAt('/operator/credits');
+    const list = await screen.findByRole('list', { name: 'Workspaces' });
+    const rows = within(list).getAllByRole('listitem');
+    // The name is the row's title, the id the line beneath it.
+    expect(within(rows[0]!).getByText('Acme Inc.')).toBeInTheDocument();
+    expect(within(rows[0]!).getByText('org_acme')).toBeInTheDocument();
+    // Unnamed: the id is the title, and it is not said twice.
+    expect(within(rows[1]!).getAllByText('org_beta')).toHaveLength(1);
   });
 
   it('grants, with resuming on by default', async () => {
