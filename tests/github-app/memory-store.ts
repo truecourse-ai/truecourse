@@ -31,11 +31,14 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
 
   async saveInstallation(rec: InstallationAccount): Promise<void> {
     const { installationId, accountLogin, accountType, createdAt, updatedAt } = rec;
+    // As the Postgres upsert does: an empty name never unnames a known row,
+    // and a row that exists keeps its createdAt.
+    const existing = this.installations.get(installationId);
     this.installations.set(installationId, {
       installationId,
-      accountLogin,
-      accountType,
-      createdAt,
+      accountLogin: accountLogin || existing?.accountLogin || '',
+      accountType: accountType || existing?.accountType || '',
+      createdAt: existing?.createdAt ?? createdAt,
       updatedAt,
     });
   }

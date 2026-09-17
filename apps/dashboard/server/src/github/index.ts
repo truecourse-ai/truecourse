@@ -20,6 +20,7 @@
  */
 
 import type { Router } from 'express';
+import { createAppError } from '@truecourse/core/lib/errors';
 import { log } from '@truecourse/core/lib/logger';
 import {
   createConnectRouter,
@@ -134,8 +135,18 @@ export function createGithubConnection(
     (async (repoKey, via) => {
       // A caller that already knows its installation is cloned through it, with
       // no link read at all: this is how a context source reads a repository
-      // Code has not connected.
+      // Code has not connected. The workspace has to HOLD that installation
+      // still: a source made while the account was attached keeps naming it
+      // after the account is removed, and must not go on minting clones of a
+      // repository the workspace can no longer reach.
       if (via?.installationId !== undefined) {
+        const installation = await store.getInstallation(via.installationId);
+        if (!installation?.workspaceOrgIds.includes(via.workspaceOrgId)) {
+          throw createAppError(
+            `${repoKey} is read through a GitHub account this workspace no longer holds (installation ${via.installationId}). Connect the account again in Settings › Repositories, or remove the source.`,
+            403,
+          );
+        }
         return createRunClone(repoKey, await tokenFor(via.installationId), {
           workspaceOrgId: via.workspaceOrgId,
           defaultBranch: via.defaultBranch ?? null,

@@ -27,7 +27,11 @@ export interface InstallationRecord {
 export type InstallationAccount = Omit<InstallationRecord, 'workspaceOrgIds'>;
 
 export interface InstallationStore {
-  /** Upsert the account; the workspace links are untouched. */
+  /**
+   * Upsert the account. A row that exists keeps its `createdAt`, keeps a
+   * known login or type when the save carries an empty one (a list that did
+   * not name it must not unname it), and keeps its workspace links.
+   */
   saveInstallation(rec: InstallationAccount): Promise<void>;
   getInstallation(installationId: number): Promise<InstallationRecord | null>;
   /** Drop the account and every workspace's link to it. */

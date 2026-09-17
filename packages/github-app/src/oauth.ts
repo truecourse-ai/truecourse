@@ -17,22 +17,28 @@ export interface UserInstallation {
   accountType: string;
 }
 
-/** Exchange the code GitHub sent to the callback for a user access token. */
+/**
+ * Exchange the code GitHub sent to the callback for a user access token. A
+ * refusal names GitHub's own reason when the answer is JSON, and the status
+ * when it is not (an outage page from GitHub or a proxy is not JSON).
+ */
 export async function exchangeUserCode(cfg: GithubAppConfig, code: string): Promise<string> {
   const res = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ client_id: cfg.clientId, client_secret: cfg.clientSecret, code }),
   });
-  const body = (await res.json()) as {
-    access_token?: string;
-    error?: string;
-    error_description?: string;
-  };
+  const text = await res.text();
+  let body: { access_token?: string; error?: string; error_description?: string } = {};
+  try {
+    body = JSON.parse(text) as typeof body;
+  } catch {
+    // Not JSON: the status is the whole answer.
+  }
   if (!res.ok || !body.access_token) {
-    throw new Error(
-      `GitHub refused the authorization code: ${body.error_description ?? body.error ?? res.status}`,
-    );
+    const reason =
+      body.error_description ?? body.error ?? `${res.status} ${res.statusText}`.trim();
+    throw new Error(`GitHub refused the authorization code: ${reason}`);
   }
   return body.access_token;
 }

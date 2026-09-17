@@ -2,15 +2,19 @@
  * Settings › Repositories: where a repository is connected FROM.
  *
  * It is real for GitHub — the accounts are the App's installations
- * `/api/github/status` reports, and connecting one is a navigation to the App's
- * install page. GitLab is LISTED and says "Coming soon": no lock, no button,
+ * `/api/github/status` reports, and connecting one is a navigation to GitHub's
+ * authorize page. The page is also where every trip to GitHub that did not
+ * attach lands: it says how the trip ended, and a `pick` landing offers the
+ * accounts GitHub named for the person to choose from. GitLab is LISTED and
+ * says "Coming soon": no lock, no button,
  * nothing to click, because there is nothing behind it yet. The providers
  * beyond these two, and the Connections tab, are the enterprise bundle's and
  * are tested beside it.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { GithubConnectStatusResponse, GithubRepoSummary } from '@truecourse/shared';
 import DashboardApp from '@/dashboard/DashboardApp';
@@ -63,12 +67,21 @@ function status(over: Partial<GithubConnectStatusResponse> = {}): GithubConnectS
   };
 }
 
-function serve(githubStatus: () => Response = () => json(status())) {
-  window.fetch = vi.fn(async (input: RequestInfo | URL) => {
+/** The attach requests the page posted, body by body. */
+let attached: unknown[] = [];
+
+function serve(githubStatus: (url: URL) => Response = () => json(status())) {
+  attached = [];
+  window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const { pathname } = new URL(href, window.location.origin);
+    const url = new URL(href, window.location.origin);
+    const { pathname } = url;
     if (pathname === '/api/repos') return json([]);
-    if (pathname === '/api/github/status') return githubStatus();
+    if (pathname === '/api/github/status') return githubStatus(url);
+    if (pathname === '/api/github/installations/attach' && init?.method === 'POST') {
+      attached.push(JSON.parse(String(init.body)));
+      return json({ ok: true, attached: [] });
+    }
     if (pathname === '/api/llm/config') return json({ config: null, providers: ['anthropic'] });
     if (pathname === '/api/sessions/runs') return json({ runs: [] });
     return json({ error: 'not found' }, 404);
@@ -186,6 +199,64 @@ describe('Settings › Repositories', () => {
     // GitHub's accounts are GitHub's: a provider with nothing connected lists none.
     expect(within(row).queryByRole('list', { name: 'GitHub installations' })).toBeNull();
     expect(within(row).queryByText(/repositor(y|ies) linked/)).toBeNull();
+  });
+
+  it('says how a trip to GitHub ended, in words that fit the outcome, wherever it started', async () => {
+    serve(() => json(status({ installations: [], repos: [] })));
+    renderAt('/settings/repositories?github=expired&from=code-connect');
+
+    const github = providerRow('GitHub');
+    expect(
+      await within(github).findByText(/The trip to GitHub took too long, or came back to another session/),
+    ).toBeInTheDocument();
+    // The retry from here goes back where the trip started.
+    const statusReads = vi.mocked(window.fetch).mock.calls
+      .map(([input]) => String(input))
+      .filter((href) => href.includes('/api/github/status'));
+    expect(statusReads[0]).toContain('from=code-connect');
+  });
+
+  it('offers the accounts a pick landing names, attaches the ticked ones, and carries on where the trip started', async () => {
+    const user = userEvent.setup();
+    serve((url) =>
+      json(
+        status({
+          installations: [],
+          repos: [],
+          ...(url.searchParams.get('offer') === 'signed-offer'
+            ? {
+                offered: [
+                  { installationId: 100, accountLogin: 'acme', accountType: 'Organization' },
+                  { installationId: 200, accountLogin: 'octo', accountType: 'User' },
+                ],
+              }
+            : {}),
+        }),
+      ),
+    );
+    renderAt('/settings/repositories?github=pick&offer=signed-offer&from=code-connect');
+
+    const github = providerRow('GitHub');
+    const offered = await within(github).findByRole('list', { name: 'Offered GitHub accounts' });
+    const boxes = within(offered).getAllByRole('checkbox');
+    expect(boxes).toHaveLength(2);
+    // Every offered account starts ticked; the person unticks what is not theirs to add.
+    expect(boxes.every((box) => (box as HTMLInputElement).checked)).toBe(true);
+    await user.click(within(offered).getByLabelText(/octo/));
+    await user.click(within(github).getByRole('button', { name: 'Connect selected' }));
+
+    await waitFor(() => expect(attached).toEqual([{ offer: 'signed-offer', installationIds: [100] }]));
+    // On to the Code connect dialog, the pick made.
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Connect a repository');
+  });
+
+  it('says when the offer a pick landing carries is no longer honoured', async () => {
+    serve(() => json(status({ installations: [], repos: [] })));
+    renderAt('/settings/repositories?github=pick&offer=stale&from=settings');
+
+    const github = providerRow('GitHub');
+    expect(await within(github).findByText(/That offer expired/)).toBeInTheDocument();
+    expect(within(github).queryByRole('list', { name: 'Offered GitHub accounts' })).toBeNull();
   });
 
   it('has no Connections tab and no provider beyond the two', async () => {

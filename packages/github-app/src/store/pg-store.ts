@@ -7,6 +7,10 @@
  * workspace. The repositories an installation brought live in `repositories`
  * and are written through `PgRepositoryStore`.
  *
+ * Every read is ONE query: the account joined to its links, grouped here.
+ * The reads sit on every connect request (the ownership check) and on every
+ * status read, so a second round trip per installation would add up.
+ *
  * Takes a ready (migrated) Drizzle db: the server owns the pool and the
  * migrations, and tests inject a PGlite-backed db.
  */
@@ -24,6 +28,13 @@ const toIso = (v: string): string => new Date(v).toISOString();
 
 type InstallationRow = typeof providerAccounts.$inferSelect;
 
+/** An account row joined to one of its links, or to none (a left join's null side). */
+interface JoinedRow {
+  account: InstallationRow;
+  workspaceOrgId: string | null;
+  linkedAt: string | null;
+}
+
 function toInstallation(r: InstallationRow, workspaceOrgIds: string[]): InstallationRecord {
   return {
     installationId: Number(r.accountId),
@@ -33,6 +44,17 @@ function toInstallation(r: InstallationRow, workspaceOrgIds: string[]): Installa
     createdAt: toIso(r.createdAt),
     updatedAt: toIso(r.updatedAt),
   };
+}
+
+/** Fold joined rows (ordered by link age) into one record per account, links in attach order. */
+function group(rows: JoinedRow[]): Map<string, { account: InstallationRow; links: JoinedRow[] }> {
+  const byAccount = new Map<string, { account: InstallationRow; links: JoinedRow[] }>();
+  for (const row of rows) {
+    const entry = byAccount.get(row.account.accountId) ?? { account: row.account, links: [] };
+    if (row.workspaceOrgId !== null) entry.links.push(row);
+    byAccount.set(row.account.accountId, entry);
+  }
+  return byAccount;
 }
 
 export class PostgresInstallationStore implements InstallationStore {
@@ -49,27 +71,22 @@ export class PostgresInstallationStore implements InstallationStore {
     );
   }
 
-  /** The workspaces attached to each of the given accounts, keyed by account id. */
-  private async linksOf(accountIds: string[]): Promise<Map<string, string[]>> {
-    const links = new Map<string, string[]>();
-    if (accountIds.length === 0) return links;
-    const rows = await this.db
+  /** Accounts with every link each carries, oldest link first. */
+  private joined() {
+    return this.db
       .select({
-        accountId: providerAccountLinks.accountId,
+        account: providerAccounts,
         workspaceOrgId: providerAccountLinks.workspaceOrgId,
+        linkedAt: providerAccountLinks.createdAt,
       })
-      .from(providerAccountLinks)
-      .where(
+      .from(providerAccounts)
+      .leftJoin(
+        providerAccountLinks,
         and(
-          eq(providerAccountLinks.provider, GITHUB_PROVIDER),
-          inArray(providerAccountLinks.accountId, accountIds),
+          eq(providerAccountLinks.provider, providerAccounts.provider),
+          eq(providerAccountLinks.accountId, providerAccounts.accountId),
         ),
-      )
-      .orderBy(providerAccountLinks.createdAt);
-    for (const row of rows) {
-      links.set(row.accountId, [...(links.get(row.accountId) ?? []), row.workspaceOrgId]);
-    }
-    return links;
+      );
   }
 
   async saveInstallation(rec: InstallationAccount): Promise<void> {
@@ -86,8 +103,8 @@ export class PostgresInstallationStore implements InstallationStore {
       .onConflictDoUpdate({
         target: [providerAccounts.provider, providerAccounts.accountId],
         set: {
-          accountLogin: sql`excluded.account_login`,
-          accountType: sql`excluded.account_type`,
+          accountLogin: sql`coalesce(nullif(excluded.account_login, ''), ${providerAccounts.accountLogin})`,
+          accountType: sql`coalesce(nullif(excluded.account_type, ''), ${providerAccounts.accountType})`,
           updatedAt: sql`excluded.updated_at`,
         },
       });
@@ -96,14 +113,13 @@ export class PostgresInstallationStore implements InstallationStore {
   async getInstallation(
     installationId: number,
   ): Promise<InstallationRecord | null> {
-    const rows = await this.db
-      .select()
-      .from(providerAccounts)
+    const rows = await this.joined()
       .where(this.account(installationId))
-      .limit(1);
-    if (!rows[0]) return null;
-    const links = await this.linksOf([rows[0].accountId]);
-    return toInstallation(rows[0], links.get(rows[0].accountId) ?? []);
+      .orderBy(providerAccountLinks.createdAt);
+    const entry = group(rows).get(String(installationId));
+    return entry
+      ? toInstallation(entry.account, entry.links.map((l) => l.workspaceOrgId!))
+      : null;
   }
 
   async removeInstallation(installationId: number): Promise<void> {
@@ -144,25 +160,32 @@ export class PostgresInstallationStore implements InstallationStore {
   async listInstallationsForWorkspace(
     workspaceOrgId: string,
   ): Promise<InstallationRecord[]> {
-    const rows = await this.db
-      .select({ account: providerAccounts })
+    // The accounts this workspace holds, with EVERY workspace's link on each,
+    // in the order this workspace attached them.
+    const held = this.db
+      .select({ accountId: providerAccountLinks.accountId })
       .from(providerAccountLinks)
-      .innerJoin(
-        providerAccounts,
-        and(
-          eq(providerAccounts.provider, providerAccountLinks.provider),
-          eq(providerAccounts.accountId, providerAccountLinks.accountId),
-        ),
-      )
       .where(
         and(
           eq(providerAccountLinks.provider, GITHUB_PROVIDER),
           eq(providerAccountLinks.workspaceOrgId, workspaceOrgId),
         ),
+      );
+    const rows = await this.joined()
+      .where(
+        and(
+          eq(providerAccounts.provider, GITHUB_PROVIDER),
+          inArray(providerAccounts.accountId, held),
+        ),
       )
       .orderBy(providerAccountLinks.createdAt);
-    const links = await this.linksOf(rows.map((r) => r.account.accountId));
-    return rows.map((r) => toInstallation(r.account, links.get(r.account.accountId) ?? []));
+    return [...group(rows).values()]
+      .map((entry) => ({
+        record: toInstallation(entry.account, entry.links.map((l) => l.workspaceOrgId!)),
+        attachedAt: entry.links.find((l) => l.workspaceOrgId === workspaceOrgId)?.linkedAt ?? '',
+      }))
+      .sort((a, b) => a.attachedAt.localeCompare(b.attachedAt))
+      .map((entry) => entry.record);
   }
 
   async close(): Promise<void> {

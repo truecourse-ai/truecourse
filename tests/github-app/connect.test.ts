@@ -6,7 +6,12 @@ import type {
   GithubConnectStatusResponse,
   GithubInstallationReposResponse,
 } from '@truecourse/shared';
-import { createConnectRouter, signConnectState, CONNECT_STATE_TTL_MS } from '../../packages/github-app/src/index';
+import {
+  createConnectRouter,
+  signConnectOffer,
+  signConnectState,
+  CONNECT_STATE_TTL_MS,
+} from '../../packages/github-app/src/index';
 import type { ConnectDeps } from '../../packages/github-app/src/connect';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
 import type { UserInstallation } from '../../packages/github-app/src/oauth';
@@ -64,6 +69,7 @@ function mount(deps: Partial<ConnectDeps> = {}): Express {
       appUrl: 'http://localhost:3000',
       setupRedirectPath: '/code?connect=1',
       setupRedirectPaths: {
+        settings: '/settings/repositories',
         'context-add': '/context?add=repository',
         'code-connect': '/code?connect=1',
       },
@@ -240,28 +246,78 @@ describe('connect router', () => {
  * The callback is the one door in: GitHub returns there with a code after an
  * authorize or an install, and the code says which installations the person
  * can reach. The signed state binds the trip to the session that started it.
+ * An install return attaches the installation the person chose on GitHub's
+ * page; a plain authorize names no choice, so what the workspace does not
+ * hold yet comes back as a signed offer and the attach route takes the pick.
+ * Every trip that did not attach lands on the host's Settings path, flagged
+ * with how it ended and where it started.
  */
 describe('the connect callback', () => {
-  it('attaches every installation the person can reach to the workspace', async () => {
+  const SETTINGS = 'http://localhost:3000/settings/repositories';
+  const settledAt = (outcome: string, from = 'settings') =>
+    `${SETTINGS}?github=${outcome}&from=${from}`;
+  /** The offer token a `pick` landing carries. */
+  const offerIn = (location: string): string => {
+    const url = new URL(location);
+    expect(url.searchParams.get('github')).toBe('pick');
+    return url.searchParams.get('offer')!;
+  };
+  const attachWith = (offer: string, installationIds: number[]) =>
+    request(app).post('/api/ee/github/installations/attach').send({ offer, installationIds });
+
+  it('offers the installations the person can reach that the workspace does not hold, attaching nothing until the pick', async () => {
     userInstallations.mockResolvedValue([ACME, OCTO]);
+    const res = await request(app)
+      .get('/api/ee/github/callback')
+      .query({ code: 'c0de', state: stateFor('org_A') })
+      .expect(302);
+    expect(userInstallations).toHaveBeenCalledWith('c0de');
+    expect(res.headers.location).toMatch(`${SETTINGS}?github=pick&offer=`);
+    expect(res.headers.location).toMatch(/&from=settings$/);
+    expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
+    expect(await store.getInstallation(100)).toBeNull();
+
+    // The status read answers the offer's names, so the page can draw them.
+    const offer = offerIn(res.headers.location);
+    const status = await request(app).get('/api/ee/github/status').query({ offer }).expect(200);
+    expect((status.body as GithubConnectStatusResponse).offered).toEqual([
+      { installationId: 100, accountLogin: 'acme', accountType: 'Organization' },
+      { installationId: 200, accountLogin: 'octo', accountType: 'User' },
+    ]);
+
+    // The pick attaches what was ticked and nothing else.
+    const attached = await attachWith(offer, [200]).expect(200);
+    expect(attached.body).toEqual({ ok: true, attached: [200] });
+    expect(await store.getInstallation(200)).toMatchObject({
+      accountLogin: 'octo',
+      accountType: 'User',
+      workspaceOrgIds: ['org_A'],
+    });
+    expect(await store.getInstallation(100)).toBeNull();
+    // Named by the user-installations list; the App API is not asked.
+    expect(lookupAccount).not.toHaveBeenCalled();
+  });
+
+  it('offers only what the workspace does not hold, and says so when that is nothing', async () => {
+    await seedInstallation(['org_A']);
+    userInstallations.mockResolvedValue([ACME, OCTO]);
+    const res = await request(app)
+      .get('/api/ee/github/callback')
+      .query({ code: 'c0de', state: stateFor('org_A') })
+      .expect(302);
+    const status = await request(app)
+      .get('/api/ee/github/status')
+      .query({ offer: offerIn(res.headers.location) })
+      .expect(200);
+    expect((status.body as GithubConnectStatusResponse).offered?.map((i) => i.installationId)).toEqual([200]);
+
+    userInstallations.mockResolvedValue([ACME]);
     await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: stateFor('org_A') })
       .expect(302)
-      .expect('location', 'http://localhost:3000/code?connect=1');
-
-    expect(userInstallations).toHaveBeenCalledWith('c0de');
-    expect(await store.getInstallation(100)).toMatchObject({
-      accountLogin: 'acme',
-      accountType: 'Organization',
-      workspaceOrgIds: ['org_A'],
-    });
-    expect(await store.getInstallation(200)).toMatchObject({
-      accountLogin: 'octo',
-      workspaceOrgIds: ['org_A'],
-    });
-    // Named by the user-installations list; the App API is not asked.
-    expect(lookupAccount).not.toHaveBeenCalled();
+      .expect('location', settledAt('nothing-new'));
+    expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
   });
 
   it('lets a second workspace attach the same installation, keeping the first', async () => {
@@ -269,10 +325,11 @@ describe('the connect callback', () => {
     await store.linkRepo(githubRepoRecord('acme/api', 100, 'org_A'));
 
     currentOrg = 'org_B';
-    await request(app)
+    const res = await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: stateFor('org_B') })
       .expect(302);
+    await attachWith(offerIn(res.headers.location), [100]).expect(200);
 
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A', 'org_B']);
     const status = await request(app).get('/api/ee/github/status').expect(200);
@@ -285,13 +342,38 @@ describe('the connect callback', () => {
       .expect(409);
   });
 
-  it('attaches once: a repeat trip does not duplicate the link', async () => {
-    await seedInstallation(['org_A']);
-    await request(app)
+  it('attaches once: a repeated pick does not duplicate the link', async () => {
+    const res = await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: stateFor('org_A') })
       .expect(302);
+    const offer = offerIn(res.headers.location);
+    await attachWith(offer, [100]).expect(200);
+    await attachWith(offer, [100]).expect(200);
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
+  });
+
+  it("refuses a pick on an offer that is not this session's, expired, or naming nothing it offered", async () => {
+    const offerFor = (orgId: string, userId = 'u1', ttl = CONNECT_STATE_TTL_MS) =>
+      signConnectOffer(
+        { orgId, userId, origin: null, installations: [ACME], expiresAt: Date.now() + ttl },
+        STATE_SECRET,
+      );
+    await attachWith(offerFor('org_B'), [100]).expect(400);
+    await attachWith(offerFor('org_A', 'someone-else'), [100]).expect(400);
+    await attachWith(offerFor('org_A', 'u1', -1), [100]).expect(400);
+    // An id the offer did not name is not attachable through it.
+    await attachWith(offerFor('org_A'), [200]).expect(400);
+    // A state token is not an offer, however well signed.
+    await attachWith(stateFor('org_A'), [100]).expect(400);
+    expect(await store.getInstallation(100)).toBeNull();
+    expect(await store.getInstallation(200)).toBeNull();
+    // Nor does the status read honour any of them.
+    const status = await request(app)
+      .get('/api/ee/github/status')
+      .query({ offer: offerFor('org_B') })
+      .expect(200);
+    expect((status.body as GithubConnectStatusResponse).offered).toBeUndefined();
   });
 
   it('sends a person with no installation on to install, with a fresh state', async () => {
@@ -304,14 +386,16 @@ describe('the connect callback', () => {
     expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
   });
 
-  it('accepts the install return, attaching the new installation', async () => {
-    userInstallations.mockResolvedValue([ACME]);
+  it('accepts the install return, attaching only the installation just chosen', async () => {
+    userInstallations.mockResolvedValue([ACME, OCTO]);
     await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', installation_id: '100', setup_action: 'install', state: stateFor('org_A') })
       .expect(302)
       .expect('location', 'http://localhost:3000/code?connect=1');
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
+    // Reachable too, but not what the person chose on GitHub's page.
+    expect(await store.getInstallation(200)).toBeNull();
   });
 
   it('refuses an install return naming an installation the person cannot reach (IDOR guard)', async () => {
@@ -321,39 +405,59 @@ describe('the connect callback', () => {
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', installation_id: '100', state: stateFor('org_A') })
       .expect(302)
-      .expect('location', 'http://localhost:3000/code?connect=1&github=refused');
+      .expect('location', settledAt('unreachable'));
     // Nothing attached — not even the reachable one.
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_OTHER']);
     expect(await store.getInstallation(200)).toBeNull();
   });
 
+  it('says when the install was only requested, and does not loop when the install page returned nothing', async () => {
+    // A non-admin asked the account's owners: GitHub comes back with no
+    // installation, and nothing to exchange.
+    await request(app)
+      .get('/api/ee/github/callback')
+      .query({ setup_action: 'request', state: stateFor('org_A') })
+      .expect(302)
+      .expect('location', settledAt('requested'));
+    expect(userInstallations).not.toHaveBeenCalled();
+
+    // Back from the install page with the App still reachable nowhere: the
+    // install page again would be the same dead end.
+    userInstallations.mockResolvedValue([]);
+    await request(app)
+      .get('/api/ee/github/callback')
+      .query({ code: 'c0de', setup_action: 'install', state: stateFor('org_A', 'u1', 'code-connect') })
+      .expect(302)
+      .expect('location', settledAt('none', 'code-connect'));
+    expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
+  });
+
   it('refuses a state for another workspace, another user, an expired one, or none', async () => {
-    const refused = 'http://localhost:3000/code?connect=1&github=refused';
     await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: stateFor('org_B') })
       .expect(302)
-      .expect('location', refused);
+      .expect('location', settledAt('expired'));
     await request(app)
       .get('/api/ee/github/callback')
-      .query({ code: 'c0de', state: stateFor('org_A', 'someone-else') })
+      .query({ code: 'c0de', state: stateFor('org_A', 'someone-else', 'context-add') })
       .expect(302)
-      .expect('location', refused);
+      .expect('location', settledAt('expired', 'context-add'));
     await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: stateFor('org_A', 'u1', null, -1) })
       .expect(302)
-      .expect('location', refused);
+      .expect('location', settledAt('expired'));
     await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: 'org_A' })
       .expect(302)
-      .expect('location', refused);
+      .expect('location', settledAt('expired'));
     await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de' })
       .expect(302)
-      .expect('location', refused);
+      .expect('location', settledAt('expired'));
     expect(userInstallations).not.toHaveBeenCalled();
     expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
   });
@@ -367,24 +471,24 @@ describe('the connect callback', () => {
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: forged })
       .expect(302)
-      .expect('location', 'http://localhost:3000/code?connect=1&github=refused');
+      .expect('location', settledAt('expired'));
     expect(userInstallations).not.toHaveBeenCalled();
   });
 
-  it('refuses when GitHub refuses the code, attaching nothing', async () => {
+  it('says when GitHub refuses the code, attaching nothing', async () => {
     userInstallations.mockRejectedValue(new Error('GitHub refused the authorization code: bad_verification_code'));
     await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'stale', state: stateFor('org_A') })
       .expect(302)
-      .expect('location', 'http://localhost:3000/code?connect=1&github=refused');
+      .expect('location', settledAt('denied'));
     expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
   });
 
-  it('lands where the trip started, and on the host-declared path otherwise', async () => {
+  it('lands an install where the trip started, and on the host-declared path otherwise', async () => {
     await request(app)
       .get('/api/ee/github/callback')
-      .query({ code: 'c0de', state: stateFor('org_A', 'u1', 'context-add') })
+      .query({ code: 'c0de', installation_id: '100', state: stateFor('org_A', 'u1', 'context-add') })
       .expect(302)
       .expect('location', 'http://localhost:3000/context?add=repository');
 
@@ -395,9 +499,16 @@ describe('the connect callback', () => {
     });
     await request(eeApp)
       .get('/api/ee/github/callback')
-      .query({ code: 'c0de', state: stateFor('org_A') })
+      .query({ code: 'c0de', installation_id: '100', state: stateFor('org_A') })
       .expect(302)
       .expect('location', 'https://app.truecourse.test/repositories?connect=1');
+    // With no Settings path declared, a trip that did not attach lands on the one path there is.
+    userInstallations.mockResolvedValue([]);
+    await request(eeApp)
+      .get('/api/ee/github/callback')
+      .query({ code: 'c0de', setup_action: 'install', state: stateFor('org_A', 'u1', 'code-connect') })
+      .expect(302)
+      .expect('location', 'https://app.truecourse.test/repositories?connect=1&github=none&from=code-connect');
   });
 
   it('mints a state that remembers where it was started, and ignores an origin it does not know', async () => {
@@ -405,7 +516,7 @@ describe('the connect callback', () => {
     const state = new URL((known.body as GithubConnectStatusResponse).connectUrl).searchParams.get('state')!;
     await request(app)
       .get('/api/ee/github/callback')
-      .query({ code: 'c0de', state })
+      .query({ code: 'c0de', installation_id: '100', state })
       .expect(302)
       .expect('location', 'http://localhost:3000/context?add=repository');
 
@@ -413,7 +524,7 @@ describe('the connect callback', () => {
     const other = new URL((unknown.body as GithubConnectStatusResponse).connectUrl).searchParams.get('state')!;
     await request(app)
       .get('/api/ee/github/callback')
-      .query({ code: 'c0de', state: other })
+      .query({ code: 'c0de', installation_id: '100', state: other })
       .expect(302)
       .expect('location', 'http://localhost:3000/code?connect=1');
   });
@@ -442,17 +553,29 @@ describe('detaching an installation from a workspace', () => {
     expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
   });
 
-  it('keeps the link when a repository’s cleanup fails', async () => {
+  it('keeps the link when a repository’s cleanup fails, disconnects the rest, and names both so a retry finishes', async () => {
     await seedInstallation(['org_A']);
     await store.linkRepo(githubRepoRecord('acme/api', 100, 'org_A'));
+    await store.linkRepo(githubRepoRecord('acme/web', 100, 'org_A'));
+    let busy = true;
     const server = mount({
-      onRepoUnlinked: async () => {
-        throw Object.assign(new Error('a job is still running'), { statusCode: 409 });
+      onRepoUnlinked: async (link) => {
+        if (busy && link.repoFullName === 'acme/web') {
+          throw Object.assign(new Error('a job is still running'), { statusCode: 409 });
+        }
       },
     });
-    await request(server).delete('/api/ee/github/installations/100').expect(409);
-    expect(await store.getRepo('acme/api')).not.toBeNull();
+    const res = await request(server).delete('/api/ee/github/installations/100').expect(409);
+    expect(res.body).toMatchObject({ disconnected: ['acme/api'], failed: ['acme/web'] });
+    expect(res.body.error).toContain('acme/web: a job is still running');
+    expect(await store.getRepo('acme/api')).toBeNull();
+    expect(await store.getRepo('acme/web')).not.toBeNull();
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
+
+    busy = false;
+    const retry = await request(server).delete('/api/ee/github/installations/100').expect(200);
+    expect(retry.body).toEqual({ ok: true, disconnected: ['acme/web'] });
+    expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
   });
 
   it('refuses for a workspace the installation is not attached to', async () => {
@@ -486,7 +609,7 @@ describe('the account behind an installation', () => {
 
     await request(app)
       .get('/api/ee/github/callback')
-      .query({ code: 'c0de', state: stateFor('org_A') })
+      .query({ code: 'c0de', installation_id: '100', setup_action: 'install', state: stateFor('org_A') })
       .expect(302);
 
     expect(lookupAccount).not.toHaveBeenCalled();

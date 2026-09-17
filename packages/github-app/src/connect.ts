@@ -6,11 +6,18 @@
  *
  * ONE door in: Connect sends the browser to GitHub's authorize page with a
  * signed `state`; GitHub comes back to the App's Callback URL with a code,
- * and the callback attaches every installation of ours the person can reach
- * to the workspace — or sends them on to install when there is none. An
- * install returns to the same callback, with the installation id beside the
- * code. Two workspaces can attach the same installation this way (GitHub
- * allows one installation per account); a REPOSITORY still belongs to one.
+ * which says which installations of ours the person can reach. NOTHING is
+ * attached without a choice: an install returns to the same callback naming
+ * the installation the person just chose on GitHub's page, and that one is
+ * attached; a plain authorize names no choice, so the installations the
+ * workspace does not hold yet come back as a signed OFFER for the person to
+ * pick from, and the attach route takes the pick. Two workspaces can attach
+ * the same installation this way (GitHub allows one installation per
+ * account); a REPOSITORY still belongs to one.
+ *
+ * Every trip that did not attach lands on the host's Settings page with a
+ * `github=<outcome>` flag (see `GithubConnectOutcome`) and the origin it
+ * started from, so ONE place explains what happened and what to do next.
  *
  * WHAT happens to a repo once it is connected — or once it is disconnected — is
  * not this router's business: it hands the link to
@@ -23,10 +30,12 @@ import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import {
   GITHUB_INSTALL_ORIGINS,
+  type GithubConnectOutcome,
   type GithubInstallOrigin,
 } from '@truecourse/shared';
 import type {
   AuthUser,
+  GithubAttachRequest,
   GithubConnectStatusResponse,
   GithubInstallableRepo,
   GithubInstallationReposResponse,
@@ -42,7 +51,9 @@ import { GITHUB_PROVIDER, installationOf } from './provider.js';
 import type { UserInstallation } from './oauth.js';
 import {
   CONNECT_STATE_TTL_MS,
+  signConnectOffer,
   signConnectState,
+  verifyConnectOffer,
   verifyConnectState,
 } from './connect-state.js';
 import type { InstallationStore, InstallationRecord } from './store/types.js';
@@ -56,7 +67,7 @@ function orgIdOf(req: Request): string | null {
 }
 
 function toInstallationSummary(
-  r: InstallationRecord,
+  r: InstallationRecord | UserInstallation,
 ): GithubInstallationSummary {
   return {
     installationId: r.installationId,
@@ -108,21 +119,22 @@ export interface ConnectDeps {
   appSlug: string;
   /** The App's OAuth client id, for the authorize URL. */
   clientId: string;
-  /** Signs the `state` a trip to GitHub carries; the server's own secret. */
+  /** Signs the `state` a trip to GitHub carries, and the offer it may come back with; the server's own secret. */
   stateSecret: string;
   /** Dashboard client origin, for browser-facing redirects (the callback's landing). */
   appUrl: string;
   /**
    * Where the callback lands, relative to {@link appUrl} — the host's own
    * connect surface, since the two dashboards that mount this router route it
-   * differently.
+   * differently. Also where every trip that did not attach lands, flagged.
    */
   setupRedirectPath: string;
   /**
-   * Where the callback lands instead when the trip was started from a named
-   * place (the origin rides the signed `state`): a host that has such places
-   * names them here, one path each. An origin with no path here lands on
-   * {@link setupRedirectPath}.
+   * Where a trip that attached lands instead when it was started from a
+   * named place (the origin rides the signed `state`): a host that has such
+   * places names them here, one path each. An origin with no path here lands
+   * on {@link setupRedirectPath}. The `settings` path, when named, is where
+   * every trip that did NOT attach lands.
    */
   setupRedirectPaths?: Partial<Record<GithubInstallOrigin, string>>;
   /** Installation-scoped GitHub client, for listing the repos a user can connect. */
@@ -153,8 +165,8 @@ function statusOf(err: unknown): number {
   return typeof status === 'number' && status >= 400 && status <= 599 ? status : 502;
 }
 
-/** The query flag the callback lands with when it could not attach anything. */
-export const CONNECT_REFUSED_FLAG = 'github=refused';
+/** The query flag a trip that did not attach lands with. */
+export const connectOutcomeFlag = (outcome: GithubConnectOutcome): string => `github=${outcome}`;
 
 export function createConnectRouter(deps: ConnectDeps): Router {
   const router = Router();
@@ -183,11 +195,25 @@ export function createConnectRouter(deps: ConnectDeps): Router {
   const buildInstallUrl = (state: string): string =>
     `https://github.com/apps/${deps.appSlug}/installations/new?state=${encodeURIComponent(state)}`;
 
-  /** Where a trip that started at `origin` lands, as an absolute URL. */
-  const landing = (origin: GithubInstallOrigin | null, flag?: string): string => {
-    const path = (origin && deps.setupRedirectPaths?.[origin]) ?? deps.setupRedirectPath;
-    if (!flag) return `${deps.appUrl}${path}`;
-    return `${deps.appUrl}${path}${path.includes('?') ? '&' : '?'}${flag}`;
+  const withQuery = (path: string, query: string): string =>
+    `${deps.appUrl}${path}${path.includes('?') ? '&' : '?'}${query}`;
+
+  /** Where a trip that attached lands: back where it started, as an absolute URL. */
+  const landing = (origin: GithubInstallOrigin | null): string =>
+    `${deps.appUrl}${(origin && deps.setupRedirectPaths?.[origin]) ?? deps.setupRedirectPath}`;
+
+  /**
+   * Where a trip that did not attach lands: the Settings page, flagged with
+   * the outcome and the origin, so it can explain and send the person back.
+   */
+  const settled = (
+    origin: GithubInstallOrigin | null,
+    outcome: GithubConnectOutcome,
+    extra: Record<string, string> = {},
+  ): string => {
+    const path = deps.setupRedirectPaths?.settings ?? deps.setupRedirectPath;
+    const query = new URLSearchParams({ ...extra, from: origin ?? 'settings' });
+    return withQuery(path, `${connectOutcomeFlag(outcome)}&${query.toString()}`);
   };
 
   /** The installation's account, or null — a lookup failure is never fatal here. */
@@ -234,6 +260,30 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     return inst && inst.workspaceOrgIds.includes(orgId) ? inst : null;
   };
 
+  /**
+   * Attach installations to the workspace, as GitHub named them. The upsert
+   * keeps a name the row already has when the list carries none, and a link
+   * that exists is left as is.
+   */
+  const attach = async (installations: UserInstallation[], orgId: string): Promise<void> => {
+    const now = new Date().toISOString();
+    for (const installation of installations) {
+      await deps.store.saveInstallation({ ...installation, createdAt: now, updatedAt: now });
+      await deps.store.linkInstallationToWorkspace(installation.installationId, orgId);
+    }
+    log.info(
+      `[github] ${installations.length} installation(s) attached to workspace ${orgId}: ${installations
+        .map((i) => i.accountLogin || `#${i.installationId}`)
+        .join(', ')}`,
+    );
+  };
+
+  /** The offer behind a token, when it is this session's; null otherwise. */
+  const offerFor = (raw: unknown, user: AuthUser, orgId: string) => {
+    const offer = verifyConnectOffer(typeof raw === 'string' ? raw : undefined, deps.stateSecret);
+    return offer && offer.orgId === orgId && offer.userId === user.id ? offer : null;
+  };
+
   router.get('/status', async (req: Request, res: Response) => {
     const user = userOf(req);
     const orgId = user?.organizationId ?? null;
@@ -259,12 +309,14 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     // the repair happens once and not on every dialog open.
     const installations = await Promise.all(listed.map(withAccount));
     const state = stateFor(user, orgId, originOf(req.query.from));
+    const offer = offerFor(req.query.offer, user, orgId);
     const body: GithubConnectStatusResponse = {
       configured: true,
       connectUrl: buildConnectUrl(state),
       installUrl: buildInstallUrl(state),
       installations: installations.map(toInstallationSummary),
       repos: repos.map(toRepoSummary),
+      ...(offer ? { offered: offer.installations.map(toInstallationSummary) } : {}),
     };
     res.json(body);
   });
@@ -316,33 +368,44 @@ export function createConnectRouter(deps: ConnectDeps): Router {
   );
 
   // The App's Callback URL: GitHub sends the browser here with `code` and our
-  // `state` — after an install (`installation_id` beside them) or after a
-  // plain authorize. The state binds the trip to the session that started
-  // it; the code says which installations the person can reach; every one of
-  // them is attached to the workspace. Nothing to attach means the person has
-  // no installation of ours yet, so they go on to install.
+  // `state` — after an install (`installation_id` and `setup_action` beside
+  // them) or after a plain authorize. The state binds the trip to the session
+  // that started it; the code says which installations the person can reach.
+  // An install return attaches the installation the person chose on GitHub's
+  // page. A plain authorize names no choice, so what the workspace does not
+  // hold yet becomes an OFFER to pick from — or, with nothing reachable at all,
+  // the person goes on to install.
   router.get('/callback', async (req: Request, res: Response) => {
     const user = userOf(req);
     const orgId = user?.organizationId ?? null;
     const rawState = typeof req.query.state === 'string' ? req.query.state : undefined;
     const state = verifyConnectState(rawState, deps.stateSecret);
     const origin = state?.origin ?? null;
-    const refuse = (why: string): void => {
-      log.warn(`[github] connect callback refused: ${why}`);
-      res.redirect(landing(origin, CONNECT_REFUSED_FLAG));
+    const settle = (outcome: GithubConnectOutcome, why: string): void => {
+      const refused = outcome === 'expired' || outcome === 'denied' || outcome === 'unreachable';
+      log[refused ? 'warn' : 'info'](`[github] connect callback: ${why} (${outcome})`);
+      res.redirect(settled(origin, outcome));
     };
 
     if (!user || !orgId) {
-      refuse('no workspace on the session');
+      settle('expired', 'no workspace on the session');
       return;
     }
     if (!state || state.orgId !== orgId || state.userId !== user.id) {
-      refuse(state ? 'state belongs to another session' : 'state missing, expired or unsigned');
+      settle('expired', state ? 'state belongs to another session' : 'state missing, expired or unsigned');
+      return;
+    }
+    // GitHub's own word for what its page did: `install`, or `request` when a
+    // non-admin asked the account's owners to install. Present only on a
+    // return from the install page.
+    const setupAction = typeof req.query.setup_action === 'string' ? req.query.setup_action : null;
+    if (setupAction === 'request') {
+      settle('requested', 'the install was requested, not made');
       return;
     }
     const code = typeof req.query.code === 'string' ? req.query.code : null;
     if (!code) {
-      refuse('no code');
+      settle('denied', 'no code');
       return;
     }
     const rawInstallation = req.query.installation_id;
@@ -352,45 +415,101 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     try {
       reachable = await deps.userInstallationsFor(code);
     } catch (err) {
-      refuse((err as Error).message);
+      settle('denied', (err as Error).message);
       return;
     }
-    if (installedId !== null && !reachable.some((i) => i.installationId === installedId)) {
-      refuse(`installation ${installedId} is not one the person can reach`);
+
+    if (installedId !== null) {
+      // The install return: the person chose this account on GitHub's page.
+      // It has to be one they can reach, or the id is not theirs to name.
+      const installed = reachable.find((i) => i.installationId === installedId);
+      if (!installed) {
+        settle('unreachable', `installation ${installedId} is not one the person can reach`);
+        return;
+      }
+      await attach([installed], orgId);
+      res.redirect(landing(origin));
       return;
     }
+
     if (reachable.length === 0) {
+      // Back from the install page with still nothing: an install scoped to
+      // repositories this person cannot read, or one that was never made.
+      // Sending them to the install page again would loop.
+      if (setupAction) {
+        settle('none', 'the App is installed nowhere the person can reach');
+        return;
+      }
       // Authorized, but the App is installed nowhere this person can reach:
       // on to GitHub's install page, which returns here with the new one.
       res.redirect(buildInstallUrl(stateFor(user, orgId, origin)));
       return;
     }
 
-    const now = new Date().toISOString();
-    for (const installation of reachable) {
-      const existing = await deps.store.getInstallation(installation.installationId);
-      await deps.store.saveInstallation({
-        installationId: installation.installationId,
-        accountLogin: installation.accountLogin || existing?.accountLogin || '',
-        accountType: installation.accountType || existing?.accountType || '',
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      });
-      await deps.store.linkInstallationToWorkspace(installation.installationId, orgId);
-    }
-    log.info(
-      `[github] ${reachable.length} installation(s) attached to workspace ${orgId}: ${reachable
-        .map((i) => i.accountLogin || `#${i.installationId}`)
-        .join(', ')}`,
+    const held = new Set(
+      (await deps.store.listInstallationsForWorkspace(orgId)).map((i) => i.installationId),
     );
-    // Land back where the trip started, so the installations are pickable at once.
-    res.redirect(landing(origin));
+    const candidates = reachable.filter((i) => !held.has(i.installationId));
+    if (candidates.length === 0) {
+      settle('nothing-new', 'every reachable installation is attached already');
+      return;
+    }
+    // A choice the person has not made yet: GitHub's list, signed, for the
+    // page to offer. A member's personal account, or an account this
+    // workspace removed on purpose, is attached only if they pick it.
+    const offer = signConnectOffer(
+      {
+        orgId,
+        userId: user.id,
+        origin,
+        installations: candidates,
+        expiresAt: Date.now() + CONNECT_STATE_TTL_MS,
+      },
+      deps.stateSecret,
+    );
+    log.info(
+      `[github] connect callback: offering ${candidates.length} installation(s) to workspace ${orgId}`,
+    );
+    res.redirect(settled(origin, 'pick', { offer }));
+  });
+
+  // The pick behind an offer: which of the installations the callback named
+  // this workspace attaches. The offer proves the list is what GitHub gave
+  // this very session; an id it does not name is ignored.
+  router.post('/installations/attach', async (req: Request, res: Response) => {
+    const user = userOf(req);
+    const orgId = user?.organizationId ?? null;
+    if (!user || !orgId) {
+      res.status(401).json({ error: 'unauthenticated' });
+      return;
+    }
+    const body = (req.body ?? {}) as Partial<GithubAttachRequest>;
+    const offer = offerFor(body.offer, user, orgId);
+    if (!offer) {
+      res.status(400).json({ error: 'That offer expired. Connect again to get a fresh one.' });
+      return;
+    }
+    const wanted = new Set(
+      Array.isArray(body.installationIds)
+        ? body.installationIds.filter((id): id is number => Number.isInteger(id))
+        : [],
+    );
+    const chosen = offer.installations.filter((i) => wanted.has(i.installationId));
+    if (chosen.length === 0) {
+      res.status(400).json({ error: 'Pick at least one of the offered accounts.' });
+      return;
+    }
+    await attach(chosen, orgId);
+    res.json({ ok: true, attached: chosen.map((i) => i.installationId) });
   });
 
   // Detach an installation from THIS workspace: its repositories connected
   // here are disconnected first (cleanup before the row, as an explicit unlink
-  // does), then the link goes. Other workspaces' links and repositories, and
-  // the installation itself on GitHub, are untouched.
+  // does), then the link goes. Every repository is tried; the ones whose
+  // cleanup succeeded are gone whatever happens to the rest, and when any
+  // failed the link stays and the answer names both, so a retry finishes
+  // the job. Other workspaces' links and repositories, and the installation
+  // itself on GitHub, are untouched.
   router.delete('/installations/:installationId', async (req: Request, res: Response) => {
     const orgId = orgIdOf(req);
     const installationId = Number(req.params.installationId);
@@ -409,24 +528,32 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     const mine = (
       await deps.repos.listReposForAccount(GITHUB_PROVIDER, String(installationId))
     ).filter((r) => r.workspaceOrgId === orgId);
+    const disconnected: string[] = [];
+    const failed: Array<{ repoFullName: string; message: string; status: number }> = [];
     for (const link of mine) {
-      if (deps.onRepoUnlinked) {
-        try {
-          await deps.onRepoUnlinked(link);
-        } catch (err) {
-          const message = (err as Error).message;
-          log.warn(`[github-app] disconnecting ${link.repoFullName} failed: ${message}`);
-          res.status(statusOf(err)).json({ error: message });
-          return;
-        }
+      try {
+        await deps.onRepoUnlinked?.(link);
+        await deps.repos.unlinkRepo(link.repoFullName);
+        disconnected.push(link.repoFullName);
+      } catch (err) {
+        const message = (err as Error).message;
+        log.warn(`[github-app] disconnecting ${link.repoFullName} failed: ${message}`);
+        failed.push({ repoFullName: link.repoFullName, message, status: statusOf(err) });
       }
-      await deps.repos.unlinkRepo(link.repoFullName);
+    }
+    if (failed.length > 0) {
+      res.status(failed[0]!.status).json({
+        error: `${failed.map((f) => `${f.repoFullName}: ${f.message}`).join('; ')}. The account stays connected until every repository is disconnected.`,
+        disconnected,
+        failed: failed.map((f) => f.repoFullName),
+      });
+      return;
     }
     await deps.store.unlinkInstallationFromWorkspace(installationId, orgId);
     log.info(
       `[github] installation ${installationId} detached from workspace ${orgId} (${mine.length} repositor${mine.length === 1 ? 'y' : 'ies'} disconnected)`,
     );
-    res.json({ ok: true, disconnected: mine.map((r) => r.repoFullName) });
+    res.json({ ok: true, disconnected });
   });
 
   router.post('/repos/link', async (req: Request, res: Response) => {

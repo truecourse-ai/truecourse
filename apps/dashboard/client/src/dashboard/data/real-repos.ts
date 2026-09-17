@@ -22,6 +22,7 @@
 
 import { deleteRepo, fetchApi, getRepos, type RepoResponse } from '@/lib/api';
 import type {
+  GithubAttachRequest,
   GithubConnectStatusResponse,
   GithubInstallableRepo,
   GithubInstallationReposResponse,
@@ -33,10 +34,26 @@ import type { Repo } from './types';
  * The App's installations on this workspace, the repositories already linked,
  * and the App's status for the connect surfaces. `from` names where an install
  * started from this page would return to (it rides the install link's state).
+ * `offer` is the token a `pick` landing carries: the read answers the
+ * installations it names, when it is still good for this session.
  */
-export function fetchGithubStatus(from?: GithubInstallOrigin): Promise<GithubConnectStatusResponse> {
-  const query = from ? `?from=${encodeURIComponent(from)}` : '';
-  return fetchApi<GithubConnectStatusResponse>(`/api/github/status${query}`);
+export function fetchGithubStatus(
+  from?: GithubInstallOrigin,
+  offer?: string,
+): Promise<GithubConnectStatusResponse> {
+  const query = new URLSearchParams({
+    ...(from ? { from } : {}),
+    ...(offer ? { offer } : {}),
+  }).toString();
+  return fetchApi<GithubConnectStatusResponse>(`/api/github/status${query ? `?${query}` : ''}`);
+}
+
+/** Attach the installations picked out of an offer. Rejects with the server's reason. */
+export async function attachGithubInstallations(request: GithubAttachRequest): Promise<void> {
+  await fetchApi<{ ok: boolean }>('/api/github/installations/attach', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
 }
 
 /** Everything one installation can see, linked or not. */
@@ -52,7 +69,8 @@ export async function fetchInstallationRepos(
 /**
  * Detach an installation from this workspace. The repositories connected
  * through it here are disconnected with it; other workspaces keep theirs.
- * Rejects with the server's reason.
+ * Rejects with the server's reason, which may be a repository that would not
+ * disconnect: the rest are gone and the account stays, so a retry finishes.
  */
 export async function detachGithubInstallation(installationId: number): Promise<void> {
   await fetchApi<{ ok: boolean }>(`/api/github/installations/${installationId}`, {

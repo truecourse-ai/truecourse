@@ -104,19 +104,56 @@ export interface GithubRepoSummary {
 export const GITHUB_INSTALL_ORIGINS = ['settings', 'code-connect', 'context-add'] as const;
 export type GithubInstallOrigin = (typeof GITHUB_INSTALL_ORIGINS)[number];
 
+/**
+ * How a trip to GitHub ended when it did not simply attach what it set out to:
+ * the `github=<outcome>` flag the callback lands Settings › Repositories with,
+ * beside `from=<origin>` naming where the trip started. A trip that attached
+ * lands back at its origin with no flag at all.
+ */
+export const GITHUB_CONNECT_OUTCOMES = [
+  /** GitHub named accounts this workspace does not hold; `offer` carries them for the person to pick from. */
+  'pick',
+  /** Every account the person can reach is attached already. */
+  'nothing-new',
+  /** The person asked an account's owners to install the App; nothing to attach until they approve. */
+  'requested',
+  /** Back from the install page with the App still installed nowhere the person can reach. */
+  'none',
+  /** The trip took too long, or came back to a session other than the one that started it. */
+  'expired',
+  /** GitHub did not complete the authorization: a stale code, or GitHub itself. */
+  'denied',
+  /** The installation the trip came back with is not one the person can reach. */
+  'unreachable',
+] as const;
+export type GithubConnectOutcome = (typeof GITHUB_CONNECT_OUTCOMES)[number];
+
 export interface GithubConnectStatusResponse {
   /** Whether the GitHub App is configured server-side. */
   configured: boolean
   /**
-   * Connect: authorize with GitHub, which attaches every installation of the
-   * App the person can reach to this workspace, or sends them on to install
-   * when there is none. Carries a signed `state` for this workspace and user.
+   * Connect: authorize with GitHub, which offers the installations of the App
+   * the person can reach and this workspace does not hold yet, or sends them
+   * on to install when there is none. Carries a signed `state` for this
+   * workspace and user.
    */
   connectUrl: string
   /** Install the App on a GitHub account that does not have it yet (same `state`). */
   installUrl: string
   installations: GithubInstallationSummary[]
   repos: GithubRepoSummary[]
+  /**
+   * The installations a `pick` landing's `offer` names, when the read carried
+   * one that is still good for this session. Absent otherwise: an offer that
+   * expired or belongs to another session offers nothing.
+   */
+  offered?: GithubInstallationSummary[]
+}
+
+/** `POST /api/github/installations/attach`: which of an offer's installations to attach. */
+export interface GithubAttachRequest {
+  offer: string
+  installationIds: number[]
 }
 
 /** A repo the installation can access — for the connect drawer's repo picker. */

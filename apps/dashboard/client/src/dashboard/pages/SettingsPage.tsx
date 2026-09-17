@@ -10,10 +10,15 @@
  * decides it.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { GITHUB_INSTALL_ORIGINS, LLM_PROVIDER_KINDS } from '@truecourse/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import {
+  GITHUB_CONNECT_OUTCOMES,
+  GITHUB_INSTALL_ORIGINS,
+  LLM_PROVIDER_KINDS,
+} from '@truecourse/shared';
 import type {
+  GithubConnectOutcome,
   GithubInstallationSummary,
   GithubRepoSummary,
   LlmConfigResponse,
@@ -26,7 +31,11 @@ import { StatusWord } from '@/dashboard/ui/status-word';
 import { Facts, ProviderIcon, PageHeader, SideMenu } from '@/dashboard/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/dashboard/data/llm-config';
 import { offeredRepositoryProviders } from '@/dashboard/data/providers';
-import { detachGithubInstallation, fetchGithubStatus } from '@/dashboard/data/real-repos';
+import {
+  attachGithubInstallations,
+  detachGithubInstallation,
+  fetchGithubStatus,
+} from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { MembersTab, type InviteKind } from '@/dashboard/pages/MembersTab';
@@ -46,9 +55,44 @@ type GithubProviderState = {
   installUrl: string | null;
   /** The repositories linked to this workspace, per installation. */
   linked: GithubRepoSummary[];
+  /**
+   * What a `pick` landing's offer names, when the server still honours it;
+   * null when it does not (expired, or another session's).
+   */
+  offered: GithubInstallationSummary[] | null;
   /** Why the read failed, when it did. */
   reason?: string;
 };
+
+/**
+ * Where a trip that started elsewhere continues once its pick is made. The
+ * same table the server lands a trip that attached on; a pick lands here
+ * first because the choice is made here.
+ */
+const RETURN_TO: Record<GithubInstallOrigin, string> = {
+  settings: '/settings/repositories',
+  'code-connect': '/code?connect=1',
+  'context-add': '/context?add=repository',
+};
+
+/** What each outcome says. `pick` draws the offer instead of a line. */
+const OUTCOME_NOTE: Record<Exclude<GithubConnectOutcome, 'pick'>, string> = {
+  'nothing-new':
+    'Every GitHub account you can reach is connected here already. Install on another account to add one.',
+  requested:
+    "Your request to install the App was sent to the account's owners. Connect again once they approve it.",
+  none: 'The App is installed on no GitHub account you can reach. Nothing was added.',
+  expired:
+    'The trip to GitHub took too long, or came back to another session. Nothing was added. Try again.',
+  denied: 'GitHub did not complete the authorization. Nothing was added. Try again.',
+  unreachable: 'GitHub did not confirm your access to that installation. Nothing was added.',
+};
+
+function outcomeOf(raw: string | null): GithubConnectOutcome | null {
+  return raw && (GITHUB_CONNECT_OUTCOMES as readonly string[]).includes(raw)
+    ? (raw as GithubConnectOutcome)
+    : null;
+}
 
 /**
  * Repositories: where they are connected FROM. One row per source-control
@@ -58,8 +102,11 @@ type GithubProviderState = {
  * GitHub is the real one: its accounts are the App's installations the server
  * reports, each line naming the account, its type and how many repositories
  * this workspace has linked through it, and connecting is a top-level
- * navigation to GitHub's authorize page, which attaches every installation the
- * person can reach or sends them on to install. On a local server the folders of this
+ * navigation to GitHub's authorize page. An install comes back attached; a
+ * plain authorize comes back HERE with the accounts the person can reach and
+ * this workspace does not hold, offered for them to pick, since nothing is
+ * attached without a choice. Every trip that did not attach lands here too,
+ * saying how it ended, wherever it started. On a local server the folders of this
  * machine are real too, each line naming the repository and the path behind it,
  * and connecting one is the connect dialog, where the path is typed. Every
  * other provider is listed and says Coming soon: hiding one would make the page
@@ -75,68 +122,117 @@ function installOriginOf(raw: string | null): GithubInstallOrigin {
 
 function RepositoriesTab() {
   const mode = useServerMode();
+  const navigate = useNavigate();
   const { refreshRealRepos } = useDashboardState();
   const [github, setGithub] = useState<GithubProviderState | null>(null);
   const [folders, setFolders] = useState<LocalRepositorySummary[] | null>(null);
   const [detaching, setDetaching] = useState<number | null>(null);
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const from = installOriginOf(params.get('from'));
-  // The callback lands here with this flag when GitHub did not confirm the
-  // person can reach the installation the trip was about.
-  const refused = params.get('github') === 'refused';
+  // A trip to GitHub that did not attach lands here saying how it ended; a
+  // `pick` carries the offer of accounts the person can choose from.
+  const outcome = outcomeOf(params.get('github'));
+  const offer = outcome === 'pick' ? params.get('offer') : null;
+  /** The offered accounts still ticked; null until the person touches one, meaning all of them. */
+  const [picked, setPicked] = useState<number[] | null>(null);
+  const [attaching, setAttaching] = useState(false);
 
+  // Reads race: a slower earlier read (another `from`, or the effect's read
+  // overlapping a detach's) must not overwrite a newer answer, nor land after
+  // the tab is gone. Only the latest read applies.
+  const readSeq = useRef(0);
   const readGithub = useCallback(async () => {
+    const seq = ++readSeq.current;
+    const apply = (next: GithubProviderState) => {
+      if (seq === readSeq.current) setGithub(next);
+    };
     try {
-      const status = await fetchGithubStatus(from);
-      setGithub({
+      const status = await fetchGithubStatus(from, offer ?? undefined);
+      apply({
         installations: status.installations,
         connectUrl: status.connectUrl || null,
         installUrl: status.installUrl || null,
         linked: status.repos,
+        offered: status.offered ?? null,
       });
     } catch (error: unknown) {
-      setGithub({
+      apply({
         installations: [],
         connectUrl: null,
         installUrl: null,
         linked: [],
+        offered: null,
         reason: error instanceof Error ? error.message : 'GitHub could not be reached',
       });
     }
-  }, [from]);
+  }, [from, offer]);
 
   useEffect(() => {
     void readGithub();
+    return () => {
+      readSeq.current += 1;
+    };
   }, [readGithub]);
+
+  const chosen = picked ?? (github?.offered ?? []).map((i) => i.installationId);
+  const togglePick = (installationId: number, on: boolean) =>
+    setPicked(on ? [...new Set([...chosen, installationId])] : chosen.filter((id) => id !== installationId));
+
+  // The pick: attach what is ticked, then carry on where the trip started —
+  // or, for a trip started here, drop the landing's flags and read afresh.
+  const attachPicked = async () => {
+    if (!offer || chosen.length === 0) return;
+    setAttaching(true);
+    try {
+      await attachGithubInstallations({ offer, installationIds: chosen });
+      if (from !== 'settings') {
+        navigate(RETURN_TO[from]);
+        return;
+      }
+      setPicked(null);
+      setParams(new URLSearchParams(), { replace: true });
+    } catch (error: unknown) {
+      setGithub((prev) =>
+        prev
+          ? { ...prev, reason: error instanceof Error ? error.message : 'Could not connect the accounts' }
+          : prev,
+      );
+    } finally {
+      setAttaching(false);
+    }
+  };
 
   // Detach an installation from this workspace: the repositories connected
   // through it here go with it, so the person is told how many before it does.
+  // A detach the server could only half do is re-read either way, so the page
+  // shows what is actually left and the reason beside it.
   const detach = useCallback(
     async (installation: GithubInstallationSummary) => {
       const linked = (github?.linked ?? []).filter(
         (r) => r.installationId === installation.installationId,
       );
       const name = installation.accountLogin || `#${installation.installationId}`;
-      const warning =
+      const repos =
         linked.length === 0
-          ? `Remove ${name} from this workspace?`
-          : `Remove ${name} from this workspace? ${linked.length} repositor${
-              linked.length === 1 ? 'y' : 'ies'
-            } connected through it will be disconnected: ${linked.map((r) => r.repoFullName).join(', ')}.`;
+          ? ''
+          : ` ${linked.length} repositor${linked.length === 1 ? 'y' : 'ies'} connected through it will be disconnected: ${linked
+              .map((r) => r.repoFullName)
+              .join(', ')}.`;
+      const warning = `Remove ${name} from this workspace?${repos} Context sources that read through it will stop syncing until it is connected again.`;
       if (!window.confirm(warning)) return;
       setDetaching(installation.installationId);
+      let failure: string | null = null;
       try {
         await detachGithubInstallation(installation.installationId);
-        await Promise.all([readGithub(), refreshRealRepos()]);
       } catch (error: unknown) {
-        setGithub((prev) =>
-          prev
-            ? { ...prev, reason: error instanceof Error ? error.message : 'Could not remove the account' }
-            : prev,
-        );
-      } finally {
-        setDetaching(null);
+        failure = error instanceof Error ? error.message : 'Could not remove the account';
       }
+      await Promise.all([readGithub(), refreshRealRepos()]);
+      if (failure) {
+        const reason = failure;
+        setGithub((prev) => (prev ? { ...prev, reason } : prev));
+      }
+      setDetaching(null);
     },
     [github, readGithub, refreshRealRepos],
   );
@@ -187,10 +283,49 @@ function RepositoriesTab() {
               {isGithub && github?.reason && (
                 <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
               )}
-              {isGithub && refused && (
-                <p className="mt-1 text-[11px] text-destructive">
-                  GitHub did not confirm your access to that installation. Nothing was added.
-                </p>
+              {isGithub && outcome && outcome !== 'pick' && (
+                <p className="mt-1 text-[11px] text-destructive">{OUTCOME_NOTE[outcome]}</p>
+              )}
+              {isGithub && outcome === 'pick' && github && (
+                github.offered && github.offered.length > 0 ? (
+                  <div className="mt-1">
+                    <p className="text-[11px] text-muted-foreground">
+                      GitHub named {github.offered.length} account
+                      {github.offered.length === 1 ? '' : 's'} this workspace does not hold. Pick the ones to connect.
+                    </p>
+                    <ul className="mt-1 space-y-1" aria-label="Offered GitHub accounts">
+                      {github.offered.map((i) => {
+                        const name = i.accountLogin || `#${i.installationId}`;
+                        return (
+                          <li key={i.installationId}>
+                            <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                checked={chosen.includes(i.installationId)}
+                                onChange={(e) => togglePick(i.installationId, e.target.checked)}
+                                disabled={attaching}
+                              />
+                              <span className="text-foreground">{name}</span>
+                              {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''}
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <button
+                      type="button"
+                      onClick={() => void attachPicked()}
+                      disabled={attaching || chosen.length === 0}
+                      className="mt-1 rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                    >
+                      {attaching ? 'Connecting' : 'Connect selected'}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[11px] text-destructive">
+                    That offer expired. Connect again to get a fresh one.
+                  </p>
+                )
               )}
               {isGithub && installations.length > 0 && (
                 <ul className="mt-1 space-y-1" aria-label="GitHub installations">

@@ -16,8 +16,11 @@ export {
 export {
   signConnectState,
   verifyConnectState,
+  signConnectOffer,
+  verifyConnectOffer,
   CONNECT_STATE_TTL_MS,
   type ConnectState,
+  type ConnectOffer,
 } from './connect-state.js';
 export { verifyWebhookSignature } from './signature.js';
 export {
@@ -50,7 +53,7 @@ export {
 } from './webhook.js';
 export {
   createConnectRouter,
-  CONNECT_REFUSED_FLAG,
+  connectOutcomeFlag,
   type ConnectDeps,
   type OnRepoLinked,
   type OnRepoUnlinked,

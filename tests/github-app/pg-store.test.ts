@@ -49,6 +49,37 @@ describe('PostgresInstallationStore (Drizzle, validated against pglite)', () => 
     expect(await store.getInstallation(999)).toBeNull();
   });
 
+  it('keeps a known name and the first createdAt when a re-save carries none', async () => {
+    await store.saveInstallation(installation(1));
+    // A list that did not name the account must not unname the row.
+    await store.saveInstallation({
+      ...installation(1),
+      accountLogin: '',
+      accountType: '',
+      createdAt: '2026-02-02T00:00:00.000Z',
+      updatedAt: '2026-02-02T00:00:00.000Z',
+    });
+    expect(await store.getInstallation(1)).toMatchObject({
+      accountLogin: 'acct-1',
+      accountType: 'Organization',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-02-02T00:00:00.000Z',
+    });
+  });
+
+  it('lists a workspace’s installations in the order it attached them, each with every workspace’s link', async () => {
+    await store.saveInstallation(installation(1));
+    await store.saveInstallation(installation(2));
+    await store.linkInstallationToWorkspace(2, 'org_B');
+    await store.linkInstallationToWorkspace(2, 'org_A');
+    await store.linkInstallationToWorkspace(1, 'org_A');
+    const listed = await store.listInstallationsForWorkspace('org_A');
+    expect(listed.map((i) => [i.installationId, i.workspaceOrgIds])).toEqual([
+      [2, ['org_B', 'org_A']],
+      [1, ['org_A']],
+    ]);
+  });
+
   it('attaches one installation to many workspaces, once each, in attach order', async () => {
     await store.saveInstallation(installation(1));
     await store.linkInstallationToWorkspace(1, 'org_A');

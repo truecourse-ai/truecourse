@@ -480,6 +480,23 @@ describe('the work-tree provider', () => {
     expect(failure).not.toMatch(/not a connected repository/);
     expect(reads).toEqual([]);
   });
+
+  it('refuses to clone through an installation the workspace no longer holds, minting no token', async () => {
+    buildApp();
+    // A context source made while the account was attached still names the
+    // installation after the workspace removed it: the clone must stop there,
+    // before any token is asked for.
+    await store.unlinkInstallationFromWorkspace(INSTALLATION_ID, ORG);
+    const failure = await acquireWorkTree('acme/handbook', {
+      installationId: INSTALLATION_ID,
+      workspaceOrgId: ORG,
+    }).then(
+      () => null,
+      (err: unknown) => err as Error & { statusCode?: number },
+    );
+    expect(failure?.message).toMatch(/GitHub account this workspace no longer holds/);
+    expect(failure?.statusCode).toBe(403);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -542,8 +559,38 @@ describe('the connect callback', () => {
       .set('Cookie', `tc_session=${ORG}`)
       .query({ code: 'c0de', state: state(OTHER_ORG) })
       .expect(302)
-      .expect('location', 'http://localhost:3000/settings/repositories?github=refused');
+      .expect('location', 'http://localhost:3000/settings/repositories?github=expired&from=settings');
     expect(await store.getInstallation(99)).toBeNull();
+  });
+
+  it('offers a plain authorize’s new installations on Settings, wherever the trip started', async () => {
+    const app = buildApp({
+      userInstallationsFor: async () => [
+        { installationId: 99, accountLogin: 'octo', accountType: 'Organization' },
+      ],
+    });
+    const fromCode = signConnectState(
+      { orgId: ORG, userId: `u_${ORG}`, origin: 'code-connect', expiresAt: Date.now() + 60_000 },
+      APP_ENV.TRUECOURSE_SECRET_KEY,
+    );
+    const res = await request(app)
+      .get('/api/github/callback')
+      .set('Cookie', `tc_session=${ORG}`)
+      .query({ code: 'c0de', state: fromCode })
+      .expect(302);
+    const landing = new URL(res.headers.location);
+    expect(landing.pathname).toBe('/settings/repositories');
+    expect(landing.searchParams.get('github')).toBe('pick');
+    expect(landing.searchParams.get('from')).toBe('code-connect');
+    expect(await store.getInstallation(99)).toBeNull();
+
+    // The pick lands the row; the Code connect dialog is where the page goes next.
+    await request(app)
+      .post('/api/github/installations/attach')
+      .set('Cookie', `tc_session=${ORG}`)
+      .send({ offer: landing.searchParams.get('offer'), installationIds: [99] })
+      .expect(200);
+    expect((await store.getInstallation(99))?.workspaceOrgIds).toEqual([ORG]);
   });
 });
 
