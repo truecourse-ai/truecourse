@@ -57,6 +57,7 @@ export {
   type ConnectDeps,
   type OnRepoLinked,
   type OnRepoUnlinked,
+  type OnInstallationReplaced,
 } from './connect.js';
 export { GITHUB_PROVIDER, installationOf } from './provider.js';
 export type {

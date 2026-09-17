@@ -80,7 +80,7 @@ let access: Record<number, GithubInstallationAccessResponse> = {};
 function serve(githubStatus: (url: URL) => Response = () => json(status())) {
   attached = [];
   detached = [];
-  access = { 42: { repositorySelection: 'selected', repositories: 5 } };
+  access = { 42: { installed: true, repositorySelection: 'selected', repositories: 5 } };
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
@@ -182,8 +182,8 @@ describe('Settings › Repositories', () => {
       ),
     );
     access = {
-      7: { repositorySelection: 'all', repositories: 12 },
-      8: { repositorySelection: 'selected', repositories: 0 },
+      7: { installed: true, repositorySelection: 'all', repositories: 12 },
+      8: { installed: true, repositorySelection: 'selected', repositories: 0 },
     };
     renderAt('/settings/repositories');
     const github = providerRow('GitHub');
@@ -330,31 +330,75 @@ describe('Settings › Repositories', () => {
     );
     renderAt('/settings/repositories?github=pick&offer=signed-offer&from=code-connect');
 
-    const github = providerRow('GitHub');
-    // The offered accounts are rows of the same list as the held one, a
-    // checkbox where the held one has its actions.
-    const accounts = await within(github).findByRole('list', { name: 'GitHub accounts' });
-    await within(accounts).findByLabelText(/octo/);
-    expect(within(accounts).getByText('linkwarden')).toBeInTheDocument();
-    const boxes = within(accounts).getAllByRole('checkbox');
+    // The pick is a dialog over the page: every offered account ticked, one
+    // button that says how many it connects. The row underneath is untouched.
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Connect GitHub accounts');
+    const offered = within(dialog).getByRole('list', { name: 'Offered GitHub accounts' });
+    const boxes = within(offered).getAllByRole('checkbox');
     expect(boxes).toHaveLength(2);
-    // Every offered account starts ticked; the person unticks what is not theirs to add.
     expect(boxes.every((box) => (box as HTMLInputElement).checked)).toBe(true);
-    await user.click(within(accounts).getByLabelText(/octo/));
-    await user.click(within(accounts).getByRole('button', { name: 'Connect selected' }));
+    expect(within(dialog).getByRole('button', { name: 'Connect 2 accounts' })).toBeEnabled();
+    // The only checkboxes on the page are the dialog's: the row draws none.
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+
+    // The person unticks what is not theirs to add.
+    await user.click(within(offered).getByLabelText(/octo/));
+    await user.click(within(dialog).getByRole('button', { name: 'Connect 1 account' }));
 
     await waitFor(() => expect(attached).toEqual([{ offer: 'signed-offer', installationIds: [100] }]));
     // On to the Code connect dialog, the pick made.
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Connect a repository');
+    await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Connect a repository'));
   });
 
-  it('says when the offer a pick landing carries is no longer honoured', async () => {
+  it('cancels the pick with nothing attached, and drops it from the address', async () => {
+    const user = userEvent.setup();
+    serve((url) =>
+      json(
+        status({
+          repos: [],
+          ...(url.searchParams.get('offer') === 'signed-offer'
+            ? {
+                offered: [
+                  { installationId: 100, accountLogin: 'acme', accountType: 'Organization' },
+                  { installationId: 200, accountLogin: 'octo', accountType: 'User' },
+                ],
+              }
+            : {}),
+        }),
+      ),
+    );
+    renderAt('/settings/repositories?github=pick&offer=signed-offer&from=settings');
+
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(attached).toEqual([]);
+    // Still on Settings, the held account still there.
+    expect(await within(providerRow('GitHub')).findByText('linkwarden')).toBeInTheDocument();
+  });
+
+  it('toasts when the offer a pick landing carries is no longer honoured', async () => {
     serve(() => json(status({ installations: [], repos: [] })));
     renderAt('/settings/repositories?github=pick&offer=stale&from=settings');
 
-    const github = providerRow('GitHub');
-    expect(await within(github).findByText(/That offer expired/)).toBeInTheDocument();
-    expect(within(github).queryByRole('list', { name: 'GitHub accounts' })).toBeNull();
+    expect(await screen.findByText('That offer expired')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('says when GitHub no longer knows an account', async () => {
+    serve(() =>
+      json(
+        status({
+          installations: [{ installationId: 7, accountLogin: 'spiderhands', accountType: 'User' }],
+          repos: [],
+        }),
+      ),
+    );
+    access = { 7: { installed: false } };
+    renderAt('/settings/repositories');
+    const accounts = await within(providerRow('GitHub')).findByRole('list', { name: 'GitHub accounts' });
+    expect(await within(accounts).findByText(/no longer installed/)).toBeInTheDocument();
   });
 
   it('has no Connections tab and no provider beyond the two', async () => {

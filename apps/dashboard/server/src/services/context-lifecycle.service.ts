@@ -18,9 +18,10 @@ import {
   getContextSource,
   listContextSources,
   setContextBindings,
+  updateContextSource,
 } from '@truecourse/core/lib/context-store';
 import { repositorySourceId } from '@truecourse/core/services/context';
-import { type ContextSource } from '@truecourse/shared';
+import type { ContextSource, RepositorySourceConfig } from '@truecourse/shared';
 import { emitContextChanged } from './context.service.js';
 
 /** How a repository's Repository source is refreshed (on connect, and on a change). */
@@ -78,6 +79,30 @@ function sourceScopes(source: ContextSource, repoFullName: string): boolean {
     source.kind === 'repository' &&
     (source.config as { repoFullName?: string }).repoFullName === repoFullName
   );
+}
+
+/**
+ * Point every Repository source of the workspace that reads through one
+ * GitHub installation at another: the App was reinstalled on the account and
+ * GitHub gave it a new id. Answers how many moved.
+ */
+export async function rekeyRepositorySources(
+  org: string,
+  fromInstallationId: number,
+  toInstallationId: number,
+): Promise<number> {
+  if (!contextStoreInstalled()) return 0;
+  let moved = 0;
+  for (const source of await listContextSources(org)) {
+    if (source.kind !== 'repository') continue;
+    const config = source.config as Partial<RepositorySourceConfig>;
+    if (config.installationId !== fromInstallationId) continue;
+    await updateContextSource(org, source.id, {
+      config: { ...config, installationId: toInstallationId } as RepositorySourceConfig,
+    });
+    moved += 1;
+  }
+  return moved;
 }
 
 /**

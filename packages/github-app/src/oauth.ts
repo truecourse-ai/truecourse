@@ -15,6 +15,8 @@ export interface UserInstallation {
   installationId: number;
   accountLogin: string;
   accountType: string;
+  /** Every repository of the account, or the ones picked; absent when the list did not say. */
+  repositorySelection?: 'all' | 'selected';
 }
 
 /**
@@ -59,10 +61,12 @@ export async function listUserInstallations(token: string): Promise<UserInstalla
     const account = installation.account as
       | { login?: string; slug?: string; type?: string }
       | null;
+    const selection = installation.repository_selection;
     return {
       installationId: installation.id,
       accountLogin: account?.login ?? account?.slug ?? '',
       accountType: account?.type ?? (account?.slug ? 'Enterprise' : ''),
+      ...(selection === 'all' || selection === 'selected' ? { repositorySelection: selection } : {}),
     };
   });
 }

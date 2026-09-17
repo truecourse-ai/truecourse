@@ -163,15 +163,41 @@ describe('connect router', () => {
   it("reports an installation's repository access as GitHub sees it, to this workspace only", async () => {
     await seedInstallation(['org_A']);
     let res = await request(app).get('/api/ee/github/installations/100/access').expect(200);
-    expect(res.body).toEqual({ repositorySelection: 'selected', repositories: 2 });
+    expect(res.body).toEqual({ installed: true, repositorySelection: 'selected', repositories: 2 });
 
     repositorySelection = 'all';
     res = await request(app).get('/api/ee/github/installations/100/access').expect(200);
-    expect(res.body).toEqual({ repositorySelection: 'all', repositories: 2 });
+    expect(res.body).toEqual({ installed: true, repositorySelection: 'all', repositories: 2 });
     repositorySelection = 'selected';
 
     currentOrg = 'org_OTHER';
     await request(app).get('/api/ee/github/installations/100/access').expect(403);
+  });
+
+  it('says when GitHub no longer knows an installation, apart from GitHub being down', async () => {
+    await seedInstallation(['org_A']);
+    const gone = {
+      apps: {
+        listReposAccessibleToInstallation: async () => {
+          throw Object.assign(new Error('Not Found'), { status: 404 });
+        },
+      },
+    } as unknown as OctokitClient;
+    const res = await request(mount({ octokitFor: () => gone }))
+      .get('/api/ee/github/installations/100/access')
+      .expect(200);
+    expect(res.body).toEqual({ installed: false });
+
+    const down = {
+      apps: {
+        listReposAccessibleToInstallation: async () => {
+          throw Object.assign(new Error('Bad Gateway'), { status: 502 });
+        },
+      },
+    } as unknown as OctokitClient;
+    await request(mount({ octokitFor: () => down }))
+      .get('/api/ee/github/installations/100/access')
+      .expect(502);
   });
 
   it('refuses to link a repo whose installation is not in the workspace', async () => {
@@ -323,7 +349,8 @@ describe('the connect callback', () => {
 
   it('offers only what the workspace does not hold, and sends the person on to install when that is nothing', async () => {
     await seedInstallation(['org_A']);
-    userInstallations.mockResolvedValue([ACME, OCTO]);
+    const NINE: UserInstallation = { installationId: 900, accountLogin: 'nine', accountType: 'User' };
+    userInstallations.mockResolvedValue([ACME, OCTO, NINE]);
     const res = await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: stateFor('org_A') })
@@ -332,7 +359,7 @@ describe('the connect callback', () => {
       .get('/api/ee/github/status')
       .query({ offer: offerIn(res.headers.location) })
       .expect(200);
-    expect((status.body as GithubConnectStatusResponse).offered?.map((i) => i.installationId)).toEqual([200]);
+    expect((status.body as GithubConnectStatusResponse).offered?.map((i) => i.installationId)).toEqual([200, 900]);
 
     // Everything reachable is attached: the only account left to add is one
     // without the App, so the trip goes on to GitHub's install page with a
@@ -357,11 +384,12 @@ describe('the connect callback', () => {
     await store.linkRepo(githubRepoRecord('acme/api', 100, 'org_A'));
 
     currentOrg = 'org_B';
-    const res = await request(app)
+    // The one account the person can reach is the answer: attached outright.
+    await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: stateFor('org_B') })
-      .expect(302);
-    await attachWith(offerIn(res.headers.location), [100]).expect(200);
+      .expect(302)
+      .expect('location', 'http://localhost:3000/code?connect=1');
 
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A', 'org_B']);
     const status = await request(app).get('/api/ee/github/status').expect(200);
@@ -375,6 +403,7 @@ describe('the connect callback', () => {
   });
 
   it('attaches once: a repeated pick does not duplicate the link', async () => {
+    userInstallations.mockResolvedValue([ACME, OCTO]);
     const res = await request(app)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', state: stateFor('org_A') })
@@ -383,6 +412,67 @@ describe('the connect callback', () => {
     await attachWith(offer, [100]).expect(200);
     await attachWith(offer, [100]).expect(200);
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
+  });
+
+  it('attaches a lone candidate without asking: one possible answer to Add account is the answer', async () => {
+    userInstallations.mockResolvedValue([ACME]);
+    await request(app)
+      .get('/api/ee/github/callback')
+      .query({ code: 'c0de', state: stateFor('org_A', 'u1', 'code-connect') })
+      .expect(302)
+      .expect('location', 'http://localhost:3000/code?connect=1');
+    expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
+  });
+
+  it('heals an App reinstalled on an account already held: the new id takes over its repositories and links', async () => {
+    // The old installation of acme, held by two workspaces with a repository
+    // each; GitHub has since given acme a new id and forgotten the old one.
+    await seedInstallation(['org_A', 'org_B']);
+    await store.linkRepo(githubRepoRecord('acme/api', 100, 'org_A'));
+    await store.linkRepo(githubRepoRecord('acme/web', 100, 'org_B'));
+    const replaced: unknown[] = [];
+    const server = mount({
+      onInstallationReplaced: async (change) => {
+        replaced.push(change);
+        // The hook runs while the old row is still there.
+        expect(await store.getInstallation(100)).not.toBeNull();
+      },
+    });
+    const fresh: UserInstallation = { installationId: 300, accountLogin: 'acme', accountType: 'Organization' };
+    userInstallations.mockResolvedValue([fresh]);
+
+    await request(server)
+      .get('/api/ee/github/callback')
+      .query({ code: 'c0de', state: stateFor('org_A') })
+      .expect(302)
+      .expect('location', 'http://localhost:3000/code?connect=1');
+
+    expect(await store.getInstallation(100)).toBeNull();
+    expect(await store.getInstallation(300)).toMatchObject({
+      accountLogin: 'acme',
+      workspaceOrgIds: ['org_A', 'org_B'],
+    });
+    expect((await store.getRepo('acme/api'))?.accountId).toBe('300');
+    expect((await store.getRepo('acme/web'))?.accountId).toBe('300');
+    expect(replaced).toEqual([{ from: 100, to: 300, workspaceOrgIds: ['org_A', 'org_B'] }]);
+  });
+
+  it('does not take a same-named installation for a replacement while the old one is still reachable', async () => {
+    await seedInstallation(['org_A']);
+    // Both ids answer to acme and the person reaches both: nothing is stale,
+    // so the new one is a choice like any other, and with octo beside it a pick.
+    userInstallations.mockResolvedValue([
+      ACME,
+      { installationId: 300, accountLogin: 'acme', accountType: 'Organization' },
+      OCTO,
+    ]);
+    const res = await request(app)
+      .get('/api/ee/github/callback')
+      .query({ code: 'c0de', state: stateFor('org_A') })
+      .expect(302);
+    offerIn(res.headers.location);
+    expect(await store.getInstallation(100)).not.toBeNull();
+    expect(await store.getInstallation(300)).toBeNull();
   });
 
   it("refuses a pick on an offer that is not this session's, expired, or naming nothing it offered", async () => {

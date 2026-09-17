@@ -567,6 +567,7 @@ describe('the connect callback', () => {
     const app = buildApp({
       userInstallationsFor: async () => [
         { installationId: 99, accountLogin: 'octo', accountType: 'Organization' },
+        { installationId: 98, accountLogin: 'nine', accountType: 'User' },
       ],
     });
     const fromCode = signConnectState(
@@ -591,6 +592,40 @@ describe('the connect callback', () => {
       .send({ offer: landing.searchParams.get('offer'), installationIds: [99] })
       .expect(200);
     expect((await store.getInstallation(99))?.workspaceOrgIds).toEqual([ORG]);
+  });
+
+  it('re-keys a Context source to the installation that replaced the one it read through', async () => {
+    // The App reinstalled on acme: GitHub names the new id only, and a source
+    // made under the old one has to keep syncing.
+    const app = buildApp({
+      userInstallationsFor: async () => [
+        { installationId: 4242, accountLogin: 'acme', accountType: 'Organization' },
+      ],
+    });
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-handbook',
+      kind: 'repository',
+      title: 'acme/handbook',
+      config: {
+        repoFullName: 'acme/handbook',
+        installationId: INSTALLATION_ID,
+        include: ['docs/**'],
+        exclude: [],
+        branch: 'main',
+      },
+    });
+
+    await request(app)
+      .get('/api/github/callback')
+      .set('Cookie', `tc_session=${ORG}`)
+      .query({ code: 'c0de', state: state() })
+      .expect(302)
+      .expect('location', 'http://localhost:3000/settings/repositories');
+
+    expect(await store.getInstallation(INSTALLATION_ID)).toBeNull();
+    expect((await store.getInstallation(4242))?.workspaceOrgIds).toEqual([ORG]);
+    const [source] = await contextStore.listSources(ORG);
+    expect(source?.config).toMatchObject({ repoFullName: 'acme/handbook', installationId: 4242 });
   });
 });
 

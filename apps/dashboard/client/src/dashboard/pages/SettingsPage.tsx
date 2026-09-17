@@ -139,9 +139,94 @@ type InstallationAccess = GithubInstallationAccessResponse | 'unknown';
 function accessWords(access: InstallationAccess | undefined): string {
   if (!access) return '';
   if (access === 'unknown') return 'access unknown';
+  if (!access.installed) return 'no longer installed';
   if (access.repositorySelection === 'all') return 'all repositories';
   if (access.repositories === 0) return 'no repositories';
   return `${access.repositories} repositor${access.repositories === 1 ? 'y' : 'ies'}`;
+}
+
+/**
+ * The pick: a trip to GitHub came back naming two or more accounts the
+ * person can reach and this workspace does not hold, and none is attached
+ * until they say which. A dialog over the page, every account ticked, one
+ * button that says how many; Cancel attaches nothing.
+ */
+function ConnectAccountsDialog({
+  offered,
+  busy,
+  onCancel,
+  onConnect,
+}: {
+  offered: GithubInstallationSummary[];
+  busy: boolean;
+  onCancel: () => void;
+  onConnect: (installationIds: number[]) => void;
+}) {
+  const [picked, setPicked] = useState<number[]>(() => offered.map((i) => i.installationId));
+  const toggle = (id: number, on: boolean) =>
+    setPicked((prev) => (on ? [...new Set([...prev, id])] : prev.filter((p) => p !== id)));
+  return (
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Connect GitHub accounts</DialogTitle>
+          <DialogDescription>
+            GitHub named {offered.length} accounts you have access to that this workspace does not use yet.
+          </DialogDescription>
+        </DialogHeader>
+        <ul className="divide-y divide-border rounded-md border border-border" aria-label="Offered GitHub accounts">
+          {offered.map((i) => {
+            const name = i.accountLogin || `#${i.installationId}`;
+            const sees =
+              i.repositorySelection === 'all'
+                ? 'All repositories'
+                : i.repositorySelection === 'selected'
+                  ? 'Selected repositories'
+                  : '';
+            return (
+              <li key={i.installationId}>
+                <label className="flex cursor-pointer items-center gap-3 px-3 py-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={picked.includes(i.installationId)}
+                    onChange={(e) => toggle(i.installationId, e.target.checked)}
+                    disabled={busy}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="text-foreground">{name}</span>
+                    {i.accountType ? (
+                      <span className="text-muted-foreground"> · {i.accountType.toLowerCase()}</span>
+                    ) : null}
+                    {sees && <span className="block text-[11px] text-muted-foreground">{sees}</span>}
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        <DialogFooter className="mt-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onConnect(picked)}
+            disabled={busy || picked.length === 0}
+            className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {busy
+              ? 'Connecting'
+              : `Connect ${picked.length} account${picked.length === 1 ? '' : 's'}`}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 /**
@@ -217,13 +302,12 @@ function RemoveAccountDialog({
  * GitHub is the real one: its accounts are the App's installations the server
  * reports, one line each naming the account, its type and what it lets the
  * App see (asked of GitHub, since this page is about the connection, not
- * what Code has used), with its two actions on the line. Adding one is ONE button, a top-level navigation to GitHub's
- * authorize page: it comes back HERE with the accounts the person can reach
- * and this workspace does not hold, offered as rows of the same list for them
- * to pick (nothing is attached without a choice), or goes on to GitHub's
- * install page when there is nothing to offer, and an install comes back
- * attached. Every trip that did not attach lands here too, told as a toast,
- * wherever it started. On a local server the folders of this
+ * what Code has used), with its two actions on the line. Adding one is ONE
+ * button, a top-level navigation to GitHub's authorize page: one new account
+ * comes back attached, two or more come back HERE as a pick in a dialog
+ * (nothing is attached without a choice), none goes on to GitHub's install
+ * page, and an install comes back attached. Every trip that did not attach
+ * lands here too, told as a toast, wherever it started. On a local server the folders of this
  * machine are real too, each line naming the repository and the path behind it,
  * and connecting one is the connect dialog, where the path is typed. Every
  * other provider is listed and says Coming soon: hiding one would make the page
@@ -251,8 +335,6 @@ function RepositoriesTab() {
   // can choose from, drawn inline.
   const outcome = outcomeOf(params.get('github'));
   const offer = outcome === 'pick' ? params.get('offer') : null;
-  /** The offered accounts still ticked; null until the person touches one, meaning all of them. */
-  const [picked, setPicked] = useState<number[] | null>(null);
   const [attaching, setAttaching] = useState(false);
 
   // Reads race: a slower earlier read (another `from`, or the effect's read
@@ -307,33 +389,39 @@ function RepositoriesTab() {
     setParams(next, { replace: true });
   }, [outcome, params, setParams]);
 
-  const chosen = picked ?? (github?.offered ?? []).map((i) => i.installationId);
-  const togglePick = (installationId: number, on: boolean) =>
-    setPicked(on ? [...new Set([...chosen, installationId])] : chosen.filter((id) => id !== installationId));
+  /** Drop the landing's flags: the pick is over, one way or the other. */
+  const closePick = () => setParams(new URLSearchParams(), { replace: true });
 
   // The pick: attach what is ticked, then carry on where the trip started —
   // or, for a trip started here, drop the landing's flags and read afresh.
-  const attachPicked = async () => {
-    if (!offer || chosen.length === 0) return;
+  const attachPicked = async (installationIds: number[]) => {
+    if (!offer || installationIds.length === 0) return;
     setAttaching(true);
     try {
-      await attachGithubInstallations({ offer, installationIds: chosen });
+      await attachGithubInstallations({ offer, installationIds });
       if (from !== 'settings') {
         navigate(RETURN_TO[from]);
         return;
       }
-      setPicked(null);
-      setParams(new URLSearchParams(), { replace: true });
+      closePick();
     } catch (error: unknown) {
-      setGithub((prev) =>
-        prev
-          ? { ...prev, reason: error instanceof Error ? error.message : 'Could not connect the accounts' }
-          : prev,
-      );
+      toast.error('Could not connect the accounts', {
+        description: error instanceof Error ? error.message : undefined,
+      });
     } finally {
       setAttaching(false);
     }
   };
+
+  // An offer the server no longer honours (expired, or another session's)
+  // is told like any other outcome and dropped from the address.
+  const offerRefused = outcome === 'pick' && github !== null && github.offered === null;
+  useEffect(() => {
+    if (!offerRefused) return;
+    setTimeout(() => toast.error('That offer expired', { description: 'Connect again to get a fresh one.' }), 0);
+    closePick();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerRefused]);
 
   // What each account lets the App see, asked of GitHub one account at a
   // time once the accounts are known. The Settings page is about the
@@ -408,6 +496,14 @@ function RepositoriesTab() {
 
   return (
     <>
+    {offered.length > 0 && (
+      <ConnectAccountsDialog
+        offered={offered}
+        busy={attaching}
+        onCancel={closePick}
+        onConnect={(ids) => void attachPicked(ids)}
+      />
+    )}
     <RemoveAccountDialog
       installation={removing}
       linked={(github?.linked ?? []).filter((r) => r.installationId === removing?.installationId)}
@@ -440,15 +536,8 @@ function RepositoriesTab() {
               {isGithub && github?.reason && (
                 <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
               )}
-              {isGithub && outcome === 'pick' && github && !offered.length && (
-                <p className="mt-1 text-[11px] text-destructive">
-                  That offer expired. Connect again to get a fresh one.
-                </p>
-              )}
-              {/* One list: the accounts held, one line each with its two
-                  actions, and under them the accounts a trip just offered,
-                  each with a checkbox in place of the actions. */}
-              {isGithub && (installations.length > 0 || offered.length > 0) && (
+              {/* The accounts held, one line each with its two actions. */}
+              {isGithub && installations.length > 0 && (
                 <ul className="mt-2 divide-y divide-border border-y border-border" aria-label="GitHub accounts">
                   {installations.map((i) => {
                     const name = i.accountLogin || `#${i.installationId}`;
@@ -488,37 +577,6 @@ function RepositoriesTab() {
                       </li>
                     );
                   })}
-                  {offered.map((i) => {
-                    const name = i.accountLogin || `#${i.installationId}`;
-                    return (
-                      <li key={`offer-${i.installationId}`} className="flex items-center gap-3 py-1.5 text-xs">
-                        <label className="flex min-w-0 flex-1 items-center gap-2 truncate">
-                          <input
-                            type="checkbox"
-                            checked={chosen.includes(i.installationId)}
-                            onChange={(e) => togglePick(i.installationId, e.target.checked)}
-                            disabled={attaching}
-                          />
-                          <span className="text-foreground">{name}</span>
-                          <span className="text-muted-foreground">
-                            {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} · offered by GitHub
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                  {offered.length > 0 && (
-                    <li className="flex justify-end py-1.5">
-                      <button
-                        type="button"
-                        onClick={() => void attachPicked()}
-                        disabled={attaching || chosen.length === 0}
-                        className="rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                      >
-                        {attaching ? 'Connecting' : 'Connect selected'}
-                      </button>
-                    </li>
-                  )}
                 </ul>
               )}
               {isLocal && (folders ?? []).length > 0 && (

@@ -57,6 +57,12 @@ export interface GithubInstallationSummary {
   installationId: number
   accountLogin: string
   accountType: string
+  /**
+   * What the installation lets the App see, as GitHub's own listing says it:
+   * every repository of the account, or the ones picked. Carried on an
+   * offered account, which the workspace cannot ask GitHub about yet.
+   */
+  repositorySelection?: 'all' | 'selected'
 }
 
 /**
@@ -166,14 +172,19 @@ export interface GithubInstallableRepo {
 /**
  * `GET /api/github/installations/:id/access`: what the App is allowed to see
  * on GitHub through one installation, as GitHub reports it. The setting
- * itself is changed on GitHub, on the installation's page.
+ * itself is changed on GitHub, on the installation's page. An installation
+ * GitHub no longer knows (the App was uninstalled, and the webhook saying so
+ * never arrived) answers `installed: false`.
  */
-export interface GithubInstallationAccessResponse {
-  /** `all`: every repository of the account, now and later; `selected`: the ones picked. */
-  repositorySelection: 'all' | 'selected'
-  /** How many repositories the installation can see today. */
-  repositories: number
-}
+export type GithubInstallationAccessResponse =
+  | {
+      installed: true
+      /** `all`: every repository of the account, now and later; `selected`: the ones picked. */
+      repositorySelection: 'all' | 'selected'
+      /** How many repositories the installation can see today. */
+      repositories: number
+    }
+  | { installed: false }
 
 export interface GithubInstallationReposResponse {
   repos: GithubInstallableRepo[]

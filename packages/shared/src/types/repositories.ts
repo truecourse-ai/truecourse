@@ -70,6 +70,16 @@ export interface RepositoryStore {
   listReposForWorkspace(workspaceOrgId: string): Promise<RepositoryRecord[]>
   /** Every repository connected through one provider account (uninstall cleanup). */
   listReposForAccount(provider: RepositoryProviderId, accountId: string): Promise<RepositoryRecord[]>
+  /**
+   * Re-key every repository of one provider account to another, answering the
+   * rows moved: how an App reinstalled on the same account (a new installation
+   * id for the same repositories) keeps its connections.
+   */
+  moveReposToAccount(
+    provider: RepositoryProviderId,
+    fromAccountId: string,
+    toAccountId: string,
+  ): Promise<RepositoryRecord[]>
 }
 
 /** One folder on this machine, as Settings and the connect dialog list it. */

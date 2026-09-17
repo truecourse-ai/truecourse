@@ -113,6 +113,21 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
     );
   }
 
+  async moveReposToAccount(
+    provider: RepositoryProviderId,
+    fromAccountId: string,
+    toAccountId: string,
+  ): Promise<RepositoryRecord[]> {
+    const moved: RepositoryRecord[] = [];
+    for (const [name, r] of this.repos) {
+      if (r.provider !== provider || r.accountId !== fromAccountId) continue;
+      const next = { ...r, accountId: toAccountId, updatedAt: new Date().toISOString() };
+      this.repos.set(name, next);
+      moved.push(next);
+    }
+    return moved;
+  }
+
   /** Every repository row, regardless of workspace — what a derived registry reads. */
   async listRepos(): Promise<RepositoryRecord[]> {
     return [...this.repos.values()];

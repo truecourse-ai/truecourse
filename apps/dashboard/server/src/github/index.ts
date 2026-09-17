@@ -46,6 +46,7 @@ import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tre
 import type { ContextGithubAccess } from '../routes/context.js';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
 import {
+  rekeyRepositorySources,
   removeRepositoryContext,
   syncRepositorySource,
   type ContextSyncStart,
@@ -273,6 +274,14 @@ export function createGithubConnection(
       await removeRepoRunState(link.repoFullName, link.workspaceOrgId);
       await removeRepositoryContext(link.workspaceOrgId, link.repoFullName);
       log.info(`[github] ${link.repoFullName} disconnected`);
+    },
+    // The App reinstalled on an account: a Context source that reads through
+    // the old installation id keeps syncing through the new one.
+    onInstallationReplaced: async ({ from, to, workspaceOrgIds }) => {
+      for (const org of workspaceOrgIds) {
+        const moved = await rekeyRepositorySources(org, from, to);
+        if (moved > 0) log.info(`[github] ${moved} context source(s) of ${org} now read through installation ${to}`);
+      }
     },
   });
 

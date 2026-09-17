@@ -70,10 +70,12 @@ function orgIdOf(req: Request): string | null {
 function toInstallationSummary(
   r: InstallationRecord | UserInstallation,
 ): GithubInstallationSummary {
+  const selection = 'repositorySelection' in r ? r.repositorySelection : undefined;
   return {
     installationId: r.installationId,
     accountLogin: r.accountLogin,
     accountType: r.accountType,
+    ...(selection ? { repositorySelection: selection } : {}),
   };
 }
 
@@ -112,6 +114,19 @@ export type OnRepoLinked = (
  * outlives its link row is scoped to nobody.
  */
 export type OnRepoUnlinked = (link: RepositoryRecord) => Promise<void>;
+
+/**
+ * An installation the App was reinstalled under: GitHub gave the same account
+ * a new id, the old one is gone there, and the callback has moved the
+ * account's repositories and workspace links to the new id. The host re-keys
+ * whatever else of its own names the old id (a Context source's installation)
+ * in each of the workspaces named. Runs before the old row is dropped.
+ */
+export type OnInstallationReplaced = (replaced: {
+  from: number;
+  to: number;
+  workspaceOrgIds: string[];
+}) => Promise<void>;
 
 export interface ConnectDeps {
   store: InstallationStore;
@@ -158,6 +173,8 @@ export interface ConnectDeps {
   onRepoLinked?: OnRepoLinked;
   /** Pre-unlink hook; see {@link OnRepoUnlinked}. Its failure fails the disconnect. */
   onRepoUnlinked?: OnRepoUnlinked;
+  /** Post-replacement hook; see {@link OnInstallationReplaced}. Best-effort: its failure is logged. */
+  onInstallationReplaced?: OnInstallationReplaced;
 }
 
 /** An error's own HTTP status if it carries one, else a bad-gateway default. */
@@ -281,6 +298,62 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     );
   };
 
+  /**
+   * An App reinstalled on an account GitHub already knew here gets a NEW
+   * installation id; the old row stays only because the webhook saying so
+   * never arrived (a local server has none). GitHub allows one installation
+   * per account, so a reachable installation whose login a held row carries
+   * under another id, with that old id no longer among the reachable, is the
+   * replacement: the account's repositories and every workspace's link move
+   * to the new id, the host re-keys what else names the old one, and the old
+   * row goes. Answers the candidates that were replacements, now attached.
+   */
+  const healReplaced = async (
+    candidates: UserInstallation[],
+    reachable: UserInstallation[],
+    held: InstallationRecord[],
+    orgId: string,
+  ): Promise<UserInstallation[]> => {
+    const reachableIds = new Set(reachable.map((i) => i.installationId));
+    const healed: UserInstallation[] = [];
+    for (const candidate of candidates) {
+      if (!candidate.accountLogin) continue;
+      const stale = held.find(
+        (h) =>
+          h.installationId !== candidate.installationId &&
+          h.accountLogin.toLowerCase() === candidate.accountLogin.toLowerCase() &&
+          !reachableIds.has(h.installationId),
+      );
+      if (!stale) continue;
+      await attach([candidate], orgId);
+      for (const org of stale.workspaceOrgIds) {
+        await deps.store.linkInstallationToWorkspace(candidate.installationId, org);
+      }
+      const moved = await deps.repos.moveReposToAccount(
+        GITHUB_PROVIDER,
+        String(stale.installationId),
+        String(candidate.installationId),
+      );
+      try {
+        await deps.onInstallationReplaced?.({
+          from: stale.installationId,
+          to: candidate.installationId,
+          workspaceOrgIds: stale.workspaceOrgIds,
+        });
+      } catch (err) {
+        log.warn(
+          `[github] re-keying installation ${stale.installationId} → ${candidate.installationId} in the host failed: ${(err as Error).message}`,
+        );
+      }
+      await deps.store.removeInstallation(stale.installationId);
+      log.info(
+        `[github] installation ${stale.installationId} (${candidate.accountLogin}) replaced by ${candidate.installationId}: ${moved.length} repositor${moved.length === 1 ? 'y' : 'ies'} and ${stale.workspaceOrgIds.length} workspace link(s) moved`,
+      );
+      healed.push(candidate);
+    }
+    return healed;
+  };
+
   /** The offer behind a token, when it is this session's; null otherwise. */
   const offerFor = (raw: unknown, user: AuthUser, orgId: string) => {
     const offer = verifyConnectOffer(typeof raw === 'string' ? raw : undefined, deps.stateSecret);
@@ -342,11 +415,19 @@ export function createConnectRouter(deps: ConnectDeps): Router {
         .octokitFor(installationId)
         .apps.listReposAccessibleToInstallation({ per_page: 1 });
       const body: GithubInstallationAccessResponse = {
+        installed: true,
         repositorySelection: data.repository_selection === 'all' ? 'all' : 'selected',
         repositories: data.total_count,
       };
       res.json(body);
     } catch (err) {
+      // GitHub knows no such installation: the App was uninstalled there and
+      // the webhook saying so never arrived. The row is stale, not broken.
+      if ((err as { status?: unknown }).status === 404) {
+        const gone: GithubInstallationAccessResponse = { installed: false };
+        res.json(gone);
+        return;
+      }
       res.status(502).json({ error: `could not read repository access: ${(err as Error).message}` });
     }
   });
@@ -484,11 +565,19 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       return;
     }
 
-    const held = new Set(
-      (await deps.store.listInstallationsForWorkspace(orgId)).map((i) => i.installationId),
+    const held = await deps.store.listInstallationsForWorkspace(orgId);
+    const heldIds = new Set(held.map((i) => i.installationId));
+    const named = reachable.filter((i) => !heldIds.has(i.installationId));
+    // A new id for an account already held is not a choice, it is a repair.
+    const healed = new Set(
+      (await healReplaced(named, reachable, held, orgId)).map((i) => i.installationId),
     );
-    const candidates = reachable.filter((i) => !held.has(i.installationId));
+    const candidates = named.filter((i) => !healed.has(i.installationId));
     if (candidates.length === 0) {
+      if (healed.size > 0) {
+        res.redirect(landing(origin));
+        return;
+      }
       // Everything the person can reach is attached already, so the only
       // account left to add is one that has no App yet: on to the install
       // page, which returns here. Only a plain authorize forwards there; a
@@ -499,6 +588,12 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       }
       log.info(`[github] connect callback: every reachable installation is attached to ${orgId}; on to install`);
       res.redirect(buildInstallUrl(stateFor(user, orgId, origin)));
+      return;
+    }
+    if (candidates.length === 1) {
+      // One possible answer to Add account is the answer: attach it.
+      await attach(candidates, orgId);
+      res.redirect(landing(origin));
       return;
     }
     // A choice the person has not made yet: GitHub's list, signed, for the

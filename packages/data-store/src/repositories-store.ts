@@ -122,4 +122,17 @@ export class PgRepositoryStore implements RepositoryStore {
       .orderBy(repositories.repoFullName);
     return rows.map(toRecord);
   }
+
+  async moveReposToAccount(
+    provider: RepositoryProviderId,
+    fromAccountId: string,
+    toAccountId: string,
+  ): Promise<RepositoryRecord[]> {
+    const rows = await this.db
+      .update(repositories)
+      .set({ accountId: toAccountId, updatedAt: new Date().toISOString() })
+      .where(and(eq(repositories.provider, provider), eq(repositories.accountId, fromAccountId)))
+      .returning();
+    return rows.map(toRecord).sort((a, b) => a.repoFullName.localeCompare(b.repoFullName));
+  }
 }
