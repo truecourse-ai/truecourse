@@ -522,9 +522,17 @@ describe('the connect callback', () => {
     expect(await store.listInstallationsForWorkspace('org_A')).toEqual([]);
   });
 
-  it('accepts the install return, attaching only the installation just chosen', async () => {
+  it('accepts the install return, attaching only the installation just chosen, and hands it to the host', async () => {
     userInstallations.mockResolvedValue([ACME, OCTO]);
-    await request(app)
+    const taken: unknown[] = [];
+    const server = mount({
+      onInstallationAttached: async (attached) => {
+        taken.push(attached);
+        // The hook runs once the row and the link are there.
+        expect((await store.getInstallation(attached.installationId))?.workspaceOrgIds).toEqual(['org_A']);
+      },
+    });
+    await request(server)
       .get('/api/ee/github/callback')
       .query({ code: 'c0de', installation_id: '100', setup_action: 'install', state: stateFor('org_A') })
       .expect(302)
@@ -532,6 +540,7 @@ describe('the connect callback', () => {
     expect((await store.getInstallation(100))?.workspaceOrgIds).toEqual(['org_A']);
     // Reachable too, but not what the person chose on GitHub's page.
     expect(await store.getInstallation(200)).toBeNull();
+    expect(taken).toEqual([{ installationId: 100, accountLogin: 'acme', workspaceOrgId: 'org_A' }]);
   });
 
   it('refuses an install return naming an installation the person cannot reach (IDOR guard)', async () => {

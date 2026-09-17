@@ -131,6 +131,20 @@ export type OnInstallationReplaced = (replaced: {
   workspaceOrgIds: string[];
 }) => Promise<void>;
 
+/**
+ * An installation attached to a workspace, whichever way (an install return,
+ * a lone candidate, a pick, a reinstall healed). The host points what of its
+ * own reads that account (a Context source of a repository the account owns)
+ * at this installation: after an uninstall and a reinstall no row remembers
+ * the old id, and GitHub allows one installation per account, so the owner
+ * is the match. Best-effort: a failure is logged, the attach stands.
+ */
+export type OnInstallationAttached = (attached: {
+  installationId: number;
+  accountLogin: string;
+  workspaceOrgId: string;
+}) => Promise<void>;
+
 export interface ConnectDeps {
   store: InstallationStore;
   /** The connected repositories, whichever provider brought them. */
@@ -176,6 +190,8 @@ export interface ConnectDeps {
   onRepoLinked?: OnRepoLinked;
   /** Pre-unlink hook; see {@link OnRepoUnlinked}. Its failure fails the disconnect. */
   onRepoUnlinked?: OnRepoUnlinked;
+  /** Post-attach hook; see {@link OnInstallationAttached}. Best-effort: its failure is logged. */
+  onInstallationAttached?: OnInstallationAttached;
   /** Post-replacement hook; see {@link OnInstallationReplaced}. Best-effort: its failure is logged. */
   onInstallationReplaced?: OnInstallationReplaced;
   /**
@@ -299,6 +315,17 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     for (const installation of installations) {
       await deps.store.saveInstallation({ ...installation, createdAt: now, updatedAt: now });
       await deps.store.linkInstallationToWorkspace(installation.installationId, orgId);
+      try {
+        await deps.onInstallationAttached?.({
+          installationId: installation.installationId,
+          accountLogin: installation.accountLogin,
+          workspaceOrgId: orgId,
+        });
+      } catch (err) {
+        log.warn(
+          `[github] the host could not take installation ${installation.installationId} in for workspace ${orgId}: ${(err as Error).message}`,
+        );
+      }
     }
     log.info(
       `[github] ${installations.length} installation(s) attached to workspace ${orgId}: ${installations

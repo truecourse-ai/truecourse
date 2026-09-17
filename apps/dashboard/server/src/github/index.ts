@@ -48,6 +48,7 @@ import type { ContextGithubAccess } from '../routes/context.js';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
 import {
   rekeyRepositorySources,
+  rekeyRepositorySourcesOfAccount,
   removeRepositoryContext,
   syncRepositorySource,
   type ContextSyncStart,
@@ -283,6 +284,12 @@ export function createGithubConnection(
     },
     // The App reinstalled on an account: a Context source that reads through
     // the old installation id keeps syncing through the new one.
+    // An account attached: a Context source reading a repository it owns
+    // reads through this installation from now on, whatever id it named.
+    onInstallationAttached: async ({ installationId, accountLogin, workspaceOrgId }) => {
+      const moved = await rekeyRepositorySourcesOfAccount(workspaceOrgId, accountLogin, installationId);
+      if (moved > 0) log.info(`[github] ${moved} context source(s) of ${workspaceOrgId} now read through installation ${installationId}`);
+    },
     onInstallationReplaced: async ({ from, to, workspaceOrgIds }) => {
       for (const org of workspaceOrgIds) {
         const moved = await rekeyRepositorySources(org, from, to);

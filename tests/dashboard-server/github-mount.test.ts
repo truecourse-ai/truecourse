@@ -594,6 +594,47 @@ describe('the connect callback', () => {
     expect((await store.getInstallation(99))?.workspaceOrgIds).toEqual([ORG]);
   });
 
+  it('points a source left behind by a removed account at the installation the account comes back under', async () => {
+    // The last workspace removed acme (the App uninstalled, the row gone),
+    // the source stayed, and the App was installed on acme again: no row
+    // remembers the old id, so the repository's owner is the match.
+    const app = buildApp({
+      userInstallationsFor: async () => [
+        { installationId: 5151, accountLogin: 'acme', accountType: 'Organization' },
+      ],
+    });
+    await store.removeInstallation(INSTALLATION_ID);
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-handbook',
+      kind: 'repository',
+      title: 'acme/handbook',
+      config: {
+        repoFullName: 'acme/handbook',
+        installationId: 161996555,
+        include: ['docs/**'],
+        exclude: [],
+        branch: 'main',
+      },
+    });
+    // Another owner's source is not touched, whatever it names.
+    await contextStore.createSource(ORG, {
+      id: 'repo-octo-notes',
+      kind: 'repository',
+      title: 'octo/notes',
+      config: { repoFullName: 'octo/notes', installationId: 77, include: [], exclude: [], branch: 'main' },
+    });
+
+    await request(app)
+      .get('/api/github/callback')
+      .set('Cookie', `tc_session=${ORG}`)
+      .query({ code: 'c0de', installation_id: '5151', setup_action: 'install', state: state() })
+      .expect(302);
+
+    const sources = await contextStore.listSources(ORG);
+    expect(sources.find((s) => s.id === 'repo-acme-handbook')?.config).toMatchObject({ installationId: 5151 });
+    expect(sources.find((s) => s.id === 'repo-octo-notes')?.config).toMatchObject({ installationId: 77 });
+  });
+
   it('re-keys a Context source to the installation that replaced the one it read through', async () => {
     // The App reinstalled on acme: GitHub names the new id only, and a source
     // made under the old one has to keep syncing.

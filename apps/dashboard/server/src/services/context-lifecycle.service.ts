@@ -91,12 +91,44 @@ export async function rekeyRepositorySources(
   fromInstallationId: number,
   toInstallationId: number,
 ): Promise<number> {
+  return rekeySources(org, toInstallationId, (config) => config.installationId === fromInstallationId);
+}
+
+/**
+ * Point every Repository source of the workspace that reads a repository OWNED
+ * by one GitHub account at the installation that account just attached under.
+ * GitHub allows one installation of the App per account, so a source naming
+ * any other installation for that owner is stale: the App was uninstalled
+ * from the account and installed again, and the row that would have said so
+ * went with the last workspace that removed it. Answers how many moved.
+ */
+export async function rekeyRepositorySourcesOfAccount(
+  org: string,
+  accountLogin: string,
+  toInstallationId: number,
+): Promise<number> {
+  const owner = accountLogin.toLowerCase();
+  if (!owner) return 0;
+  return rekeySources(
+    org,
+    toInstallationId,
+    (config) =>
+      config.installationId !== toInstallationId &&
+      (config.repoFullName ?? '').split('/')[0]?.toLowerCase() === owner,
+  );
+}
+
+async function rekeySources(
+  org: string,
+  toInstallationId: number,
+  stale: (config: Partial<RepositorySourceConfig>) => boolean,
+): Promise<number> {
   if (!contextStoreInstalled()) return 0;
   let moved = 0;
   for (const source of await listContextSources(org)) {
     if (source.kind !== 'repository') continue;
     const config = source.config as Partial<RepositorySourceConfig>;
-    if (config.installationId !== fromInstallationId) continue;
+    if (config.provider === 'local' || !stale(config)) continue;
     await updateContextSource(org, source.id, {
       config: { ...config, installationId: toInstallationId } as RepositorySourceConfig,
     });
