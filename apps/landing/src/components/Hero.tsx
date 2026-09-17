@@ -41,7 +41,7 @@ export function Hero() {
   useEffect(() => {
     if (!line.visible) return;
     const svg = line.ref.current;
-    const path = svg?.querySelector('path');
+    const path = svg?.querySelector<SVGPathElement>('.hero-crest');
     const hull = boat.current;
     const host = hero.current;
     const sheet = wind.current;
@@ -152,7 +152,7 @@ export function Hero() {
         aria-hidden="true"
       >
         <Waves />
-        <path d={LINE} pathLength={1} />
+        <path className="hero-crest" d={LINE} pathLength={1} />
         <g ref={boat} className="hero-boat" transform="translate(472 92) scale(0.42) translate(-50 -80)">
           <BoatGlyph />
         </g>
