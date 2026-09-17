@@ -114,14 +114,30 @@ export async function workspaceOnCredits(orgId: string): Promise<boolean> {
 
 /**
  * The platform's own provider block, read from the environment on every use so
- * it is never held anywhere a dump could find it. Both variables are required:
- * a key with no model would mean guessing which model a workspace's money buys.
+ * it is never held anywhere a dump could find it. The key and the model are
+ * required: a key with no model would mean guessing which model a workspace's
+ * money buys. Two optional variables say where that model lives and what it
+ * costs, for a key that is not OpenAI's own:
+ *   - `TRUECOURSE_CREDITS_OPENAI_BASE_URL` points the OpenAI client at an
+ *     OpenAI-compatible endpoint (an Azure AI Foundry resource's `/openai/v1`),
+ *     which takes the same key as the bearer token the client already sends.
+ *   - `TRUECOURSE_CREDITS_PRICE_MODEL` is the list-price model the deployment
+ *     named by `TRUECOURSE_CREDITS_MODEL` serves. Without it a deployment name
+ *     prices as nothing and a credits workspace is never debited.
  */
 export function platformCreditsConfig(): LlmApiConfig | null {
   const apiKey = process.env.TRUECOURSE_CREDITS_OPENAI_API_KEY?.trim();
   const model = process.env.TRUECOURSE_CREDITS_MODEL?.trim();
   if (!apiKey || !model) return null;
-  return { provider: 'openai', model, apiKey };
+  const baseURL = process.env.TRUECOURSE_CREDITS_OPENAI_BASE_URL?.trim();
+  const priceModel = process.env.TRUECOURSE_CREDITS_PRICE_MODEL?.trim();
+  return {
+    provider: 'openai',
+    model,
+    apiKey,
+    ...(baseURL ? { baseURL } : {}),
+    ...(priceModel ? { priceModel } : {}),
+  };
 }
 
 /**

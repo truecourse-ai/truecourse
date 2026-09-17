@@ -42,6 +42,7 @@ export function buildProviderConfig(api: LlmApiConfig | undefined): ProviderConf
     provider: api.provider,
     model,
     fallbackModel: api.fallbackModel?.trim() || undefined,
+    priceModel: api.priceModel?.trim() || undefined,
     baseURL: api.baseURL?.trim() || undefined,
     headers: api.headers,
   };
@@ -89,15 +90,20 @@ function primePriceTable(): void {
     });
 }
 
+/** One call's tokens, in the buckets both backends report. */
+interface CallTokens {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+}
+
 /**
  * Ceiling cost for one call: every input-side token (fresh, cache-read,
  * cache-written) is charged at the list input rate — providers only ever
  * discount those, so the real bill lands at or below this.
  */
-export function priceCall(
-  modelId: string,
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number },
-): number {
+export function priceCall(modelId: string, usage: CallTokens): number {
   try {
     primePriceTable();
     if (!priceTable) return 0;
@@ -108,6 +114,21 @@ export function priceCall(
   } catch {
     return 0;
   }
+}
+
+/**
+ * The pricing hook for ONE config's calls. A model id is not always a priced
+ * model: behind a gateway it is a DEPLOYMENT name (`gpt-5.6-sol-2`), which no
+ * price list holds, so the config names the list-price model it serves and the
+ * call is priced as that. Only the config's OWN model is mapped — a fallback
+ * call, or a per-stage override, prices under the id it really ran on, or not
+ * at all.
+ */
+export function pricingFor(
+  cfg: Pick<ProviderConfig, 'model' | 'priceModel'>,
+): (modelId: string, usage: CallTokens) => number {
+  return (modelId, usage) =>
+    priceCall(cfg.priceModel && modelId === cfg.model ? cfg.priceModel : modelId, usage);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +150,7 @@ export function createApiTransportFor(
   // the stage tiers it would otherwise inherit are Claude CLI aliases,
   // meaningless to a raw provider API.
   return createApiTransport(cfg, {
-    pricing: priceCall,
+    pricing: pricingFor(cfg),
     honorRequestModel: opts.honorRequestModel ?? true,
     ...(opts.onUsage ? { onUsage: opts.onUsage } : {}),
   });

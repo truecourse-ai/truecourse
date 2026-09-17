@@ -154,3 +154,49 @@ describe('priceForModel', () => {
     expect(priceForModel('some-local-model', table)).toBeNull();
   });
 });
+
+/**
+ * A model id is not always a priced model: behind an Azure AI Foundry endpoint
+ * it is a DEPLOYMENT name no price list holds. The config says which list-price
+ * model that deployment serves, and only its own model is mapped.
+ */
+describe('pricingFor', () => {
+  const TRANSPORT = '../../packages/core/src/services/llm/install-transport.js';
+  const USAGE = { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheCreateTokens: 0 };
+  const DEPLOYMENTS = {
+    data: [
+      { id: 'openai/gpt-5.6-sol', pricing: { prompt: '0.000002', completion: '0.000008' } },
+      { id: 'openai/gpt-5.6-luna', pricing: { prompt: '0.0000004', completion: '0.0000016' } },
+    ],
+  };
+  const SOL = 1000 * 0.000002 + 100 * 0.000008;
+  const LUNA = 1000 * 0.0000004 + 100 * 0.0000016;
+
+  /** A hook for `cfg` whose price table has already resolved — the table loads
+   *  off the hot path, so the first priced call is the one that starts it. */
+  async function hookFor(cfg: { model: string; priceModel?: string }) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(DEPLOYMENTS)));
+    vi.resetModules();
+    const { pricingFor }: typeof import('../../packages/core/src/services/llm/install-transport.js') =
+      await import(TRANSPORT);
+    const known = pricingFor({ model: 'gpt-5.6-sol' });
+    known('gpt-5.6-sol', USAGE);
+    await vi.waitFor(() => expect(known('gpt-5.6-sol', USAGE)).toBeGreaterThan(0));
+    return pricingFor(cfg);
+  }
+
+  it('prices the deployment as the model it serves', async () => {
+    const priced = await hookFor({ model: 'gpt-5.6-sol-2', priceModel: 'gpt-5.6-sol' });
+    expect(priced('gpt-5.6-sol-2', USAGE)).toBeCloseTo(SOL, 12);
+  });
+
+  it('cannot price a deployment name on its own', async () => {
+    const priced = await hookFor({ model: 'gpt-5.6-sol-2' });
+    expect(priced('gpt-5.6-sol-2', USAGE)).toBe(0);
+  });
+
+  it('prices any other model the call really ran on under its own id', async () => {
+    const priced = await hookFor({ model: 'gpt-5.6-sol-2', priceModel: 'gpt-5.6-sol' });
+    expect(priced('gpt-5.6-luna', USAGE)).toBeCloseTo(LUNA, 12);
+  });
+});

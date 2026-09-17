@@ -30,6 +30,7 @@ import { createTestApp, resetTestWorkspaceLlm, stubJobs, TEST_ORG } from '../hel
 import { clearTestRegistry } from '../helpers/test-fixture';
 import { installCreditsStore, type InstalledCreditsStore } from '../helpers/credits-store';
 import {
+  platformCreditsConfig,
   resetWorkspaceLlmConfigStore,
   setWorkspaceLlmConfigStore,
 } from '../../apps/dashboard/server/src/services/workspace-llm.service';
@@ -325,19 +326,26 @@ describe('local mode', () => {
 });
 
 describe('the start gate', () => {
-  const savedKey = process.env.TRUECOURSE_CREDITS_OPENAI_API_KEY;
-  const savedModel = process.env.TRUECOURSE_CREDITS_MODEL;
+  const CREDITS_ENV = [
+    'TRUECOURSE_CREDITS_OPENAI_API_KEY',
+    'TRUECOURSE_CREDITS_MODEL',
+    'TRUECOURSE_CREDITS_OPENAI_BASE_URL',
+    'TRUECOURSE_CREDITS_PRICE_MODEL',
+  ] as const;
+  const saved = Object.fromEntries(CREDITS_ENV.map((name) => [name, process.env[name]]));
 
   beforeEach(() => {
     process.env.TRUECOURSE_CREDITS_OPENAI_API_KEY = 'sk-platform';
     process.env.TRUECOURSE_CREDITS_MODEL = 'gpt-5.6';
+    delete process.env.TRUECOURSE_CREDITS_OPENAI_BASE_URL;
+    delete process.env.TRUECOURSE_CREDITS_PRICE_MODEL;
   });
 
   afterEach(() => {
-    if (savedKey === undefined) delete process.env.TRUECOURSE_CREDITS_OPENAI_API_KEY;
-    else process.env.TRUECOURSE_CREDITS_OPENAI_API_KEY = savedKey;
-    if (savedModel === undefined) delete process.env.TRUECOURSE_CREDITS_MODEL;
-    else process.env.TRUECOURSE_CREDITS_MODEL = savedModel;
+    for (const name of CREDITS_ENV) {
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+    }
   });
 
   it('refuses a scan at zero, and lets it through with a balance', async () => {
@@ -366,6 +374,28 @@ describe('the start gate', () => {
     expect(await creditsStartCheck(TEST_ORG, 0.5)).toMatchObject({ verdict: 'ok', estimate: 50 });
     // With no estimate to compare, a balance above zero is a start.
     expect(await creditsStartCheck(TEST_ORG)).toMatchObject({ verdict: 'ok' });
+  });
+
+  it('runs the platform key against its own endpoint, priced as the model the deployment serves', () => {
+    process.env.TRUECOURSE_CREDITS_OPENAI_BASE_URL =
+      'https://acme.services.ai.azure.com/openai/v1';
+    process.env.TRUECOURSE_CREDITS_MODEL = 'gpt-5.6-sol-2';
+    process.env.TRUECOURSE_CREDITS_PRICE_MODEL = 'gpt-5.6-sol';
+    expect(platformCreditsConfig()).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.6-sol-2',
+      apiKey: 'sk-platform',
+      baseURL: 'https://acme.services.ai.azure.com/openai/v1',
+      priceModel: 'gpt-5.6-sol',
+    });
+  });
+
+  it('carries neither when neither is set', () => {
+    expect(platformCreditsConfig()).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.6',
+      apiKey: 'sk-platform',
+    });
   });
 
   it('tells a credits workspace when the server holds no platform key', async () => {
