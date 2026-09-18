@@ -32,6 +32,7 @@ import {
   type ContextDocumentRow,
 } from '@truecourse/shared';
 import { createRepoSpecSource, workspaceDecisionWriters } from '@/components/spec/spec-source';
+import { DocFacts } from '@/components/spec/DocFacts';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { getContextDoc } from '@/lib/api';
 import { StatusWord } from '@/dashboard/ui/status-word';
@@ -189,7 +190,10 @@ function PlainDocument({ row }: { row: ContextDocumentRow }) {
         ) : content === null ? (
           <p className="text-xs text-muted-foreground">Loading…</p>
         ) : (
-          <DocMarkdown source={content} />
+          <>
+            <DocFacts source={content} />
+            <DocMarkdown source={content} />
+          </>
         )}
       </div>
     </div>
