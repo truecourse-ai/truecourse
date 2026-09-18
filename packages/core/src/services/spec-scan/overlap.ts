@@ -56,6 +56,8 @@ import {
 } from '@truecourse/spec-consolidator'
 import { promptFingerprint } from '../agent/session-cache.js'
 import {
+  docLifecycleFingerprint,
+  docLifecycleLines,
   docTitle,
   instructionsBriefingBlock,
   readDocChunkTool,
@@ -162,6 +164,15 @@ NOT a disagreement (do NOT report):
   - OMISSION — one doc simply does not mention what the other states. Silence is never disagreement.
   - Two components — each statement is true of a DIFFERENT subsystem, so both hold at once.
   - HEDGED / SPECULATIVE — a "may be tuned later" beside a current value is a plan beside a present, not a conflict.
+  - SETTLED BY LIFECYCLE — one side is no longer a live claim (see below).
+
+# What each doc's dates and status decide
+
+Every doc is briefed with its LAST CHANGED date, its STATUS (the state it is in, and how this run reads it) and, when it has one, its STATUS HISTORY. Read them before you judge a collision:
+  - A NEWER doc that was DELIVERED (shipped) supersedes an OLDER one that was only PLANNED: the later, delivered statement is what the system does, and the earlier proposal is not a rival claim. Do not report it.
+  - A doc whose status is OUT-OF-SCOPE, DEPRECATED or DEFERRED states something that was dropped, replaced or postponed. It is not a live claim against a shipped one, whatever it says.
+  - Two LIVE docs — both delivered, or both planned, with neither superseding the other — that state incompatible things ARE a disagreement. Nothing here settles which side wins; that is exactly the call a human must make, so report it.
+A date alone decides nothing: recency is not authority. It is recency BESIDE the statuses that settles a collision.
 
 SCOPE: this session is the ONLY one that will ever see these pairs — no other comparison group covers them. Judge every disagreement you find between the briefed docs, whatever topic it touches; never defer one to "another area's session".
 
@@ -270,17 +281,24 @@ export function deriveOverlapWorkItems(
 
 /**
  * The cache key: prompt fingerprint :: area id :: the sorted content hashes of
- * the cluster's briefed docs :: the identity fingerprint of the briefed pairs
- * (docs + headings, never scores — an edit elsewhere in the corpus that only
- * shifts weights re-runs nothing). `extraParts` is the appendable tail (the
- * orchestrator `instructions` land there).
+ * the cluster's briefed docs :: their LIFECYCLES :: the identity fingerprint of
+ * the briefed pairs (docs + headings, never scores — an edit elsewhere in the
+ * corpus that only shifts weights re-runs nothing). `extraParts` is the
+ * appendable tail (the orchestrator `instructions` land there).
+ *
+ * The lifecycles are a key part because the verdict turns on them: a ticket
+ * moving from planned to done stops being the loser of its disagreement. A
+ * doc's content hash no longer sees that move — frontmatter is metadata, not
+ * identity — so nothing else in this key would.
  */
 export function overlapSessionCacheKey(item: OverlapWorkItem, extraParts: readonly string[] = []): string {
   const hashes = item.docs.map((d) => d.contentHash).sort()
+  const lifecycles = item.docs.map((d) => `${d.path}=${docLifecycleFingerprint(d)}`).sort()
   return scanCacheKey([
     OVERLAP_SESSION_PROMPT_FINGERPRINT,
     item.areaId,
     hashes.join(','),
+    lifecycles.join(','),
     pairsFingerprint(item.pairs),
     ...extraParts,
   ])
@@ -484,9 +502,13 @@ export function overlapSessionDef(input: OverlapSessionInput): SessionDef<Overla
   }
 }
 
-/** One doc's briefing block: path, title, and its heading outline. */
+/** One doc's briefing block: path, title, lifecycle, and its heading outline. */
 function docBlock(doc: DocCandidate): string[] {
-  return [`--- doc: ${doc.path}  ·  ${docTitle(doc)} ---`, headingOutline(docBody(doc))]
+  return [
+    `--- doc: ${doc.path}  ·  ${docTitle(doc)} ---`,
+    ...docLifecycleLines(doc, { classify: true }),
+    headingOutline(docBody(doc)),
+  ]
 }
 
 const pairSide = (s: CollisionPair['a']): string => `${s.doc} · ${s.heading ?? '(lead)'}`
