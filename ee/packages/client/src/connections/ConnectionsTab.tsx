@@ -1,12 +1,12 @@
 /**
  * Settings › Connections: the accounts a document can come from, one row each
- * with its brand marks.
+ * with its brand mark.
  *
  * A connection is the ACCOUNT, made once per workspace. An Atlassian site is
  * ONE account — a single login whose token reads both Jira and Confluence — so
- * it is one row wearing both marks. What that account READS is a source, added
- * in Context, so this page never mentions a project or a space: it connects, it
- * tests, and it disconnects.
+ * it is one row, wearing Atlassian's mark rather than the two products'. What
+ * that account READS is a source, added in Context, so this page never mentions
+ * a project or a space: it connects, it tests, and it disconnects.
  *
  * One account connects today. The rest stay listed and say Coming soon: hiding
  * them would make the page lie about where this is going, and offering them
@@ -47,8 +47,8 @@ import { removeConnection, saveConnection, testConnection } from './api';
 interface Connector {
   key: string;
   label: string;
-  /** The brand marks the row wears, side by side for an account serving several. */
-  tools: ConnectorTool[];
+  /** The brand mark the row wears. */
+  tool: ConnectorTool;
   /** The account behind it, or null while the tool is still Coming soon. */
   provider: ContextConnectionProvider | null;
 }
@@ -57,18 +57,18 @@ const CONNECTORS: readonly Connector[] = [
   {
     key: 'atlassian',
     label: CONTEXT_CONNECTION_LABEL.atlassian,
-    tools: ['jira', 'confluence'],
+    tool: 'atlassian',
     provider: 'atlassian',
   },
   {
     key: 'google-drive',
     label: CONTEXT_SOURCE_KIND_LABEL['google-drive'],
-    tools: ['gdrive'],
+    tool: 'gdrive',
     provider: null,
   },
-  { key: 'onedrive', label: CONTEXT_SOURCE_KIND_LABEL.onedrive, tools: ['onedrive'], provider: null },
-  { key: 'notion', label: CONTEXT_SOURCE_KIND_LABEL.notion, tools: ['notion'], provider: null },
-  { key: 'slack', label: CONTEXT_SOURCE_KIND_LABEL.slack, tools: ['slack'], provider: null },
+  { key: 'onedrive', label: CONTEXT_SOURCE_KIND_LABEL.onedrive, tool: 'onedrive', provider: null },
+  { key: 'notion', label: CONTEXT_SOURCE_KIND_LABEL.notion, tool: 'notion', provider: null },
+  { key: 'slack', label: CONTEXT_SOURCE_KIND_LABEL.slack, tool: 'slack', provider: null },
 ];
 
 const FIELD =
@@ -116,11 +116,7 @@ export function ConnectionsTab() {
           const view = provider ? viewOf(provider) : null;
           const row = (
             <div className="flex w-full items-start gap-4 px-6 py-3">
-              <span className="mt-0.5 flex shrink-0 items-center gap-1">
-                {connector.tools.map((tool) => (
-                  <ConnectorLogo key={tool} tool={tool} className="h-6 w-6" />
-                ))}
-              </span>
+              <ConnectorLogo tool={connector.tool} className="mt-0.5 h-6 w-6 shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-3">
                   <span className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-foreground">

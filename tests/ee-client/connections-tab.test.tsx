@@ -1,9 +1,9 @@
 /**
  * Settings › Connections, for real: the one account that connects.
  *
- * An Atlassian site is ONE account, so it is ONE row wearing both product
- * marks. The row opens the account form; Test runs the read a sync makes per
- * product and says what each answered; Save stores it and the row then names
+ * An Atlassian site is ONE account, so it is ONE row wearing Atlassian's mark.
+ * The row opens the account form; Test makes one read per product and says
+ * what each answered; Save stores it and the row then names
  * the site it reads. Removing says how many sources it paused. The other four
  * tools stay listed and inert.
  */
@@ -108,7 +108,7 @@ afterEach(() => {
 });
 
 describe('the connectors list', () => {
-  it('is one Atlassian row wearing both marks, above the four that cannot connect yet', async () => {
+  it('is one Atlassian row wearing one mark, above the four that cannot connect yet', async () => {
     serve();
     renderTab();
     const list = await screen.findByRole('list', { name: 'Connectors' });
@@ -120,12 +120,9 @@ describe('the connectors list', () => {
       within(list).getAllByRole('button').map((button) => button.getAttribute('aria-label')),
     ).toEqual(['Connect Atlassian']);
 
-    // The one row carries both product marks, side by side.
+    // One account, one mark: Atlassian's, not the two products'.
     const atlassian = within(list).getAllByRole('listitem')[0]!;
-    expect([...atlassian.querySelectorAll('img')].map((img) => img.dataset.tool)).toEqual([
-      'jira',
-      'confluence',
-    ]);
+    expect([...atlassian.querySelectorAll('img')].map((img) => img.dataset.tool)).toEqual(['atlassian']);
   });
 
   it('names the site the account reads, and when it was saved', async () => {

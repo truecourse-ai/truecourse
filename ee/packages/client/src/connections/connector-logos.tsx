@@ -5,6 +5,7 @@
  */
 
 import type { ReactElement } from 'react';
+import atlassian from './logos/atlassian.svg';
 import confluence from './logos/confluence.svg';
 import gdrive from './logos/gdrive.svg';
 import jira from './logos/jira.svg';
@@ -12,9 +13,9 @@ import notion from './logos/notion.svg';
 import onedrive from './logos/onedrive.svg';
 import slack from './logos/slack.svg';
 
-export type ConnectorTool = 'jira' | 'confluence' | 'gdrive' | 'onedrive' | 'notion' | 'slack';
+export type ConnectorTool = 'atlassian' | 'jira' | 'confluence' | 'gdrive' | 'onedrive' | 'notion' | 'slack';
 
-const LOGO: Record<ConnectorTool, string> = { jira, confluence, gdrive, onedrive, notion, slack };
+const LOGO: Record<ConnectorTool, string> = { atlassian, jira, confluence, gdrive, onedrive, notion, slack };
 
 export function ConnectorLogo({
   tool,
@@ -23,8 +24,7 @@ export function ConnectorLogo({
   tool: ConnectorTool;
   className?: string;
 }): ReactElement {
-  // Decorative: the row names the tool in words. `data-tool` says WHICH mark it
-  // is, for a row that wears several.
+  // Decorative: the row names the tool in words. `data-tool` says which mark it is.
   return (
     <img
       src={LOGO[tool]}
