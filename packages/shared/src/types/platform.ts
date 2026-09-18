@@ -57,6 +57,32 @@ export interface GithubInstallationSummary {
   installationId: number
   accountLogin: string
   accountType: string
+  /**
+   * What the installation lets the App see, as GitHub's own listing says it:
+   * every repository of the account, or the ones picked. Carried on an
+   * offered account, which the workspace cannot ask GitHub about yet.
+   */
+  repositorySelection?: 'all' | 'selected'
+  /**
+   * How many workspaces hold the installation, this one included. Carried on
+   * a held account: at 1, removing it here uninstalls the App on GitHub.
+   */
+  workspaces?: number
+}
+
+/**
+ * `DELETE /api/github/installations/:id`: the workspace let go of the
+ * installation. An installation no workspace holds any more is uninstalled
+ * from GitHub by the App itself (`done`), or stays there when GitHub refused
+ * (`failed`, with the reason) — the row is gone either way; one other
+ * workspaces still hold is `kept` on GitHub.
+ */
+export interface GithubDetachResponse {
+  ok: true
+  /** The repositories this workspace had connected through it, now disconnected. */
+  disconnected: string[]
+  uninstall: 'done' | 'failed' | 'kept'
+  reason?: string
 }
 
 /**
@@ -97,20 +123,63 @@ export interface GithubRepoSummary {
 }
 
 /**
- * Where a GitHub App install was started from, carried through GitHub's
- * `state` so the return lands there: Settings, Code's connect dialog, or Add
- * context's repository step.
+ * Where a trip to GitHub (Connect, or an install) was started from, carried
+ * through GitHub's `state` so the return lands there: Settings, Code's connect
+ * dialog, or Add context's repository step.
  */
 export const GITHUB_INSTALL_ORIGINS = ['settings', 'code-connect', 'context-add'] as const;
 export type GithubInstallOrigin = (typeof GITHUB_INSTALL_ORIGINS)[number];
 
+/**
+ * How a trip to GitHub ended: the `github=<outcome>` flag the callback lands
+ * Settings › Repositories with, beside `from=<origin>` naming where the trip
+ * started. A trip that attached lands back at its origin, flagged only when
+ * that origin is Settings itself; the other origins show what arrived.
+ */
+export const GITHUB_CONNECT_OUTCOMES = [
+  /** Attached, on a trip started from Settings; `accounts` names what, comma-separated. */
+  'attached',
+  /** GitHub named accounts this workspace does not hold; `offer` carries them for the person to pick from. */
+  'pick',
+  /** The person asked an account's owners to install the App; nothing to attach until they approve. */
+  'requested',
+  /** Back from the install page with nothing new: no reachable installation, or every one attached already. */
+  'none',
+  /** The trip took too long, or came back to a session other than the one that started it. */
+  'expired',
+  /** GitHub did not complete the authorization: a stale code, or GitHub itself. */
+  'denied',
+  /** The installation the trip came back with is not one the person can reach. */
+  'unreachable',
+  /** Back from an installation's settings page on GitHub, where its repository access was changed. */
+  'updated',
+] as const;
+export type GithubConnectOutcome = (typeof GITHUB_CONNECT_OUTCOMES)[number];
+
 export interface GithubConnectStatusResponse {
   /** Whether the GitHub App is configured server-side. */
   configured: boolean
-  /** URL to install the App (carries the workspace id as `state`). */
-  installUrl: string
+  /**
+   * The one door in: authorize with GitHub, which offers the installations
+   * of the App the person can reach and this workspace does not hold yet, or
+   * sends them on to GitHub's install page when there is nothing to offer.
+   * Carries a signed `state` for this workspace and user.
+   */
+  connectUrl: string
   installations: GithubInstallationSummary[]
   repos: GithubRepoSummary[]
+  /**
+   * The installations a `pick` landing's `offer` names, when the read carried
+   * one that is still good for this session. Absent otherwise: an offer that
+   * expired or belongs to another session offers nothing.
+   */
+  offered?: GithubInstallationSummary[]
+}
+
+/** `POST /api/github/installations/attach`: which of an offer's installations to attach. */
+export interface GithubAttachRequest {
+  offer: string
+  installationIds: number[]
 }
 
 /** A repo the installation can access — for the connect drawer's repo picker. */
@@ -118,7 +187,26 @@ export interface GithubInstallableRepo {
   fullName: string
   defaultBranch: string
   private: boolean
+  /** Connected in another workspace: a repository belongs to one, so not pickable here. */
+  connectedElsewhere: boolean
 }
+
+/**
+ * `GET /api/github/installations/:id/access`: what the App is allowed to see
+ * on GitHub through one installation, as GitHub reports it. The setting
+ * itself is changed on GitHub, on the installation's page. An installation
+ * GitHub no longer knows (the App was uninstalled, and the webhook saying so
+ * never arrived) answers `installed: false`.
+ */
+export type GithubInstallationAccessResponse =
+  | {
+      installed: true
+      /** `all`: every repository of the account, now and later; `selected`: the ones picked. */
+      repositorySelection: 'all' | 'selected'
+      /** How many repositories the installation can see today. */
+      repositories: number
+    }
+  | { installed: false }
 
 export interface GithubInstallationReposResponse {
   repos: GithubInstallableRepo[]

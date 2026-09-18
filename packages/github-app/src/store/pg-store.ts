@@ -2,18 +2,23 @@
  * Postgres InstallationStore — the GitHub App's own rows, built on Drizzle ORM.
  * An installation is a PROVIDER ACCOUNT (`provider_accounts`, provider
  * `github`), whose id is text there and a number in GitHub's own language, so
- * the conversion happens at this boundary and nowhere else. The repositories an
- * installation brought live in `repositories` and are written through
- * `PgRepositoryStore`.
+ * the conversion happens at this boundary and nowhere else. The workspaces an
+ * installation is attached to are `provider_account_links` rows, one per
+ * workspace. The repositories an installation brought live in `repositories`
+ * and are written through `PgRepositoryStore`.
+ *
+ * Every read is ONE query: the account joined to its links, grouped here.
+ * The reads sit on every connect request (the ownership check) and on every
+ * status read, so a second round trip per installation would add up.
  *
  * Takes a ready (migrated) Drizzle db: the server owns the pool and the
  * migrations, and tests inject a PGlite-backed db.
  */
 
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
-import type { InstallationStore, InstallationRecord } from './types.js';
-import { providerAccounts } from '@truecourse/db';
+import type { InstallationStore, InstallationRecord, InstallationAccount } from './types.js';
+import { providerAccounts, providerAccountLinks } from '@truecourse/db';
 import { GITHUB_PROVIDER } from '../provider.js';
 
 /** Any Drizzle Postgres db (node-postgres in prod, PGlite in tests). */
@@ -23,15 +28,33 @@ const toIso = (v: string): string => new Date(v).toISOString();
 
 type InstallationRow = typeof providerAccounts.$inferSelect;
 
-function toInstallation(r: InstallationRow): InstallationRecord {
+/** An account row joined to one of its links, or to none (a left join's null side). */
+interface JoinedRow {
+  account: InstallationRow;
+  workspaceOrgId: string | null;
+  linkedAt: string | null;
+}
+
+function toInstallation(r: InstallationRow, workspaceOrgIds: string[]): InstallationRecord {
   return {
     installationId: Number(r.accountId),
     accountLogin: r.accountLogin,
     accountType: r.accountType,
-    workspaceOrgId: r.workspaceOrgId,
+    workspaceOrgIds,
     createdAt: toIso(r.createdAt),
     updatedAt: toIso(r.updatedAt),
   };
+}
+
+/** Fold joined rows (ordered by link age) into one record per account, links in attach order. */
+function group(rows: JoinedRow[]): Map<string, { account: InstallationRow; links: JoinedRow[] }> {
+  const byAccount = new Map<string, { account: InstallationRow; links: JoinedRow[] }>();
+  for (const row of rows) {
+    const entry = byAccount.get(row.account.accountId) ?? { account: row.account, links: [] };
+    if (row.workspaceOrgId !== null) entry.links.push(row);
+    byAccount.set(row.account.accountId, entry);
+  }
+  return byAccount;
 }
 
 export class PostgresInstallationStore implements InstallationStore {
@@ -48,7 +71,25 @@ export class PostgresInstallationStore implements InstallationStore {
     );
   }
 
-  async saveInstallation(rec: InstallationRecord): Promise<void> {
+  /** Accounts with every link each carries, oldest link first. */
+  private joined() {
+    return this.db
+      .select({
+        account: providerAccounts,
+        workspaceOrgId: providerAccountLinks.workspaceOrgId,
+        linkedAt: providerAccountLinks.createdAt,
+      })
+      .from(providerAccounts)
+      .leftJoin(
+        providerAccountLinks,
+        and(
+          eq(providerAccountLinks.provider, providerAccounts.provider),
+          eq(providerAccountLinks.accountId, providerAccounts.accountId),
+        ),
+      );
+  }
+
+  async saveInstallation(rec: InstallationAccount): Promise<void> {
     await this.db
       .insert(providerAccounts)
       .values({
@@ -56,17 +97,14 @@ export class PostgresInstallationStore implements InstallationStore {
         accountId: String(rec.installationId),
         accountLogin: rec.accountLogin,
         accountType: rec.accountType,
-        workspaceOrgId: rec.workspaceOrgId,
         createdAt: rec.createdAt,
         updatedAt: rec.updatedAt,
       })
       .onConflictDoUpdate({
         target: [providerAccounts.provider, providerAccounts.accountId],
         set: {
-          accountLogin: sql`excluded.account_login`,
-          accountType: sql`excluded.account_type`,
-          // Don't wipe an existing link when a re-sent event has no workspace.
-          workspaceOrgId: sql`coalesce(excluded.workspace_org_id, ${providerAccounts.workspaceOrgId})`,
+          accountLogin: sql`coalesce(nullif(excluded.account_login, ''), ${providerAccounts.accountLogin})`,
+          accountType: sql`coalesce(nullif(excluded.account_type, ''), ${providerAccounts.accountType})`,
           updatedAt: sql`excluded.updated_at`,
         },
       });
@@ -75,15 +113,17 @@ export class PostgresInstallationStore implements InstallationStore {
   async getInstallation(
     installationId: number,
   ): Promise<InstallationRecord | null> {
-    const rows = await this.db
-      .select()
-      .from(providerAccounts)
+    const rows = await this.joined()
       .where(this.account(installationId))
-      .limit(1);
-    return rows[0] ? toInstallation(rows[0]) : null;
+      .orderBy(providerAccountLinks.createdAt);
+    const entry = group(rows).get(String(installationId));
+    return entry
+      ? toInstallation(entry.account, entry.links.map((l) => l.workspaceOrgId!))
+      : null;
   }
 
   async removeInstallation(installationId: number): Promise<void> {
+    // The links cascade with the account row.
     await this.db.delete(providerAccounts).where(this.account(installationId));
   }
 
@@ -92,24 +132,60 @@ export class PostgresInstallationStore implements InstallationStore {
     workspaceOrgId: string,
   ): Promise<void> {
     await this.db
-      .update(providerAccounts)
-      .set({ workspaceOrgId, updatedAt: new Date().toISOString() })
-      .where(this.account(installationId));
+      .insert(providerAccountLinks)
+      .values({
+        provider: GITHUB_PROVIDER,
+        accountId: String(installationId),
+        workspaceOrgId,
+        createdAt: new Date().toISOString(),
+      })
+      .onConflictDoNothing();
+  }
+
+  async unlinkInstallationFromWorkspace(
+    installationId: number,
+    workspaceOrgId: string,
+  ): Promise<void> {
+    await this.db
+      .delete(providerAccountLinks)
+      .where(
+        and(
+          eq(providerAccountLinks.provider, GITHUB_PROVIDER),
+          eq(providerAccountLinks.accountId, String(installationId)),
+          eq(providerAccountLinks.workspaceOrgId, workspaceOrgId),
+        ),
+      );
   }
 
   async listInstallationsForWorkspace(
     workspaceOrgId: string,
   ): Promise<InstallationRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(providerAccounts)
+    // The accounts this workspace holds, with EVERY workspace's link on each,
+    // in the order this workspace attached them.
+    const held = this.db
+      .select({ accountId: providerAccountLinks.accountId })
+      .from(providerAccountLinks)
+      .where(
+        and(
+          eq(providerAccountLinks.provider, GITHUB_PROVIDER),
+          eq(providerAccountLinks.workspaceOrgId, workspaceOrgId),
+        ),
+      );
+    const rows = await this.joined()
       .where(
         and(
           eq(providerAccounts.provider, GITHUB_PROVIDER),
-          eq(providerAccounts.workspaceOrgId, workspaceOrgId),
+          inArray(providerAccounts.accountId, held),
         ),
-      );
-    return rows.map(toInstallation);
+      )
+      .orderBy(providerAccountLinks.createdAt);
+    return [...group(rows).values()]
+      .map((entry) => ({
+        record: toInstallation(entry.account, entry.links.map((l) => l.workspaceOrgId!)),
+        attachedAt: entry.links.find((l) => l.workspaceOrgId === workspaceOrgId)?.linkedAt ?? '',
+      }))
+      .sort((a, b) => a.attachedAt.localeCompare(b.attachedAt))
+      .map((entry) => entry.record);
   }
 
   async close(): Promise<void> {

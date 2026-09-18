@@ -61,6 +61,32 @@ async function databaseBefore(tag: string) {
 
 const NOW = '2026-09-15T09:40:00Z';
 
+describe('0027_provider_account_links', () => {
+  it('moves each installation’s workspace onto a link row, and an unattached one gets none', async () => {
+    const { sql, finish } = await databaseBefore('0027_provider_account_links');
+    await sql.query(
+      `INSERT INTO provider_accounts (provider, account_id, account_login, account_type, workspace_org_id, created_at, updated_at)
+       VALUES ('github', '111', 'acme', 'Organization', 'org_A', $1, $1), ('github', '222', 'beta', 'User', NULL, $1, $1)`,
+      [NOW],
+    );
+
+    await finish();
+
+    const links = await sql.query<{ provider: string; account_id: string; workspace_org_id: string }>(
+      'SELECT provider, account_id, workspace_org_id FROM provider_account_links',
+    );
+    expect(links.rows).toEqual([{ provider: 'github', account_id: '111', workspace_org_id: 'org_A' }]);
+    // The account row no longer carries a workspace at all.
+    const columns = await sql.query<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'provider_accounts'",
+    );
+    expect(columns.rows.map((c) => c.column_name)).not.toContain('workspace_org_id');
+    // Dropping the account drops its link.
+    await sql.query("DELETE FROM provider_accounts WHERE account_id = '111'");
+    expect((await sql.query('SELECT 1 FROM provider_account_links')).rows).toEqual([]);
+  });
+});
+
 describe('0022_provider_repositories', () => {
   it('renames the connection registry in place, keeping every repository and installation', async () => {
     const { sql, finish } = await databaseBefore('0022_provider_repositories');
@@ -77,13 +103,18 @@ describe('0022_provider_repositories', () => {
 
     await finish();
 
-    const accounts = await sql.query<{ provider: string; account_id: string; account_login: string; workspace_org_id: string | null }>(
-      'SELECT provider, account_id, account_login, workspace_org_id FROM provider_accounts ORDER BY account_id',
+    const accounts = await sql.query<{ provider: string; account_id: string; account_login: string }>(
+      'SELECT provider, account_id, account_login FROM provider_accounts ORDER BY account_id',
     );
     expect(accounts.rows).toEqual([
-      { provider: 'github', account_id: '111', account_login: 'acme', workspace_org_id: 'org_A' },
-      { provider: 'github', account_id: '222', account_login: 'beta', workspace_org_id: null },
+      { provider: 'github', account_id: '111', account_login: 'acme' },
+      { provider: 'github', account_id: '222', account_login: 'beta' },
     ]);
+    // The workspace an installation belonged to rides on as its link (0027).
+    const links = await sql.query<{ account_id: string; workspace_org_id: string }>(
+      'SELECT account_id, workspace_org_id FROM provider_account_links ORDER BY account_id',
+    );
+    expect(links.rows).toEqual([{ account_id: '111', workspace_org_id: 'org_A' }]);
     const repos = await sql.query<{ repo_full_name: string; provider: string; account_id: string; workspace_org_id: string; default_branch: string; location: string | null }>(
       'SELECT repo_full_name, provider, account_id, workspace_org_id, default_branch, location FROM repositories ORDER BY repo_full_name',
     );

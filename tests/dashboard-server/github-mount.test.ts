@@ -106,7 +106,9 @@ import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/m
 import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
 import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
-import { MemoryInstallationStore } from '../github-app/memory-store';
+import type { UserInstallation } from '../../packages/github-app/src/oauth';
+import { signConnectState } from '../../packages/github-app/src/connect-state';
+import { MemoryInstallationStore, seedInstallation } from '../github-app/memory-store';
 import { memoryContextStore } from '../helpers/memory-context-store';
 
 const ORG = 'org_A';
@@ -121,6 +123,9 @@ const APP_ENV = {
   GITHUB_APP_PRIVATE_KEY: 'not-a-real-key',
   GITHUB_APP_WEBHOOK_SECRET: WEBHOOK_SECRET,
   GITHUB_APP_SLUG: 'truecourse-test',
+  GITHUB_APP_CLIENT_ID: 'Iv1.test',
+  GITHUB_APP_CLIENT_SECRET: 'client-shh',
+  TRUECOURSE_SECRET_KEY: 'test-secret-key-for-connect-state-signing',
 } as const;
 
 const tmpDirs: string[] = [];
@@ -186,6 +191,7 @@ interface MountOptions {
   lookupInstallationAccount?: (
     installationId: number,
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
+  userInstallationsFor?: (code: string) => Promise<UserInstallation[]>;
 }
 
 let store: MemoryInstallationStore;
@@ -246,14 +252,7 @@ beforeEach(async () => {
   contextStore = memoryContextStore();
   setContextStore(contextStore);
   setRegistryStore(derivedRegistry(store));
-  await store.saveInstallation({
-    installationId: INSTALLATION_ID,
-    accountLogin: 'acme',
-    accountType: 'Organization',
-    workspaceOrgId: ORG,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  });
+  await seedInstallation(store, INSTALLATION_ID, [ORG]);
   // The onboarding scan runs on the connecting workspace's provider — give the
   // workspace one, and answer its pre-flight probe without a network call.
   const stored = { provider: 'anthropic' as const, model: 'claude-x', apiKey: 'sk-test' };
@@ -313,6 +312,8 @@ describe('a server with no GitHub App configured', () => {
     expect(status.body.error).toMatch(/GITHUB_APP_PRIVATE_KEY/);
     expect(status.body.error).toMatch(/GITHUB_APP_WEBHOOK_SECRET/);
     expect(status.body.error).toMatch(/GITHUB_APP_SLUG/);
+    expect(status.body.error).toMatch(/GITHUB_APP_CLIENT_ID/);
+    expect(status.body.error).toMatch(/GITHUB_APP_CLIENT_SECRET/);
 
     // The webhook too: an unconfigured server tells GitHub why, rather than
     // 404ing a path that looks like it should exist.
@@ -480,35 +481,193 @@ describe('the work-tree provider', () => {
     expect(failure).not.toMatch(/not a connected repository/);
     expect(reads).toEqual([]);
   });
+
+  it('refuses to clone through an installation the workspace no longer holds, minting no token', async () => {
+    buildApp();
+    // A context source made while the account was attached still names the
+    // installation after the workspace removed it: the clone must stop there,
+    // before any token is asked for.
+    await store.unlinkInstallationFromWorkspace(INSTALLATION_ID, ORG);
+    const failure = await acquireWorkTree('acme/handbook', {
+      installationId: INSTALLATION_ID,
+      workspaceOrgId: ORG,
+    }).then(
+      () => null,
+      (err: unknown) => err as Error & { statusCode?: number },
+    );
+    expect(failure?.message).toMatch(/GitHub account this workspace no longer holds/);
+    expect(failure?.statusCode).toBe(403);
+  });
 });
 
 // ---------------------------------------------------------------------------
 // Naming an installation
 // ---------------------------------------------------------------------------
 
-describe('an installation the webhook never announced', () => {
-  it('takes its account from the App API on the setup redirect', async () => {
-    const looked: number[] = [];
+describe('the connect callback', () => {
+  /** The state /status would have minted for the workspace's session. */
+  const state = (orgId = ORG) =>
+    signConnectState(
+      { orgId, userId: `u_${orgId}`, origin: 'settings', expiresAt: Date.now() + 60_000 },
+      APP_ENV.TRUECOURSE_SECRET_KEY,
+    );
+
+  it('attaches the installations GitHub says the person can reach, named from that list', async () => {
+    const codes: string[] = [];
     const app = buildApp({
-      lookupInstallationAccount: async (installationId) => {
-        looked.push(installationId);
-        return { accountLogin: 'acme', accountType: 'Organization' };
+      userInstallationsFor: async (code) => {
+        codes.push(code);
+        return [{ installationId: 99, accountLogin: 'octo', accountType: 'Organization' }];
       },
     });
 
     // No `installation` delivery for 99 — only the browser coming back from GitHub.
     await request(app)
-      .get('/api/github/setup')
+      .get('/api/github/callback')
       .set('Cookie', `tc_session=${ORG}`)
-      .query({ installation_id: '99', state: ORG })
+      .query({ code: 'c0de', installation_id: '99', setup_action: 'install', state: state() })
+      .expect(302)
+      .expect('location', 'http://localhost:3000/settings/repositories?github=attached&accounts=octo&from=settings');
+
+    expect(codes).toEqual(['c0de']);
+    expect(await store.getInstallation(99)).toMatchObject({
+      accountLogin: 'octo',
+      accountType: 'Organization',
+      workspaceOrgIds: [ORG],
+    });
+  });
+
+  it('bounces a session-less return through login and comes back here', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .get('/api/github/callback')
+      .query({ code: 'c0de', state: state() })
+      .expect(302);
+    expect(res.headers.location).toMatch(/^\/api\/auth\/login\?next=/);
+    expect(decodeURIComponent(res.headers.location.split('next=')[1]!)).toContain(
+      '/api/github/callback?code=c0de',
+    );
+  });
+
+  it("refuses a state minted for another workspace's session", async () => {
+    const app = buildApp({
+      userInstallationsFor: async () => [
+        { installationId: 99, accountLogin: 'octo', accountType: 'Organization' },
+      ],
+    });
+    await request(app)
+      .get('/api/github/callback')
+      .set('Cookie', `tc_session=${ORG}`)
+      .query({ code: 'c0de', state: state(OTHER_ORG) })
+      .expect(302)
+      .expect('location', 'http://localhost:3000/settings/repositories?github=expired&from=settings');
+    expect(await store.getInstallation(99)).toBeNull();
+  });
+
+  it('offers a plain authorize’s new installations on Settings, wherever the trip started', async () => {
+    const app = buildApp({
+      userInstallationsFor: async () => [
+        { installationId: 99, accountLogin: 'octo', accountType: 'Organization' },
+        { installationId: 98, accountLogin: 'nine', accountType: 'User' },
+      ],
+    });
+    const fromCode = signConnectState(
+      { orgId: ORG, userId: `u_${ORG}`, origin: 'code-connect', expiresAt: Date.now() + 60_000 },
+      APP_ENV.TRUECOURSE_SECRET_KEY,
+    );
+    const res = await request(app)
+      .get('/api/github/callback')
+      .set('Cookie', `tc_session=${ORG}`)
+      .query({ code: 'c0de', state: fromCode })
+      .expect(302);
+    const landing = new URL(res.headers.location);
+    expect(landing.pathname).toBe('/settings/repositories');
+    expect(landing.searchParams.get('github')).toBe('pick');
+    expect(landing.searchParams.get('from')).toBe('code-connect');
+    expect(await store.getInstallation(99)).toBeNull();
+
+    // The pick lands the row; the Code connect dialog is where the page goes next.
+    await request(app)
+      .post('/api/github/installations/attach')
+      .set('Cookie', `tc_session=${ORG}`)
+      .send({ offer: landing.searchParams.get('offer'), installationIds: [99] })
+      .expect(200);
+    expect((await store.getInstallation(99))?.workspaceOrgIds).toEqual([ORG]);
+  });
+
+  it('points a source left behind by a removed account at the installation the account comes back under', async () => {
+    // The last workspace removed acme (the App uninstalled, the row gone),
+    // the source stayed, and the App was installed on acme again: no row
+    // remembers the old id, so the repository's owner is the match.
+    const app = buildApp({
+      userInstallationsFor: async () => [
+        { installationId: 5151, accountLogin: 'acme', accountType: 'Organization' },
+      ],
+    });
+    await store.removeInstallation(INSTALLATION_ID);
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-handbook',
+      kind: 'repository',
+      title: 'acme/handbook',
+      config: {
+        repoFullName: 'acme/handbook',
+        installationId: 161996555,
+        include: ['docs/**'],
+        exclude: [],
+        branch: 'main',
+      },
+    });
+    // Another owner's source is not touched, whatever it names.
+    await contextStore.createSource(ORG, {
+      id: 'repo-octo-notes',
+      kind: 'repository',
+      title: 'octo/notes',
+      config: { repoFullName: 'octo/notes', installationId: 77, include: [], exclude: [], branch: 'main' },
+    });
+
+    await request(app)
+      .get('/api/github/callback')
+      .set('Cookie', `tc_session=${ORG}`)
+      .query({ code: 'c0de', installation_id: '5151', setup_action: 'install', state: state() })
       .expect(302);
 
-    expect(looked).toEqual([99]);
-    expect(await store.getInstallation(99)).toMatchObject({
-      accountLogin: 'acme',
-      accountType: 'Organization',
-      workspaceOrgId: ORG,
+    const sources = await contextStore.listSources(ORG);
+    expect(sources.find((s) => s.id === 'repo-acme-handbook')?.config).toMatchObject({ installationId: 5151 });
+    expect(sources.find((s) => s.id === 'repo-octo-notes')?.config).toMatchObject({ installationId: 77 });
+  });
+
+  it('re-keys a Context source to the installation that replaced the one it read through', async () => {
+    // The App reinstalled on acme: GitHub names the new id only, and a source
+    // made under the old one has to keep syncing.
+    const app = buildApp({
+      userInstallationsFor: async () => [
+        { installationId: 4242, accountLogin: 'acme', accountType: 'Organization' },
+      ],
     });
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-handbook',
+      kind: 'repository',
+      title: 'acme/handbook',
+      config: {
+        repoFullName: 'acme/handbook',
+        installationId: INSTALLATION_ID,
+        include: ['docs/**'],
+        exclude: [],
+        branch: 'main',
+      },
+    });
+
+    await request(app)
+      .get('/api/github/callback')
+      .set('Cookie', `tc_session=${ORG}`)
+      .query({ code: 'c0de', state: state() })
+      .expect(302)
+      .expect('location', 'http://localhost:3000/settings/repositories?github=attached&accounts=acme&from=settings');
+
+    expect(await store.getInstallation(INSTALLATION_ID)).toBeNull();
+    expect((await store.getInstallation(4242))?.workspaceOrgIds).toEqual([ORG]);
+    const [source] = await contextStore.listSources(ORG);
+    expect(source?.config).toMatchObject({ repoFullName: 'acme/handbook', installationId: 4242 });
   });
 });
 

@@ -18,7 +18,7 @@ import {
   type OnRepoUnlinked,
 } from '../../packages/github-app/src/connect';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
-import { MemoryInstallationStore } from './memory-store';
+import { MemoryInstallationStore, seedInstallation } from './memory-store';
 
 const ORG = 'org_A';
 const REPO = 'mushgev/truecourse-gate-test';
@@ -43,6 +43,9 @@ function makeApp(hooks: { onRepoLinked?: OnRepoLinked; onRepoUnlinked?: OnRepoUn
       store,
       repos: store,
       appSlug: 'tc-app',
+      clientId: 'Iv1.test',
+      stateSecret: 'test-state-secret',
+      userInstallationsFor: async () => [],
       appUrl: 'http://localhost:3000',
       setupRedirectPath: '/code?connect=1',
       octokitFor: () => octokit,
@@ -66,14 +69,7 @@ function unlink(app: Express, repoFullName = REPO) {
 
 beforeEach(async () => {
   store = new MemoryInstallationStore();
-  await store.saveInstallation({
-    installationId: 42,
-    accountLogin: 'mushgev',
-    accountType: 'User',
-    workspaceOrgId: ORG,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  });
+  await seedInstallation(store, 42, [ORG], { accountLogin: 'mushgev', accountType: 'User' });
 });
 
 describe('connect — the post-link seam', () => {

@@ -1,6 +1,6 @@
 {
-  "id": "f1f756e0-a74b-455a-a2a9-3fc4df7cebf8",
-  "prevId": "ba94e5dd-1008-4a1e-ba16-df65db377af0",
+  "id": "8817796b-412e-4868-aec3-0fb16dd8dd21",
+  "prevId": "e82a54b0-f066-4219-8dc0-1e84b334ad03",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -129,6 +129,84 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.provider_account_links": {
+      "name": "provider_account_links",
+      "schema": "",
+      "columns": {
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_org_id": {
+          "name": "workspace_org_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "provider_account_links_workspace_idx": {
+          "name": "provider_account_links_workspace_idx",
+          "columns": [
+            {
+              "expression": "workspace_org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "provider_account_links_account_fk": {
+          "name": "provider_account_links_account_fk",
+          "tableFrom": "provider_account_links",
+          "tableTo": "provider_accounts",
+          "columnsFrom": [
+            "provider",
+            "account_id"
+          ],
+          "columnsTo": [
+            "provider",
+            "account_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "provider_account_links_provider_account_id_workspace_org_id_pk": {
+          "name": "provider_account_links_provider_account_id_workspace_org_id_pk",
+          "columns": [
+            "provider",
+            "account_id",
+            "workspace_org_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.provider_accounts": {
       "name": "provider_accounts",
       "schema": "",
@@ -157,12 +235,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "workspace_org_id": {
-          "name": "workspace_org_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -176,23 +248,7 @@
           "notNull": true
         }
       },
-      "indexes": {
-        "provider_accounts_workspace_idx": {
-          "name": "provider_accounts_workspace_idx",
-          "columns": [
-            {
-              "expression": "workspace_org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "provider_accounts_provider_account_id_pk": {

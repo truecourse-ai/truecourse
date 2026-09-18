@@ -6,7 +6,22 @@
  * the webhook router.
  */
 
-export { loadGithubAppConfig, type GithubAppConfig } from './config.js';
+export { loadGithubAppConfig, GITHUB_APP_ENV_VARS, type GithubAppConfig } from './config.js';
+export {
+  exchangeUserCode,
+  listUserInstallations,
+  reachableInstallations,
+  type UserInstallation,
+} from './oauth.js';
+export {
+  signConnectState,
+  verifyConnectState,
+  signConnectOffer,
+  verifyConnectOffer,
+  CONNECT_STATE_TTL_MS,
+  type ConnectState,
+  type ConnectOffer,
+} from './connect-state.js';
 export { verifyWebhookSignature } from './signature.js';
 export {
   createGithubAuth,
@@ -21,6 +36,7 @@ export {
   installationOctokit,
   appOctokit,
   fetchInstallationAccount,
+  uninstallApp,
   splitRepo,
   type OctokitClient,
   type RepoCoords,
@@ -38,10 +54,17 @@ export {
 } from './webhook.js';
 export {
   createConnectRouter,
+  connectOutcomeFlag,
   type ConnectDeps,
   type OnRepoLinked,
   type OnRepoUnlinked,
+  type OnInstallationAttached,
+  type OnInstallationReplaced,
 } from './connect.js';
 export { GITHUB_PROVIDER, installationOf } from './provider.js';
-export type { InstallationStore, InstallationRecord } from './store/types.js';
+export type {
+  InstallationStore,
+  InstallationRecord,
+  InstallationAccount,
+} from './store/types.js';
 export { PostgresInstallationStore, type InstallationDb } from './store/pg-store.js';

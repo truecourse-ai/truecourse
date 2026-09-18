@@ -108,6 +108,27 @@ describe('PgRepositoryStore', () => {
     expect(await store.getRepo('acme/api')).toBeNull();
   });
 
+  it('moves every repository of one account to another, answering the rows moved', async () => {
+    await store.linkRepo(githubRepo('acme/api'));
+    await store.linkRepo(githubRepo('acme/web'));
+    await store.linkRepo(githubRepo('other/thing', { workspaceOrgId: 'org_B', accountId: '3' }));
+
+    const moved = await store.moveReposToAccount('github', '1', '7');
+    expect(moved.map((r) => [r.repoFullName, r.accountId])).toEqual([
+      ['acme/api', '7'],
+      ['acme/web', '7'],
+    ]);
+    expect(await store.listReposForAccount('github', '1')).toEqual([]);
+    expect((await store.listReposForAccount('github', '7')).map((r) => r.repoFullName)).toEqual([
+      'acme/api',
+      'acme/web',
+    ]);
+    // Another account's rows, and every other column, are untouched.
+    expect((await store.getRepo('other/thing'))?.accountId).toBe('3');
+    expect((await store.getRepo('acme/api'))?.slug).toBe('acme-api');
+    expect(await store.moveReposToAccount('github', '99', '7')).toEqual([]);
+  });
+
   it('mints the slug against the workspace alone, so two workspaces share a plain slug', async () => {
     const a = await store.linkRepo(githubRepo('acme/data-pipeline'));
     const b = await store.linkRepo(githubRepo('acme/data_pipeline', { workspaceOrgId: 'org_B', accountId: '2' }));

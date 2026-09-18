@@ -46,6 +46,17 @@ export function appOctokit(cfg: GithubAppConfig): Octokit {
 }
 
 /**
+ * Uninstall the App from the account behind an installation, as the App
+ * itself (app-level auth). What the last workspace letting go of an
+ * installation does: an installation serving no workspace is dead weight
+ * that only re-attaches silently. GitHub's `installation.deleted` webhook
+ * follows and finds nothing left to disconnect. A throw is GitHub's refusal.
+ */
+export async function uninstallApp(cfg: GithubAppConfig, installationId: number): Promise<void> {
+  await appOctokit(cfg).apps.deleteInstallation({ installation_id: installationId });
+}
+
+/**
  * The account an installation belongs to — its login and whether it is a user or
  * an organization. Read from the App API so the identity of an installation never
  * depends on the `installation` webhook being delivered (a webhook URL that is

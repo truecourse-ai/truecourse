@@ -19,7 +19,7 @@ export * from './workspace-invite-links.js';
 export * from './llm-usage.js';
 export * from './credits.js';
 
-import { providerAccounts, repositories } from './repositories.js';
+import { providerAccounts, providerAccountLinks, repositories } from './repositories.js';
 import { llmProviderConfig } from './llm.js';
 import { content } from './content.js';
 import { decisions } from './decisions.js';
@@ -48,6 +48,7 @@ export const schema = {
   activityRuns,
   activityEvents,
   providerAccounts,
+  providerAccountLinks,
   repositories,
   llmProviderConfig,
   content,

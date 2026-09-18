@@ -58,6 +58,7 @@ import { listContextSources, putRepoContextBindings } from '@/lib/api';
 import {
   fetchGithubStatus,
   fetchInstallationRepos,
+  installationSettingsUrl,
   linkGithubRepo,
 } from '@/dashboard/data/real-repos';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
@@ -193,7 +194,9 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     };
   }, [open]);
 
-  // What the selected installation can see.
+  // What the selected installation can see. Re-read on demand: the person
+  // may have just changed the App's repository access on GitHub.
+  const [reposRead, setReposRead] = useState(0);
   useEffect(() => {
     if (installationId === null) return;
     let live = true;
@@ -211,7 +214,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     return () => {
       live = false;
     };
-  }, [installationId]);
+  }, [installationId, reposRead]);
 
   const installations = github.kind === 'ready' ? github.installations : [];
   const chosen = installations.find((i) => i.installationId === installationId) ?? null;
@@ -481,21 +484,24 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               {reposError && <li className="px-3 py-6 text-center text-xs text-destructive">{reposError}</li>}
               {installationRepos?.length === 0 && !reposError && (
                 <li className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  This installation can see no repositories. Grant the app access on GitHub.
+                  This installation can see no repositories.
                 </li>
               )}
               {(installationRepos ?? []).map((r) => {
+                // A repository belongs to one workspace: connected here, or
+                // in another one, it is shown and not pickable.
                 const linked = isLinked(r.fullName);
+                const taken = linked || r.connectedElsewhere;
                 const selected = picked[0] === r.fullName;
                 return (
                   <li key={r.fullName}>
                     <button
                       type="button"
-                      disabled={linked}
+                      disabled={taken}
                       aria-pressed={selected}
                       onClick={() => setPicked([r.fullName])}
                       className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
-                        linked ? 'cursor-default opacity-60' : selected ? 'bg-muted' : 'hover:bg-muted/40'
+                        taken ? 'cursor-default opacity-60' : selected ? 'bg-muted' : 'hover:bg-muted/40'
                       }`}
                     >
                       <span
@@ -507,12 +513,42 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                         {selected && <Check className="h-2.5 w-2.5" />}
                       </span>
                       <span className="block min-w-0 flex-1 truncate font-mono text-xs text-foreground">{r.fullName}</span>
-                      <Capsule>{linked ? 'connected' : r.private ? 'private' : 'public'}</Capsule>
+                      <Capsule>
+                        {linked
+                          ? 'connected'
+                          : r.connectedElsewhere
+                            ? 'in another workspace'
+                            : r.private
+                              ? 'private'
+                              : 'public'}
+                      </Capsule>
                     </button>
                   </li>
                 );
               })}
             </ul>
+            {chosen && (
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Not listed?{' '}
+                <a
+                  href={installationSettingsUrl(chosen)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-foreground hover:underline"
+                >
+                  Change which repositories {nameOf(chosen)} lets the App see
+                </a>{' '}
+                on GitHub, then{' '}
+                <button
+                  type="button"
+                  onClick={() => setReposRead((n) => n + 1)}
+                  className="text-foreground hover:underline"
+                >
+                  reload
+                </button>
+                .
+              </p>
+            )}
           </div>
         )}
 

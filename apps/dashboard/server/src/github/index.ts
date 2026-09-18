@@ -20,6 +20,7 @@
  */
 
 import type { Router } from 'express';
+import { createAppError } from '@truecourse/core/lib/errors';
 import { log } from '@truecourse/core/lib/logger';
 import {
   createConnectRouter,
@@ -31,10 +32,13 @@ import {
   loadGithubAppConfig,
   installationOf,
   PostgresInstallationStore,
+  reachableInstallations,
   splitRepo,
+  uninstallApp,
   type InstallationStore,
   type GithubAuth,
   type OctokitClient,
+  type UserInstallation,
 } from '@truecourse/github-app';
 import type { RepositoryRecord, RepositoryStore } from '@truecourse/shared';
 import { getDb } from '../db.js';
@@ -43,6 +47,8 @@ import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tre
 import type { ContextGithubAccess } from '../routes/context.js';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
 import {
+  rekeyRepositorySources,
+  rekeyRepositorySourcesOfAccount,
   removeRepositoryContext,
   syncRepositorySource,
   type ContextSyncStart,
@@ -73,6 +79,15 @@ export interface GithubConnectionOverrides {
   lookupInstallationAccount?: (
     installationId: number,
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
+  /**
+   * The installations the person behind an OAuth code can reach. Default: the
+   * code exchanged with GitHub for a user token, asked once.
+   */
+  userInstallationsFor?: (code: string) => Promise<UserInstallation[]>;
+  /** Signs the connect `state`. Default: `TRUECOURSE_SECRET_KEY`. */
+  stateSecret?: string;
+  /** Uninstall the App from an account. Default: the App API (app-level auth). */
+  uninstallInstallation?: (installationId: number) => Promise<void>;
   /** Per-run work trees. Default: a token clone into the workspace's run dir. */
   workTree?: WorkTreeProvider;
   /**
@@ -125,8 +140,18 @@ export function createGithubConnection(
     (async (repoKey, via) => {
       // A caller that already knows its installation is cloned through it, with
       // no link read at all: this is how a context source reads a repository
-      // Code has not connected.
+      // Code has not connected. The workspace has to HOLD that installation
+      // still: a source made while the account was attached keeps naming it
+      // after the account is removed, and must not go on minting clones of a
+      // repository the workspace can no longer reach.
       if (via?.installationId !== undefined) {
+        const installation = await store.getInstallation(via.installationId);
+        if (!installation?.workspaceOrgIds.includes(via.workspaceOrgId)) {
+          throw createAppError(
+            `${repoKey} is read through a GitHub account this workspace no longer holds (installation ${via.installationId}). Connect the account again in Settings › Repositories, or remove the source.`,
+            403,
+          );
+        }
         return createRunClone(repoKey, await tokenFor(via.installationId), {
           workspaceOrgId: via.workspaceOrgId,
           defaultBranch: via.defaultBranch ?? null,
@@ -205,10 +230,21 @@ export function createGithubConnection(
     },
   });
 
+  // The connect `state` is signed with the server's own secret, the one boot
+  // already requires for the workspace's encrypted rows.
+  const stateSecret = overrides.stateSecret ?? process.env.TRUECOURSE_SECRET_KEY;
+  if (!stateSecret) {
+    throw new Error('TRUECOURSE_SECRET_KEY is required to sign the GitHub connect state');
+  }
+
   const connect = createConnectRouter({
     store,
     repos,
     appSlug: cfg.appSlug,
+    clientId: cfg.clientId,
+    stateSecret,
+    userInstallationsFor:
+      overrides.userInstallationsFor ?? ((code: string) => reachableInstallations(cfg, code)),
     appUrl: process.env.WORKOS_APP_URL || 'http://localhost:3000',
     // Back to the connect dialog, so the new installation is pickable at once.
     setupRedirectPath: '/settings/repositories',
@@ -221,6 +257,9 @@ export function createGithubConnection(
     lookupInstallationAccount:
       overrides.lookupInstallationAccount ??
       ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
+    uninstallInstallation:
+      overrides.uninstallInstallation ??
+      ((installationId: number) => uninstallApp(cfg, installationId)),
     onRepoLinked: async (link: RepositoryRecord) => {
       // Connecting starts the repository's Flow setup, which derives its recipe,
       // dependencies and interfaces from the CODE. What the repository reads is
@@ -242,6 +281,20 @@ export function createGithubConnection(
       await removeRepoRunState(link.repoFullName, link.workspaceOrgId);
       await removeRepositoryContext(link.workspaceOrgId, link.repoFullName);
       log.info(`[github] ${link.repoFullName} disconnected`);
+    },
+    // The App reinstalled on an account: a Context source that reads through
+    // the old installation id keeps syncing through the new one.
+    // An account attached: a Context source reading a repository it owns
+    // reads through this installation from now on, whatever id it named.
+    onInstallationAttached: async ({ installationId, accountLogin, workspaceOrgId }) => {
+      const moved = await rekeyRepositorySourcesOfAccount(workspaceOrgId, accountLogin, installationId);
+      if (moved > 0) log.info(`[github] ${moved} context source(s) of ${workspaceOrgId} now read through installation ${installationId}`);
+    },
+    onInstallationReplaced: async ({ from, to, workspaceOrgIds }) => {
+      for (const org of workspaceOrgIds) {
+        const moved = await rekeyRepositorySources(org, from, to);
+        if (moved > 0) log.info(`[github] ${moved} context source(s) of ${org} now read through installation ${to}`);
+      }
     },
   });
 

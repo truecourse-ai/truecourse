@@ -77,7 +77,7 @@ function serve(registry: typeof REPO[] = []) {
     }
     if (pathname === '/api/repos') return json(registry);
     if (pathname === '/api/llm/config') return json({ config: null, providers: ['anthropic'] });
-    if (pathname === '/api/github/status') return json({ installations: [], installUrl: '', repos: [] });
+    if (pathname === '/api/github/status') return json({ installations: [], connectUrl: '', repos: [] });
     if (pathname === '/api/workspace/members') return json({ members: [], invitations: [] });
     if (pathname === '/api/context/sources') return json({ sources: [] });
     if (pathname === '/api/context/documents') return json({ documents: [], areas: [], repositories: [] });

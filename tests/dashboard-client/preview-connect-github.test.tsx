@@ -66,7 +66,7 @@ interface LinkBody {
   defaultBranch?: string;
 }
 
-const INSTALL_URL = 'https://github.com/apps/truecourse/installations/new?state=org_1';
+const CONNECT_URL = 'https://github.com/login/oauth/authorize?client_id=Iv1.app&state=signed';
 
 const realFetch = window.fetch;
 
@@ -92,7 +92,7 @@ function linkedRepo(repoFullName: string): GithubRepoSummary {
 function status(partial: Partial<GithubConnectStatusResponse> = {}): GithubConnectStatusResponse {
   return {
     configured: true,
-    installUrl: INSTALL_URL,
+    connectUrl: CONNECT_URL,
     installations: [{ installationId: 42, accountLogin: 'linkwarden', accountType: 'Organization' }],
     repos: [],
     ...partial,
@@ -261,8 +261,8 @@ describe('connecting a repository through the GitHub App', () => {
       registry,
       installationRepos: {
         42: [
-          { fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false },
-          { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true },
+          { fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false, connectedElsewhere: false },
+          { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true, connectedElsewhere: false },
         ],
       },
       link: (body) => {
@@ -296,7 +296,7 @@ describe('connecting a repository through the GitHub App', () => {
       registry: [],
       llm: () => json({ config: null, providers: ['anthropic'] }),
       installationRepos: {
-        42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }],
+        42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false, connectedElsewhere: false }],
       },
     });
 
@@ -322,7 +322,7 @@ describe('connecting a repository through the GitHub App', () => {
       release = resolve;
     });
     serve({
-      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
+      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false, connectedElsewhere: false }] },
       link: async () => {
         await cloning;
         return json({ ok: true }, 201);
@@ -433,8 +433,8 @@ describe('connecting a repository through the GitHub App', () => {
       status: () => json(status({ repos: [linkedRepo('linkwarden/linkwarden')] })),
       installationRepos: {
         42: [
-          { fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false },
-          { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true },
+          { fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false, connectedElsewhere: false },
+          { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true, connectedElsewhere: false },
         ],
       },
     });
@@ -445,12 +445,35 @@ describe('connecting a repository through the GitHub App', () => {
     expect(screen.getByRole('button', { name: /linkwarden\/docs/ })).toBeEnabled();
   });
 
+  it("points at the installation's GitHub settings when a repository is not listed, and re-reads on reload", async () => {
+    const repos: Record<number, Array<{ fullName: string; defaultBranch: string; private: boolean; connectedElsewhere: boolean }>> = {
+      42: [],
+    };
+    const { fetchMock } = serve({ installationRepos: repos });
+
+    const dialog = await openGithubRepos();
+    expect(await within(dialog).findByText('This installation can see no repositories.')).toBeInTheDocument();
+    // Which repositories the App sees is GitHub's setting, on the installation's own page.
+    expect(
+      within(dialog).getByRole('link', { name: /Change which repositories linkwarden lets the App see/ }),
+    ).toHaveAttribute('href', 'https://github.com/organizations/linkwarden/settings/installations/42');
+
+    // Access granted on GitHub, the reload lists what the installation now sees.
+    repos[42] = [{ fullName: 'linkwarden/docs', defaultBranch: 'main', private: true, connectedElsewhere: false }];
+    await userEvent.click(within(dialog).getByRole('button', { name: 'reload' }));
+    expect(await within(dialog).findByRole('button', { name: /linkwarden\/docs/ })).toBeEnabled();
+    const listings = fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .filter((href) => href.includes('/api/github/installations/42/repos'));
+    expect(listings).toHaveLength(2);
+  });
+
   it('keeps the dialog open and names the repository the server refused', async () => {
     const { posted } = serve({
       installationRepos: {
         42: [
-          { fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false },
-          { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true },
+          { fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false, connectedElsewhere: false },
+          { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true, connectedElsewhere: false },
         ],
       },
       // The picked repository is refused: the dialog stays, and says why.
@@ -484,7 +507,7 @@ describe('connecting a repository through the GitHub App', () => {
         source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com', docCount: 12 }),
         ownSource('linkwarden/linkwarden'),
       ],
-      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
+      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false, connectedElsewhere: false }] },
     });
 
     const dialog = await openGithubRepos();
@@ -511,7 +534,7 @@ describe('connecting a repository through the GitHub App', () => {
   it('offers only the other sources when Context has none for the repository', async () => {
     serve({
       sources: [source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com', docCount: 12 })],
-      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
+      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false, connectedElsewhere: false }] },
     });
 
     const dialog = await openGithubRepos();
@@ -529,7 +552,7 @@ describe('connecting a repository through the GitHub App', () => {
   it('says the workspace has no source yet when there is none', async () => {
     serve({
       sources: [],
-      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
+      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false, connectedElsewhere: false }] },
     });
 
     const dialog = await openGithubRepos();
@@ -555,8 +578,8 @@ describe('connecting a repository through the GitHub App', () => {
       ],
       installationRepos: {
         42: [
-          { fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false },
-          { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true },
+          { fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false, connectedElsewhere: false },
+          { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true, connectedElsewhere: false },
         ],
       },
       link: (body) => {
