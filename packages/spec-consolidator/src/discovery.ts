@@ -220,12 +220,31 @@ const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/;
  * is the window the relevance classifier judges a doc through — metadata spent
  * out of that window is content the classifier never sees.
  *
- * The parsers that READ frontmatter keep the whole file; only identity and the
- * preview window are taken from the document itself.
+ * The parsers that READ frontmatter keep the whole file; identity, the preview
+ * window and every deterministic reader of what the doc SAYS take the document
+ * itself ({@link docProse}).
  */
 function documentBody(content: string): string {
   const m = FRONTMATTER.exec(content);
   return m ? content.slice(m[0].length).replace(/^\r?\n/, '') : content;
+}
+
+/**
+ * A doc's PROSE: {@link docBody} beneath its frontmatter.
+ *
+ * Every deterministic pass that reasons about what a doc STATES reads this
+ * rather than the whole file, because a metadata block is not content and a
+ * reader that counts it as content draws conclusions from our own bookkeeping.
+ * A synced issue carries `status_category` and `status_history` like every
+ * other synced issue, so section pairing keyed on the file finds every pair of
+ * tickets colliding on those two words, and near-duplicate detection finds them
+ * all alike. Both read the prose instead.
+ *
+ * A parser whose whole job is the metadata block (`readDocFrontmatter`,
+ * `parseDocStatus`) still takes `docBody`.
+ */
+export function docProse(doc: DocCandidate): string {
+  return documentBody(docBody(doc));
 }
 
 function makeCandidate(
