@@ -14,7 +14,12 @@ import { createApp } from './app.js';
 import { createAuth } from './auth/index.js';
 import { serverMode } from './mode.js';
 import { createLocalConnection, type LocalMount } from './local/index.js';
-import { registeredServerFeatures, type ServerRouterMount } from './features.js';
+import {
+  registeredServerFeatures,
+  type FeatureContextDriver,
+  type ServerFeatureContext,
+  type ServerRouterMount,
+} from './features.js';
 import { createGithubConnection } from './github/index.js';
 import { createServerJobs } from './jobs/index.js';
 import { closeDb, getDb, getDbHandle, initDb } from './db.js';
@@ -28,7 +33,11 @@ import {
 import { PgInviteLinkStore, PgRepositoryStore } from '@truecourse/data-store';
 import { setRepoProviderLookup } from './services/work-tree.service.js';
 import { startRunChangeRelay } from './services/run-events.service.js';
-import { setContextEventPublisher } from './services/context.service.js';
+import {
+  emitContextChanged,
+  setContextEventPublisher,
+  setFeatureContextDrivers,
+} from './services/context.service.js';
 import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepRunClones } from './services/run-clone.service.js';
@@ -38,7 +47,7 @@ import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunsWatches } from './services/run-watch.service.js';
 import { getLogDir } from '@truecourse/core/config/runtime-dir';
 import { initSentry, flushSentry } from './observability/sentry.js';
-import { shutdownServerAnalytics } from './observability/posthog.js';
+import { actorOf, captureAction, shutdownServerAnalytics } from './observability/posthog.js';
 import { observeRepositories } from './observability/repositories.js';
 import { ServerLogTransport } from './observability/log-transport.js';
 import { registerEditionFeatures } from './edition-loader.js';
@@ -127,6 +136,30 @@ export async function startServer(): Promise<void> {
   // A `context/` document ref belongs to a workspace, not to a repository, so
   // the doc reader needs to know whose workspace a repository reads.
   setRepoWorkspaceLookup(async (repoKey) => (await repoLinks.getRepo(repoKey))?.workspaceOrgId ?? null);
+
+  // 4b. This edition's own features, built once from what boot already has: the
+  //     routers it mounts (put up with the app in step 7) and the context source
+  //     kinds it drives, installed BEFORE the queue starts so the first sync
+  //     that runs already sees them. The open edition has none — nobody
+  //     registered any.
+  const featureContext: ServerFeatureContext = {
+    db: getDb(),
+    masterSecret,
+    workspaceSession: auth.workspaceSession,
+    capture: (event, req, properties) => {
+      const who = actorOf(req);
+      if (who) captureAction(event, { ...who, ...(properties ? { properties } : {}) });
+    },
+    contextChanged: (org, change) => emitContextChanged(org, change),
+  };
+  const featureRouters: ServerRouterMount[] = [];
+  const featureDrivers: FeatureContextDriver[] = [];
+  for (const feature of registeredServerFeatures()) {
+    featureRouters.push(...feature.mount(featureContext));
+    featureDrivers.push(...(feature.contextDrivers?.(featureContext) ?? []));
+    log.info(`[Server] ${feature.name} enabled`);
+  }
+  setFeatureContextDrivers(featureDrivers);
 
   // 5. Background job queue. Long-running work runs here instead of inside the
   //    request that asked for it. Built BEFORE the GitHub connection, whose
@@ -239,17 +272,7 @@ export async function startServer(): Promise<void> {
     );
   }
 
-  // 7. This edition's own routers, built once from what boot already has. The
-  //    open edition has none — nobody registered any.
-  const featureRouters: ServerRouterMount[] = [];
-  for (const feature of registeredServerFeatures()) {
-    featureRouters.push(
-      ...feature.mount({ db: getDb(), masterSecret, workspaceSession: auth.workspaceSession }),
-    );
-    log.info(`[Server] ${feature.name} enabled`);
-  }
-
-  // 8. Setup Express app + socket.io
+  // 7. Setup Express app + socket.io
   const app = createApp({
     authVerifier: auth.verify,
     authRouter: auth.router,
@@ -263,7 +286,7 @@ export async function startServer(): Promise<void> {
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
-  // 9. Start listening
+  // 8. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {

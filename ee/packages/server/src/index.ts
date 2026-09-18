@@ -7,11 +7,29 @@
  * is there, so the dependency still runs one way — this package names the open
  * server, and the open server names this package in exactly one file.
  *
- * The other two enterprise features are the client's — the document Connections
- * tab and the repository providers beyond the open edition's (Azure DevOps
- * today, listed as coming soon) add no routes, so they register in
- * `ee/packages/client` and nothing here mounts for them.
+ * Two features mount here: more than one workspace (`/api/auth/workspaces`) and
+ * the document Connections (`/api/connections`, plus the Jira and Confluence
+ * context source drivers it contributes). The third — the repository providers
+ * beyond the open edition's, Azure DevOps today — adds no routes and registers
+ * in `ee/packages/client` alone.
  */
 
 export { eeServerFeatures } from './features.js';
 export { createWorkspacesRouter, workspacesFeature } from './workspaces/index.js';
+export {
+  CONNECTIONS_PATH,
+  ConnectionMissingError,
+  ConnectionStore,
+  confluenceConfig,
+  connectionsFeature,
+  createConfluenceDriver,
+  createConnectionsRouter,
+  createJiraDriver,
+  jiraConfig,
+  probeConfluence,
+  probeJira,
+  type AtlassianConnection,
+  type ConfluenceDriverDeps,
+  type ConnectionsRouterDeps,
+  type JiraDriverDeps,
+} from './connections/index.js';

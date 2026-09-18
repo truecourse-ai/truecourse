@@ -400,6 +400,30 @@ describe('the sweep query', () => {
     expect(await listDueContextSources(db, '2026-09-09T10:00:00.000Z')).toEqual([]);
   });
 
+  it('names every clock-swept kind that is older than the age given', async () => {
+    // Nothing announces a change to a Jira project or a Confluence space any
+    // more than to a site, so the sweep is what keeps all three current.
+    const tool = (id: string, kind: 'jira' | 'confluence') => ({
+      id,
+      kind,
+      title: id,
+      config: kind === 'jira' ? { projectKey: 'ENG' } : { spaceKey: 'ENG' },
+    });
+    await store.createSource(ORG, tool('jira-acme-eng', 'jira'));
+    await store.createSource(ORG, tool('confluence-acme-eng', 'confluence'));
+    await store.createSource(ORG, tool('jira-acme-fresh', 'jira'));
+    await store.updateSource(ORG, 'jira-acme-eng', { lastSyncAt: '2026-09-01T10:00:00.000Z' });
+    await store.updateSource(ORG, 'confluence-acme-eng', {
+      lastSyncAt: '2026-09-01T10:00:00.000Z',
+    });
+    await store.updateSource(ORG, 'jira-acme-fresh', { lastSyncAt: '2026-09-10T10:00:00.000Z' });
+
+    expect(await listDueContextSources(db, '2026-09-09T10:00:00.000Z')).toEqual([
+      { workspaceOrgId: ORG, sourceId: 'confluence-acme-eng' },
+      { workspaceOrgId: ORG, sourceId: 'jira-acme-eng' },
+    ]);
+  });
+
   it('skips a paused source, of either kind, however long it has waited', async () => {
     await store.createSource(ORG, site('paused'));
     await store.updateSource(ORG, 'paused', { status: 'paused' });

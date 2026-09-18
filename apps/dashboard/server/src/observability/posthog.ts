@@ -70,6 +70,10 @@ export const EVENTS = {
   runFinished: 'run_finished',
   /** A context source was stored (a repository's markdown, a documentation site). */
   contextSourceAdded: 'context_source_added',
+  /** A tool account was connected or re-saved in Settings › Connections. */
+  connectionSaved: 'connection_saved',
+  /** A tool account was removed there, which pauses the sources that read it. */
+  connectionRemoved: 'connection_removed',
   /** A documentation conflict was ruled on: a side picked, or dismissed. */
   conflictResolved: 'conflict_resolved',
   /** A flow or a claim was ruled out of testing. */

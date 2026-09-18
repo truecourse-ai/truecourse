@@ -6,15 +6,16 @@
  * provider — so the whole app is rendered with this edition registered first,
  * and the assertions are on the open pages drawing what was registered.
  *
- * Nothing behind either one connects yet, so every connector row and the Azure
- * row say Coming soon and are inert: no lock, no button, nothing to click. The
- * provider still owns its hosts, so an Azure remote wears the Azure mark.
+ * Two connectors connect (Jira and Confluence, each a row that opens its
+ * account form); the other four and the Azure row say Coming soon and are
+ * inert: no lock, no button, nothing to click. The provider still owns its
+ * hosts, so an Azure remote wears the Azure mark.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { GithubConnectStatusResponse } from '@truecourse/shared';
+import { CONTEXT_CONNECTION_PROVIDERS, type GithubConnectStatusResponse } from '@truecourse/shared';
 import DashboardApp from '@/dashboard/DashboardApp';
 import { registerEditionFeatures } from '../../ee/packages/client/src/edition';
 
@@ -41,6 +42,16 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
+/** A workspace that has connected neither tool. */
+const CONNECTIONS = CONTEXT_CONNECTION_PROVIDERS.map((provider) => ({
+  provider,
+  connected: false,
+  baseUrl: '',
+  accountEmail: '',
+  tokenMask: null,
+  updatedAt: null,
+}));
+
 const STATUS: GithubConnectStatusResponse = {
   configured: true,
   installations: [],
@@ -55,6 +66,7 @@ function serve() {
     if (pathname === '/api/github/status') return json(STATUS);
     if (pathname === '/api/llm/config') return json({ config: null, providers: ['anthropic'] });
     if (pathname === '/api/sessions/runs') return json({ runs: [] });
+    if (pathname === '/api/connections') return json({ connections: CONNECTIONS });
     return json({ error: 'not found' }, 404);
   }) as unknown as typeof window.fetch;
 }
@@ -91,7 +103,7 @@ describe('Settings › Connections', () => {
     ]);
   });
 
-  it('lists the six tool connectors, every one of them Coming soon and inert', async () => {
+  it('lists the six tool connectors, and only the two that connect are controls', async () => {
     renderAt('/settings/connections');
 
     const list = await screen.findByRole('list', { name: 'Connectors' });
@@ -102,8 +114,10 @@ describe('Settings › Connections', () => {
           within(row).getByText(/^(Jira|Confluence|Google Drive|OneDrive|Notion|Slack)$/).textContent,
       ),
     ).toEqual(['Jira', 'Confluence', 'Google Drive', 'OneDrive', 'Notion', 'Slack']);
-    expect(within(list).getAllByText('Coming soon')).toHaveLength(6);
-    expect(within(list).queryByRole('button')).toBeNull();
+    // The four with nothing behind them stay listed and inert.
+    expect(within(list).getAllByText('Coming soon')).toHaveLength(4);
+    expect(within(list).getAllByRole('button').map((button) => button.getAttribute('aria-label')))
+      .toEqual(['Connect Jira', 'Connect Confluence']);
     expect(within(list).queryByRole('link')).toBeNull();
   });
 });

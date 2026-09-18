@@ -13,7 +13,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ContextDocumentRow, ContextSourceView, ContextSyncRecord } from '@truecourse/shared';
+import type {
+  ContextDocumentRow,
+  ContextSourceKind,
+  ContextSourceView,
+  ContextSyncRecord,
+} from '@truecourse/shared';
 import {
   getContextSource,
   getContextStaleness,
@@ -114,13 +119,20 @@ function useRead<T>(read: () => Promise<T>, signal: number, key = ''): Read<T> {
 export interface ContextSourcesState {
   /** null until the first read lands. */
   sources: ContextSourceView[] | null;
+  /** The kinds this server can add — its own answer, not a constant. */
+  addableKinds: ContextSourceKind[];
   error: string | null;
   refetch: () => Promise<void>;
 }
 
 export function useContextSources(signal: number): ContextSourcesState {
-  const read = useRead(async () => (await listContextSources()).sources, signal);
-  return { sources: read.data, error: read.error, refetch: read.refetch };
+  const read = useRead(() => listContextSources(), signal);
+  return {
+    sources: read.data?.sources ?? null,
+    addableKinds: read.data?.addableKinds ?? [],
+    error: read.error,
+    refetch: read.refetch,
+  };
 }
 
 export interface ContextSourceState {

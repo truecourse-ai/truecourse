@@ -15,9 +15,13 @@
  * that moves between organizations mints cookies with.
  */
 
-import type { Router } from 'express';
+import type { Request, Router } from 'express';
 import type { Db } from '@truecourse/db';
+import type { ContextSourceKind } from '@truecourse/shared';
+import type { ContextSourceDriver } from '@truecourse/core/services/context';
 import type { WorkspaceSessionTools } from './auth/index.js';
+import { setFeatureContextDrivers, type ContextChange } from './services/context.service.js';
+import type { ServerAnalyticsEvent } from './observability/posthog.js';
 
 /** What a feature is built from. */
 export interface ServerFeatureContext {
@@ -30,6 +34,25 @@ export interface ServerFeatureContext {
    * feature that needs one mounts nothing.
    */
   workspaceSession: WorkspaceSessionTools | null;
+  /**
+   * Report one product action, from the route where it became true. The event
+   * names are the server's own catalogue (`observability/posthog.ts`), so a
+   * feature can only send one that is in it.
+   */
+  capture(event: ServerAnalyticsEvent, req: Request, properties?: Record<string, unknown>): void;
+  /** Tell a workspace its Context moved, so its open pages re-read. */
+  contextChanged(org: string, change: ContextChange): Promise<void>;
+}
+
+/**
+ * One kind of context source a feature can sync. The driver is built PER
+ * WORKSPACE, because a tool source reads the account that workspace connected,
+ * and at call time, because a connection can be made or removed while the
+ * server runs.
+ */
+export interface FeatureContextDriver {
+  kind: ContextSourceKind;
+  driver(workspaceOrgId: string): ContextSourceDriver;
 }
 
 export interface ServerRouterMount {
@@ -53,6 +76,12 @@ export interface ServerFeature {
    */
   manyWorkspaces?: boolean;
   mount(context: ServerFeatureContext): ServerRouterMount[];
+  /**
+   * The context source kinds this feature drives. They are merged over the open
+   * edition's own drivers, which is what makes a tool source addable, syncable
+   * and swept exactly as a site is.
+   */
+  contextDrivers?(context: ServerFeatureContext): FeatureContextDriver[];
 }
 
 const features: ServerFeature[] = [];
@@ -68,4 +97,5 @@ export function registeredServerFeatures(): readonly ServerFeature[] {
 /** Test seam: a registration must not outlive the test that made it. */
 export function clearServerFeatures(): void {
   features.length = 0;
+  setFeatureContextDrivers([]);
 }

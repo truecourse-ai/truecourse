@@ -9,13 +9,16 @@
  * the client all read them from here so there is one vocabulary.
  *
  * The six tool kinds are listed so the schema and the add dialog share one
- * vocabulary; nothing in this slice creates a source of those kinds.
+ * vocabulary; which of them can actually be added is the SERVER's answer
+ * (`ContextSourcesResponse.addableKinds`), built from the drivers registered at
+ * boot — a tool whose driver an edition does not carry is a name in this list
+ * and nothing more.
  */
 
 import type { GuardCoveragePlainStatus } from '../guard/dashboard.js';
 import type { RepositoryProviderId } from './repositories.js';
 
-/** Every kind a source can be. Only `repository` and `site` have a driver. */
+/** Every kind a source can be. Which ones have a driver is the server's answer. */
 export const CONTEXT_SOURCE_KINDS = [
   'repository',
   'site',
@@ -28,8 +31,54 @@ export const CONTEXT_SOURCE_KINDS = [
 ] as const;
 export type ContextSourceKind = (typeof CONTEXT_SOURCE_KINDS)[number];
 
-/** The kinds that actually sync today. */
-export const IMPLEMENTED_CONTEXT_SOURCE_KINDS: readonly ContextSourceKind[] = ['repository', 'site'];
+/**
+ * The kinds a CLOCK refreshes. Nothing announces a change to them — a site has
+ * no webhook and neither Atlassian tool is asked for one — so the sweep is the
+ * only thing that keeps them current. A repository is absent because its push
+ * syncs it. The sweep's predicate reads this list and nothing else.
+ */
+export const CLOCK_SWEPT_CONTEXT_SOURCE_KINDS = [
+  'site',
+  'jira',
+  'confluence',
+] as const satisfies readonly ContextSourceKind[];
+
+/** The tools a workspace connects an ACCOUNT for, one connection per tool. */
+export const CONTEXT_CONNECTION_PROVIDERS = ['jira', 'confluence'] as const;
+export type ContextConnectionProvider = (typeof CONTEXT_CONNECTION_PROVIDERS)[number];
+
+/** Whether a kind is one of the tools a connection is made for. */
+export function isContextConnectionProvider(kind: string): kind is ContextConnectionProvider {
+  return (CONTEXT_CONNECTION_PROVIDERS as readonly string[]).includes(kind);
+}
+
+/**
+ * One tool's connection, as every reader sees it: the account, never the token.
+ * `connected` is false for a tool the workspace has not connected — the row is
+ * still listed, because the page is about the tools, not about the rows.
+ */
+export interface ContextConnectionView {
+  provider: ContextConnectionProvider;
+  connected: boolean;
+  /** The Atlassian site, e.g. `https://acme.atlassian.net`. '' when unconnected. */
+  baseUrl: string;
+  accountEmail: string;
+  /** The stored token's last four characters, or null when there is none. */
+  tokenMask: string | null;
+  /** When the connection was last saved; null when it has never been. */
+  updatedAt: string | null;
+}
+
+export interface ContextConnectionsResponse {
+  connections: ContextConnectionView[];
+}
+
+/** What a connection save carries. An omitted token keeps the stored one. */
+export interface ContextConnectionInput {
+  baseUrl: string;
+  accountEmail: string;
+  apiToken?: string;
+}
 
 /** The ONE word per kind: the add dialog offers it, and every list names it. */
 export const CONTEXT_SOURCE_KIND_LABEL: Record<ContextSourceKind, string> = {
@@ -91,7 +140,28 @@ export interface SiteSourceConfig {
   llmsTxtUrl: string;
 }
 
-export type ContextSourceConfig = RepositorySourceConfig | SiteSourceConfig | Record<string, unknown>;
+/**
+ * A Jira source's scope: one project of the connected site, and an optional
+ * filter within it. No credentials — the driver looks the workspace's Jira
+ * connection up when it reads.
+ */
+export interface JiraSourceConfig {
+  projectKey: string;
+  /** JQL ANDed under the project scope. Blank means every standard issue type. */
+  jql?: string;
+}
+
+/** A Confluence source's scope: one space of the connected site. */
+export interface ConfluenceSourceConfig {
+  spaceKey: string;
+}
+
+export type ContextSourceConfig =
+  | RepositorySourceConfig
+  | SiteSourceConfig
+  | JiraSourceConfig
+  | ConfluenceSourceConfig
+  | Record<string, unknown>;
 
 /** The default scope a Repository source is created with. */
 export const DEFAULT_REPOSITORY_INCLUDE: readonly string[] = ['docs/**', '**/*.md'];
@@ -189,6 +259,12 @@ export interface ContextSourcesResponse {
   sources: ContextSourceView[];
   /** The latest sync that changed something, or binding change. Null when nothing ever did. */
   changedAt: string | null;
+  /**
+   * The kinds this server can actually add, out of the drivers it registered at
+   * boot. The add dialog offers these and nothing else, so an edition without a
+   * tool's driver simply never offers it.
+   */
+  addableKinds: ContextSourceKind[];
 }
 
 export interface ContextDocumentsResponse {

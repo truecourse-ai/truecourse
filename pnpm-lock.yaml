@@ -393,12 +393,21 @@ importers:
       '@truecourse/dashboard-server':
         specifier: workspace:*
         version: link:../../../apps/dashboard/server
+      '@truecourse/data-store':
+        specifier: workspace:*
+        version: link:../../../packages/data-store
+      '@truecourse/db':
+        specifier: workspace:*
+        version: link:../../../packages/db
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
       '@workos-inc/node':
         specifier: ^7.0.0
         version: 7.82.0(express@4.22.1)
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@electric-sql/pglite@0.2.17)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(pg@8.21.0)
       express:
         specifier: ^4.21.0
         version: 4.22.1
