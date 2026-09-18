@@ -3,7 +3,7 @@
  *
  *   GET    /api/connections                every tool, connected or not
  *   PUT    /api/connections/:provider      connect or re-save; an omitted token keeps the stored one
- *   POST   /api/connections/:provider/test the real read a sync makes, limit 1
+ *   POST   /api/connections/:provider/test one bounded read that proves the account
  *   DELETE /api/connections/:provider      remove it, and pause what read through it
  *
  * The token never comes back: a view carries its last four characters and
@@ -36,8 +36,9 @@ import { ConnectionStore, type AtlassianConnection } from './store.js';
 export interface ConnectionsRouterDeps {
   store: ConnectionStore;
   /**
-   * The credentials probe behind Test: the same read the sync's first page
-   * makes, bounded to one row, so a passing Test means a sync will work.
+   * The credentials probe behind Test: one read bounded to a row that proves
+   * the site, the account, the token and the product access. A connection
+   * names no project or space, so their keys are the source's Check to prove.
    */
   probe(provider: ContextConnectionProvider, connection: AtlassianConnection): Promise<void>;
   /** Report one product action, and tell the workspace its Context moved. */
@@ -99,9 +100,8 @@ export function createConnectionsRouter(deps: ConnectionsRouterDeps): Router {
     res.json({ connection: await deps.store.getView(org, provider) });
   });
 
-  // The SAME read a sync makes, bounded to one document — a passing Test means
-  // a sync will work. The submitted token is used when there is one, the stored
-  // one when the field was left masked.
+  // One bounded read that proves the account. The submitted token is used when
+  // there is one, the stored one when the field was left masked.
   router.post('/:provider/test', async (req: Request, res: Response) => {
     const org = orgOf(req);
     if (!org) return res.status(403).json({ error: 'This session has no workspace.' });

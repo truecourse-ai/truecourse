@@ -282,19 +282,21 @@ export function jiraConfig(config: ContextSourceConfig): JiraSourceConfig {
 }
 
 /**
- * The credentials probe behind Settings › Connections' Test: the same search
- * the sync's first page makes, asking for ONE issue and no project scope — so
- * it proves the account, the token and Jira access, which is everything a sync
- * needs of a connection. A refusal is the driver's own user-facing reason.
+ * The credentials probe behind Settings › Connections' Test: one project
+ * listing, bounded to a row. It proves the site, the account, the token and
+ * Jira access — everything a sync needs of a connection — without naming a
+ * project, which a connection does not carry (the project is the SOURCE's, and
+ * its Check is where a wrong key surfaces). Not the search a sync makes: Jira
+ * refuses a search with no restriction, and the only restriction a sync has is
+ * the project. A refusal is the driver's own user-facing reason.
  */
 export async function probeJira(
   connection: AtlassianConnection,
   sleepMs?: (ms: number) => Promise<void>,
 ): Promise<void> {
-  const jql = encodeURIComponent('ORDER BY created ASC');
   await getJson<unknown>({
     credentials: connection,
-    url: `${connection.baseUrl}/rest/api/3/search/jql?jql=${jql}&maxResults=1&fields=summary`,
+    url: `${connection.baseUrl}/rest/api/3/project/search?maxResults=1`,
     describe: describeError,
     ...(sleepMs ? { sleepMs } : {}),
   });

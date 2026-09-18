@@ -497,12 +497,11 @@ describe('when Jira rate-limits', () => {
 });
 
 describe('the Jira probe behind Test', () => {
-  it('is the same search, asking for one issue and no project', async () => {
-    stub(() => ({ body: { issues: [] } }));
+  it('lists one project and names none: Jira refuses a search with no restriction', async () => {
+    stub(() => ({ body: { values: [], total: 0 } }));
     await expect(probeJira(CONNECTION)).resolves.toBeUndefined();
-    expect(called()[0]).toContain('/rest/api/3/search/jql');
-    expect(called()[0]).toContain('maxResults=1');
-    expect(jqlOf()).toBe('ORDER BY created ASC');
+    expect(called()).toHaveLength(1);
+    expect(called()[0]).toBe('https://acme.atlassian.net/rest/api/3/project/search?maxResults=1');
   });
 
   it('reports the account’s own refusal', async () => {

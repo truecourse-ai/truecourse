@@ -10,7 +10,7 @@
  * them would make the page lie about where this is going, and offering them
  * would make it lie about what it does.
  *
- * Testing runs the read a sync makes. A refusal is Atlassian's own reason, as
+ * Testing makes one read that proves the account. A refusal is Atlassian's own reason, as
  * the server relayed it — paraphrasing it would throw away the only thing that
  * says what to change.
  */
@@ -147,7 +147,7 @@ export function ConnectionsTab() {
 }
 
 /**
- * One tool's account. Saving stores it; Test runs the read a sync makes, with
+ * One tool's account. Saving stores it; Test makes one read that proves it, with
  * whatever token is in the field or the stored one when it is left blank —
  * which is what the masked placeholder means.
  */
