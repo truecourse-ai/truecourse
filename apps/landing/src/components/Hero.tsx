@@ -183,6 +183,10 @@ export function Hero() {
             View on GitHub
           </a>
         </Reveal>
+        <Reveal as="p" className="backing" delay={260} rise>
+          <span>Backed by</span>
+          <img src="/skydeck.svg" alt="Berkeley SkyDeck" />
+        </Reveal>
         <div
           ref={stage.ref}
           className={`reveal rise hero-stage${stage.visible ? ' visible' : ''}`}
