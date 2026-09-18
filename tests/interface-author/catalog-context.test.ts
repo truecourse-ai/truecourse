@@ -25,7 +25,7 @@ describe('catalog context', () => {
 
   it('uses authored overlay definitions without mutating either catalog', () => {
     const derived = file([task(0)])
-    const authored = file([{ ...task(0), steps: [{ kind: 'activate', target: 'button "New exact action"' }] }])
+    const authored = file([{ ...task(0), steps: [{ kind: 'activate', target: { role: 'button', name: 'New exact action' } }] }])
     const before = structuredClone({ derived, authored })
     const context = ownTaskContext({ derived, authored, screenId: 'screen', replace: true })
     expect(context).toContain('New exact action')

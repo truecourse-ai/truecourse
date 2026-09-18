@@ -14,28 +14,41 @@
  *
  * On an instance running on its operator's Claude Code the GET carries that
  * as `operator` and the PATCH is refused: nothing saved here would be used.
+ *
+ * TRUECOURSE CREDITS are a choice like the others and unlike the others: they
+ * store NOTHING — no key, no model, no endpoint — because the block runs on is
+ * the platform's, held in this server's environment. The GET offers the choice
+ * only on a server that holds one, and carries the workspace's balance so the
+ * page can show what choosing it buys. Picking it also carries on whatever the
+ * workspace had paused, and so does saving a key of its own: a workspace that
+ * can spend again has no reason to sit still.
  */
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
+import { isCreditsProvider, LLM_PROVIDER_CHOICES } from '@truecourse/shared';
 import type { LlmConfigUpdate } from '@truecourse/shared';
 import type { LlmApiConfig } from '@truecourse/core/services/llm/provider-config';
 import { log } from '@truecourse/core/lib/logger';
 import {
+  CreditsProviderUnavailableError,
+  creditsOffered,
   OPERATOR_PROVIDER,
+  offeredProviderChoices,
   operatorClaudeCode,
+  platformCreditsConfig,
   probeWorkspaceLlmConfig,
   workspaceLlmConfigStore,
 } from '../services/workspace-llm.service.js';
+import { creditsBalance, resumeWorkspaceJobs } from '../services/credits.service.js';
 import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
 
 const OPERATOR_MESSAGE =
   "This instance runs on the operator's Claude Code (TRUECOURSE_LLM_TRANSPORT=claude-code); the workspace provider is not used.";
 
 const configSchema = z.object({
-  provider: z.enum(LLM_PROVIDER_KINDS),
-  model: z.string().min(1).max(200),
+  provider: z.enum(LLM_PROVIDER_CHOICES),
+  model: z.string().max(200).optional(),
   fallbackModel: z.string().max(200).optional(),
   apiKey: z.string().min(1).max(2000).optional(),
   accessKeyId: z.string().max(200).optional(),
@@ -55,8 +68,8 @@ function buildCandidate(
 ): LlmApiConfig {
   const sameProvider = stored?.provider === input.provider;
   const candidate: LlmApiConfig = {
-    provider: input.provider,
-    model: input.model,
+    provider: input.provider as LlmApiConfig['provider'],
+    model: input.model ?? '',
     ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
     ...(input.baseURL ? { baseURL: input.baseURL } : {}),
     ...(input.headers ? { headers: input.headers } : {}),
@@ -85,8 +98,9 @@ router.get('/config', async (req: Request, res: Response) => {
   try {
     res.json({
       config: await workspaceLlmConfigStore().getView(orgId),
-      providers: LLM_PROVIDER_KINDS,
+      providers: offeredProviderChoices(),
       ...(operatorClaudeCode() ? { operator: OPERATOR_PROVIDER } : {}),
+      ...(creditsOffered() ? { credits: { balance: await creditsBalance(orgId) } } : {}),
     });
   } catch (err) {
     log.error(`[LLM] reading the config for ${orgId} failed: ${(err as Error).message}`);
@@ -112,11 +126,23 @@ router.patch('/config', async (req: Request, res: Response) => {
   const input = parsed.data;
 
   const store = workspaceLlmConfigStore();
-  const stored = await store.getConfig(orgId).catch(() => null);
-  const candidate = buildCandidate(input, stored);
+  const credits = isCreditsProvider(input.provider);
+  // Credits are probed like anything else, against the block they really run
+  // on — the platform's. Nothing of it is stored and nothing of it is answered.
+  const candidate = credits
+    ? platformCreditsConfig()
+    : buildCandidate(input, await store.getConfig(orgId).catch(() => null));
+  if (!candidate) {
+    res.status(409).json({ error: new CreditsProviderUnavailableError().message });
+    return;
+  }
+  if (!credits && !input.model?.trim()) {
+    res.status(400).json({ error: 'A model is required for this provider.' });
+    return;
+  }
 
   // Bedrock may use ambient IAM credentials; every other provider needs a key.
-  if (input.provider !== 'bedrock' && !candidate.apiKey) {
+  if (!credits && input.provider !== 'bedrock' && !candidate.apiKey) {
     res.status(400).json({ error: 'An API key is required for this provider.' });
     return;
   }
@@ -129,20 +155,34 @@ router.patch('/config', async (req: Request, res: Response) => {
     log.warn(
       `[LLM] provider test failed (${input.provider}) for ${orgId}: ${(err as Error).message}`,
     );
-    res.status(400).json({ error: `Provider test failed: ${(err as Error).message}` });
+    res.status(400).json({
+      error: credits
+        ? 'The credits provider did not answer. Nothing was saved.'
+        : `Provider test failed: ${(err as Error).message}`,
+    });
     return;
   }
 
-  await store.save(orgId, input);
-  log.info(`[LLM] provider updated for ${orgId} → ${candidate.provider} (${candidate.model})`);
+  // Credits keep the platform's model out of the row: the choice is the whole
+  // of what is stored.
+  await store.save(orgId, credits ? { provider: input.provider } : input);
+  log.info(`[LLM] provider updated for ${orgId} → ${input.provider}`);
   const who = actorOf(req);
   if (who) {
     captureAction(EVENTS.llmProviderSaved, {
       ...who,
-      properties: { provider: input.provider, model: input.model },
+      properties: { provider: input.provider, ...(credits ? {} : { model: input.model }) },
     });
   }
-  res.json({ config: await store.getView(orgId), providers: LLM_PROVIDER_KINDS });
+  // A workspace that can spend again carries on what it had paused. A save to
+  // credits only does so when there is a balance behind them.
+  const spendable = credits ? (await creditsBalance(orgId)) > 0 : true;
+  if (spendable) await resumeWorkspaceJobs(orgId);
+  res.json({
+    config: await store.getView(orgId),
+    providers: offeredProviderChoices(),
+    ...(creditsOffered() ? { credits: { balance: await creditsBalance(orgId) } } : {}),
+  });
 });
 
 export default router;

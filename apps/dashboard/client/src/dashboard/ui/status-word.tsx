@@ -142,6 +142,7 @@ export const RUN_STATUS_TONE: Record<WorkStatus, StatusTone> = {
   completed: 'success',
   failed: 'failure',
   interrupted: 'attention',
+  paused: 'attention',
 };
 
 export const VERDICT_TONE: Record<'passed' | 'failed' | 'blocked', StatusTone> = {

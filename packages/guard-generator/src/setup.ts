@@ -39,7 +39,10 @@
  * IDEMPOTENT BY CONSTRUCTION, twice over: a bare run over a repo that already has a
  * recipe and a seed reports and no-ops, and the report's `steps` spine records a
  * per-step input fingerprint so an unchanged step is SKIPPED on the next run
- * (`skipped`/`unchanged`). `refresh` forces every step; refreshing the SEED
+ * (`skipped`/`unchanged`). That spine is written at every step boundary, not
+ * only when the run ends, so a run that stops part-way — an empty balance, a
+ * killed process — is carried on from what it reached rather than paying for
+ * those steps again. `refresh` forces every step; refreshing the SEED
  * additionally needs `confirmSeedReplace` to answer true, and a caller that cannot
  * ask answers false — a hand-edited seed script is never clobbered by an option.
  *
@@ -70,6 +73,7 @@ import {
   guardAuthoredInterfacesPath,
   hashableRecipeText,
   readGuardSetup,
+  writeGuardSetup,
   readInterfaceCatalog,
   readAuthoredInterfaceCatalog,
   webScreensNeedingReadables,
@@ -529,6 +533,35 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const ranBefore = (step: GuardSetupOnlyStep): boolean =>
     (prior?.steps ?? []).some((row) => row.key === step)
 
+  // What has settled so far, written to `guard/setup.json` at EVERY step
+  // boundary rather than only when the run ends. A run that stops part-way —
+  // an empty balance, a killed process — assembles no report at all, so
+  // without this the steps it did settle would be re-run and re-paid for on
+  // the next attempt; a hosted job collects this file into the setup bundle,
+  // which is what carries them across clones. The status is the HARD gate's,
+  // which held before anything is written here, and a short spine means the
+  // run stopped, never that a step passed silently.
+  const soFar: {
+    recipe?: GuardSetupRecipeStep
+    externals?: GuardSetupExternalsStep
+    seed?: GuardSetupSeedStep
+    detection?: NonNullable<GuardSetupReport['detection']>
+  } = {}
+  const settleSpine = (): void => {
+    if (!soFar.recipe) return
+    writeGuardSetup(repoRoot, {
+      ranAt: new Date().toISOString(),
+      status: 'ok',
+      // The prior rows carry forward for every step this run has not reached:
+      // a step an earlier run settled stays settled until its input moves.
+      steps: mergeStepSpine(steps, priorReport),
+      recipe: soFar.recipe,
+      ...(soFar.externals ? { externals: soFar.externals } : {}),
+      ...(soFar.seed ? { seed: soFar.seed } : {}),
+      ...(soFar.detection ? { detection: soFar.detection } : {}),
+    })
+  }
+
   // ONE analysis pass feeds every step — memoized exactly as generate memoizes it.
   // Which STEP pays for it depends on the repo (the recipe step derives from the
   // route surface; a repo that already has one first needs it at detect), so the
@@ -700,6 +733,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     })
     opts.onStepDone?.('recipe', recipeSummary(recipeStep, probes))
   }
+  // The hard gate held: from here the spine is worth keeping whatever stops
+  // the run.
+  soFar.recipe = recipeStep
+  settleSpine()
 
   // ---- The credential↔spec check, reported where fixing it is free. --------
   const credentials = recipeAuthCredentials(recipe)
@@ -749,6 +786,14 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     'detect',
     detectSummary(detectedExternals, database),
   )
+  soFar.detection = {
+    externalServices: detectedExternals,
+    database: database
+      ? { type: database.type, driver: database.driver, tables: database.tables.length }
+      : null,
+    datastoreUrls,
+  }
+  settleSpine()
 
   // ---- Step 3: the catalog — the externals skeleton (det) + the session. ---
   // SOFT throughout: the hard gate already held, and a catalog that could not be
@@ -903,6 +948,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       }
     }
   }
+  if (externalsStep) soFar.externals = externalsStep
+  settleSpine()
 
   // ---- Step 4: interfaces — reconcile the cli disputes, author the web tasks.
   // SOFT: an authoring failure fails the STEP, never setup — the derived half of
@@ -978,6 +1025,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       opts.onStepDone?.('interfaces', 'not wired into this run')
     }
   }
+  settleSpine()
 
   // The recipe on disk may have changed under the catalog step (the skeleton is a
   // real write), so the seed drafts against the RELOADED one — its fingerprint has
@@ -1082,6 +1130,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       opts.onStepDone?.('seed', seedSummary(seedStep))
     }
   }
+  // The recipe row too: the seed's cold-clone proof may have unsettled it.
+  soFar.recipe = recipeStep
+  if (seedStep) soFar.seed = seedStep
+  settleSpine()
 
   // Private state is its own targeted setup step; it never replaces the main seed.
   let preparationFailure: string | undefined
@@ -1121,6 +1173,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       else opts.onStepDone?.('preparations', findings.length > 0 ? summary : (result.reason ?? result.status))
     }
   }
+  settleSpine()
 
   // ---- Step 6: auth. Framework row only until plan step 14 wires it. -------
   // The ONE step that may end `blocked` (a supplied credential waiting on a user

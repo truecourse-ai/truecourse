@@ -4,7 +4,8 @@
  * the bands never touch. The bands sit muted until the pointer is over the plot (or it has
  * keyboard focus), then show at full colour. The readout above the plot lists
  * every series at the hovered date (the latest at rest), value first; a
- * crosshair snaps to the nearest point. Full width: the plot is a shape-only
+ * crosshair snaps to the nearest point; how a value reads is the surface's
+ * (`formatValue`), so a chart of money says money. Full width: the plot is a shape-only
  * SVG stretched to its box, every word is HTML beside it, so nothing
  * stretches but the areas. Keyboard reaches every point once the plot has
  * focus (arrow keys).
@@ -42,6 +43,7 @@ export function StackedArea<K extends string>({
   onPickSeries,
   controls,
   numbersAtRest = true,
+  formatValue = (value) => String(value),
 }: {
   label: string;
   /** Bottom first: the first series sits on the baseline. */
@@ -57,6 +59,8 @@ export function StackedArea<K extends string>({
    * words stay, the values come with the pointer.
    */
   numbersAtRest?: boolean;
+  /** How a value READS — money, tokens. Plain numbers by default. */
+  formatValue?: (value: number) => string;
 }) {
   const [active, setActive] = useState<number | null>(null);
   const id = useId();
@@ -117,7 +121,7 @@ export function StackedArea<K extends string>({
             const body = (
               <>
                 <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
-                {(active !== null || numbersAtRest) && <span className="tabular-nums font-medium text-foreground">{point.values[s.key] ?? 0}</span>}
+                {(active !== null || numbersAtRest) && <span className="tabular-nums font-medium text-foreground">{formatValue(point.values[s.key] ?? 0)}</span>}
                 {s.label}
               </>
             );
@@ -160,7 +164,7 @@ export function StackedArea<K extends string>({
         >
           <title id={`${id}-title`}>{label}</title>
           <desc id={`${id}-desc`}>
-            {points.map((p) => `${dateWord(p.at)}: ${series.map((s) => `${p.values[s.key] ?? 0} ${s.label.toLowerCase()}`).join(', ')}`).join('; ')}
+            {points.map((p) => `${dateWord(p.at)}: ${series.map((s) => `${formatValue(p.values[s.key] ?? 0)} ${s.label.toLowerCase()}`).join(', ')}`).join('; ')}
           </desc>
           {/* Muted at rest, full colour under the pointer or keyboard focus:
               the chart is a picture until it is being read. */}

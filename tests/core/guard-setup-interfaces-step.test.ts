@@ -68,7 +68,7 @@ function authored(places: string[]): InterfacesFile {
       type: 'web' as const,
       title: `Do something on ${at}`,
       entry: { method: 'GET', path: '/' },
-      steps: [{ kind: 'activate' as const, target: 'button "Go"' }],
+      steps: [{ kind: 'activate' as const, target: { role: 'button', name: 'Go' } }],
       at,
       fingerprint: `sha256:web-${i}`,
     })),

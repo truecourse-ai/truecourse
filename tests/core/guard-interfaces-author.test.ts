@@ -61,7 +61,7 @@ const AUTHORED: InterfacesFile = {
       type: 'web',
       title: 'Register a repository from its path',
       entry: { method: 'GET', path: '/' },
-      steps: [{ kind: 'activate', target: 'button "Add Repository"' }],
+      steps: [{ kind: 'activate', target: { role: 'button', name: 'Add Repository' } }],
       at: 'root',
       fingerprint: 'sha256:web-add',
     },

@@ -18,7 +18,7 @@ import type { GuardPrerequisiteTarget } from '@truecourse/shared'
  */
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { guardManifestSections, type GuardManifest } from '@truecourse/shared'
+import { guardManifestSections, isCreditsExhausted, type GuardManifest } from '@truecourse/shared'
 import { extractSectionTexts, nodeRefContext, normalizeSectionText } from '@truecourse/guard-runner'
 import { snapExtraction, type ReuseExtractionSeam } from './extract.js'
 import { flowSectionKey } from './flows.js'
@@ -189,6 +189,9 @@ async function judge(
         return parsed.data
       }
     } catch (e) {
+      // A refusal is not an invalid reply: asking again cannot be paid for, and
+      // the full re-extraction the null verdict falls back to costs more still.
+      if (isCreditsExhausted(e)) throw e
       lastError = (e as Error).message
     }
   }

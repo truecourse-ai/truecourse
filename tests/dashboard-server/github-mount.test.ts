@@ -255,9 +255,10 @@ beforeEach(async () => {
   await seedInstallation(store, INSTALLATION_ID, [ORG]);
   // The onboarding scan runs on the connecting workspace's provider — give the
   // workspace one, and answer its pre-flight probe without a network call.
+  const stored = { provider: 'anthropic' as const, model: 'claude-x', apiKey: 'sk-test' };
   setWorkspaceLlmConfigStore({
-    getConfig: async (orgId) =>
-      orgId === ORG ? { provider: 'anthropic', model: 'claude-x', apiKey: 'sk-test' } : null,
+    getConfig: async (orgId) => (orgId === ORG ? stored : null),
+    getSelection: async (orgId) => (orgId === ORG ? { kind: 'api', config: stored } : null),
     getView: async () => null,
     save: async () => {},
   });

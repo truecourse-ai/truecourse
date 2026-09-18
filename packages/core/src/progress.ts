@@ -12,6 +12,11 @@ export interface AnalysisStep {
    * computation.
    */
   facts?: string[];
+  /**
+   * The step reached the end of its work list with items that never settled:
+   * it is done, and what it saved does not cover everything it was given.
+   */
+  partial?: boolean;
   /** When the step became active, and when it reached done or error. */
   startedAt?: string;
   endedAt?: string;
@@ -64,6 +69,19 @@ export class StepTracker {
 
   error(key: string, detail?: string): void {
     this.setStatus(key, 'error', detail);
+  }
+
+  /**
+   * Say this step's work is incomplete: at least one of its items did not
+   * settle. Independent of status — a step says this and still reaches `done`,
+   * because it did finish going through its list.
+   */
+  partial(key: string): void {
+    const step = this.steps.find((s) => s.key === key);
+    if (step && !step.partial) {
+      step.partial = true;
+      this.emit();
+    }
   }
 
   detail(key: string, detail: string): void {

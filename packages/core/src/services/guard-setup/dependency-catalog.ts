@@ -48,6 +48,7 @@ import {
   DEPENDENCY_NAME_PATTERN,
   type GuardDependenciesFile,
   GuardDependenciesFileSchema,
+  isCreditsExhausted,
   type GuardDependenciesLocal,
   type GuardDependencyCondition,
   type GuardDependencyEntry,
@@ -657,6 +658,7 @@ export function buildCatalogSession(
         ...(outcome.fromCache ? { fromCache: true } : {}),
       };
     } catch (error) {
+      if (isCreditsExhausted(error)) throw error;
       return {
         status: 'failed',
         reason: error instanceof Error ? error.message : String(error),

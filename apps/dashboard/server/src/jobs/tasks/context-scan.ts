@@ -17,6 +17,18 @@
  * The job posts ONE notification. What the corpus change means for the
  * repositories is the RIPPLE (`../context-ripple.js`), run from the settle hook
  * so the single-flight key is already free.
+ *
+ * NOTHING PARTIAL IS STORED, and that is deliberate. A scan that stops
+ * part-way — an empty balance, a killed process — has curated some documents
+ * and not others, and its corpus is a WHOLE: the areas are settled across every
+ * kept document, the pointers are re-anchored against all of them, and the
+ * ripple compares the stored corpus with the one before it to decide which
+ * repositories are stale. Storing half of one would shrink the workspace corpus
+ * to the documents that happened to finish, cut every repository's slice down
+ * with it, and ripple generates against a spec nobody wrote. So the scan pauses
+ * with the last complete corpus standing, and the resumed job scans again —
+ * paying only for what moved, because the per-document judgments are already in
+ * the LLM cache and a cached document costs nothing to curate a second time.
  */
 
 import { log } from '@truecourse/core/lib/logger';
@@ -31,6 +43,7 @@ import {
   startWorkspaceLlm,
   type WorkspaceLlm,
 } from '../../services/workspace-llm.service.js';
+import { createUsageMeter, withCredits, type UsageMeter } from '../../services/usage-meter.service.js';
 import { recordFailedWorkspaceScanRun } from '../../services/context-scan.service.js';
 import { emitContextChanged } from '../../services/context.service.js';
 import {
@@ -67,7 +80,7 @@ export interface ContextScanJobResult {
 }
 
 export interface ContextScanTaskDeps {
-  startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
+  startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runScan?: typeof workspaceContextScanInProcess;
   /** The ripple's collaborators, built by the mount (they need the enqueues). */
   ripple?: (org: string) => ContextRippleDeps;
@@ -100,69 +113,92 @@ export function createContextScanTask(
       // Stamped BEFORE anything is read, so a sync that lands mid-scan is
       // seen by the coalesce check even though the corpus it produced is older.
       const startedAt = now().toISOString();
-      let llm: WorkspaceLlm;
-      try {
-        llm = await startLlm(org);
-      } catch (err) {
-        // The probe died before the scan could open a run — create one carrying
-        // the reason, so the Agent page shows a failed scan instead of nothing.
-        if (err instanceof LlmProbeFailedError) {
-          const runId = await recordFailedWorkspaceScanRun(org, {
-            message: err.message,
-            kind: 'llm-probe',
-          });
-          if (runId) runIds.set(ctx.jobId, runId);
-        }
-        throw err;
-      }
-
-      const result = await runScan({
+      // The scan is the workspace's own work, so its spend names no repository.
+      const meter = createUsageMeter({
         workspaceOrgId: org,
-        repositories: await repositoriesOf(deps, org),
-        tracker: checklistTracker(ctx),
-        driver: llm.driver(),
-        transportMode: llm.mode,
-        onRunStarted: (info) => {
-          runIds.set(ctx.jobId, info.runId);
-          void ctx.notify({ level: 'started', title: 'Document scan started', data: { runId: info.runId } });
-        },
-        ...(ctx.signal ? { signal: ctx.signal } : {}),
+        repoFullName: null,
+        jobType: CONTEXT_SCAN_TASK,
+        jobId: ctx.jobId,
       });
+      try {
+        let llm: WorkspaceLlm;
+        try {
+          llm = await startLlm(org, meter);
+        } catch (err) {
+          // The probe died before the scan could open a run — create one carrying
+          // the reason, so the Agent page shows a failed scan instead of nothing.
+          if (err instanceof LlmProbeFailedError) {
+            const runId = await recordFailedWorkspaceScanRun(org, {
+              message: err.message,
+              kind: 'llm-probe',
+            });
+            if (runId) runIds.set(ctx.jobId, runId);
+          }
+          throw err;
+        }
 
-      const conflicts = openConflicts(result.corpus, result.decisions).length;
-      await emitContextChanged(org, { change: 'documents' });
-      rippleInputs.set(ctx.jobId, {
-        previousCorpus: result.previousCorpus,
-        corpus: result.corpus,
-        corpusChanged: result.corpusChanged,
-        openConflicts: conflicts,
-      });
+        // The scan owns its own run record (it opens one after the estimate
+        // gate), so the credits gate wraps the engine call itself: a scan that
+        // met an empty balance paused, whatever the engine called it.
+        const repositories = await repositoriesOf(deps, org);
+        const result = await withCredits(meter, () =>
+          runScan({
+            workspaceOrgId: org,
+            repositories,
+            tracker: checklistTracker(ctx),
+            driver: llm.driver(),
+            transportMode: llm.mode,
+            onRunStarted: (info) => {
+              runIds.set(ctx.jobId, info.runId);
+              meter.setRunId(info.runId);
+              // A resumed scan scans again — there is no half corpus to carry
+              // on from — so it opens a run of its own rather than reviving
+              // this one, and names itself a rescan.
+              ctx.resumeWith({ source: 'rescan' });
+              void ctx.notify({ level: 'started', title: 'Document scan started', data: { runId: info.runId } });
+            },
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+          }),
+        );
 
-      const jobResult: ContextScanJobResult = {
-        documents: result.documents,
-        areas: result.corpus.areas.length,
-        openConflicts: conflicts,
-        corpusChanged: result.corpusChanged,
-        startedAt,
-      };
-      const runId = runIds.get(ctx.jobId);
-      return {
-        result: jobResult,
-        notification:
-          conflicts > 0
-            ? {
-                level: 'warning',
-                title: 'Documents scanned, conflicts to resolve',
-                body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} curated, but ${conflicts} open conflict${conflicts === 1 ? '' : 's'} must be resolved before tests are regenerated.`,
-                data: { openConflicts: conflicts, ...(runId ? { runId } : {}) },
-              }
-            : {
-                level: 'success',
-                title: 'Documents scanned',
-                body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} in ${result.corpus.areas.length} area${result.corpus.areas.length === 1 ? '' : 's'}.`,
-                data: { documents: result.corpus.docs.length, ...(runId ? { runId } : {}) },
-              },
-      };
+        const conflicts = openConflicts(result.corpus, result.decisions).length;
+        await emitContextChanged(org, { change: 'documents' });
+        rippleInputs.set(ctx.jobId, {
+          previousCorpus: result.previousCorpus,
+          corpus: result.corpus,
+          corpusChanged: result.corpusChanged,
+          openConflicts: conflicts,
+        });
+
+        const jobResult: ContextScanJobResult = {
+          documents: result.documents,
+          areas: result.corpus.areas.length,
+          openConflicts: conflicts,
+          corpusChanged: result.corpusChanged,
+          startedAt,
+        };
+        const runId = runIds.get(ctx.jobId);
+        return {
+          result: jobResult,
+          notification:
+            conflicts > 0
+              ? {
+                  level: 'warning',
+                  title: 'Documents scanned, conflicts to resolve',
+                  body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} curated, but ${conflicts} open conflict${conflicts === 1 ? '' : 's'} must be resolved before tests are regenerated.`,
+                  data: { openConflicts: conflicts, ...(runId ? { runId } : {}) },
+                }
+              : {
+                  level: 'success',
+                  title: 'Documents scanned',
+                  body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} in ${result.corpus.areas.length} area${result.corpus.areas.length === 1 ? '' : 's'}.`,
+                  data: { documents: result.corpus.docs.length, ...(runId ? { runId } : {}) },
+                },
+        };
+      } finally {
+        // However the scan ended, what it spent up to that point is written.
+        await meter.close();
+      }
     },
 
     onError: (err, payload) => {

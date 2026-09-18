@@ -16,6 +16,13 @@ export interface ProviderConfig {
   model: string;
   /** Optional secondary model, tried only if the primary call errors. */
   fallbackModel?: string;
+  /**
+   * The LIST-PRICE model id {@link ProviderConfig.model} serves, when the model
+   * id itself is not one — an Azure AI Foundry deployment name
+   * (`gpt-5.6-sol-2`) prices as the model behind it (`gpt-5.6-sol`). Only the
+   * config's own model is mapped; a fallback call prices under its own id.
+   */
+  priceModel?: string;
   /** API key — anthropic / openai / copilot. */
   apiKey?: string;
   /**

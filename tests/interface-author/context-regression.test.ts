@@ -45,13 +45,13 @@ describe('combined interface context regression', () => {
           id: `web/cancel-delete-${screen.id}`, type: 'web', purpose: 'control', title: 'Cancel expense deletion',
           entry: { method: 'GET', path: screen.address }, at: dialogs[index].id, to: screen.id,
           startingState: 'expense-present', endState: 'expense-present',
-          steps: [{ kind: 'activate', target: 'button "Cancel"', within: { role: 'dialog', name: 'Delete expense', exact: true } }],
+          steps: [{ kind: 'activate', target: { role: 'button', name: 'Cancel' }, within: { role: 'dialog', name: 'Delete expense', exact: true } }],
         }],
       }
       const tool = def.tools.find(tool => tool.name === 'check_draft')!
       const result = await tool.execute(tool.inputSchema.parse(fragment), { workItem: screen.id, signal: new AbortController().signal, dispatchChild: async () => { throw new Error('unused') } })
       expect(result.isError, result.content).toBeUndefined()
-      expect(result.content).toContain('The draft is valid')
+      expect(result.content).toContain('Accepted and kept')
       const wrongOwner = structuredClone(fragment)
       wrongOwner.interfaces[0].at = dialogs[1 - index].id
       expect((await tool.execute(tool.inputSchema.parse(wrongOwner), { workItem: screen.id, signal: new AbortController().signal, dispatchChild: async () => { throw new Error('unused') } })).isError).toBe(true)

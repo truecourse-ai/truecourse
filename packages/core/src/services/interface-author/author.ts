@@ -343,7 +343,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
           })
           prepared.set(item.place.id, result.place)
           if (result.place.status === 'rejected') {
-            return `The catalog cannot accept this outcome. Correct these problems, run check_draft, and return the complete corrected outcome:\n- ${result.place.problems.join('\n- ')}`
+            return `The catalog cannot accept this outcome. Correct these problems, run check_draft on the corrected pieces, and return the draftId of the check that accepted them:\n- ${result.place.problems.join('\n- ')}`
           }
           // Validate and write synchronously before the loop marks the session
           // completed. No peer can change the catalog between these operations.

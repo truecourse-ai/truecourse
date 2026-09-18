@@ -14,9 +14,15 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { jobs, notifications, type Db } from '@truecourse/db';
-import type { JobView, JobStatus, NotificationLevel, NotificationView } from '@truecourse/shared';
+import type {
+  JobView,
+  JobPauseReason,
+  JobStatus,
+  NotificationLevel,
+  NotificationView,
+} from '@truecourse/shared';
 
 /** Thrown by `JobStore.create` when an active job already holds the (org, key). */
 export class ActiveJobExistsError extends Error {
@@ -53,10 +59,22 @@ function toJobView(r: JobRow): JobView {
     progress: { current: r.progressCurrent, total: r.progressTotal, message: r.progressMessage },
     result: r.result ?? null,
     error: r.error,
+    pauseReason: (r.pauseReason as JobPauseReason | null) ?? null,
     createdAt: r.createdAt,
     startedAt: r.startedAt,
     finishedAt: r.finishedAt,
   };
+}
+
+/** A paused job, with everything carrying it on needs. */
+export interface PausedJob {
+  id: string;
+  workspaceOrgId: string;
+  type: string;
+  key: string | null;
+  payload: Record<string, unknown> | null;
+  reason: JobPauseReason | null;
+  pausedAt: string | null;
 }
 
 export class JobStore {
@@ -135,6 +153,123 @@ export class JobStore {
 
   async markFailed(id: string, error: string): Promise<JobView | null> {
     return this.update(id, { status: 'failed', error, finishedAt: new Date().toISOString() });
+  }
+
+  /**
+   * Stop a job part-way with nothing wrong: it is out of credits, and the work
+   * it has not done is still to do. The row settles `paused` — terminal, so the
+   * single-flight key frees and the job can be enqueued again — carrying the
+   * reason and, merged onto the payload it was created with, whatever pointer
+   * the body says a resume must start from. No error is recorded: a pause is
+   * not a failure.
+   */
+  async markPaused(
+    id: string,
+    input: { reason: JobPauseReason; resume?: Record<string, unknown> },
+  ): Promise<JobView | null> {
+    const resume = input.resume ?? {};
+    const [row] = await this.db
+      .update(jobs)
+      .set({
+        status: 'paused',
+        pauseReason: input.reason,
+        finishedAt: new Date().toISOString(),
+        payload: sql`coalesce(${jobs.payload}, '{}'::jsonb) || ${JSON.stringify(resume)}::jsonb`,
+      })
+      .where(and(eq(jobs.id, id), inArray(jobs.status, ['queued', 'running'])))
+      .returning();
+    return row ? toJobView(row) : null;
+  }
+
+  /**
+   * The workspace's paused jobs, OLDEST FIRST — the order they stopped in is the
+   * order a grant carries them on in. A row carried on is no longer `paused`
+   * (it is the queued job again, see {@link JobStore.markRequeued}), so there
+   * is no second state to filter out: what this lists is what is still waiting.
+   */
+  async listPaused(org: string): Promise<PausedJob[]> {
+    const rows = await this.db
+      .select()
+      .from(jobs)
+      .where(and(eq(jobs.workspaceOrgId, org), eq(jobs.status, 'paused')))
+      .orderBy(asc(jobs.finishedAt), asc(jobs.createdAt));
+    return rows.map((row) => ({
+      id: row.id,
+      workspaceOrgId: row.workspaceOrgId,
+      type: row.type,
+      key: row.key,
+      payload: row.payload,
+      reason: (row.pauseReason as JobPauseReason | null) ?? null,
+      pausedAt: row.finishedAt,
+    }));
+  }
+
+  /** How many paused jobs each of these workspaces is holding. */
+  async pausedCounts(orgs: readonly string[]): Promise<Map<string, number>> {
+    if (orgs.length === 0) return new Map();
+    const rows = await this.db
+      .select({ org: jobs.workspaceOrgId, count: sql<number>`count(*)::int` })
+      .from(jobs)
+      .where(and(inArray(jobs.workspaceOrgId, [...orgs]), eq(jobs.status, 'paused')))
+      .groupBy(jobs.workspaceOrgId);
+    return new Map(rows.map((row) => [row.org, row.count]));
+  }
+
+  /**
+   * Carry a paused row ON: the SAME row goes back to `queued`, keeping the
+   * payload it paused with (identity plus the resume pointer its body merged
+   * onto it) and dropping everything about having stopped. A resume is one job
+   * from beginning to end — there is never a second row with the same payload
+   * beside the first, and nothing is left sitting at `paused` next to a
+   * running twin.
+   *
+   * Null when the row is no longer paused (something already carried it on) or
+   * when its single-flight key is held by another active job — a workspace
+   * that started the same work by hand keeps the run it started, and this row
+   * is superseded by it (see {@link JobStore.supersedePaused}).
+   */
+  async markRequeued(id: string): Promise<JobView | null> {
+    try {
+      const [row] = await this.db
+        .update(jobs)
+        .set({
+          status: 'queued',
+          pauseReason: null,
+          error: null,
+          result: null,
+          startedAt: null,
+          finishedAt: null,
+          progressCurrent: 0,
+          progressTotal: 0,
+          progressMessage: null,
+        })
+        .where(and(eq(jobs.id, id), eq(jobs.status, 'paused')))
+        .returning();
+      return row ? toJobView(row) : null;
+    } catch (err) {
+      // 23505 = unique_violation on jobs_active_key_uniq → this key is active
+      // again. drizzle may wrap the driver error, so check `.cause` too.
+      const code =
+        (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
+      if (code === '23505') return null;
+      throw err;
+    }
+  }
+
+  /**
+   * A new job took this key, so anything still PAUSED under it is superseded:
+   * the new one does that work, and a row left waiting would be carried on by
+   * the next grant and run it a second time. They settle `cancelled`, which is
+   * what a stop somebody else's request caused already means here, and they
+   * leave the Credits page's paused list with it. Answers how many moved.
+   */
+  async supersedePaused(org: string, key: string): Promise<number> {
+    const rows = await this.db
+      .update(jobs)
+      .set({ status: 'cancelled', pauseReason: null, finishedAt: new Date().toISOString() })
+      .where(and(eq(jobs.workspaceOrgId, org), eq(jobs.key, key), eq(jobs.status, 'paused')))
+      .returning({ id: jobs.id });
+    return rows.length;
   }
 
   /**

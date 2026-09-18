@@ -15,7 +15,9 @@
  * workspace connected:
  *
  *   GET /runs                             ?repo=&kind=&status=&limit=&before=, newest first
- *   GET /runs/:runId                      one run, whichever key of the workspace holds it
+ *   GET /runs/:runId                      one run, whichever key of the workspace holds it,
+ *                                         with the paused job carrying it on when one is
+ *                                         waiting (`pausedJobId`)
  *   GET /runs/:runId/activity             one history page, ?after=&limit=
  *   GET /runs/:runId/stream               replay + live, ?after=<cursor>
  *   GET /runs/:runId/transcript/:sessionId  one piece of work's transcript, ?since=<seq>
@@ -38,6 +40,7 @@ import { RunStatusSchema, SessionCommandSchema } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { orgOf } from '../services/workspace-llm.service.js';
+import { pausedJobOfRun } from '../services/credits.service.js';
 import { readRegistry, type RegistryEntry } from '@truecourse/core/config/registry';
 import {
   SessionRunNotFoundError,
@@ -401,7 +404,16 @@ export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}):
       const entries = await workspaceRepos(deps, req);
       const run = await findRun(req);
       if (!run) { res.status(404).json({ error: 'Session run not found.' }); return; }
-      res.json({ run: toWorkspaceRun(run, new Map(entries.map((e) => [e.path, e]))) });
+      // A run that stopped for money is carried on by the JOB that stopped, not
+      // by a fresh one: the page needs that row's id to offer a Resume that
+      // means continue. Only asked of a run that actually paused.
+      const org = req.user?.organizationId;
+      const pausedJobId =
+        run.status === 'paused' && org ? await pausedJobOfRun(org, run.runId) : null;
+      res.json({
+        run: toWorkspaceRun(run, new Map(entries.map((e) => [e.path, e]))),
+        pausedJobId,
+      });
     } catch (e) {
       next(e);
     }

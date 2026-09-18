@@ -358,9 +358,9 @@ describe('runAgentLoop completion', () => {
   });
 
   it('context-exhausts pre-emptively at the token ceiling, recording the overshoot', async () => {
-    // Context is a LEVEL, not a sum: each turn's usage envelope approximates
-    // occupancy (input + cache reads + output). The ceiling binds when a
-    // turn's level crosses it — before the provider's wall does.
+    // Context is a LEVEL, not a sum: what the model SAW this turn (its prompt,
+    // cache reads and cache writes) approximates occupancy. The ceiling binds
+    // when a turn's level crosses it — before the provider's wall does.
     const { driver } = fakeDriver(async ({ emit, interrupted }) => {
       await emit({ type: 'assistant-turn', text: 'small', usage: usage(400) });
       for (let i = 0; i < 20 && !interrupted(); i++) {
@@ -387,6 +387,61 @@ describe('runAgentLoop completion', () => {
     expect(outcome.spent).toMatchObject({ turns: 2, tokens: 1500 });
     // The ceiling is not a budget: no resume grant softens it.
     expect(persistence.readEvents('s1').filter((e) => e.type === 'resume-grant')).toHaveLength(0);
+  });
+
+  it('measures the ceiling against what the model SAW, never what it wrote', async () => {
+    // The turn that ended a real session: 30k of prompt and 128k of reply, a
+    // level of 30k under a 150k ceiling. Folding the reply into the level made
+    // it 158k and killed the session with the window four fifths empty — the
+    // reply is not context until the turn after it sends it back.
+    const { driver } = fakeDriver(async ({ emit }) => {
+      await emit({ type: 'assistant-turn', text: 'fat', usage: usage(30_000, 128_000) });
+      await emit({ type: 'assistant-turn', text: 'fat', usage: usage(30_000, 128_000) });
+      return { kind: 'outcome', value: { verdict: 'keep' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: makeDef({ budget: { turns: 10, maxResumes: 0, tokenCeiling: 150_000 } }),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    // The spend rollup is untouched: it still counts every token both turns moved.
+    expect(outcome.spent).toMatchObject({ turns: 2, tokens: 316_000 });
+  });
+
+  it('context-exhausts on the prompt alone, cache reads and writes included', async () => {
+    const occupied: TurnUsage = {
+      inputTokens: 40_000,
+      outputTokens: 200,
+      cacheReadTokens: 100_000,
+      cacheCreateTokens: 12_000,
+      costUsd: 0,
+      costSource: 'unpriced',
+    };
+    const { driver } = fakeDriver(async ({ emit, interrupted }) => {
+      for (let i = 0; i < 20 && !interrupted(); i++) {
+        await emit({ type: 'assistant-turn', text: 'big', usage: occupied });
+      }
+      return endedWithoutOutcome();
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: makeDef({ budget: { turns: 100, maxResumes: 0, tokenCeiling: 150_000 } }),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('failed');
+    expect(outcome.status === 'failed' && outcome.failure.kind).toBe('context-exhausted');
+    expect(outcome.spent.turns).toBe(1);
   });
 
   it('ends the session malformed after two consecutive re-asked turns', async () => {

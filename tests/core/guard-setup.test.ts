@@ -403,7 +403,7 @@ function settledRepo(): string {
           type: 'web',
           title: 'Open the root screen',
           entry: { method: 'GET', path: '/' },
-          steps: [{ kind: 'activate', target: 'button "Open"' }],
+          steps: [{ kind: 'activate', target: { role: 'button', name: 'Open' } }],
           at: 'root',
           fingerprint: 'sha256:web',
         },

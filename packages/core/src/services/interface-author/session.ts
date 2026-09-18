@@ -77,7 +77,7 @@ export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef
     outcomePrecondition: {
       tool: 'check_draft',
       message:
-        'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your complete draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` again.',
+        'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` with the draftId of the accepted check.',
     },
   }
 }
@@ -372,8 +372,8 @@ Each task carries:
 - \`entry\` — \`{"method": "GET", "path": "<address>"}\`. The address is where the task is performed, exactly as the routing declares it, with \`{param}\` slots.
 - \`steps\` — the ordered interactions, and ONLY the ones that make up this task:
   - \`{"kind": "navigate", "route": "/repos/{repoId}"}\` — moving to an address.
-  - \`{"kind": "activate", "target": "button \\"Analyze\\""}\` — a click, a tap, a submit.
-  - \`{"kind": "input", "target": "textbox \\"Repository path\\""}\` — putting a value in a field.
+  - \`{"kind": "activate", "target": {"role": "button", "name": "Analyze"}}\` — a click, a tap, a submit.
+  - \`{"kind": "input", "target": {"role": "textbox", "name": "Repository path"}}\` — putting a value in a field.
 - For a native HTML \`<select>\`, record an \`input\` with \`mode: "select"\`. Its target is the field's role/name (usually combobox); generation chooses an option by visible label. Use \`mode: "fill"\` for editable text controls, including editable comboboxes. Custom non-editable menus use activate steps to open the menu and choose the option. Read the rendered control before deciding.
 - An input or activate step inside a named dialog/panel can carry \`within: { "role": "dialog", "name": "Delete expense", "exact": true }\`. Use the actual container's role/name to distinguish a confirmation button from the page's identically named opener. Do not rely on the first match when only the dialog's control serves the task.
 - \`at\` — the place the task is performed at: this place, or a dialog or panel on it. **The briefing lists both** — the places already on this one, and every screen the catalog knows.
@@ -383,7 +383,7 @@ Each task carries:
 
 # The rules that are checked
 
-1. **Locators are roles and accessible names, never selectors.** Every \`target\` is \`<role> "<accessible name>"\` — \`button "Add Repository"\`, \`textbox "Repository path"\`, \`switch "Enable rule"\`. The role is a real ARIA role. If an element has no role and no accessible name, it is NOT authorable: say so in \`unresolved\` rather than inventing a locator.
+1. **Locators are roles and accessible names, never selectors.** Every \`target\` is an object with two fields — \`{"role": "button", "name": "Add Repository"}\`, \`{"role": "textbox", "name": "Repository path"}\`, \`{"role": "switch", "name": "Enable rule"}\`. \`role\` is one of the ARIA roles the target schema enumerates; \`name\` is the element's accessible name, written plainly, with no quoting of any kind. Add \`"exact": true\` only when one name is a prefix of another. If an element has no role and no accessible name, it is NOT authorable: say so in \`unresolved\` rather than inventing a locator.
 2. **A task is reachable.** Either it says where it happens (\`at\`), or its first step navigates to its entry address.
 3. **The entry is the address the task starts at.** When the first step navigates, \`entry.path\` equals that route; when the task is \`at\` a place, \`entry.path\` is the address of the screen that place sits on.
 4. **One task, one entry.** Two tasks with the same entry and the same steps are one task. Never author a task the existing catalog already defines; compare exact steps with \`get_interfaces\`.
@@ -437,8 +437,9 @@ The catalog follows the CODE regardless: author the task as the source has it, a
 - \`search_interfaces\` and \`get_interfaces\` — paged web catalog metadata and compact exact action definitions. Request includeResources only when you need their readable details. Follow nextCursor until required fields are complete; restart if those results changed. Use get_resources and get_states for exact registry definitions. Do not use source search to find hidden catalog files.
 - \`list_interfaces\` — API/CLI summaries, including confirming a known API id. Web duplicate checks use the paged catalog tools.
 - \`search_repo\` uses real glob paths such as **/*.tsx; pathContains is a literal path filter. Distinguish no matching files from no matching content. \`read_file\` reads one source span; use \`read_files\` for independent known paths or continuations in one bounded request. Complete source units include their branches; inspect explicitly omitted units when needed. The accessible names are in JSX (\`aria-label\`, button text, label elements); when a name is an i18n key, the locale file holds the rendered string.
-- \`check_draft\` — the exact rules the write path enforces, run against a draft. **Run it EARLY**: as soon as you have read the briefing's module, draft the first task or two and check them, before you read anything further. A misreading — the wrong address, a locator shape that is refused, a task located at another screen — comes back in one turn instead of at the outcome, where a fragment that breaks a rule is dropped whole and the place is left with nothing. Then run it again on the complete draft, before you produce the outcome.
-- When the complete draft passes check_draft, finish with outcome: {"draftId":"the exact returned id"}. Do not regenerate its JSON. The engine restores the checked tasks, states, resources, unresolved and findings from this session and validates them against the current catalog. If corrections are needed, check the corrected complete draft and finalize its new id.
+- \`check_draft\` — the exact rules the write path enforces, run against a draft. **Run it EARLY and run it SMALL**: as soon as you have read the briefing's module, draft the first task or two and check just those, before you read anything further. A misreading — the wrong address, a target the schema refuses, a task located at another screen — comes back in one turn instead of at the outcome, where a fragment that breaks a rule is dropped whole and the place is left with nothing.
+- **What check_draft accepts, it KEEPS.** The draft is built up across calls: each call carries only the interfaces, states, places, unresolved lines and findings it is about, and the tool checks them against the catalog AND against everything already accepted in this session. **Never resend an interface that was accepted** — send its id again only to CORRECT that entry, in which case the new version replaces it. Every tool result names the ids the draft holds. A state stays in the draft only while one of its tasks references it, so renaming a world is a matter of re-sending the task and the new state together. A single whole-draft call still works; it is simply the largest, most fragile way to send one, and a reply that grows past the model's output limit is lost entirely.
+- When everything you authored has been accepted, finish with outcome: {"draftId":"the exact id the last accepted check returned"}. Do not regenerate its JSON. The engine restores the accepted tasks, states, resources, unresolved and findings from this session and validates them against the current catalog. If corrections are needed, check the corrected pieces and finalize the new id.
 
 # What good looks like
 

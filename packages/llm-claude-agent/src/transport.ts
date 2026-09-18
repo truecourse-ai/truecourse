@@ -23,11 +23,13 @@
 import {
   emitLlmCallRecord,
   recordUsageFromEnvelope,
+  reportTransportUsage,
   resolveStallTimeoutMs,
   resolveTimeoutScale,
   type EnvelopeUsage,
   type LlmRequest,
   type LlmTransport,
+  type TransportUsageObserver,
 } from '@truecourse/shared/llm';
 import { resolveClaudeBinary } from '@truecourse/shared';
 import { loadSdk } from './sdk-import.js';
@@ -46,6 +48,12 @@ export interface ClaudeAgentTransportOptions {
   pathToClaudeCodeExecutable?: string;
   /** Test seam: replaces the lazily imported SDK module. */
   sdk?: SdkModule;
+  /**
+   * One report per call that reached the model, for a caller that must account
+   * for what a run spends. Supplied at construction: a transport hands back
+   * text, so there is nothing to read usage off from outside.
+   */
+  onUsage?: TransportUsageObserver;
 }
 
 /**
@@ -65,11 +73,16 @@ export function createClaudeAgentTransport(opts: ClaudeAgentTransportOptions = {
     const sdk = opts.sdk ?? (await loadSdk());
     // Resolved per call, so one long-lived instance follows a binary override.
     const bin = opts.pathToClaudeCodeExecutable ?? resolveClaudeBinary();
-    return runOneShot(sdk, bin, req);
+    return runOneShot(sdk, bin, req, opts.onUsage);
   };
 }
 
-async function runOneShot(sdk: SdkModule, bin: string, req: LlmRequest): Promise<string> {
+async function runOneShot(
+  sdk: SdkModule,
+  bin: string,
+  req: LlmRequest,
+  onUsage: TransportUsageObserver | undefined,
+): Promise<string> {
   const t0 = Date.now();
   const ts = new Date().toISOString();
   const inputChars = req.system.length + req.user.length;
@@ -269,6 +282,17 @@ async function runOneShot(sdk: SdkModule, bin: string, req: LlmRequest): Promise
     usage = recordUsageFromEnvelope(req, result);
   } catch {
     /* usage is observational only */
+  }
+  if (usage) {
+    reportTransportUsage(onUsage, {
+      stage,
+      model: usage.model || req.model || '',
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreateTokens: usage.cacheCreateTokens,
+      costUsd: usage.costUsd,
+    });
   }
   succeed(usage, text);
   return text;

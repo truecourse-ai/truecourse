@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { CREDITS_PAUSE_FAILURE, isCreditsExhausted } from '@truecourse/shared'
 import { LlmStageFailureError } from '@truecourse/shared/llm'
 import { ScanAbortedError, runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import { listStoredSessionRuns } from '../../packages/core/src/lib/sessions-store'
@@ -672,6 +673,29 @@ describe('spec-scan.curate-doc — failures', () => {
         failures: 2,
       })
     }
+    expect(fs.readFileSync(corpusFilePath(repo))).toEqual(before)
+  })
+
+  it('a session that runs out of credits MID-WAY aborts before the corpus is written', async () => {
+    twoDocs()
+    const decisions = covering(['docs'])
+    fs.mkdirSync(path.dirname(corpusFilePath(repo)), { recursive: true })
+    fs.writeFileSync(corpusFilePath(repo), '{"sentinel":true}')
+    const before = fs.readFileSync(corpusFilePath(repo))
+
+    // One doc is curated, the next meets an empty balance. The fail-open would
+    // keep it untagged and write a corpus that reads like a clean scan, and the
+    // one-abort rule cannot see it: not every session was lost.
+    const stub = stubDriver(
+      scanScript(({ briefing }) =>
+        docPathOf(briefing).includes('auth')
+          ? ({ kind: 'failure', failure: CREDITS_PAUSE_FAILURE } as DriverResult)
+          : outcome(KEEP('users entity')),
+      ),
+    )
+    await expect(runScan({ decisions, driver: async () => stub.driver })).rejects.toSatisfy(
+      isCreditsExhausted,
+    )
     expect(fs.readFileSync(corpusFilePath(repo))).toEqual(before)
   })
 })

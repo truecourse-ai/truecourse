@@ -50,6 +50,7 @@
 import { z } from 'zod'
 import {
   InterfacesFileSchema,
+  isCreditsExhausted,
   type Interface,
   type InterfaceState,
   type InterfacesFile,
@@ -170,6 +171,8 @@ export async function reconcileStates(input: ReconcileStatesInput): Promise<Stat
     } catch (error) {
       // A pass that could not ask still keeps whatever the deterministic half
       // found: this is a tidying step, and losing it costs a re-run, not a run.
+      // An empty balance is not that: it stops the run rather than tidying it.
+      if (isCreditsExhausted(error)) throw error
       problems.push(`the reconciliation call failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }

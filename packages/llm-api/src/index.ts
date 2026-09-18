@@ -7,6 +7,8 @@ export {
 } from './transport.js';
 export {
   createApiSessionDriver,
+  condenseCutOff,
+  MAX_WHITESPACE_RUN,
   OUTCOME_TOOL_NAME,
   retryDelayMs,
   RETRY_JITTER,

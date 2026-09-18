@@ -183,7 +183,7 @@ async function callTool(call: StubCall, name: string, args: unknown): Promise<{ 
 
 describe('flowWorkerSessionDef', () => {
   it('offers web-only bounded catalog tools without weakening the execution gate', async () => {
-    const catalog = createAuthorCatalog([{ id: 'web/setup-late', type: 'web', title: 'Create prerequisite', entry: { method: 'GET', path: '/setup' }, steps: [{ kind: 'activate', target: 'button "Create"' }], fingerprint: 'setup-v1' }])
+    const catalog = createAuthorCatalog([{ id: 'web/setup-late', type: 'web', title: 'Create prerequisite', entry: { method: 'GET', path: '/setup' }, steps: [{ kind: 'activate', target: { role: 'button', name: 'Create' } }], fingerprint: 'setup-v1' }])
     const { task } = fakeTask({ surface: 'web', catalog })
     const def = flowWorkerSessionDef({ task, judgeWith: () => async () => ({ kind: 'faithful' }) })
     expect(def.tools.map(t => t.name)).toEqual(['search_interfaces', 'get_interfaces', 'run_scenario', 'submit_scenario', 'drop_scenario'])

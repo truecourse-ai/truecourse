@@ -238,14 +238,17 @@ header.site.scrolled {
   justify-content: space-between;
   gap: 24px;
 }
+/* The wordmark is the logo, so it is set the way the logo file sets it: mono,
+   bold, and spaced apart rather than together. The 16px against the page's
+   17px holds the same optical size, mono running wider per character. */
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: var(--font-sans);
-  font-weight: 600;
-  font-size: 17px;
-  letter-spacing: -0.01em;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.01em;
 }
 .brand .mark {
   width: 26px;
@@ -663,9 +666,28 @@ footer.site .icon-btn {
   gap: 12px;
   margin-top: 36px;
 }
+/* Who stands behind the company, answered after the ask rather than before it:
+   one quiet line under the buttons, never a badge competing with the headline. */
+.backing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 28px;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  color: var(--muted-2);
+}
+/* Sized off the text beside it: the wordmark's cap height reads as one line,
+   not as a second logo answering the one in the header. */
+.backing img {
+  height: 15px;
+  width: auto;
+  display: block;
+}
 /* The hero's stage: the dashboard, toured. */
 .hero-stage {
-  margin: clamp(56px, 7vw, 88px) auto 0;
+  margin: clamp(36px, 4.5vw, 56px) auto 0;
   max-width: 1080px;
 }
 .tour-stage {

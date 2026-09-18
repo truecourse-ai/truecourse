@@ -64,7 +64,7 @@ const SILENCE_RULE: Interface = (() => {
   const shape = {
     type: 'web' as const,
     entry: { method: 'GET', path: '/repos/{repoId}' },
-    steps: [{ kind: 'activate' as const, target: 'button "Rules"' }],
+    steps: [{ kind: 'activate' as const, target: { role: 'button', name: 'Rules' } }],
   }
   return {
     id: 'web/silence-rule',

@@ -896,11 +896,22 @@ function Line({ line }: { line: ConversationLine }) {
       );
     case 'assistant': {
       const call = line.toolCall && !isOutcomeTool(line.toolCall.name) ? line.toolCall : undefined;
-      if (!call && !line.text) return null;
+      if (!call && !line.text && !line.cutOff) return null;
       return (
         <Message ts={line.ts}>
           {line.text && <Prose text={line.text} />}
           {call && <Json label={call.name} value={call.args} />}
+          {line.cutOff && (
+            <Json
+              label={`${line.cutOff.toolName ?? 'reply'} · ${
+                line.cutOff.reason === 'length'
+                  ? 'cut off at the output limit'
+                  : 'aborted — degenerate output'
+              }`}
+              value={line.cutOff.partial}
+              tone={RED}
+            />
+          )}
         </Message>
       );
     }

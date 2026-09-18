@@ -56,12 +56,21 @@
  *   discipline) therefore sees ONE consistent snapshot across both calls.
  * - `fold` never overlaps another `fold`, whatever the completion order.
  *
+ * THE CREDITS PAUSE. A session that parked because the workspace can no longer
+ * pay ENDS the pool: nothing it has left to start can pay either, and a caller
+ * that folded that park as a failed item would settle a half-run as a whole one
+ * — a step ticked done over work that never happened, with nothing in its cache
+ * to replay. The park is not folded and not re-queued; the items still queued
+ * never start, the sessions in flight finish the turn they are on, and the pool
+ * then throws {@link CreditsExhaustedError} for the job to settle `paused`.
+ *
  * The pool never touches run status — `run.finish` belongs to the command
  * adapter, which knows what a partial run means for its command.
  */
 
 import os from 'node:os'
 import pLimit from 'p-limit'
+import { CreditsExhaustedError, isCreditsPauseFailure } from '@truecourse/shared'
 import {
   runAgentLoop,
   type SessionDef,
@@ -238,6 +247,9 @@ export async function runSessionPool<TItem, TOutcome>(
     outcome.failure.kind === 'transport' &&
     outcome.failure.retryability === 'transient'
 
+  /** Set by the first park on an empty balance; thrown once the waves drain. */
+  let paused = false
+
   /**
    * Run one item's session and fold its outcome. A re-run (`prior` set) is a
    * RESUME of the first session: same def — `session(item)`/`briefing(item)`
@@ -285,6 +297,14 @@ export async function runSessionPool<TItem, TOutcome>(
       ...(opts.now ? { now: opts.now } : {}),
     }).outcome
 
+    // An empty balance is the one failure the fold must never see: it says
+    // nothing about this item, and folding it would be the run agreeing that
+    // the work is settled. The item stays untouched, and the pool ends.
+    if (outcome.status === 'failed' && isCreditsPauseFailure(outcome.failure)) {
+      paused = true
+      return
+    }
+
     // A throttled-to-death session goes back on the queue once — behind
     // everything still pending, at the governed permit count — instead of
     // into the results. Its serial group does NOT wait for the re-run: the
@@ -295,7 +315,7 @@ export async function runSessionPool<TItem, TOutcome>(
       opts.onProgress?.({ kind: 'item-requeued', workItem, index, total: opts.items.length })
       retryRuns.push(
         runGroup(() =>
-          opts.signal?.aborted
+          opts.signal?.aborted || paused
             ? undefined
             : runItem(item, { of: sessionId, def, ...(sharedPrefix ? { sharedPrefix } : {}) }),
         ),
@@ -320,7 +340,8 @@ export async function runSessionPool<TItem, TOutcome>(
           // A run the caller aborted starts nothing else — the rest of this
           // group is abandoned too, exactly as an interrupted serial chain
           // should be: its members were to be briefed on work that never landed.
-          if (opts.signal?.aborted) return
+          // A workspace that cannot pay stops the same way.
+          if (opts.signal?.aborted || paused) return
           await runItem(item)
         }
       }),
@@ -329,6 +350,10 @@ export async function runSessionPool<TItem, TOutcome>(
   // Re-runs were enqueued during the main wave and cannot spawn further ones
   // (one re-queue per work item), so a single second wait drains them.
   await Promise.all(retryRuns)
+
+  // Thrown after the waves drain, so no session is left running behind the
+  // caller's back and no fold lands after the run has stopped.
+  if (paused) throw new CreditsExhaustedError()
 
   // Completion order is provider latency; the report is the work list.
   results.sort((a, b) => (order.get(a.workItem) ?? 0) - (order.get(b.workItem) ?? 0))

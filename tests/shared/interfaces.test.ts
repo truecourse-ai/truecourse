@@ -26,6 +26,7 @@ import {
   InterfacesFileSchema,
   type InterfacesFile,
   canonicalRoutePath,
+  describeInterfaceTarget,
   interfaceEntryLabel,
   interfaceFingerprint,
   guardDriverIds,
@@ -52,8 +53,8 @@ function iface(steps: InterfaceStep[], over: Partial<Interface> = {}): Interface
 const INVOKE: InterfaceStep = { kind: 'invoke', command: ['tasks', 'add'], flags: ['--json', '--force'] }
 const REQUEST: InterfaceStep = { kind: 'request', method: 'POST', path: '/tasks' }
 const NAVIGATE: InterfaceStep = { kind: 'navigate', route: '/board' }
-const INPUT: InterfaceStep = { kind: 'input', target: 'TaskBoard::titleField' }
-const ACTIVATE: InterfaceStep = { kind: 'activate', target: 'TaskBoard::addButton' }
+const INPUT: InterfaceStep = { kind: 'input', target: { role: 'textbox', name: 'Task title' } }
+const ACTIVATE: InterfaceStep = { kind: 'activate', target: { role: 'button', name: 'Add task' } }
 
 
 /**
@@ -411,8 +412,8 @@ describe('interfaceFingerprint', () => {
 
   it('a navigate step folds its route; input/activate fold their target', () => {
     expect(fp([{ ...NAVIGATE, route: '/settings' }])).not.toBe(fp([NAVIGATE]))
-    expect(fp([{ ...INPUT, target: 'TaskBoard::dueField' }])).not.toBe(fp([INPUT]))
-    expect(fp([{ ...ACTIVATE, target: 'TaskRow::doneCheckbox' }])).not.toBe(fp([ACTIVATE]))
+    expect(fp([{ ...INPUT, target: { role: 'textbox', name: 'Due date' } }])).not.toBe(fp([INPUT]))
+    expect(fp([{ ...ACTIVATE, target: { role: 'checkbox', name: 'Done' } }])).not.toBe(fp([ACTIVATE]))
   })
 
   it('the kind is part of the identity — same target, different interaction', () => {
@@ -2463,7 +2464,7 @@ describe('canonicalRoutePath', () => {
  * interaction, so nothing here may ever reach a fingerprint.
  */
 describe('the resource registry', () => {
-  const ACTIVATE_RULE: InterfaceStep = { kind: 'activate', target: 'switch "LLM rules"' }
+  const ACTIVATE_RULE: InterfaceStep = { kind: 'activate', target: { role: 'switch', name: 'LLM rules' } }
 
   const webIface = (over: Partial<Interface> = {}): Interface =>
     iface([ACTIVATE_RULE], {
@@ -2824,7 +2825,7 @@ describe('interface provenance', () => {
 
 
 it('fingerprints native selection and scoped targets without invalidating legacy fill steps', () => {
-  const steps = [{ kind: 'input' as const, target: 'combobox "Category"' }];
+  const steps = [{ kind: 'input' as const, target: { role: 'combobox' as const, name: 'Category' } }];
   const base = { type: 'web' as const, entry: { method: 'GET', path: '/' }, steps };
   const original = interfaceFingerprint(base);
   expect(interfaceFingerprint({ ...base, steps: [{ ...steps[0], mode: 'fill' }] })).toBe(original);
@@ -2833,3 +2834,79 @@ it('fingerprints native selection and scoped targets without invalidating legacy
   expect(interfaceFingerprint({ ...base, steps: [scoped] })).not.toBe(original);
   expect(interfaceFingerprint({ ...base, steps: [{ ...scoped, within: { ...scoped.within, exact: true } }] })).not.toBe(interfaceFingerprint({ ...base, steps: [scoped] }));
 });
+
+/**
+ * THE STEP TARGET IS TWO FIELDS — a role and an accessible name, the same
+ * vocabulary a scenario's own locator uses. It was one string,
+ * `<role> "<accessible name>"`, and a catalog stored in that form still reads:
+ * the string is parsed back into its two fields on the way in, nothing writes
+ * it on the way out, and the fingerprint it was stored under does not move.
+ */
+describe('a step target', () => {
+  const structured = { kind: 'activate' as const, target: { role: 'button' as const, name: 'Add expense' } }
+
+  it('is a role and an accessible name, and renders as one line', () => {
+    expect(InterfaceStepSchema.parse(structured)).toEqual(structured)
+    expect(describeInterfaceTarget({ role: 'button', name: 'Add expense' })).toBe('button "Add expense"')
+    expect(describeInterfaceTarget({ role: 'button', name: 'Add', exact: true })).toBe('button "Add" (exact)')
+  })
+
+  it('refuses a selector, a test id and a role no ARIA vocabulary knows', () => {
+    for (const target of ['#add-expense', '[data-testid=add]', 'div.add > button']) {
+      const parsed = InterfaceStepSchema.safeParse({ kind: 'activate', target })
+      expect(parsed.success).toBe(false)
+      expect(!parsed.success && parsed.error.issues[0].message).toContain('never a selector')
+    }
+    expect(InterfaceStepSchema.safeParse({ kind: 'activate', target: { role: 'clicky', name: 'Add' } }).success).toBe(false)
+  })
+
+  it('parses the stored string form back into its two fields', () => {
+    expect(InterfaceStepSchema.parse({ kind: 'activate', target: 'button "Add expense"' })).toEqual(structured)
+    expect(
+      InterfaceStepSchema.parse({ kind: 'input', mode: 'select', target: 'combobox "Category"' }),
+    ).toEqual({ kind: 'input', mode: 'select', target: { role: 'combobox', name: 'Category' } })
+  })
+
+  it('reads a whole stored catalog written in the string form, and keeps its fingerprints', () => {
+    const steps = [
+      { kind: 'input', target: 'textbox "Repository path"' },
+      { kind: 'activate', target: 'button "Add Repository"' },
+    ]
+    const stored = {
+      version: 2,
+      generatedAt: '2026-08-17T00:00:00.000Z',
+      recipeFingerprint: 'sha256:recipe',
+      interfaces: [
+        {
+          id: 'web/add-repository-by-path',
+          type: 'web',
+          title: 'Register a repository from its path',
+          entry: { method: 'GET', path: '/' },
+          steps,
+          fingerprint: 'sha256:stored',
+        },
+      ],
+    }
+    const parsed = InterfacesFileSchema.parse(stored)
+    expect(parsed.interfaces[0].steps).toEqual([
+      { kind: 'input', target: { role: 'textbox', name: 'Repository path' } },
+      { kind: 'activate', target: { role: 'button', name: 'Add Repository' } },
+    ])
+    // Splitting the locator in two moved no identity. The constant is what the
+    // fold produced while the target was one string, so every fingerprint
+    // already embedded in a scenario YAML still names its interface.
+    expect(interfaceFingerprint({ type: 'web', entry: parsed.interfaces[0].entry, steps: parsed.interfaces[0].steps }))
+      .toBe('sha256:b5887d8a1028efe0c9752ef528b33cb00cbdc06254e72f4c4103497a7b07a666')
+  })
+
+  it('folds `exact` only when it is set, so an unmarked target keeps its identity', () => {
+    const entry = { method: 'GET' as const, path: '/' }
+    const plain = interfaceFingerprint({ type: 'web', entry, steps: [structured] })
+    expect(
+      interfaceFingerprint({ type: 'web', entry, steps: [{ ...structured, target: { ...structured.target, exact: false } }] }),
+    ).toBe(plain)
+    expect(
+      interfaceFingerprint({ type: 'web', entry, steps: [{ ...structured, target: { ...structured.target, exact: true } }] }),
+    ).not.toBe(plain)
+  })
+})

@@ -681,6 +681,7 @@ export async function guardGenerateInProcess(
       // One line per THING the run did, filed under the step that did it. The
       // engine's phase names ARE this checklist's keys, so they line up.
       onFact: (step, line) => tracker?.fact(step, line),
+      onStepIncomplete: step => tracker?.partial(step),
       onFlowSettled: async (settled, total) => {
         throwIfAborted();
         building = false;

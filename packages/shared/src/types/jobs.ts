@@ -14,9 +14,21 @@
  * failure: no error is recorded and no notification is posted. `interrupted` is
  * what a job and its run BOTH become when the process running them died — the
  * boot sweep settles the pair with one word, so a restart never reads as the
- * work having failed.
+ * work having failed. `paused` is a stop the job can be picked up from: the
+ * work is unfinished but nothing about it went wrong, and re-enqueuing the row
+ * (with whatever resume pointer it settled on) is what carries it on.
  */
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
+export type JobStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+  | 'paused';
+
+/** Why a job paused. One word, the client's to render. */
+export type JobPauseReason = 'credits';
 
 /** Open job-type vocabulary — `context.sync`, `context.scan`, `repo.guard-*` today. */
 export type JobType = string;
@@ -63,6 +75,8 @@ export interface JobView {
   /** Type-specific result payload on success (e.g. `{ synced: 4 }`). */
   result: unknown | null;
   error: string | null;
+  /** Why it paused; null for every other outcome. */
+  pauseReason: JobPauseReason | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;

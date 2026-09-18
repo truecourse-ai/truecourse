@@ -330,7 +330,7 @@ describe('browser setup grounding', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
     const create: Interface = { id: 'web/create', type: 'web', title: 'Create a record',
-      entry: { method: 'GET', path: '/' }, steps: [{ kind: 'activate', target: 'button "Add record"' }],
+      entry: { method: 'GET', path: '/' }, steps: [{ kind: 'activate', target: { role: 'button', name: 'Add record' } }],
       fingerprint: 'sha256:create' }
     const briefings: string[] = []
     const cacheInputs: string[][] = []
@@ -352,7 +352,7 @@ describe('browser setup grounding', () => {
     expect(briefings[0]).not.toContain('Add record')
     expect(fetched[0]).toContain('Add record')
     expect(briefings[0]).toContain('metadata associations')
-    await run({ ...create, steps: [{ kind: 'activate', target: 'button "New record"' }], fingerprint: 'sha256:create-v2' })
+    await run({ ...create, steps: [{ kind: 'activate', target: { role: 'button', name: 'New record' } }], fingerprint: 'sha256:create-v2' })
     expect(briefings).toHaveLength(2)
     expect(briefings[1]).not.toContain('New record')
     expect(fetched[1]).toContain('New record')

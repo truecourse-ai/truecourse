@@ -71,7 +71,9 @@ import {
   emitSpecComplete,
 } from '../socket/handlers.js';
 import { requireJobs } from '../jobs/current.js';
+import { refusedWithoutCredits } from './credits.js';
 import {
+  CreditsProviderUnavailableError,
   LlmNotConfiguredError,
   LlmProbeFailedError,
   orgOf,
@@ -158,9 +160,18 @@ function allFindingsDismissed(
  */
 async function refusedWithoutLlm(req: Request, res: Response): Promise<boolean> {
   try {
+    // The balance first: proving a provider that cannot be paid for is work
+    // nobody asked for, and the refusal is about the money either way.
+    if (await refusedWithoutCredits(req, res)) return true;
     await startWorkspaceLlm(orgOf(req));
     return false;
   } catch (e) {
+    // A workspace that chose credits on a server that holds none: a setting to
+    // change, like an unconfigured provider, not a job that dies later.
+    if (e instanceof CreditsProviderUnavailableError) {
+      res.status(409).json({ error: e.code, message: e.message });
+      return true;
+    }
     if (e instanceof LlmNotConfiguredError) {
       res.status(409).json({ error: e.code, message: e.message });
       return true;
@@ -274,6 +285,9 @@ router.post('/:id/guard/setup', async (req: Request, res: Response, next: NextFu
 router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
+    // The visual judge is the only thing a run can spend on, and it spends the
+    // same balance, so a run starts under the same gate.
+    if (await refusedWithoutCredits(req, res)) return;
     const outcome = await requireJobs().enqueueGuardRun({
       repoId: req.params.id as string,
       repoFullName: repo.path,

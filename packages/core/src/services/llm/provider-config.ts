@@ -21,6 +21,12 @@ export interface LlmApiConfig {
   model: string;
   /** Optional secondary model, tried once if the primary call errors. */
   fallbackModel?: string;
+  /**
+   * The list-price model id {@link LlmApiConfig.model} serves, when the model
+   * id itself is not one — a deployment name behind a gateway prices as the
+   * model it deploys. Nothing on the Models page sets it yet.
+   */
+  priceModel?: string;
   /** The key itself; the Models page refuses to save a config without one. Bedrock omits it for the AWS chain. */
   apiKey?: string;
   /** Gateway / self-hosted endpoint speaking the provider's protocol. */

@@ -39,6 +39,7 @@ import {
   type RecipeRepairFn,
 } from '@truecourse/guard-generator';
 import { createWorkingSandbox, maskedRecipeText, type WorkingSandbox } from '@truecourse/guard-runner';
+import { isCreditsExhausted } from '@truecourse/shared';
 import { cachedSessionOutcome } from '../agent/session-cache.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
@@ -403,6 +404,7 @@ export function buildRecipeRepair(
         ...(sessionRunId ? { sessionRunId } : {}),
       };
     } catch (error) {
+      if (isCreditsExhausted(error)) throw error;
       return { error: message(error), ...(context.runId() ? { sessionRunId: context.runId() } : {}) };
     }
   };

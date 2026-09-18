@@ -46,6 +46,7 @@ export const RUN_STATUS_META: Record<WorkStatus, { word: string; dot: string }> 
   completed: { word: 'Finished', dot: 'bg-emerald-500' },
   failed: { word: 'Failed', dot: 'bg-red-500' },
   interrupted: { word: 'Interrupted', dot: 'bg-amber-500' },
+  paused: { word: 'Paused', dot: 'bg-amber-500' },
 };
 
 /** The step-dot palette: a pending step is an empty ring, never a fill; the
@@ -85,6 +86,25 @@ export function formatDuration(ms: number): string {
   const rest = String(seconds % 60).padStart(2, '0');
   if (minutes < 60) return `${minutes}m ${rest}s`;
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+}
+
+/**
+ * Money, as a page says it: two decimals once there is a cent to show, four
+ * below that, so a stage that cost a fraction of a cent reads as a number
+ * rather than as zero.
+ */
+export function formatUsd(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '$0.00';
+  return value >= 0.01 ? `$${value.toFixed(2)}` : `$${value.toFixed(4)}`;
+}
+
+/** Tokens at a glance: `1.2M`, `4.5K`, `812`. */
+export function formatTokens(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
+  if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (value >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
+  return String(Math.round(value));
 }
 
 /**

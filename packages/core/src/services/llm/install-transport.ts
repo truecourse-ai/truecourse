@@ -12,7 +12,7 @@
 import { createApiTransport, type ProviderConfig } from '@truecourse/llm-api';
 import { createClaudeAgentTransport } from '@truecourse/llm-claude-agent';
 import { resolveClaudeBinary } from '@truecourse/shared';
-import type { LlmTransport } from '@truecourse/shared/llm';
+import type { LlmTransport, TransportUsageObserver } from '@truecourse/shared/llm';
 import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type { LlmApiConfig } from './provider-config.js';
 import { getModelPrices, priceForModel, type PriceTable } from './model-prices.js';
@@ -42,6 +42,7 @@ export function buildProviderConfig(api: LlmApiConfig | undefined): ProviderConf
     provider: api.provider,
     model,
     fallbackModel: api.fallbackModel?.trim() || undefined,
+    priceModel: api.priceModel?.trim() || undefined,
     baseURL: api.baseURL?.trim() || undefined,
     headers: api.headers,
   };
@@ -89,15 +90,20 @@ function primePriceTable(): void {
     });
 }
 
+/** One call's tokens, in the buckets both backends report. */
+interface CallTokens {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+}
+
 /**
  * Ceiling cost for one call: every input-side token (fresh, cache-read,
  * cache-written) is charged at the list input rate — providers only ever
  * discount those, so the real bill lands at or below this.
  */
-export function priceCall(
-  modelId: string,
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number },
-): number {
+export function priceCall(modelId: string, usage: CallTokens): number {
   try {
     primePriceTable();
     if (!priceTable) return 0;
@@ -110,6 +116,21 @@ export function priceCall(
   }
 }
 
+/**
+ * The pricing hook for ONE config's calls. A model id is not always a priced
+ * model: behind a gateway it is a DEPLOYMENT name (`gpt-5.6-sol-2`), which no
+ * price list holds, so the config names the list-price model it serves and the
+ * call is priced as that. Only the config's OWN model is mapped — a fallback
+ * call, or a per-stage override, prices under the id it really ran on, or not
+ * at all.
+ */
+export function pricingFor(
+  cfg: Pick<ProviderConfig, 'model' | 'priceModel'>,
+): (modelId: string, usage: CallTokens) => number {
+  return (modelId, usage) =>
+    priceCall(cfg.priceModel && modelId === cfg.model ? cfg.priceModel : modelId, usage);
+}
+
 // ---------------------------------------------------------------------------
 // Transports
 // ---------------------------------------------------------------------------
@@ -120,7 +141,7 @@ export function priceCall(
  */
 export function createApiTransportFor(
   api: LlmApiConfig | undefined,
-  opts: { honorRequestModel?: boolean } = {},
+  opts: { honorRequestModel?: boolean; onUsage?: TransportUsageObserver } = {},
 ): LlmTransport {
   const cfg = buildProviderConfig(api);
   primePriceTable();
@@ -129,8 +150,9 @@ export function createApiTransportFor(
   // the stage tiers it would otherwise inherit are Claude CLI aliases,
   // meaningless to a raw provider API.
   return createApiTransport(cfg, {
-    pricing: priceCall,
+    pricing: pricingFor(cfg),
     honorRequestModel: opts.honorRequestModel ?? true,
+    ...(opts.onUsage ? { onUsage: opts.onUsage } : {}),
   });
 }
 
@@ -142,8 +164,18 @@ let claudeCode: LlmTransport | undefined;
  * The claude-code one-shot transport: the Agent SDK on the `claude` login of
  * whoever runs this process, resolving the binary per call. Operator mode hands
  * it to every run.
+ *
+ * A run that accounts for its own spend passes an observer and gets a transport
+ * of its own: the shared one reports to whoever built it first, and two runs
+ * must never pay into one another's account.
  */
-export function createClaudeCodeTransport(): LlmTransport {
+export function createClaudeCodeTransport(onUsage?: TransportUsageObserver): LlmTransport {
+  if (onUsage) {
+    return createClaudeAgentTransport({
+      pathToClaudeCodeExecutable: resolveClaudeBinary(),
+      onUsage,
+    });
+  }
   claudeCode ??= createClaudeAgentTransport({ pathToClaudeCodeExecutable: resolveClaudeBinary() });
   return claudeCode;
 }

@@ -252,10 +252,10 @@ function startSession<TOutcome>(
         costUsd += body.usage.costUsd;
         prevTurnMalformed = currentTurnMalformed;
         currentTurnMalformed = false;
-        // Context is a LEVEL: this turn's envelope approximates occupancy.
-        // Crossing the ceiling pre-empts the provider wall — compaction
-        // never runs, and no resume grant softens it.
-        if (totalTokens(body.usage) >= def.budget.tokenCeiling) {
+        // Context is a LEVEL: what the model SAW this turn approximates
+        // occupancy. Crossing the ceiling pre-empts the provider wall —
+        // compaction never runs, and no resume grant softens it.
+        if (contextTokens(body.usage) >= def.budget.tokenCeiling) {
           interruptCause = 'context';
           requestInterrupt();
         } else if (turnsThisGrant >= def.budget.turns) {
@@ -662,7 +662,18 @@ function presented<T>(
   }
 }
 
-/** Total tokens a turn moved — cache reads included (they occupy context). */
+/** Total tokens a turn MOVED — every bucket the provider billed for. This is a
+ *  spend rollup and is summed across turns; it is not an occupancy level. */
 function totalTokens(usage: TurnUsage): number {
   return usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreateTokens;
+}
+
+/**
+ * What the model SAW on one turn: the prompt it was handed, cache reads and
+ * cache writes included, since all three occupy the window. The turn's own
+ * OUTPUT is excluded — it is not context until the next turn sends it back, so
+ * counting it lets one fat reply trip a ceiling the real window is nowhere near.
+ */
+function contextTokens(usage: TurnUsage): number {
+  return usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens;
 }

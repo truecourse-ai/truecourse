@@ -55,6 +55,7 @@ import { LOCAL_ORG_ID } from './auth/local.js';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, FileLogTransport, setLogTransport, log } from '@truecourse/core/lib/logger';
 import { publishEvent } from '@truecourse/jobs';
+import { setCreditsNotifier } from './services/credits.service.js';
 
 const port = parseInt(process.env.PORT || '3001', 10);
 
@@ -180,6 +181,19 @@ export async function startServer(): Promise<void> {
     workspaceOf: workspaceOfRepo,
     publish: (org, event) => publishEvent(getDb(), org, event),
   });
+  // A credits notice is a feed row like a job's, on the same live stream: the
+  // balance running low, the balance empty, credits granted.
+  setCreditsNotifier(async (org, notice) => {
+    const notification = await jobs.notifications.add({
+      org,
+      kind: 'credits',
+      level: notice.level,
+      title: notice.title,
+      body: notice.body,
+      data: notice.data ?? null,
+    });
+    await publishEvent(getDb(), org, { type: 'notification', notification, jobId: null });
+  });
 
   // 6. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
@@ -282,6 +296,11 @@ export async function startServer(): Promise<void> {
     localRouter: local?.router ?? null,
     jobs,
     featureRouters,
+    // Who a workspace IS, for the operator's Credits page. Local mode has no
+    // identity provider to ask, and no operator routes to ask for.
+    ...(auth.workspaceSession
+      ? { workspaceNames: auth.workspaceSession.organizationName }
+      : {}),
   });
   const httpServer = createServer(app);
   setupSocket(httpServer);

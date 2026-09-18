@@ -122,7 +122,7 @@ const PLACED_INTERFACE = {
   type: 'web',
   title: 'Open the Rules dialog',
   entry: { method: 'GET', path: '/repos/{repoId}' },
-  steps: [{ kind: 'activate', target: 'button "Rules"' }],
+  steps: [{ kind: 'activate', target: { role: 'button', name: 'Rules' } }],
   at: 'repo-report',
   to: 'rules-dialog',
   fingerprint: 'sha256:j3',

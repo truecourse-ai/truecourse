@@ -1,7 +1,7 @@
 /**
  * Settings as a hub: the workspace's members, where its repositories are
- * connected from, the LLM provider, and whatever this edition registered
- * beside them. The sub-tab is in the URL, so a settings page is a place a link
+ * connected from, the LLM provider, what its runs spent on it, and whatever
+ * this edition registered beside them. The sub-tab is in the URL, so a settings page is a place a link
  * can point at.
  *
  * Everything here is the server's. There is no plan and no entitlement read yet,
@@ -17,7 +17,9 @@ import { Unlink } from 'lucide-react';
 import {
   GITHUB_CONNECT_OUTCOMES,
   GITHUB_INSTALL_ORIGINS,
-  LLM_PROVIDER_KINDS,
+  LLM_CREDITS_PROVIDER,
+  LLM_PROVIDER_CHOICES,
+  isCreditsProvider,
 } from '@truecourse/shared';
 import type {
   GithubConnectOutcome,
@@ -26,7 +28,7 @@ import type {
   GithubRepoSummary,
   LlmConfigResponse,
   LlmConfigUpdate,
-  LlmProviderKind,
+  LlmProviderChoice,
   GithubInstallOrigin,
   LocalRepositorySummary,
 } from '@truecourse/shared';
@@ -51,7 +53,10 @@ import {
 } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
+import type { ServerMode } from '@truecourse/shared';
 import { MembersTab, type InviteKind } from '@/dashboard/pages/MembersTab';
+import { UsageTab } from '@/dashboard/pages/UsageTab';
+import { CreditsTab } from '@/dashboard/pages/CreditsTab';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { registeredSettingsTabs, type SettingsTab } from '@/dashboard/shell/registry';
 
@@ -649,18 +654,20 @@ function RepositoriesTab() {
   );
 }
 
-const PROVIDER_LABEL: Record<LlmProviderKind, string> = {
+const PROVIDER_LABEL: Record<LlmProviderChoice, string> = {
   anthropic: 'Anthropic API',
   openai: 'OpenAI',
   bedrock: 'AWS Bedrock',
   copilot: 'GitHub Copilot',
+  truecourse: 'TrueCourse credits',
 };
 
-const MODEL_PLACEHOLDER: Record<LlmProviderKind, string> = {
+const MODEL_PLACEHOLDER: Record<LlmProviderChoice, string> = {
   anthropic: 'claude-opus-5',
   openai: 'gpt-5.6',
   bedrock: 'anthropic.claude-opus-5',
   copilot: 'gpt-5.6',
+  truecourse: '',
 };
 
 const FIELD =
@@ -683,7 +690,7 @@ function ModelsTab() {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const [provider, setProvider] = useState<LlmProviderKind>('anthropic');
+  const [provider, setProvider] = useState<LlmProviderChoice>('anthropic');
   const [model, setModel] = useState('');
   const [fallbackModel, setFallbackModel] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -734,6 +741,9 @@ function ModelsTab() {
 
   const current = data?.config ?? null;
   const isBedrock = provider === 'bedrock';
+  // The credits choice has no key field and no model field — there is nothing
+  // of the platform's to show, masked or otherwise.
+  const onCredits = isCreditsProvider(provider);
   const keyIsForThisProvider = current?.hasKey && current.provider === provider;
   const keyPlaceholder = keyIsForThisProvider
     ? `${current?.keyMask ?? '••••'}, leave blank to keep`
@@ -746,15 +756,18 @@ function ModelsTab() {
     setBusy(true);
     setError(null);
     setSaved(false);
-    const update: LlmConfigUpdate = {
-      provider,
-      model: model.trim(),
-      ...(fallbackModel.trim() ? { fallbackModel: fallbackModel.trim() } : {}),
-      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-      ...(accessKeyId.trim() ? { accessKeyId: accessKeyId.trim() } : {}),
-      ...(baseURL.trim() ? { baseURL: baseURL.trim() } : {}),
-      ...(region.trim() ? { region: region.trim() } : {}),
-    };
+    // Credits store nothing: no key to send, no model to name, no endpoint.
+    const update: LlmConfigUpdate = onCredits
+      ? { provider }
+      : {
+          provider,
+          model: model.trim(),
+          ...(fallbackModel.trim() ? { fallbackModel: fallbackModel.trim() } : {}),
+          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+          ...(accessKeyId.trim() ? { accessKeyId: accessKeyId.trim() } : {}),
+          ...(baseURL.trim() ? { baseURL: baseURL.trim() } : {}),
+          ...(region.trim() ? { region: region.trim() } : {}),
+        };
     void saveLlmConfig(update)
       .then((next) => {
         apply(next);
@@ -773,12 +786,27 @@ function ModelsTab() {
         <Facts
           className="border-b border-border"
           rowClassName="px-6"
-          rows={[
-            { label: 'Provider', value: PROVIDER_LABEL[current.provider] },
-            { label: 'Model', value: <span className="font-mono">{current.model}</span> },
-            { label: 'Key', value: current.hasKey ? (current.keyMask ?? 'stored') : 'no stored key' },
-            { label: 'Updated', value: new Date(current.updatedAt).toLocaleString() },
-          ]}
+          rows={
+            isCreditsProvider(current.provider)
+              ? [
+                  { label: 'Provider', value: PROVIDER_LABEL.truecourse },
+                  {
+                    label: 'Balance',
+                    value: (
+                      <span className="tabular-nums">
+                        {(data?.credits?.balance ?? 0).toLocaleString()} credits
+                      </span>
+                    ),
+                  },
+                  { label: 'Updated', value: new Date(current.updatedAt).toLocaleString() },
+                ]
+              : [
+                  { label: 'Provider', value: PROVIDER_LABEL[current.provider] },
+                  { label: 'Model', value: <span className="font-mono">{current.model}</span> },
+                  { label: 'Key', value: current.hasKey ? (current.keyMask ?? 'stored') : 'no stored key' },
+                  { label: 'Updated', value: new Date(current.updatedAt).toLocaleString() },
+                ]
+          }
         />
       )}
 
@@ -787,10 +815,10 @@ function ModelsTab() {
             Provider
             <select
               value={provider}
-              onChange={(e) => setProvider(e.target.value as LlmProviderKind)}
+              onChange={(e) => setProvider(e.target.value as LlmProviderChoice)}
               className={FIELD}
             >
-              {(data?.providers ?? LLM_PROVIDER_KINDS).map((p) => (
+              {(data?.providers ?? LLM_PROVIDER_CHOICES).map((p) => (
                 <option key={p} value={p}>
                   {PROVIDER_LABEL[p]}
                 </option>
@@ -798,79 +826,99 @@ function ModelsTab() {
             </select>
           </label>
 
-          <label className="block text-[11px] font-medium text-muted-foreground">
-            Model
-            <input
-              required
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder={MODEL_PLACEHOLDER[provider]}
-              className={FIELD_MONO}
-            />
-          </label>
-
-          <label className="block text-[11px] font-medium text-muted-foreground">
-            Fallback model
-            <input
-              value={fallbackModel}
-              onChange={(e) => setFallbackModel(e.target.value)}
-              placeholder="Tried only if the primary model errors"
-              className={FIELD_MONO}
-            />
-          </label>
-
-          <label className="block text-[11px] font-medium text-muted-foreground">
-            {isBedrock ? 'AWS secret access key' : 'API key'}
-            <input
-              type="password"
-              autoComplete="off"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={keyPlaceholder}
-              className={FIELD_MONO}
-            />
-          </label>
-
-          {isBedrock ? (
-            <>
-              <label className="block text-[11px] font-medium text-muted-foreground">
-                AWS region
-                <input
-                  value={region}
-                  onChange={(e) => setRegion(e.target.value)}
-                  placeholder="us-east-1"
-                  className={FIELD_MONO}
-                />
-              </label>
-              <label className="block text-[11px] font-medium text-muted-foreground">
-                AWS access key id
-                <input
-                  value={accessKeyId}
-                  onChange={(e) => setAccessKeyId(e.target.value)}
-                  placeholder="Leave blank to use the instance IAM role"
-                  className={FIELD_MONO}
-                />
-              </label>
-            </>
+          {onCredits ? (
+            <p className="pt-1 text-[11px] text-muted-foreground">
+              Runs go through TrueCourse&rsquo;s own key and come out of this workspace&rsquo;s
+              balance:{' '}
+              <span className="tabular-nums text-foreground">
+                {(data?.credits?.balance ?? 0).toLocaleString()} credits
+              </span>
+              . There is no key to paste and no model to pick.{' '}
+              <Link to="/settings/credits" className="text-foreground underline underline-offset-2">
+                Credits
+              </Link>{' '}
+              is where the balance and what spent it are.
+            </p>
           ) : (
+            <>
             <label className="block text-[11px] font-medium text-muted-foreground">
-              Custom base URL
+              Model
               <input
-                value={baseURL}
-                onChange={(e) => setBaseURL(e.target.value)}
-                placeholder={
-                  provider === 'copilot'
-                    ? 'Defaults to the GitHub Copilot endpoint'
-                    : 'For a gateway, proxy or self-hosted endpoint'
-                }
+                required
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder={MODEL_PLACEHOLDER[provider]}
                 className={FIELD_MONO}
               />
             </label>
+
+            <label className="block text-[11px] font-medium text-muted-foreground">
+              Fallback model
+              <input
+                value={fallbackModel}
+                onChange={(e) => setFallbackModel(e.target.value)}
+                placeholder="Tried only if the primary model errors"
+                className={FIELD_MONO}
+              />
+            </label>
+
+            <label className="block text-[11px] font-medium text-muted-foreground">
+              {isBedrock ? 'AWS secret access key' : 'API key'}
+              <input
+                type="password"
+                autoComplete="off"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={keyPlaceholder}
+                className={FIELD_MONO}
+              />
+            </label>
+
+            {isBedrock ? (
+              <>
+                <label className="block text-[11px] font-medium text-muted-foreground">
+                  AWS region
+                  <input
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value)}
+                    placeholder="us-east-1"
+                    className={FIELD_MONO}
+                  />
+                </label>
+                <label className="block text-[11px] font-medium text-muted-foreground">
+                  AWS access key id
+                  <input
+                    value={accessKeyId}
+                    onChange={(e) => setAccessKeyId(e.target.value)}
+                    placeholder="Leave blank to use the instance IAM role"
+                    className={FIELD_MONO}
+                  />
+                </label>
+              </>
+            ) : (
+              <label className="block text-[11px] font-medium text-muted-foreground">
+                Custom base URL
+                <input
+                  value={baseURL}
+                  onChange={(e) => setBaseURL(e.target.value)}
+                  placeholder={
+                    provider === 'copilot'
+                      ? 'Defaults to the GitHub Copilot endpoint'
+                      : 'For a gateway, proxy or self-hosted endpoint'
+                  }
+                  className={FIELD_MONO}
+                />
+              </label>
+            )}
+            </>
           )}
 
-          <p className="pt-1 text-[11px] text-muted-foreground">
-            The engine calls the model with this provider's credentials, and only from a run this workspace started.
-          </p>
+          {!onCredits && (
+            <p className="pt-1 text-[11px] text-muted-foreground">
+              The engine calls the model with this provider&rsquo;s credentials, and only from a run
+              this workspace started.
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
@@ -891,12 +939,13 @@ function ModelsTab() {
 }
 
 /**
- * The sections of Settings: the three the product has, then whatever this
+ * The sections of Settings: the four the product has, then whatever this
  * edition registered. A bare `/settings` lands on the first.
  */
 function settingsTabs(
   invite: InviteKind | null,
   onInviteChange: (invite: InviteKind | null) => void,
+  mode: ServerMode,
 ): SettingsTab[] {
   const base: SettingsTab[] = [
     {
@@ -906,6 +955,13 @@ function settingsTabs(
     },
     { id: 'repositories', label: 'Repositories', render: () => <RepositoriesTab /> },
     { id: 'models', label: 'Models', render: () => <ModelsTab /> },
+    { id: 'usage', label: 'Usage', render: () => <UsageTab /> },
+    // Credits are TrueCourse's own key on a granted balance. A local machine
+    // has no operator to grant anything and no platform key to spend, so the
+    // tab is not there at all.
+    ...(mode === 'local'
+      ? []
+      : [{ id: 'credits', label: 'Credits', render: () => <CreditsTab /> }]),
   ];
   return [...base, ...registeredSettingsTabs()];
 }
@@ -914,10 +970,11 @@ export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
   // A local workspace is one person on one machine: there is no identity
   // provider to send an invitation through, so none is offered.
-  const invitable = useServerMode() !== 'local';
+  const mode = useServerMode();
+  const invitable = mode !== 'local';
   /** Which invite dialog is open, if any: by email, or by link. */
   const [invite, setInvite] = useState<InviteKind | null>(null);
-  const tabs = useMemo(() => settingsTabs(invite, setInvite), [invite]);
+  const tabs = useMemo(() => settingsTabs(invite, setInvite, mode), [invite, mode]);
   const active = tabs.find((t) => t.id === tab) ?? tabs[0]!;
 
   return (

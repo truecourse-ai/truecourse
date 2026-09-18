@@ -145,8 +145,8 @@ function json(body: unknown, status = 200): Response {
 
 /** A world: two connected repositories, the runs the workspace route lists, and
  *  the jobs it has in flight. */
-function serve(runs: WorkspaceRun[], jobs: JobView[] = []) {
-  const state = { runs, jobs, calls: [] as string[] };
+function serve(runs: WorkspaceRun[], jobs: JobView[] = [], pausedJobId: string | null = null) {
+  const state = { runs, jobs, pausedJobId, calls: [] as string[] };
   window.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
@@ -158,9 +158,12 @@ function serve(runs: WorkspaceRun[], jobs: JobView[] = []) {
     if (url.pathname.startsWith('/api/sessions/runs/')) {
       const id = decodeURIComponent(url.pathname.slice('/api/sessions/runs/'.length));
       const found = state.runs.find((r) => r.runId === id);
-      return found ? json({ run: found }) : json({ error: 'run not found' }, 404);
+      return found
+        ? json({ run: found, pausedJobId: found.status === 'paused' ? state.pausedJobId : null })
+        : json({ error: 'run not found' }, 404);
     }
     if (/^\/api\/repos\/[^/]+\/sessions\/runs$/.test(url.pathname)) return json({ runs: [] });
+    if (url.pathname.startsWith('/api/credits/resume/')) return json({ jobId: state.pausedJobId }, 202);
     return json({ error: 'not found' }, 404);
   }) as unknown as typeof window.fetch;
   return state;
@@ -546,6 +549,60 @@ describe('one conversation', () => {
     await user.click(await screen.findByRole('button', { name: 'Run again' }));
     await waitFor(() =>
       expect(state.calls).toContain(`/api/repos/${REPO_B.id}/guard/setup`),
+    );
+  });
+
+  // The word has to be true: Resume carries the paused JOB on — one row, one
+  // conversation — and it is offered for every command, not only the one that
+  // can replay its own record.
+  it('carries a run that stopped for credits on, rather than starting a second one', async () => {
+    const paused = run({
+      command: 'guard-setup',
+      runId: 'run-setup-paused',
+      status: 'paused',
+      finishedAt: '2026-09-02T09:02:30.000Z',
+      repo: { id: REPO_B.id, fullName: REPO_B.name },
+    });
+    const state = serve([paused], [], 'job_paused_1');
+    renderAt(`/agent/${paused.runId}`);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(state.calls).toContain('/api/credits/resume/job_paused_1'));
+    // Never the start route: that would be a second job over the same work.
+    expect(state.calls).not.toContain(`/api/repos/${REPO_B.id}/guard/setup`);
+  });
+
+  it('says Run again when the paused work has no job left to carry it on', async () => {
+    const paused = run({
+      command: 'guard-setup',
+      runId: 'run-setup-carried',
+      status: 'paused',
+      finishedAt: '2026-09-02T09:02:30.000Z',
+      repo: { id: REPO_B.id, fullName: REPO_B.name },
+    });
+    serve([paused]);
+    renderAt(`/agent/${paused.runId}`);
+
+    expect(await screen.findByRole('button', { name: 'Run again' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
+  });
+
+  it('still offers a failed generate its own record to replay', async () => {
+    const failed = run({
+      command: 'guard-generate',
+      runId: 'run-generate-failed',
+      status: 'failed',
+      finishedAt: '2026-09-02T09:02:30.000Z',
+      repo: { id: REPO_B.id, fullName: REPO_B.name },
+    });
+    const state = serve([failed]);
+    renderAt(`/agent/${failed.runId}`);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Resume' }));
+    await waitFor(() =>
+      expect(state.calls.some((c) => c.startsWith(`/api/repos/${REPO_B.id}/guard/generate`))).toBe(true),
     );
   });
 

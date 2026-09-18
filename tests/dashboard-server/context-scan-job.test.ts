@@ -25,6 +25,7 @@ import { JobStore, NotificationStore } from '@truecourse/data-store';
 import { executeJob, type JobRuntime } from '@truecourse/jobs';
 import type { CuratedCorpus, DecisionsFile } from '@truecourse/spec-consolidator';
 import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
+import { CreditsExhaustedError } from '@truecourse/core/lib/credits-store';
 import type { WorkspaceContextScanResult } from '@truecourse/core/commands/context-scan';
 import {
   createContextScanTask,
@@ -240,6 +241,54 @@ describe('the context.scan job', () => {
     expect(notes[0]).toMatchObject({ level: 'error', title: 'Document scan failed' });
     // A run the scan opened before dying is still where the failure is read.
     expect(notes[0]!.data).toMatchObject({ runId: SCAN_RUN_ID });
+  });
+
+  // A DELIBERATE decision not to store anything partial. A corpus is a WHOLE —
+  // its areas are settled across every kept document, its pointers re-anchored
+  // against all of them, and the ripple compares it with the one before it to
+  // decide which repositories are stale. Half of one would shrink the workspace
+  // corpus to the documents that happened to finish, cut every repository's
+  // slice down with it, and ripple generates against a spec nobody wrote. So a
+  // scan stopped by an empty balance leaves the last complete corpus standing
+  // and ripples nothing; the resumed job scans again, paying only for what
+  // moved, because a document already judged is answered from the LLM cache.
+  it('a scan stopped by an empty balance stores no corpus and ripples nothing', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'context.scan', key: 'context.scan' });
+    const rippled: string[] = [];
+    const def = createContextScanTask({
+      startLlm: async () => testLlm,
+      runScan: async (options) => {
+        options.onRunStarted?.({ command: 'spec-scan', runId: SCAN_RUN_ID, dir: '' });
+        throw new CreditsExhaustedError(ORG, 0);
+      },
+      ripple: () => ({
+        workspaceOrgId: ORG,
+        listRepos: async () => [{ repoId: 'widgets', repoFullName: 'acme/widgets', sourceIds: [SRC_A] }],
+        hasSetup: async () => true,
+        isSettingUp: async () => false,
+        startSetup: async (repo) => {
+          rippled.push(repo.repoFullName);
+          return true;
+        },
+        startGenerate: async (repo) => {
+          rippled.push(repo.repoFullName);
+          return true;
+        },
+      }),
+    });
+    await executeJob(rt, def, { jobId: job.id, workspaceOrgId: ORG, source: 'manual' });
+
+    const settled = await rt.jobStore.get(job.id);
+    expect(settled).toMatchObject({ status: 'paused', pauseReason: 'credits', error: null });
+    expect(settled?.result).toBeNull();
+    expect(rippled).toEqual([]);
+    // Carried on by the row itself, which then says it is a rescan: there is no
+    // half corpus to continue from, only work the cache has already paid for.
+    const [paused] = await rt.jobStore.listPaused(ORG);
+    expect(paused?.payload).toMatchObject({ source: 'rescan' });
+    expect((await rt.jobStore.markRequeued(paused!.id))?.id).toBe(job.id);
+    expect(await rt.jobStore.listPaused(ORG)).toEqual([]);
   });
 
   it('carries no address when the scan died before a run existed', async () => {

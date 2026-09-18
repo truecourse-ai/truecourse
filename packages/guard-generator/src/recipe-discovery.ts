@@ -49,7 +49,7 @@ import {
   type Recipe,
   type RouteManifestApp,
 } from '@truecourse/guard-runner'
-import type { DatastoreUrlRef } from '@truecourse/shared'
+import { isCreditsExhausted, type DatastoreUrlRef } from '@truecourse/shared'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
 import {
   RECIPE_PROMPT_FINGERPRINT,
@@ -1268,7 +1268,8 @@ function databaseGuidance(database: DatabaseDependencyHint, composeGenerated: bo
  * re-asked. `retry` carries a rejected proposal's verification evidence, and rides
  * on both the call and its corrective re-ask. Returns `{ error }` on a
  * still-invalid or thrown call — the caller turns it into `verify-failed`, never a
- * crash.
+ * crash. An empty balance is the exception: it throws, because a call that was
+ * never made says nothing about the recipe.
  */
 async function proposeRecipeWithReask(
   input: RecipeDiscoveryInput,
@@ -1280,6 +1281,9 @@ async function proposeRecipeWithReask(
   try {
     raw = await runner(base)
   } catch (e) {
+    // The balance refused the call: the proposal is unasked, not unusable, and
+    // a `verify-failed` verdict here would spend the repair loop on nothing.
+    if (isCreditsExhausted(e)) throw e
     return { error: `recipe proposal call failed: ${(e as Error).message}` }
   }
   const parsed = RecipeProposalSchema.safeParse(raw)
@@ -1289,6 +1293,7 @@ async function proposeRecipeWithReask(
   try {
     reRaw = await runner({ ...base, correction: { invalidOutput: quoteInvalidOutput(raw) } })
   } catch (e) {
+    if (isCreditsExhausted(e)) throw e
     return { error: `recipe proposal re-ask failed: ${(e as Error).message}` }
   }
   const reParsed = RecipeProposalSchema.safeParse(reRaw)

@@ -23,10 +23,11 @@
  * write path runs. A peer can change the catalog after a check, so outcome
  * acceptance validates again and returns any new conflicts for correction.
  *
- * What it is asked for is an EARLY call, not only a closing one: the
- * fragment is dropped whole when it breaks a rule, so a session that first
- * checks at turn 24 pays for a misreading with the whole place, while the same
- * misreading on a first task at turn 5 costs a turn.
+ * What it is asked for is an EARLY call and a SMALL one: the fragment is
+ * dropped whole when it breaks a rule, so a session that first checks at turn
+ * 24 pays for a misreading with the whole place, while the same misreading on a
+ * first task at turn 5 costs a turn. A call carries the piece it is about,
+ * and what passes is kept for the session — see {@link checkDraftTool}.
  */
 
 import { z } from 'zod'
@@ -34,7 +35,14 @@ import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import type { InterfacesFile } from '@truecourse/shared'
 import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js'
 import { liveAuthorCatalog } from './catalog-context.js'
-import { AuthoredFragmentSchema, validateFragment } from './draft.js'
+import {
+  AuthoredFragmentSchema,
+  EMPTY_FRAGMENT,
+  collapseAuthoredIds,
+  foldAuthoredFragment,
+  validateFragment,
+  type AuthoredFragment,
+} from './draft.js'
 import { checkedDraftEvidence } from './checked-draft.js'
 import { scopeFragmentIds } from './identity.js'
 
@@ -138,17 +146,35 @@ function interfacesTool(input: AuthorToolsInput): SessionTool {
   })
 }
 
+/**
+ * THE ACCEPTED DRAFT IS SESSION STATE. A tool instance belongs to one session,
+ * so the draft it is building can live in this closure — and that is what turns
+ * `check_draft` from a whole-catalog submission into an incremental one: a call
+ * carries the piece it is about, the piece is checked against the catalogs AND
+ * against everything this session has already had accepted, and what passes is
+ * kept. Fixing one locator then costs one interface instead of forty-five.
+ *
+ * Uniqueness is why the accepted draft has to be the thing checked: an id and a
+ * fingerprint name one thing across the whole draft, not within one call.
+ *
+ * `outcome` resolves the draft by the id of the check that accepted it, exactly
+ * as it always has — the artifact carries the accumulated fragment, so nothing
+ * about resolution (or about a resume, which reads the artifact off the
+ * transcript) changes with the call that produced it.
+ */
 function checkDraftTool(input: AuthorToolsInput): SessionTool {
+  let accepted: AuthoredFragment = EMPTY_FRAGMENT
   return defineSessionTool({
     name: 'check_draft',
     description:
-      'Check a draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the `<role> "<name>"` locator policy, reachability, and the catalog schema. Call it EARLY, on your first task or two, and again on the complete draft before you produce the outcome; outcome acceptance checks the current catalog again, and returns any new conflicts for correction.',
+      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the role/name target policy, reachability, and the catalog schema. What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
     kind: 'check-draft',
     readOnly: true,
     destructive: false,
     inputSchema: AuthoredFragmentSchema,
     async execute(args) {
-      const fragment = scopeFragmentIds(args, input)
+      const combined = foldAuthoredFragment(accepted, args)
+      const fragment = collapseAuthoredIds(scopeFragmentIds(combined, input))
       const result = validateFragment({
         derived: input.derived,
         authored: input.authored,
@@ -156,20 +182,39 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
         replaceable: input.replaceable,
         ...(input.scope ? { scope: input.scope } : {}),
       })
-      if (result.ok) {
-        const artifact = checkedDraftEvidence(fragment)
+      if (!result.ok) {
         return {
-          content: `The draft is valid: ${args.interfaces.length} task(s), ${args.states?.length ?? 0} state(s), ${
-            args.resources?.length ?? 0
-          } place(s). To finish, call outcome with ${JSON.stringify({ draftId: artifact.draftId })}. Do not repeat the draft. Final acceptance checks the current catalog again.`,
-          artifact,
+          content: `${result.errors.length} problem(s) — nothing in this call was accepted, and the draft still holds ${
+            accepted.interfaces.length
+          } task(s):\n- ${result.errors.join('\n- ')}`,
+          isError: true,
         }
       }
-      return { content: `${result.errors.length} problem(s):\n- ${result.errors.join('\n- ')}`, isError: true }
+      accepted = fragment
+      const artifact = checkedDraftEvidence(fragment)
+      return {
+        content: [
+          `Accepted and kept. The draft now holds ${fragment.interfaces.length} task(s), ${
+            fragment.states?.length ?? 0
+          } state(s), ${fragment.resources?.length ?? 0} place(s).`,
+          ...draftIds(fragment),
+          `Do not send any of them again except to correct one. To finish, call outcome with ${JSON.stringify(
+            { draftId: artifact.draftId },
+          )} — do not repeat the draft. Final acceptance checks the current catalog again.`,
+        ].join('\n'),
+        artifact,
+      }
     },
   })
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+/** How many of the accepted task ids the tool result names before it counts the
+ *  rest — the list is a reminder of what is already held, not the draft itself. */
+const MAX_DRAFT_IDS_LISTED = 30
+
+/** The ids the draft holds, one per line — what "already accepted" names. */
+function draftIds(fragment: AuthoredFragment): string[] {
+  const ids = fragment.interfaces.map((task) => `  ${task.id}`)
+  if (ids.length <= MAX_DRAFT_IDS_LISTED) return ids
+  return [...ids.slice(0, MAX_DRAFT_IDS_LISTED), `  … ${ids.length - MAX_DRAFT_IDS_LISTED} more`]
 }

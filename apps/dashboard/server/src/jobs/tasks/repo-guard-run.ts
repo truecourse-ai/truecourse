@@ -23,6 +23,14 @@
  * persists nothing and fails the job with the runner's own message, a failed
  * build's or install's output tail behind it. A cancelled run leaves the store
  * exactly as it found it.
+ *
+ * NOTHING PARTIAL IS STORED, and that is deliberate. What a run saves becomes
+ * the repository's BASELINE — the board Home's trend counts, the coverage every
+ * later run is compared against — so a board missing the judge's verdicts on
+ * its failing steps would be read as the truth about the repository and
+ * diffed against for as long as it stood. The whole thing is deterministic
+ * apart from that one annotation, so there is nothing expensive to salvage:
+ * the resumed job runs the scenarios again and stores a board that is complete.
  */
 
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
@@ -39,6 +47,7 @@ import { buildOutputTail, runFailureMessage, type RunGuardResult } from '@trueco
 import type { GuardSummary } from '@truecourse/shared';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
+import { createUsageMeter, withCredits, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
 import { markWorldStateUnknown, materializeStoredGuardState, persistGuardRun } from '../materialize-guard.js';
@@ -59,7 +68,7 @@ export interface GuardRunJobResult {
 
 /** The engines the body drives — production wires the real ones. */
 export interface RepoGuardRunTaskDeps {
-  startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
+  startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runGuard?: typeof guardRunInProcess;
 }
 
@@ -96,7 +105,16 @@ export function createRepoGuardRunTask(
       await ctx.notify({ level: 'started', title: 'Flow run started', data: { repoFullName } });
       // The judge is the run's only model call and it is parked by default, so
       // the workspace's provider is resolved only when it would actually be used.
-      const llm = guardVisualJudgeEnabled() ? await startLlm(ctx.payload.workspaceOrgId) : null;
+      // The meter exists either way and writes nothing when nothing spent.
+      const meter = createUsageMeter({
+        workspaceOrgId: ctx.payload.workspaceOrgId,
+        repoFullName,
+        jobType: REPO_GUARD_RUN_TASK,
+        jobId: ctx.jobId,
+      });
+      const llm = guardVisualJudgeEnabled()
+        ? await startLlm(ctx.payload.workspaceOrgId, meter)
+        : null;
 
       await ctx.phase('clone');
       const tree = await acquireWorkTree(repoFullName);
@@ -126,10 +144,15 @@ export function createRepoGuardRunTask(
         // to what was provided, and the runner reads that from the two overlay files.
         await materializeGuardOverlays(repoFullName, tree.dir);
 
-        const result = await runGuard(tree.dir, {
-          tracker: mirrorTracker(ctx, GUARD_RUN_STEPS),
-          ...(llm ? { visualJudge: createGuardVisualJudge(tree.dir, { transport: llm.transport() }) } : {}),
-        });
+        // The judge is the only thing here that spends, and it is annotation-only
+        // — but a run that could not afford its verdicts is a run whose board is
+        // missing them, so it pauses rather than storing a half-judged board.
+        const result = await withCredits(meter, () =>
+          runGuard(tree.dir, {
+            tracker: mirrorTracker(ctx, GUARD_RUN_STEPS),
+            ...(llm ? { visualJudge: createGuardVisualJudge(tree.dir, { transport: llm.transport() }) } : {}),
+          }),
+        );
         // A stop the user asked for: the harness settles the row cancelled, and
         // a store that never saw this run is exactly what a cancel means.
         if (ctx.signal?.aborted) return { notification: null };
@@ -163,6 +186,8 @@ export function createRepoGuardRunTask(
         };
       } finally {
         tree.dispose();
+        // However the run ended, what the judge spent is written.
+        await meter.close();
       }
     },
 
