@@ -137,6 +137,13 @@ export function stubJobs(): StubJobs {
       return stub.linksAnswer;
     },
     cancelRepoJobs: async () => 'stopped' as const,
+    // Paused jobs are the credits surface's; a queue that runs nothing has none.
+    resumePaused: async () => null,
+    jobStore: {
+      listPaused: async () => [],
+      pausedCounts: async () => new Map<string, number>(),
+      markResumed: async () => {},
+    },
     routers: { events: Router(), jobs: Router(), notifications: Router() },
   } as unknown as JobsMount;
   return stub;
@@ -157,6 +164,7 @@ export const TEST_LLM_CONFIG = {
  */
 export function installTestWorkspaceLlm(): void {
   setWorkspaceLlmConfigStore({
+    getSelection: async () => ({ kind: 'api', config: { ...TEST_LLM_CONFIG } }),
     getConfig: async () => ({ ...TEST_LLM_CONFIG }),
     getView: async () => null,
     save: async () => {},

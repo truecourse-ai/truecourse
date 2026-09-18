@@ -31,6 +31,13 @@ import type {
   ContextSourceView,
   HomePeriod,
   HomeResponse,
+  UsageResponse,
+  CreditsResponse,
+  CreditsResumeResponse,
+  CreditGrantRequest,
+  CreditAdjustRequest,
+  CreditMovementResponse,
+  OperatorCreditsResponse,
   JobsResponse,
   NotificationsResponse,
   AuthUser,
@@ -805,9 +812,18 @@ export function listWorkspaceRuns(query: {
   );
 }
 
-/** One run by id, from whichever repository of the workspace owns it. */
-export function getWorkspaceRun(runId: string): Promise<{ run: WorkspaceRun }> {
-  return fetchApi<{ run: WorkspaceRun }>(`/api/sessions/runs/${encodeURIComponent(runId)}`);
+/**
+ * One run by id, from whichever repository of the workspace owns it.
+ * `pausedJobId` names the job waiting to carry this run on, when it stopped for
+ * credits — what a Resume acts on, so the run continues instead of a second one
+ * starting beside it.
+ */
+export function getWorkspaceRun(
+  runId: string,
+): Promise<{ run: WorkspaceRun; pausedJobId: string | null }> {
+  return fetchApi<{ run: WorkspaceRun; pausedJobId: string | null }>(
+    `/api/sessions/runs/${encodeURIComponent(runId)}`,
+  );
 }
 
 /**
@@ -1155,6 +1171,51 @@ export function markNotificationsRead(
 
 export function fetchHome(period: HomePeriod): Promise<HomeResponse> {
   return fetchApi<HomeResponse>(`/api/home?period=${encodeURIComponent(period)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Usage: what the workspace's runs spent, over the chosen period and filters.
+// ---------------------------------------------------------------------------
+
+/** The address the page is at, minus everything `/api/usage` has no use for. */
+export function fetchUsage(params: URLSearchParams): Promise<UsageResponse> {
+  const query = params.toString();
+  return fetchApi<UsageResponse>(`/api/usage${query ? `?${query}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Credits: what the workspace may spend of TrueCourse's own, and every movement
+// of it. The operator's three addresses answer 404 to anyone who is not one, so
+// a member's client reads them as absent rather than forbidden.
+// ---------------------------------------------------------------------------
+
+export function fetchCredits(): Promise<CreditsResponse> {
+  return fetchApi<CreditsResponse>('/api/credits');
+}
+
+/** Carry one paused run on. */
+export function resumePausedRun(jobId: string): Promise<CreditsResumeResponse> {
+  return fetchApi<CreditsResumeResponse>(`/api/credits/resume/${encodeURIComponent(jobId)}`, {
+    method: 'POST',
+  });
+}
+
+export function fetchOperatorCredits(): Promise<OperatorCreditsResponse> {
+  return fetchApi<OperatorCreditsResponse>('/api/operator/credits');
+}
+
+export function grantCredits(body: CreditGrantRequest): Promise<CreditMovementResponse> {
+  return fetchApi<CreditMovementResponse>('/api/operator/credits/grant', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function adjustCredits(body: CreditAdjustRequest): Promise<CreditMovementResponse> {
+  return fetchApi<CreditMovementResponse>('/api/operator/credits/adjust', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export interface SessionTranscriptPage {

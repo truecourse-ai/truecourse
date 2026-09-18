@@ -24,6 +24,7 @@ import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   GUARD_OBSERVATION_CAPABILITIES,
+  isCreditsExhausted,
   verificationCapabilityGap,
   type GuardPrerequisiteTarget,
   verificationCasePreparation,
@@ -579,7 +580,10 @@ export async function matchFlow(
   for (let attempt = 0; attempt < 2; attempt++) {
     let raw: unknown
     try { calls++; raw = await runner(ctx) }
-    catch (e) { return retainedWithError((e as Error).message) ?? { kind: 'error', reason: `match call failed: ${(e as Error).message}`, calls } }
+    // An empty balance is not this pair's verdict: softening it would settle the
+    // pair as "no match", tick the step done over work that never ran, and leave
+    // nothing in the cache for the resume to replay. It travels.
+    catch (e) { if (isCreditsExhausted(e)) throw e; return retainedWithError((e as Error).message) ?? { kind: 'error', reason: `match call failed: ${(e as Error).message}`, calls } }
     const parsed = RealizationMatchSchema.safeParse(raw)
     if (!parsed.success) {
       if (attempt > 0) return retainedWithError(flattenZodError(parsed.error)) ?? { kind: 'error', reason: `match output invalid after re-ask: ${flattenZodError(parsed.error)}; output: ${quoteInvalidOutput(raw)}`, calls }

@@ -100,6 +100,44 @@ export type LlmTransport = (req: LlmRequest) => Promise<string>;
 // per-stage usage accounting
 // ---------------------------------------------------------------------------
 
+/**
+ * ONE one-shot call's spend, handed to the observer the transport was BUILT
+ * with. A transport answers with the model's text, so there is nothing for a
+ * wrapper to read usage off: a run that must account for what it spends
+ * supplies this when it builds its transport, and gets one report per call that
+ * reached the model. Cache hits never reach a transport and are never reported.
+ *
+ * The provider is not here: whoever installed the observer chose the provider,
+ * and a transport does not repeat what its owner already knows.
+ */
+export interface TransportUsage {
+  /** The pipeline stage the call belongs to; `unknown` when it named none. */
+  stage: string;
+  /** The model that answered, as the provider reported it. */
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  costUsd: number;
+}
+
+/** Observes {@link TransportUsage}. Must never throw: accounting is not the call. */
+export type TransportUsageObserver = (usage: TransportUsage) => void;
+
+/** Report one call to `observe`, whose failure can never become the call's. */
+export function reportTransportUsage(
+  observe: TransportUsageObserver | undefined,
+  usage: TransportUsage,
+): void {
+  if (!observe) return;
+  try {
+    observe(usage);
+  } catch {
+    /* accounting is observational — it must never break a call */
+  }
+}
+
 /** Aggregated token + cost usage for one pipeline stage across a run. */
 export interface StageUsage {
   stage: string;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flowFingerprint, type GuardFlow, type GuardFlowMilestone, type Interface } from '@truecourse/shared'
+import { CreditsExhaustedError, flowFingerprint, isCreditsExhausted, type GuardFlow, type GuardFlowMilestone, type Interface } from '@truecourse/shared'
 import { buildSurfaceCatalogs, matchFlow, planFlowMatching, readCachedMatch } from '../../packages/guard-generator/src/match.js'
 import { MATCH_SYSTEM_PROMPT, buildMatchUserPrompt } from '../../packages/guard-generator/src/prompts.js'
 import { makeTempRepo, rmrf } from './helpers.js'
@@ -80,6 +80,18 @@ describe('matching incomplete catalogs and verification capabilities', () => {
     expect(result).toMatchObject({ kind: 'error', reason: expect.stringContaining('unknown interface ids: web/invented') })
     expect(result).toMatchObject({ reason: expect.stringContaining('gap names unknown milestone 9') })
     expect(result).toMatchObject({ reason: expect.stringContaining('milestone 9 has duplicate gaps') })
+  })
+  it('lets an empty balance through instead of settling the pair as a failed match', async () => {
+    const runner = vi.fn(async () => { throw new CreditsExhaustedError('org_test', 0) })
+    await expect(matchFlow(repo(), flow(), catalog, runner)).rejects.toSatisfy(isCreditsExhausted)
+    expect(runner).toHaveBeenCalledTimes(1)
+  })
+  it('does not settle a retained partial plan when the correction was refused on credits', async () => {
+    const runner = vi.fn()
+      .mockResolvedValueOnce({ plan: [{ interfaceId: control.id, milestone: 1 }] })
+      .mockRejectedValueOnce(new CreditsExhaustedError('org_test', 0))
+    await expect(matchFlow(repo(), flow(), catalog, runner)).rejects.toSatisfy(isCreditsExhausted)
+    expect(runner).toHaveBeenCalledTimes(2)
   })
   it('advertises a full-page refresh as native browser navigation, not a missing app control', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('SAME detail')

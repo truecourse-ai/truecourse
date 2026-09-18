@@ -56,4 +56,17 @@ set_secret sentry-dsn                    "${SENTRY_DSN:-}"
 set_secret truecourse-max-concurrency    "${TRUECOURSE_MAX_CONCURRENCY:-}"    integer
 set_secret truecourse-max-api-concurrency "${TRUECOURSE_MAX_API_CONCURRENCY:-}" integer
 
+# CREDITS, hosted only: the platform's own OpenAI key, for the workspaces that
+# pick "TrueCourse credits" on the Models page instead of bringing a key. The
+# key and the model are required together or the choice is not offered at all;
+# the base URL names another endpoint serving that model (an Azure AI Foundry
+# resource takes the same key as its bearer token, and the model is then its
+# DEPLOYMENT name), and the price model is the list-price model that deployment
+# serves, without which a deployment name prices as nothing and nobody is
+# debited. The key is read per run and never stored, logged or answered with.
+set_secret truecourse-credits-openai-api-key  "${TRUECOURSE_CREDITS_OPENAI_API_KEY:-}"
+set_secret truecourse-credits-model           "${TRUECOURSE_CREDITS_MODEL:-}"
+set_secret truecourse-credits-openai-base-url "${TRUECOURSE_CREDITS_OPENAI_BASE_URL:-}"
+set_secret truecourse-credits-price-model     "${TRUECOURSE_CREDITS_PRICE_MODEL:-}"
+
 echo "Done. Now provision or release the VM (see infra/azure/vm/DEPLOYMENT.md)."

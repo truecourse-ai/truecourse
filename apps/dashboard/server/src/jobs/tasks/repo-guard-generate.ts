@@ -42,6 +42,7 @@ import {
 import { loadScenarios } from '@truecourse/guard-runner';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
+import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { readGuardGenerateResume } from '../guard-generate-resume.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
@@ -92,7 +93,7 @@ export interface GuardGenerateJobResult {
 export interface RepoGuardGenerateTaskDeps {
   /** Enqueue the baseline run a generate with scenarios chains into. */
   chainGuardRun(request: OnboardingJobRequest): Promise<void>;
-  startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
+  startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runGenerate?: typeof guardGenerateInProcess;
 }
 
@@ -114,202 +115,225 @@ export function createRepoGuardGenerateTask(
     traceMeta: (payload) => ({ repoFullName: payload.repoFullName }),
 
     async run(ctx) {
-      return dashboardActivity(ctx, 'guard-generate', GUARD_GENERATE_STEPS, async (activityRun, activityTracker) => {
-        const { repoFullName } = ctx.payload;
-        runIds.set(ctx.jobId, activityRun.runId);
-        await ctx.notify({
-          level: 'started',
-          title: 'Flow generation started',
-          data: { repoFullName, runId: activityRun.runId },
-        });
-        // Re-read at execution time as well: the queue payload carries identity,
-        // never client-supplied completed steps or a trusted snapshot of status.
+      const meter = createUsageMeter({
+        workspaceOrgId: ctx.payload.workspaceOrgId,
+        repoFullName: ctx.payload.repoFullName,
+        jobType: REPO_GUARD_GENERATE_TASK,
+        jobId: ctx.jobId,
+      });
+      try {
+        // Read at execution time, and BEFORE the record is carried on: the
+        // queue payload carries identity, never client-supplied completed steps
+        // or a trusted snapshot of status, and the grant is read off a record
+        // that has stopped — which the one this job continues is about to stop
+        // being.
         const resume = ctx.payload.resumeRunId
-          ? await readGuardGenerateResume(repoFullName, ctx.payload.resumeRunId)
+          ? await readGuardGenerateResume(ctx.payload.repoFullName, ctx.payload.resumeRunId)
           : undefined;
-        const llm = await startLlm(ctx.payload.workspaceOrgId);
+        return await dashboardActivity(ctx, 'guard-generate', GUARD_GENERATE_STEPS, async (activityRun, activityTracker) => {
+          const { repoFullName } = ctx.payload;
+          runIds.set(ctx.jobId, activityRun.runId);
+          meter.setRunId(activityRun.runId);
+          // Where a resume starts from, declared the moment the run exists: a
+          // generate that pauses is carried on IN this record, replaying what
+          // it had already authored out of it.
+          ctx.resumeWith({ carryOnRunId: activityRun.runId, resumeRunId: activityRun.runId });
+          await ctx.notify({
+            level: 'started',
+            title: 'Flow generation started',
+            data: { repoFullName, runId: activityRun.runId },
+          });
+          const llm = await startLlm(ctx.payload.workspaceOrgId, meter);
 
-        await ctx.phase('clone');
-        const tree = await acquireWorkTree(repoFullName);
-        try {
-          const commitSha = await resolveCommitSha(tree.dir);
-          if (resume) assertGuardGenerateResumeCommit(resume, commitSha);
-          activityRun.setGitRef?.(commitSha);
-          activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
-          const ref = { repoKey: repoFullName, commitSha };
-          // Generate needs documents, which setup does not: a repository that
-          // reads none is never rippled here (the scan's ripple skips an empty
-          // slice), so reaching this is somebody pressing Generate on a
-          // repository linked to nothing — which is a refusal with a reason.
-          const slice = await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
-          if (slice.documents === 0) {
-            throw new Error(
-              slice.hasWorkspaceCorpus
-                ? `${repoFullName} reads no scanned document — link it to a source with documents on its Context tab before generating scenarios.`
-                : `${repoFullName}'s workspace has no scanned documents yet — run the Document scan before generating scenarios.`,
-            );
-          }
-          activityTracker.fact('clone', 'the stored spec corpus and decisions written into the clone');
-          const baseline = await materializeStoredGuardState(repoFullName, tree.dir);
-          activityTracker.fact(
-            'clone',
-            baseline
-              ? `the baseline scenario set and report from ${baseline.slice(0, 8)} written into the clone`
-              : 'no baseline scenario set: this generate starts from nothing',
-          );
-          // Setup's bundle goes in LAST: its recipe and catalogs are the current
-          // truth, whatever the scenario set was generated against.
-          const bundle = await loadGuardSetupBundle(repoFullName);
-          if (!bundle) {
-            throw new Error(
-              `${repoFullName} has not been set up yet — run guard setup before generating scenarios.`,
-            );
-          }
-          materializeGuardSetupBundle(tree.dir, bundle);
-          markWorldStateUnknown(tree.dir);
-          activityTracker.fact('clone', `the newest setup bundle written into the clone: ${Object.keys(bundle).join(', ')}`);
-          // The registered instances beside it: what a supplied dependency is
-          // provided with decides which sections generate can author.
-          if (await materializeGuardOverlays(repoFullName, tree.dir)) {
-            activityTracker.fact('clone', 'the registered instances written into the clone');
-          }
-          activityTracker.done('clone');
-
-          let guard;
+          await ctx.phase('clone');
+          const tree = await acquireWorkTree(repoFullName);
           try {
-            const driver = llm.driver();
-            ({ guard } = await runGenerate(tree.dir, {
-              driver,
-              transport: llm.transport(),
-              transportMode: llm.mode,
-              attribution: driver.attribution,
-              sessionsKey: repoFullName,
-              sessionRun: activityRun,
-              tracker: activityTracker,
-              requireExistingRecipe: true,
-              ...(resume ? { resume } : {}),
-              ...(ctx.signal ? { signal: ctx.signal } : {}),
-            }));
-          } catch (err) {
-            if (ctx.signal?.aborted) throw err;
-            if (err instanceof OpenConflictsError) {
-              // The engine already stopped the run on the gate's reason.
-              await writeGuardResult(ref, buildOpenConflictsReport(err, new Date().toISOString()), {
-                baseline: true,
-              });
-              const result: GuardGenerateJobResult = {
-                repoFullName,
-                status: 'open-conflicts',
-                written: 0,
-                birthFindings: 0,
-                noChanges: false,
-                openConflicts: err.conflicts.length,
-              };
-              return {
-                result,
-                notification: {
-                  level: 'warning',
-                  title: 'Flow generation blocked',
-                  body: firstLine(err.message),
-                  data: {
-                    repoFullName,
-                    runId: activityRun.runId,
-                    openConflicts: err.conflicts.length,
-                  },
-                },
-              };
+            const commitSha = await resolveCommitSha(tree.dir);
+            if (resume) assertGuardGenerateResumeCommit(resume, commitSha);
+            activityRun.setGitRef?.(commitSha);
+            activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
+            const ref = { repoKey: repoFullName, commitSha };
+            // Generate needs documents, which setup does not: a repository that
+            // reads none is never rippled here (the scan's ripple skips an empty
+            // slice), so reaching this is somebody pressing Generate on a
+            // repository linked to nothing — which is a refusal with a reason.
+            const slice = await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
+            if (slice.documents === 0) {
+              throw new Error(
+                slice.hasWorkspaceCorpus
+                  ? `${repoFullName} reads no scanned document — link it to a source with documents on its Context tab before generating scenarios.`
+                  : `${repoFullName}'s workspace has no scanned documents yet — run the Document scan before generating scenarios.`,
+              );
             }
-            throw err;
-          }
-          // A stop the user asked for: the harness settles the row cancelled, and
-          // a store that never saw this run is exactly what a cancel means.
-          if (ctx.signal?.aborted) return { notification: null };
-          if (guard.status !== 'ok') {
-            throw new Error(guard.reason ?? `guard generate ended ${guard.status}.`);
-          }
-
-          // The report the engine left in the tree is what gets stored, so the
-          // row's counts come from it too — never from a result it could differ from.
-          const report = readGeneratedReport(tree.dir) ?? buildGuardReport(guard, new Date().toISOString());
-          await persistGeneratedGuard(ref, tree.dir, report);
-
-          // Keep successful documents and the failure report, but do not present
-          // an incomplete extraction as success or chain its baseline run.
-          if (report.extractionFailures.length > 0) {
-            const docs = report.extractionFailures.map(failure => failure.doc).join(', ');
-            activityTracker.error('extract', `Claim extraction failed for ${docs}`);
-            throw new Error(
-              `Claim extraction failed for ${docs}. Partial results were saved. Retry generation to complete coverage.`,
+            activityTracker.fact('clone', 'the stored spec corpus and decisions written into the clone');
+            const baseline = await materializeStoredGuardState(repoFullName, tree.dir);
+            activityTracker.fact(
+              'clone',
+              baseline
+                ? `the baseline scenario set and report from ${baseline.slice(0, 8)} written into the clone`
+                : 'no baseline scenario set: this generate starts from nothing',
             );
-          }
+            // Setup's bundle goes in LAST: its recipe and catalogs are the current
+            // truth, whatever the scenario set was generated against.
+            const bundle = await loadGuardSetupBundle(repoFullName);
+            if (!bundle) {
+              throw new Error(
+                `${repoFullName} has not been set up yet — run guard setup before generating scenarios.`,
+              );
+            }
+            materializeGuardSetupBundle(tree.dir, bundle);
+            markWorldStateUnknown(tree.dir);
+            activityTracker.fact('clone', `the newest setup bundle written into the clone: ${Object.keys(bundle).join(', ')}`);
+            // The registered instances beside it: what a supplied dependency is
+            // provided with decides which sections generate can author.
+            if (await materializeGuardOverlays(repoFullName, tree.dir)) {
+              activityTracker.fact('clone', 'the registered instances written into the clone');
+            }
+            activityTracker.done('clone');
 
-          const written = report.written.length;
-          const findings = report.birthFindings.length;
-
-          const result: GuardGenerateJobResult = {
-            repoFullName,
-            status: 'ok',
-            written,
-            birthFindings: findings,
-            noChanges: report.noChanges,
-            openConflicts: 0,
-          };
-
-          // Nothing authored, nothing inherited: the scenario set this run just
-          // stored is empty, so the baseline run it would chain into can only
-          // clone and fail on "no scenarios" seconds later. Settle on the reason
-          // the report carries instead — a refused run latches one, a failed
-          // author leaves an error — and end the chain here. A `noChanges`
-          // report is no exception: an empty set that stayed empty is still
-          // empty, and the count here is what tells that from an unchanged
-          // set with scenarios in it.
-          if (written === 0 && runnableScenarios(tree.dir) === 0) {
-            return {
-              result: { ...result, status: 'nothing-written' },
-              notification: {
-                level: 'warning',
-                title: 'Flows generated nothing',
-                body:
-                  firstLine(report.refusal?.message) ||
-                  firstLine(report.errors[0]?.message) ||
-                  'no flow settled',
-                data: { repoFullName, runId: activityRun.runId },
-              },
-            };
-          }
-
-          return {
-            result,
-            notification: report.noChanges
-              ? {
-                  level: 'success',
-                  title: 'Flows up to date',
-                  body: 'Nothing changed since the last generate.',
-                  data: { repoFullName, runId: activityRun.runId },
-                }
-              : findings > 0
-                ? {
+            let guard;
+            try {
+              const driver = llm.driver();
+              ({ guard } = await runGenerate(tree.dir, {
+                driver,
+                transport: llm.transport(),
+                transportMode: llm.mode,
+                attribution: driver.attribution,
+                sessionsKey: repoFullName,
+                sessionRun: activityRun,
+                tracker: activityTracker,
+                requireExistingRecipe: true,
+                ...(resume ? { resume } : {}),
+                ...(ctx.signal ? { signal: ctx.signal } : {}),
+              }));
+            } catch (err) {
+              if (ctx.signal?.aborted) throw err;
+              if (err instanceof OpenConflictsError) {
+                // The engine already stopped the run on the gate's reason.
+                await writeGuardResult(ref, buildOpenConflictsReport(err, new Date().toISOString()), {
+                  baseline: true,
+                });
+                const result: GuardGenerateJobResult = {
+                  repoFullName,
+                  status: 'open-conflicts',
+                  written: 0,
+                  birthFindings: 0,
+                  noChanges: false,
+                  openConflicts: err.conflicts.length,
+                };
+                return {
+                  result,
+                  notification: {
                     level: 'warning',
-                    title: 'Flows generated, findings to review',
-                    body: `${written} scenario${written === 1 ? '' : 's'} written, ${findings} birth finding${findings === 1 ? '' : 's'}.`,
+                    title: 'Flow generation blocked',
+                    body: firstLine(err.message),
                     data: {
                       repoFullName,
                       runId: activityRun.runId,
-                      written,
-                      birthFindings: findings,
+                      openConflicts: err.conflicts.length,
                     },
-                  }
-                : {
-                    level: 'success',
-                    title: 'Flows generated',
-                    body: `${written} scenario${written === 1 ? '' : 's'} written.`,
-                    data: { repoFullName, runId: activityRun.runId, written },
                   },
-          };
-        } finally {
-          tree.dispose();
-        }
-      });
+                };
+              }
+              throw err;
+            }
+            // A stop the user asked for: the harness settles the row cancelled, and
+            // a store that never saw this run is exactly what a cancel means.
+            if (ctx.signal?.aborted) return { notification: null };
+            // Out of credits: what the engine got through is partial, so it is
+            // NOT stored as this repository's baseline. The resume replays what
+            // the caches already hold and pays only for the rest.
+            meter.assertCredits();
+            if (guard.status !== 'ok') {
+              throw new Error(guard.reason ?? `guard generate ended ${guard.status}.`);
+            }
+
+            // The report the engine left in the tree is what gets stored, so the
+            // row's counts come from it too — never from a result it could differ from.
+            const report = readGeneratedReport(tree.dir) ?? buildGuardReport(guard, new Date().toISOString());
+            await persistGeneratedGuard(ref, tree.dir, report);
+
+            // Keep successful documents and the failure report, but do not present
+            // an incomplete extraction as success or chain its baseline run.
+            if (report.extractionFailures.length > 0) {
+              const docs = report.extractionFailures.map(failure => failure.doc).join(', ');
+              activityTracker.error('extract', `Claim extraction failed for ${docs}`);
+              throw new Error(
+                `Claim extraction failed for ${docs}. Partial results were saved. Retry generation to complete coverage.`,
+              );
+            }
+
+            const written = report.written.length;
+            const findings = report.birthFindings.length;
+
+            const result: GuardGenerateJobResult = {
+              repoFullName,
+              status: 'ok',
+              written,
+              birthFindings: findings,
+              noChanges: report.noChanges,
+              openConflicts: 0,
+            };
+
+            // Nothing authored, nothing inherited: the scenario set this run just
+            // stored is empty, so the baseline run it would chain into can only
+            // clone and fail on "no scenarios" seconds later. Settle on the reason
+            // the report carries instead — a refused run latches one, a failed
+            // author leaves an error — and end the chain here. A `noChanges`
+            // report is no exception: an empty set that stayed empty is still
+            // empty, and the count here is what tells that from an unchanged
+            // set with scenarios in it.
+            if (written === 0 && runnableScenarios(tree.dir) === 0) {
+              return {
+                result: { ...result, status: 'nothing-written' },
+                notification: {
+                  level: 'warning',
+                  title: 'Flows generated nothing',
+                  body:
+                    firstLine(report.refusal?.message) ||
+                    firstLine(report.errors[0]?.message) ||
+                    'no flow settled',
+                  data: { repoFullName, runId: activityRun.runId },
+                },
+              };
+            }
+
+            return {
+              result,
+              notification: report.noChanges
+                ? {
+                    level: 'success',
+                    title: 'Flows up to date',
+                    body: 'Nothing changed since the last generate.',
+                    data: { repoFullName, runId: activityRun.runId },
+                  }
+                : findings > 0
+                  ? {
+                      level: 'warning',
+                      title: 'Flows generated, findings to review',
+                      body: `${written} scenario${written === 1 ? '' : 's'} written, ${findings} birth finding${findings === 1 ? '' : 's'}.`,
+                      data: {
+                        repoFullName,
+                        runId: activityRun.runId,
+                        written,
+                        birthFindings: findings,
+                      },
+                    }
+                  : {
+                      level: 'success',
+                      title: 'Flows generated',
+                      body: `${written} scenario${written === 1 ? '' : 's'} written.`,
+                      data: { repoFullName, runId: activityRun.runId, written },
+                    },
+            };
+          } finally {
+            tree.dispose();
+          }
+        }, meter);
+      } finally {
+        // However the generate ended, what it spent up to that point is written.
+        await meter.close();
+      }
     },
 
     onError: (err, payload) => {

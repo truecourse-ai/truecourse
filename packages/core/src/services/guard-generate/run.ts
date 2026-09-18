@@ -41,6 +41,7 @@ import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   GUARD_REVIEW_POLICY_VERSION,
   ExtractOutcomeSchema,
+  isCreditsExhausted,
   settledScenariosOf,
   type ExtractOutcome,
   type GuardFlowWorkerOutcome,
@@ -337,6 +338,9 @@ async function runCachedGuardPool<TItem, TOutcome>(
     try {
       acquired = await opts.driver()
     } catch (e) {
+      // A balance that refused the driver refuses every session behind it too:
+      // that is the run's pause, not this wave's transport failure.
+      if (isCreditsExhausted(e)) throw e
       const outcome = driverConstructionFailure(e)
       for (const item of toRun) {
         summary.ran++
@@ -687,6 +691,7 @@ export function createGuardGenerateSessionSeams(
       try {
         acquiredCtx = await acquire()
       } catch (e) {
+        if (isCreditsExhausted(e)) throw e
         const outcome = driverConstructionFailure(e)
         const reason = describeSessionFailure(outcome.failure)
         for (const task of ready) {

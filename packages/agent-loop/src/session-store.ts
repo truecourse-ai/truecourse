@@ -27,7 +27,18 @@ export const SessionCommandSchema = z.enum([
 ]);
 export type SessionCommand = z.infer<typeof SessionCommandSchema>;
 
-export const RunStatusSchema = z.enum(['running', 'completed', 'failed', 'interrupted']);
+/**
+ * `interrupted` is what a run a dead process left behind becomes; `paused` is
+ * what one becomes when it stopped on purpose with work still to do — out of
+ * credits — and can be carried on from where it got to.
+ */
+export const RunStatusSchema = z.enum([
+  'running',
+  'completed',
+  'failed',
+  'interrupted',
+  'paused',
+]);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
 /** One row of the run's session index — the dashboard lists sessions from

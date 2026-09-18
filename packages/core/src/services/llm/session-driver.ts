@@ -22,7 +22,7 @@ import {
 import type { SessionDriver, SessionLlm } from '@truecourse/agent-loop';
 import { resolveClaudeBinary } from '@truecourse/shared';
 import type { LlmApiConfig, LlmTransportMode } from './provider-config.js';
-import { buildProviderConfig, priceCall } from './install-transport.js';
+import { buildProviderConfig, pricingFor } from './install-transport.js';
 
 /** The model claude-code mode runs every session on. */
 export const SESSION_MODEL_CLAUDE_CODE = 'opus';
@@ -57,7 +57,8 @@ export interface SessionDriverOptions {
 export function createApiSessionDriverFor(
   api: LlmApiConfig | undefined,
 ): ConfiguredSessionDriver {
-  const driver = createApiSessionDriver(buildProviderConfig(api), { pricing: priceCall });
+  const cfg = buildProviderConfig(api);
+  const driver = createApiSessionDriver(cfg, { pricing: pricingFor(cfg) });
   return { driver, mode: 'api', attribution: driver.attribution };
 }
 

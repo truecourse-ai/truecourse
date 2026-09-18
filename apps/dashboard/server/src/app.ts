@@ -14,6 +14,9 @@ import guardActionsRouter from './routes/guard-actions.js';
 import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions.js';
 import capabilitiesRouter from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
+import { createUsageRouter } from './routes/usage.js';
+import { createCreditsRouter, createOperatorCreditsRouter } from './routes/credits.js';
+import { isLocalMode } from './mode.js';
 import { createAuthGate } from './middleware/auth.js';
 import { actorContext } from './middleware/actor.js';
 import type { GithubMount } from './github/index.js';
@@ -85,6 +88,13 @@ export interface CreateAppOptions {
    * registered it.
    */
   featureRouters?: ServerRouterMount[];
+  /**
+   * An organization's display name, as the identity provider knows it: the
+   * auth layer's cached lookup. The operator's Credits page lists a workspace
+   * by it rather than by its id; absent (local mode, a test) every row is its
+   * id, which is what the page falls back to.
+   */
+  workspaceNames?: (organizationId: string) => Promise<string | undefined>;
 }
 
 export function createApp(opts: CreateAppOptions): express.Express {
@@ -199,6 +209,23 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // The workspace's Models settings — workspace-scoped, not repo-scoped, so it
   // sits beside the registry routes rather than behind the project resolver.
   app.use('/api/llm', llmRouter);
+
+  // What this workspace's runs spent at the model. Workspace-scoped and
+  // read-only, so it sits beside the Models settings it accounts for.
+  app.use('/api/usage', createUsageRouter({ repoLinks }));
+
+  // What it may spend of TrueCourse's own. Absent in local mode, where there is
+  // no operator to grant anything and no platform key to spend: the `/api`
+  // catch-all below answers those addresses as the routes they are not.
+  if (!isLocalMode()) {
+    app.use('/api/credits', createCreditsRouter());
+    app.use(
+      '/api/operator/credits',
+      createOperatorCreditsRouter(
+        opts.workspaceNames ? { workspaceName: opts.workspaceNames } : {},
+      ),
+    );
+  }
 
   // The job queue: the live event stream, job status, and the notifications
   // feed. Workspace-scoped like the Models settings, so they mount together.

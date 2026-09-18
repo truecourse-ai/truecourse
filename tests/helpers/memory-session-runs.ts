@@ -175,6 +175,20 @@ export class MemorySessionRunStore implements SessionRunBackend {
     return held.handle;
   }
 
+  /** The same handle, running again: what a resumed job writes into. */
+  async resume(repoKey: string, command: SessionCommand, runId: string): Promise<SessionRunStore> {
+    const held = this.runs.get(runId);
+    if (!held || held.repoKey !== repoKey || held.record.command !== command) {
+      throw new SessionRunNotFoundError();
+    }
+    held.record.status = 'running';
+    delete held.record.finishedAt;
+    delete held.record.error;
+    appendActivityEvent(held.handle.dir, { kind: 'run', run: toPublicRunRecord(held.record) });
+    this.announce(repoKey);
+    return held.handle;
+  }
+
   async list(repoKey: string, command?: SessionCommand): Promise<RunRecord[]> {
     return [...this.runs.values()]
       .filter((h) => h.repoKey === repoKey && (!command || h.record.command === command))

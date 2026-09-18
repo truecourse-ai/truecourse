@@ -18,13 +18,17 @@
  * piece of work rather than one run record.
  *
  * The conversation route owns the one-row header (the repository, the status,
- * the ref, how long it took, and Run again when the work ended badly) and
- * mounts the conversation itself below it.
+ * the ref, how long it took, and one control when the work ended badly) and
+ * mounts the conversation itself below it. That control says what it does:
+ * Resume when the work can be carried on — the job that stopped for credits,
+ * put back on the queue, or a generate replaying its own record — and Run again
+ * when it can only be started from the beginning.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { MousePointer2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { EmptyState } from '@/components/ui/empty-state';
 import { RunConversationPage, RunElapsed } from '@/components/sessions/RunConversationPage';
 import {
@@ -37,7 +41,7 @@ import {
   type WorkStatus,
 } from '@/components/sessions/run-model';
 import type { JobView } from '@truecourse/shared';
-import { getWorkspaceRun, type WorkspaceRun } from '@/lib/api';
+import { getWorkspaceRun, resumePausedRun, type WorkspaceRun } from '@/lib/api';
 import { connectSocket } from '@/lib/socket';
 import { PageHeader } from '@/dashboard/ui/bits';
 import { filterKey, selectedValues, type FilterDimension } from '@/dashboard/ui/filter-builder';
@@ -347,6 +351,9 @@ function RunStatusWord({ status, run }: { status: WorkStatus; run: WorkspaceRun 
 /** One conversation: the header this page owns, the flow underneath it. */
 function ConversationRoute({ runId }: { runId: string }) {
   const [run, setRun] = useState<WorkspaceRun | null>(null);
+  // The job waiting to carry this run on, when it stopped for credits.
+  const [pausedJobId, setPausedJobId] = useState<string | null>(null);
+  const [resuming, setResuming] = useState(false);
   const [missing, setMissing] = useState(false);
   const starter = useRunTrigger(run?.repo?.id ?? '');
 
@@ -367,6 +374,7 @@ function ConversationRoute({ runId }: { runId: string }) {
         try {
           const res = await getWorkspaceRun(runId);
           setRun(res.run);
+          setPausedJobId(res.pausedJobId ?? null);
           setMissing(false);
         } catch {
           setMissing(true);
@@ -433,10 +441,20 @@ function ConversationRoute({ runId }: { runId: string }) {
 
   if (!run) return null;
 
-  // Only a repository's work can be started again from here: the workspace's
+  // A run that stopped for money is carried on by the JOB that stopped: that
+  // row goes back on the queue with everything it had reached, whatever the
+  // command, so this is a real Resume and never a second run beside the first.
+  // It belongs to the workspace's own work as much as a repository's.
+  const carriesOn = run.status === 'paused' && pausedJobId !== null;
+  // Only a repository's work can be STARTED AGAIN from here: the workspace's
   // own runs start on Context, which is where their subject lives.
-  const canRerun = run.repo !== null && (run.status === 'failed' || run.status === 'interrupted');
-  const canResume = run.command === 'guard-generate';
+  const canRerun =
+    run.repo !== null &&
+    (run.status === 'failed' || run.status === 'interrupted' || run.status === 'paused');
+  // A generate that died can be started again from its own record, replaying
+  // what it had already authored. No other command has such a grant, so no
+  // other command's button may say Resume.
+  const replaysRecord = run.command === 'guard-generate' && !carriesOn;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -451,15 +469,37 @@ function ConversationRoute({ runId }: { runId: string }) {
             <RunStatusWord status={run.status} run={run} />
             <span className="font-mono text-muted-foreground">{shortRef(run.gitRef)}</span>
             <RunElapsed run={run} />
-            {canRerun && starter.supports(run.command) && (
+            {carriesOn ? (
               <button
                 type="button"
-                disabled={starter.pending}
-                onClick={() => starter.start(run.command, canResume ? run.runId : undefined)}
+                disabled={resuming}
+                onClick={() => {
+                  setResuming(true);
+                  void resumePausedRun(pausedJobId)
+                    .then(() => read())
+                    .catch((e: unknown) =>
+                      toast.error('Could not carry the run on', {
+                        description: e instanceof Error ? e.message : String(e),
+                      }),
+                    )
+                    .finally(() => setResuming(false));
+                }}
                 className="rounded border border-border px-2 py-0.5 font-medium text-foreground hover:bg-muted/60 disabled:opacity-50"
               >
-                {starter.pending ? 'Starting…' : canResume ? 'Resume' : 'Run again'}
+                {resuming ? 'Resuming…' : 'Resume'}
               </button>
+            ) : (
+              canRerun &&
+              starter.supports(run.command) && (
+                <button
+                  type="button"
+                  disabled={starter.pending}
+                  onClick={() => starter.start(run.command, replaysRecord ? run.runId : undefined)}
+                  className="rounded border border-border px-2 py-0.5 font-medium text-foreground hover:bg-muted/60 disabled:opacity-50"
+                >
+                  {starter.pending ? 'Starting…' : replaysRecord ? 'Resume' : 'Run again'}
+                </button>
+              )
             )}
           </span>
         }

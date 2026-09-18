@@ -26,6 +26,7 @@ import {
   hashableRecipeText,
   type Recipe,
 } from '@truecourse/guard-runner';
+import { isCreditsExhausted } from '@truecourse/shared';
 import { runSessionPool } from '../agent/session-pool.js';
 import { preparationContext } from './preparation-context.js';
 import { preparationObservationSession, qualifyObservations, type ObservationReview } from './preparation-observation.js';
@@ -376,6 +377,7 @@ export function buildPreparationSession(
         ...(context.runId() ? { sessionRunId: context.runId() } : {}),
       };
     } catch (error) {
+      if (isCreditsExhausted(error)) throw error;
       return {
         status: 'failed',
         reason: redact(error instanceof Error ? error.message : String(error)),

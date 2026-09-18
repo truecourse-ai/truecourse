@@ -150,6 +150,37 @@ export class PgSessionRunStore implements SessionRunBackend {
     return run;
   }
 
+  /**
+   * Carry a settled run on. The record goes back to `running` and this process
+   * takes the writer's lease in ONE transaction, so the write guard every later
+   * event passes ("a terminal run takes no running state") sees a live run
+   * rather than the one it stopped as. The journal, the sessions it already
+   * parked and the checklist all stand: a resume continues the conversation.
+   */
+  async resume(repoKey: string, command: Command, runId: string): Promise<SessionRunStore> {
+    await this.reconcile([repoKey]);
+    const resumed = await this.db.transaction(async tx => {
+      const [row] = await tx.select().from(activityRuns).where(and(eq(activityRuns.repoKey, repoKey), eq(activityRuns.command, command), eq(activityRuns.runId, runId))).for('update');
+      if (!row) throw new SessionRunNotFoundError();
+      const record = clone(row.record) as Record;
+      record.status = 'running';
+      delete record.finishedAt; delete record.error;
+      await tx.update(activityRuns).set({
+        record, nextCursor: row.nextCursor + 1,
+        owner: this.owner, leaseUntil: sql`CURRENT_TIMESTAMP + interval '60 seconds'`,
+      }).where(eq(activityRuns.runId, runId));
+      await tx.insert(activityEvents).values({ runId, cursor: row.nextCursor, body: { kind: 'run', run: toPublicRunRecord(record) } });
+      await tx.execute(sql`SELECT pg_notify('truecourse_activity', ${JSON.stringify({ repoKey, runId, owner: this.owner })})`);
+      return { record, cursor: row.nextCursor };
+    });
+    this.live.delete(runId);
+    const run = this.handle(repoKey, resumed.record);
+    this.live.set(runId, run);
+    this.announce(repoKey, runId, false);
+    publishCommittedActivity(run.dir, { cursor: resumed.cursor, kind: 'run', run: toPublicRunRecord(clone(resumed.record) as Record) });
+    return run;
+  }
+
   async open(repoKey: string, command: Command, runId: string): Promise<SessionRunStore> {
     await this.reconcile([repoKey]);
     const [row] = await this.db.select().from(activityRuns).where(and(eq(activityRuns.repoKey, repoKey), eq(activityRuns.command, command), eq(activityRuns.runId, runId)));
@@ -384,6 +415,14 @@ export class PgSessionRunStore implements SessionRunBackend {
       finish(status, options) {
         record.status = status; record.finishedAt = new Date().toISOString(); delete record.endpoint;
         if (options?.error) record.error = options.error;
+        // A pause is a stop the run is carried on from, so its live sessions are
+        // parked rather than left reading as running — the same word the boot
+        // sweep gives the sessions of a run a dead process abandoned.
+        if (status === 'paused') {
+          for (const session of record.sessions) {
+            if (session.status === 'running' || session.status === 'waiting') session.status = 'parked';
+          }
+        }
         write();
       },
       persistence: {

@@ -2,7 +2,8 @@
  * Install the storage. Every one of core's store seams is filled here with its
  * `@truecourse/data-store` Postgres implementation, so the whole pipeline — the
  * repository registry, the specs, the workspace's context, the guard state, the
- * session runs and the LLM-stage caches — reads and writes the database. A run's
+ * session runs, what the runs spent and the LLM-stage caches — reads and writes
+ * the database. A run's
  * working tree is an ephemeral clone (see services/run-clone.service.ts) and
  * holds nothing durable.
  *
@@ -20,6 +21,8 @@ import { setRepoDocReader, type RepoDocReader } from '@truecourse/core/lib/repo-
 import { setGuardStore } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { setContextStore } from '@truecourse/core/lib/context-store';
+import { setUsageStore } from '@truecourse/core/lib/usage-store';
+import { setCreditsStore } from '@truecourse/core/lib/credits-store';
 import { setRegistryStore } from '@truecourse/core/config/registry';
 import { setSessionRunBackend } from '@truecourse/core/lib/sessions-store';
 import { setKvCacheStore } from '@truecourse/llm';
@@ -32,6 +35,8 @@ import {
   RepositoriesRegistryStore,
   PgKvCacheStore,
   PgLlmConfigStore,
+  PgUsageStore,
+  PgCreditsStore,
   purgeRepoData,
 } from '@truecourse/data-store';
 import { setShowResolvedStageModel, setShowStageUsage } from '@truecourse/core/commands/spec-in-process';
@@ -146,6 +151,13 @@ export function installDbStores(
   // in the pipeline reads a provider by itself — the routes load the asking
   // workspace's and thread it into the run.
   setWorkspaceLlmConfigStore(new PgLlmConfigStore(db, masterSecret));
+  // What every run spent at the model, one row per (job, stage or session),
+  // written while the run goes. Settings › Usage is the read side.
+  setUsageStore(new PgUsageStore(db));
+  // What a workspace running on TrueCourse's own key may spend, and every
+  // movement of it. The platform key itself is never here: it is the server's
+  // environment, read per run.
+  setCreditsStore(new PgCreditsStore(db));
   // Each workspace names ONE model, and its transport ignores the per-stage
   // hint, so rendering the per-stage tiers would be a lie.
   setShowResolvedStageModel(false);

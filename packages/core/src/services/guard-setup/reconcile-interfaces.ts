@@ -54,7 +54,12 @@ import {
   type CliProbeExec,
   type MapperDiagnostic,
 } from '@truecourse/interface-mapper'
-import { interfaceFingerprint, type Interface } from '@truecourse/shared'
+import {
+  CreditsExhaustedError,
+  interfaceFingerprint,
+  isCreditsPauseFailure,
+  type Interface,
+} from '@truecourse/shared'
 import { cachedSessionOutcome, promptFingerprint } from '../agent/session-cache.js'
 
 export const RECONCILE_INTERFACES_SESSION_KIND = 'guard-setup.reconcile-interfaces'
@@ -431,6 +436,12 @@ export async function runReconcileInterfacesSession(
       }).outcome
     },
   })
+  // The one session guard setup runs outside the pool, so it carries the pool's
+  // credits rule itself: a park on an empty balance is the run's pause, not a
+  // reconcile that decided nothing.
+  if (outcome.status === 'failed' && isCreditsPauseFailure(outcome.failure)) {
+    throw new CreditsExhaustedError()
+  }
   return { outcome, ...(sessionId ? { sessionId } : {}) }
 }
 

@@ -80,6 +80,14 @@ export const EVENTS = {
   inviteLinkCreated: 'invite_link_created',
   /** A self-serve signup named their workspace. */
   workspaceCreated: 'workspace_created',
+  /** An operator handed a workspace credits. */
+  creditsGranted: 'credits_granted',
+  /** A workspace ran out of credits — mid-run, or at a start it was refused. */
+  creditsExhausted: 'credits_exhausted',
+  /** A job stopped part-way with nothing wrong. */
+  runPaused: 'run_paused',
+  /** A paused job was carried on. */
+  runResumed: 'run_resumed',
 } as const;
 
 export type ServerAnalyticsEvent = (typeof EVENTS)[keyof typeof EVENTS];
@@ -189,6 +197,20 @@ export function captureJobStarted(info: JobStartedInfo): void {
  * for it may be long closed.
  */
 export function captureJobFinished(info: JobSettledInfo): void {
+  // A pause is not a finish: the work is unfinished and nothing went wrong, so
+  // it is its own event — and for every job type, not just the four that pair.
+  if (info.outcome === 'paused') {
+    captureAction(EVENTS.runPaused, {
+      workspaceId: info.org,
+      properties: {
+        jobType: info.type,
+        jobId: info.jobId,
+        reason: 'credits',
+        repo: info.meta?.repoFullName ?? undefined,
+      },
+    });
+    return;
+  }
   const event = FINISHED_EVENTS[info.type];
   if (!event) return;
   captureAction(event, {
@@ -200,6 +222,14 @@ export function captureJobFinished(info: JobSettledInfo): void {
       repo: info.meta?.repoFullName ?? undefined,
       commit: info.meta?.commitSha ?? undefined,
     },
+  });
+}
+
+/** A paused job carried on — by a grant, by a key, or by somebody pressing Resume. */
+export function captureRunResumed(org: string, jobType: string, jobId: string): void {
+  captureAction(EVENTS.runResumed, {
+    workspaceId: org,
+    properties: { jobType, jobId, reason: 'credits' },
   });
 }
 

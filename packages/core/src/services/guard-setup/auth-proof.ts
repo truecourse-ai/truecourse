@@ -42,6 +42,7 @@ import {
   type ResolvedDependency,
   type SuppliedInstance,
 } from '@truecourse/guard-runner';
+import { isCreditsExhausted } from '@truecourse/shared';
 import { runSessionPool } from '../agent/session-pool.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 
@@ -392,6 +393,7 @@ export function buildAuthProof(
         ...(sessionRunId ? { sessionRunId } : {}),
       };
     } catch (error) {
+      if (isCreditsExhausted(error)) throw error;
       return {
         status: 'failed',
         reason: error instanceof Error ? error.message : String(error),

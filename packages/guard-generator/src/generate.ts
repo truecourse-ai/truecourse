@@ -4,7 +4,7 @@ import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
 import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowInvocationGaps } from './prerequisites.js'
 import { reconcileRemaining, type RepairIssue } from './worker-repair.js'
-import { GUARD_OBSERVATION_CAPABILITIES, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
+import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * `guard generate` orchestration — the LLM pipeline that turns spec FLOWS into
@@ -740,6 +740,15 @@ export interface GenerateGuardsOptions {
    * of a session or a computation.
    */
   onFact?: (step: GuardGenerateFactStep, line: string) => void
+
+  /**
+   * This step went through its whole work list and some of its items never
+   * settled: it finished, and what it wrote to its caches does not cover
+   * everything it was given. Reported once per step, after the step's last
+   * item. A resume reads it — replaying such a step from its caches would
+   * miss exactly the items that failed.
+   */
+  onStepIncomplete?: (step: GuardGenerateFactStep) => void
 }
 
 /** The generate phases a fact can be filed under; the core command maps them
@@ -1005,6 +1014,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const transport = audit.transport
   /** File one line about a thing this run did, under the phase that did it. */
   const fact = (step: GuardGenerateFactStep, line: string): void => options.onFact?.(step, line)
+  /** Say this step finished over items that never settled. */
+  const incomplete = (step: GuardGenerateFactStep): void => options.onStepIncomplete?.(step)
 
   if (!hasGuardUniverse(repoRoot)) {
     return emptyResult('no-docs', {
@@ -1370,6 +1381,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     })
   }
 
+  // A document that could not be extracted (or whose views did not all land)
+  // leaves nothing in the extract caches for it, so the step finished over work
+  // a replay cannot supply.
+  if (extractionFailures.length > 0) incomplete('extract')
+
   // Extraction is the stage everything downstream reads: when EVERY extract call
   // failed there are no claims, so synthesis, authoring, and the manifest would run
   // over nothing and the run would report `ok` with an empty result — a run that
@@ -1538,6 +1554,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   })
   const flowsSessionLoss = (synthesis.sessionSummaries ?? []).find(isSystemicSessionLoss)
   for (const summary of synthesis.sessionSummaries ?? []) recordSessionSummary(summary)
+  // An area that produced no flows cached none of them.
+  if (synthesis.unsettled.length > 0) incomplete('flows')
 
   // Flow synthesis is the flows line's generation unit: with no flows there is
   // nothing to match, nothing to author, and — worse — the manifest pass below reads
@@ -2001,6 +2019,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     for (const line of result.facts) fact('match', line)
     if (result.work) works.push(result.work)
   }
+  // Only a SETTLED verdict is cached, so a pair whose call was lost has no
+  // entry for a replay to read.
+  if (matchCallErrors > 0) incomplete('match')
 
 
   // Matching decides which interfaces each flow's scenario walks: with no plan the
@@ -2108,6 +2129,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             settled = true
           }
         } catch (e) {
+          // The deterministic fallback below is a guess about the world; it must
+          // not stand in for a call the balance refused to pay for.
+          if (isCreditsExhausted(e)) throw e
           lastError = (e as Error).message
         }
       }

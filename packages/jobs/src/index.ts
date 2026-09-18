@@ -10,9 +10,12 @@
  *
  * Enqueues are single-flight per `key`: one active job per (workspace, key), so
  * a redelivered webhook, a double click or a chain race never queues a
- * duplicate. A cancel stops the run when it is happening in this process and
- * settles the row `cancelled`; cancellation is a normal outcome, not a failure,
- * so it records no error and posts no notification.
+ * duplicate. A PAUSED row does not hold the key (it is terminal), so an enqueue
+ * under a key something is paused under supersedes it: the new job does that
+ * work, and the old row must not be carried on later and run it again. A cancel
+ * stops the run when it is happening in this process and settles the row
+ * `cancelled`; cancellation is a normal outcome, not a failure, so it records no
+ * error and posts no notification.
  *
  * An enqueue can also name a QUEUE (see {@link EnqueueOptions}), which is how a
  * caller says "these jobs must not run at the same time as each other".
@@ -201,6 +204,13 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
       // bogus "already running" null. Mark it terminal, then rethrow.
       await jobStore.markFailed(job.id, (err as Error).message).catch(() => undefined);
       throw err;
+    }
+    // Whatever was still PAUSED under this key is superseded: this job does
+    // that work now, and a row left waiting would be carried on by the next
+    // grant and run it a second time.
+    const superseded = await jobStore.supersedePaused(org, key).catch(() => 0);
+    if (superseded > 0) {
+      log.info(`[jobs] ${task} ${job.id} supersedes ${superseded} paused job(s) of ${key}`);
     }
     // The queued row is news the moment it exists: a job waiting its turn in
     // a lane shows on the Agent page from this frame, not from the next frame

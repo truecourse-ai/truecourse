@@ -37,8 +37,10 @@ export const jobs = pgTable(
     type: text('type').notNull(),
     /** Single-flight / UI-mapping key, e.g. 'context.sync:<sourceId>'. Null ⇒ no single-flight. */
     key: text('key'),
-    /** 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'. */
+    /** 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted' | 'paused'. */
     status: text('status').notNull(),
+    /** Why a `paused` row stopped ('credits'); null for every other outcome. */
+    pauseReason: text('pause_reason'),
     progressCurrent: integer('progress_current').notNull().default(0),
     progressTotal: integer('progress_total').notNull().default(0),
     progressMessage: text('progress_message'),

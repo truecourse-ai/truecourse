@@ -28,6 +28,13 @@ export interface OnboardingJobRequest {
    * asked directly: a chain, a webhook, the scheduler.
    */
   requestedBy?: string;
+  /**
+   * The run record this job is carrying on. Declared by the BODY through
+   * `ctx.resumeWith` the moment it opens one, so a paused row put back on the
+   * queue writes into the conversation it stopped in rather than a second one
+   * beside it. Never a caller's to set: a fresh request is a fresh run.
+   */
+  carryOnRunId?: string;
 }
 
 export type OnboardingJobPayload = OnboardingJobRequest & JobPayload;

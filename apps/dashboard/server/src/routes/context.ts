@@ -83,7 +83,12 @@ import {
   docCoveragePlainStatus,
   readGuardCoverageSources,
 } from '@truecourse/core/commands/guard-read';
-import { LlmNotConfiguredError, LlmProbeFailedError, startWorkspaceLlm } from '../services/workspace-llm.service.js';
+import {
+  CreditsProviderUnavailableError,
+  LlmNotConfiguredError,
+  LlmProbeFailedError,
+  startWorkspaceLlm,
+} from '../services/workspace-llm.service.js';
 import {
   contextIsStale,
   recordFailedWorkspaceScanRun,
@@ -101,6 +106,7 @@ import {
   type SiteSourceConfig,
 } from '@truecourse/shared';
 import { requireJobs } from '../jobs/current.js';
+import { refusedWithoutCredits } from './credits.js';
 import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
 import { emitContextChanged, serverContextDrivers } from '../services/context.service.js';
 import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
@@ -547,10 +553,15 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/scan', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
+      // The balance first: proving a provider that cannot be paid for is work
+      // nobody asked for, and the refusal is about the money either way.
+      if (await refusedWithoutCredits(req, res)) return;
       try {
         await startWorkspaceLlm(org);
       } catch (e) {
-        if (e instanceof LlmNotConfiguredError) {
+        // A workspace that chose credits on a server that holds none: a setting
+        // to change, like an unconfigured provider, not a job that dies later.
+        if (e instanceof CreditsProviderUnavailableError || e instanceof LlmNotConfiguredError) {
           res.status(409).json({ error: e.code, message: e.message });
           return;
         }
