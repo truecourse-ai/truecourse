@@ -396,7 +396,7 @@ describe('buildResourceHints + the PLACES block', () => {
       type: 'web',
       title: id,
       entry: { method: 'GET', path: '/' },
-      steps: [{ kind: 'activate', target: 'button "x"' }],
+      steps: [{ kind: 'activate', target: { role: 'button', name: 'x' } }],
       ...(at ? { at } : {}),
       ...(to ? { to } : {}),
       fingerprint: `fp-${id}`,

@@ -11,7 +11,7 @@ afterEach(() => { resetKvCacheStore(); while (repos.length) rmrf(repos.pop()!) }
 function repo() { const r = makeTempRepo(); repos.push(r); return r }
 const control: Interface = { id: 'web/cancel-add', title: 'Cancel adding', type: 'web', purpose: 'control',
   entry: { method: 'GET', path: '/' }, at: 'add-dialog', to: 'root',
-  steps: [{ kind: 'activate', target: 'button "Cancel"', within: { role: 'dialog', name: 'Add expense', exact: true } }],
+  steps: [{ kind: 'activate', target: { role: 'button', name: 'Cancel' }, within: { role: 'dialog', name: 'Add expense', exact: true } }],
   fingerprint: 'sha256:cancel' }
 const catalog = buildSurfaceCatalogs([control]).get('web')!
 function flow(extra: Partial<GuardFlowMilestone> = {}): GuardFlow {

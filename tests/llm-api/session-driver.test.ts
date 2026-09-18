@@ -14,8 +14,10 @@ const { buildModelMock } = vi.hoisted(() => ({ buildModelMock: vi.fn() }));
 vi.mock('../../packages/llm-api/src/model.js', () => ({ buildModel: buildModelMock }));
 
 import {
+  condenseCutOff,
   createApiSessionDriver,
   DEFAULT_API_RETRY,
+  MAX_WHITESPACE_RUN,
   OUTCOME_TOOL_NAME,
   RETRY_JITTER,
   retryDelayMs,
@@ -27,11 +29,17 @@ import type {
 import type {
   DriverResult,
   SessionDef,
+  SessionEvent,
   SessionEventBody,
+  SessionPersistence,
   SessionProgress,
   SessionRunInput,
 } from '../../packages/agent-loop/src/index';
-import { defineSessionTool, SessionToolArgsError } from '../../packages/agent-loop/src/index';
+import {
+  defineSessionTool,
+  runAgentLoop,
+  SessionToolArgsError,
+} from '../../packages/agent-loop/src/index';
 
 const cfg = {
   provider: 'anthropic' as const,
@@ -52,7 +60,7 @@ type StubContent =
   | { type: 'reasoning'; text: string }
   | { type: 'tool-call'; toolCallId: string; toolName: string; input: string };
 
-type StubTurn = { content: StubContent[] } | { throws: unknown };
+type StubTurn = { content: StubContent[] } | { throws: unknown } | { parts: unknown[] };
 
 /** One scripted turn as the parts the provider streams it in. */
 function streamParts(content: StubContent[]): unknown[] {
@@ -118,7 +126,7 @@ function scriptedModel(turns: StubTurn[]) {
         const turn = turns.shift();
         if (!turn) throw new Error('scripted model ran out of turns');
         if ('throws' in turn) throw turn.throws;
-        const parts = streamParts(turn.content);
+        const parts = 'parts' in turn ? turn.parts : streamParts(turn.content);
         return {
           stream: new ReadableStream({
             start(controller) {
@@ -1217,5 +1225,189 @@ describe('retryDelayMs', () => {
     expect(retryDelayMs(policy, 1, undefined, () => 0.5)).toBeGreaterThan(
       retryDelayMs(policy, 1, undefined, noJitter),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// a reply that never finishes: the output limit, and the whitespace flood
+// ---------------------------------------------------------------------------
+
+/**
+ * A turn the provider streams as a tool call it OPENS and never closes: no
+ * `tool-input-end`, no `tool-call`, so the SDK hands back no call at all. It is
+ * what a reply cut off at the output limit looks like on the wire, and what the
+ * degenerate case looks like once the model stops writing anything real.
+ */
+function unfinishedCall(
+  toolName: string,
+  deltas: readonly string[],
+  finishReason: 'length' | 'stop',
+): unknown[] {
+  return [
+    { type: 'stream-start', warnings: [] },
+    { type: 'tool-input-start', id: 'c-cut', toolName },
+    ...deltas.map((delta) => ({ type: 'tool-input-delta', id: 'c-cut', delta })),
+    {
+      type: 'finish',
+      finishReason: { unified: finishReason },
+      usage: {
+        inputTokens: { total: 100, noCache: 40, cacheRead: 50, cacheWrite: 10 },
+        outputTokens: { total: 128_000, text: 128_000, reasoning: undefined },
+      },
+    },
+  ];
+}
+
+describe('api session driver degenerate output', () => {
+  it('aborts a reply flooding whitespace and ends the session on it, unretried', async () => {
+    const scripted = scriptedModel([
+      { parts: unfinishedCall('probe', ['{"value":"Add', ' '.repeat(3_000)], 'length') },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle, events } = runSession(createApiSessionDriver(cfg));
+
+    const result = (await handle.done) as Extract<DriverResult, { kind: 'failure' }>;
+    expect(result.kind).toBe('failure');
+    expect(result.failure).toMatchObject({ kind: 'malformed', retryability: 'none' });
+    expect(result.failure.kind === 'malformed' && result.failure.detail).toContain(
+      '3000 consecutive whitespace characters in the arguments of `probe`',
+    );
+    // Neither retried on the model that produced it nor swapped to the
+    // fallback: the same prompt floods the same way.
+    expect(scripted.calls).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'provider-retry')).toHaveLength(0);
+  });
+
+  it('records what the flooding turn wrote, with the flood collapsed to a count', async () => {
+    const scripted = scriptedModel([
+      { parts: unfinishedCall('probe', ['{"value":"Add expense', ' '.repeat(2_500)], 'length') },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle, events } = runSession(createApiSessionDriver(cfgNoFallback));
+    await handle.done;
+
+    const turn = events.find((e) => e.type === 'assistant-turn');
+    expect(turn).toMatchObject({
+      cutOff: {
+        reason: 'degenerate',
+        toolName: 'probe',
+        partial: '{"value":"Add expense[+2500 whitespace]',
+      },
+    });
+  });
+
+  it('fires only past the guard — a turn with a merely long indent is untouched', async () => {
+    const value = ' '.repeat(MAX_WHITESPACE_RUN - 1);
+    const scripted = scriptedModel([
+      {
+        parts: [
+          { type: 'stream-start', warnings: [] },
+          { type: 'tool-input-start', id: 'c1', toolName: 'probe' },
+          { type: 'tool-input-delta', id: 'c1', delta: `{"value":"${value}"` },
+          { type: 'tool-input-delta', id: 'c1', delta: '}' },
+          { type: 'tool-input-end', id: 'c1' },
+          {
+            type: 'tool-call',
+            toolCallId: 'c1',
+            toolName: 'probe',
+            input: JSON.stringify({ value }),
+          },
+          {
+            type: 'finish',
+            finishReason: { unified: 'tool-calls' },
+            usage: {
+              inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 10, text: 10, reasoning: undefined },
+            },
+          },
+        ],
+      },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle, events } = runSession(createApiSessionDriver(cfgNoFallback));
+
+    expect(await handle.done).toMatchObject({ kind: 'outcome' });
+    expect(events.some((e) => e.type === 'assistant-turn' && 'cutOff' in e)).toBe(false);
+  });
+
+  it('collapses every long run and elides a tail past the transcript budget', () => {
+    expect(condenseCutOff(`a${' '.repeat(40)}b${'\n'.repeat(25)}c`)).toBe(
+      'a[+40 whitespace]b[+25 whitespace]c',
+    );
+    // A short run is the argument's own formatting and stays verbatim.
+    expect(condenseCutOff('a\n  b')).toBe('a\n  b');
+    expect(condenseCutOff('x'.repeat(5_000)).endsWith('… [+3000 more characters]')).toBe(true);
+  });
+});
+
+describe('api session driver output-limit cut-off', () => {
+  it('sends a correction instead of the continue nudge, and marks the turn malformed', async () => {
+    const scripted = scriptedModel([
+      { parts: unfinishedCall('probe', ['{"value":"one'], 'length') },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle, events } = runSession(createApiSessionDriver(cfgNoFallback));
+
+    expect(await handle.done).toMatchObject({ kind: 'outcome' });
+    expect(events.find((e) => e.type === 'assistant-turn')).toMatchObject({
+      cutOff: { reason: 'length', toolName: 'probe', partial: '{"value":"one' },
+    });
+    // The turn is malformed — that is what the shell counts — and what the
+    // model actually reads tells it to make the call smaller.
+    expect(events.find((e) => e.type === 're-ask')).toMatchObject({
+      invalid: '{"value":"one',
+      reason: 'the reply was cut off at the output limit before the `probe` call was complete',
+    });
+    const said = events.flatMap((e) => (e.type === 'user-message' ? [e.content] : []));
+    expect(said.some((m) => m.includes('make it SMALLER'))).toBe(true);
+    expect(said.some((m) => m.startsWith('Continue.'))).toBe(false);
+  });
+
+  it('leaves a text turn that stopped normally on the continue nudge', async () => {
+    const scripted = scriptedModel([
+      { content: [text('still reading')] },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle, events } = runSession(createApiSessionDriver(cfgNoFallback));
+
+    expect(await handle.done).toMatchObject({ kind: 'outcome' });
+    expect(events.some((e) => e.type === 're-ask')).toBe(false);
+    expect(
+      events.some((e) => e.type === 'user-message' && e.content.startsWith('Continue.')),
+    ).toBe(true);
+  });
+
+  it('ends the session on two cut-off replies in a row, under the shell’s malformed policy', async () => {
+    const scripted = scriptedModel([
+      { parts: unfinishedCall('probe', ['{"value":"one'], 'length') },
+      { parts: unfinishedCall('probe', ['{"value":"two'], 'length') },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const journal = new Map<string, SessionEvent[]>();
+    const persistence: SessionPersistence = {
+      appendEvent(sessionId, event) {
+        journal.set(sessionId, [...(journal.get(sessionId) ?? []), event]);
+      },
+      updateIndex() {},
+      readEvents: (sessionId) => journal.get(sessionId) ?? [],
+    };
+    const outcome = await runAgentLoop({
+      def: makeDef(),
+      workItem: 'w',
+      initialMessages: ['go'],
+      driver: createApiSessionDriver(cfgNoFallback),
+      persistence,
+      sessionId: 's-cut',
+    }).outcome;
+
+    expect(outcome.status).toBe('failed');
+    expect(outcome.status === 'failed' && outcome.failure).toEqual({
+      kind: 'malformed',
+      detail: 'two consecutive malformed turns',
+      retryability: 'none',
+    });
   });
 });

@@ -91,23 +91,23 @@ const api = (method: string, path: string, extra: Partial<Row> = {}): Row => ({
 // with titles) — it feeds the search haystack and any surface that wants it.
 describe('signatures — web', () => {
   it('camelCases the task id, stripped of its surface prefix', () => {
-    expect(memberSignature(web('web/silence-rule-from-violation-card', [{ kind: 'activate', target: 'button "x"' }])))
+    expect(memberSignature(web('web/silence-rule-from-violation-card', [{ kind: 'activate', target: { role: 'button', name: 'x' } }])))
       .toBe('silenceRuleFromViolationCard()');
   });
 
   it('takes one argument per {placeholder} in the step TARGETS, in step order, deduped', () => {
     const iface = web('web/reenable-rule-from-rules-panel', [
-      { kind: 'activate', target: 'button "Browse Rules"' },
-      { kind: 'activate', target: 'switch "Enable {rule}"' },
-      { kind: 'activate', target: 'button "Confirm {rule}"' },
+      { kind: 'activate', target: { role: 'button', name: 'Browse Rules' } },
+      { kind: 'activate', target: { role: 'switch', name: 'Enable {rule}' } },
+      { kind: 'activate', target: { role: 'button', name: 'Confirm {rule}' } },
     ]);
     expect(memberSignature(iface)).toBe('reenableRuleFromRulesPanel(rule)');
   });
 
   it('names an input step with no placeholder `text` — something is typed into it', () => {
     const iface = web('web/add-repository-by-path', [
-      { kind: 'input', target: 'textbox "Paste repository path..."' },
-      { kind: 'activate', target: 'button "Add Repository"' },
+      { kind: 'input', target: { role: 'textbox', name: 'Paste repository path...' } },
+      { kind: 'activate', target: { role: 'button', name: 'Add Repository' } },
     ]);
     expect(memberSignature(iface)).toBe('addRepositoryByPath(text)');
   });
@@ -120,7 +120,7 @@ describe('signatures — web', () => {
   });
 
   it('has no return type of its own — a web task moves the WORLD, and says so as states', () => {
-    const iface = web('web/silence-rule', [{ kind: 'activate', target: 'button "x"' }], {
+    const iface = web('web/silence-rule', [{ kind: 'activate', target: { role: 'button', name: 'x' } }], {
       endState: 'rule-silenced',
     });
     expect(memberReturns(iface)).toBeUndefined();
@@ -143,21 +143,21 @@ describe('the locator chain', () => {
   it('joins the step targets in the order they run', () => {
     expect(
       taskLocatorChain([
-        { kind: 'activate', target: 'button "More actions"' },
-        { kind: 'activate', target: 'menuitem "Disable rule for this repo"' },
+        { kind: 'activate', target: { role: 'button', name: 'More actions' } },
+        { kind: 'activate', target: { role: 'menuitem', name: 'Disable rule for this repo' } },
       ]),
     ).toBe('button "More actions" → menuitem "Disable rule for this repo"');
   });
 
   it('renders the targets VERBATIM, placeholders and all — the driver looks for these', () => {
-    expect(taskLocatorChain([{ kind: 'activate', target: 'button "{category}"' }])).toBe('button "{category}"');
+    expect(taskLocatorChain([{ kind: 'activate', target: { role: 'button', name: '{category}' } }])).toBe('button "{category}"');
   });
 
   it('takes an input step by its target, like any other element', () => {
     expect(
       taskLocatorChain([
-        { kind: 'input', target: 'textbox "Paste repository path..."' },
-        { kind: 'activate', target: 'button "Add Repository"' },
+        { kind: 'input', target: { role: 'textbox', name: 'Paste repository path...' } },
+        { kind: 'activate', target: { role: 'button', name: 'Add Repository' } },
       ]),
     ).toBe('textbox "Paste repository path..." → button "Add Repository"');
   });
@@ -167,7 +167,7 @@ describe('the locator chain', () => {
     expect(
       taskLocatorChain([
         { kind: 'navigate', route: '/' },
-        { kind: 'activate', target: 'link "{repoName}"' },
+        { kind: 'activate', target: { role: 'link', name: '{repoName}' } },
       ]),
     ).toBe('link "{repoName}"');
   });
@@ -308,13 +308,13 @@ describe('screens — a top-level place and its parts', () => {
     { id: 'orphan-pane', kind: 'panel', title: 'the orphan pane', of: 'nowhere' },
   ];
   const interfaces = [
-    web('web/silence-rule', [{ kind: 'activate', target: 'button "x"' }], { at: 'violations-list' }),
-    web('web/open-rules-panel', [{ kind: 'activate', target: 'button "Rules"' }], {
+    web('web/silence-rule', [{ kind: 'activate', target: { role: 'button', name: 'x' } }], { at: 'violations-list' }),
+    web('web/open-rules-panel', [{ kind: 'activate', target: { role: 'button', name: 'Rules' } }], {
       at: 'violations-list',
       to: 'rules-dialog',
     }),
-    web('web/toggle-rule', [{ kind: 'activate', target: 'switch "Disable"' }], { at: 'rule-row' }),
-    web('web/reload-report', [{ kind: 'activate', target: 'button "Reload"' }], { at: 'repo-report' }),
+    web('web/toggle-rule', [{ kind: 'activate', target: { role: 'switch', name: 'Disable' } }], { at: 'rule-row' }),
+    web('web/reload-report', [{ kind: 'activate', target: { role: 'button', name: 'Reload' } }], { at: 'repo-report' }),
     web('web/open-home', [{ kind: 'navigate', route: '/' }], { to: 'repo-report' }),
     // Another surface's row must never land in this surface's rows.
     cli(['rules', 'list'], { resource: 'violations-list' }),
@@ -385,7 +385,7 @@ describe('screens — a top-level place and its parts', () => {
   });
 
   it('treats a place id the registry does not carry as loose — never a dangling row', () => {
-    const stray = web('web/stray', [{ kind: 'activate', target: 'button "x"' }], { at: 'not-a-place' });
+    const stray = web('web/stray', [{ kind: 'activate', target: { role: 'button', name: 'x' } }], { at: 'not-a-place' });
     expect(looseEntries('web', resources, [stray]).map((j) => j.id)).toEqual(['web/stray']);
   });
 });
@@ -580,7 +580,7 @@ describe('resolving an interface id to the row that owns it', () => {
   ];
 
   it('sends a web task to the SCREEN its panel is part of — a panel is no destination', () => {
-    const task = web('web/silence-rule', [{ kind: 'activate', target: 'b' }], { at: 'violations-list' });
+    const task = web('web/silence-rule', [{ kind: 'activate', target: { role: 'button', name: 'b' } }], { at: 'violations-list' });
     expect(placeSelectionForInterface(task, resources)).toBe('web:repo-report');
   });
 
@@ -601,7 +601,7 @@ describe('resolving an interface id to the row that owns it', () => {
   it('lands a web member with no place on its surface’s ENTRIES — the group that HAS a row for it', () => {
     const loose = web('web/open-home', [{ kind: 'navigate', route: '/' }]);
     expect(placeSelectionForInterface(loose, resources)).toBe(`web:${ENTRIES_PLACE}`);
-    const dangling = web('web/stray', [{ kind: 'activate', target: 'b' }], { at: 'gone' });
+    const dangling = web('web/stray', [{ kind: 'activate', target: { role: 'button', name: 'b' } }], { at: 'gone' });
     expect(placeSelectionForInterface(dangling, resources)).toBe(`web:${ENTRIES_PLACE}`);
     expect(placeSelectionForInterface(loose, undefined)).toBe(`web:${ENTRIES_PLACE}`);
   });

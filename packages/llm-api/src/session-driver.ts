@@ -63,6 +63,75 @@ const BEGIN_MESSAGE = 'Begin.';
 const CONTINUE_NUDGE = `Continue. When you have reached the final result, call the \`${OUTCOME_TOOL_NAME}\` tool.`;
 
 /**
+ * THE DEGENERATE-OUTPUT GUARD: the longest run of consecutive whitespace this
+ * driver will watch a turn write before it stops believing the turn.
+ *
+ * A tool argument is JSON. The widest whitespace run anything authored contains
+ * is the indentation of a deeply nested value or a blank line inside an embedded
+ * snippet — tens of characters. Two thousand is two orders of magnitude past
+ * that, so no legitimate argument can reach it, and three orders short of what a
+ * wedged decoder emits: the measured case lost the closing quote of a locator
+ * mid-argument and then wrote ten million spaces over nineteen minutes, twice,
+ * before the provider's own output limit stopped it. The guard turns those
+ * nineteen minutes into seconds.
+ */
+export const MAX_WHITESPACE_RUN = 2_000;
+
+/** A whitespace run this long or longer is recorded as a count rather than
+ *  verbatim, so a flood never rides into the durable transcript. */
+const COLLAPSED_WHITESPACE_RUN = 20;
+
+/** How much of a cut-off reply the transcript keeps. The PREFIX is what makes
+ *  the failure explainable; past this the tail is elided with its length. */
+const MAX_CUTOFF_TEXT = 2_000;
+
+/**
+ * A cut-off reply as the transcript records it: long whitespace runs collapsed
+ * to their count, the tail beyond {@link MAX_CUTOFF_TEXT} elided with its own.
+ */
+export function condenseCutOff(text: string): string {
+  const collapsed = text.replace(
+    new RegExp(`\\s{${COLLAPSED_WHITESPACE_RUN},}`, 'g'),
+    (run) => `[+${run.length} whitespace]`,
+  );
+  if (collapsed.length <= MAX_CUTOFF_TEXT) return collapsed;
+  return `${collapsed.slice(0, MAX_CUTOFF_TEXT)}… [+${collapsed.length - MAX_CUTOFF_TEXT} more characters]`;
+}
+
+/**
+ * The guard fired: the model wrote a whitespace run no argument contains, and
+ * the request was aborted mid-flight. Never retried and never nudged — another
+ * attempt is another output window of the same wedged decoder.
+ */
+class DegenerateOutputError extends Error {
+  constructor(
+    readonly run: number,
+    readonly toolName: string | undefined,
+    readonly partial: string,
+    readonly modelId: string,
+  ) {
+    super(
+      `degenerate output: ${run} consecutive whitespace characters${
+        toolName ? ` in the arguments of \`${toolName}\`` : ' in the reply'
+      } — the request was aborted`,
+    );
+    this.name = 'DegenerateOutputError';
+  }
+}
+
+/** What the model is told after its reply was cut off at the output limit. */
+function lengthCutOffMessage(toolName: string | undefined): string {
+  return [
+    `Your last reply was cut off at the model's output limit before${
+      toolName ? ` the \`${toolName}\`` : ' the tool'
+    } call was complete, so none of it could be run.`,
+    `Do not continue it — a continuation is cut off at the same limit.`,
+    `Make the call again and make it SMALLER: send the smallest piece that stands on its own,`,
+    `one item at a time if need be, and never restate work that was already accepted.`,
+  ].join(' ');
+}
+
+/**
  * How this driver answers a provider failure. The AI SDK's own
  * retry has no observation hook, so `maxRetries: 0` hands the loop to us and
  * every wait becomes a `provider-retry` transcript event. Attempts are per
@@ -316,12 +385,42 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
         onProgress: input.onProgress,
       }));
     } catch (err) {
+      // The guard aborted the request. The turn is recorded with what the
+      // stream delivered before it wedged — that prefix is the only account of
+      // it there will ever be — and the session ends on it: `none` retryability,
+      // because a second attempt is a second flood.
+      if (err instanceof DegenerateOutputError) {
+        onEvent({
+          type: 'assistant-turn',
+          usage: turnUsageOf(undefined, err.modelId, rt.pricing),
+          cutOff: {
+            reason: 'degenerate',
+            ...(err.toolName ? { toolName: err.toolName } : {}),
+            partial: condenseCutOff(err.partial),
+          },
+        } as SessionEventBody);
+        return {
+          kind: 'failure',
+          failure: { kind: 'malformed', detail: err.message, retryability: 'none' },
+        };
+      }
       return { kind: 'failure', failure: classifyTransportError(err, signal) };
     }
 
     const usage = turnUsageOf(result.usage, modelId, rt.pricing);
     const toolCalls = result.toolCalls;
     const first = toolCalls[0];
+    // A reply the output limit cut off before its call closed: the SDK discards
+    // the unclosed call, so what the stream delivered of it is recorded here or
+    // nowhere.
+    const cutOff =
+      !first && result.finishReason === 'length'
+        ? {
+            reason: 'length' as const,
+            ...(result.unfinished ? { toolName: result.unfinished.toolName } : {}),
+            partial: condenseCutOff(result.unfinished?.args ?? result.text),
+          }
+        : undefined;
     // What the RESPONSE says served the turn, which the configured model id
     // does not always answer: on Bedrock/Foundry it is a deployment name, and
     // a fallback swap changes it mid-session.
@@ -343,11 +442,28 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
         : {}),
       usage,
       ...(respondedModelId ? { model: respondedModelId } : {}),
+      ...(cutOff ? { cutOff } : {}),
       raw,
     } as SessionEventBody & { raw?: RawPayload });
     messages.push(...(result.response.messages as ModelMessage[]));
 
     if (!first) {
+      // A reply that stopped at the output limit with no call to run is not
+      // deliberation, and `CONTINUE_NUDGE` answers it with another full output
+      // window of the same. It is a MALFORMED turn — the `re-ask` says so, and
+      // the shell ends the session on two of them in a row — and the correction
+      // tells the model the one thing that can work: send it smaller.
+      if (cutOff) {
+        onEvent({
+          type: 're-ask',
+          invalid: cutOff.partial,
+          reason: `the reply was cut off at the output limit before${
+            cutOff.toolName ? ` the \`${cutOff.toolName}\`` : ' the tool'
+          } call was complete`,
+        });
+        say(lengthCutOffMessage(cutOff.toolName));
+        continue;
+      }
       say(CONTINUE_NUDGE);
       continue;
     }
@@ -427,6 +543,19 @@ interface TurnResult {
   usage: Awaited<StreamResult['usage']>;
   finishReason: Awaited<StreamResult['finishReason']>;
   response: Awaited<StreamResult['response']>;
+  /** The call the stream OPENED and never closed, with its argument text as far
+   *  as it got. The SDK drops such a call before the loop sees it, so this is
+   *  the only account of what the turn was writing when it stopped. */
+  unfinished?: { toolName: string; args: string };
+}
+
+/** What one turn's stream carried beyond the settled result. */
+interface StreamReport {
+  /** The `error` part a failed call ends on. */
+  error?: { error: unknown };
+  /** The degenerate-output guard fired, after `run` whitespace characters. */
+  degenerate?: { run: number; toolName?: string; partial: string };
+  unfinished?: { toolName: string; args: string };
 }
 
 /** Where a turn's progress goes while the model is still writing it. */
@@ -483,36 +612,66 @@ async function callModel(
       : m,
   );
   const run = async (candidate: { model: LanguageModel; modelId: string }): Promise<TurnResult> => {
-    const result = streamText({
-      model: candidate.model,
-      system,
-      messages: prompt,
-      tools,
-      abortSignal: signal,
-      maxRetries: 0,
-      // A failed call is reported by this driver — as the `provider-retry`
-      // event of the wait it causes, or as the session's failure. The SDK's
-      // default handler dumps the same error to stderr on top of that.
-      onError: () => {},
-      // Carries the prompt-cache cluster key and, because the transcript
-      // event models ONE tool call per turn, this provider's way of asking
-      // for a single call. A turn that still carries several is executed in
-      // full — see the loop.
-      providerOptions: rt.tuning.callOptions(candidate.modelId, rt.cacheKey),
-    });
-    const failure = await reportTurn(result, live);
-    // A call that failed is an `error` part carrying the provider's own error;
-    // the result promises reject with the SDK's no-output error instead, which
-    // says nothing about a status, a Retry-After or another attempt.
-    if (failure) throw failure.error;
-    const [text, toolCalls, usage, finishReason, response] = await Promise.all([
-      result.text,
-      result.toolCalls,
-      result.usage,
-      result.finishReason,
-      result.response,
-    ]);
-    return { text, toolCalls, usage, finishReason, response };
+    // The TURN's own controller, chained to the session's: the degenerate-output
+    // guard cancels the request in flight without aborting the session, which
+    // the session signal cannot do because it is shared with every other turn
+    // and with the tools.
+    const turn = new AbortController();
+    const cancelTurn = (): void => turn.abort();
+    if (signal.aborted) turn.abort();
+    else signal.addEventListener('abort', cancelTurn, { once: true });
+    try {
+      const result = streamText({
+        model: candidate.model,
+        system,
+        messages: prompt,
+        tools,
+        abortSignal: turn.signal,
+        maxRetries: 0,
+        // A failed call is reported by this driver — as the `provider-retry`
+        // event of the wait it causes, or as the session's failure. The SDK's
+        // default handler dumps the same error to stderr on top of that.
+        onError: () => {},
+        // Carries the prompt-cache cluster key and, because the transcript
+        // event models ONE tool call per turn, this provider's way of asking
+        // for a single call. A turn that still carries several is executed in
+        // full — see the loop.
+        providerOptions: rt.tuning.callOptions(candidate.modelId, rt.cacheKey),
+      });
+      const stream = await reportTurn(result, live, cancelTurn);
+      // The guard already aborted the request; the result promises are never
+      // touched, because an aborted stream settles them into rejections nobody
+      // is waiting for.
+      if (stream.degenerate) {
+        throw new DegenerateOutputError(
+          stream.degenerate.run,
+          stream.degenerate.toolName,
+          stream.degenerate.partial,
+          candidate.modelId,
+        );
+      }
+      // A call that failed is an `error` part carrying the provider's own error;
+      // the result promises reject with the SDK's no-output error instead, which
+      // says nothing about a status, a Retry-After or another attempt.
+      if (stream.error) throw stream.error.error;
+      const [text, toolCalls, usage, finishReason, response] = await Promise.all([
+        result.text,
+        result.toolCalls,
+        result.usage,
+        result.finishReason,
+        result.response,
+      ]);
+      return {
+        text,
+        toolCalls,
+        usage,
+        finishReason,
+        response,
+        ...(stream.unfinished ? { unfinished: stream.unfinished } : {}),
+      };
+    } finally {
+      signal.removeEventListener('abort', cancelTurn);
+    }
   };
 
   const candidates = rt.fallback ? [rt.primary, rt.fallback] : [rt.primary];
@@ -525,6 +684,9 @@ async function callModel(
       } catch (err) {
         // An abort is a decision, not a provider problem: never retried.
         if (signal.aborted) throw err;
+        // Nor is a wedged decoder: the same prompt produces the same flood on
+        // this model and on the fallback, so neither is tried again.
+        if (err instanceof DegenerateOutputError) throw err;
         const failure = retryabilityOf(err);
         const again = attempt < rt.retry.attempts && failure.retryable;
         // Out of tries on this model — the fallback is the next thing to try,
@@ -559,57 +721,110 @@ async function callModel(
  * page used to sit through. Draining is also what settles the result, so it
  * runs whether or not anyone is watching, and it hands back the error part a
  * failed call ends on.
+ *
+ * It is also the only place that WATCHES what is being written. Two things are
+ * read out of the deltas and out of nowhere else: the argument text of a call
+ * the stream never closes (the SDK discards such a call, so without this the
+ * turn is a usage line), and a run of whitespace past
+ * {@link MAX_WHITESPACE_RUN} — at which point `cancel` aborts the request
+ * rather than letting it write its way to the provider's output limit.
  */
 async function reportTurn(
   result: StreamResult,
   live: LiveTurn,
-): Promise<{ error: unknown } | undefined> {
+  cancel: () => void,
+): Promise<StreamReport> {
   const report = (progress: SessionProgress): void => live.onProgress?.(progress);
-  const composing = new Map<string, string>();
+  const composing = new Map<string, { toolName: string; args: string }>();
+  // Consecutive whitespace written so far, per stream: the prose, and each call
+  // being composed. A run is a property of ONE thing being written, so the
+  // counters do not share and an interleaved delta never masks a flood.
+  const runs = new Map<string, number>();
+  /** Fold one delta into its stream's run; true once the run is past the guard. */
+  const floods = (key: string, delta: string): boolean => {
+    const run = whitespaceRun(delta, runs.get(key) ?? 0);
+    runs.set(key, run);
+    return run >= MAX_WHITESPACE_RUN;
+  };
   let text = '';
   let thinking = '';
-  let failure: { error: unknown } | undefined;
-  for await (const part of result.fullStream) {
-    switch (part.type) {
-      case 'text-delta':
-        text += part.text;
-        report({ kind: 'text', turnId: live.turnId, text });
-        break;
-      case 'reasoning-delta':
-        thinking += part.text;
-        report({ kind: 'thinking', turnId: live.turnId, text: thinking });
-        break;
-      case 'tool-input-start':
-        composing.set(part.id, part.toolName);
-        report({
-          kind: 'tool',
-          toolCallId: part.id,
-          toolName: part.toolName,
-          phase: 'calling',
-          elapsedSeconds: 0,
-        });
-        break;
-      case 'tool-input-delta': {
-        const toolName = composing.get(part.id);
-        if (toolName !== undefined) {
+  const out: StreamReport = {};
+  try {
+    for await (const part of result.fullStream) {
+      switch (part.type) {
+        case 'text-delta':
+          text += part.text;
+          report({ kind: 'text', turnId: live.turnId, text });
+          if (floods('text', part.text)) {
+            out.degenerate = { run: runs.get('text')!, partial: text };
+            cancel();
+          }
+          break;
+        case 'reasoning-delta':
+          thinking += part.text;
+          report({ kind: 'thinking', turnId: live.turnId, text: thinking });
+          break;
+        case 'tool-input-start':
+          composing.set(part.id, { toolName: part.toolName, args: '' });
           report({
             kind: 'tool',
             toolCallId: part.id,
-            toolName,
+            toolName: part.toolName,
             phase: 'calling',
             elapsedSeconds: 0,
           });
+          break;
+        case 'tool-input-delta': {
+          const call = composing.get(part.id);
+          if (call !== undefined) {
+            call.args += part.delta;
+            report({
+              kind: 'tool',
+              toolCallId: part.id,
+              toolName: call.toolName,
+              phase: 'calling',
+              elapsedSeconds: 0,
+            });
+            if (floods(part.id, part.delta)) {
+              out.degenerate = {
+                run: runs.get(part.id)!,
+                toolName: call.toolName,
+                partial: call.args,
+              };
+              cancel();
+            }
+          }
+          break;
         }
-        break;
+        case 'tool-input-end':
+          composing.delete(part.id);
+          break;
+        case 'error':
+          out.error = { error: part.error };
+          break;
+        default:
+          break;
       }
-      case 'error':
-        failure = { error: part.error };
-        break;
-      default:
-        break;
     }
+  } catch (err) {
+    // The abort the guard just fired ends the drain; anything else is a real
+    // stream failure and is reported as one.
+    if (!out.degenerate) throw err;
   }
-  return failure;
+  // Whatever is still composing was opened and never closed.
+  const [unfinished] = [...composing.values()];
+  if (unfinished) out.unfinished = unfinished;
+  return out;
+}
+
+/**
+ * The length of the whitespace run this chunk ends on, continuing `carried`
+ * from the chunk before: the whole chunk when it is nothing but whitespace, its
+ * trailing whitespace when it is not, and zero when it ends on a real character.
+ */
+function whitespaceRun(chunk: string, carried: number): number {
+  const trailing = /\s*$/.exec(chunk)![0].length;
+  return trailing === chunk.length ? carried + trailing : trailing;
 }
 
 /**

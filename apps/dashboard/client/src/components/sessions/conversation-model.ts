@@ -26,6 +26,7 @@ import type {
   SessionLlm,
   SessionProgress,
   SessionStatus,
+  TurnCutOff,
   TurnUsage,
   UserInputQuestion,
 } from '@truecourse/agent-loop';
@@ -46,6 +47,9 @@ export type ConversationLine = { key: string; seq: number; ts: string } & (
       toolCall?: { name: string; args: string };
       model?: string;
       usage?: TurnUsage;
+      /** Present only on a turn that stopped before its call was complete:
+       *  what the stream delivered of it, condensed. */
+      cutOff?: TurnCutOff;
     }
   | { kind: 'tool'; toolName: string; content: string; isError: boolean }
   /** The outcome value in full; of its display blocks only findings render. */
@@ -286,6 +290,7 @@ function toLine(event: SessionEvent): ConversationLine | null {
           : {}),
         ...(event.model ? { model: event.model } : {}),
         ...(event.usage ? { usage: event.usage } : {}),
+        ...(event.cutOff ? { cutOff: event.cutOff } : {}),
       };
     case 'tool-result':
       return {

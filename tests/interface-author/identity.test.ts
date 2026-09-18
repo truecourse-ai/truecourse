@@ -21,7 +21,7 @@ function fragment(screenId = 'documents'): AuthoredFragment {
     interfaces: [{
       id: 'web/save', type: 'web', title: 'Save', entry: { method: 'GET', path: `/${screenId}` },
       at: 'editor-panel', to: 'confirmation', startingState: 'signed-in', endState: 'saved',
-      steps: [{ kind: 'activate', target: 'button "Save"' }], apiEffects: [],
+      steps: [{ kind: 'activate', target: { role: 'button', name: 'Save' } }], apiEffects: [],
     }],
     resources: [
       { id: screenId, kind: 'screen', title: screenId, address: `/${screenId}` },
@@ -87,7 +87,7 @@ describe('screen-owned authoring identities', () => {
     const draft: AuthoredFragment = {
       interfaces: [{
         ...original.interfaces[0], id: 'web/show-note', at: 'note',
-        steps: [{ kind: 'activate', target: 'button "Show note"' }],
+        steps: [{ kind: 'activate', target: { role: 'button', name: 'Show note' } }],
       }],
       resources: [
         { id: 'editor-panel', kind: 'panel', title: 'Editor', readables: { markers: [{ marker: 'Editing' }] } },

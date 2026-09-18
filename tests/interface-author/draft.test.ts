@@ -10,6 +10,8 @@ import { describe, it, expect } from 'vitest'
 import {
   AuthoredTaskSchema,
   AuthoredFragmentSchema,
+  EMPTY_FRAGMENT,
+  foldAuthoredFragment,
   stampFragment,
   validateFragment,
   type AuthoredFragment,
@@ -47,8 +49,8 @@ function task(overrides: Partial<AuthoredFragment['interfaces'][number]> = {}) {
     group: 'home',
     entry: { method: 'GET', path: '/' },
     steps: [
-      { kind: 'input' as const, target: 'textbox "Repository path"' },
-      { kind: 'activate' as const, target: 'button "Add Repository"' },
+      { kind: 'input' as const, target: { role: 'textbox', name: 'Repository path' } },
+      { kind: 'activate' as const, target: { role: 'button', name: 'Add Repository' } },
     ],
     at: 'root',
     apiEffects: ['api/get-api-repos'],
@@ -157,14 +159,14 @@ describe('the locator policy', () => {
     const result = validate(
       fragment({ interfaces: [task({ steps: [{ kind: 'activate', target: '#add-repo-button' }] })] }),
     )
-    expect(result.errors.some((e) => e.includes('is not `<role> "<accessible name>"`'))).toBe(true)
+    expect(result.errors.some((e) => e.includes('never a selector'))).toBe(true)
   })
 
   it('refuses a role no ARIA vocabulary knows', () => {
     const result = validate(
-      fragment({ interfaces: [task({ steps: [{ kind: 'activate', target: 'clicky "Add"' }] })] }),
+      fragment({ interfaces: [task({ steps: [{ kind: 'activate', target: { role: 'clicky', name: 'Add' } }] })] }),
     )
-    expect(result.errors.some((e) => e.includes('is not an ARIA role'))).toBe(true)
+    expect(result.errors.some((e) => e.includes("received 'clicky'"))).toBe(true)
   })
 })
 
@@ -200,7 +202,7 @@ describe('a task is reachable and located where it says', () => {
             id: 'web/filter-rules',
             at: 'rules-dialog',
             entry: { method: 'GET', path: '/repos/{repoId}' },
-            steps: [{ kind: 'activate', target: 'button "Security"' }],
+            steps: [{ kind: 'activate', target: { role: 'button', name: 'Security' } }],
           }),
         ],
         resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid' }],
@@ -224,7 +226,7 @@ describe('the session authors ONE place', () => {
             id: 'web/filter-rules',
             at: 'rules-dialog',
             entry: { method: 'GET', path: '/repos/{repoId}' },
-            steps: [{ kind: 'activate', target: 'button "Security"' }],
+            steps: [{ kind: 'activate', target: { role: 'button', name: 'Security' } }],
           }),
         ],
         resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid' }],
@@ -355,8 +357,8 @@ describe('resource enrichment', () => {
 describe('control type and scope survive authoring', () => {
   it('accepts native select input and a confirmation scoped to its dialog', () => {
     const steps = [
-      { kind: 'input' as const, target: 'combobox "Category"', mode: 'select' as const, within: { role: 'dialog' as const, name: 'Edit expense' } },
-      { kind: 'activate' as const, target: 'button "Delete expense"', within: { role: 'dialog' as const, name: 'Delete expense', exact: true } },
+      { kind: 'input' as const, target: { role: 'combobox', name: 'Category' }, mode: 'select' as const, within: { role: 'dialog' as const, name: 'Edit expense' } },
+      { kind: 'activate' as const, target: { role: 'button', name: 'Delete expense' }, within: { role: 'dialog' as const, name: 'Delete expense', exact: true } },
     ];
     const parsed = AuthoredFragmentSchema.parse(fragment({ interfaces: [task({ steps })] }));
     expect(parsed.interfaces[0].steps).toEqual(steps);
@@ -375,5 +377,73 @@ describe('supporting browser controls', () => {
     expect(result.errors).toEqual([])
     expect(result.authored!.interfaces.filter((i) => i.purpose === 'control')).toHaveLength(5)
     expect(result.authored!.interfaces.every((i) => i.steps.length > 0)).toBe(true)
+  })
+})
+
+/**
+ * THE FOLD — what `check_draft` does with the piece a call carries. A draft is
+ * built up across calls, so the fold is what "already accepted" means: an id it
+ * re-sends corrects that entry, an id it omits is untouched, and a place is
+ * merged the way the write path merges an enrichment.
+ */
+describe('folding one checked piece into the draft so far', () => {
+  const second = task({ id: 'web/open-repository', title: 'Open a repository' })
+
+  it('adds what a call carries and leaves the rest of the draft alone', () => {
+    const folded = foldAuthoredFragment(fragment({ unresolved: ['no name on the icon button'] }), {
+      interfaces: [second],
+      unresolved: ['no name on the icon button', 'the toast has no role'],
+    })
+    expect(folded.interfaces.map((i) => i.id)).toEqual([task().id, second.id])
+    // The repeated line is one line; the new one lands after it.
+    expect(folded.unresolved).toEqual(['no name on the icon button', 'the toast has no role'])
+  })
+
+  it('replaces an entry a later call re-sends, keeping its place in the draft', () => {
+    const corrected = task({ steps: [{ kind: 'activate', target: { role: 'link', name: 'Add' } }] })
+    const folded = foldAuthoredFragment(
+      foldAuthoredFragment(fragment(), { interfaces: [second] }),
+      { interfaces: [corrected] },
+    )
+    expect(folded.interfaces.map((i) => i.id)).toEqual([task().id, second.id])
+    expect(folded.interfaces[0].steps).toEqual(corrected.steps)
+  })
+
+  it('merges a place readable kind by kind, the way the write path does', () => {
+    const folded = foldAuthoredFragment(
+      fragment({
+        resources: [
+          { id: 'root', kind: 'screen', title: '/', address: '/', readables: { markers: [{ marker: 'No repositories yet' }] } },
+        ],
+      }),
+      {
+        interfaces: [],
+        resources: [
+          { id: 'root', kind: 'screen', title: '/', address: '/', readables: { elements: [{ element: { role: 'heading', name: 'Repositories' } }] } },
+        ],
+      },
+    )
+    expect(folded.resources).toHaveLength(1)
+    expect(Object.keys(folded.resources![0].readables!).sort()).toEqual(['elements', 'markers'])
+  })
+
+  /**
+   * A state names the world a task assumes or leaves, so one the draft's own
+   * tasks no longer chain to is not part of the draft. That is what lets a
+   * correction RENAME a world — the id the task left behind goes with it,
+   * instead of riding along to the outcome and colliding with the registry.
+   */
+  it('keeps only the states the draft’s own tasks reference', () => {
+    const base = foldAuthoredFragment(EMPTY_FRAGMENT, {
+      interfaces: [task({ endState: 'repository-registered' })],
+      states: [{ id: 'repository-registered', description: 'A repository is registered.' }],
+    })
+    expect(base.states!.map((s) => s.id)).toEqual(['repository-registered'])
+
+    const renamed = foldAuthoredFragment(base, {
+      interfaces: [task({ endState: 'listed-repository-registered' })],
+      states: [{ id: 'listed-repository-registered', description: 'A repository is registered.' }],
+    })
+    expect(renamed.states!.map((s) => s.id)).toEqual(['listed-repository-registered'])
   })
 })
