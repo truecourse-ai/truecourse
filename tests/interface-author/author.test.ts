@@ -31,7 +31,7 @@ import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree
 import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays'
 import { buildScreens, screenShowRows } from '../../apps/dashboard/client/src/lib/interface-pom'
 import type { AuthoredFragment } from '../../packages/core/src/services/interface-author/draft'
-import { InterfacesFileSchema, type InterfacesFile } from '../../packages/shared/src/index'
+import { InterfacesFileSchema, interfaceFingerprint, type InterfacesFile } from '../../packages/shared/src/index'
 import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
@@ -76,8 +76,8 @@ const HOME_TASK = {
   group: 'home',
   entry: { method: 'GET', path: '/' },
   steps: [
-    { kind: 'input' as const, target: 'textbox "Repository path"' },
-    { kind: 'activate' as const, target: 'button "Add Repository"' },
+    { kind: 'input' as const, target: { role: 'textbox', name: 'Repository path' } },
+    { kind: 'activate' as const, target: { role: 'button', name: 'Add Repository' } },
   ],
   at: 'root',
   endState: 'repository-registered',
@@ -100,7 +100,7 @@ const REPORT_FRAGMENT: AuthoredFragment = {
       title: 'Open the rules panel from the repository report',
       group: 'repos',
       entry: { method: 'GET', path: '/repos/{repoId}' },
-      steps: [{ kind: 'activate', target: 'button "Browse Rules"' }],
+      steps: [{ kind: 'activate', target: { role: 'button', name: 'Browse Rules' } }],
       at: 'repos-repoid',
       to: 'rules-dialog',
     },
@@ -308,7 +308,7 @@ describe('a session that authors', () => {
         states: HOME_FRAGMENT.states,
       }
       const checked = await callTool(input, 'check_draft', draft)
-      expect(checked).toContain('The draft is valid')
+      expect(checked).toContain('Accepted and kept')
       const draftId = /"draftId":"([^"]+)"/.exec(checked)![1]
       return { kind: 'outcome', value: { draftId } }
     })
@@ -326,7 +326,7 @@ describe('a session that authors', () => {
     const { persistence, events } = memoryPersistence()
     const { driver } = scriptedDriver(async (_place, input) => {
       const checked = await callTool(input, 'check_draft', HOME_FRAGMENT)
-      expect(checked).toContain('The draft is valid')
+      expect(checked).toContain('Accepted and kept')
       const draftId = /"draftId":"([^"]+)"/.exec(checked)![1]
       input.onEvent({ type: 'assistant-turn', toolCall: { name: 'outcome', args: { draftId } }, usage: usage() })
       return { kind: 'outcome', value: { draftId } }
@@ -353,7 +353,7 @@ describe('a session that authors', () => {
 
     // The tools really read this repository.
     expect(toolCalls[0]).toContain('aria-label="Repository path"')
-    expect(toolCalls[1]).toContain('The draft is valid')
+    expect(toolCalls[1]).toContain('Accepted and kept')
 
     const home = result.places.find((p) => p.placeId === 'root')!
     expect(home.status).toBe('authored')
@@ -383,6 +383,107 @@ describe('a session that authors', () => {
       'guard-interfaces.web-tasks',
     ])
     expect([...index.values()][0].workItem).toBe('web:root')
+  })
+
+  /**
+   * INCREMENTAL CHECKING. A call carries the piece it is about; what passes is
+   * kept for the session and is what the next call is checked against, so a fix
+   * costs the one interface it fixes instead of the whole catalog. The outcome
+   * still names one draft id, and it resolves everything that accumulated.
+   */
+  it('builds its draft one interface at a time, and the outcome resolves what accumulated', async () => {
+    const { persistence } = memoryPersistence()
+    const open = {
+      id: 'web/open-repository',
+      type: 'web' as const,
+      title: 'Open a registered repository',
+      group: 'home',
+      entry: { method: 'GET', path: '/' },
+      steps: [{ kind: 'activate' as const, target: { role: 'link' as const, name: 'the repository' } }],
+      at: 'root',
+      startingState: 'repository-registered',
+    }
+    const fixedSteps = [
+      { kind: 'activate' as const, target: { role: 'link' as const, name: 'Open repository' } },
+    ]
+    const { driver } = scriptedDriver(async (place, input) => {
+      if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
+      expect(await callTool(input, 'check_draft', HOME_FRAGMENT)).toContain('holds 1 task(s)')
+      // The second call restates NOTHING of the first, and the draft grows.
+      const second = await callTool(input, 'check_draft', { interfaces: [open] })
+      expect(second).toContain('holds 2 task(s)')
+      expect(second).toContain('add-repository-by-path')
+      // A re-sent id CORRECTS that one entry, at the cost of that one entry.
+      const fixed = await callTool(input, 'check_draft', {
+        interfaces: [{ ...open, steps: fixedSteps }],
+      })
+      expect(fixed).toContain('holds 2 task(s)')
+      const draftId = /"draftId":"([^"]+)"/.exec(fixed)![1]
+      return { kind: 'outcome', value: { draftId } }
+    })
+
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence })
+
+    const home = result.places.find((p) => p.placeId === 'root')!
+    expect(home.status).toBe('authored')
+    expect(home.taskIds).toHaveLength(2)
+    // The first call's unresolved line rode along, as part of the same draft.
+    expect(home.unresolved).toEqual(HOME_FRAGMENT.unresolved)
+    const file = readAuthoredFile()
+    expect(file.interfaces).toHaveLength(2)
+    expect(file.interfaces.find((i) => i.title === open.title)!.steps).toEqual(fixedSteps)
+    expect(file.interfaces.find((i) => i.title === HOME_TASK.title)!.steps).toEqual(HOME_TASK.steps)
+    expect(file.states!.web.map((s) => s.id)).toEqual(['repository-registered'])
+  })
+
+  /**
+   * A catalog written while a step target was ONE STRING still reads: the
+   * string is parsed back into its two fields, the fingerprint it was stored
+   * under is unmoved (so every scenario grounded on it still resolves), and the
+   * next write puts only the structured form on disk.
+   */
+  it('reads an authored catalog written with string targets, and rewrites it structured', async () => {
+    const legacyTask = {
+      id: 'web/browse-rules',
+      type: 'web',
+      title: 'Browse the rules of a repository',
+      entry: { method: 'GET', path: '/repos/{repoId}' },
+      steps: [{ kind: 'activate', target: 'button "Browse Rules"' }],
+      at: 'repos-repoid',
+      fingerprint: interfaceFingerprint({
+        type: 'web',
+        entry: { method: 'GET', path: '/repos/{repoId}' },
+        steps: [{ kind: 'activate', target: { role: 'button', name: 'Browse Rules' } }],
+      }),
+    }
+    fs.writeFileSync(
+      guardAuthoredInterfacesPath(repo),
+      JSON.stringify({ version: 2, generatedAt: '', recipeFingerprint: '', interfaces: [legacyTask] }),
+    )
+
+    // The reader hands back the two fields, under the fingerprint it was stored with.
+    const read = readAuthoredInterfaceCatalog(repo)!
+    expect(read.interfaces[0].steps).toEqual([
+      { kind: 'activate', target: { role: 'button', name: 'Browse Rules' } },
+    ])
+    expect(read.interfaces[0].fingerprint).toBe(legacyTask.fingerprint)
+
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async (place, input) =>
+      place === 'root'
+        ? { kind: 'outcome', value: HOME_FRAGMENT }
+        : { kind: 'outcome', value: { interfaces: [] } },
+    )
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+
+    // The string form is gone from disk; the entry is otherwise untouched.
+    const written = readAuthoredFile()
+    const rewritten = written.interfaces.find((i) => i.id === legacyTask.id)!
+    expect(rewritten.steps).toEqual([
+      { kind: 'activate', target: { role: 'button', name: 'Browse Rules' } },
+    ])
+    expect(rewritten.fingerprint).toBe(legacyTask.fingerprint)
+    expect(JSON.stringify(written)).not.toContain('button \\"Browse Rules\\"')
   })
 
   /**
@@ -451,10 +552,10 @@ describe('concurrent state definitions', () => {
       }
       if (input.resume) {
         expect(input.initialMessages.join('\n')).toContain('already names')
-        expect(await callTool(input, 'check_draft', repaired)).toContain('The draft is valid')
+        expect(await callTool(input, 'check_draft', repaired)).toContain('Accepted and kept')
         return { kind: 'outcome', value: repaired }
       }
-      expect(await callTool(input, 'check_draft', detail)).toContain('The draft is valid')
+      expect(await callTool(input, 'check_draft', detail)).toContain('Accepted and kept')
       draftChecked()
       if (checkAfterSave) {
         await saved
@@ -504,7 +605,7 @@ describe('an outcome that breaks a rule', () => {
         ? {
             kind: 'outcome',
             value: {
-              interfaces: [{ ...HOME_TASK, steps: [{ kind: 'activate', target: '#add-repo' }] }],
+              interfaces: [{ ...HOME_TASK, at: 'repos-repoid' }],
             } satisfies AuthoredFragment,
           }
         : { kind: 'outcome', value: { interfaces: [] } },
@@ -512,7 +613,7 @@ describe('an outcome that breaks a rule', () => {
 
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
     expect(result.places[0].status).toBe('failed')
-    expect(result.places[0].problems.join('\n')).toContain('is not `<role> "<accessible name>"`')
+    expect(result.places[0].problems.join('\n')).toContain('is not a task of `root`')
     expect(result.authored).toBe(0)
     expect(fs.existsSync(guardAuthoredInterfacesPath(repo))).toBe(false)
   })
@@ -574,7 +675,7 @@ describe('the findings a session reports', () => {
     const { driver } = scriptedDriver(async () => ({
       kind: 'outcome',
       value: {
-        interfaces: [{ ...HOME_TASK, steps: [{ kind: 'activate', target: '#add-repo' }] }],
+        interfaces: [{ ...HOME_TASK, at: 'repos-repoid' }],
         findings: ['docs/setup.mdx names a "Import" button src/Home.tsx does not render'],
       } satisfies AuthoredFragment,
     }))
@@ -812,7 +913,7 @@ describe('a session that skipped `check_draft`', () => {
     expect(opened).toHaveLength(2)
     expect(opened[0][0]).toContain('  place    root (screen)')
     expect(opened[1]).toEqual([
-      'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your complete draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` again.',
+      'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` with the draftId of the accepted check.',
     ])
     // It fires at most once: the second outcome is taken though the tool still
     // never ran, so a stubborn session ends on its own merits, not in a loop.
@@ -837,7 +938,7 @@ describe('source and task evidence in the initial session', () => {
       expect(briefing).toContain('api.addRepo(path)')
       expect(briefing).toContain('<button>Add Repository</button>')
       expect(briefing).toContain('"status":"complete"')
-      expect(await callTool(input, 'check_draft', HOME_FRAGMENT)).toContain('The draft is valid')
+      expect(await callTool(input, 'check_draft', HOME_FRAGMENT)).toContain('Accepted and kept')
       return { kind: 'outcome', value: HOME_FRAGMENT }
     }, { checksDraft: false })
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'], context })
@@ -862,7 +963,7 @@ describe('source and task evidence in the initial session', () => {
         evidence = await callTool(input, 'read_file', JSON.parse(hint![1]))
       }
       expect(evidence).toContain('<button>Add Repository</button>')
-      expect(await callTool(input, 'check_draft', HOME_FRAGMENT)).toContain('The draft is valid')
+      expect(await callTool(input, 'check_draft', HOME_FRAGMENT)).toContain('Accepted and kept')
       return { kind: 'outcome', value: HOME_FRAGMENT }
     }, { checksDraft: false })
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'], context })
@@ -877,7 +978,7 @@ describe('source and task evidence in the initial session', () => {
       expect(briefing).toContain(JSON.stringify(HOME_TASK.steps))
       expect(briefing).toContain('Replacement: preserve surviving ids and exact steps')
       expect(briefing).toContain('1 complete definitions included, 0 omitted')
-      expect(await callTool(input, 'check_draft', { interfaces: [HOME_TASK] })).toContain('The draft is valid')
+      expect(await callTool(input, 'check_draft', { interfaces: [HOME_TASK] })).toContain('Accepted and kept')
       return { kind: 'outcome', value: { interfaces: [HOME_TASK] } }
     }, { checksDraft: false })
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'], replace: true, context })
@@ -1112,7 +1213,7 @@ describe('sessions run in a pool, the fold does not', () => {
     type: 'web',
     title: `Do the thing at ${place}`,
     entry: { method: 'GET', path: address },
-    steps: [{ kind: 'activate', target: 'button "Go"' }],
+    steps: [{ kind: 'activate', target: { role: 'button', name: 'Go' } }],
     at: place,
   })
 
@@ -1476,7 +1577,7 @@ describe('readable authoring through storage and the screen read view', () => {
       expect(source).toContain('repos.map(repo => <li>{repo.name}</li>)')
       expect(source).toContain('checked={includeArchived}')
       expect(source).toContain('No analysis yet')
-      expect(await callTool(input, 'check_draft', fragment)).toContain('The draft is valid')
+      expect(await callTool(input, 'check_draft', fragment)).toContain('Accepted and kept')
       return { kind: 'outcome', value: fragment }
     })
     // A named place selects enrichment; replacing existing tasks requires --replace.

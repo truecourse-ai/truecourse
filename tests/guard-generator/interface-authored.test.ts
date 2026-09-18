@@ -116,8 +116,8 @@ it('preserves native selection and dialog scope in the generation briefing', () 
   const scoped = iface({
     id: 'web/edit-expense', type: 'web', entry: { method: 'GET', path: '/expenses/{id}' },
     steps: [
-      { kind: 'input', target: 'combobox "Category"', mode: 'select', within: { role: 'dialog', name: 'Edit expense' } },
-      { kind: 'activate', target: 'button "Delete expense"', within: { role: 'dialog', name: 'Delete expense', exact: true } },
+      { kind: 'input', target: { role: 'combobox', name: 'Category' }, mode: 'select', within: { role: 'dialog', name: 'Edit expense' } },
+      { kind: 'activate', target: { role: 'button', name: 'Delete expense' }, within: { role: 'dialog', name: 'Delete expense', exact: true } },
     ],
   });
   const lines = realizationLines(scoped, 'web');
@@ -126,7 +126,7 @@ it('preserves native selection and dialog scope in the generation briefing', () 
   expect(lines[1]).toContain('within dialog “Delete expense”');
   expect(interfaceDigest(scoped).steps[0]).toContain('select');
   expect(interfaceDigest(scoped).steps[1]).toContain('within dialog');
-  const legacy = iface({ ...scoped, steps: [{ kind: 'input', target: 'textbox "Description"' }] });
+  const legacy = iface({ ...scoped, steps: [{ kind: 'input', target: { role: 'textbox', name: 'Description' } }] });
   expect(realizationLines(legacy, 'web')[0]).toContain('fill: textbox');
   expect(legacy.fingerprint).not.toBe(scoped.fingerprint);
 });

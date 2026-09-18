@@ -28,7 +28,6 @@
 
 import { z } from 'zod'
 import {
-  GUARD_WEB_ROLES,
   InterfaceOperationEntrySchema,
   InterfaceResourceIdSchema,
   InterfaceResourceSchema,
@@ -51,14 +50,6 @@ export const AUTHORED_SURFACE = 'web'
 
 /** `web/<kebab-slug>` — the id shape every authored task is held to. */
 const AUTHORED_ID = /^web\/[a-z0-9]+(?:-[a-z0-9]+)*$/
-
-/**
- * `<role> "<accessible name>"` — the locator policy written as a target
- * string: roles and accessible names only, never CSS,
- * never a test id. All 57 step targets of the reference corpus are in this form,
- * so it is the corpus's grammar, not a new one.
- */
-const TARGET_GRAMMAR = /^([a-z]+) "([^"]+)"$/
 
 /**
  * The steps a web task is made of — the three web members of the shared step
@@ -144,6 +135,79 @@ export const AuthoredFragmentSchema = z
   .strict()
 export type AuthoredFragment = z.infer<typeof AuthoredFragmentSchema>
 
+/** A draft with nothing in it — where a session's accepted draft starts. */
+export const EMPTY_FRAGMENT: AuthoredFragment = { interfaces: [] }
+
+/**
+ * Lay a freshly checked piece over the draft a session already has accepted.
+ * A piece names what it is about and nothing else, so an id it re-sends is a
+ * CORRECTION of that entry and an id it omits is left exactly as it was — which
+ * is what lets a session fix one locator without resending the catalog.
+ */
+export function foldAuthoredFragment(
+  base: AuthoredFragment,
+  addition: AuthoredFragment,
+): AuthoredFragment {
+  return collapseAuthoredIds({
+    interfaces: [...base.interfaces, ...addition.interfaces],
+    states: [...(base.states ?? []), ...(addition.states ?? [])],
+    resources: [...(base.resources ?? []), ...(addition.resources ?? [])],
+    unresolved: [...(base.unresolved ?? []), ...(addition.unresolved ?? [])],
+    findings: [...(base.findings ?? []), ...(addition.findings ?? [])],
+  })
+}
+
+/**
+ * One entry per id, the LAST one winning — except a place, which is merged the
+ * way the write path merges an enrichment over the catalog: a supplied readable
+ * kind replaces that kind, an omitted one keeps what was established. The lists
+ * that carry no id (`unresolved`, `findings`) keep their first appearance and
+ * drop exact repeats.
+ *
+ * A STATE is kept only while one of the draft's own tasks references it. A
+ * state definition exists to name the world a task assumes or leaves, so one
+ * nothing in the draft chains to is not part of the draft — and that is what
+ * lets a correction RENAME a world: the task moves to the new id, and the id it
+ * left behind goes with it instead of riding along to the outcome. A state the
+ * catalog already defines is unaffected; this prunes the fragment, never the
+ * registry.
+ *
+ * Runs again AFTER {@link scopeFragmentIds}, because that is what makes a
+ * screen-local id and its already-qualified twin the same entry.
+ */
+export function collapseAuthoredIds(fragment: AuthoredFragment): AuthoredFragment {
+  const interfaces = new Map<string, AuthoredTask>()
+  for (const task of fragment.interfaces) interfaces.set(task.id, task)
+  const referenced = new Set<string>()
+  for (const task of interfaces.values()) {
+    if (task.startingState) referenced.add(task.startingState)
+    if (task.endState) referenced.add(task.endState)
+  }
+  const states = new Map<string, InterfaceState>()
+  for (const state of fragment.states ?? []) {
+    if (referenced.has(state.id)) states.set(state.id, state)
+  }
+  const resources = new Map<string, AuthoredPlace>()
+  for (const place of fragment.resources ?? []) {
+    const prior = resources.get(place.id)
+    resources.set(place.id, {
+      ...prior,
+      ...place,
+      ...(place.readables ? { readables: { ...prior?.readables, ...place.readables } } : {}),
+    })
+  }
+  const lines = (values: readonly string[] | undefined): string[] => [...new Set(values ?? [])]
+  const unresolved = lines(fragment.unresolved)
+  const findings = lines(fragment.findings)
+  return {
+    interfaces: [...interfaces.values()],
+    ...(states.size > 0 ? { states: [...states.values()] } : {}),
+    ...(resources.size > 0 ? { resources: [...resources.values()] } : {}),
+    ...(unresolved.length > 0 ? { unresolved } : {}),
+    ...(findings.length > 0 ? { findings } : {}),
+  }
+}
+
 /**
  * The worlds the catalog already names, in catalog order, the authored file's
  * wording winning where both halves define an id. This is the registry a
@@ -217,18 +281,17 @@ export interface ValidateFragmentInput {
 /**
  * Hold a fragment to every rule at once and return the file it would produce.
  * The schema does the structural half (ids resolve in the area registry, a
- * screen sits on nothing, a state id is not a sentence); this adds the five
- * rules that are about AUTHORING rather than about the shape:
+ * screen sits on nothing, a state id is not a sentence, a step's target is an
+ * ARIA role and an accessible name); this adds the four rules that are about
+ * AUTHORING rather than about the shape:
  *
  *  1. an id names one thing — no collision with a derived or authored entry;
  *  2. a fingerprint names one thing — the same task authored twice is one task,
  *     and its second copy would double every scenario grounded on it;
- *  3. a target is `<role> "<name>"` with a real ARIA role ('s locator
- *     policy: an element with no role and no accessible name is not guessed at);
- *  4. a task is REACHABLE and says where it happens — `at`, or a first
+ *  3. a task is REACHABLE and says where it happens — `at`, or a first
  *     `navigate` step, and when both the address and the place are known they
  *     have to agree;
- *  5. a state id names one world catalog-wide — a draft references what the
+ *  4. a state id names one world catalog-wide — a draft references what the
  *     registry already defines and never redefines it as something else.
  */
 export function validateFragment(input: ValidateFragmentInput): FragmentValidation {
@@ -273,25 +336,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
     twins.set(task.fingerprint, task.id)
   }
 
-  // ---- 3. the locator policy ----------------------------------------------
-  const roles = new Set<string>(GUARD_WEB_ROLES)
-  for (const task of stamped.interfaces) {
-    task.steps.forEach((step, i) => {
-      if (step.kind !== 'activate' && step.kind !== 'input') return
-      const match = TARGET_GRAMMAR.exec(step.target)
-      if (!match) {
-        errors.push(
-          `\`${task.id}\` step ${i + 1}: target \`${step.target}\` is not \`<role> "<accessible name>"\` — the locator policy is roles and names, never a selector`,
-        )
-        return
-      }
-      if (!roles.has(match[1])) {
-        errors.push(`\`${task.id}\` step ${i + 1}: \`${match[1]}\` is not an ARIA role this vocabulary knows`)
-      }
-    })
-  }
-
-  // ---- 4. reachable, and located where it says -----------------------------
+  // ---- 3. reachable, and located where it says -----------------------------
   const places = new Map<string, InterfaceResource>()
   const existingPlaces = new Map(
     (mergeInterfaceCatalogs(derived, authored)?.resources?.[AUTHORED_SURFACE] ?? []).map((place) => [place.id, place]),
@@ -351,7 +396,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
     }
   }
 
-  // ---- 5. a state id names one world, catalog-wide -------------------------
+  // ---- 4. a state id names one world, catalog-wide -------------------------
   // The registry is what tasks chain BY: `at-least-one-repository-registered`
   // means the same world at every place, or the chain is a coincidence of
   // spelling. So a draft may REFERENCE any id the catalog defines (the schema

@@ -38,6 +38,28 @@ export const TurnUsageSchema = z.object({
 });
 export type TurnUsage = z.infer<typeof TurnUsageSchema>;
 
+/**
+ * WHAT A TURN LEFT BEHIND WHEN IT NEVER FINISHED. A reply can stop before the
+ * tool call it was writing is closed — the provider's output limit cut it, or
+ * the driver aborted a run of whitespace no real argument contains — and the
+ * transport layer discards an unclosed call before any driver sees it. Without
+ * this record the turn is a usage line and nothing else, and the next reader has
+ * no way to say what the model was doing when it stopped.
+ *
+ * `partial` is the argument text the stream did deliver, condensed: long
+ * whitespace runs stand as a count and a long tail is elided, so the prefix that
+ * explains the failure survives without the flood that caused it.
+ */
+export const TurnCutOffSchema = z.object({
+  /** `length` = the provider stopped at its output limit; `degenerate` = the
+   *  driver aborted the request over a whitespace run. */
+  reason: z.enum(['length', 'degenerate']),
+  /** The tool whose arguments the stream was writing, when it was writing one. */
+  toolName: z.string().optional(),
+  partial: z.string(),
+})
+export type TurnCutOff = z.infer<typeof TurnCutOffSchema>
+
 /** A session's budget rollup, kept on the session index row and on child refs. */
 export const BudgetSpentSchema = z.object({
   turns: z.number().int().nonnegative(),
@@ -227,6 +249,10 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     /** The model the RESPONSE reported, when the backend reports one — the
      *  honest answer for a turn a fallback or a deployment alias served. */
     model: z.string().optional(),
+    /** Present only on a turn that stopped before its tool call was complete —
+     *  see {@link TurnCutOffSchema}. Absent on every turn that finished, which
+     *  is every turn in a journal written before the field existed. */
+    cutOff: TurnCutOffSchema.optional(),
   }),
   z.object({
     type: z.literal('tool-result'),

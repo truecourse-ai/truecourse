@@ -83,7 +83,7 @@ import type {
   InterfaceResource,
   InterfaceStep,
 } from '@truecourse/shared';
-import { describeWebLocator, webLocatorHandle } from '@truecourse/shared';
+import { describeInterfaceTarget, describeWebLocator, webLocatorHandle } from '@truecourse/shared';
 
 // ---------------------------------------------------------------------------
 // Selection ids. A place id is AREA-SCOPED (web's `violations-list` and an api
@@ -176,7 +176,7 @@ export function webArgs(steps: readonly InterfaceStep[]): string[] {
   const args: string[] = [];
   for (const step of steps) {
     if (step.kind !== 'activate' && step.kind !== 'input') continue;
-    const names = placeholders(step.target);
+    const names = placeholders(step.target.name);
     if (names.length > 0) args.push(...names);
     else if (step.kind === 'input') args.push('text');
   }
@@ -197,7 +197,7 @@ export function webName(id: string): string {
  */
 export function stepTargetText(step: InterfaceStep): string {
   if (step.kind === 'navigate') return step.route;
-  if (step.kind === 'input' || step.kind === 'activate') return step.target;
+  if (step.kind === 'input' || step.kind === 'activate') return describeInterfaceTarget(step.target);
   if (step.kind === 'request') return `${step.method} ${step.path}`;
   return step.command.join(' ');
 }

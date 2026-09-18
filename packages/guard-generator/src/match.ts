@@ -30,6 +30,7 @@ import {
   verificationCasePreparation,
   interfaceEntryLabel,
   flowDriversToMatch,
+  describeInterfaceTarget,
   describeWebLocator,
   interfaceFingerprint,
   type GuardDriverId,
@@ -143,7 +144,7 @@ function stepSummary(step: InterfaceStep): string {
     case 'navigate':
       return `navigate: ${step.route}`
     default:
-      return `${step.kind}${step.kind === 'input' && step.mode ? ` (${step.mode})` : ''}: ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
+      return `${step.kind}${step.kind === 'input' && step.mode ? ` (${step.mode})` : ''}: ${describeInterfaceTarget(step.target)}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
   }
 }
 
@@ -181,9 +182,9 @@ function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
     case 'navigate':
       return `navigate: ${step.route}`
     case 'input':
-      return `${step.mode === 'select' ? 'select' : 'fill'}: ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
+      return `${step.mode === 'select' ? 'select' : 'fill'}: ${describeInterfaceTarget(step.target)}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
     default:
-      return `click: ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
+      return `click: ${describeInterfaceTarget(step.target)}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
   }
 }
 

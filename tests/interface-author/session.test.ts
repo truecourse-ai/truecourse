@@ -37,7 +37,7 @@ describe('the authoring session def', () => {
     expect(def().outcomePrecondition).toEqual({
       tool: 'check_draft',
       message:
-        'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your complete draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` again.',
+        'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` with the draftId of the accepted check.',
     })
     // The tool it names is one the session actually has, or the demand is unmeetable.
     expect(def().tools.map((tool) => tool.name)).toContain(def().outcomePrecondition!.tool)

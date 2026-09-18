@@ -266,7 +266,7 @@ describe('author catalog', () => {
 
   it('reports an oversized indivisible locator explicitly without truncation', () => {
     const entry = action(0)
-    entry.steps = [{ kind: 'activate', target: 'x'.repeat(13_000) }]
+    entry.steps = [{ kind: 'activate', target: { role: 'button', name: 'x'.repeat(13_000) } }]
     const catalog = createAuthorCatalog([entry])
     let cursor: string | undefined
     let failure: { content: string; isError?: boolean }

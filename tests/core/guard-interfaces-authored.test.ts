@@ -67,7 +67,7 @@ const AUTHORED_WEB = {
   type: 'web' as const,
   title: 'Silence a rule',
   entry: { method: 'GET', path: '/repos/{repoId}' },
-  steps: [{ kind: 'activate' as const, target: 'button "Rules"' }],
+  steps: [{ kind: 'activate' as const, target: { role: 'button', name: 'Rules' } }],
   at: 'repo-report',
   to: 'rules-dialog',
   fingerprint: 'sha256:authored-web',

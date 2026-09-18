@@ -23,7 +23,13 @@
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { GuardDriverIdSchema } from './guard/drivers.js'
-import { GUARD_WEB_ROLES, GUARD_WEB_STATES, GuardWebLocatorSchema, GuardWebScopeSchema } from './guard/web-steps.js'
+import {
+  GUARD_WEB_ROLES,
+  GUARD_WEB_STATES,
+  GuardWebLocatorSchema,
+  GuardWebScopeSchema,
+  type GuardWebScope,
+} from './guard/web-steps.js'
 
 /** The closed step vocabulary, shared by every surface. */
 export const InterfaceStepKindSchema = z.enum([
@@ -68,13 +74,67 @@ export const InterfaceNavigateStepSchema = z
   })
   .strict()
 
+/**
+ * `<role> "<accessible name>"` — the shape a target had while it was ONE
+ * STRING. A stored catalog written then still reads: a string in a target
+ * position is parsed back into its two fields. Nothing writes one.
+ */
+const LEGACY_TARGET = /^([a-z]+) "([^"]+)"$/
+
+/** The legacy string split in two; anything else passes to the schema as-is. */
+function parseLegacyTarget(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  const match = LEGACY_TARGET.exec(value)
+  return match ? { role: match[1], name: match[2] } : value
+}
+
+/**
+ * THE TARGET — the element a web step acts on, as the two things a user
+ * perceives about it: the ARIA role the browser resolves, and the accessible
+ * name it carries. Exactly the vocabulary a scenario's own locator uses
+ * ({@link GuardWebScopeSchema}), because a task's steps compile into those
+ * scenarios and a second spelling of one idea is a translation nobody wrote.
+ *
+ * It was one string, and the string is why this schema exists: a nested pair of
+ * double quotes inside a JSON string argument is the hardest thing a model has
+ * to write, and an authoring session that lost the closing quote of
+ * `button "Add expense"` mid-argument then wrote ten million space characters
+ * against the provider's output limit. Two fields have no quoting problem at
+ * all, and the role arrives as an enumerated value the model is handed rather
+ * than a token it has to spell.
+ *
+ * The declared INPUT type is the object, not `unknown`: the legacy string is
+ * something a stored file may still hold, never something a writer may hand in,
+ * and a type that admitted it would spread that permission through every schema
+ * an interface appears in.
+ */
+export const InterfaceTargetSchema = z.preprocess(
+  parseLegacyTarget,
+  z
+    .object(GuardWebScopeSchema.shape, {
+      // What a step target that is not an object gets told — a CSS selector, an
+      // XPath or a test id arrives here, and the shape is the answer to all
+      // three.
+      invalid_type_error:
+        'a step target is {"role": "<aria role>", "name": "<accessible name>"} — a role and an accessible name, never a selector',
+    })
+    .strict(),
+) as unknown as z.ZodType<GuardWebScope, z.ZodTypeDef, GuardWebScope>
+export type InterfaceTarget = GuardWebScope
+
+/** A target in the words a person reads it in — `button "Add expense"`. The one
+ *  rendering, shared by the prompts, the catalog views and the error messages. */
+export function describeInterfaceTarget(target: InterfaceTarget): string {
+  return `${target.role} "${target.name}"${target.exact ? ' (exact)' : ''}`
+}
+
 /** Put a value into a field — the target as the surface names it. */
 export const InterfaceInputStepSchema = z
   .object({
     kind: z.literal('input'),
     /** Native selects choose a visible option; text controls use fill. */
     mode: z.enum(['fill', 'select']).optional(),
-    target: z.string().min(1),
+    target: InterfaceTargetSchema,
     within: GuardWebScopeSchema.optional(),
     label: z.string().optional(),
   })
@@ -84,7 +144,7 @@ export const InterfaceInputStepSchema = z
 export const InterfaceActivateStepSchema = z
   .object({
     kind: z.literal('activate'),
-    target: z.string().min(1),
+    target: InterfaceTargetSchema,
     within: GuardWebScopeSchema.optional(),
     label: z.string().optional(),
   })
@@ -1726,9 +1786,13 @@ function stepIdentity(step: InterfaceStep): string {
     case 'navigate':
       return [step.kind, normalizeToken(step.route)].join('\u0000')
     default:
+      // The target folds as the ONE STRING it used to be, so splitting it in
+      // two moved no stored fingerprint and no scenario's grounding with it.
+      // `exact` folds only when it is set, for the same reason.
       return [
         step.kind,
-        normalizeToken(step.target),
+        normalizeToken(`${step.target.role} "${step.target.name}"`),
+        ...(step.target.exact ? ['exact'] : []),
         ...(step.kind === 'input' && step.mode === 'select' ? ['select'] : []),
         ...(step.within ? ['within', step.within.role, normalizeToken(step.within.name), String(step.within.exact ?? false)] : []),
       ].join('\u0000')
