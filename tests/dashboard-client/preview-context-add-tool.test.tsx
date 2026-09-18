@@ -38,11 +38,13 @@ vi.mock('@/lib/socket', () => {
 });
 
 import DashboardApp from '@/dashboard/DashboardApp';
-import { registerSettingsTab } from '@/dashboard/shell/registry';
+import { registerSettingsTab, registerSourceKindMark } from '@/dashboard/shell/registry';
 
 // An edition with document Connections. Registration is module-level, as the
-// real one is, and vitest isolates this file from every other.
+// real one is, and vitest isolates this file from every other. It registers a
+// mark for Jira and none for Confluence, so both branches of the row render.
 registerSettingsTab({ id: 'connections', label: 'Connections', render: () => null });
+registerSourceKindMark('jira', 'data:image/svg+xml,jira-mark');
 
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = (() => {}) as Element['scrollTo'];
@@ -152,6 +154,11 @@ describe('the kinds the dialog offers', () => {
     // The account's two kinds, then the two kinds that need no account.
     expect(within(list).getAllByRole('button')).toHaveLength(4);
     expect(within(list).getByRole('link')).toHaveTextContent('Connect another tool in Settings');
+    // A kind wears the mark its edition registered; one without gets the generic icon.
+    const [jira, confluence] = within(list).getAllByRole('button');
+    expect(jira!.querySelector('img')?.getAttribute('src')).toBe('data:image/svg+xml,jira-mark');
+    expect(confluence!.querySelector('img')).toBeNull();
+    expect(confluence!.querySelector('svg')).not.toBeNull();
   });
 
   it('leaves out a kind the account serves but this server cannot add', async () => {

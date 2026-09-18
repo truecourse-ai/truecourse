@@ -1,5 +1,5 @@
 /**
- * The edition seam on the client: the three places the shell lets another
+ * The edition seam on the client: the four places the shell lets another
  * bundle add to itself.
  *
  * The open edition is the whole product minus three things — the document
@@ -15,7 +15,7 @@
  */
 
 import type { ComponentType, ReactNode } from 'react';
-import type { ServerMode } from '@truecourse/shared';
+import type { ContextSourceKind, ServerMode } from '@truecourse/shared';
 
 /**
  * One section of Settings: a row in its side menu and the page behind it, at
@@ -74,6 +74,12 @@ export type WorkspaceSwitcher = ComponentType<{ collapsed: boolean }>;
 const settingsTabs: SettingsTab[] = [];
 const repositoryProviders: RepositoryProvider[] = [];
 let workspaceSwitcher: WorkspaceSwitcher | null = null;
+/**
+ * A tool kind's own mark, as an image URL. The brands' marks ship with the
+ * edition that connects them, so the open shell draws a generic icon for a kind
+ * nobody registered a mark for.
+ */
+const sourceKindMarks = new Map<ContextSourceKind, string>();
 
 export function registerSettingsTab(tab: SettingsTab): void {
   settingsTabs.push(tab);
@@ -97,4 +103,12 @@ export function registerWorkspaceSwitcher(switcher: WorkspaceSwitcher): void {
 
 export function registeredWorkspaceSwitcher(): WorkspaceSwitcher | null {
   return workspaceSwitcher;
+}
+
+export function registerSourceKindMark(kind: ContextSourceKind, logo: string): void {
+  sourceKindMarks.set(kind, logo);
+}
+
+export function registeredSourceKindMark(kind: ContextSourceKind): string | null {
+  return sourceKindMarks.get(kind) ?? null;
 }

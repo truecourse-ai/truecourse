@@ -63,7 +63,7 @@ import { addContextSource, listContextConnections, previewContextSource } from '
 import { fetchGithubStatus, fetchInstallationRepos } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
-import { registeredSettingsTabs } from '@/dashboard/shell/registry';
+import { registeredSettingsTabs, registeredSourceKindMark } from '@/dashboard/shell/registry';
 import { Stepper } from '@/dashboard/ui/stepper';
 import { sourceHref } from './context-hrefs';
 
@@ -362,7 +362,12 @@ export function AddContextDialog({
               .flatMap((connection) =>
                 connection.kinds
                   .filter((kind) => addableKinds.includes(kind))
-                  .map((kind) => ({ kind, baseUrl: connection.baseUrl })),
+                  .map((kind) => ({
+                    kind,
+                    baseUrl: connection.baseUrl,
+                    // The kind's own mark when the edition registered one.
+                    mark: registeredSourceKindMark(kind),
+                  })),
               )
               .map((tool) => (
                 <li key={tool.kind}>
@@ -376,7 +381,11 @@ export function AddContextDialog({
                     className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
                   >
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground">
-                      <Plug className="h-4 w-4" aria-hidden />
+                      {tool.mark ? (
+                        <img src={tool.mark} alt="" aria-hidden className="h-5 w-5 object-contain" />
+                      ) : (
+                        <Plug className="h-4 w-4" aria-hidden />
+                      )}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] text-foreground">

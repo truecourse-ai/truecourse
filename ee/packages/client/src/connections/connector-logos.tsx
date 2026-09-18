@@ -17,6 +17,11 @@ export type ConnectorTool = 'atlassian' | 'jira' | 'confluence' | 'gdrive' | 'on
 
 const LOGO: Record<ConnectorTool, string> = { atlassian, jira, confluence, gdrive, onedrive, notion, slack };
 
+/** A tool's mark as an image URL, for the shell registries that take one. */
+export function connectorLogo(tool: ConnectorTool): string {
+  return LOGO[tool];
+}
+
 export function ConnectorLogo({
   tool,
   className = 'h-6 w-6',
