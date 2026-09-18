@@ -15,7 +15,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { sql } from 'drizzle-orm';
 import { schema, MIGRATIONS_DIR } from '@truecourse/db';
 
-const MIGRATION = path.join(MIGRATIONS_DIR, '0028_integration_connections.sql');
+const MIGRATION = path.join(MIGRATIONS_DIR, '0029_integration_connections.sql');
 
 let client: PGlite;
 
@@ -44,7 +44,7 @@ function statements(): string[] {
     .filter(Boolean);
 }
 
-describe('0028_integration_connections', () => {
+describe('0029_integration_connections', () => {
   it('leaves a healthy database with the table and without the pending column', async () => {
     const db = drizzle(client, { schema });
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
