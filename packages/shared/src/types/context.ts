@@ -12,7 +12,8 @@
  * vocabulary; which of them can actually be added is the SERVER's answer
  * (`ContextSourcesResponse.addableKinds`), built from the drivers registered at
  * boot — a tool whose driver an edition does not carry is a name in this list
- * and nothing more.
+ * and nothing more. A kind is not an account: one connection serves every kind
+ * {@link CONTEXT_CONNECTION_KINDS} lists for it.
  */
 
 import type { GuardCoveragePlainStatus } from '../guard/dashboard.js';
@@ -43,22 +44,49 @@ export const CLOCK_SWEPT_CONTEXT_SOURCE_KINDS = [
   'confluence',
 ] as const satisfies readonly ContextSourceKind[];
 
-/** The tools a workspace connects an ACCOUNT for, one connection per tool. */
-export const CONTEXT_CONNECTION_PROVIDERS = ['jira', 'confluence'] as const;
+/**
+ * The ACCOUNTS a workspace connects. One account, not one per kind: an
+ * Atlassian site is a single login whose token reads both products, so the
+ * connection is `atlassian` and the kinds it serves are Jira and Confluence.
+ */
+export const CONTEXT_CONNECTION_PROVIDERS = ['atlassian'] as const;
 export type ContextConnectionProvider = (typeof CONTEXT_CONNECTION_PROVIDERS)[number];
 
-/** Whether a kind is one of the tools a connection is made for. */
-export function isContextConnectionProvider(kind: string): kind is ContextConnectionProvider {
-  return (CONTEXT_CONNECTION_PROVIDERS as readonly string[]).includes(kind);
+/** The source kinds each connection's account reads. */
+export const CONTEXT_CONNECTION_KINDS: Record<
+  ContextConnectionProvider,
+  readonly ContextSourceKind[]
+> = {
+  atlassian: ['jira', 'confluence'],
+};
+
+/** The ONE word per connection. Nothing else may name an account. */
+export const CONTEXT_CONNECTION_LABEL: Record<ContextConnectionProvider, string> = {
+  atlassian: 'Atlassian',
+};
+
+/** Whether a name is one of the accounts a connection is made for. */
+export function isContextConnectionProvider(name: string): name is ContextConnectionProvider {
+  return (CONTEXT_CONNECTION_PROVIDERS as readonly string[]).includes(name);
+}
+
+/** The connection a source kind is read through, or null when it needs none. */
+export function contextConnectionOf(kind: ContextSourceKind): ContextConnectionProvider | null {
+  for (const provider of CONTEXT_CONNECTION_PROVIDERS) {
+    if (CONTEXT_CONNECTION_KINDS[provider].includes(kind)) return provider;
+  }
+  return null;
 }
 
 /**
- * One tool's connection, as every reader sees it: the account, never the token.
- * `connected` is false for a tool the workspace has not connected — the row is
- * still listed, because the page is about the tools, not about the rows.
+ * One account, as every reader sees it: the login, never the token.
+ * `connected` is false for an account the workspace has not connected — the row
+ * is still listed, because the page is about the tools, not about the rows.
  */
 export interface ContextConnectionView {
   provider: ContextConnectionProvider;
+  /** The source kinds this account reads, which is what it can add in Context. */
+  kinds: ContextSourceKind[];
   connected: boolean;
   /** The Atlassian site, e.g. `https://acme.atlassian.net`. '' when unconnected. */
   baseUrl: string;
@@ -78,6 +106,19 @@ export interface ContextConnectionInput {
   baseUrl: string;
   accountEmail: string;
   apiToken?: string;
+}
+
+/** What ONE product said when the account was tested against it. */
+export type ContextConnectionProductTest = { ok: true } | { ok: false; error: string };
+
+/**
+ * What Test answers: one verdict per product the account serves. `ok` is true
+ * when at least one of them answered — an account may hold a Jira licence and
+ * no Confluence one, and it is still a usable connection.
+ */
+export interface ContextConnectionTestResponse {
+  ok: boolean;
+  products: Partial<Record<ContextSourceKind, ContextConnectionProductTest>>;
 }
 
 /** The ONE word per kind: the add dialog offers it, and every list names it. */

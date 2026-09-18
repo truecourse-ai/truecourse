@@ -1,10 +1,11 @@
 /**
- * The document CONNECTIONS feature: the account a workspace connects once per
- * tool, and the context source drivers that read through it.
+ * The document CONNECTIONS feature: the account a workspace connects, and the
+ * context source drivers that read through it.
  *
- * A connection and a source are two things. The connection is the account —
- * made in Settings › Connections, one row per tool, its token encrypted at rest
- * — and it is this feature's routes. A source is what that account READS (a
+ * A connection and a source are two things. The connection is the ACCOUNT —
+ * made in Settings › Connections, its token encrypted at rest — and it is this
+ * feature's routes. One Atlassian site is one account: a single row, a single
+ * token, and the two kinds it serves. A source is what that account READS (a
  * Jira project, a Confluence space), added in Context like any other source;
  * there can be several per connection, and they are ordinary `context_sources`
  * rows that the open edition's routes, sync job and sweep handle unchanged. All
@@ -30,8 +31,8 @@ export const connectionsFeature: ServerFeature = {
         path: CONNECTIONS_PATH,
         router: createConnectionsRouter({
           store,
-          probe: (provider, connection) =>
-            provider === 'jira' ? probeJira(connection) : probeConfluence(connection),
+          probe: (kind, connection) =>
+            kind === 'jira' ? probeJira(connection) : probeConfluence(connection),
           context,
         }),
       },
@@ -44,13 +45,13 @@ export const connectionsFeature: ServerFeature = {
       {
         kind: 'jira',
         driver: (org) =>
-          createJiraDriver({ connection: () => store.requireConnection(org, 'jira') }),
+          createJiraDriver({ connection: () => store.requireConnection(org, 'atlassian') }),
       },
       {
         kind: 'confluence',
         driver: (org) =>
           createConfluenceDriver({
-            connection: () => store.requireConnection(org, 'confluence'),
+            connection: () => store.requireConnection(org, 'atlassian'),
           }),
       },
     ];

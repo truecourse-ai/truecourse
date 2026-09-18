@@ -1,27 +1,32 @@
 /**
- * Settings › Connections: the tools a document can come from, one row each with
- * its brand mark.
+ * Settings › Connections: the accounts a document can come from, one row each
+ * with its brand marks.
  *
- * A connection is the ACCOUNT, made once per workspace and per tool. What that
- * account READS is a source, added in Context — so this page never mentions a
- * project or a space: it connects, it tests, and it disconnects.
+ * A connection is the ACCOUNT, made once per workspace. An Atlassian site is
+ * ONE account — a single login whose token reads both Jira and Confluence — so
+ * it is one row wearing both marks. What that account READS is a source, added
+ * in Context, so this page never mentions a project or a space: it connects, it
+ * tests, and it disconnects.
  *
- * Two tools connect today. The rest stay listed and say Coming soon: hiding
+ * One account connects today. The rest stay listed and say Coming soon: hiding
  * them would make the page lie about where this is going, and offering them
  * would make it lie about what it does.
  *
- * Testing makes one read that proves the account. A refusal is Atlassian's own reason, as
- * the server relayed it — paraphrasing it would throw away the only thing that
- * says what to change.
+ * Testing makes one read per product the account serves and says what each of
+ * them answered, because an account may hold one product's licence and not the
+ * other's. A refusal is Atlassian's own reason, as the server relayed it —
+ * paraphrasing it would throw away the only thing that says what to change.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import {
+  CONTEXT_CONNECTION_KINDS,
+  CONTEXT_CONNECTION_LABEL,
   CONTEXT_SOURCE_KIND_LABEL,
   formatRelativeTime,
-  isContextConnectionProvider,
   type ContextConnectionProvider,
+  type ContextConnectionTestResponse,
   type ContextConnectionView,
   type ContextSourceKind,
 } from '@truecourse/shared';
@@ -38,19 +43,45 @@ import { StatusWord } from '@/dashboard/ui/status-word';
 import { ConnectorLogo, type ConnectorTool } from './connector-logos';
 import { removeConnection, saveConnection, testConnection } from './api';
 
-const CONNECTORS: readonly { kind: ContextSourceKind; tool: ConnectorTool }[] = [
-  { kind: 'jira', tool: 'jira' },
-  { kind: 'confluence', tool: 'confluence' },
-  { kind: 'google-drive', tool: 'gdrive' },
-  { kind: 'onedrive', tool: 'onedrive' },
-  { kind: 'notion', tool: 'notion' },
-  { kind: 'slack', tool: 'slack' },
+/** One row of the page: an account that connects, or a tool that will. */
+interface Connector {
+  key: string;
+  label: string;
+  /** The brand marks the row wears, side by side for an account serving several. */
+  tools: ConnectorTool[];
+  /** The account behind it, or null while the tool is still Coming soon. */
+  provider: ContextConnectionProvider | null;
+}
+
+const CONNECTORS: readonly Connector[] = [
+  {
+    key: 'atlassian',
+    label: CONTEXT_CONNECTION_LABEL.atlassian,
+    tools: ['jira', 'confluence'],
+    provider: 'atlassian',
+  },
+  {
+    key: 'google-drive',
+    label: CONTEXT_SOURCE_KIND_LABEL['google-drive'],
+    tools: ['gdrive'],
+    provider: null,
+  },
+  { key: 'onedrive', label: CONTEXT_SOURCE_KIND_LABEL.onedrive, tools: ['onedrive'], provider: null },
+  { key: 'notion', label: CONTEXT_SOURCE_KIND_LABEL.notion, tools: ['notion'], provider: null },
+  { key: 'slack', label: CONTEXT_SOURCE_KIND_LABEL.slack, tools: ['slack'], provider: null },
 ];
 
 const FIELD =
   'mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary';
 const FIELD_MONO = `${FIELD} font-mono`;
 const BUTTON = 'rounded px-3 py-1.5 text-xs font-medium disabled:opacity-50';
+
+/** The products an account serves, as a sentence: `Jira and Confluence`. */
+function productWords(kinds: readonly ContextSourceKind[]): string {
+  const words = kinds.map((kind) => CONTEXT_SOURCE_KIND_LABEL[kind]);
+  if (words.length < 2) return words[0] ?? '';
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]!}`;
+}
 
 /** What a connection form holds while it is being filled in. */
 interface Form {
@@ -81,16 +112,19 @@ export function ConnectionsTab() {
     <>
       <ul className="divide-y divide-border border-b border-border" aria-label="Connectors">
         {CONNECTORS.map((connector) => {
-          const provider = isContextConnectionProvider(connector.kind) ? connector.kind : null;
+          const provider = connector.provider;
           const view = provider ? viewOf(provider) : null;
-          const label = CONTEXT_SOURCE_KIND_LABEL[connector.kind];
           const row = (
             <div className="flex w-full items-start gap-4 px-6 py-3">
-              <ConnectorLogo tool={connector.tool} className="mt-0.5 h-6 w-6 shrink-0" />
+              <span className="mt-0.5 flex shrink-0 items-center gap-1">
+                {connector.tools.map((tool) => (
+                  <ConnectorLogo key={tool} tool={tool} className="h-6 w-6" />
+                ))}
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-3">
                   <span className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-foreground">
-                    {label}
+                    {connector.label}
                   </span>
                   {provider ? (
                     view?.connected ? (
@@ -116,11 +150,15 @@ export function ConnectionsTab() {
             </div>
           );
           return (
-            <li key={connector.kind}>
+            <li key={connector.key}>
               {provider ? (
                 <button
                   type="button"
-                  aria-label={view?.connected ? `Edit the ${label} connection` : `Connect ${label}`}
+                  aria-label={
+                    view?.connected
+                      ? `Edit the ${connector.label} connection`
+                      : `Connect ${connector.label}`
+                  }
                   onClick={() => setEditing(provider)}
                   className="block w-full transition-colors hover:bg-muted/40"
                 >
@@ -147,8 +185,8 @@ export function ConnectionsTab() {
 }
 
 /**
- * One tool's account. Saving stores it; Test makes one read that proves it, with
- * whatever token is in the field or the stored one when it is left blank —
+ * One account. Saving stores it; Test makes one read per product it serves,
+ * with whatever token is in the field or the stored one when it is left blank —
  * which is what the masked placeholder means.
  */
 function ConnectionDialog({
@@ -162,19 +200,20 @@ function ConnectionDialog({
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const label = CONTEXT_SOURCE_KIND_LABEL[provider];
+  const label = CONTEXT_CONNECTION_LABEL[provider];
+  const kinds = view?.kinds ?? CONTEXT_CONNECTION_KINDS[provider];
   const [form, setForm] = useState<Form>({
     ...EMPTY,
     baseUrl: view?.baseUrl ?? '',
     accountEmail: view?.accountEmail ?? '',
   });
   const [busy, setBusy] = useState(false);
-  const [tested, setTested] = useState(false);
+  const [tested, setTested] = useState<ContextConnectionTestResponse | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   const edit = (patch: Partial<Form>): void => {
     setForm({ ...form, ...patch });
-    setTested(false);
+    setTested(null);
     setFailure(null);
   };
 
@@ -198,7 +237,8 @@ function ConnectionDialog({
         <DialogHeader>
           <DialogTitle>{label}</DialogTitle>
           <DialogDescription>
-            The account this workspace reads {label} with. What it reads is added in Context.
+            The account this workspace reads {productWords(kinds)} with. What it reads is added in
+            Context.
           </DialogDescription>
         </DialogHeader>
 
@@ -238,7 +278,28 @@ function ConnectionDialog({
               className={FIELD_MONO}
             />
           </label>
-          {tested && !failure && <StatusWord tone="success" word="The account answered" />}
+          {tested && (
+            <ul className="space-y-1">
+              {kinds.map((kind) => {
+                const verdict = tested.products[kind];
+                if (!verdict) return null;
+                return (
+                  <li key={kind}>
+                    {verdict.ok ? (
+                      <StatusWord
+                        tone="success"
+                        word={`${CONTEXT_SOURCE_KIND_LABEL[kind]} answered.`}
+                      />
+                    ) : (
+                      <p className="text-[11px] text-destructive">
+                        {`${CONTEXT_SOURCE_KIND_LABEL[kind]}: ${verdict.error}`}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           {failure && <p className="text-[11px] text-destructive">{failure}</p>}
         </div>
 
@@ -269,8 +330,7 @@ function ConnectionDialog({
             disabled={busy}
             onClick={() =>
               run(async () => {
-                await testConnection(provider, payload());
-                setTested(true);
+                setTested(await testConnection(provider, payload()));
               })
             }
             className={`${BUTTON} border border-border text-foreground hover:bg-muted/60`}

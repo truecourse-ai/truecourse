@@ -5,12 +5,13 @@
  * adding a source never silently changes a corpus.
  *
  * STEP 1 IS THE INSTANCE, the same shape the connect-repository dialog uses:
- * the workspace's CONNECTED ACCOUNTS first (a tool this server can add and this
- * workspace has connected, named by the site it reads), then the two kinds that
- * need no account — a repository's own markdown, and a documentation site
- * through its llms.txt — the whole row being the button. Connecting a tool is
- * Settings' job, so the list ends with the one link that goes there, in an
- * edition that HAS tools.
+ * the workspace's CONNECTED ACCOUNTS first — one row per SOURCE KIND an account
+ * serves that this server can add, named by the site it reads, so one Atlassian
+ * account offers Jira and Confluence — then the two kinds that need no account,
+ * a repository's own markdown and a documentation site through its llms.txt,
+ * the whole row being the button. Connecting an account is Settings' job, so
+ * the list ends with the one link that goes there, in an edition that HAS
+ * tools.
  *
  * WHICH KINDS are offered is the server's answer (`addableKinds`), built from
  * the drivers it registered at boot: an edition without a tool's driver never
@@ -39,9 +40,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { GitBranch, Globe, Plug } from 'lucide-react';
 import {
   CONTEXT_SOURCE_KIND_LABEL,
+  contextConnectionOf,
   DEFAULT_REPOSITORY_EXCLUDE,
   DEFAULT_REPOSITORY_INCLUDE,
-  isContextConnectionProvider,
   type ContextConnectionView,
   type ContextSourceCheck,
   type ContextSourceKind,
@@ -187,9 +188,9 @@ export function AddContextDialog({
   // The tool accounts this workspace has connected, read when the dialog opens
   // and only where a tool can be added at all: the route belongs to the edition
   // that has Connections, and the server's `addableKinds` is what says so.
-  const tools = addableKinds.filter(isContextConnectionProvider);
+  const toolKinds = addableKinds.filter((kind) => contextConnectionOf(kind) !== null);
   useEffect(() => {
-    if (!open || tools.length === 0) return;
+    if (!open || toolKinds.length === 0) return;
     let live = true;
     void listContextConnections()
       .then((answer) => {
@@ -203,7 +204,7 @@ export function AddContextDialog({
     return () => {
       live = false;
     };
-  }, [open, tools.length]);
+  }, [open, toolKinds.length]);
 
   // The accounts a Repository source can read through, read on entering the
   // scope step: a source may read any repository they can reach, connected in
@@ -357,13 +358,18 @@ export function AddContextDialog({
         {step === 1 && (
           <ul className="min-w-0 divide-y divide-border rounded-md border border-border" aria-label="Kinds of source">
             {(connections ?? [])
-              .filter((connection) => connection.connected && tools.includes(connection.provider))
-              .map((connection) => (
-                <li key={connection.provider}>
+              .filter((connection) => connection.connected)
+              .flatMap((connection) =>
+                connection.kinds
+                  .filter((kind) => addableKinds.includes(kind))
+                  .map((kind) => ({ kind, baseUrl: connection.baseUrl })),
+              )
+              .map((tool) => (
+                <li key={tool.kind}>
                   <button
                     type="button"
                     onClick={() => {
-                      setKind(connection.provider);
+                      setKind(tool.kind);
                       setChecked(null);
                       setFailure(null);
                     }}
@@ -374,10 +380,10 @@ export function AddContextDialog({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] text-foreground">
-                        {CONTEXT_SOURCE_KIND_LABEL[connection.provider]}
+                        {CONTEXT_SOURCE_KIND_LABEL[tool.kind]}
                       </span>
                       <span className="block truncate text-[11px] text-muted-foreground">
-                        {connection.baseUrl}
+                        {tool.baseUrl}
                       </span>
                     </span>
                   </button>

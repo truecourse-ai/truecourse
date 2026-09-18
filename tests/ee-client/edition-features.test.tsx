@@ -6,16 +6,21 @@
  * provider — so the whole app is rendered with this edition registered first,
  * and the assertions are on the open pages drawing what was registered.
  *
- * Two connectors connect (Jira and Confluence, each a row that opens its
- * account form); the other four and the Azure row say Coming soon and are
- * inert: no lock, no button, nothing to click. The provider still owns its
- * hosts, so an Azure remote wears the Azure mark.
+ * One connector connects — Atlassian, the single account whose token reads
+ * both Jira and Confluence, a row that opens its account form; the other four
+ * and the Azure row say Coming soon and are inert: no lock, no button, nothing
+ * to click. The provider still owns its hosts, so an Azure remote wears the
+ * Azure mark.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { CONTEXT_CONNECTION_PROVIDERS, type GithubConnectStatusResponse } from '@truecourse/shared';
+import {
+  CONTEXT_CONNECTION_KINDS,
+  CONTEXT_CONNECTION_PROVIDERS,
+  type GithubConnectStatusResponse,
+} from '@truecourse/shared';
 import DashboardApp from '@/dashboard/DashboardApp';
 import { registerEditionFeatures } from '../../ee/packages/client/src/edition';
 
@@ -42,9 +47,10 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-/** A workspace that has connected neither tool. */
+/** A workspace that has connected no account. */
 const CONNECTIONS = CONTEXT_CONNECTION_PROVIDERS.map((provider) => ({
   provider,
+  kinds: [...CONTEXT_CONNECTION_KINDS[provider]],
   connected: false,
   baseUrl: '',
   accountEmail: '',
@@ -103,7 +109,7 @@ describe('Settings › Connections', () => {
     ]);
   });
 
-  it('lists the six tool connectors, and only the two that connect are controls', async () => {
+  it('lists the one account and the four tools that cannot connect yet', async () => {
     renderAt('/settings/connections');
 
     const list = await screen.findByRole('list', { name: 'Connectors' });
@@ -111,13 +117,13 @@ describe('Settings › Connections', () => {
     expect(
       rows.map(
         (row) =>
-          within(row).getByText(/^(Jira|Confluence|Google Drive|OneDrive|Notion|Slack)$/).textContent,
+          within(row).getByText(/^(Atlassian|Google Drive|OneDrive|Notion|Slack)$/).textContent,
       ),
-    ).toEqual(['Jira', 'Confluence', 'Google Drive', 'OneDrive', 'Notion', 'Slack']);
+    ).toEqual(['Atlassian', 'Google Drive', 'OneDrive', 'Notion', 'Slack']);
     // The four with nothing behind them stay listed and inert.
     expect(within(list).getAllByText('Coming soon')).toHaveLength(4);
     expect(within(list).getAllByRole('button').map((button) => button.getAttribute('aria-label')))
-      .toEqual(['Connect Jira', 'Connect Confluence']);
+      .toEqual(['Connect Atlassian']);
     expect(within(list).queryByRole('link')).toBeNull();
   });
 });

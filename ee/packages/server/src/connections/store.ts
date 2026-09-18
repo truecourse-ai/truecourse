@@ -1,10 +1,11 @@
 /**
- * The workspace's tool CONNECTIONS — one row per (workspace, tool) over
+ * The workspace's ACCOUNT CONNECTIONS — one row per (workspace, account) over
  * `integration_connections`, the API token encrypted at rest under the server's
  * master secret.
  *
- * A connection is the ACCOUNT, not what it reads: a workspace makes one per
- * tool and the sources that read through it are Context's rows. Two reads,
+ * A connection is the ACCOUNT, not what it reads: an Atlassian site is one
+ * login whose token reads both Jira and Confluence, so there is one row for it
+ * and the sources that read through it are Context's rows. Two reads,
  * deliberately separate (the shape `PgLlmConfigStore` keeps): a masked view for
  * the page, which never carries a secret, and a decrypted connection for the
  * driver about to call Atlassian with it.
@@ -16,7 +17,8 @@ import { and, eq, sql } from 'drizzle-orm';
 import { integrationConnections, type Db } from '@truecourse/db';
 import { decryptSecret, encryptSecret, maskKey } from '@truecourse/data-store';
 import {
-  CONTEXT_SOURCE_KIND_LABEL,
+  CONTEXT_CONNECTION_KINDS,
+  CONTEXT_CONNECTION_LABEL,
   type ContextConnectionInput,
   type ContextConnectionProvider,
   type ContextConnectionView,
@@ -32,15 +34,15 @@ export interface AtlassianConnection {
 }
 
 /**
- * The workspace has not connected this tool (or its connection lost its token).
- * A {@link ContextConfigError}, because that is what it is from Context's side:
- * a scope this workspace cannot read, which the routes answer as a 400 in these
- * words and a sync records as the source's failure note.
+ * The workspace has not connected this account (or its connection lost its
+ * token). A {@link ContextConfigError}, because that is what it is from
+ * Context's side: a scope this workspace cannot read, which the routes answer
+ * as a 400 in these words and a sync records as the source's failure note.
  */
 export class ConnectionMissingError extends ContextConfigError {
   constructor(readonly provider: ContextConnectionProvider) {
     super(
-      `This workspace has no ${CONTEXT_SOURCE_KIND_LABEL[provider]} connection. ` +
+      `This workspace has no ${CONTEXT_CONNECTION_LABEL[provider]} connection. ` +
         'Connect the account in Settings › Connections.',
     );
     this.name = 'ConnectionMissingError';
@@ -94,10 +96,12 @@ export class ConnectionStore {
     org: string,
     provider: ContextConnectionProvider,
   ): Promise<ContextConnectionView> {
+    const kinds = [...CONTEXT_CONNECTION_KINDS[provider]];
     const row = await this.getRow(org, provider);
     if (!row) {
       return {
         provider,
+        kinds,
         connected: false,
         baseUrl: '',
         accountEmail: '',
@@ -117,6 +121,7 @@ export class ConnectionStore {
     const config = (row.config as StoredConfig | null) ?? {};
     return {
       provider,
+      kinds,
       connected: row.tokenEnc != null,
       baseUrl: config.baseUrl ?? '',
       accountEmail: config.accountEmail ?? '',

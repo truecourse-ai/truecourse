@@ -2,9 +2,11 @@
  * Add context, for a tool the workspace connects an account to.
  *
  * WHICH kinds are offered is the server's answer (`addableKinds`), and which
- * TOOLS are offered is the workspace's connections: a connected account is a
- * row of its own, named by the site it reads; an unconnected one is not a row
- * at all, and the list ends with the one link that goes where it is connected.
+ * TOOLS are offered is the workspace's connections: ONE connected account is a
+ * row PER SOURCE KIND it serves — an Atlassian login offers Jira and
+ * Confluence, each named by the site it reads — and a kind this server cannot
+ * add is no row at all. An unconnected account is no row either, and the list
+ * ends with the one link that goes where it is connected.
  *
  * The edition that has Connections is what registers that Settings section, so
  * this file registers one — the dialog is the open shell's, and it must say
@@ -55,11 +57,9 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-const connection = (
-  provider: 'jira' | 'confluence',
-  connected: boolean,
-): ContextConnectionView => ({
-  provider,
+const connection = (connected: boolean): ContextConnectionView => ({
+  provider: 'atlassian',
+  kinds: ['jira', 'confluence'],
   connected,
   baseUrl: connected ? 'https://acme.atlassian.net' : '',
   accountEmail: connected ? 'u@acme.test' : '',
@@ -76,7 +76,7 @@ interface World {
 function serve(over: Partial<World> = {}): World {
   const state: World = {
     addableKinds: ['repository', 'site', 'jira', 'confluence'],
-    connections: [connection('jira', true), connection('confluence', false)],
+    connections: [connection(true)],
     calls: [],
     ...over,
   };
@@ -140,22 +140,32 @@ afterEach(() => {
 });
 
 describe('the kinds the dialog offers', () => {
-  it('offers a connected tool by name, above the kinds that need no account', async () => {
+  it('offers one row per kind the connected account serves, above the kinds that need none', async () => {
     serve();
     renderContext();
     const list = await openKinds();
 
     await waitFor(() => expect(within(list).getByText('Jira')).toBeInTheDocument());
-    expect(within(list).getByText('https://acme.atlassian.net')).toBeInTheDocument();
-    // The connected tool, then the two kinds that need no account.
-    expect(within(list).getAllByRole('button')).toHaveLength(3);
-    // Confluence is connectable here, but this workspace has not connected it.
-    expect(within(list).queryByText('Confluence')).toBeNull();
+    expect(within(list).getByText('Confluence')).toBeInTheDocument();
+    // Each names the site the one account reads.
+    expect(within(list).getAllByText('https://acme.atlassian.net')).toHaveLength(2);
+    // The account's two kinds, then the two kinds that need no account.
+    expect(within(list).getAllByRole('button')).toHaveLength(4);
     expect(within(list).getByRole('link')).toHaveTextContent('Connect another tool in Settings');
   });
 
+  it('leaves out a kind the account serves but this server cannot add', async () => {
+    serve({ addableKinds: ['repository', 'site', 'jira'] });
+    renderContext();
+    const list = await openKinds();
+
+    await waitFor(() => expect(within(list).getByText('Jira')).toBeInTheDocument());
+    expect(within(list).queryByText('Confluence')).toBeNull();
+    expect(within(list).getAllByRole('button')).toHaveLength(3);
+  });
+
   it('offers no tool at all when the workspace has connected none', async () => {
-    serve({ connections: [connection('jira', false), connection('confluence', false)] });
+    serve({ connections: [connection(false)] });
     renderContext();
     const list = await openKinds();
 

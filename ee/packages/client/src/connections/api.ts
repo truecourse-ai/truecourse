@@ -1,5 +1,5 @@
 /**
- * The workspace's tool connections, as the Connections tab changes them. The
+ * The workspace's account connections, as the Connections tab changes them. The
  * LIST is the open client's (`@/lib/api`), because the add-context dialog needs
  * it too; connecting, testing and removing are only ever done here.
  */
@@ -8,10 +8,11 @@ import { fetchApi } from '@/lib/api';
 import type {
   ContextConnectionInput,
   ContextConnectionProvider,
+  ContextConnectionTestResponse,
   ContextConnectionView,
 } from '@truecourse/shared';
 
-/** Connect or re-save one tool. An omitted token keeps the stored one. */
+/** Connect or re-save one account. An omitted token keeps the stored one. */
 export function saveConnection(
   provider: ContextConnectionProvider,
   input: ContextConnectionInput,
@@ -22,12 +23,15 @@ export function saveConnection(
   });
 }
 
-/** The real read a sync makes, with the submitted token or the stored one. */
+/**
+ * The real read a sync makes, once per product the account serves, with the
+ * submitted token or the stored one. The answer is a verdict per product.
+ */
 export function testConnection(
   provider: ContextConnectionProvider,
   input: ContextConnectionInput,
-): Promise<{ ok: boolean }> {
-  return fetchApi<{ ok: boolean }>(`/api/connections/${provider}/test`, {
+): Promise<ContextConnectionTestResponse> {
+  return fetchApi<ContextConnectionTestResponse>(`/api/connections/${provider}/test`, {
     method: 'POST',
     body: JSON.stringify(input),
   });

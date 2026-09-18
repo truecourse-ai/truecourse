@@ -60,7 +60,7 @@ describe('the enterprise bundle', () => {
     await request(app).get('/api/connections').expect(403);
   });
 
-  it('contributes the two context source drivers the open edition has not', () => {
+  it('contributes the two context source drivers the open edition has not, off one account', () => {
     installTestRegistry();
     for (const feature of eeServerFeatures) registerServerFeature(feature);
     const context = featureContext();
@@ -69,7 +69,8 @@ describe('the enterprise bundle', () => {
     );
     expect(drivers.map((d) => d.kind)).toEqual(['jira', 'confluence']);
     // Built per workspace: the account a source reads through is that
-    // workspace's, so the driver cannot be made before the org is known.
+    // workspace's ONE Atlassian connection, so the driver cannot be made
+    // before the org is known.
     expect(drivers.map((d) => d.driver('org_test').kind)).toEqual(['jira', 'confluence']);
   });
 });

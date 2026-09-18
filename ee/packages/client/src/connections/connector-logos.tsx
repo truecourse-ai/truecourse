@@ -23,5 +23,15 @@ export function ConnectorLogo({
   tool: ConnectorTool;
   className?: string;
 }): ReactElement {
-  return <img src={LOGO[tool]} alt="" aria-hidden className={`${className} object-contain`} />;
+  // Decorative: the row names the tool in words. `data-tool` says WHICH mark it
+  // is, for a row that wears several.
+  return (
+    <img
+      src={LOGO[tool]}
+      data-tool={tool}
+      alt=""
+      aria-hidden
+      className={`${className} object-contain`}
+    />
+  );
 }

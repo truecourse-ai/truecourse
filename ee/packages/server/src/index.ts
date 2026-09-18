@@ -8,10 +8,11 @@
  * server, and the open server names this package in exactly one file.
  *
  * Two features mount here: more than one workspace (`/api/auth/workspaces`) and
- * the document Connections (`/api/connections`, plus the Jira and Confluence
- * context source drivers it contributes). The third — the repository providers
- * beyond the open edition's, Azure DevOps today — adds no routes and registers
- * in `ee/packages/client` alone.
+ * the document Connections (`/api/connections` over the workspace's one
+ * Atlassian account, plus the Jira and Confluence context source drivers that
+ * read through it). The third — the repository providers beyond the open
+ * edition's, Azure DevOps today — adds no routes and registers in
+ * `ee/packages/client` alone.
  */
 
 export { eeServerFeatures } from './features.js';
