@@ -25,11 +25,20 @@ export function guardGenerateResume(record: PublicRunRecord): GuardGenerateResum
     });
   // A pool may tick done before its final fold/epic pass. A later step must
   // have started too. Author and validate overlap, so neither is replay-only.
+  //
+  // A step that reached the end of its list with items that never settled is
+  // NOT replay-only however done it looks: those items wrote nothing to the
+  // caches, so replaying the step would miss exactly them and the resume would
+  // refuse to run at all rather than pay for the handful that were lost. The
+  // step re-runs, its settled items answer from cache, and only the lost ones
+  // are bought again. Everything after it re-runs too: their inputs move when
+  // the missing items land.
   const completedSteps: string[] = [];
   for (const key of STEPS.slice(0, 5)) {
     const index = STEPS.indexOf(key);
-    const laterStarted = items.some(item => STEPS.indexOf(item.key) > index && item.status !== 'pending');
-    if (items.find(item => item.key === key)?.status !== 'done' || !laterStarted) break;
+    const item = items.find(entry => entry.key === key);
+    const laterStarted = items.some(entry => STEPS.indexOf(entry.key) > index && entry.status !== 'pending');
+    if (item?.status !== 'done' || item.partial || !laterStarted) break;
     completedSteps.push(key);
   }
   return { runId: record.runId, gitRef: record.gitRef, completedSteps };

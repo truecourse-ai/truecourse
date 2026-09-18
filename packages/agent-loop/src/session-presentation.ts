@@ -67,6 +67,11 @@ export type DisplayDispute = z.infer<typeof DisplayDisputeSchema>;
  * `startedAt`/`endedAt` are the step's own clock, stamped where its status
  * moves, so how long a step has been going is read rather than guessed. A
  * record written before they existed carries neither.
+ *
+ * `partial` says the step reached the end of its work list with items that
+ * never settled: it is `done`, and what it saved does not cover everything it
+ * was given. A resume reads it, because replaying such a step from its caches
+ * would miss exactly those items.
  */
 export const ChecklistItemSchema = z.object({
   key: z.string(),
@@ -75,6 +80,7 @@ export const ChecklistItemSchema = z.object({
   detail: z.string().optional(),
   sessionKinds: z.array(z.string()).optional(),
   facts: z.array(z.string()).optional(),
+  partial: z.boolean().optional(),
   startedAt: z.string().optional(),
   endedAt: z.string().optional(),
 });

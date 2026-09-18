@@ -10,7 +10,15 @@
  * a statement is arithmetic rather than a reconstruction. What the tab shows
  * folds a run's many debits into ONE line for the run: a generate makes
  * thousands of calls, and nobody reads a ledger per call.
+ *
+ * THE PAUSE lives here too — the error and the two predicates that recognise
+ * it — because it has to TRAVEL. Every engine package catches errors around its
+ * LLM calls and softens them into a failed item; an empty balance is the one
+ * thing none of them may soften, and they all depend on this package while none
+ * of them may depend on core.
  */
+
+import type { SessionFailure } from '@truecourse/agent-loop';
 
 /** How many credits a dollar of priced model cost is. */
 export const CREDITS_PER_USD = 100;
@@ -23,6 +31,65 @@ export function creditsOfUsd(usd: number): number {
 /** The credits of a balance as the dollars they are worth. */
 export function usdOfCredits(credits: number): number {
   return credits / CREDITS_PER_USD;
+}
+
+// --- the pause ------------------------------------------------------
+
+/**
+ * The workspace cannot spend: its balance is at or below zero. Thrown BEFORE a
+ * call or a turn, so a run overshoots by at most the one call in flight.
+ *
+ * It is a PAUSE, not a failure. A stage that catches it and returns a soft
+ * outcome tells the run the ITEM failed, and the run carries on spending what
+ * it does not have, ticks its step done over work that never happened, and
+ * leaves a step that can never be replayed from cache. So every catch around an
+ * LLM call rethrows this one, and the first refusal ends the run.
+ *
+ * The workspace and the balance are carried when the thrower held the account;
+ * a caller that met the pause as a parked session has neither in hand.
+ */
+export class CreditsExhaustedError extends Error {
+  readonly code = 'credits-exhausted';
+  constructor(
+    readonly workspaceOrgId?: string,
+    readonly balance?: number,
+  ) {
+    super('This workspace is out of credits. The run is paused until it can spend again.');
+    this.name = 'CreditsExhaustedError';
+  }
+}
+
+/** Whether this is the pause rather than a failure. Matched on the code, so an
+ *  error that crossed a package boundary is still recognised. */
+export function isCreditsExhausted(err: unknown): err is CreditsExhaustedError {
+  return (
+    err instanceof CreditsExhaustedError ||
+    (typeof err === 'object' &&
+      err !== null &&
+      (err as { code?: unknown }).code === 'credits-exhausted')
+  );
+}
+
+/**
+ * How the pause reaches an agent session: a driver never throws (a rejected
+ * `done` is reserved for driver defects), so the refusal arrives as the park it
+ * is. `blocked` is the shell's word for "park loudly, never hammer".
+ */
+export const CREDITS_PAUSE_FAILURE: Extract<SessionFailure, { kind: 'transport' }> = {
+  kind: 'transport',
+  detail: 'out of credits',
+  class: 'permission',
+  retryability: 'blocked',
+};
+
+/** Whether a session parked because the workspace could no longer pay. */
+export function isCreditsPauseFailure(failure: SessionFailure): boolean {
+  return (
+    failure.kind === 'transport' &&
+    failure.class === CREDITS_PAUSE_FAILURE.class &&
+    failure.retryability === CREDITS_PAUSE_FAILURE.retryability &&
+    failure.detail === CREDITS_PAUSE_FAILURE.detail
+  );
 }
 
 /** The three movements. A grant and an adjustment are an operator's; a debit is a run's. */

@@ -46,7 +46,7 @@ import {
   resolveEntry,
   staleAuthoredPlaceDiagnostics,
 } from '@truecourse/guard-runner';
-import type { InterfacesFile, MapperDiagnostic } from '@truecourse/shared';
+import { isCreditsExhausted, type InterfacesFile, type MapperDiagnostic } from '@truecourse/shared';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
 import { planWorkItems } from '../interface-author/author.js';
 import {
@@ -115,6 +115,7 @@ export function buildInterfacesStep(
         if (reconcile.changes && reconcile.changes.length > 0) recorded.changes = reconcile.changes;
         if (reconcile.fromCache !== undefined) recorded.reconcileFromCache = reconcile.fromCache;
       } catch (error) {
+        if (isCreditsExhausted(error)) throw error;
         notes.push(`reconcile failed: ${message(error)}`);
       }
     } else if (disputes.length > 0) {
@@ -178,6 +179,7 @@ export function buildInterfacesStep(
         ...recorded,
       };
     } catch (error) {
+      if (isCreditsExhausted(error)) throw error;
       context.note('failed');
       // Return the failure on the step so setup can continue its remaining work.
       return {

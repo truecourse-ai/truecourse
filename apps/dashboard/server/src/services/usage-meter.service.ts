@@ -32,14 +32,13 @@ import type {
   DriverResult,
   SessionDriver,
   SessionEventBody,
-  SessionFailure,
   SessionHandle,
   SessionStatus,
   TurnUsage,
 } from '@truecourse/agent-loop';
 import { log } from '@truecourse/core/lib/logger';
 import { CreditsExhaustedError } from '@truecourse/core/lib/credits-store';
-import { creditsOfUsd } from '@truecourse/shared';
+import { creditsOfUsd, CREDITS_PAUSE_FAILURE } from '@truecourse/shared';
 import {
   attachUsageRun,
   recordUsage,
@@ -372,19 +371,6 @@ export async function withCredits<T>(meter: UsageMeter, run: () => Promise<T>): 
 }
 
 /**
- * How a session ends when the workspace may not spend. `blocked` is the shell's
- * own word for "park loudly, never hammer": the session's index entry becomes
- * `parked`, its journal stands, and nothing retries it — which is exactly a
- * pause waiting on a grant.
- */
-const OUT_OF_CREDITS: SessionFailure = {
-  kind: 'transport',
-  detail: 'out of credits',
-  class: 'permission',
-  retryability: 'blocked',
-};
-
-/**
  * The same driver, reporting what its sessions spend and refusing to spend what
  * is not there. Every `assistant-turn` the driver emits carries the turn's four
  * token buckets and its cost, so the wrapper reads the transcript the session
@@ -445,7 +431,7 @@ export function meterDriver(
         interrupt: () => handle.interrupt(),
         done: handle.done.then((result) =>
           stopped && result.kind === 'failure'
-            ? { kind: 'failure', failure: OUT_OF_CREDITS, resumeCursor: result.resumeCursor }
+            ? { kind: 'failure', failure: CREDITS_PAUSE_FAILURE, resumeCursor: result.resumeCursor }
             : result,
         ),
       };
@@ -455,7 +441,7 @@ export function meterDriver(
 
 /** A session that never opened, already parked: there was nothing to spend. */
 function parkedHandle(): SessionHandle {
-  const done: DriverResult = { kind: 'failure', failure: OUT_OF_CREDITS };
+  const done: DriverResult = { kind: 'failure', failure: CREDITS_PAUSE_FAILURE };
   return {
     done: Promise.resolve(done),
     status: (): SessionStatus => 'parked',

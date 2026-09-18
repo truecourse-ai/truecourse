@@ -12,6 +12,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import os from 'node:os'
 import { z } from 'zod'
+import { CREDITS_PAUSE_FAILURE, isCreditsExhausted } from '@truecourse/shared'
 import {
   runSessionPool,
   defaultPoolConcurrency,
@@ -806,5 +807,52 @@ describe('session pool transient re-queue', () => {
 
     expect(progress.filter((e) => e.kind === 'item-start')).toHaveLength(1)
     expect(progress.filter((e) => e.kind === 'item-requeued')).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// the credits pause
+// ---------------------------------------------------------------------------
+
+describe('session pool credits pause', () => {
+  const parked = (): DriverResult => ({ kind: 'failure', failure: CREDITS_PAUSE_FAILURE })
+
+  it('ends the pool on the first park, folds it nowhere and starts nothing else', async () => {
+    const { driver, runs } = scriptedDriver(async (workItem) => (workItem === 'b' ? parked() : done()))
+    const { persistence } = memoryPersistence()
+    const folded: string[] = []
+
+    await expect(
+      runSessionPool({
+        ...poolOptions(['a', 'b', 'c', 'd']),
+        driver,
+        persistence,
+        concurrency: 1,
+        fold: (item: string) => {
+          folded.push(item)
+        },
+      }),
+    ).rejects.toSatisfy(isCreditsExhausted)
+
+    // `a` settled, `b` parked and was never folded, `c` and `d` never started.
+    expect(folded).toEqual(['a'])
+    expect(runs.map((r) => r.workItem)).toEqual(['a', 'b'])
+  })
+
+  it('never re-queues a park: an empty balance does not get better on a second ask', async () => {
+    const { driver, runs } = scriptedDriver(async () => parked())
+    const { persistence } = memoryPersistence()
+
+    await expect(
+      runSessionPool({
+        ...poolOptions(['a']),
+        driver,
+        persistence,
+        concurrency: 1,
+        fold: () => {},
+      }),
+    ).rejects.toSatisfy(isCreditsExhausted)
+
+    expect(runs).toHaveLength(1)
   })
 })

@@ -93,6 +93,7 @@ import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { proveSeedFromColdClone } from './seed-cold-proof.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
+import { isCreditsExhausted } from '@truecourse/shared';
 
 export const SEED_SESSION_KIND = 'guard-setup.seed';
 
@@ -1540,6 +1541,10 @@ export function buildSeedSession(
         ...(folded.coldProofSkipped ? { coldProofSkipped: folded.coldProofSkipped } : {}),
       };
     } catch (error) {
+      // An empty balance did not refuse the seed — it refused to buy one. The
+      // step stays unsettled and the run pauses; a `failed` row here would fix
+      // that word into the setup bundle's step spine.
+      if (isCreditsExhausted(error)) throw error;
       return {
         status: 'failed',
         reason: message(error),

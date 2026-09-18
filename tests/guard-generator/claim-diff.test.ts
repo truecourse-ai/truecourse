@@ -5,6 +5,7 @@
  * re-stamps the manifest so the following generate is a genuine no-op.
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
+import { CreditsExhaustedError, isCreditsExhausted } from '@truecourse/shared'
 import { planGuardWork, type ReuseExtractionSeam, type PriorExtraction } from '@truecourse/guard-generator'
 import { readManifest, writeManifest } from '@truecourse/guard-runner'
 import {
@@ -175,6 +176,29 @@ describe('claim-diff gate — cosmetic doc edits do not re-author', () => {
     expect(seam.reused).toEqual([])
     expect(workerTasks.length).toBe(1)
     expect(res.errors.some((e) => e.message.includes('claim-diff gate could not judge'))).toBe(true)
+  }, 90_000)
+
+  it('an empty balance is not re-asked and does not fall through to a re-extraction', async () => {
+    const r = seed()
+    await generate(r)
+    writeDoc(r, DOC, COSMETIC_EDIT)
+
+    const seam = reuseSeam()
+    let calls = 0
+    await expect(
+      runGenerate({
+        repoRoot: r,
+        extractSession: extraction(),
+        reuseExtraction: seam,
+        claimDiffRunner: async () => {
+          calls++
+          throw new CreditsExhaustedError('org_test', 0)
+        },
+        flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
+      }),
+    ).rejects.toSatisfy(isCreditsExhausted)
+    expect(calls).toBe(1)
+    expect(seam.reused).toEqual([])
   }, 90_000)
 
   it('a manifest without recorded docs skips the gate', async () => {

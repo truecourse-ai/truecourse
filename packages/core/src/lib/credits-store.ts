@@ -13,10 +13,20 @@
  *
  * {@link CreditsExhaustedError} is thrown by whoever checks before spending. It
  * is a PAUSE, not a failure: the job that meets one settles `paused`, its
- * sessions park with their journals intact, and a grant carries them on.
+ * sessions park with their journals intact, and a grant carries them on. The
+ * error itself lives in `@truecourse/shared`, where the engine packages that
+ * must never soften it can reach it; it is re-exported here so a reader of the
+ * store finds the refusal beside the balance it comes from.
  */
 
 import type { CreditLedgerKind } from '@truecourse/shared';
+
+export {
+  CreditsExhaustedError,
+  isCreditsExhausted,
+  CREDITS_PAUSE_FAILURE,
+  isCreditsPauseFailure,
+} from '@truecourse/shared';
 
 /** A workspace's balance and the grant the low-balance line is measured from. */
 export interface CreditBalanceRecord {
@@ -104,32 +114,6 @@ export interface CreditsStore {
   statement(workspaceOrgId: string, limit: number): Promise<CreditStatementRecord[]>;
   /** Every workspace the credits system knows about, with its recent spend. */
   workspaces(since: string): Promise<CreditWorkspaceRecord[]>;
-}
-
-/**
- * The workspace cannot spend: its balance is at or below zero. Thrown BEFORE a
- * call or a turn, so a run overshoots by at most the one call in flight.
- */
-export class CreditsExhaustedError extends Error {
-  readonly code = 'credits-exhausted';
-  constructor(
-    readonly workspaceOrgId: string,
-    readonly balance: number,
-  ) {
-    super('This workspace is out of credits. The run is paused until it can spend again.');
-    this.name = 'CreditsExhaustedError';
-  }
-}
-
-/** Whether this is the pause rather than a failure. Matched on the code, so an
- *  error that crossed a package boundary is still recognised. */
-export function isCreditsExhausted(err: unknown): err is CreditsExhaustedError {
-  return (
-    err instanceof CreditsExhaustedError ||
-    (typeof err === 'object' &&
-      err !== null &&
-      (err as { code?: unknown }).code === 'credits-exhausted')
-  );
 }
 
 /** Reaching the store before boot installed it is a bug — say so, don't invent. */
