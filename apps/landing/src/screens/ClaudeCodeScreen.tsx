@@ -1,6 +1,6 @@
 import { FLOW_ID } from './evidence';
 import { HLine, Screen, Txt } from './primitives';
-import { SCREEN_H, baseline, uiWidth, ui } from './theme';
+import { baseline, uiWidth, ui } from './theme';
 import { useCompact } from './use-compact';
 
 /** The terminal's palette: Claude Code in a dark terminal window. */
@@ -304,7 +304,9 @@ export function ClaudeCodeScreen() {
     );
   }
   const W = 1040;
-  const H = SCREEN_H;
+  // Shorter than the shared canvas on purpose: the merge panel beside the
+  // terminal floats in white if this page is stretched to match the others.
+  const H = 380;
   const termW = 600;
   return (
     <Screen width={W} height={H} label={LABEL} className="screen-cc">
