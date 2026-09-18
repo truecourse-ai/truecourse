@@ -24,7 +24,7 @@ import {
   cellX,
   type Col,
 } from './primitives';
-import { baseline, ui } from './theme';
+import { SCREEN_H, baseline, ui } from './theme';
 import { useCompact } from './use-compact';
 
 interface IconAt {
@@ -193,7 +193,7 @@ export function ContextScreen() {
 
 function Full() {
   const W = 1040;
-  const H = 440;
+  const H = SCREEN_H;
   const MENU_W = 176;
   const content = SIDEBAR_W + MENU_W;
   const READER_X = 752;
