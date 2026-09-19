@@ -23,6 +23,13 @@ export const ui = {
   failTint: '#f9d2d2',
 } as const;
 
+/**
+ * The height every desktop screen draws at. They share one canvas so the
+ * steps line up wherever they are placed, and each screen's chrome (the
+ * sidebar, the dividers, the tally at the foot) fills it.
+ */
+export const SCREEN_H = 580;
+
 export type Tone = 'success' | 'failure' | 'blocked' | 'unproven' | 'neutral';
 
 export const TONE: Record<Tone, string> = {

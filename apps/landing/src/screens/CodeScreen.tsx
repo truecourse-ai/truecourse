@@ -16,7 +16,7 @@ import {
   cellX,
   type Col,
 } from './primitives';
-import { TONE, baseline, textWidth, ui, type Tone } from './theme';
+import { SCREEN_H, TONE, baseline, textWidth, ui, type Tone } from './theme';
 
 /** The five coverage words, worst first, as the Requirements bar orders them. */
 const SEGMENTS: { key: keyof Counts; tone: Tone }[] = [
@@ -128,7 +128,7 @@ const HEAD_Y = 88;
 
 /** The size the page draws at: the full shell, or the phone layout without a sidebar. */
 export function codePageSize(compact: boolean): { W: number; H: number } {
-  return compact ? { W: 500, H: 400 } : { W: 1040, H: 440 };
+  return compact ? { W: 500, H: 400 } : { W: 1040, H: SCREEN_H };
 }
 
 /**

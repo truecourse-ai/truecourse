@@ -1,5 +1,5 @@
 import { HLine, Screen, SentenceHighlight, Txt, VLine, order } from './primitives';
-import { baseline, textWidth, uiWidth, ui } from './theme';
+import { SCREEN_H, baseline, textWidth, uiWidth, ui } from './theme';
 import { useCompact } from './use-compact';
 
 /** GitHub's light palette, as its pull request page paints it. */
@@ -390,7 +390,8 @@ function Full() {
   const bodyTop = tabsY + TABS_H + 20;
   const commentH = commentHeight(false);
   const boxY = bodyTop + commentH + 20;
-  const H = boxY + mergeBoxHeight(false) + pad;
+  // Never shorter than the shared canvas, never shorter than its own content.
+  const H = Math.max(boxY + mergeBoxHeight(false) + pad, SCREEN_H);
   const title = 'Move refunds to store credit';
   const wants = 'ada-okafor wants to merge 3 commits into';
   const wantsEnd = pad + 54 + uiWidth(wants, T.body);

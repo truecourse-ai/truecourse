@@ -304,6 +304,8 @@ export function ClaudeCodeScreen() {
     );
   }
   const W = 1040;
+  // Shorter than the shared canvas on purpose: the merge panel beside the
+  // terminal floats in white if this page is stretched to match the others.
   const H = 380;
   const termW = 600;
   return (
