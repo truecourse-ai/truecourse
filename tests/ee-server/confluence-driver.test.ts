@@ -164,6 +164,43 @@ describe('a Confluence document', () => {
     );
   });
 
+  it('keeps what an inline code span holds', async () => {
+    // A spec page states its values in code spans — a path, an envelope, a
+    // header. The rule that converts them used the wrong capture index, which
+    // `String.replace` does not treat as an error: it emitted the token, so
+    // every value became the literal `$2` and was lost on the way in.
+    oneListing([
+      page({
+        body: {
+          storage: {
+            value:
+              '<p>Errors from <code>/api/expenses</code> are '
+              + '<code>{ "error": "message" }</code>.</p>',
+          },
+        },
+      }),
+    ]);
+    const doc = (await driver().sync({ spaceKey: 'ENG' }, [])).documents[0]!;
+    expect(doc.body).toContain('Errors from `/api/expenses` are `{ "error": "message" }`.');
+    expect(doc.body).not.toContain('$2');
+  });
+
+  it('keeps bold, italics and a link beside it', async () => {
+    oneListing([
+      page({
+        body: {
+          storage: {
+            value:
+              '<p><strong>Must</strong> be <em>exact</em>: see '
+              + '<a href="https://example.test/spec">the spec</a>.</p>',
+          },
+        },
+      }),
+    ]);
+    const doc = (await driver().sync({ spaceKey: 'ENG' }, [])).documents[0]!;
+    expect(doc.body).toContain('**Must** be _exact_: see [the spec](https://example.test/spec).');
+  });
+
   it('omits a date the API did not return, and the block when it returned none', async () => {
     oneListing([page({ history: undefined, version: { number: 2, when: undefined } })]);
     const partial = (await driver().sync({ spaceKey: 'ENG' }, [])).documents[0]!;

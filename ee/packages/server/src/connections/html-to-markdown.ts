@@ -30,7 +30,11 @@ function inlineMarkup(s: string): string {
   return s
     .replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**')
     .replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, '_$2_')
-    .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, '`$2`')
+    // `$1`, not `$2`: the bold and italic rules above capture their own tag
+    // name first, this one does not. A wrong index is not an error in
+    // `String.replace` — it emits the token, so every inline code span became
+    // the literal `$2` and the value it held was lost.
+    .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
     .replace(/<a\b[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)')
     .replace(/<[^>]+>/g, '')
     .trim();
