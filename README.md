@@ -95,21 +95,8 @@ Questions, feedback, or security reports: **Mushegh Gevorgyan**,
 
 ## License
 
-Two licenses, split by directory.
+**MIT** for everything outside `ee/`. See [LICENSE](LICENSE).
 
-**MIT** covers everything outside `ee/`: the engine, the dashboard, the server,
-the shared packages and the tests. That is the whole product except the three
-features below. Use it, fork it, run it in production, sell what you build on
-it. See [LICENSE](LICENSE).
-
-**The TrueCourse Enterprise Edition License** covers `ee/` and everything under
-it. That directory holds three features: the document Connections (Settings ›
-Connections, and the Jira and Confluence source drivers), repository providers
-beyond the open edition's, and more than one workspace. You may read, copy and
-modify it for development and testing. Using it in production, or providing its
-functionality to anyone else as a hosted service or otherwise, needs a
-TrueCourse Enterprise subscription. See [ee/LICENSE](ee/LICENSE).
-
-The split is by directory and nothing else. `ee/` depends on the open tree and
-registers into it; no open file imports `ee/`, which is pinned by a test. So a
-checkout with `ee/` removed is the MIT product, whole and working.
+**Enterprise** for `ee/`, which holds the document Connections, the extra
+repository providers and multiple workspaces. Free to read and modify for
+development; production use needs a subscription. See [ee/LICENSE](ee/LICENSE).
