@@ -201,6 +201,66 @@ describe('a Confluence document', () => {
     expect(doc.body).toContain('**Must** be _exact_: see [the spec](https://example.test/spec).');
   });
 
+  it('makes a fenced block of a code macro, language and all', async () => {
+    oneListing([
+      page({
+        body: {
+          storage: {
+            value:
+              '<ac:structured-macro ac:name="code">'
+              + '<ac:parameter ac:name="language">json</ac:parameter>'
+              + '<ac:plain-text-body><![CDATA[{ "error": "message" }]]></ac:plain-text-body>'
+              + '</ac:structured-macro>',
+          },
+        },
+      }),
+    ]);
+    const doc = (await driver().sync({ spaceKey: 'ENG' }, [])).documents[0]!;
+    expect(doc.body).toContain('```json\n{ "error": "message" }\n```');
+    // The language belongs to the fence, never to the prose beside it.
+    expect(doc.body).not.toMatch(/^json$/m);
+  });
+
+  it('drops a macro parameter rather than leaving it in the prose', async () => {
+    oneListing([
+      page({
+        body: {
+          storage: {
+            value:
+              '<ac:structured-macro ac:name="panel">'
+              + '<ac:parameter ac:name="borderColor">note</ac:parameter>'
+              + '<ac:rich-text-body><p>Read this first.</p></ac:rich-text-body>'
+              + '</ac:structured-macro>',
+          },
+        },
+      }),
+    ]);
+    const doc = (await driver().sync({ spaceKey: 'ENG' }, [])).documents[0]!;
+    expect(doc.body).toContain('Read this first.');
+    expect(doc.body).not.toMatch(/^note$/m);
+  });
+
+  it('does not turn an indented list into a code block', async () => {
+    // Storage format is pretty-printed. Stripping a tag leaves its indentation,
+    // and four spaces is an indented code block — a nested list came out as a
+    // wall of grey with no way to tell it had ever been prose.
+    oneListing([
+      page({
+        body: {
+          storage: {
+            value: '<ul>\n    <li>\n        First thing\n    </li>\n    <li>Second thing</li>\n</ul>',
+          },
+        },
+      }),
+    ]);
+    const doc = (await driver().sync({ spaceKey: 'ENG' }, [])).documents[0]!;
+    for (const line of doc.body.split('\n')) {
+      expect(line).not.toMatch(/^ {4}\S/);
+    }
+    expect(doc.body).toContain('- First thing');
+    expect(doc.body).toContain('- Second thing');
+  });
+
   it('omits a date the API did not return, and the block when it returned none', async () => {
     oneListing([page({ history: undefined, version: { number: 2, when: undefined } })]);
     const partial = (await driver().sync({ spaceKey: 'ENG' }, [])).documents[0]!;

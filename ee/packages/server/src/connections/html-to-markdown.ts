@@ -7,7 +7,9 @@
  * that flattened headings) would change block ids → cache misses → LLM cost on
  * every sync, even for unchanged pages. So: **headings are preserved** as
  * `#..######` (the consolidator slices blocks by heading), lists/paragraphs
- * become readable text, and Confluence macro wrappers are dropped to their text.
+ * become readable text, a code macro becomes a fenced block, and every other
+ * Confluence macro wrapper is dropped to its text — its PARAMETERS dropped
+ * whole, because a macro's configuration is not the page's content.
  *
  * Tags are stripped BEFORE entities are decoded, and entities are decoded ONCE
  * at the very end — otherwise a decoded `&lt;tag&gt;` would be re-eaten by the
@@ -40,11 +42,61 @@ function inlineMarkup(s: string): string {
     .trim();
 }
 
+/** The text of a CDATA section, or the string unchanged when it is not one. */
+function uncdata(s: string): string {
+  return s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+}
+
+/**
+ * Leading whitespace, on every line that is not inside a fence.
+ *
+ * Storage format is pretty-printed, and stripping a tag leaves its indentation
+ * behind. Four spaces is an indented code block in markdown, so a nested list
+ * came out as a wall of grey — the words were still there and no reader could
+ * tell they were prose. A fence keeps its own indentation, which is the code's.
+ */
+function dedentOutsideFences(s: string): string {
+  let inFence = false;
+  return s
+    .split('\n')
+    .map((line) => {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        return line.trimStart();
+      }
+      return inFence ? line : line.trimStart();
+    })
+    .join('\n');
+}
+
 export function storageXhtmlToMarkdown(xhtml: string): string {
   let s = xhtml;
 
+  // A CODE MACRO is a fenced block: its language is a parameter and its body is
+  // CDATA. Taken before the generic macro strip below, which would leave the
+  // language word sitting in the prose and the body indistinguishable from it.
+  s = s.replace(
+    /<ac:structured-macro\b[^>]*ac:name="code"[\s\S]*?<\/ac:structured-macro>/gi,
+    (macro: string) => {
+      const language =
+        /<ac:parameter\b[^>]*ac:name="language"[^>]*>([\s\S]*?)<\/ac:parameter>/i
+          .exec(macro)?.[1]
+          ?.trim() ?? '';
+      const body =
+        /<ac:plain-text-body\b[^>]*>([\s\S]*?)<\/ac:plain-text-body>/i.exec(macro)?.[1] ?? '';
+      return `\n\n\`\`\`${language}\n${uncdata(body).trim()}\n\`\`\`\n\n`;
+    },
+  );
+
+  // A macro PARAMETER is configuration, never content — a panel's colour, a
+  // macro's language, a layout's width. Dropped whole: keeping the text inside
+  // it is what put bare words like `json` and `note` in the middle of a page.
+  s = s.replace(/<ac:parameter\b[\s\S]*?<\/ac:parameter>/gi, '');
+  s = s.replace(/<ac:parameter\b[^>]*\/>/gi, '');
+
   // Confluence macros (`<ac:…>`, `<ri:…>`) — drop the wrapper tags, keep inner text.
   s = s.replace(/<\/?(ac|ri):[^>]*>/gi, '');
+  s = uncdata(s);
 
   // Code/preformatted blocks first (preserve their raw text, tags removed).
   s = s.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_m, inner: string) => {
@@ -68,7 +120,7 @@ export function storageXhtmlToMarkdown(xhtml: string): string {
   s = inlineMarkup(s);
 
   // Decode entities ONCE, after all tag-stripping. Then normalize whitespace.
-  return decodeEntities(s)
+  return dedentOutsideFences(decodeEntities(s))
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
