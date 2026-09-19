@@ -16,7 +16,6 @@
 import yaml from 'js-yaml';
 import { WRAP_UP_TURNS, type SessionEvent } from '@truecourse/agent-loop';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import {
   evidenceRelPath,
   guardAdjudicateFindingsPath,
@@ -362,8 +361,6 @@ export type AdjudicationProgress =
 
 export interface RunGuardAdjudicationOptions {
   repoRoot: string;
-  /** The run's transport: what the sessions' `visual_judge` tool asks through. */
-  transport: LlmTransport;
   /** Restrict to failures whose recorded actual came from this run; default:
    *  the board as it stands (every current fail/error row). */
   runId?: string;
@@ -514,7 +511,7 @@ export async function runGuardAdjudication(
         session: (item) => {
           const state = newSessionState();
           states.set(item.scenarioId, state);
-          return adjudicationSessionDef({ repoRoot, item, exec, state, transport: opts.transport });
+          return adjudicationSessionDef({ repoRoot, item, exec, state });
         },
         briefing: (item) => [briefings.get(item.scenarioId)!],
         driver,

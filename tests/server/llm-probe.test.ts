@@ -1,15 +1,14 @@
 /**
  * `probeApiConfig()` — the live check the Models page runs before a provider
- * configuration is saved or trusted, exercised through the transport seam (no
+ * configuration is saved or trusted, exercised through its own seam (no
  * network).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { LlmRequest } from '@truecourse/shared/llm';
 import { probeApiConfig } from '../../packages/core/src/services/llm/probe.js';
-import { LlmApiConfigError } from '../../packages/core/src/services/llm/install-transport.js';
+import { LlmApiConfigError } from '../../packages/core/src/services/llm/provider.js';
 
 let home: string;
 const savedEnv = { ...process.env };
@@ -28,32 +27,14 @@ afterEach(() => {
 });
 
 describe('probeApiConfig', () => {
-  it('sends the configuration probe: json answer, 30s timeout, and resolves on a reply', async () => {
-    let seen: LlmRequest | undefined;
-    await expect(
-      probeApiConfig(anthropic, {
-        createTransport: () => async (req) => {
-          seen = req;
-          return '{"ok": true}';
-        },
-      }),
-    ).resolves.toBeUndefined();
-    expect(seen?.system).toBe('You are a configuration probe.');
-    expect(seen?.user).toBe('Reply with exactly {"ok": true}.');
-    expect(seen?.responseFormat).toBe('json');
-    expect(seen?.timeoutMs).toBe(30_000);
-  });
-
-  it('rejects an empty completion', async () => {
-    await expect(
-      probeApiConfig(anthropic, { createTransport: () => async () => '   ' }),
-    ).rejects.toThrow(/empty response/);
+  it('resolves when the provider answers', async () => {
+    await expect(probeApiConfig(anthropic, { probe: async () => {} })).resolves.toBeUndefined();
   });
 
   it('surfaces the provider error verbatim', async () => {
     await expect(
       probeApiConfig(anthropic, {
-        createTransport: () => async () => {
+        probe: async () => {
           throw new Error('401 invalid x-api-key');
         },
       }),
@@ -66,9 +47,8 @@ describe('probeApiConfig', () => {
       probeApiConfig(
         { provider: 'anthropic', model: 'm' },
         {
-          createTransport: () => async () => {
+          probe: async () => {
             called = true;
-            return 'ok';
           },
         },
       ),
@@ -76,17 +56,21 @@ describe('probeApiConfig', () => {
     expect(called).toBe(false);
   });
 
-  it('passes the provider config through to the transport factory', async () => {
-    let cfg: { provider: string; model: string; apiKey?: string } | undefined;
+  it('hands the probe the provider config it validated', async () => {
+    let cfg: { provider: string; model: string; apiKey?: string; baseURL?: string } | undefined;
     await probeApiConfig(
       { ...anthropic, baseURL: 'https://gateway.internal/v1' },
       {
-        createTransport: (c) => {
+        probe: async (c) => {
           cfg = c;
-          return async () => 'ok';
         },
       },
     );
-    expect(cfg).toMatchObject({ provider: 'anthropic', model: 'claude-sonnet-4-5', apiKey: 'sk-test' });
+    expect(cfg).toMatchObject({
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-5',
+      apiKey: 'sk-test',
+      baseURL: 'https://gateway.internal/v1',
+    });
   });
 });

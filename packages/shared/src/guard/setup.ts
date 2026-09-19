@@ -239,20 +239,15 @@ export const GuardSetupReportSchema = z
       })
       .strict()
       .optional(),
-    /** LLM call/token/cost totals for the run — omitted when nothing was spent. */
+    /** LLM cost totals for the run — omitted when nothing was spent. */
     usage: z
       .object({
-        calls: z.number().int().nonnegative(),
-        inputTokens: z.number().int().nonnegative(),
-        outputTokens: z.number().int().nonnegative(),
         costUsd: z.number().nonnegative(),
         /**
-         * The AGENT-SESSION share of the spend, in the loop's own units.
-         * `BudgetSpent` counts turns and TOTAL tokens (no input/output split),
-         * so it is recorded beside the one-shot fields rather than folded into
-         * them — mapping total tokens onto `inputTokens` would be a lie the
-         * cost column then repeats. `costUsd` above is the whole run
-         * (one-shots + sessions); this block says how much of it was sessions.
+         * What the run's AGENT SESSIONS spent, in the loop's own units:
+         * `BudgetSpent` counts turns and TOTAL tokens, with no input/output
+         * split, because that is what a turn reports. Every LLM call a run
+         * makes is a turn of a session, so this is the whole of it.
          */
         sessions: z
           .object({
@@ -263,6 +258,11 @@ export const GuardSetupReportSchema = z
           })
           .strict()
           .optional(),
+        /** The per-call token totals a report stored before every stage became
+         *  a session carried. Never written now. */
+        calls: z.number().int().nonnegative().optional(),
+        inputTokens: z.number().int().nonnegative().optional(),
+        outputTokens: z.number().int().nonnegative().optional(),
       })
       .strict()
       .optional(),

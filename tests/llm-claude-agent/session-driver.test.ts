@@ -165,6 +165,44 @@ function runSession(sdk: SdkModule, overrides?: Partial<SessionRunInput>) {
 // ---------------------------------------------------------------------------
 
 describe('claude agent session driver', () => {
+  it('shows the model an IMAGE the session was given, text first', async () => {
+    const pixels = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64');
+    const { sdk, captured } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      yield success({ verdict: 'seen' });
+    });
+    const { handle, events } = runSession(sdk, {
+      initialMessages: ['look at this'],
+      images: [{ mediaType: 'image/png', data: pixels }],
+    });
+    expect((await handle.done).kind).toBe('outcome');
+
+    // Text FIRST — the instruction has to be in context before the pixels.
+    expect(captured.received[0].message.content).toEqual([
+      { type: 'text', text: 'look at this' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: pixels } },
+    ]);
+    // The TRANSCRIPT records what was shown, never the bytes.
+    expect(events.find((e) => e.type === 'user-message')).toMatchObject({
+      content: 'look at this',
+      images: [{ mediaType: 'image/png', bytes: 4 }],
+    });
+    expect(JSON.stringify(events)).not.toContain(pixels);
+  });
+
+  it('leaves a text-only session on the plain string it always sent', async () => {
+    const { sdk, captured } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      yield success({ verdict: 'ok' });
+    });
+    const { handle, events } = runSession(sdk);
+    expect((await handle.done).kind).toBe('outcome');
+    expect(captured.received[0].message.content).toBe('go');
+    expect(events.find((e) => e.type === 'user-message')).not.toHaveProperty('images');
+  });
+
   it('streams text and tool progress without splitting one complete assistant turn', async () => {
     const progress: unknown[] = [];
     const { sdk, captured } = fakeSdk(async function* (ctx) {

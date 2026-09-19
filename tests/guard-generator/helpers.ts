@@ -33,6 +33,8 @@ import {
   type InterfaceProvider,
   type MatchRunner,
   type WorldClassifyRunner,
+  type RecipeRunner,
+  type ClaimDiffRunner,
   type RawGeneratedApiScenario,
   type RawGeneratedCliScenario,
   type RawGeneratedScenario,
@@ -758,6 +760,8 @@ export function flowStageSeams(repo: string): {
   flowWorkerSession: FlowWorkerSessionSeam
   matchRunner: MatchRunner
   worldClassifyRunner: WorldClassifyRunner
+  recipeRunner: RecipeRunner
+  claimDiffRunner: ClaimDiffRunner
 } {
   return {
     interfaces: DEFAULT_INTERFACES(repo),
@@ -769,6 +773,14 @@ export function flowStageSeams(repo: string): {
     // No flow is destructive unless a test says so — the default keeps every
     // existing case's scheduling (and its `errors: []` assertions) unchanged.
     worldClassifyRunner: async () => ({ mutators: [] }),
+    // A test that needs a recipe proposed, or the claim-diff gate asked,
+    // injects its own: reaching these means the case forgot to.
+    recipeRunner: async () => {
+      throw new Error('no recipe proposer injected for this case')
+    },
+    claimDiffRunner: async () => {
+      throw new Error('no claim-diff runner injected for this case')
+    },
   }
 }
 

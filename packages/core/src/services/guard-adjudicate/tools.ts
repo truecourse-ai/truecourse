@@ -27,12 +27,15 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import { evidenceScenarioDir } from '@truecourse/guard-runner';
 import { readGuardEvidenceAt } from '../../lib/guard-store.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
-import { resolveModel, resolveFallbackModel } from '../../config/llm-models.js';
-import { runVisualJudge, spawnVisualJudgeRunner } from '../llm/guard-visual-judge.js';
+import {
+  buildVisualJudgeUserPrompt,
+  runVisualJudge,
+  visualJudgeSessionDef,
+  type VisualJudgeRunner,
+} from '../llm/guard-visual-judge.js';
 import { describeSessionFailure } from '../guard-setup/session-context.js';
 import { readInvocation } from './evidence.js';
 import { executeOneScenario, type AdjudicationExecution } from './execute.js';
@@ -76,8 +79,6 @@ export interface AdjudicationToolsInput {
   item: AdjudicationItem;
   exec: AdjudicationExecution;
   state: AdjudicationSessionState;
-  /** The run's transport, which `visual_judge`'s one vision call goes through. */
-  transport: LlmTransport;
 }
 
 export function buildAdjudicationTools(input: AdjudicationToolsInput): SessionTool[] {
@@ -181,7 +182,7 @@ function visualJudgeTool(input: AdjudicationToolsInput): SessionTool {
     readOnly: true,
     destructive: false,
     inputSchema: z.object({ step: z.number().int().positive() }).strict(),
-    async execute(args) {
+    async execute(args, ctx) {
       if (!item.evidenceDir) {
         return { content: 'this failure carries no evidence bundle on this machine.', isError: true };
       }
@@ -196,16 +197,18 @@ function visualJudgeTool(input: AdjudicationToolsInput): SessionTool {
         evidenceScenarioDir(repoRoot, item.runId, item.scenarioId),
         step.web.screenshot,
       );
-      let runner;
-      try {
-        runner = spawnVisualJudgeRunner({
-          transport: input.transport,
-          model: resolveModel('guard.visualJudge'),
-          fallbackModel: resolveFallbackModel() ?? undefined,
-        });
-      } catch (e) {
-        return { content: `no usable vision transport: ${e instanceof Error ? e.message : String(e)}`, isError: true };
-      }
+      // The verdict is a CHILD session of this adjudication — one turn, one
+      // picture, on the same driver and the same journal, so what it saw is
+      // readable beside the reasoning that asked for it.
+      const runner: VisualJudgeRunner = async (judgeCtx, screenshotBase64) => {
+        const child = await ctx.dispatchChild(
+          visualJudgeSessionDef(),
+          [buildVisualJudgeUserPrompt(judgeCtx)],
+          [{ mediaType: 'image/png', data: screenshotBase64 }],
+        );
+        if (child.status === 'completed') return child.output;
+        throw new Error(describeSessionFailure(child.failure));
+      };
       const failing = args.step === item.step;
       const outcome = await runVisualJudge(
         repoRoot,

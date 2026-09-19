@@ -69,7 +69,7 @@ import {
   type ApiRouteRef,
 } from './recipe-propose.js'
 import { GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
-import type { RecipeRunner } from './runners.js'
+import type { RecipeRunner } from './leaf-seams.js'
 
 export const RECIPE_CACHE_NAME = 'guard/recipe'
 

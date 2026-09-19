@@ -1,6 +1,6 @@
 /**
- * Live validation of a candidate API-transport configuration: one tiny call
- * that proves the credentials, endpoint, and model id all resolve and answer.
+ * Live validation of a candidate provider configuration: one tiny call that
+ * proves the credentials, endpoint, and model id all resolve and answer.
  *
  * The Models page runs it before it persists a provider, and every run runs it
  * before it spends, so a block accepted in one place is accepted in the other.
@@ -8,20 +8,16 @@
  * Nothing is recorded and nothing is priced — the probe is not a pipeline call.
  */
 
-import { createApiTransport, type ProviderConfig } from '@truecourse/llm-api';
+import { probeProvider, type ProviderConfig } from '@truecourse/llm-api';
 import { loadSdk } from '@truecourse/llm-claude-agent';
 import { resolveClaudeBinary } from '@truecourse/shared';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import type { LlmApiConfig } from './provider-config.js';
 import { checkClaudeAuth } from '../../lib/cli-binary.js';
-import { buildProviderConfig } from './install-transport.js';
-
-/** Timeout for the probe call — long enough for a cold provider, short enough to fail fast. */
-const PROBE_TIMEOUT_MS = 30_000;
+import { buildProviderConfig } from './provider.js';
 
 export interface ProbeApiConfigOptions {
-  /** Build the transport under test. Overridden by tests; defaults to the real one. */
-  createTransport?: (cfg: ProviderConfig) => LlmTransport;
+  /** Make the probe call. Overridden by tests; defaults to the real one. */
+  probe?: (cfg: ProviderConfig) => Promise<void>;
 }
 
 /**
@@ -34,17 +30,7 @@ export async function probeApiConfig(
   opts: ProbeApiConfigOptions = {},
 ): Promise<void> {
   const cfg = buildProviderConfig(api);
-  const transport = (opts.createTransport ?? ((c) => createApiTransport(c)))(cfg);
-  const text = await transport({
-    system: 'You are a configuration probe.',
-    user: 'Reply with exactly {"ok": true}.',
-    responseFormat: 'json',
-    timeoutMs: PROBE_TIMEOUT_MS,
-  });
-  // A non-empty completion confirms the credentials + model resolve and respond.
-  if (typeof text !== 'string' || text.trim() === '') {
-    throw new Error('provider returned an empty response');
-  }
+  await (opts.probe ?? probeProvider)(cfg);
 }
 
 /**

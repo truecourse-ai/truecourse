@@ -24,6 +24,9 @@ export const SessionCommandSchema = z.enum([
   // a guard run's evidence. Its own command for the same reason: adjudication
   // runs against a RUN, on its own cadence, independently of any generate.
   'guard-adjudicate',
+  // A scenario run. Deterministic apart from ONE opt-in annotation: the visual
+  // verdict on a failing web step. A run that asks for none creates no record.
+  'guard-run',
 ]);
 export type SessionCommand = z.infer<typeof SessionCommandSchema>;
 

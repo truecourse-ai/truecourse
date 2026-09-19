@@ -54,6 +54,16 @@ This needs the `claude` binary on your PATH and signed in. Every run then uses
 that login and the Models page is read-only; leave the variable out to save a
 provider and key on that page instead.
 
+One model runs everything — every call and every agent session of a run. On a
+Claude Code login that model is `opus`, and `TRUECOURSE_MODEL` names another;
+`TRUECOURSE_FALLBACK_MODEL` is what a call retries on when the primary is
+overloaded. A workspace with its own API key names its one model on the Models
+page instead, and these variables do not apply to it.
+
+Every LLM call is a turn of an agent session, whether the work takes thirty
+turns or one, so what a run spent is one record per session kind and the price
+is the one the provider reported. Settings › Usage reads it back.
+
 ## Telemetry
 
 The app sends product analytics to PostHog. The server sends every product

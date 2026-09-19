@@ -126,7 +126,7 @@ import {
   type RequiredResource,
 } from './seed-evidence.js'
 import type { InterfaceProvider } from './generate.js'
-import type { RecipeRunner } from './runners.js'
+import type { RecipeRunner } from './leaf-seams.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -232,8 +232,9 @@ export interface GuardSetupOptions {
   onStepFact?: (step: GuardSetupStepKey, line: string) => void
   // --- the session seams ---
   /**
-   * The recipe-repair session (step 9), passed through to `discoverRecipe`.
-   * Absent ⇒ the legacy one-shot `recipeRunner` fallback runs instead.
+   * The recipe-repair session (step 9), passed through to `discoverRecipe` —
+   * a full agent loop in a live sandbox, on the failure path only. Absent ⇒
+   * the one-turn `recipeRunner` proposal is the only ask there is.
    */
   repair?: RecipeRepairFn
   /**

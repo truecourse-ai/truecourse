@@ -2,7 +2,7 @@
  * Every spec-scan session declares its OUTCOME SCHEMA on the session def, so the
  * loop can refuse an outcome the schema rejects (and the api driver can enforce
  * the shape through structured output). This replaces the retired one-shot
- * check that each stage put a JSON schema on its `LlmRequest`.
+ * check that each stage put a JSON schema on the request it built.
  *
  * Each case also pins the def's `systemPrompt` to the exported constant — the
  * string the session CACHE fingerprints hash (`promptFingerprint`) — so a schema

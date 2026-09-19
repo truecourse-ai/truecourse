@@ -239,10 +239,10 @@
       "types": "./dist/services/llm/session-driver.d.ts",
       "import": "./dist/services/llm/session-driver.js"
     },
-    "./services/llm/install-transport": {
-      "truecourse-source": "./src/services/llm/install-transport.ts",
-      "types": "./dist/services/llm/install-transport.d.ts",
-      "import": "./dist/services/llm/install-transport.js"
+    "./services/llm/provider": {
+      "truecourse-source": "./src/services/llm/provider.ts",
+      "types": "./dist/services/llm/provider.d.ts",
+      "import": "./dist/services/llm/provider.js"
     },
     "./services/llm/provider-config": {
       "truecourse-source": "./src/services/llm/provider-config.ts",
