@@ -28,7 +28,6 @@ let sessionScript: StubScript = () => {
   throw new Error('no session script installed for this case')
 }
 vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
-  SESSION_MODEL_CLAUDE_CODE: 'opus',
   assertSessionBackendReady: async () => {},
   createClaudeCodeSessionDriver: () => {
     constructions++

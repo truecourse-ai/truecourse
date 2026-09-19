@@ -880,7 +880,11 @@ export const GuardUnadjudicatedStageSchema = z
   .strict()
 export type GuardUnadjudicatedStage = z.infer<typeof GuardUnadjudicatedStageSchema>
 
-/** LLM call/token/cost totals for the generate run — omitted when unmeasured. */
+/**
+ * LLM call/token/cost totals a generate report stored before every call became
+ * a turn of a session carried. Never written now — what a run spends is one
+ * `llm_usage` row per session kind, and the run record carries the total.
+ */
 export const GuardGenerateUsageSchema = z
   .object({
     calls: z.number().int().nonnegative(),

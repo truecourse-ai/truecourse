@@ -11,7 +11,7 @@ import { completeRealization } from '@truecourse/guard-generator';
  * fingerprint included), then turns items into calls with per-kind expected
  * turn counts — `minCalls` = items (one turn each), `maxCalls` = items ×
  * (maxResumes+1) × turns (the budget ceiling), expected = items ×
- * EXPECTED_TURNS. One model runs every session, so the scan estimate
+ * EXPECTED_TURNS. One model runs everything, so the scan estimate
  * carries no per-stage tier labels.
  *
  * Per-kind system prompts and briefing builders are the REAL ones (imported
@@ -82,7 +82,6 @@ import {
 } from '../spec-scan/orchestrate.js';
 import { buildScanUniverse, instructionsFingerprint } from '../spec-scan/tools.js';
 import type { ScanStep } from '../spec-scan/run.js';
-import { SESSION_MODEL_CLAUDE_CODE } from './session-driver.js';
 import {
   planGuardWork,
   bindClaimPrerequisites,
@@ -254,7 +253,7 @@ const STAGE_LABELS: Record<string, string> = {
   [AUTH_PROOF_SESSION_KIND]: 'Verifying supplied auth',
   'guard-setup.preparation-observations': 'Reviewing baseline observation scope',
   [PREPARATION_SESSION_KIND]: 'Preparing private test data',
-  // guard generate (session kinds; recipe + match are still one-shots)
+  // guard generate — the pooled kinds, and the two one-TURN ones
   guardRecipe: 'Discovering recipe',
   guardMatch: 'Matching flows',
   [EXTRACT_SESSION_KIND]: 'Extracting claims',
@@ -371,10 +370,10 @@ async function probeSessionCache<T>(
   return parsed.success ? parsed.data : null;
 }
 
-/** The one model every session of a run runs on: the model the run's own
- *  driver names, else claude-code mode's pinned tier. No per-stage tiers. */
+/** The one model a run runs on — every session and every call alike: the model
+ *  the run's own driver names, else operator mode's. */
 function sessionModel(named?: string): string {
-  return named?.trim() || SESSION_MODEL_CLAUDE_CODE;
+  return named?.trim() || resolveModel();
 }
 
 const mean = (ns: number[]): number =>
@@ -813,8 +812,8 @@ interface GuardRealizationPlan {
 }
 
 /**
- * Plan `guard.match` (still a one-shot) + the flow-worker sessions — the two
- * stages whose work count is an earlier stage's OUTPUT. Exact whenever the flow
+ * Plan the realization match + the flow-worker sessions — the two kinds whose
+ * work count is an earlier stage's OUTPUT. Exact whenever the flow
  * corpus is settled (every area's synthesis cached, so `scenarios/flows.json`
  * IS what the run will use) AND the interface snapshot exists: matching then
  * probes the SAME `.cache/guard/match` entries the run reads, and the worker
@@ -1371,9 +1370,9 @@ export async function estimateGuardSetup(
  * cost. Same convention as scan/generate: cache-aware, "N of M sections changed",
  * no stages ⇒ confirm skipped.
  *
- * Every stage reads the SAME planner the run does (the LLM stages are agent
- * SESSIONS now, `guard.match` and recipe discovery the two remaining
- * one-shots), so the estimate can never promise work the run skips (or hide
+ * Every stage reads the SAME planner the run does (every LLM stage is an agent
+ * SESSION — the pooled kinds, and the one-turn realization match and recipe
+ * proposal), so the estimate can never promise work the run skips (or hide
  * work it pays for):
  *  - EXTRACTION is exact — one session per doc whose `guard/extract-session`
  *    entry misses, probed with the run's own key builder across the whole
@@ -1423,7 +1422,7 @@ export async function estimateGuardTokens(
   const stages: StageCallEstimate[] = [
     {
       stage: 'guardRecipe',
-      model: resolveModel('guard.recipe'),
+      model,
       // One discovery call only when no recipe.json exists yet.
       calls: plan.recipeMissing ? 1 : 0,
       avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
@@ -1457,12 +1456,12 @@ export async function estimateGuardTokens(
         : 'flow count estimated from source obligations — flow count is a synthesis output',
     }),
     {
-      // Matching (still a one-shot): one call per (flow, surface with
-      // interfaces). Exact when the flow corpus is settled and the interface
-      // snapshot exists — it probes the same match cache the run reads;
-      // otherwise the claim-derived ceiling.
+      // Matching: one ONE-TURN session per (flow, surface with interfaces).
+      // Exact when the flow corpus is settled and the interface snapshot
+      // exists — it probes the same match cache the run reads; otherwise the
+      // claim-derived ceiling.
       stage: 'guardMatch',
-      model: resolveModel('guard.match'),
+      model,
       calls: realization.matchCalls,
       minCalls: 0,
       maxCalls: realization.maxPairs,

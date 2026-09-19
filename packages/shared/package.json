@@ -17,9 +17,9 @@
       "import": "./dist/guard/proof-node.js"
     },
     "./llm": {
-      "truecourse-source": "./src/llm/transport.ts",
-      "types": "./dist/llm/transport.d.ts",
-      "import": "./dist/llm/transport.js"
+      "truecourse-source": "./src/llm/index.ts",
+      "types": "./dist/llm/index.d.ts",
+      "import": "./dist/llm/index.js"
     },
     "./openapi": {
       "truecourse-source": "./src/openapi/index.ts",

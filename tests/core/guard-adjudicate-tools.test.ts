@@ -15,7 +15,6 @@ import path from 'node:path'
 import type { ToolContext } from '../../packages/agent-loop/src/index'
 import { evidenceRelPath, type GuardExecInput, type GuardExecReport } from '@truecourse/guard-runner'
 import type { GuardScenarioResult } from '@truecourse/shared'
-import { noProviderTransport, type LlmRequest, type LlmTransport } from '@truecourse/shared/llm'
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 import {
   buildAdjudicationTools,
@@ -47,8 +46,31 @@ const CTX: ToolContext = {
   workItem: 'scn.a',
   signal: new AbortController().signal,
   dispatchChild: () => {
-    throw new Error('no child is dispatched by these tools')
+    throw new Error('this tool dispatches no child')
   },
+}
+
+/** A context whose child dispatch answers from a script and records what it
+ *  was shown — the visual judge is a depth-1 CHILD of an adjudication. */
+function ctxWithChild(value: unknown): {
+  ctx: ToolContext
+  dispatched: Array<{ kind: string; messages: readonly string[]; images?: readonly { mediaType: string; data: string }[] }>
+} {
+  const dispatched: Array<{ kind: string; messages: readonly string[]; images?: readonly { mediaType: string; data: string }[] }> = []
+  const ctx: ToolContext = {
+    workItem: 'scn.a',
+    signal: new AbortController().signal,
+    dispatchChild: async (def, messages, images) => {
+      dispatched.push({ kind: def.kind, messages, ...(images ? { images } : {}) })
+      return {
+        status: 'completed' as const,
+        output: value as never,
+        pendingQuestions: [],
+        spent: { turns: 1, tokens: 10, costUsd: 0 },
+      }
+    },
+  }
+  return { ctx, dispatched }
 }
 
 const RECIPE = { build: 'true', entry: ['node', 'nothing.mjs'] } as unknown as AdjudicationExecution['recipe']
@@ -92,7 +114,7 @@ function toolsFor(input: {
   repoRoot: string
   exec: AdjudicationExecution
   itemOver?: Parameters<typeof item>[0]
-  transport?: LlmTransport
+  ctx?: ToolContext
 }) {
   const state = newSessionState()
   const tools = buildAdjudicationTools({
@@ -100,9 +122,9 @@ function toolsFor(input: {
     item: item({ scenario: scenarioDoc('scn.a'), ...input.itemOver }),
     exec: input.exec,
     state,
-    transport: input.transport ?? noProviderTransport,
   })
-  const call = (name: string, args: unknown) => tools.find((t) => t.name === name)!.execute(args, CTX)
+  const call = (name: string, args: unknown) =>
+    tools.find((t) => t.name === name)!.execute(args, input.ctx ?? CTX)
   return { tools, state, call }
 }
 
@@ -259,26 +281,31 @@ describe('read_evidence', () => {
     expect(result.content).toContain('visual_judge')
   })
 
-  it('`visual_judge` asks through the transport the session was handed', async () => {
+  it('`visual_judge` dispatches a CHILD session and shows it the screenshot', async () => {
     const { r, evidenceDir } = withBundles()
     const mine = path.join(r, '.truecourse', 'guard', 'evidence', RUN_ID, 'scn.a')
     fs.writeFileSync(
       path.join(mine, 'invocation.json'),
       JSON.stringify({ steps: [{ index: 1, web: { screenshot: 'step-1.png', expectation: 'a red banner' } }] }),
     )
-    fs.writeFileSync(path.join(mine, 'step-1.png'), Buffer.from('89504e470d0a1a0a', 'hex'))
-    const seen: LlmRequest[] = []
-    const transport: LlmTransport = async (req) => {
-      seen.push(req)
-      return JSON.stringify({ expectedVisible: 'no', screenSummary: 'A blank page.', rationale: 'No banner is drawn.' })
-    }
-    const { call } = toolsFor({ repoRoot: r, exec: noExec, itemOver: { evidenceDir }, transport })
+    const pixels = Buffer.from('89504e470d0a1a0a', 'hex')
+    fs.writeFileSync(path.join(mine, 'step-1.png'), pixels)
+    const { ctx, dispatched } = ctxWithChild({
+      expectedVisible: 'no',
+      screenSummary: 'A blank page.',
+      rationale: 'No banner is drawn.',
+    })
+    const { call } = toolsFor({ repoRoot: r, exec: noExec, itemOver: { evidenceDir }, ctx })
 
     const result = await call('visual_judge', { step: 1 })
 
     expect(result.isError).toBeUndefined()
     expect(result.content).toContain('expected visible on screen: no')
-    expect(seen.map((req) => req.stage)).toEqual(['guard.visualJudge'])
+    expect(dispatched).toHaveLength(1)
+    expect(dispatched[0].kind).toBe('guard-run.visual-judge')
+    expect(dispatched[0].images).toEqual([
+      { mediaType: 'image/png', data: pixels.toString('base64') },
+    ])
   })
 
   it('says so when the row carries no bundle at all', async () => {

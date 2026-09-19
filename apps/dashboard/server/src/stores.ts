@@ -39,7 +39,6 @@ import {
   PgCreditsStore,
   purgeRepoData,
 } from '@truecourse/data-store';
-import { setShowResolvedStageModel, setShowStageUsage } from '@truecourse/core/commands/spec-in-process';
 import { setWorkspaceLlmConfigStore } from './services/workspace-llm.service.js';
 import { setRepoDataPurge } from './services/repo-removal.service.js';
 
@@ -159,9 +158,6 @@ export function installDbStores(
   // environment, read per run.
   setCreditsStore(new PgCreditsStore(db));
   // Each workspace names ONE model, and its transport ignores the per-stage
-  // hint, so rendering the per-stage tiers would be a lie.
-  setShowResolvedStageModel(false);
-  setShowStageUsage(false);
 
   sessionRuns = new PgSessionRunStore(db, lockPool);
   setSessionRunBackend(sessionRuns);

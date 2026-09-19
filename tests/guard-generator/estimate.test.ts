@@ -18,6 +18,7 @@ import { manifestPath } from '@truecourse/shared/work-tree'
 import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index'
 import { setCacheEntry } from '@truecourse/llm'
 import { estimateGuardTokens } from '../../packages/core/src/services/llm/spec-estimate.js'
+import { resolveModel } from '../../packages/core/src/config/llm-models.js'
 import {
   EXTRACT_SESSION_CACHE_NAME,
   EXTRACT_SESSION_BUDGET,
@@ -158,6 +159,43 @@ async function generateAndWarm(r: string, extractor = extract, author = worker, 
   }
   return result
 }
+
+// ---------------------------------------------------------------------------
+// One model, so one price.
+// ---------------------------------------------------------------------------
+
+describe('estimateGuardTokens — every stage priced at the one model', () => {
+  const savedModel = process.env.TRUECOURSE_MODEL
+  afterEach(() => {
+    if (savedModel === undefined) delete process.env.TRUECOURSE_MODEL
+    else process.env.TRUECOURSE_MODEL = savedModel
+  })
+
+  /** Every quoted stage's model, one-shots and sessions alike. */
+  const modelsOf = async (r: string): Promise<Set<string>> =>
+    new Set(((await estimateGuardTokens(r)).stages ?? []).map((s) => s.model))
+
+  it('quotes the operator model for the one-shots as well as the sessions', async () => {
+    const bare = repo()
+    writeCorpus(bare, [{ ref: DOC }])
+    writeDoc(bare, DOC, DOC_CONTENT)
+    // A repo with no recipe quotes `guardRecipe` too, so the set covers both
+    // the surviving one-shots and every session kind.
+    const stages = new Map(((await estimateGuardTokens(bare)).stages ?? []).map((s) => [s.stage, s]))
+    expect(stages.has('guardRecipe')).toBe(true)
+    expect(await modelsOf(bare)).toEqual(new Set([resolveModel()]))
+  })
+
+  it('follows TRUECOURSE_MODEL, so the ceiling prices what will really run', async () => {
+    process.env.TRUECOURSE_MODEL = 'sonnet'
+    expect(await modelsOf(coldRepo())).toEqual(new Set(['sonnet']))
+  })
+
+  it("takes the run's own model when its driver names one", async () => {
+    const est = await estimateGuardTokens(coldRepo(), undefined, { sessionModel: 'gpt-5.5' })
+    expect(new Set((est.stages ?? []).map((s) => s.model))).toEqual(new Set(['gpt-5.5']))
+  })
+})
 
 // ---------------------------------------------------------------------------
 // Session math: items, expected turns, and the budget ceiling.

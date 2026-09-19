@@ -25,7 +25,7 @@ import {
   type RepoIdentity,
 } from '@truecourse/spec-consolidator';
 import type { LlmTransportMode } from '../services/llm/provider-config.js';
-import { resolveModel, type StageId } from '../config/llm-models.js';
+import { resolveModel } from '../config/llm-models.js';
 import { openConflicts } from '@truecourse/shared';
 
 export type {
@@ -33,7 +33,6 @@ export type {
   ConflictResolution,
   CuratedCorpus,
 } from '@truecourse/spec-consolidator';
-import { getStageUsage, stageTokenTotal } from '@truecourse/shared/llm';
 import type { SessionDriver, UserInputQuestion } from '@truecourse/agent-loop';
 import { runSpecScanSessions, type ScanStep } from '../services/spec-scan/run.js';
 export {
@@ -129,81 +128,6 @@ const CURATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   overlap: [OVERLAP_SESSION_KIND],
   verify: [],
 };
-
-// ---------------------------------------------------------------------------
-// Live per-step usage tag (` · <model> · <tok> tok · $<cost>`)
-// ---------------------------------------------------------------------------
-
-function humanTokens(n: number): string {
-  if (n >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(Math.round(n));
-}
-
-/**
- * Whether progress may fall back to the per-stage *resolved* model when no real
- * usage was recorded. The product runs ONE model for every stage (the transport
- * ignores the per-stage hint) and records no per-stage usage, so the fallback
- * would show a misleading name — the dashboard server turns it off at boot
- * ({@link setShowResolvedStageModel}), and progress then shows no model name.
- */
-let showResolvedStageModel = true;
-
-/** The dashboard server calls this at boot (`false`). */
-export function setShowResolvedStageModel(show: boolean): void {
-  showResolvedStageModel = show;
-}
-
-/**
- * Whether a step's progress detail carries its model, tokens and cost at all.
- * On by default; the dashboard server turns them off at boot — the product
- * shows a step's count only, and spend has its own place.
- */
-let showStageUsage = true;
-
-export function setShowStageUsage(show: boolean): void {
-  showStageUsage = show;
-}
-
-/**
- * ` · <model> · <tok> tok · $<cost>` suffix for an explicit stage set — the core
- * of {@link stepUsageTag}, exported so other steppers (guard generate) render the
- * SAME live tag from their own stage mapping, sharing the model-name toggle.
- *
- * `mode` is the run's effective transport mode, so the pre-call fallback names the
- * model the run will really use — not the one the saved selection would have.
- */
-export function stageUsageTag(
-  stages: StageId[],
-  repoRoot: string,
-  mode?: LlmTransportMode,
-): string {
-  if (stages.length === 0 || !showStageUsage) return '';
-  const usage = getStageUsage();
-  let tok = 0;
-  let cost = 0;
-  const models = new Set<string>();
-  for (const s of stages) {
-    const u = usage.get(s);
-    if (u && u.calls > 0) {
-      tok += stageTokenTotal(u);
-      cost += u.costUsd;
-      if (u.model) models.add(u.model);
-    }
-  }
-  let model = [...models].join(', ');
-  if (!model && showResolvedStageModel) {
-    model = [...new Set(stages.map((s) => resolveModel(s)))].join(', ');
-  }
-  const parts: string[] = [];
-  if (model) parts.push(model);
-  if (tok > 0 || cost > 0) {
-    parts.push(`${humanTokens(tok)} tok`);
-    parts.push(`$${cost.toFixed(2)}`);
-  }
-  return parts.length ? ` · ${parts.join(' · ')}` : '';
-}
-
 
 // ---------------------------------------------------------------------------
 // Corpus path driver — the entry point the dashboard routes call.
@@ -575,8 +499,7 @@ export async function curateInProcess(
     if (!options.deferRunCompletion) run.finish('completed');
 
     // "Nothing changed" = the scan ran zero fresh sessions (every kind was a
-    // cache hit) and lost none. Computed by the run itself — sessions never
-    // touch the one-shot stage-usage sink the old derivation read.
+    // cache hit) and lost none. Computed by the run itself.
     return {
       curate: result,
       noChanges: result.noChanges,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { jsonSchemaHint } from '../../packages/shared/src/llm/transport.js';
+import { jsonSchemaHint } from '../../packages/shared/src/llm/index.js';
 import { AuthoredFragmentSchema } from '../../packages/core/src/services/interface-author/draft.js';
 import { compactNormalizedSchema } from '../../packages/llm-api/src/compact-schema.js';
 import { normalizeForStrictOutput, stripInjectedNulls } from '../../packages/llm-api/src/strict-schema.js';

@@ -5,7 +5,7 @@ import {
   VOCAB_NORMALIZER_SYSTEM_PROMPT,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
 } from '../../packages/spec-consolidator/src/index.js'
-import { OUTPUT_ONLY_GUARDRAIL } from '../../packages/shared/src/llm/transport.js'
+import { OUTPUT_ONLY_GUARDRAIL } from '../../packages/shared/src/llm/index.js'
 
 /**
  * Every spec-scan LLM system prompt closes the action space with the ONE shared

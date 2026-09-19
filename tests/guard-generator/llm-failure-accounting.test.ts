@@ -24,10 +24,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { generateGuards, type ExtractResult, type FlowsAreaSessionSeam } from '@truecourse/guard-generator'
+import { generateGuards, MATCH_SESSION_KIND, type ExtractResult, type FlowsAreaSessionSeam } from '@truecourse/guard-generator'
 import { manifestPath, readManifest, writeManifest, scenariosDir } from '@truecourse/guard-runner'
 import { type GuardScenario } from '@truecourse/shared'
-import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   makeTempRepo,
   rmrf,
@@ -78,13 +77,6 @@ function seed(...docs: { ref: string; content: string }[]): string {
 const ONE_DOC = [{ ref: DOC, content: DOC_CONTENT }]
 
 /** A transport that throws for `stages` and answers `{}` otherwise. */
-function failing(stages: string[], message: string): LlmTransport {
-  return async (req) => {
-    if (stages.includes(req.stage ?? '')) throw new Error(message)
-    return '{}'
-  }
-}
-
 /** Every doc's extraction lost, transport-class — the systemic-loss shape. */
 function extractionLost(reason: string, docs: string[]): ReturnType<typeof extractSessionOf> {
   return extractSessionOf(
@@ -216,7 +208,7 @@ describe('flow synthesis losing every session aborts before flows.json is rewrit
     })
 
     expect(res.status).toBe('llm-failed')
-    expect(res.reason).toContain('guard.flows')
+    expect(res.reason).toContain(FLOWS_KIND)
     expect(res.reason).toContain('unusable')
     // Nothing failed, so no tally records it — the reason is the record.
     expect(res.llmFailures).toEqual([])
@@ -225,9 +217,7 @@ describe('flow synthesis losing every session aborts before flows.json is rewrit
   })
 })
 
-describe('matching losing every call aborts before a flow is re-authored', () => {
-  // Match is one of the TWO stages still on the one-shot transport, so it is
-  // still a CALL tally rather than a session summary.
+describe('matching losing every session aborts before a flow is re-authored', () => {
   it('keeps the prior scenarios the settle pass would have deleted', async () => {
     const r = seed(...ONE_DOC)
     const prior = commitPriorFlow(r)
@@ -235,12 +225,24 @@ describe('matching losing every call aborts before a flow is re-authored', () =>
     const res = await generateGuards({
       ...flowStageSeams(r),
       repoRoot: r,
-      matchRunner: undefined,
-      transport: failing(['guard.match'], 'claude API error (api 500)'),
+      matchRunner: async () => {
+        throw new Error('claude API error (api 500)')
+      },
+      leafSummaries: () => [
+        sessionSummary(MATCH_SESSION_KIND, {
+          ran: 1,
+          failed: 1,
+          firstError: 'claude API error (api 500)',
+        }),
+      ],
     })
 
     expect(res.status).toBe('llm-failed')
-    expect(res.reason).toContain('guard.match')
+    expect(res.reason).toContain(MATCH_SESSION_KIND)
+    expect(res.llmFailures.find((f) => f.stage === MATCH_SESSION_KIND)).toMatchObject({
+      attempts: 1,
+      failures: 1,
+    })
     expect(res.written).toEqual([])
     expect(fs.readFileSync(manifestPath(r), 'utf-8')).toBe(prior.manifest)
     expect(fs.readFileSync(prior.file, 'utf-8')).toBe(prior.scenario)
