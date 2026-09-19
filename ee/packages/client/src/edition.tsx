@@ -23,6 +23,9 @@ export function registerEditionFeatures(): void {
   registerSettingsTab({
     id: 'connections',
     label: 'Connections',
+    // Registering it says this bundle carries the tab; whether a workspace may
+    // open it is its own grant, which the shell reads off the session.
+    entitlement: 'connections',
     render: () => <ConnectionsTab />,
   });
   registerRepositoryProvider(azureDevOps);

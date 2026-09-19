@@ -137,8 +137,8 @@ export type RepoResponse = {
   isGitRepo?: boolean;
 };
 
-// Capabilities — fetched once at app boot by AppProvider so any component can
-// ask `useCapability('sso')` or `useServerMode()`.
+// How the server runs — fetched once at app boot by AppProvider so any
+// component can ask `useServerMode()`.
 export function getCapabilities(): Promise<CapabilitiesResponse> {
   return fetchApi<CapabilitiesResponse>('/api/capabilities');
 }

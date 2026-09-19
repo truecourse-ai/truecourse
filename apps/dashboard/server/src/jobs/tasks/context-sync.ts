@@ -67,7 +67,9 @@ export interface ContextSyncJobResult {
 
 export interface ContextSyncTaskDeps {
   /** The drivers the body runs, for one workspace. Production builds them from the server's deps. */
-  drivers?: (workspaceOrgId: string) => Map<ContextSourceKind, ContextSourceDriver>;
+  drivers?: (
+    workspaceOrgId: string,
+  ) => Promise<Map<ContextSourceKind, ContextSourceDriver>> | Map<ContextSourceKind, ContextSourceDriver>;
   /** The clock the sync record is stamped with. */
   now?: () => Date;
   /**
@@ -124,7 +126,7 @@ export function createContextSyncTask(
         return { result: { sourceId, outcome: 'paused', ...NOTHING }, notification: null };
       }
 
-      const driver = drivers(org).get(source.kind);
+      const driver = (await drivers(org)).get(source.kind);
       if (!driver) throw new ContextKindUnsupportedError(source.kind);
 
       const previous = await listContextDocuments(org, sourceId);

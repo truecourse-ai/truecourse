@@ -6,6 +6,11 @@
  * provider — so the whole app is rendered with this edition registered first,
  * and the assertions are on the open pages drawing what was registered.
  *
+ * Registering the tab is not what puts it on the page: the workspace has to
+ * HOLD the Connections grant, which the session answers. A workspace that does
+ * not is a Settings page without that section at all, which is the last of the
+ * three places the grant is enforced.
+ *
  * One connector connects — Atlassian, the single account whose token reads
  * both Jira and Confluence, a row that opens its account form; the other four
  * and the Azure row say Coming soon and are inert: no lock, no button, nothing
@@ -14,13 +19,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import {
   CONTEXT_CONNECTION_KINDS,
   CONTEXT_CONNECTION_PROVIDERS,
   type GithubConnectStatusResponse,
 } from '@truecourse/shared';
+import type { EnterpriseFeature } from '@truecourse/shared';
+import { AuthProvider } from '@/auth/AuthContext';
 import DashboardApp from '@/dashboard/DashboardApp';
 import { registerEditionFeatures } from '../../ee/packages/client/src/edition';
 
@@ -64,10 +71,28 @@ const STATUS: GithubConnectStatusResponse = {
   repos: [],
 };
 
+const USER = {
+  id: 'user_me',
+  email: 'dana@acme.dev',
+  firstName: 'Dana',
+  organizationId: 'org_a',
+  organizationName: 'Acme',
+};
+
+/** What the session says this workspace may use. */
+let entitlements: EnterpriseFeature[];
+
 function serve() {
   window.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(href, window.location.origin);
+    if (pathname === '/api/auth/me') {
+      return json({
+        user: USER,
+        edition: entitlements.length > 0 ? 'enterprise' : 'community',
+        entitlements,
+      });
+    }
     if (pathname === '/api/repos') return json([]);
     if (pathname === '/api/github/status') return json(STATUS);
     if (pathname === '/api/llm/config') return json({ config: null, providers: ['anthropic'] });
@@ -81,15 +106,18 @@ function renderAt(path: string) {
   window.history.replaceState({}, '', path);
   render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/*" element={<DashboardApp />} />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          <Route path="/*" element={<DashboardApp />} />
+        </Routes>
+      </AuthProvider>
     </MemoryRouter>,
   );
 }
 
 beforeEach(() => {
   window.history.replaceState({}, '', '/');
+  entitlements = ['connections'];
   serve();
 });
 
@@ -101,14 +129,45 @@ describe('Settings › Connections', () => {
   it('is a section of Settings, after the ones the product has', async () => {
     renderAt('/settings');
     const sections = await screen.findByRole('navigation', { name: 'Settings sections' });
-    expect(within(sections).getAllByRole('link').map((link) => link.textContent)).toEqual([
-      'Members',
-      'Repositories',
-      'Models',
-      'Usage',
-      'Credits',
-      'Connections',
-    ]);
+    await waitFor(() =>
+      expect(within(sections).getAllByRole('link').map((link) => link.textContent)).toEqual([
+        'Members',
+        'Repositories',
+        'Models',
+        'Usage',
+        'Credits',
+        'Connections',
+      ]),
+    );
+  });
+
+  it('is not a section at all for a workspace that was not granted it', async () => {
+    entitlements = [];
+    renderAt('/settings');
+    const sections = await screen.findByRole('navigation', { name: 'Settings sections' });
+    await waitFor(() =>
+      expect(within(sections).getAllByRole('link').map((link) => link.textContent)).toEqual([
+        'Members',
+        'Repositories',
+        'Models',
+        'Usage',
+        'Credits',
+      ]),
+    );
+  });
+
+  // Its address is not a way in either: a section this workspace does not have
+  // lands on the first one it does, and nothing asks the server for a
+  // connection it may not read.
+  it('does not open at its own address for a workspace without the grant', async () => {
+    entitlements = [];
+    renderAt('/settings/connections');
+    expect(await screen.findByRole('navigation', { name: 'Settings sections' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Connectors' })).toBeNull());
+    const reads = (window.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+      (call) => String(call[0]).includes('/api/connections'),
+    );
+    expect(reads).toEqual([]);
   });
 
   it('lists the one account and the four tools that cannot connect yet', async () => {

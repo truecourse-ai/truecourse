@@ -86,6 +86,10 @@ export const EVENTS = {
   workspaceCreated: 'workspace_created',
   /** An operator handed a workspace credits. */
   creditsGranted: 'credits_granted',
+  /** An operator opened one enterprise feature to a workspace. */
+  entitlementGranted: 'entitlement_granted',
+  /** An operator closed one again, which pauses what read through it. */
+  entitlementRevoked: 'entitlement_revoked',
   /** A workspace ran out of credits — mid-run, or at a start it was refused. */
   creditsExhausted: 'credits_exhausted',
   /** A job stopped part-way with nothing wrong. */

@@ -16,7 +16,6 @@ import { serverMode } from './mode.js';
 import { createLocalConnection, type LocalMount } from './local/index.js';
 import {
   registeredServerFeatures,
-  type FeatureContextDriver,
   type ServerFeatureContext,
   type ServerRouterMount,
 } from './features.js';
@@ -37,7 +36,9 @@ import {
   emitContextChanged,
   setContextEventPublisher,
   setFeatureContextDrivers,
+  type EditionContextDriver,
 } from './services/context.service.js';
+import { isEntitled } from './services/entitlements.service.js';
 import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepRunClones } from './services/run-clone.service.js';
@@ -152,12 +153,20 @@ export async function startServer(): Promise<void> {
       if (who) captureAction(event, { ...who, ...(properties ? { properties } : {}) });
     },
     contextChanged: (org, change) => emitContextChanged(org, change),
+    entitled: (org, entitlement) => isEntitled(org, entitlement),
   };
   const featureRouters: ServerRouterMount[] = [];
-  const featureDrivers: FeatureContextDriver[] = [];
+  const featureDrivers: EditionContextDriver[] = [];
   for (const feature of registeredServerFeatures()) {
     featureRouters.push(...feature.mount(featureContext));
-    featureDrivers.push(...(feature.contextDrivers?.(featureContext) ?? []));
+    // A driver carries the grant of the feature that brought it, so a workspace
+    // without that grant is never offered its kinds.
+    for (const driver of feature.contextDrivers?.(featureContext) ?? []) {
+      featureDrivers.push({
+        ...driver,
+        ...(feature.entitlement ? { entitlement: feature.entitlement } : {}),
+      });
+    }
     log.info(`[Server] ${feature.name} enabled`);
   }
   setFeatureContextDrivers(featureDrivers);

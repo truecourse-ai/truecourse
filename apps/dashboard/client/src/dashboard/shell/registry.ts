@@ -15,7 +15,7 @@
  */
 
 import type { ComponentType, ReactNode } from 'react';
-import type { ContextSourceKind, ServerMode } from '@truecourse/shared';
+import type { ContextSourceKind, EnterpriseFeature, ServerMode } from '@truecourse/shared';
 
 /**
  * One section of Settings: a row in its side menu and the page behind it, at
@@ -25,6 +25,12 @@ import type { ContextSourceKind, ServerMode } from '@truecourse/shared';
 export interface SettingsTab {
   id: string;
   label: string;
+  /**
+   * The grant a workspace must hold for this section to be drawn at all.
+   * Absent on a section every workspace has. Registering it is not what makes
+   * it the workspace's — the entitlement is (see `auth/AuthContext`).
+   */
+  entitlement?: EnterpriseFeature;
   render(): ReactNode;
 }
 

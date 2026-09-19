@@ -18,6 +18,15 @@
  * Removing a connection does NOT remove the documents it brought in: every
  * source of every kind the account served is PAUSED, with a note saying which
  * account went, so connecting it again is a Resume rather than an add.
+ *
+ * ENTITLEMENT. Mounting these routes is what this DEPLOYMENT carries; whether a
+ * workspace may use them is its own grant, so every route asks. An ungranted
+ * one is refused 403: the routes are here, this deployment does serve them, and
+ * the caller is a known member of a known workspace — what is missing is
+ * permission, which is what 403 says. Hiding them behind a 404 would be the
+ * operator console's rule, and it is the wrong one here: nothing about
+ * Connections is a secret, the client already carries the tab, and the
+ * authenticated answer already says which features the workspace holds.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -35,11 +44,11 @@ import {
 } from '@truecourse/shared';
 import type { ServerFeatureContext } from '@truecourse/dashboard-server';
 import { log } from '@truecourse/core/lib/logger';
-import {
-  listContextSources,
-  updateContextSource,
-} from '@truecourse/core/lib/context-store';
+import { pauseContextSourcesOfKinds } from '@truecourse/core/lib/context-store';
 import { ConnectionStore, type AtlassianConnection } from './store.js';
+
+/** The grant a workspace must hold to reach any of this. */
+const ENTITLEMENT = 'connections' as const;
 
 /** What a route needs of the connection it is about to act on. */
 export interface ConnectionsRouterDeps {
@@ -51,8 +60,11 @@ export interface ConnectionsRouterDeps {
    * to prove.
    */
   probe(kind: ContextSourceKind, connection: AtlassianConnection): Promise<void>;
-  /** Report one product action, and tell the workspace its Context moved. */
-  context: Pick<ServerFeatureContext, 'capture' | 'contextChanged'>;
+  /**
+   * Report one product action, tell the workspace its Context moved, and ask
+   * whether this workspace may use the feature at all.
+   */
+  context: Pick<ServerFeatureContext, 'capture' | 'contextChanged' | 'entitled'>;
 }
 
 /** The workspace the caller is acting in, or null when the session names none. */
@@ -66,8 +78,24 @@ function providerOf(req: Request): ContextConnectionProvider | null {
   return isContextConnectionProvider(raw) ? raw : null;
 }
 
+/** What an ungranted workspace is told, in the words a member can act on. */
+const NOT_ENTITLED =
+  'Connections are not part of this workspace\u2019s plan. Ask TrueCourse to open them.';
+
 export function createConnectionsRouter(deps: ConnectionsRouterDeps): Router {
   const router: Router = Router();
+
+  // Every route below is the workspace's, so its grant is asked for once, here,
+  // rather than four times over. The per-route session check stays: it is what
+  // narrows the workspace id the handler then uses.
+  router.use(async (req: Request, res: Response, next) => {
+    const org = orgOf(req);
+    if (!org) return res.status(403).json({ error: 'This session has no workspace.' });
+    if (!(await deps.context.entitled(org, ENTITLEMENT))) {
+      return res.status(403).json({ error: NOT_ENTITLED });
+    }
+    next();
+  });
 
   router.get('/', async (req: Request, res: Response) => {
     const org = orgOf(req);
@@ -175,23 +203,18 @@ export function createConnectionsRouter(deps: ConnectionsRouterDeps): Router {
   /**
    * Every source of every kind this account served, paused with the reason. The
    * documents stay: a connection removed by mistake is one Resume away from
-   * syncing again, and nothing about the corpus changes meanwhile.
+   * syncing again, and nothing about the corpus changes meanwhile. A revoked
+   * entitlement stops the same sources the same way, off the same helper.
    */
-  async function pauseSourcesOf(
+  function pauseSourcesOf(
     org: string,
     provider: ContextConnectionProvider,
   ): Promise<string[]> {
-    const kinds = CONTEXT_CONNECTION_KINDS[provider];
-    const paused: string[] = [];
-    for (const source of await listContextSources(org)) {
-      if (!kinds.includes(source.kind) || source.status === 'paused') continue;
-      await updateContextSource(org, source.id, {
-        status: 'paused',
-        statusNote: `The ${CONTEXT_CONNECTION_LABEL[provider]} connection this source reads through was removed.`,
-      });
-      paused.push(source.id);
-    }
-    return paused;
+    return pauseContextSourcesOfKinds(
+      org,
+      CONTEXT_CONNECTION_KINDS[provider],
+      `The ${CONTEXT_CONNECTION_LABEL[provider]} connection this source reads through was removed.`,
+    );
   }
 
   return router;

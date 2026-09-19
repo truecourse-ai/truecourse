@@ -9,6 +9,10 @@
  * one and answers a verdict for each, removing a connection PAUSES every source
  * of every kind it served without touching their documents, and both mutations
  * report themselves as one product action each.
+ *
+ * And none of it is reachable by a workspace that was not GRANTED the feature:
+ * mounting these routes is what the deployment carries, and the grant is what
+ * the workspace holds.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -42,6 +46,8 @@ let probeRefusals: Partial<Record<ContextSourceKind, string>>;
 /** The product actions the routes reported. */
 let captured: { event: string; properties?: Record<string, unknown> }[];
 let changes: { org: string; change: string }[];
+/** Whether the workspace behind the request holds the Connections grant. */
+let entitled: boolean;
 
 beforeEach(async () => {
   client = new PGlite();
@@ -54,6 +60,7 @@ beforeEach(async () => {
   probeRefusals = {};
   captured = [];
   changes = [];
+  entitled = true;
 
   app = express();
   app.use(express.json());
@@ -78,6 +85,7 @@ beforeEach(async () => {
         contextChanged: async (org, change) => {
           changes.push({ org, change: change.change });
         },
+        entitled: async (_org, feature) => feature === 'connections' && entitled,
       },
     }),
   );
@@ -354,5 +362,50 @@ describe('the connection a driver reads with', () => {
       accountEmail: 'u@acme.test',
       apiToken: 'super-secret-token',
     });
+  });
+});
+
+/**
+ * The grant is not decoration: an ungranted workspace is refused at every one
+ * of these addresses, so the feature cannot be used by asking for it directly.
+ *
+ * The refusal is 403 and not the operator console's 404: the routes ARE here,
+ * this deployment does serve them, and the caller is a known member of a known
+ * workspace. What is missing is permission, which is what 403 says — and
+ * nothing about Connections is a secret worth hiding behind a lie.
+ */
+describe('a workspace that was not granted Connections', () => {
+  beforeEach(() => {
+    entitled = false;
+  });
+
+  it('is refused at every address, in words a member can act on', async () => {
+    const refusal = 'Connections are not part of this workspace’s plan. Ask TrueCourse to open them.';
+    for (const send of [
+      () => request(app).get('/api/connections'),
+      () => request(app).put('/api/connections/atlassian').send(ACCOUNT),
+      () => request(app).post('/api/connections/atlassian/test').send(ACCOUNT),
+      () => request(app).delete('/api/connections/atlassian'),
+    ]) {
+      const got = await send().expect(403);
+      expect(got.body).toEqual({ error: refusal });
+    }
+  });
+
+  it('writes nothing, probes nothing and reports nothing on the way to being refused', async () => {
+    await request(app).put('/api/connections/atlassian').send(ACCOUNT).expect(403);
+    await request(app).post('/api/connections/atlassian/test').send(ACCOUNT).expect(403);
+    expect(await store.getConnection(ORG, 'atlassian')).toBeNull();
+    expect(probes).toEqual([]);
+    expect(captured).toEqual([]);
+  });
+
+  it('cannot delete what a granted workspace stored, which is what keeps its sources', async () => {
+    entitled = true;
+    await request(app).put('/api/connections/atlassian').send(ACCOUNT).expect(200);
+    entitled = false;
+
+    await request(app).delete('/api/connections/atlassian').expect(403);
+    expect(await store.getConnection(ORG, 'atlassian')).not.toBeNull();
   });
 });

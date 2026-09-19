@@ -76,7 +76,7 @@ function serve(mode: ServerMode) {
 }
 
 function renderAt(path: string, mode: ServerMode) {
-  const capabilities: CapabilitiesResponse = { edition: 'community', mode, capabilities: [] };
+  const capabilities: CapabilitiesResponse = { mode };
   window.history.replaceState({}, '', path);
   render(
     <MemoryRouter initialEntries={[path]}>

@@ -34,11 +34,11 @@ import {
   Check,
   type LucideIcon,
 } from 'lucide-react';
-import { useAuth } from '@/auth/AuthContext';
+import { useAuth, useEntitlement } from '@/auth/AuthContext';
 import { Brand } from '@/components/brand';
 import { DiscordIcon } from '@/components/DiscordIcon';
 import { EVENTS, trackEvent } from '@/lib/posthog';
-import { useEdition, useServerMode } from '@/contexts/CapabilityContext';
+import { useServerMode } from '@/contexts/CapabilityContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { useDashboardState } from './dashboard-state';
 import { useDashboardUser } from './use-dashboard-user';
@@ -142,17 +142,18 @@ function useClickOutside(open: boolean, close: () => void) {
  *
  * Local mode is always this block: there is one implicit workspace and no
  * identity provider to move a session through, so the server mounts no
- * `/api/auth/workspaces` routes for a switcher to call. So is a server that
- * booted the open edition under a client built with the enterprise one: it
- * says `community`, and has no such routes either. Both are checked here,
- * once, rather than inside whatever was registered.
+ * `/api/auth/workspaces` routes for a switcher to call. So is a workspace that
+ * was never granted more than one — the switcher is that grant's surface, and
+ * a workspace holding some other enterprise feature is not thereby in two
+ * places. Both are checked here, once, rather than inside whatever was
+ * registered.
  */
 function WorkspaceBlock({ collapsed }: { collapsed: boolean }) {
   const Switcher = registeredWorkspaceSwitcher();
   const { workspace } = useDashboardState();
   const local = useServerMode() === 'local';
-  const enterprise = useEdition() === 'enterprise';
-  if (Switcher && !local && enterprise) return <Switcher collapsed={collapsed} />;
+  const manyWorkspaces = useEntitlement('workspaces');
+  if (Switcher && !local && manyWorkspaces) return <Switcher collapsed={collapsed} />;
 
   // Nobody is signed in: there is no workspace to name.
   if (!workspace) return null;

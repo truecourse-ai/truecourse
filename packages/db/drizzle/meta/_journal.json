@@ -211,6 +211,13 @@
       "when": 1789956896573,
       "tag": "0029_integration_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1789956896574,
+      "tag": "0030_workspace_entitlements",
+      "breakpoints": true
     }
   ]
 }

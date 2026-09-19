@@ -234,7 +234,7 @@ async function normalizeConfig(
   const raw = (config ?? {}) as ContextSourceConfig;
   if (kind === 'repository') return { kind, config: repositoryConfig(raw) };
   if (kind === 'site') return { kind, config: siteConfig(raw) };
-  const driver = driverFor(org, kind);
+  const driver = await driverFor(org, kind);
   if (!driver.scope) throw new ContextKindUnsupportedError(kind);
   const identity = await driver.scope(raw);
   return { kind, config: identity.config, identity };
@@ -247,9 +247,13 @@ function titleFor(scope: NormalizedConfig): string {
   return scope.identity.title;
 }
 
-/** The driver this server has for a kind, or a refusal naming the kind. */
-function driverFor(org: string, kind: ContextSourceKind): ContextSourceDriver {
-  const driver = serverContextDrivers(org).get(kind);
+/**
+ * The driver this server has for a kind IN THIS WORKSPACE, or a refusal naming
+ * the kind. A kind an edition drives but this workspace is not entitled to has
+ * no driver here, so it reads exactly as a kind nothing can sync.
+ */
+async function driverFor(org: string, kind: ContextSourceKind): Promise<ContextSourceDriver> {
+  const driver = (await serverContextDrivers(org)).get(kind);
   if (!driver) throw new ContextKindUnsupportedError(kind);
   return driver;
 }
@@ -300,14 +304,14 @@ async function startWorkspaceScan(org: string, source: 'link'): Promise<string |
  * Read `kind` off a request body, refusing anything this server cannot sync —
  * which is a question about the DRIVERS it registered at boot, not a constant.
  */
-function readKind(org: string, body: { kind?: unknown }): ContextSourceKind {
+async function readKind(org: string, body: { kind?: unknown }): Promise<ContextSourceKind> {
   const kind = typeof body.kind === 'string' ? body.kind.trim() : '';
   if (!(CONTEXT_SOURCE_KINDS as readonly string[]).includes(kind)) {
     throw new ContextConfigError(
       `Unknown source kind ${JSON.stringify(kind)}. Known kinds: ${CONTEXT_SOURCE_KINDS.join(', ')}.`,
     );
   }
-  driverFor(org, kind as ContextSourceKind);
+  await driverFor(org, kind as ContextSourceKind);
   return kind as ContextSourceKind;
 }
 
@@ -352,7 +356,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
       // Which kinds can be ADDED is this server's own answer — the drivers it
       // registered at boot — so the add dialog offers what exists here and
       // nothing else.
-      res.json({ sources, changedAt, addableKinds: addableContextKinds(org) });
+      res.json({ sources, changedAt, addableKinds: await addableContextKinds(org) });
     } catch (e) {
       respond(res, next, e);
     }
@@ -767,9 +771,9 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     try {
       const org = orgOf(req);
       const body = (req.body ?? {}) as { kind?: unknown; config?: unknown; installationId?: unknown };
-      const kind = readKind(org, body);
+      const kind = await readKind(org, body);
       const scope = await scopeFor(req, kind, body.config, body.installationId);
-      res.json(await driverFor(org, kind).check(scope.config));
+      res.json(await (await driverFor(org, kind)).check(scope.config));
     } catch (e) {
       respond(res, next, e);
     }
@@ -867,7 +871,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         repoIds?: unknown;
         installationId?: unknown;
       };
-      const kind = readKind(org, body);
+      const kind = await readKind(org, body);
       const scope = await scopeFor(req, kind, body.config, body.installationId);
       const repoKeys = await readRepoIds(req, body.repoIds);
 

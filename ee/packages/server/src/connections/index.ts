@@ -23,6 +23,10 @@ export const CONNECTIONS_PATH = '/api/connections';
 
 export const connectionsFeature: ServerFeature = {
   name: 'document connections',
+  // Which workspaces may use it is an operator's grant, not this deployment's
+  // answer: the routes refuse an ungranted workspace and its kinds are never
+  // offered in Add context.
+  entitlement: 'connections',
 
   mount(context) {
     const store = new ConnectionStore(context.db, context.masterSecret);

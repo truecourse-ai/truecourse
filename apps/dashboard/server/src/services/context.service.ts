@@ -15,6 +15,10 @@
  * job and the sweep all see one map and none of them knows which edition filled
  * it.
  *
+ * A feature's kinds are the workspace's only while it holds the feature's
+ * GRANT: an ungranted workspace is never offered them in Add context and has no
+ * driver to sync them with, which is where the grant stops being decoration.
+ *
  * EVENTS. A Context mutation is workspace-wide, not repository-scoped, so it
  * rides the SSE stream every workspace already holds open (`/api/events`)
  * rather than a repo socket room. Boot installs the publisher; with none
@@ -22,7 +26,12 @@
  * silent no-op, exactly as a socket emit is.
  */
 
-import { CONTEXT_SOURCE_KINDS, type ContextSourceKind, type ServerEvent } from '@truecourse/shared';
+import {
+  CONTEXT_SOURCE_KINDS,
+  type ContextSourceKind,
+  type EnterpriseFeature,
+  type ServerEvent,
+} from '@truecourse/shared';
 import {
   contextDrivers,
   type ContextDriverDeps,
@@ -30,6 +39,7 @@ import {
 } from '@truecourse/core/services/context';
 import { log } from '@truecourse/core/lib/logger';
 import type { FeatureContextDriver } from '../features.js';
+import { workspaceEntitlements } from './entitlements.service.js';
 import { acquireWorkTree } from './work-tree.service.js';
 
 /** How a workspace-wide event reaches the workspace's open streams. */
@@ -91,28 +101,42 @@ export function contextDriverDeps(org: string): ContextDriverDeps {
   );
 }
 
-let featureDrivers: readonly FeatureContextDriver[] = [];
+/** One feature's driver as the server installs it, with the grant it needs. */
+export interface EditionContextDriver extends FeatureContextDriver {
+  /** The grant a workspace must hold for this kind to be offered at all. */
+  entitlement?: EnterpriseFeature;
+}
+
+let featureDrivers: readonly EditionContextDriver[] = [];
 
 /** Install the drivers this edition's features registered. Boot calls it once. */
-export function setFeatureContextDrivers(next: readonly FeatureContextDriver[]): void {
+export function setFeatureContextDrivers(next: readonly EditionContextDriver[]): void {
   featureDrivers = next;
 }
 
 /**
  * The drivers, built from this server's deps for one workspace: the open
- * edition's two, and whatever this edition's features added on top.
+ * edition's two, and whichever of this edition's the workspace is entitled to.
  */
-export function serverContextDrivers(org: string): Map<ContextSourceKind, ContextSourceDriver> {
+export async function serverContextDrivers(
+  org: string,
+): Promise<Map<ContextSourceKind, ContextSourceDriver>> {
   const drivers = contextDrivers(contextDriverDeps(org));
-  for (const feature of featureDrivers) drivers.set(feature.kind, feature.driver(org));
+  if (featureDrivers.length === 0) return drivers;
+  const held = new Set(await workspaceEntitlements(org));
+  for (const feature of featureDrivers) {
+    if (feature.entitlement && !held.has(feature.entitlement)) continue;
+    drivers.set(feature.kind, feature.driver(org));
+  }
   return drivers;
 }
 
 /**
- * The kinds this server can ADD — the drivers it has, in the vocabulary's own
- * order, so the add dialog never offers a kind nothing can sync.
+ * The kinds this server can ADD for this workspace — the drivers it has for it,
+ * in the vocabulary's own order, so the add dialog never offers a kind nothing
+ * can sync and never offers one this workspace may not use.
  */
-export function addableContextKinds(org: string): ContextSourceKind[] {
-  const drivers = serverContextDrivers(org);
+export async function addableContextKinds(org: string): Promise<ContextSourceKind[]> {
+  const drivers = await serverContextDrivers(org);
   return CONTEXT_SOURCE_KINDS.filter((kind) => drivers.has(kind));
 }

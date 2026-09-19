@@ -62,8 +62,27 @@ GitHub is the provider that connects today, and a folder on this machine in
 local mode. GitLab and Azure DevOps are listed as coming soon.
 
 **One build, one image, one process entry.** The image carries both editions
-and nothing in the Dockerfile or a release script picks one; which edition a
-process is comes from whether `ee/` sits beside the open tree.
+and nothing in the Dockerfile or a release script picks one; whether a process
+CARRIES the enterprise edition comes from whether `ee/` sits beside the open
+tree.
+
+**Carrying it is not the same as a workspace being allowed to use it.** Each of
+the three is a per-workspace GRANT (`ENTERPRISE_FEATURES` in
+`@truecourse/shared`: `connections`, `repository-providers`, `workspaces`),
+held as one row per (workspace, feature) in `workspace_entitlements` — the
+`entitlements` seam in core, `PgEntitlementsStore` in data-store, granted and
+revoked from the operator console (`/api/operator/entitlements`, operator-only
+and answering 404 to anyone else, unmounted in local mode, beside the credits
+console). What a workspace may use is the grant AND the bundle:
+`services/entitlements.service.ts` intersects them, and LOCAL MODE holds
+everything the bundle carries, since one developer on one machine is the whole
+deployment and there is no operator to grant anything. Enforcement is three
+places — the feature's context drivers are not built for an ungranted workspace
+(so Add context never offers `jira` or `confluence`), `/api/connections` refuses
+one 403, and Settings › Connections is drawn on the grant. REVOKING pauses the
+workspace's sources of that feature's kinds with the reason, exactly as removing
+the connection does (`pauseContextSourcesOfKinds`), and leaves their documents,
+so a later grant is a Resume.
 
 The dependency runs ONE WAY, from `ee/` inward: no open source file reaches
 into `ee/`, and the one seam on each side is pinned by
@@ -86,9 +105,12 @@ source roots, so moving the bundle means moving those two lines by hand.
   and the tests), registers the bundle's exported `eeServerFeatures` when it is
   there, registers nothing when it is not, and logs which edition it found and
   the path it probed either way. A bundle that is present but cannot load or
-  exports no feature list stops the boot, naming it. `GET /api/capabilities`
-  reports the result as `edition`, and the client's workspace switcher draws
-  only when the server says `enterprise`.
+  exports no feature list stops the boot, naming it. `ServerFeature.entitlement`
+  names the grant each feature is, and the feature's context is handed an
+  `entitled(org, feature)` it asks per request. WHAT A WORKSPACE MAY USE rides
+  the authenticated answer (`GET /api/auth/me` → `edition` + `entitlements`, in
+  both auth modes); `GET /api/capabilities` is public and carries `mode` alone,
+  so the two can never disagree.
 
 ## Modes
 
@@ -124,7 +146,7 @@ says it is local.
 
 ## Storage
 
-**One storage: Postgres.** `DATABASE_URL` is required in every mode and WorkOS auth in hosted mode only (`createAuth('local')` builds no WorkOS client), and boot (`apps/dashboard/server/src/index.ts` → `stores.ts`) fills every one of core's store seams with its `@truecourse/data-store` implementation over a content-addressed `content` table. The seams exist only because `packages/core` cannot depend on `packages/data-store` — the dependency runs the other way — so nothing is installed by default and a process that never booted fails loud instead of inventing an empty store. A repository exists by being connected — through the GitHub App, or as a folder on this machine in local mode — scoped to its workspace and identified by its key (`owner/repo`, or `local/<folder>`); the rows live in `repositories` (with the provider accounts that brought them in `provider_accounts`), and the "registry" is a live view of that table, not one of its own. A run gets its files through the work-tree seam, which dispatches on the repository's provider: the App clones through an installation, the local provider copies the folder.
+**One storage: Postgres.** `DATABASE_URL` is required in every mode and WorkOS auth in hosted mode only (`createAuth('local')` builds no WorkOS client), and boot (`apps/dashboard/server/src/index.ts` → `stores.ts`) fills every one of core's store seams with its `@truecourse/data-store` implementation over a content-addressed `content` table. Which ENTERPRISE FEATURES a workspace may use is one of those seams too (`workspace_entitlements`, one row per grant; see EDITIONS above). The seams exist only because `packages/core` cannot depend on `packages/data-store` — the dependency runs the other way — so nothing is installed by default and a process that never booted fails loud instead of inventing an empty store. A repository exists by being connected — through the GitHub App, or as a folder on this machine in local mode — scoped to its workspace and identified by its key (`owner/repo`, or `local/<folder>`); the rows live in `repositories` (with the provider accounts that brought them in `provider_accounts`), and the "registry" is a live view of that table, not one of its own. A run gets its files through the work-tree seam, which dispatches on the repository's provider: the App clones through an installation, the local provider copies the folder.
 
 Onboarding runs as BACKGROUND JOBS, not inside the request that asked for it: connecting a repo creates NO context source and links none, and enqueues `repo.guard-setup` straight from its link hook, which chains `repo.guard-generate` when its recipe gate held, which chains `repo.guard-run` — the BASELINE RUN — once a scenario set is stored (`apps/dashboard/server/src/jobs/`). What a repository READS is Context's side: sources are made there, the connect dialog's Context step links the ones that already exist, and the FIRST `context.sync` of a repository's own source starts `repo.guard-setup` too when that repository has no setup bundle yet. Generate and Run enqueue their links by hand, and a decision that clears the last block on a generate (the final conflict resolved, the last finding dismissed) enqueues it through the `guard-generate-enqueue` seam. There is NO per-repository scan: documentation belongs to the workspace (see CONTEXT below), and the one Document scan is `POST /api/context/scan`. The routes enqueue and answer `202 { jobId }`; progress rides the repo's socket room (`spec:progress` / `spec:complete`) and the job's own SSE stream. Disconnecting a repo cancels whatever it has in flight.
 

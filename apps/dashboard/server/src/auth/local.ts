@@ -11,7 +11,14 @@
 
 import os from 'node:os';
 import { Router } from 'express';
-import type { AuthUser, AuthVerifier, WorkspaceMembersResponse } from '@truecourse/shared';
+import type {
+  AuthMeResponse,
+  AuthUser,
+  AuthVerifier,
+  WorkspaceMembersResponse,
+} from '@truecourse/shared';
+import { editionOf } from '@truecourse/shared';
+import { workspaceEntitlements } from '../services/entitlements.service.js';
 
 /**
  * The one workspace a local server has. It is a real organization id as far as
@@ -55,11 +62,20 @@ export function createLocalSessionVerifier(): AuthVerifier {
  * login to start, no session to end and no workspace to name. The routes that
  * exist hosted answer 404 here rather than pretending, so a client that asks
  * for one learns it is not there.
+ *
+ * It answers what this workspace may use, exactly as the hosted one does, and
+ * the answer is everything the bundle beside this tree carries. One developer
+ * on one machine IS the whole deployment: there is no operator to grant
+ * anything and nobody to bill, so a local server withholding its own features
+ * from itself would be locking a door with nobody on the other side of it.
  */
 export function createLocalAuthRouter(): Router {
   const router = Router();
-  router.get('/me', (_req, res) => {
-    res.json({ user: localUser() });
+  router.get('/me', async (_req, res) => {
+    const user = localUser();
+    const entitlements = await workspaceEntitlements(LOCAL_ORG_ID);
+    const body: AuthMeResponse = { user, edition: editionOf(entitlements), entitlements };
+    res.json(body);
   });
   return router;
 }

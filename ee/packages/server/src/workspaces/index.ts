@@ -121,6 +121,7 @@ export function createWorkspacesRouter(tools: WorkspaceSessionTools): Router {
 
 export const workspacesFeature: ServerFeature = {
   name: 'multiple workspaces',
+  entitlement: 'workspaces',
   manyWorkspaces: true,
   // A session moves between workspaces through the identity provider, so a
   // server that has none — one machine, one implicit workspace — mounts

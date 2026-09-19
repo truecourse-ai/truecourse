@@ -39,6 +39,9 @@ function featureContext(): ServerFeatureContext {
     } as unknown as ServerFeatureContext['workspaceSession'],
     capture: () => {},
     contextChanged: async () => {},
+    // No workspace here holds anything: these cases are about what the BUNDLE
+    // contributes, which is the deployment's answer and not a workspace's.
+    entitled: async () => false,
   };
 }
 
@@ -58,6 +61,13 @@ describe('the enterprise bundle', () => {
     // Connections is behind the gate, so a request with no workspace on it is
     // the refusal its own route writes.
     await request(app).get('/api/connections').expect(403);
+  });
+
+  it('says which grant each of its features is, so a workspace can be given one', () => {
+    expect(eeServerFeatures.map((f) => [f.name, f.entitlement])).toEqual([
+      ['multiple workspaces', 'workspaces'],
+      ['document connections', 'connections'],
+    ]);
   });
 
   it('contributes the two context source drivers the open edition has not, off one account', () => {
