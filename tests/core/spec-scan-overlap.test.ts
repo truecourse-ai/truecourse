@@ -30,9 +30,12 @@ import {
   OVERLAP_SESSION_CACHE_NAME,
   OVERLAP_SESSION_KIND,
   OVERLAP_SESSION_SYSTEM_PROMPT,
+  overlapBriefing,
+  overlapSessionCacheKey,
   overlapSessionDef,
   validateOverlapFindings,
   type OverlapOutcome,
+  type OverlapWorkItem,
 } from '../../packages/core/src/services/spec-scan/overlap'
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
@@ -1091,5 +1094,92 @@ describe('a failed overlap session', () => {
     }).catch((e: unknown) => e as LlmStageFailureError)
     expect(error).toBeInstanceOf(LlmStageFailureError)
     expect((error as LlmStageFailureError).tally.stage).toBe(OVERLAP_SESSION_KIND)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The docs' lifecycles — what lets a session settle who supersedes whom
+// ---------------------------------------------------------------------------
+
+/**
+ * A session cannot rule that one doc supersedes another unless it knows which
+ * is the newer and whether the older statement was delivered, dropped or
+ * superseded. Both facts ride the briefing — and the key, because a ticket
+ * moving to done changes the verdict while its content hash, which no longer
+ * covers frontmatter, sees nothing move.
+ */
+describe('overlap — each doc briefed with where it stands', () => {
+  const TICKET = [
+    '---',
+    'updated: 2026-03-02T15:20:00.000Z',
+    'status: "Done"',
+    'status_history:',
+    '  - "… 3 earlier transitions omitted"',
+    '  - "2026-03-01T10:00:00.000Z  In Progress -> Done"',
+    '---',
+    '',
+    '# ENG-42: Cancellation',
+    '',
+    '## Rules',
+    'An order in Pending may be cancelled.',
+  ].join('\n')
+  const PLAIN = ['# Cancellation policy', '', '## Rules', 'An order may never be cancelled.'].join('\n')
+
+  const doc = (p: string, content: string): DocCandidate => ({
+    path: p,
+    absPath: '',
+    content,
+    kind: 'prd',
+    preview: content.split('\n').slice(0, 20).join('\n'),
+    lastTouched: '2026-02-20T00:00:00.000Z',
+    contentHash: `hash-${p}`,
+    size: content.length,
+  })
+
+  const item = (ticket: string): OverlapWorkItem => ({
+    areaId: 'core/orders',
+    concern: 'orders',
+    cluster: 0,
+    docs: [doc('tickets/ENG-42.md', ticket), doc('docs/policy.md', PLAIN)],
+    pairs: [
+      {
+        a: { doc: 'tickets/ENG-42.md', heading: 'Rules' },
+        b: { doc: 'docs/policy.md', heading: 'Rules' },
+        keys: ['cancel'],
+        score: 1,
+      },
+    ],
+  })
+
+  it('states each doc\'s last change, status and history beside its outline', () => {
+    const briefing = overlapBriefing(item(TICKET))
+    // The ticket states its own `updated`, which beats the tree's mtime.
+    expect(briefing).toContain('LAST CHANGED: 2026-03-02')
+    // Its name, and how this run reads it — the classification the corpus carries.
+    expect(briefing).toContain('STATUS: Done (shipped)')
+    expect(briefing).toContain('… 3 earlier transitions omitted')
+    expect(briefing).toContain('2026-03-01  In Progress -> Done')
+    // A doc that states nothing falls back to when the tree last touched it.
+    expect(briefing).toContain('LAST CHANGED: 2026-02-20')
+  })
+
+  it('tells the session what a delivered doc does to an older planned one', () => {
+    expect(OVERLAP_SESSION_SYSTEM_PROMPT).toContain('DELIVERED (shipped) supersedes')
+    expect(OVERLAP_SESSION_SYSTEM_PROMPT).toContain('OUT-OF-SCOPE, DEPRECATED or DEFERRED')
+    expect(OVERLAP_SESSION_SYSTEM_PROMPT).toContain('Two LIVE docs')
+  })
+
+  it('re-runs the cluster when a status moves, though the text did not', () => {
+    const before = overlapSessionCacheKey(item(TICKET))
+    const moved = TICKET.replace('status: "Done"', 'status: "In Progress"')
+    expect(overlapSessionCacheKey(item(moved))).not.toBe(before)
+    // Same lifecycle, same key — the fingerprint is the facts, not the bytes.
+    expect(overlapSessionCacheKey(item(TICKET))).toBe(before)
+  })
+
+  it('re-runs it when the doc last changed on a different day', () => {
+    const before = overlapSessionCacheKey(item(TICKET))
+    const later = TICKET.replace('2026-03-02T15:20:00.000Z', '2026-06-06T09:00:00.000Z')
+    expect(overlapSessionCacheKey(item(later))).not.toBe(before)
   })
 })

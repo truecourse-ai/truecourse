@@ -26,10 +26,8 @@ import {
   type CreditsResponse,
   type OperatorCreditsResponse,
 } from '@truecourse/shared';
-import { createAppError } from '@truecourse/core/lib/errors';
 import type { CreditStatementRecord } from '@truecourse/core/lib/credits-store';
 import { readCreditBalance } from '@truecourse/core/lib/credits-store';
-import { log } from '@truecourse/core/lib/logger';
 import {
   adjustWorkspaceCredits,
   creditStatement,
@@ -40,6 +38,11 @@ import {
   resumePausedJob,
 } from '../services/credits.service.js';
 import { orgOf, workspaceOnCredits } from '../services/workspace-llm.service.js';
+import { operatorOnly } from '../middleware/operator.js';
+import {
+  resolveWorkspaceName,
+  type WorkspaceNameLookup,
+} from '../services/workspace-name.service.js';
 
 /** One statement line, named in the product's words rather than a job type's id. */
 function toEntry(row: CreditStatementRecord): CreditEntryView {
@@ -158,15 +161,6 @@ const movementSchema = z.object({
   resumePaused: z.boolean().optional(),
 });
 
-/** Not an operator? Then there is no such route. */
-function operatorOnly(req: Request, _res: Response, next: NextFunction): void {
-  if (req.user?.isOperator) {
-    next();
-    return;
-  }
-  next(createAppError('The server has no such route.', 404));
-}
-
 /** What the operator's side is built from beyond the ledger itself. */
 export interface OperatorCreditsRouterOptions {
   /**
@@ -175,42 +169,7 @@ export interface OperatorCreditsRouterOptions {
    * Absent on a server with no identity provider, and then every row is listed
    * by its id.
    */
-  workspaceName?: (organizationId: string) => Promise<string | undefined>;
-}
-
-/**
- * Ids already complained about, so a provider that will not name a workspace
- * costs the log ONE line rather than one per read of the page.
- */
-const unnamed = new Set<string>();
-
-/**
- * A workspace's name, or null. A lookup that fails never fails the page: the
- * operator is reading balances, and a row without a name is still a row. It
- * simply goes back to being an id.
- */
-async function resolveWorkspaceName(
-  lookup: OperatorCreditsRouterOptions['workspaceName'],
-  organizationId: string,
-): Promise<string | null> {
-  if (!lookup) return null;
-  try {
-    const name = await lookup(organizationId);
-    if (name) {
-      unnamed.delete(organizationId);
-      return name;
-    }
-    warnUnnamed(organizationId, 'the identity provider has no name for it');
-  } catch (e) {
-    warnUnnamed(organizationId, (e as Error).message);
-  }
-  return null;
-}
-
-function warnUnnamed(organizationId: string, why: string): void {
-  if (unnamed.has(organizationId)) return;
-  unnamed.add(organizationId);
-  log.warn(`[credits] could not name ${organizationId}: ${why}`);
+  workspaceName?: WorkspaceNameLookup;
 }
 
 export function createOperatorCreditsRouter(

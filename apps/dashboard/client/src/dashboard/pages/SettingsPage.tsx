@@ -53,7 +53,8 @@ import {
 } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
-import type { ServerMode } from '@truecourse/shared';
+import type { EnterpriseFeature, ServerMode } from '@truecourse/shared';
+import { useEntitlements } from '@/auth/AuthContext';
 import { MembersTab, type InviteKind } from '@/dashboard/pages/MembersTab';
 import { UsageTab } from '@/dashboard/pages/UsageTab';
 import { CreditsTab } from '@/dashboard/pages/CreditsTab';
@@ -939,13 +940,15 @@ function ModelsTab() {
 }
 
 /**
- * The sections of Settings: the four the product has, then whatever this
- * edition registered. A bare `/settings` lands on the first.
+ * The sections of Settings: the ones the product has, then whichever of this
+ * edition's the workspace is entitled to. A bare `/settings` lands on the first,
+ * and an address whose section is not this workspace's lands there too.
  */
 function settingsTabs(
   invite: InviteKind | null,
   onInviteChange: (invite: InviteKind | null) => void,
   mode: ServerMode,
+  entitlements: ReadonlySet<EnterpriseFeature>,
 ): SettingsTab[] {
   const base: SettingsTab[] = [
     {
@@ -963,7 +966,15 @@ function settingsTabs(
       ? []
       : [{ id: 'credits', label: 'Credits', render: () => <CreditsTab /> }]),
   ];
-  return [...base, ...registeredSettingsTabs()];
+  // A registered section that names a grant is drawn only for a workspace that
+  // holds it: registering it says this bundle CARRIES it, not that this
+  // workspace may use it.
+  return [
+    ...base,
+    ...registeredSettingsTabs().filter(
+      (tab) => !tab.entitlement || entitlements.has(tab.entitlement),
+    ),
+  ];
 }
 
 export default function SettingsPage() {
@@ -974,7 +985,11 @@ export default function SettingsPage() {
   const invitable = mode !== 'local';
   /** Which invite dialog is open, if any: by email, or by link. */
   const [invite, setInvite] = useState<InviteKind | null>(null);
-  const tabs = useMemo(() => settingsTabs(invite, setInvite, mode), [invite, mode]);
+  const entitlements = useEntitlements();
+  const tabs = useMemo(
+    () => settingsTabs(invite, setInvite, mode, entitlements),
+    [invite, mode, entitlements],
+  );
   const active = tabs.find((t) => t.id === tab) ?? tabs[0]!;
 
   return (

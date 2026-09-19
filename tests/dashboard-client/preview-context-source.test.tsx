@@ -532,3 +532,91 @@ describe('the documents narrowed to one source', () => {
     expect(screen.getByRole('heading', { name: 'Documents' })).toBeInTheDocument();
   });
 });
+
+/**
+ * A source a tool account reads: its scope is the project or the space, and
+ * everything else about the page — Sync now, Pause, Remove, the readers, the
+ * syncs — is what it is for a site.
+ */
+describe('a tool source’s scope', () => {
+  const JIRA: ContextSourceView = {
+    id: 'jira-acme-atlassian-net-eng',
+    kind: 'jira',
+    title: 'ENG (Jira)',
+    config: { projectKey: 'ENG', jql: 'labels = spec' },
+    status: 'synced',
+    statusNote: null,
+    lastSyncAt: '2026-09-10T10:00:00.000Z',
+    createdAt: '2026-08-01T10:00:00.000Z',
+    updatedAt: '2026-09-10T10:00:00.000Z',
+    docCount: 7,
+    repositories: [],
+  };
+
+  const CONFLUENCE: ContextSourceView = {
+    ...JIRA,
+    id: 'confluence-acme-atlassian-net-eng',
+    kind: 'confluence',
+    title: 'Engineering',
+    config: { spaceKey: 'ENG' },
+  };
+
+  it('shows the project and the filter it stored, and saves a new one', async () => {
+    const state = serve({
+      sources: [JIRA],
+      syncs: [],
+      patch: () => json({ source: JIRA, jobId: 'job-sync' }, 202),
+    });
+    renderAt(at(JIRA));
+    const user = userEvent.setup();
+
+    const project = await screen.findByRole('textbox', { name: 'Project key' });
+    expect(project).toHaveValue('ENG');
+    expect(screen.getByRole('textbox', { name: 'JQL filter' })).toHaveValue('labels = spec');
+    // Nothing has changed yet, so there is nothing to save.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    await user.clear(screen.getByRole('textbox', { name: 'JQL filter' }));
+    await user.type(screen.getByRole('textbox', { name: 'JQL filter' }), 'labels = api');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(state.calls).toContain(`PATCH /api/context/sources/${JIRA.id}`),
+    );
+    expect(state.bodies).toContainEqual({
+      config: { projectKey: 'ENG', jql: 'labels = api' },
+    });
+  });
+
+  it('shows the space a Confluence source reads, and saves a new one', async () => {
+    const state = serve({
+      sources: [CONFLUENCE],
+      syncs: [],
+      patch: () => json({ source: CONFLUENCE, jobId: 'job-sync' }, 202),
+    });
+    renderAt(at(CONFLUENCE));
+    const user = userEvent.setup();
+
+    const space = await screen.findByRole('textbox', { name: 'Space key' });
+    expect(space).toHaveValue('ENG');
+    expect(screen.queryByRole('textbox', { name: 'llms.txt URL' })).toBeNull();
+
+    await user.clear(space);
+    await user.type(space, 'OPS');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(state.calls).toContain(`PATCH /api/context/sources/${CONFLUENCE.id}`),
+    );
+    expect(state.bodies).toContainEqual({ config: { spaceKey: 'OPS' } });
+  });
+
+  it('can be synced, paused and removed, as a site can', async () => {
+    serve({ sources: [JIRA], syncs: [] });
+    renderAt(at(JIRA));
+
+    expect(await screen.findByRole('button', { name: 'Sync now' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeEnabled();
+  });
+});

@@ -10,11 +10,13 @@
 import { Router, type Request, type Response } from 'express';
 import { WorkOS } from '@workos-inc/node';
 import type { OrganizationMembership, User } from '@workos-inc/node';
-import type { AuthResult, AuthUser, AuthVerifier } from '@truecourse/shared';
+import type { AuthMeResponse, AuthResult, AuthUser, AuthVerifier } from '@truecourse/shared';
+import { editionOf } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
 import type { WorkosConfig } from './config.js';
 import { parseCookies, serializeCookie } from './cookies.js';
 import { captureWorkspaceCreated } from '../observability/posthog.js';
+import { workspaceEntitlements } from '../services/entitlements.service.js';
 
 export const SESSION_COOKIE = 'tc_session';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -612,9 +614,18 @@ export function createAuthRouter(
     const organizationName =
       user.organizationName ??
       (organizationId ? await resolveOrgName(workos, organizationId) : undefined);
-    res.json({
+    // WHAT THIS WORKSPACE MAY USE rides the authenticated answer rather than
+    // the public one, because it is the workspace's fact and not the
+    // deployment's: this same server opens the enterprise features to one
+    // organization and keeps them closed for the next. A session in no
+    // organization is in no workspace, so it may use nothing.
+    const entitlements = organizationId ? await workspaceEntitlements(organizationId) : [];
+    const body: AuthMeResponse = {
       user: organizationName ? { ...user, organizationName } : user,
-    });
+      edition: editionOf(entitlements),
+      entitlements,
+    };
+    res.json(body);
   });
 
   // Self-serve onboarding: a signed-in user who belongs to no organization

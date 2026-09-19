@@ -6,6 +6,15 @@
  * `disabled` survives only as the context's DEFAULT value, so a tree rendered
  * WITHOUT a provider (fixture-only tests) reads as "no auth here" instead of
  * hanging on a probe that never happens. The provider itself never sets it.
+ *
+ * The same answer carries WHAT THIS WORKSPACE MAY USE — the enterprise features
+ * it holds. They belong here rather than on the public capabilities endpoint
+ * because they are the workspace's, not the deployment's: one workspace of a
+ * hosted server holds Connections and the next one does not. The answer also
+ * carries `edition`, the one word for the same list, which nothing on the
+ * client reads: a surface is drawn on the feature it IS, never on the summary.
+ * A tree with no session holds none of them, so a gated surface never flashes
+ * before the probe has answered.
  */
 
 import {
@@ -20,7 +29,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { AuthUser } from '@truecourse/shared';
+import type { AuthMeResponse, AuthUser, EnterpriseFeature } from '@truecourse/shared';
 import { takeRememberedInvite } from '@/auth/invite-resume';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { SESSION_REFUSED_EVENT } from '@/lib/api';
@@ -35,25 +44,36 @@ type AuthStatus = 'disabled' | 'loading' | 'authed' | 'anon';
 interface AuthValue {
   status: AuthStatus;
   user: AuthUser | null;
+  /** The enterprise features this workspace holds; empty with no session. */
+  entitlements: ReadonlySet<EnterpriseFeature>;
   signIn: () => void;
   /** End the session; the browser lands on the app root afterwards. */
   signOut: () => Promise<void>;
 }
 
+const NO_ENTITLEMENTS: ReadonlySet<EnterpriseFeature> = new Set<EnterpriseFeature>();
+
 const AuthContext = createContext<AuthValue>({
   status: 'disabled',
   user: null,
+  entitlements: NO_ENTITLEMENTS,
   signIn: () => {},
   signOut: async () => {},
 });
 
-/** The session the server holds right now: its user, or null for none. */
-async function probeSession(): Promise<AuthUser | null> {
+/** What the session probe answered: the person, and what their workspace holds. */
+interface Session {
+  user: AuthUser;
+  entitlements: EnterpriseFeature[];
+}
+
+/** The session the server holds right now, or null for none. */
+async function probeSession(): Promise<Session | null> {
   try {
     const res = await fetch(`${getServerUrl()}${AUTH_BASE}/me`, { credentials: 'include' });
     if (!res.ok) return null;
-    const body = (await res.json()) as { user: AuthUser };
-    return body.user;
+    const body = (await res.json()) as AuthMeResponse;
+    return { user: body.user, entitlements: body.entitlements ?? [] };
   } catch {
     return null;
   }
@@ -66,7 +86,7 @@ function sameSession(a: AuthUser, b: AuthUser): boolean {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   // What the last probe answered, for a later refusal to compare against.
   const probed = useRef<AuthUser | null>(null);
 
@@ -75,8 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('loading');
     void probeSession().then((next) => {
       if (cancelled) return;
-      probed.current = next;
-      setUser(next);
+      probed.current = next?.user ?? null;
+      setSession(next);
       setStatus(next ? 'authed' : 'anon');
     });
     return () => {
@@ -100,9 +120,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const current = probed.current;
           if (!next) {
             probed.current = null;
-            setUser(null);
+            setSession(null);
             setStatus('anon');
-          } else if (current && !sameSession(current, next)) {
+          } else if (current && !sameSession(current, next.user)) {
             window.location.reload();
           }
         })
@@ -142,8 +162,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthValue>(
-    () => ({ status, user, signIn, signOut }),
-    [status, user, signIn, signOut],
+    () => ({
+      status,
+      user: session?.user ?? null,
+      entitlements: session ? new Set(session.entitlements) : NO_ENTITLEMENTS,
+      signIn,
+      signOut,
+    }),
+    [status, session, signIn, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -151,6 +177,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth(): AuthValue {
   return useContext(AuthContext);
+}
+
+/** Whether this workspace holds one enterprise feature. False until the probe answers. */
+export function useEntitlement(feature: EnterpriseFeature): boolean {
+  return useContext(AuthContext).entitlements.has(feature);
+}
+
+/** Everything it holds, for a surface that filters a list by them. */
+export function useEntitlements(): ReadonlySet<EnterpriseFeature> {
+  return useContext(AuthContext).entitlements;
 }
 
 function FullScreen({ children }: { children: ReactNode }) {

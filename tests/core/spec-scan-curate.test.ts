@@ -233,6 +233,58 @@ describe('the curate-doc prompt and briefing', () => {
     // The instructions tail (step 6) moves every scan key.
     expect(curateDocCacheKey({ identity: IDENTITY, doc }, ['fp'])).not.toBe(key)
   })
+
+  /**
+   * A synced ticket states when it last moved and where it stands. The session
+   * is told — a doc's standing is context for the judgment it is making anyway
+   * — but the KEY is deliberately deaf to it: the fold re-derives the status
+   * deterministically on every run, and a ticket restates `updated` on every
+   * comment, so keying on it would re-buy four hundred unchanged docs a sprint.
+   */
+  it('the briefing states when the doc last changed and where it stands', () => {
+    const ticket = [
+      '---',
+      'updated: 2026-03-02T15:20:00.000Z',
+      'status: "Done"',
+      'status_category: "done"',
+      'status_history:',
+      '  - "… 3 earlier transitions omitted"',
+      '  - "2026-03-01T10:00:00.000Z  In Progress -> Done"',
+      '---',
+      '',
+      '# ENG-42: Cancellation',
+    ].join('\n')
+    const briefing = curateDocBriefing(docCandidate('tickets/ENG-42.md', ticket), IDENTITY)
+    expect(briefing).toContain('LAST CHANGED: 2026-03-02')
+    expect(briefing).toContain('STATUS: Done (category: done)')
+    expect(briefing).toContain('… 3 earlier transitions omitted')
+    expect(briefing).toContain('2026-03-01  In Progress -> Done')
+
+    // A doc that states nothing about itself: the tree's date, and no status.
+    const plain = curateDocBriefing(docCandidate('docs/api.md', '# API\n'), IDENTITY)
+    expect(plain).toContain('LAST CHANGED: 2026-01-01')
+    expect(plain).not.toContain('STATUS')
+  })
+
+  it('does not re-buy the doc when only its metadata moved', () => {
+    // Discovery hashes the document BENEATH the block, so a comment that moved
+    // `updated` leaves the hash where it was (see the discovery tests). What is
+    // under test here is the other half: the briefing says the new date and the
+    // key does not hear it, so the cached verdict still answers.
+    const body = (updated: string, status: string): string =>
+      ['---', `updated: ${updated}`, `status: "${status}"`, '---', '', '# ENG-42: Cancellation'].join('\n')
+    const doc = (updated: string, status: string) => ({
+      ...docCandidate('tickets/ENG-42.md', body(updated, status)),
+      contentHash: 'identical-beneath-the-block',
+    })
+    const before = doc('2026-03-02T15:20:00.000Z', 'In Progress')
+    const after = doc('2026-08-20T09:00:00.000Z', 'Done')
+
+    expect(curateDocBriefing(after, IDENTITY)).not.toBe(curateDocBriefing(before, IDENTITY))
+    expect(curateDocCacheKey({ identity: IDENTITY, doc: after })).toBe(
+      curateDocCacheKey({ identity: IDENTITY, doc: before }),
+    )
+  })
 })
 
 // ---------------------------------------------------------------------------

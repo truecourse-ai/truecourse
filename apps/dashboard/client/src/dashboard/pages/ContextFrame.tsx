@@ -97,7 +97,7 @@ export function ContextFrame({
   right?: ReactNode;
   children: ReactNode;
 }) {
-  const { sources, refetch } = useContextSources(signal);
+  const { sources, addableKinds, refetch } = useContextSources(signal);
   const stale = useContextStaleness(signal);
   const { runs } = useWorkspaceRuns([]);
   // Add context opens by address: `?add=repository` is the install's return
@@ -170,6 +170,7 @@ export function ContextFrame({
         }}
         initialKind={addKind}
         sources={sources}
+        addableKinds={addableKinds}
         onAdded={() => void refetch()}
       />
     </div>

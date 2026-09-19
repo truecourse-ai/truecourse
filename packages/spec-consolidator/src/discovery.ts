@@ -202,6 +202,51 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
   return out;
 }
 
+/**
+ * A YAML frontmatter block opening the document, if it has one. The fence must
+ * be the first line and must close, so a `---` used as a horizontal rule is not
+ * mistaken for one.
+ */
+const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/;
+
+/**
+ * The document beneath any frontmatter — what the doc SAYS, separated from what
+ * it says ABOUT itself.
+ *
+ * That line matters twice. A doc's content hash keys the per-doc LLM caches, and
+ * frontmatter carries fields that move without the text moving: a synced ticket
+ * restates its `updated` on any comment or label change, so hashing it makes a
+ * sprint of comments buy a paid re-tag of every unchanged doc. And the preview
+ * is the window the relevance classifier judges a doc through — metadata spent
+ * out of that window is content the classifier never sees.
+ *
+ * The parsers that READ frontmatter keep the whole file; identity, the preview
+ * window and every deterministic reader of what the doc SAYS take the document
+ * itself ({@link docProse}).
+ */
+function documentBody(content: string): string {
+  const m = FRONTMATTER.exec(content);
+  return m ? content.slice(m[0].length).replace(/^\r?\n/, '') : content;
+}
+
+/**
+ * A doc's PROSE: {@link docBody} beneath its frontmatter.
+ *
+ * Every deterministic pass that reasons about what a doc STATES reads this
+ * rather than the whole file, because a metadata block is not content and a
+ * reader that counts it as content draws conclusions from our own bookkeeping.
+ * A synced issue carries `status_category` and `status_history` like every
+ * other synced issue, so section pairing keyed on the file finds every pair of
+ * tickets colliding on those two words, and near-duplicate detection finds them
+ * all alike. Both read the prose instead.
+ *
+ * A parser whose whole job is the metadata block (`readDocFrontmatter`,
+ * `parseDocStatus`) still takes `docBody`.
+ */
+export function docProse(doc: DocCandidate): string {
+  return documentBody(docBody(doc));
+}
+
 function makeCandidate(
   absPath: string,
   rootDir: string,
@@ -218,8 +263,11 @@ function makeCandidate(
   }
 
   const rel = path.relative(rootDir, absPath).split(path.sep).join('/');
-  const preview = content.split(/\r?\n/).slice(0, previewLines).join('\n');
-  const contentHash = createHash('sha256').update(content).digest('hex');
+  // Identity and the preview window come from the document, not from the
+  // metadata block above it. See {@link documentBody}.
+  const body = documentBody(content);
+  const preview = body.split(/\r?\n/).slice(0, previewLines).join('\n');
+  const contentHash = createHash('sha256').update(body).digest('hex');
   const lastTouched = opts.skipGit
     ? stat.mtime.toISOString()
     : (gitLastTouched(rootDir, rel) ?? stat.mtime.toISOString());

@@ -23,6 +23,7 @@ import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { setContextStore } from '@truecourse/core/lib/context-store';
 import { setUsageStore } from '@truecourse/core/lib/usage-store';
 import { setCreditsStore } from '@truecourse/core/lib/credits-store';
+import { setEntitlementsStore } from '@truecourse/core/lib/entitlements-store';
 import { setRegistryStore } from '@truecourse/core/config/registry';
 import { setSessionRunBackend } from '@truecourse/core/lib/sessions-store';
 import { setKvCacheStore } from '@truecourse/llm';
@@ -37,6 +38,7 @@ import {
   PgLlmConfigStore,
   PgUsageStore,
   PgCreditsStore,
+  PgEntitlementsStore,
   purgeRepoData,
 } from '@truecourse/data-store';
 import { setShowResolvedStageModel, setShowStageUsage } from '@truecourse/core/commands/spec-in-process';
@@ -158,6 +160,9 @@ export function installDbStores(
   // movement of it. The platform key itself is never here: it is the server's
   // environment, read per run.
   setCreditsStore(new PgCreditsStore(db));
+  // Which enterprise features each workspace may use. An operator grants them;
+  // mounting a router is what this deployment CARRIES, not what a workspace holds.
+  setEntitlementsStore(new PgEntitlementsStore(db));
   // Each workspace names ONE model, and its transport ignores the per-stage
   // hint, so rendering the per-stage tiers would be a lie.
   setShowResolvedStageModel(false);

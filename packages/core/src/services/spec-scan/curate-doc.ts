@@ -33,6 +33,7 @@ import { promptFingerprint } from '../agent/session-cache.js'
 import {
   DOC_CHUNK_CHARS,
   corpusVocabTool,
+  docLifecycleLines,
   instructionsBriefingBlock,
   listDocsTool,
   readChunkTool,
@@ -185,6 +186,13 @@ export function docOriginCachePart(origin: DocOrigin | undefined): string {
   return origin ? `origin:${origin.sourceId}:${origin.sourceKind}` : ''
 }
 
+/**
+ * The doc's DATES and STATUS are deliberately NOT parts of this key, though the
+ * briefing states them: the fold re-derives the status with `parseDocStatus` on
+ * every run, so a ticket moving to Done updates the corpus without buying a
+ * session. They are context for a session that runs anyway — and a ticket
+ * restates `updated` on every comment, which would miss the cache for good.
+ */
 export function curateDocCacheKey(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
@@ -264,6 +272,7 @@ export function curateDocBriefing(
     identityBlock(identity),
     origin ? `REF: ${doc.path}` : `PATH (repo-relative): ${doc.path}`,
     ...(origin ? [`SOURCE: ${origin.sourceTitle} (${origin.sourceKind})`] : []),
+    ...docLifecycleLines(doc),
     `Detected kind: ${doc.kind}`,
     `Size: ${doc.size} bytes`,
     '',

@@ -22,6 +22,7 @@ import type {
 import type { GuardDependenciesView, GuardDependencyPatch } from '@/types/guard-dependencies';
 import type {
   ContextBindingsResponse,
+  ContextConnectionsResponse,
   ContextDocumentsViewResponse,
   ContextSource,
   ContextSourceCheck,
@@ -136,8 +137,8 @@ export type RepoResponse = {
   isGitRepo?: boolean;
 };
 
-// Capabilities — fetched once at app boot by AppProvider so any component can
-// ask `useCapability('sso')` or `useServerMode()`.
+// How the server runs — fetched once at app boot by AppProvider so any
+// component can ask `useServerMode()`.
 export function getCapabilities(): Promise<CapabilitiesResponse> {
   return fetchApi<CapabilitiesResponse>('/api/capabilities');
 }
@@ -881,6 +882,15 @@ export function getWorkspaceRunTranscript(
 
 export function listContextSources(): Promise<ContextSourcesResponse> {
   return fetchApi<ContextSourcesResponse>('/api/context/sources');
+}
+
+/**
+ * The tool accounts this workspace has connected. The route exists only where
+ * the Connections feature is mounted, so it is asked only for a kind the server
+ * said it can add — the add dialog's tool rows are exactly the connected ones.
+ */
+export function listContextConnections(): Promise<ContextConnectionsResponse> {
+  return fetchApi<ContextConnectionsResponse>('/api/connections');
 }
 
 /** The rows of the Documents view, composed and folded on the server. */

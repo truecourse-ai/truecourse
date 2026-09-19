@@ -234,3 +234,49 @@ describe('pairsFingerprint', () => {
     expect(pairsFingerprint([base])).not.toBe(pairsFingerprint([base, other]))
   })
 })
+
+/**
+ * A synced issue opens with a metadata block, and every issue of a project
+ * carries the same keys in it. Pairing on the whole file made `status_category`
+ * and `status_history` look like rare shared claims, so every pair of tickets
+ * was nominated on our own bookkeeping — crowding out the real collisions the
+ * budget exists for.
+ */
+describe('frontmatter is not a claim', () => {
+  const ticket = (path: string, status: string, heading: string, body: string): DocCandidate =>
+    doc(
+      path,
+      [
+        '---',
+        'created: 2026-07-09T20:35:28.661Z',
+        'updated: 2026-08-18T00:02:32.054Z',
+        `status: "${status}"`,
+        `status_category: "${status === 'Done' ? 'done' : 'indeterminate'}"`,
+        'status_history:',
+        `  - "2026-08-18T00:02:06.200Z  To Do -> ${status}"`,
+        '---',
+        '',
+        `# ${heading}`,
+        '',
+        body,
+      ].join('\n'),
+    )
+
+  it('nominates nothing for two tickets that share only their metadata block', () => {
+    const pairs = deriveCollisionPairs([
+      ticket('KAN-1.md', 'In Progress', 'KAN-1: Paginate the expense list', 'The list shows five rows.'),
+      ticket('KAN-3.md', 'Done', 'KAN-3: Convert a receipt', 'The receipt offers EUR, GBP and CAD.'),
+    ])
+    expect(pairs).toEqual([])
+  })
+
+  it('still nominates two tickets that collide on what they state', () => {
+    const pairs = deriveCollisionPairs([
+      ticket('KAN-1.md', 'In Progress', 'KAN-1: Paginate the expense list', 'GET /api/expenses returns pageSize of five.'),
+      ticket('KAN-11.md', 'Done', 'KAN-11: Show ten per page', 'GET /api/expenses returns pageSize of ten.'),
+    ])
+    expect(pairs.length).toBeGreaterThan(0)
+    expect(pairs[0].a.doc).toBe('KAN-1.md')
+    expect(pairs[0].b.doc).toBe('KAN-11.md')
+  })
+})

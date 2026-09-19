@@ -16,6 +16,7 @@ import capabilitiesRouter from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
 import { createUsageRouter } from './routes/usage.js';
 import { createCreditsRouter, createOperatorCreditsRouter } from './routes/credits.js';
+import { createOperatorEntitlementsRouter } from './routes/entitlements.js';
 import { isLocalMode } from './mode.js';
 import { createAuthGate } from './middleware/auth.js';
 import { actorContext } from './middleware/actor.js';
@@ -90,9 +91,9 @@ export interface CreateAppOptions {
   featureRouters?: ServerRouterMount[];
   /**
    * An organization's display name, as the identity provider knows it: the
-   * auth layer's cached lookup. The operator's Credits page lists a workspace
-   * by it rather than by its id; absent (local mode, a test) every row is its
-   * id, which is what the page falls back to.
+   * auth layer's cached lookup. The operator's consoles list a workspace by it
+   * rather than by its id; absent (local mode, a test) every row is its id,
+   * which is what they fall back to.
    */
   workspaceNames?: (organizationId: string) => Promise<string | undefined>;
 }
@@ -130,8 +131,9 @@ export function createApp(opts: CreateAppOptions): express.Express {
     if (mount.public) app.use(mount.path, mount.router);
   }
 
-  // Capabilities + health stay public so the client can discover the
-  // feature gates and liveness before authenticating.
+  // How this server runs, and whether it is alive: both public, so the client
+  // can read them before it has a session. What a WORKSPACE may use is not
+  // here — it rides `/api/auth/me`, where there is a workspace to answer for.
   app.use('/api/capabilities', capabilitiesRouter);
   // Liveness only: no database or worker probe. `release` is the deployed
   // image digest a VM release sets, so a deploy can tell the new process from
@@ -214,17 +216,16 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // read-only, so it sits beside the Models settings it accounts for.
   app.use('/api/usage', createUsageRouter({ repoLinks }));
 
-  // What it may spend of TrueCourse's own. Absent in local mode, where there is
-  // no operator to grant anything and no platform key to spend: the `/api`
-  // catch-all below answers those addresses as the routes they are not.
+  // What it may spend of TrueCourse's own, and which enterprise features it may
+  // use. Both are absent in local mode, where there is no operator to grant
+  // anything, no platform key to spend, and one workspace that already holds
+  // whatever the bundle carries: the `/api` catch-all below answers those
+  // addresses as the routes they are not.
   if (!isLocalMode()) {
+    const workspaceNames = opts.workspaceNames ? { workspaceName: opts.workspaceNames } : {};
     app.use('/api/credits', createCreditsRouter());
-    app.use(
-      '/api/operator/credits',
-      createOperatorCreditsRouter(
-        opts.workspaceNames ? { workspaceName: opts.workspaceNames } : {},
-      ),
-    );
+    app.use('/api/operator/credits', createOperatorCreditsRouter(workspaceNames));
+    app.use('/api/operator/entitlements', createOperatorEntitlementsRouter(workspaceNames));
   }
 
   // The job queue: the live event stream, job status, and the notifications

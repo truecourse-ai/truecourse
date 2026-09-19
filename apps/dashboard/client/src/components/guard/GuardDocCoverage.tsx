@@ -28,6 +28,7 @@ import type {
   GuardDocCoverage as GuardDocCoverageData,
   GuardSectionCoverageStatus,
 } from '@truecourse/shared';
+import { DocFacts } from '@/components/spec/DocFacts';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { alignSections, buildAnchorTargets, splitDocBlocks, stripDocAnchors } from '@/lib/guard-doc-sections';
@@ -292,6 +293,9 @@ export function GuardDocCoverage({
       onClickCapture={onClickCapture}
       className="h-full overflow-auto px-4 py-3 text-[13px] leading-relaxed text-foreground"
     >
+      {/* A synced ticket's own facts, above the ticket. The renderer hides the
+          frontmatter they come from; a doc that states none renders nothing. */}
+      <DocFacts source={content} />
       {blocks.map((block, i) => {
         const section = aligned[i];
         const status = section?.status;

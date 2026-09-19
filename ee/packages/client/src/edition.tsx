@@ -11,9 +11,11 @@
 import {
   registerRepositoryProvider,
   registerSettingsTab,
+  registerSourceKindMark,
   registerWorkspaceSwitcher,
 } from '@/dashboard/shell/registry';
 import { ConnectionsTab } from './connections/ConnectionsTab';
+import { connectorLogo } from './connections/connector-logos';
 import { azureDevOps } from './providers/azure';
 import { WorkspaceSwitcher } from './workspaces/WorkspaceSwitcher';
 
@@ -21,8 +23,15 @@ export function registerEditionFeatures(): void {
   registerSettingsTab({
     id: 'connections',
     label: 'Connections',
+    // Registering it says this bundle carries the tab; whether a workspace may
+    // open it is its own grant, which the shell reads off the session.
+    entitlement: 'connections',
     render: () => <ConnectionsTab />,
   });
   registerRepositoryProvider(azureDevOps);
   registerWorkspaceSwitcher(WorkspaceSwitcher);
+  // The kinds the Atlassian connection serves wear their own marks wherever
+  // the open shell lists a source kind.
+  registerSourceKindMark('jira', connectorLogo('jira'));
+  registerSourceKindMark('confluence', connectorLogo('confluence'));
 }

@@ -29,7 +29,7 @@
 
 import { createHash } from 'node:crypto';
 import { parseHeadings } from '@truecourse/shared';
-import { docBody, type DocCandidate } from './discovery.js';
+import { docProse, type DocCandidate } from './discovery.js';
 import { canonicalizeConcern, type VocabMap } from './corpus-types.js';
 
 // ---------------------------------------------------------------------------
@@ -190,7 +190,9 @@ export function deriveCollisionPairs(docs: readonly DocCandidate[], vocab?: Voca
   // a code fence never becomes a phantom section).
   const sections: IndexedSection[] = [];
   for (const doc of docs) {
-    for (const s of splitFenceAwareSections(docBody(doc))) {
+    // The PROSE, not the whole file: a metadata block is not a claim, and
+    // every synced issue carries the same keys in one.
+    for (const s of splitFenceAwareSections(docProse(doc))) {
       const keys = new Set<string>();
       for (const t of extractClaimTokens(s.text)) keys.add(`t:${t}`);
       if (s.heading !== null) {

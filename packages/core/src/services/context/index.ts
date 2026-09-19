@@ -1,11 +1,12 @@
 /**
- * Context source drivers — the two kinds that sync in this slice, behind one
- * seam. `contextDrivers()` builds the registry a caller needs; asking it for a
- * kind that has no driver (the six tool kinds, which are names in a list) is a
- * refusal that says so, never a silent no-op.
+ * Context source drivers — the two the OPEN edition carries, behind one seam.
+ * `contextDrivers()` builds that registry; an edition adds its own tool drivers
+ * on top of it (`apps/dashboard/server/src/services/context.service.ts`), and
+ * asking for a kind nothing registered is a refusal that says so, never a
+ * silent no-op.
  */
 
-import { IMPLEMENTED_CONTEXT_SOURCE_KINDS, type ContextSourceKind } from '@truecourse/shared';
+import type { ContextSourceKind } from '@truecourse/shared';
 import { createRepositoryDriver, type RepositoryDriverDeps } from './repository-driver.js';
 import { createSiteDriver, type SiteDriverDeps } from './site-driver.js';
 import type { ContextSourceDriver } from './types.js';
@@ -35,11 +36,6 @@ export function contextDriver(
   const driver = contextDrivers(deps).get(kind);
   if (!driver) throw new ContextKindUnsupportedError(kind);
   return driver;
-}
-
-/** Whether a kind can actually sync (the add dialog locks the rest). */
-export function isImplementedContextKind(kind: string): kind is ContextSourceKind {
-  return (IMPLEMENTED_CONTEXT_SOURCE_KINDS as readonly string[]).includes(kind);
 }
 
 export { createSiteDriver, type SiteDriverDeps } from './site-driver.js';
@@ -72,6 +68,7 @@ export {
   type ContextDriverOptions,
   type ContextLedgerEntry,
   type ContextSourceDriver,
+  type ContextSourceScope,
   type ContextSyncResult,
   type ContextWorkTree,
   type ContextWorkTreeProvider,

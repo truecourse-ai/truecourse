@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { Edition, ServerMode, WorkspaceSummary } from '@truecourse/shared';
+import type { EnterpriseFeature, ServerMode, WorkspaceSummary } from '@truecourse/shared';
 import { AuthProvider } from '@/auth/AuthContext';
 import { AppProvider } from '@/contexts/CapabilityContext';
 import DashboardApp from '@/dashboard/DashboardApp';
@@ -64,6 +64,8 @@ function json(body: unknown, status = 200): Response {
 /** What the server was asked, and what it answered the two moves with. */
 interface World {
   workspaces: WorkspaceSummary[];
+  /** What the session says this workspace may use. */
+  entitlements: EnterpriseFeature[];
   switched: string[];
   created: string[];
   /** The answer to POST /workspaces; the default one creates. */
@@ -77,6 +79,7 @@ let world: World;
 function serve(over: Partial<World> = {}) {
   world = {
     workspaces: WORKSPACES,
+    entitlements: ['workspaces'],
     switched: [],
     created: [],
     create: () => json({ user: { ...USER, organizationId: 'org_new', organizationName: 'Third' } }),
@@ -89,7 +92,13 @@ function serve(over: Partial<World> = {}) {
     const { pathname } = new URL(href, 'http://localhost:3000');
     const method = init?.method ?? 'GET';
 
-    if (pathname === '/api/auth/me') return json({ user: USER });
+    if (pathname === '/api/auth/me') {
+      return json({
+        user: USER,
+        edition: world.entitlements.length > 0 ? 'enterprise' : 'community',
+        entitlements: world.entitlements,
+      });
+    }
     if (pathname === '/api/auth/workspaces' && method === 'GET') {
       return json({ workspaces: world.workspaces });
     }
@@ -131,16 +140,20 @@ function stubAssign(): ReturnType<typeof vi.fn> {
   return assign;
 }
 
-/** The shell under a hosted enterprise server, which is where the switcher lives. */
+/** The shell in a workspace granted more than one, which is where the switcher lives. */
 function renderShell() {
   renderShellIn('hosted');
 }
 
-/** The same shell, told what the server is, the way `/api/capabilities` tells it. */
-function renderShellIn(mode: ServerMode, edition: Edition = 'enterprise') {
+/**
+ * The same shell, told how the server runs, the way `/api/capabilities` tells
+ * it. WHICH workspace may switch is the session's answer, not this one's, so it
+ * is set on `world.entitlements` before rendering.
+ */
+function renderShellIn(mode: ServerMode) {
   render(
     <MemoryRouter initialEntries={['/']}>
-      <AppProvider initial={{ edition, mode, capabilities: [] }}>
+      <AppProvider initial={{ mode }}>
         <AuthProvider>
           <Routes>
             <Route path="/*" element={<DashboardApp />} />
@@ -284,10 +297,13 @@ describe('the workspace switcher and the server mode', () => {
     expect(await switcher()).toHaveTextContent('Acme');
   });
 
-  // A client built with this edition can reach a server that booted without
-  // its bundle; that server says `community` and mounts no workspaces routes.
-  it('leaves the one-workspace block in place when the server says community', async () => {
-    renderShellIn('hosted', 'community');
+  // A client built with this edition can reach a server that booted without its
+  // bundle, and it can serve a workspace that was never granted more than one.
+  // Either way the session holds nothing, and the switcher would have nothing
+  // to call.
+  it('leaves the one-workspace block in place for a workspace that holds no such grant', async () => {
+    serve({ entitlements: [] });
+    renderShellIn('hosted');
 
     expect((await screen.findAllByText('Acme')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Switch workspace' })).toBeNull();

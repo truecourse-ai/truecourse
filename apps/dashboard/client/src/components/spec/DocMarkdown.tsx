@@ -9,6 +9,12 @@
  * from Docusaurus-based sites are full of them, so they render as callouts —
  * known type or not — rather than leaking their `:::` fences as prose.
  *
+ * A leading YAML frontmatter block is metadata a doc states ABOUT itself — a
+ * synced ticket's dates and status, a PRD's own header — and `remark-frontmatter`
+ * parses it into a node this renderer has no handler for, so it never reaches
+ * the page. Hiding it is presentation only: the block stays in the source every
+ * consumer downstream reads, and {@link DocFacts} states it as facts instead.
+ *
  * `highlight` marks the conflicting sections in place: the WHOLE section (its
  * heading + body up to the next heading) gets an amber band, so the user sees
  * exactly where two docs disagree, right on the document. `highlightPreamble`
@@ -22,6 +28,7 @@
 import type { ComponentType, ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkDirective from 'remark-directive';
+import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -162,7 +169,7 @@ const COMPONENTS: Components = {
 function Md({ source }: { source: string }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkDirective, remarkAdmonitions]}
+      remarkPlugins={[remarkGfm, remarkDirective, remarkFrontmatter, remarkAdmonitions]}
       rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
       components={COMPONENTS}
     >

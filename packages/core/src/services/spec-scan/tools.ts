@@ -15,11 +15,14 @@ import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool, type ToolDisplay } from '@truecourse/agent-loop'
 import {
+  classifyStatusValue,
   docBody,
   headingOutline,
   leadText,
+  readDocFrontmatter,
   sectionText,
   type DocCandidate,
+  type DocFrontmatter,
 } from '@truecourse/spec-consolidator'
 import { parseHeadings, planDocChunks } from '@truecourse/shared'
 
@@ -80,6 +83,83 @@ export function docTitle(doc: DocCandidate): string {
   if (headings.length > 0) return headings[0].text
   const base = doc.path.split('/').pop() ?? doc.path
   return base
+}
+
+// ---------------------------------------------------------------------------
+// A doc's LIFECYCLE — when it last changed, where it stands, how it got there
+// ---------------------------------------------------------------------------
+
+/**
+ * The facts a session needs to weigh one doc against another: a document cannot
+ * be told to supersede its neighbour unless the session knows which is the newer
+ * and whether the older statement was delivered, dropped or superseded.
+ *
+ * `lastChanged` prefers what the DOCUMENT states (`updated` in its frontmatter,
+ * restated by the connector on every sync) over the tree's `lastTouched` — the
+ * git commit date, or a materialized file's stamped mtime — which is the only
+ * answer for a repository doc that states nothing about itself.
+ */
+interface DocLifecycle {
+  lastChanged: string
+  front: DocFrontmatter | undefined
+}
+
+function docLifecycle(doc: DocCandidate): DocLifecycle {
+  const front = readDocFrontmatter(docBody(doc))
+  return { lastChanged: front?.updated ?? doc.lastTouched, front }
+}
+
+/** The day of an instant — the grain a briefing compares two docs at. */
+const day = (iso: string): string => iso.slice(0, 10)
+
+/** One transition, as both briefings print it: `2026-03-01  In Progress -> Done`. */
+const transitionLine = (t: { at?: string; from: string; to: string }): string =>
+  `  ${t.at ? `${day(t.at)}  ` : ''}${t.from || '(none)'} -> ${t.to}`
+
+/**
+ * The lifecycle in words, for a briefing. `classify` adds the run's own
+ * five-word reading of the status name beside it — the overlap session weighs
+ * documents against each other and needs the classification the corpus will
+ * carry, while the curation session REPORTS the status and must read the
+ * document rather than echo us.
+ */
+export function docLifecycleLines(doc: DocCandidate, opts: { classify?: boolean } = {}): string[] {
+  const { lastChanged, front } = docLifecycle(doc)
+  const lines = [`LAST CHANGED: ${day(lastChanged)}`]
+  if (front?.status) {
+    const classified = opts.classify ? classifyStatusValue(front.status) : undefined
+    const aside = classified ?? (front.statusCategory ? `category: ${front.statusCategory}` : undefined)
+    lines.push(`STATUS: ${front.status}${aside ? ` (${aside})` : ''}`)
+  } else if (front?.statusCategory) {
+    lines.push(`STATUS: ${front.statusCategory} (category only)`)
+  }
+  const history = front?.statusHistory ?? []
+  if (history.length > 0 || (front?.omittedTransitions ?? 0) > 0) {
+    lines.push('STATUS HISTORY (oldest first):')
+    const omitted = front?.omittedTransitions ?? 0
+    if (omitted > 0) {
+      lines.push(`  … ${omitted} earlier transition${omitted === 1 ? '' : 's'} omitted`)
+    }
+    lines.push(...history.map(transitionLine))
+  }
+  return lines
+}
+
+/**
+ * The lifecycle as a cache-key part. It covers exactly what a briefing STATES,
+ * which is the invariant that keeps a cached verdict answerable: a status moving
+ * from planned to done changes the adjudication, and since a doc's content hash
+ * stopped covering its frontmatter it no longer sees that move.
+ */
+export function docLifecycleFingerprint(doc: DocCandidate): string {
+  const { lastChanged, front } = docLifecycle(doc)
+  return [
+    day(lastChanged),
+    front?.status ?? '',
+    front?.statusCategory ?? '',
+    String(front?.omittedTransitions ?? 0),
+    ...(front?.statusHistory ?? []).map((t) => `${t.at ?? ''}|${t.from}>${t.to}`),
+  ].join('|')
 }
 
 /** Render one chunk of a doc, with an honest chunk header. */
