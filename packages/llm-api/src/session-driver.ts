@@ -32,6 +32,7 @@ import {
 } from 'ai';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
+import { sessionImageRef } from '@truecourse/agent-loop';
 import type {
   DriverResult,
   SessionDef,
@@ -51,7 +52,7 @@ import { normalizeForStrictOutput, stripInjectedNulls, type SchemaPath } from '.
 import { compactNormalizedSchema } from './compact-schema.js';
 import { providerTuningFor, type ProviderTuning } from './provider-tuning.js';
 import type { ProviderConfig } from './types.js';
-import { callUsageOf, type CallUsage } from './transport.js';
+import { callUsageOf, type CallUsage } from './usage.js';
 
 /** Reserved tool name the model calls to end the session with its outcome. */
 export const OUTCOME_TOOL_NAME = 'outcome';
@@ -186,7 +187,7 @@ export function retryDelayMs(
 }
 
 export interface ApiSessionDriverOptions {
-  /** Cost for one turn's usage, in USD — same hook as the one-shot transport.
+  /** Cost for one turn's usage, in USD.
    *  Present ⇒ turns record `costSource: 'model-priced'`; absent ⇒ `unpriced`. */
   pricing?: (modelId: string, usage: CallUsage) => number;
   /** Overrides on `DEFAULT_API_RETRY`, field by field. */
@@ -344,9 +345,33 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
   if (input.resume) messages.push(...rebuildHistory(input.resume.events));
   // On a resume the transcript already carries the original opening messages;
   // whatever arrives here is a NEW observation.
+  // Images ride the FIRST message this session sends and only that one — the
+  // briefing, or the corrective re-ask that reopens it. The transcript records
+  // only that they were shown, so a rebuilt history has no pixels in it and
+  // this is where they come back.
+  let imagesPending = input.images ?? [];
   const say = (content: string): void => {
-    messages.push({ role: 'user', content });
-    onEvent({ type: 'user-message', content });
+    const images = imagesPending;
+    imagesPending = [];
+    messages.push({
+      role: 'user',
+      // Text FIRST — the instruction has to be in context before the pixels.
+      content: images.length
+        ? [
+            { type: 'text', text: content },
+            ...images.map((image) => ({
+              type: 'image' as const,
+              image: image.data,
+              mediaType: image.mediaType,
+            })),
+          ]
+        : content,
+    });
+    onEvent({
+      type: 'user-message',
+      content,
+      ...(images.length ? { images: images.map(sessionImageRef) } : {}),
+    });
   };
   // The cluster's shared prefix opens a FRESH conversation, ahead of anything
   // this session alone was told. A resume rebuilds it out of the transcript
@@ -988,10 +1013,18 @@ function rebuildHistory(events: readonly SessionEvent[]): ModelMessage[] {
   };
   for (const event of events) {
     switch (event.type) {
-      case 'user-message':
+      case 'user-message': {
         closePending('interrupted before the tool result was recorded');
-        messages.push({ role: 'user', content: event.content });
+        // The transcript holds an image's description, never its bytes, so a
+        // rebuilt history says what was shown rather than pretending nothing
+        // was. The live images are re-sent with this session's own opening
+        // message, so the model can still see what it is being asked about.
+        const shown = event.images?.length
+          ? `${event.content}\n\n[${event.images.length} image(s) shown here are re-sent with the current message.]`
+          : event.content;
+        messages.push({ role: 'user', content: shown });
         break;
+      }
       case 'assistant-turn': {
         closePending('interrupted before the tool result was recorded');
         const parts: Extract<ModelMessage, { role: 'assistant' }>['content'] = [];

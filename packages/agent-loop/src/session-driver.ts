@@ -93,9 +93,29 @@ export interface SharedPromptPrefix {
   cacheKey: string;
 }
 
+/**
+ * ONE image a session shows the model — base64 bytes plus their media type,
+ * the only form both backends take. Deliberately NOT a path or a URL: a driver
+ * must never read the filesystem or the network on a caller's behalf.
+ */
+export interface SessionImage {
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+  /** The raw bytes, base64-encoded — no `data:` prefix. */
+  data: string;
+}
+
 export interface SessionRunInput {
   def: SessionDef;
   initialMessages: readonly string[];
+  /**
+   * Images the session must LOOK at, shown with its FIRST initial message —
+   * text first, so the instruction precedes the pixels. Absent (the
+   * overwhelmingly common case) leaves both backends on the text path they
+   * have always taken: a vision session must not change one byte of how a text
+   * session is sent. A RESUME shows them again, because the transcript records
+   * only that they were shown, never the bytes.
+   */
+  images?: readonly SessionImage[];
   /** The cluster prefix this session opens with, when it belongs to one. */
   sharedPrefix?: SharedPromptPrefix;
   resume?: SessionResume;

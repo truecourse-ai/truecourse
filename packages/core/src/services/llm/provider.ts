@@ -1,18 +1,15 @@
 /**
- * How a run's LLM transport is built.
+ * What a run reaches the model WITH: a workspace's stored provider block,
+ * validated into a provider config, and the price table its calls are costed
+ * against.
  *
- * A run reaches the model with the credentials of the workspace that asked for
- * it: the server loads that workspace's stored provider block and builds a
- * direct-API transport (`@truecourse/llm-api`) here, threading it into the
- * pipeline call. There is no process-wide provider — except in OPERATOR MODE,
- * where every workspace runs on this process's own `claude` login through the
- * Agent SDK one-shot transport (`@truecourse/llm-claude-agent`).
+ * There is no process-wide provider. A run is built from the block of the
+ * workspace that asked for it, and the session driver (`session-driver.ts`) is
+ * what it is handed to — except in OPERATOR MODE, where every workspace runs on
+ * this process's own `claude` login and there is no block at all.
  */
 
-import { createApiTransport, type ProviderConfig } from '@truecourse/llm-api';
-import { createClaudeAgentTransport } from '@truecourse/llm-claude-agent';
-import { resolveClaudeBinary } from '@truecourse/shared';
-import type { LlmTransport, TransportUsageObserver } from '@truecourse/shared/llm';
+import type { ProviderConfig } from '@truecourse/llm-api';
 import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type { LlmApiConfig } from './provider-config.js';
 import { getModelPrices, priceForModel, type PriceTable } from './model-prices.js';
@@ -121,61 +118,11 @@ export function priceCall(modelId: string, usage: CallTokens): number {
  * model: behind a gateway it is a DEPLOYMENT name (`gpt-5.6-sol-2`), which no
  * price list holds, so the config names the list-price model it serves and the
  * call is priced as that. Only the config's OWN model is mapped — a fallback
- * call, or a per-stage override, prices under the id it really ran on, or not
- * at all.
+ * call prices under the id it really ran on, or not at all.
  */
 export function pricingFor(
   cfg: Pick<ProviderConfig, 'model' | 'priceModel'>,
 ): (modelId: string, usage: CallTokens) => number {
   return (modelId, usage) =>
     priceCall(cfg.priceModel && modelId === cfg.model ? cfg.priceModel : modelId, usage);
-}
-
-// ---------------------------------------------------------------------------
-// Transports
-// ---------------------------------------------------------------------------
-
-/**
- * Build the API transport from a workspace's stored provider block. Throws
- * `LlmApiConfigError` when the block is unusable.
- */
-export function createApiTransportFor(
-  api: LlmApiConfig | undefined,
-  opts: { honorRequestModel?: boolean; onUsage?: TransportUsageObserver } = {},
-): LlmTransport {
-  const cfg = buildProviderConfig(api);
-  primePriceTable();
-  // Per-stage model overrides (`TRUECOURSE_MODEL_<STAGE>`) arrive as `req.model`.
-  // A caller whose block IS the whole selection (a workspace's) turns that off:
-  // the stage tiers it would otherwise inherit are Claude CLI aliases,
-  // meaningless to a raw provider API.
-  return createApiTransport(cfg, {
-    pricing: pricingFor(cfg),
-    honorRequestModel: opts.honorRequestModel ?? true,
-    ...(opts.onUsage ? { onUsage: opts.onUsage } : {}),
-  });
-}
-
-/** The one claude-code transport of this process — identity is how a caller
- *  tells "this spawns `claude`" from a transport that never does. */
-let claudeCode: LlmTransport | undefined;
-
-/**
- * The claude-code one-shot transport: the Agent SDK on the `claude` login of
- * whoever runs this process, resolving the binary per call. Operator mode hands
- * it to every run.
- *
- * A run that accounts for its own spend passes an observer and gets a transport
- * of its own: the shared one reports to whoever built it first, and two runs
- * must never pay into one another's account.
- */
-export function createClaudeCodeTransport(onUsage?: TransportUsageObserver): LlmTransport {
-  if (onUsage) {
-    return createClaudeAgentTransport({
-      pathToClaudeCodeExecutable: resolveClaudeBinary(),
-      onUsage,
-    });
-  }
-  claudeCode ??= createClaudeAgentTransport({ pathToClaudeCodeExecutable: resolveClaudeBinary() });
-  return claudeCode;
 }

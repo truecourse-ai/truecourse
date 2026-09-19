@@ -172,7 +172,6 @@ export function installTestWorkspaceLlm(): void {
   setWorkspaceLlmBackend({
     probe: async () => {},
     driver: () => ({}) as never,
-    transport: (async () => '{}') as never,
   });
 }
 

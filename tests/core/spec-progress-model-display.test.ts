@@ -1,29 +1,16 @@
 /**
- * Progress model display.
+ * Progress names no model.
  *
- * The mechanism: a progress step's detail carries the models its stages actually
- * called; when no real usage was recorded (a full cache) the library default
- * falls back to the per-stage RESOLVED model, and the dashboard — which runs one
- * model per run and records no per-stage usage — suppresses that fallback
- * (`setShowResolvedStageModel(false)`), because otherwise progress would show a
- * tier ("sonnet, haiku") the run never called.
- *
- * SPEC SCAN NO LONGER PARTICIPATES. Its stages are agent
- * SESSIONS on ONE model: there are no per-stage tiers left to display, and
- * `curateInProcess` details are session counts. So the mechanism is pinned
- * directly on `stageUsageTag` (still live for `guard`), and the scan is pinned on
- * the successor contract — its progress names no model at all.
+ * A step's progress detail says what the run is DOING — docs, areas, flows —
+ * and never which model is doing it. There is only one model per run now, and
+ * what it cost has its own place (the run record, and Settings › Usage), so a
+ * tier name in a progress line would be noise at best and a guess at worst.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  curateInProcess,
-  setShowResolvedStageModel,
-  stageUsageTag,
-  CURATE_STEPS,
-} from '../../packages/core/src/commands/spec-in-process';
+import { curateInProcess, CURATE_STEPS } from '../../packages/core/src/commands/spec-in-process';
 import { StepTracker } from '../../packages/core/src/progress';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import type { DriverResult, SessionDriver } from '../../packages/agent-loop/src/index';
@@ -39,33 +26,11 @@ beforeEach(() => {
   fs.writeFileSync(path.join(repo, 'docs', 'beta.md'), '# Orders beta\nbody');
 });
 afterEach(() => {
-  setShowResolvedStageModel(true); // restore the module default
   resetSessionRuns();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
-describe('stageUsageTag — the model fallback and its EE suppression', () => {
-  // No usage was recorded for these stages in this process, so both cases take
-  // the fallback path — the state a full cache (or the dashboard) leaves behind.
-  // The stage must be a LIVE per-stage id: guard generate's content stages became
-  // agent sessions on one model and left the table, so a retired id resolves to no
-  // model at all and would pass the suppressed case vacuously.
-  it('OSS (default): falls back to the resolved per-stage model', () => {
-    const tag = stageUsageTag(['guard.match'], repo);
-    expect(MODEL_TIER.test(tag)).toBe(true);
-  });
-
-  it('EE (suppressed): names no model', () => {
-    setShowResolvedStageModel(false);
-    expect(stageUsageTag(['guard.match'], repo)).toBe('');
-  });
-
-  it('is empty for a step that maps to no stage', () => {
-    expect(stageUsageTag([], repo)).toBe('');
-  });
-});
-
-describe('spec scan progress — one model, so no tier is displayed', () => {
+describe('spec scan progress', () => {
   it('names no model tier in any step detail', async () => {
     const details: string[] = [];
     const tracker = new StepTracker((payload) => {

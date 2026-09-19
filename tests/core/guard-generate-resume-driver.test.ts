@@ -55,7 +55,6 @@ describe('resume through the generate driver', () => {
       ...flowStageSeams(repo),
       extractSession: undefined,
       driver,
-      transport: async () => '{}',
       resume: { runId: 'old-run', gitRef: '', completedSteps: ['index', 'extract'] },
     })).rejects.toThrow('Cannot resume: saved extract results are missing');
     expect(calls).toEqual([]);

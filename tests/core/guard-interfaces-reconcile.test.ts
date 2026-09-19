@@ -1,15 +1,17 @@
 /**
- * The standalone state reconciliation runs on the transport it is handed —
- * the run's own provider — never on a process default or a spawned `claude`.
+ * The standalone state reconciliation runs as ONE session on the driver it is
+ * handed — the run's own provider — never on a process default or a spawned
+ * `claude`.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { guardAuthoredInterfacesPath, guardInterfacesPath } from '@truecourse/guard-runner';
-import type { LlmRequest } from '@truecourse/shared/llm';
 import { interfaceFingerprint, type Interface, type InterfacesFile } from '../../packages/shared/src/index';
 import { runGuardInterfaceReconcile } from '../../packages/core/src/commands/guard-interfaces';
+import { STATE_RECONCILE_SESSION_KIND } from '../../packages/core/src/services/interface-author/reconcile';
+import { memoryPersistence, outcome, stubDriver, transportFailure } from './spec-scan-session-stub';
 
 const DERIVED: InterfacesFile = {
   version: 2,
@@ -71,18 +73,33 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(repo, { recursive: true, force: true }));
 
 describe('runGuardInterfaceReconcile', () => {
-  it('asks the given transport, as the state-reconcile stage, and applies its groups', async () => {
-    const seen: LlmRequest[] = [];
+  it('runs ONE tool-less session on the given driver, and applies its groups', async () => {
+    const stub = stubDriver(() =>
+      outcome({ groups: [{ keep: 'document-created', absorb: ['document-saved'] }] }),
+    );
+    const { persistence } = memoryPersistence();
     const result = await runGuardInterfaceReconcile({
       repoRoot: repo,
-      transport: async (req) => {
-        seen.push(req);
-        return JSON.stringify({ groups: [{ keep: 'document-created', absorb: ['document-saved'] }] });
-      },
+      driver: stub.driver,
+      persistence,
     });
 
-    expect(seen.map((req) => req.stage)).toEqual(['guard.stateReconcile']);
+    expect(stub.kinds).toEqual([STATE_RECONCILE_SESSION_KIND]);
+    expect(stub.calls[0].def.tools).toEqual([]);
+    // The whole registry is the briefing — there is nothing to look up.
+    expect(stub.calls[0].briefing).toContain('document-created');
     expect(result.status).toBe('reconciled');
     expect(result.merges).toEqual([{ keep: 'document-created', absorb: ['document-saved'] }]);
+  });
+
+  it('keeps the deterministic half when the session is lost, and says so', async () => {
+    const stub = stubDriver(() => transportFailure());
+    const { persistence } = memoryPersistence();
+    const result = await runGuardInterfaceReconcile({
+      repoRoot: repo,
+      driver: stub.driver,
+      persistence,
+    });
+    expect(result.problems.join(' ')).toMatch(/the reconciliation session failed/);
   });
 });

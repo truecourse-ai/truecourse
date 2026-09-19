@@ -37,20 +37,25 @@ import {
   type GuardVisualJudgment,
 } from '@truecourse/shared';
 import type { GuardVisualJudge, GuardVisualJudgeInput } from '@truecourse/guard-runner';
-import {
-  extractJsonValue,
-  noProviderTransport,
-  jsonSchemaHint,
-  OUTPUT_ONLY_GUARDRAIL,
-  type LlmTransport,
-} from '@truecourse/shared/llm';
-import { resolveFallbackModel, resolveModel } from '../../config/llm-models.js';
+import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm';
+import type { SessionDriver, SessionPersistence } from '@truecourse/agent-loop';
+import { oneTurnSessionDef, runOneTurnSession, withOutcomeDelivery, type OneTurnSession } from '../agent/one-turn.js';
+import { describeSessionFailure } from '../guard-setup/session-context.js';
+import type { SessionDef } from '@truecourse/agent-loop';
+
+/** The session kind one verdict runs as. */
+export const VISUAL_JUDGE_SESSION_KIND = 'guard-run.visual-judge';
 
 /** Where verdicts are cached — under `.truecourse/.cache/`, derived and disposable. */
 export const VISUAL_JUDGE_CACHE_NAME = 'guard/visual-judge';
 
-/** Per-call ceiling. A vision call on one screenshot is not a long job. */
-const VISUAL_JUDGE_TIMEOUT_MS = 180_000;
+/** The verdict schema the prompt states, rendered from the SAME Zod the session
+ *  validates its outcome with. */
+const VISUAL_JUDGE_RESPONSE_SCHEMA = jsonSchemaHint(GuardVisualJudgmentSchema);
+
+/** What one verdict may read and write. A screenshot is big; the answer is three
+ *  short fields. */
+const VISUAL_JUDGE_TOKEN_CEILING = 200_000;
 
 /**
  * Byte ceiling on a screenshot we are willing to send. Web screenshots are
@@ -60,9 +65,6 @@ const VISUAL_JUDGE_TIMEOUT_MS = 180_000;
  * trade worth making). Well under every transport's own request limit, on purpose.
  */
 export const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
-
-/** The verdict schema, rendered from the SAME Zod the reply is validated with. */
-const VISUAL_JUDGE_RESPONSE_SCHEMA = jsonSchemaHint(GuardVisualJudgmentSchema);
 
 export const VISUAL_JUDGE_SYSTEM_PROMPT = `\
 You are a QA screenshot verifier. You are given ONE screenshot of a web page taken
@@ -131,14 +133,10 @@ function fingerprint(text: string): string {
  *  change re-judges every failure instead of serving stale verdicts. */
 export const VISUAL_JUDGE_PROMPT_FINGERPRINT = fingerprint(VISUAL_JUDGE_SYSTEM_PROMPT);
 
-/** On a re-ask, the invalid reply quoted back so the model can see its own miss. */
-export interface VisualJudgeCorrection {
-  invalidOutput: string;
-}
-
-export interface VisualJudgeContext extends GuardVisualJudgeInput {
-  correction?: VisualJudgeCorrection;
-}
+/** What one verdict is asked about — the failing step, exactly as the runner
+ *  saw it. A reply that does not fit the schema is repaired inside the session
+ *  that produced it, so nothing is quoted back here. */
+export type VisualJudgeContext = GuardVisualJudgeInput;
 
 export function buildVisualJudgeUserPrompt(ctx: VisualJudgeContext): string {
   const lines = [
@@ -165,44 +163,55 @@ export function buildVisualJudgeUserPrompt(ctx: VisualJudgeContext): string {
     '',
     'Return exactly one JSON object: { "expectedVisible", "screenSummary", "rationale" }.',
   );
-  if (ctx.correction) {
-    lines.push(
-      '',
-      'CORRECTION — your previous response was NOT valid. You returned:',
-      ctx.correction.invalidOutput,
-      'Return exactly ONE JSON object with an "expectedVisible" of yes | no | unclear,',
-      'a one-or-two-sentence "screenSummary", and a "rationale" — and NOTHING else.',
-    );
-  }
   return lines.join('\n');
 }
 
-/** The injectable runner — output-only, returns the model's raw parsed JSON. */
+/** What one verdict's session IS — shared by the run's own judge and by the
+ *  adjudication session that dispatches it as a child. */
+export function visualJudgeSession(): OneTurnSession<GuardVisualJudgment> {
+  return {
+    kind: VISUAL_JUDGE_SESSION_KIND,
+    title: 'Visual judge',
+    systemPrompt: withOutcomeDelivery(VISUAL_JUDGE_SYSTEM_PROMPT),
+    outcomeSchema: GuardVisualJudgmentSchema,
+    tokenCeiling: VISUAL_JUDGE_TOKEN_CEILING,
+  };
+}
+
+/** The same session as a def, for a parent that dispatches it as a child. */
+export function visualJudgeSessionDef(): SessionDef<GuardVisualJudgment> {
+  return oneTurnSessionDef(visualJudgeSession());
+}
+
+/** The injectable runner — the verdict, or a throw naming why there is none. */
 export type VisualJudgeRunner = (
   ctx: VisualJudgeContext,
   screenshotBase64: string,
-) => Promise<unknown>;
+) => Promise<GuardVisualJudgment>;
 
-/** Build the production runner: one vision call over the run's transport. */
-export function spawnVisualJudgeRunner(
-  opts: { transport?: LlmTransport; model?: string; fallbackModel?: string; timeoutMs?: number } = {},
-): VisualJudgeRunner {
-  const transport = opts.transport ?? noProviderTransport;
-  const timeoutMs = opts.timeoutMs ?? VISUAL_JUDGE_TIMEOUT_MS;
+/**
+ * The production runner: ONE-TURN SESSION over one screenshot. It has nothing to
+ * explore — the picture and the mismatch are the whole briefing — so it looks,
+ * answers, and ends. The image rides the session message itself; the transcript
+ * records that a PNG of that size was shown, never its bytes.
+ */
+export function visualJudgeSessionRunner(opts: {
+  driver: SessionDriver;
+  persistence: SessionPersistence;
+  signal?: AbortSignal;
+}): VisualJudgeRunner {
   return async (ctx, screenshotBase64) => {
-    const raw = await transport({
-      id: `guard.visualJudge:${ctx.scenarioId}:${ctx.stepIndex}${ctx.correction ? ':correction' : ''}`,
-      stage: 'guard.visualJudge',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: VISUAL_JUDGE_SYSTEM_PROMPT,
-      user: buildVisualJudgeUserPrompt(ctx),
+    const outcome = await runOneTurnSession<GuardVisualJudgment>({
+      session: visualJudgeSession(),
+      workItem: `${ctx.scenarioId}:${ctx.stepIndex}`,
+      briefing: buildVisualJudgeUserPrompt(ctx),
       images: [{ mediaType: 'image/png', data: screenshotBase64 }],
-      responseFormat: 'json',
-      schema: VISUAL_JUDGE_RESPONSE_SCHEMA,
-      timeoutMs,
+      driver: opts.driver,
+      persistence: opts.persistence,
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
-    return JSON.parse(extractJsonValue(raw));
+    if (outcome.status === 'completed') return outcome.output;
+    throw new Error(describeSessionFailure(outcome.failure));
   };
 }
 
@@ -271,56 +280,19 @@ export async function runVisualJudge(
     if (parsed.success) return { status: 'judged', judgment: parsed.data };
   }
 
-  const ctx: VisualJudgeContext = { ...input };
   const base64 = screenshot.toString('base64');
-  const judgment = await callWithReask(ctx, base64, runner);
-  if (judgment === null) return { status: 'failed', reason: 'no valid verdict after one re-ask' };
+  let judgment: GuardVisualJudgment;
+  try {
+    // The session validates its own answer and repairs it once; a verdict that
+    // never arrived is a fact about this run, so it is never cached.
+    judgment = await runner({ ...input }, base64);
+  } catch (e) {
+    return { status: 'failed', reason: e instanceof Error ? e.message : String(e) };
+  }
   await setCacheEntry(repoRoot, VISUAL_JUDGE_CACHE_NAME, cacheKey, judgment).catch(() => {});
   return { status: 'judged', judgment };
 }
 
-/**
- * Call the runner and validate the verdict; on a SCHEMA failure re-ask ONCE with
- * the invalid output quoted back. A THROWN call is not re-asked — a dead transport
- * does not get better by being asked twice, and this stage must never delay a run.
- */
-async function callWithReask(
-  ctx: VisualJudgeContext,
-  screenshotBase64: string,
-  runner: VisualJudgeRunner,
-): Promise<GuardVisualJudgment | null> {
-  let raw: unknown;
-  try {
-    raw = await runner(ctx, screenshotBase64);
-  } catch {
-    return null;
-  }
-  const first = GuardVisualJudgmentSchema.safeParse(raw);
-  if (first.success) return first.data;
-
-  let reRaw: unknown;
-  try {
-    reRaw = await runner(
-      { ...ctx, correction: { invalidOutput: quoteInvalidOutput(raw) } },
-      screenshotBase64,
-    );
-  } catch {
-    return null;
-  }
-  const second = GuardVisualJudgmentSchema.safeParse(reRaw);
-  return second.success ? second.data : null;
-}
-
-/** The prior reply, quoted back at a bounded size for the corrective re-ask. */
-function quoteInvalidOutput(raw: unknown): string {
-  let text: string;
-  try {
-    text = typeof raw === 'string' ? raw : JSON.stringify(raw);
-  } catch {
-    text = String(raw);
-  }
-  return text.length > 2_000 ? `${text.slice(0, 2_000)}… (truncated)` : text;
-}
 
 /**
  * Whether the hosted run job should wire the judge in at all, on the workspace's
@@ -336,33 +308,33 @@ export function guardVisualJudgeEnabled(): boolean {
 }
 
 /**
- * The judge a run is wired with: the run's transport, the stage's model, and
- * every failure mode flattened to `null`.
+ * The judge a run is wired with: the run's own driver and journal, and every
+ * failure mode flattened to `null` — this is an annotation on a failing step,
+ * and it must never become one of its own.
  *
- * The transport is resolved LAZILY, inside the call: building it eagerly would
- * cost every run, including the overwhelming majority that never fail a web
- * step.
+ * The driver is resolved LAZILY, inside the call: building it eagerly would cost
+ * every run, including the overwhelming majority that never fail a web step.
  */
 export function createGuardVisualJudge(
   repoRoot: string,
   opts: {
-    /**
-     * The transport the judge asks through — the asking workspace's provider,
-     * whose credentials never install process-wide.
-     */
-    transport: LlmTransport;
+    /** The driver and journal the verdict session runs on — the asking
+     *  workspace's, whose credentials never install process-wide. */
+    acquire: () => Promise<{ driver: SessionDriver; persistence: SessionPersistence }>;
+    signal?: AbortSignal;
   },
 ): GuardVisualJudge {
   return async (input) => {
     let runner: VisualJudgeRunner;
     try {
-      runner = spawnVisualJudgeRunner({
-        transport: opts.transport,
-        model: resolveModel('guard.visualJudge'),
-        fallbackModel: resolveFallbackModel() ?? undefined,
+      const { driver, persistence } = await opts.acquire();
+      runner = visualJudgeSessionRunner({
+        driver,
+        persistence,
+        ...(opts.signal ? { signal: opts.signal } : {}),
       });
     } catch {
-      // No usable transport (no `claude` on PATH, unbuildable API config) — the
+      // No usable backend (no `claude` on PATH, unbuildable API config) — the
       // failure is reported exactly as it would have been without a judge.
       return null;
     }

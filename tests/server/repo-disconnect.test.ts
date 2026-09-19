@@ -44,7 +44,6 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { JobStore } from '@truecourse/data-store';
 import { registerJob } from '@truecourse/jobs';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import { createTestApp, TEST_ORG } from '../helpers/test-app';
 import { readRegistry } from '@truecourse/core/config/registry';
 import { clearTestRegistry, installTestRegistry, setupTestFixture } from '../helpers/test-fixture';
@@ -96,7 +95,6 @@ async function until(predicate: () => boolean, timeoutMs = 5000): Promise<void> 
 const testLlm: WorkspaceLlm = {
   mode: 'api',
   driver: () => forbiddenDriver('no session runs in this suite'),
-  transport: (async () => '{}') as LlmTransport,
 };
 
 let app: Express;

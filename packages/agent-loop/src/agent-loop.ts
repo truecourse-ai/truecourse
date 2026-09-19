@@ -20,6 +20,7 @@ import type {
   DriverResult,
   SessionDriver,
   SessionHandle,
+  SessionImage,
   SessionResume,
   SharedPromptPrefix,
 } from './session-driver.js';
@@ -55,6 +56,13 @@ export interface AgentLoopInput<TOutcome> {
   /** The work item this session serves (a doc path, an area, a flow id). */
   workItem: string;
   initialMessages: readonly string[];
+  /**
+   * Images the session must LOOK at. Shown with the first message the driver
+   * sends — the opening briefing, and again on a resume or a corrective
+   * re-ask, because a session that is asked to revise its answer about a
+   * picture must still be able to see it.
+   */
+  images?: readonly SessionImage[];
   /**
    * A prefix this session shares with its cluster peers — carried to
    * the driver untouched. It does NOT descend to a child session: a child runs
@@ -361,7 +369,11 @@ function startSession<TOutcome>(
       // Orchestrator → worker is the only topology (depth 1). A child
       // dispatching its own child gets a structured failure the parent sees
       // as a tool result — never a grandchild session, never a throw.
-      async dispatchChild<TChild>(childDef: SessionDef<TChild>, childMessages: readonly string[]) {
+      async dispatchChild<TChild>(
+        childDef: SessionDef<TChild>,
+        childMessages: readonly string[],
+        childImages?: readonly SessionImage[],
+      ) {
         if (depth >= 1) {
           return {
             status: 'failed' as const,
@@ -383,6 +395,7 @@ function startSession<TOutcome>(
             def: childDef,
             workItem,
             initialMessages: childMessages,
+            ...(childImages?.length ? { images: childImages } : {}),
             driver,
             persistence,
             sessionId: childId,
@@ -426,6 +439,7 @@ function startSession<TOutcome>(
         handle = driver.runSession({
           def: wrappedDef,
           initialMessages,
+          ...(input.images?.length ? { images: input.images } : {}),
           ...(input.sharedPrefix ? { sharedPrefix: input.sharedPrefix } : {}),
           ...(resume ? { resume } : {}),
           onEvent: track,

@@ -46,7 +46,7 @@ import {
   type MatchUserContext,
 } from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
-import type { MatchRunner } from './runners.js'
+import type { MatchRunner } from './leaf-seams.js'
 import { PROVIDER_CONTROL_VERSION, resolveProviderControl, type Recipe, type ResolvedProviderControl } from '@truecourse/guard-runner'
 
 export const MATCH_CACHE_NAME = 'guard/match'

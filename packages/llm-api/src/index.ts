@@ -1,10 +1,5 @@
-export {
-  createApiTransport,
-  createAiSdkTransport,
-  type ApiTransportOptions,
-  type AiSdkTransportOptions,
-  type CallUsage,
-} from './transport.js';
+export { probeProvider, PROBE_TIMEOUT_MS } from './probe.js';
+export { callUsageOf, type CallUsage, type SdkUsage } from './usage.js';
 export {
   createApiSessionDriver,
   condenseCutOff,

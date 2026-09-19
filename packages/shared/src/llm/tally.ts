@@ -3,7 +3,7 @@
  * pipeline stage sent to the transport and how many of them FAILED (the call
  * threw: no answer at all). Kept node-free so the guard report schema can reuse
  * the shape without dragging the transport's `node:child_process` into a browser
- * bundle; the wrapper that produces it lives in `transport.ts` (`auditTransport`).
+ * bundle; a run's own accounting produces it.
  *
  * A failure here is strictly a TRANSPORT failure. A call that returned text the
  * caller then failed to parse or Zod-validate is a successful attempt — those

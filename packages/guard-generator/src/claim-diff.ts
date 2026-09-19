@@ -24,7 +24,7 @@ import { snapExtraction, type ReuseExtractionSeam } from './extract.js'
 import { flowSectionKey } from './flows.js'
 import { CLAIM_DIFF_PROMPT_FINGERPRINT, type ClaimDiffSectionInput } from './prompts.js'
 import { ClaimDiffSchema, type ClaimDiff } from './schemas.js'
-import type { ClaimDiffRunner } from './runners.js'
+import type { ClaimDiffRunner } from './leaf-seams.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
 
 export const CLAIM_DIFF_CACHE_NAME = 'guard/claim-diff'

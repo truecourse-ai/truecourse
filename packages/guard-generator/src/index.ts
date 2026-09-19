@@ -1,9 +1,10 @@
 /**
- * `@truecourse/guard-generator` — the LLM side of guard: whole-document claim
- * extraction, recipe discovery, batched scenario authoring, and birth validation.
- * Authorship is output-only — the model returns content through the shared
- * transport seam and the engine (this package) parses, validates, birth-validates,
- * and writes. Depends on `@truecourse/guard-runner` (the deterministic engine) and
+ * `@truecourse/guard-generator` — the DETERMINISTIC half of guard: the work
+ * plan, the section plan, recipe discovery, realization matching, birth
+ * validation and every write. The model's part arrives through injected SEAMS
+ * (`leaf-seams.ts` and the session seams on `generateGuards`), implemented in
+ * `@truecourse/core`, which this package cannot depend on. Depends on
+ * `@truecourse/guard-runner` (the deterministic engine) and
  * `@truecourse/shared`; those never depend back on it.
  */
 
@@ -20,7 +21,6 @@ export {
   // One line per thing a run did, filed under the phase that did it.
   type GuardGenerateFactStep,
   type GuardGenerateResult,
-  type GuardGenerateModels,
   type GeneratedScenarioInfo,
   type GuardBirthFinding,
   type GuardGenerateError,
@@ -343,6 +343,10 @@ export {
   CLAIM_DIFF_PROMPT_FINGERPRINT,
   buildClaimDiffUserPrompt,
   type ClaimDiffSectionInput,
+  WORLD_CLASSIFY_SYSTEM_PROMPT,
+  WORLD_CLASSIFY_PROMPT_FINGERPRINT,
+  buildWorldClassifyUserPrompt,
+  type WorldClassifyFlowInput,
 } from './prompts.js'
 
 // Example mining (D3) — the doc's own examples run verbatim.
@@ -357,15 +361,16 @@ export {
 } from './examples.js'
 
 export {
-  spawnRecipeRunner,
-  spawnMatchRunner,
-  spawnWorldClassifyRunner,
-  spawnClaimDiffRunner,
+  RECIPE_PROPOSE_SESSION_KIND,
+  MATCH_SESSION_KIND,
+  CLAIM_DIFF_SESSION_KIND,
+  WORLD_CLASSIFY_SESSION_KIND,
   type RecipeRunner,
   type MatchRunner,
   type WorldClassifyRunner,
   type ClaimDiffRunner,
-} from './runners.js'
+  type LeafSummaries,
+} from './leaf-seams.js'
 
 export {
   reuseCosmeticExtractions,
@@ -427,6 +432,8 @@ export {
   type SynthesizedEpicFlow,
   ClaimDiffSchema,
   type ClaimDiff,
+  WorldClassifySchema,
+  type WorldClassify,
 } from './schemas.js'
 
 // The app↔server join — which recipe server serves a flow's paths, and

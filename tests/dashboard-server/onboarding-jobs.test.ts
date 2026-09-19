@@ -80,7 +80,6 @@ import {
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
 import { GUARD_FORMAT_VERSION, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
 import { captureJobStarted } from '../../apps/dashboard/server/src/observability/posthog';
 import type { RepoGuardGenerateTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-generate';
@@ -133,11 +132,10 @@ async function until(predicate: () => boolean, timeoutMs = 30_000): Promise<void
   while (!predicate() && Date.now() < deadline) await settle(10);
 }
 
-/** A provider that answers without a network call, on a driver nothing may reach. */
+/** A provider on a driver nothing in this suite may reach. */
 const testLlm: WorkspaceLlm = {
   mode: 'api',
   driver: () => forbiddenDriver('the setup sessions are stubbed in this suite'),
-  transport: (async () => '{}') as LlmTransport,
 };
 
 /**
@@ -896,9 +894,8 @@ describe('the guard generate job', () => {
       { '.truecourse/scenarios/recipe.json': JSON.stringify(RECIPE, null, 2) + '\n' },
     );
 
-  it.each(['api', 'claude-code'] as const)('passes the selected %s driver and transport into generation', async mode => {
+  it.each(['api', 'claude-code'] as const)('passes the selected %s driver into generation', async mode => {
     const driver = forbiddenDriver('generation is stubbed in this test');
-    const transport: LlmTransport = async () => '{}';
     let driverConstructions = 0;
     generateLlm = {
       mode,
@@ -906,13 +903,11 @@ describe('the guard generate job', () => {
         driverConstructions++;
         return driver;
       },
-      transport: () => transport,
     };
     let called = false;
     generateImpl = async (repoRoot, options) => {
       called = true;
       expect(options?.driver).toBe(driver);
-      expect(options?.transport).toBe(transport);
       expect(options?.transportMode).toBe(mode);
       expect(options?.attribution).toBe(driver.attribution);
       return authoring(repoRoot, options);

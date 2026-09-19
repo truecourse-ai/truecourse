@@ -29,7 +29,6 @@ import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
 } from '@truecourse/guard-runner';
-import { noProviderTransport } from '@truecourse/shared/llm';
 import { setCacheEntry } from '@truecourse/llm';
 import {
   proposeRecipe,
@@ -77,8 +76,6 @@ vi.mock('../../packages/core/src/services/llm/session-driver.js', async (importO
 import {
   guardSetupInProcess,
   estimateGuardSetupCost,
-  assertLlmProviderConfigured,
-  NoLlmProviderError,
   EstimateDeclined,
   GUARD_SETUP_STEPS,
 } from '../../packages/core/src/commands/guard-setup.js';
@@ -184,7 +181,6 @@ const neverCalled = async (): Promise<never> => {
 
 /** The seed/auth seams stubbed out: those sessions are covered by their own lanes. */
 const inertSeams = {
-  transport: async () => 'ok',
   authorInterfaces: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
   seedSession: (async () => ({ status: 'skipped', reason: 'stubbed in this test' })) as GuardSetupSeedSession,
   preparationSession: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
@@ -221,17 +217,6 @@ function detailRecorder(): { tracker: StepTracker; details: Map<string, string[]
 // ---------------------------------------------------------------------------
 // Step 0 — the provider check
 // ---------------------------------------------------------------------------
-
-describe('assertLlmProviderConfigured', () => {
-  it('refuses the EE no-provider sentinel', () => {
-    expect(() => assertLlmProviderConfigured(noProviderTransport)).toThrow(NoLlmProviderError);
-  });
-
-  it('accepts a real transport', () => {
-    expect(() => assertLlmProviderConfigured(async () => 'ok')).not.toThrow();
-  });
-
-});
 
 // ---------------------------------------------------------------------------
 // The pre-flight estimate — six SESSION kinds
@@ -473,8 +458,10 @@ describe('guardSetupInProcess', () => {
 
     const { report } = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
 
-    // Nothing one-shot ran: the whole spend is sessions.
-    expect(report.usage?.calls).toBe(0);
+    // Every LLM call a run makes is a turn of a session, so that is the whole
+    // of what `usage` says.
+    expect(report.usage?.calls).toBeUndefined();
+    expect(report.usage?.costUsd).toBe(report.usage?.sessions?.costUsd);
     expect(report.usage?.sessions?.count).toBeGreaterThan(0);
     expect(report.usage?.sessions?.turns).toBeGreaterThan(0);
     // The catalog row names the sessions-store run its session ran under.
@@ -565,24 +552,6 @@ describe('guardSetupInProcess', () => {
   });
 
   // Never ask to spend, then fail: step 0 runs BEFORE the estimate gate.
-  it('fails the provider check before the estimate is even offered', async () => {
-    const r = fixtureRepo();
-    let asked = false;
-
-    await expect(
-      guardSetupInProcess(r, {
-        recipeRunner: neverCalled,
-        ...inertSeams,
-        transport: noProviderTransport,
-        onLlmEstimate: async () => {
-          asked = true;
-          return true;
-        },
-      }),
-    ).rejects.toBeInstanceOf(NoLlmProviderError);
-
-    expect(asked).toBe(false);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -640,7 +609,6 @@ describe('guardSetupInProcess — hosted injection', () => {
 
     const { report, sessionsRunDirs } = await guardSetupInProcess(r, {
       driver,
-      transport: async () => 'ok',
       transportMode: 'api',
       sessionsKey: key,
       interfaces: interfaces(),
@@ -682,7 +650,7 @@ describe('guardSetupInProcess — hosted injection', () => {
     const { report, sessionsRunDirs } = await guardSetupInProcess(r, {
       ...inertSeams, authorInterfaces: undefined,
       catalogSession: async () => ({ status: 'ok', added: [], findings: [] }),
-      driver, transport: neverCalled, transportMode: 'api', sessionsKey: key,
+      driver, transportMode: 'api', sessionsKey: key,
       sessionRun: parent, tracker, onRunStarted, interfaces: interfaces(),
       seedSession: async () => {
         // Interfaces must not close the run before setup's later steps execute.
@@ -716,7 +684,6 @@ describe('guardSetupInProcess — hosted injection', () => {
 
     const { report } = await guardSetupInProcess(r, {
       driver: forbiddenDriver('the recipe gate fails before any session'),
-      transport: neverCalled,
       transportMode: 'claude-code',
       sessionsKey: key,
       eagerRun: true,
