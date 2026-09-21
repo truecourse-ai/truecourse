@@ -135,6 +135,7 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     assignmentFingerprints: ['a'],
     interfaceFingerprints: ['i1', 'i2'],
     webCatalogFingerprint: 'w',
+    webCatalogReads: ['web/home:abc'],
     prerequisiteMaterial: 'p',
     recipeSlice: 'rs',
     roster: 'ro',
@@ -151,7 +152,10 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     expect(moved({ sectionKeys: ['s2', 's1'] })).toEqual([])
     expect(moved({ assignmentFingerprints: ['a2'] })).toEqual(['assignment'])
     expect(moved({ interfaceFingerprints: ['i1'] })).toEqual(['interfaces'])
-    expect(moved({ webCatalogFingerprint: 'w2' })).toEqual(['webCatalog'])
+    // The whole catalog rides the LEGACY bag alone; what the flow's session
+    // read is the component.
+    expect(moved({ webCatalogFingerprint: 'w2' })).toEqual([])
+    expect(moved({ webCatalogReads: ['web/home:moved'] })).toEqual(['webCatalog.reads'])
     expect(moved({ prerequisiteMaterial: 'p2' })).toEqual(['prerequisites'])
     expect(moved({ recipeSlice: 'rs2' })).toEqual(['recipe.slice'])
     expect(moved({ roster: 'ro2' })).toEqual(['roster'])

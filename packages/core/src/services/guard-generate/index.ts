@@ -65,7 +65,7 @@ export {
   flowWorkerSystemPrompt,
   flowWorkerPromptFingerprint,
   flowWorkerCacheKey,
-  flowWorkerLegacyCacheKey,
+  flowWorkerLegacyCacheKeys,
   flowWorkerSessionDef,
   cacheableWorkerOutcome,
   CachedWorkerEntrySchema,

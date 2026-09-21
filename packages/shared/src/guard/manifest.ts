@@ -189,6 +189,17 @@ export const GuardManifestFlowSchema = z
      * Written with the hash; absent on a manifest written before the field.
      */
     generationInputs: z.record(z.string(), z.string()).optional(),
+    /**
+     * The browser-catalog entries this flow's web authoring session was SERVED
+     * by its search and get tools — the only part of that catalog its scenario
+     * can depend on, since a committed web scenario holds raw locators and no
+     * catalog ids. The settle compare folds these entries' CURRENT
+     * fingerprints, so an unrelated screen moving re-opens nothing and an id
+     * that has left the catalog re-opens this flow. Absent for a non-web flow
+     * and for a row written before the record existed; such a row has nothing
+     * to compare and is not re-opened through this path until it authors again.
+     */
+    catalogReads: z.array(z.string().min(1)).optional(),
     /** Per-surface gaps: why a surface has no scenario. */
     gaps: z.array(GuardManifestGapSchema).default([]),
     /** Prior scenarios an editing worker deliberately dropped (see

@@ -114,7 +114,7 @@ import {
   FLOW_WORKER_SESSION_KIND,
   cacheableWorkerOutcome,
   flowWorkerCacheKey,
-  flowWorkerLegacyCacheKey,
+  flowWorkerLegacyCacheKeys,
   flowWorkerSessionDef,
   flowWorkerSystemPrompt,
   type CachedWorkerEntry,
@@ -637,7 +637,7 @@ export function createGuardGenerateSessionSeams(
               opts.repoRoot,
               FLOW_WORKER_CACHE_NAME,
               flowWorkerCacheKey(task),
-              flowWorkerLegacyCacheKey(task),
+              ...flowWorkerLegacyCacheKeys(task),
             ).catch(() => null)
         if (hit !== null) {
           const parsed = CachedWorkerEntrySchema.safeParse(hit)
@@ -668,6 +668,10 @@ export function createGuardGenerateSessionSeams(
               // session runs.
               if (await task.confirmCached(accepted.map((s, i) => ({ yaml: yamls[i]!, expectedReds: s.expectedReds, review: parsed.data.reviews![i] })))) {
                 if (task.validateOutcome(outcome)) { misses.push(task); continue }
+                // The served entry stands in for the session, so the flow
+                // records what that session read. An entry written before the
+                // read-set existed replays none, and the flow keeps its own.
+                if (parsed.data.catalogReads) task.replayCatalogReads?.(parsed.data.catalogReads)
                 summary.fromCache++
                 byTask.set(task.workItem, { kind: 'outcome', outcome, fromCache: true })
                 tick('settled')
@@ -795,12 +799,16 @@ export function createGuardGenerateSessionSeams(
               const reviews = accepted.map((s) => task.stashedReview(s.scenarioYamlSha))
               if (yamls.length > 0 && yamls.every((y): y is string => y !== undefined) &&
                 reviews.every((r): r is NonNullable<typeof r> => r !== undefined)) {
+                // The read-set rides the entry: a later HIT must record the
+                // same catalog entries the flow's settle compare folds.
+                const catalogReads = task.catalogReads?.() ?? []
                 const entry: CachedWorkerEntry = {
                   outcome: settled.output,
                   version: GUARD_REVIEW_POLICY_VERSION,
                   reviews,
                   scenarioYaml: yamls[0]!,
                   ...(yamls.length > 1 ? { scenarioYamls: yamls } : {}),
+                  ...(catalogReads.length > 0 ? { catalogReads } : {}),
                 }
                 await setCacheEntry(opts.repoRoot, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), entry).catch(
                   () => undefined,

@@ -1,4 +1,13 @@
-import { createAuthorCatalog, scopedAuthorResources, type AuthorCatalog } from './author-catalog.js'
+import {
+  createAuthorCatalog,
+  catalogReadMaterial,
+  recordCatalogReads,
+  scopedAuthorResources,
+  webAuthorKeyMaterial,
+  webSetupCandidates,
+  type AuthorCatalog,
+  type CatalogReadLog,
+} from './author-catalog.js'
 import { completeRealization } from './match.js'
 import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
@@ -901,6 +910,10 @@ export interface FlowWorkerCacheMaterial {
   /** The whole recipe fingerprint, for the OLD key a miss falls back to.
    *  Delete with the legacy hash. */
   recipeFingerprint: string
+  /** {@link interfaceFingerprints} as the retired formula folded it — the web
+   *  arm carried the WHOLE author catalog where it now carries what the session
+   *  is handed. Absent when the two agree. Delete with the legacy hash. */
+  legacyInterfaceFingerprints?: readonly string[]
   /** `edit` when the briefing carries the flow's committed scenarios to edit;
    *  `scratch` otherwise (the key then matches every pre-edit-mode entry). */
   mode: 'scratch' | 'edit'
@@ -938,8 +951,15 @@ export interface FlowWorkerTask {
    *  from-scratch author. */
   prior?: { scenarios: readonly { id: string; yaml: string }[] }
   cacheMaterial: FlowWorkerCacheMaterial
-  /** Web-only immutable catalog access. */
+  /** Web-only immutable catalog access, recording what it serves this task. */
   catalog?: AuthorCatalog
+  /** Web only: the catalog entry ids this task's session was served — the
+   *  flow's settle record folds exactly those entries' fingerprints. Core
+   *  writes them into the cache entry beside the outcome. */
+  catalogReads?(): string[]
+  /** Web only: adopt the read-set a cached entry was stored with, so a worker
+   *  cache HIT records what the live session would have. */
+  replayCatalogReads?(ids: readonly string[]): void
   /**
    * Render the briefing — today's `buildAuthorCtx` payload through
    * `buildAuthorUserPrompt`, plus (epics) the members' settled scenarios.
@@ -1547,7 +1567,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // not itself walk when a SETUP step needs one (sign up, then sign in, then test
   // favorites). Empty for a repo with no api interfaces — the block simply renders not.
   const apiInterfaces = catalogs.get('api')?.interfaces ?? []
-  const authorCatalog = createAuthorCatalog((catalogs.get('web')?.interfaces ?? []).filter(i => !servedByOtherApp(serverIndex, recipe.web?.app, interfaceEntryPath(i))), mapped.resources)
+  const authorCatalog = buildWebAuthorCatalog(catalogs.get('web')?.interfaces ?? [], serverIndex, recipe.web?.app, mapped.resources)
   // The counts describe what this run GROUNDED ON — the surface catalogs, not the
   // catalog file — which is why the total is their sum. They are read when flows
   // settle unrealized, and an entry the matcher never sees (an RPC-derived
@@ -1989,7 +2009,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       sectionKeys,
       assignmentFingerprints: [...plans.values()].map((p) => realizationAssignmentFingerprint(p)),
       interfaceFingerprints: [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint)),
-      ...(plans.has('web') ? { webCatalogFingerprint: catalogs.get('web')!.fingerprint } : {}),
+      ...(plans.has('web')
+        ? {
+            webCatalogFingerprint: catalogs.get('web')!.fingerprint,
+            // What the flow's LAST session read, priced against the catalog as
+            // it stands now. A flow that re-authors re-stamps this below with
+            // what its new session read.
+            webCatalogReads: catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []),
+          }
+        : {}),
       prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe),
       // A flow with no plan is realized on no surface, so it folds the cli
       // slice as a stable stand-in: the estimate makes the same choice, and a
@@ -2067,6 +2095,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         gaps,
         inputsHash,
         inputComponents,
+        inputParts,
         prior,
         changed,
         // Only a settled row the compare re-opened has moved inputs to name; a
@@ -2429,6 +2458,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // settles.
   const failedTests = new Map<string, { candidate: BirthCandidate; finding: GuardBirthFinding }[]>()
   const taskByKey = new Map(authorTasks.map((t) => [taskKey(t), t]))
+  // What each web task's session is SERVED out of the shared catalog. Kept at
+  // run scope because the flow's settle record is written long after the pool
+  // has finished, and memoized per task so a re-made task keeps its reads.
+  const catalogReadsByTask = new Map<string, CatalogReadLog>()
+  const readLogFor = (ref: string): CatalogReadLog => {
+    const existing = catalogReadsByTask.get(ref)
+    if (existing) return existing
+    const log = recordCatalogReads(authorCatalog)
+    catalogReadsByTask.set(ref, log)
+    return log
+  }
 
   /**
    * The server-binding SAFETY NET, for the flows the route gates could not classify at
@@ -3267,6 +3307,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const editMode = priorScenarios.length > 0
         const observations = new WorkerObservations(task.surface)
         observationStores.add(observations)
+        // The shared catalog, recorded per task: what this session is served is
+        // what its flow's settle compare folds.
+        const reads = task.surface === 'web' ? readLogFor(ref) : undefined
+        const commonFingerprints = [
+          flowPrerequisiteStateMaterial(task.work.flow, prerequisiteResolution.targets, recipe),
+          realizationAssignmentFingerprint(task.plan),
+          ...task.plan.interfaces.map((j) => j.fingerprint),
+        ]
         return {
           workItem: `flow:${task.work.flow.id}:${task.surface}`,
           flowId: task.work.flow.id,
@@ -3275,16 +3323,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           milestoneCount: new Set(task.plan.steps.map((s) => s.milestone)).size,
           ...(taint ? { taint: { title: taint.title, mismatch: taint.mismatch } } : {}),
           ...(editMode ? { prior: { scenarios: priorScenarios } } : {}),
-          ...(task.surface === 'web' ? { catalog: authorCatalog } : {}),
+          ...(reads
+            ? {
+                catalog: reads.catalog,
+                catalogReads: () => reads.ids(),
+                replayCatalogReads: (ids: readonly string[]) => reads.adopt(ids),
+              }
+            : {}),
           cacheMaterial: {
             flowFingerprint: task.work.flow.fingerprint,
             sectionKeys: task.work.sectionKeys,
             interfaceFingerprints: [
-              flowPrerequisiteStateMaterial(task.work.flow, prerequisiteResolution.targets, recipe),
-              realizationAssignmentFingerprint(task.plan),
-              ...task.plan.interfaces.map((j) => j.fingerprint),
-              ...(task.surface === 'web' ? [authorCatalog.fingerprint] : []),
+              ...commonFingerprints,
+              // The web arm folds what the session is HANDED, not the whole
+              // catalog it may search: one unrelated screen's readables moving
+              // used to re-key every web flow.
+              ...(task.surface === 'web'
+                ? [webAuthorKeyMaterial(authorCatalog, task.plan.interfaces, task.work.flow, mapped.resources)]
+                : []),
             ],
+            ...(task.surface === 'web'
+              ? { legacyInterfaceFingerprints: [...commonFingerprints, authorCatalog.fingerprint] }
+              : {}),
             recipeSlice: flowRecipeSliceFingerprint(recipe, task.surface),
             roster: seedRosterFingerprint(recipe),
             preparations: preparationsFingerprint(repoRoot, recipe),
@@ -4084,6 +4144,25 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return { ...entry, generationInputsHash: null }
   }
 
+  /**
+   * The flow's settle record. A flow that re-authored on web re-folds its
+   * components over what its session actually READ — the compare that re-opened
+   * it could only know the PRIOR read-set — while every other flow keeps the
+   * components the compare computed. A flow whose web session produced nothing
+   * (it failed, or the browser was missing) carries its prior read-set rather
+   * than losing it.
+   */
+  const settleRecord = (work: FlowWork): FlowSettleRecord => {
+    if (!work.plans.has('web')) return { hash: work.inputsHash, components: work.inputComponents }
+    const served = work.changed ? catalogReadsByTask.get(`${work.flow.id}\0web`)?.ids() ?? [] : []
+    const catalogReads = served.length > 0 ? served : work.prior?.catalogReads ?? []
+    const components = flowGenerationInputComponents({
+      ...work.inputParts,
+      webCatalogReads: catalogReadMaterial(authorCatalog, catalogReads),
+    })
+    return { hash: flowSettleDigest(components), components, catalogReads }
+  }
+
   for (const work of works) {
     if (!work.changed) {
       // Unchanged: its committed scenarios stand, its MATCH-stage gaps are re-derived
@@ -4091,7 +4170,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // run), and its hash carries so the next generate is a no-op again.
       workingManifest.set(
         work.flow.id,
-        enforceSettleInvariant(manifestEntry(work, work.prior?.scenarios ?? [], work.inputsHash)),
+        enforceSettleInvariant(manifestEntry(work, work.prior?.scenarios ?? [], settleRecord(work))),
       )
       const carried = work.prior?.scenarios.length ?? 0
       fact(
@@ -4264,7 +4343,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // tests are real coverage) but records NO inputs hash, so the next generate
     // re-runs it. A committed failing test is NOT such a surface — it settled.
     for (const r of retired) retiredReport.push({ flowId: work.flow.id, ...r })
-    const entry = enforceSettleInvariant(manifestEntry(work, scenarios, unsettledFlow ? null : work.inputsHash, retired))
+    const entry = enforceSettleInvariant(manifestEntry(work, scenarios, unsettledFlow ? null : settleRecord(work), retired))
     workingManifest.set(work.flow.id, entry)
     const wroteHere = written.length - writtenBefore
     if (entry.generationInputsHash === null) {
@@ -4477,6 +4556,9 @@ interface FlowWork {
   inputsHash: string
   /** The settle inputs behind `inputsHash`, by name. */
   inputComponents: Record<string, string>
+  /** The parts those components were built from — re-folded when the flow
+   *  settles with a web read-set its compare could not know. */
+  inputParts: FlowGenerationInputParts
   prior?: GuardManifestFlow
   changed: boolean
   /**
@@ -4574,10 +4656,19 @@ interface AuthorTask {
 
 const taskKey = (task: { work: FlowWork; surface: GuardDriverId }): string => `${task.work.flow.id}\0${task.surface}`
 
+/** A flow's settle record: the named inputs it leaves behind, their digest, and
+ *  the catalog entries its web session read. Null for a flow that did not settle. */
+interface FlowSettleRecord {
+  hash: string
+  components: Record<string, string>
+  /** Absent for a non-web flow. */
+  catalogReads?: readonly string[]
+}
+
 function manifestEntry(
   work: FlowWork,
   scenarios: GuardManifestScenario[],
-  generationInputsHash: string | null,
+  settled: FlowSettleRecord | null,
   retiredScenarios: GuardManifestRetiredScenario[] = [],
 ): GuardManifestFlow {
   return {
@@ -4595,8 +4686,9 @@ function manifestEntry(
       .map(([surface, plan]) => ({ surface, interfaceIds: plan.interfaces.map((j) => j.id) }))
       .filter((j) => j.interfaceIds.length > 0)
       .sort((a, b) => a.surface.localeCompare(b.surface)),
-    generationInputsHash,
-    ...(generationInputsHash !== null ? { generationInputs: work.inputComponents } : {}),
+    generationInputsHash: settled?.hash ?? null,
+    ...(settled ? { generationInputs: settled.components } : {}),
+    ...(settled?.catalogReads ? { catalogReads: [...settled.catalogReads] } : {}),
     gaps: work.gaps.slice().sort((a, b) => a.surface.localeCompare(b.surface) || a.kind.localeCompare(b.kind)),
   }
 }
@@ -5015,7 +5107,7 @@ function assembleAuthorCtx(opts: {
       resources: task.surface === 'web' ? scopedAuthorResources(task.plan.interfaces, opts.resources) : buildResourceHints(task.plan.interfaces, opts.resources),
     },
   )
-  return { ...ctx, ...(task.surface === 'web' ? { webSetupCandidates: opts.authorCatalog.candidates(task.plan.interfaces, JSON.stringify(task.work.flow)) } : {}) }
+  return { ...ctx, ...(task.surface === 'web' ? { webSetupCandidates: webSetupCandidates(opts.authorCatalog, task.plan.interfaces, task.work.flow) } : {}) }
 }
 
 // --- Flow-worker helpers ------------------------------------------------------
@@ -5380,6 +5472,25 @@ function recipeCredentialCapabilities(
     out.push({ name, header: cred.header, ...(cred.description ? { description: cred.description } : {}) })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * THE RUN'S ONE WEB AUTHORING CATALOG: every web interface the recipe's own app
+ * serves, with the resources those interfaces reach. Exported because the
+ * pre-flight estimate has to build it the same way — the web arm of a worker's
+ * cache key is drawn from it, and an estimate that built a different catalog
+ * would price a session the run serves from cache.
+ */
+export function buildWebAuthorCatalog(
+  webInterfaces: readonly Interface[],
+  serverIndex: ServerRouteIndex,
+  webApp: string | undefined,
+  resources?: Record<string, InterfaceResource[]>,
+): AuthorCatalog {
+  return createAuthorCatalog(
+    webInterfaces.filter((i) => !servedByOtherApp(serverIndex, webApp, interfaceEntryPath(i))),
+    resources,
+  )
 }
 
 /** One interface's entry path (`''` when it has none) — the route-manifest lookup key. */

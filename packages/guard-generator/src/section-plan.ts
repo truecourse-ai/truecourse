@@ -246,8 +246,12 @@ export interface FlowGenerationInputParts {
   assignmentFingerprints: readonly string[]
   /** The planned interfaces' fingerprints. */
   interfaceFingerprints: readonly string[]
-  /** The whole web catalog's fingerprint, when the flow has a web plan. */
+  /** The whole web catalog's fingerprint, when the flow has a web plan — for
+   *  {@link legacyFlowGenerationInputsHash}'s bag alone. */
   webCatalogFingerprint?: string
+  /** Each catalog entry the flow's web session was served, with its CURRENT
+   *  fingerprint. Present (possibly empty) for a flow with a web plan. */
+  webCatalogReads?: readonly string[]
   prerequisiteMaterial: string
   /** The recipe slice of the surface this flow is realized on. */
   recipeSlice: string
@@ -290,7 +294,12 @@ export function flowGenerationInputComponents(parts: FlowGenerationInputParts): 
     roster: digest([parts.roster]),
     preparation: digest([parts.preparation]),
   }
-  if (parts.webCatalogFingerprint) components.webCatalog = digest([parts.webCatalogFingerprint])
+  // The web catalog enters by what the flow's session READ, never whole: an
+  // unrelated screen's re-authored readables used to re-open every web flow.
+  // A row that carries no read-set (it predates the record, or its session
+  // never ran) has this name filled in with no session, which is also why such
+  // a row cannot be re-opened through this path until it next authors.
+  if (parts.webCatalogReads) components['webCatalog.reads'] = digest(parts.webCatalogReads)
   return components
 }
 

@@ -56,7 +56,7 @@ import {
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
   FLOW_WORKER_STAGE_VERSION,
-  flowWorkerLegacyCacheKey,
+  flowWorkerLegacyCacheKeys,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
   FLOW_WORKER_WEB_SYSTEM_PROMPT,
   FLOW_WORKER_SESSION_KIND,
@@ -299,7 +299,13 @@ describe('flowWorkerCacheKey', () => {
     )
     // The old key — the surface's prompt over the whole recipe fingerprint —
     // stays computable, so a committed entry is served once on the way over.
-    expect(flowWorkerLegacyCacheKey(base)).not.toBe(flowWorkerCacheKey(base))
+    expect(flowWorkerLegacyCacheKeys(base)).toEqual([expect.not.stringMatching(flowWorkerCacheKey(base))])
+    // A web task has TWO old keys: the whole author catalog sat in the bag
+    // under this stage version before the key folded what the session is handed.
+    const web = { ...base, surface: 'web' as const,
+      cacheMaterial: { ...base.cacheMaterial, interfaceFingerprints: ['iface-1', 'handed'], legacyInterfaceFingerprints: ['iface-1', 'whole-catalog'] } }
+    const webKeys = flowWorkerLegacyCacheKeys(web)
+    expect(new Set([...webKeys, flowWorkerCacheKey(web)]).size).toBe(3)
     expect(flowWorkerPromptFingerprint('cli')).toBe(FLOW_WORKER_CLI_PROMPT_FINGERPRINT)
     expect(flowWorkerPromptFingerprint('api')).toBe(FLOW_WORKER_API_PROMPT_FINGERPRINT)
     expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).not.toBe(FLOW_WORKER_API_PROMPT_FINGERPRINT)
@@ -409,6 +415,29 @@ describe('the flow-worker pool’s cache', () => {
     // No session, so no briefing was ever prepared and no driver built.
     expect(calls.prepare).toBe(0)
     expect(constructions).toBe(0)
+  })
+
+  it('carries a web task’s read-set through the cache in both directions', async () => {
+    const r = docRepo()
+    // A HIT stands in for the session, so the flow records what that session read.
+    const replayed: string[] = []
+    const { task: hit } = fakeTask({ surface: 'web', replayCatalogReads: (ids) => replayed.push(...ids) }, 'served')
+    await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(hit), {
+      outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
+      scenarioYaml: YAML,
+      version: GUARD_REVIEW_POLICY_VERSION,
+      reviews: [reviewFor(YAML)],
+      catalogReads: ['web/home', 'home'],
+    })
+    const served = await workerSeam(r)({ tasks: [hit], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
+    expect(served.summary).toMatchObject({ ran: 0, fromCache: 1 })
+    expect(replayed).toEqual(['web/home', 'home'])
+
+    // A live settle writes what its own session was served.
+    const { task: live } = fakeTask({ surface: 'web', catalogReads: () => ['web/late'] }, 'authored')
+    sessionScript = settleScript
+    await workerSeam(r)({ tasks: [live], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
+    expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(live))).toMatchObject({ catalogReads: ['web/late'] })
   })
 
   it('a cached settled entry whose confirmation FAILS is a miss — the session runs and overwrites it', async () => {

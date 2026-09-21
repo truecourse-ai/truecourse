@@ -229,20 +229,24 @@ export function flowWorkerCacheKey(task: FlowWorkerTask): string {
   )
 }
 
-/** {@link flowWorkerCacheKey} as it was computed while the surface's prompt and
- *  the whole recipe fingerprint were in it — the key a miss falls back to.
- *  Delete with the legacy hash. */
-export function flowWorkerLegacyCacheKey(task: FlowWorkerTask): string {
+/**
+ * {@link flowWorkerCacheKey} under the formulas that came before it, newest
+ * first: the web arm's whole-author-catalog fingerprint under this stage
+ * version (web only), and the surface's prompt over the whole recipe
+ * fingerprint. A miss reads them in turn. Delete with the legacy hash.
+ */
+export function flowWorkerLegacyCacheKeys(task: FlowWorkerTask): string[] {
   const m = task.cacheMaterial
-  return workerCacheKey(
-    flowWorkerPromptFingerprint(task.surface),
-    { fingerprint: m.flowFingerprint },
-    task.surface,
-    m.sectionKeys,
-    m.interfaceFingerprints,
-    m.recipeFingerprint,
-    m.mode === 'edit' ? { priorShas: m.priorShas } : undefined,
-  )
+  const legacyBag = m.legacyInterfaceFingerprints ?? m.interfaceFingerprints
+  const edit = m.mode === 'edit' ? { priorShas: m.priorShas } : undefined
+  return [
+    ...(m.legacyInterfaceFingerprints
+      ? [workerCacheKey(`flow-worker-v${FLOW_WORKER_STAGE_VERSION}`, { fingerprint: m.flowFingerprint }, task.surface,
+          m.sectionKeys, legacyBag, workerRecipeMaterial(m), edit)]
+      : []),
+    workerCacheKey(flowWorkerPromptFingerprint(task.surface), { fingerprint: m.flowFingerprint }, task.surface,
+      m.sectionKeys, legacyBag, m.recipeFingerprint, edit),
+  ]
 }
 
 /**
@@ -266,6 +270,10 @@ export const CachedWorkerEntrySchema = z
     /** Every accepted yaml, index-aligned with `settledScenariosOf(outcome)` —
      *  written by edit-mode settles; a legacy entry reads as a one-element list. */
     scenarioYamls: z.array(z.string().min(1)).optional(),
+    /** The browser-catalog entries the session that wrote this entry was
+     *  served, so a HIT records on the flow what the live session would have.
+     *  Absent on a cli/api entry and on one written before the record. */
+    catalogReads: z.array(z.string().min(1)).optional(),
   })
   .strict()
 export type CachedWorkerEntry = z.infer<typeof CachedWorkerEntrySchema>

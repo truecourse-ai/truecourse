@@ -335,6 +335,7 @@ describe('browser setup grounding', () => {
     const briefings: string[] = []
     const cacheInputs: string[][] = []
     const fetched: string[] = []
+    const reads: string[][] = []
     const run = (setup: Interface) => runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface(), setup),
@@ -343,6 +344,7 @@ describe('browser setup grounding', () => {
       flowWorkerSession: submitWorkerSessions((task) => {
         cacheInputs.push(task.cacheMaterial.interfaceFingerprints)
         fetched.push(task.catalog!.get({ ids: [setup.id] }).content)
+        reads.push(task.catalogReads!())
         return { blocked: [{ order: 1, capability: 'missing-data: record' }] }
       }, { onBriefing: (_task, briefing) => briefings.push(briefing) }),
     })
@@ -356,7 +358,11 @@ describe('browser setup grounding', () => {
     expect(briefings).toHaveLength(2)
     expect(briefings[1]).not.toContain('New record')
     expect(fetched[1]).toContain('New record')
-    expect(cacheInputs[0]).not.toEqual(cacheInputs[1])
+    // A setup action outside the plan is offered as a shortlist SUMMARY, which
+    // its re-authored steps do not move, so the worker key stands. The session
+    // fetched it, and that read is what the flow's settle compare folds.
+    expect(cacheInputs[0]).toEqual(cacheInputs[1])
+    expect(reads[1]).toContain(create.id)
   })
 })
 

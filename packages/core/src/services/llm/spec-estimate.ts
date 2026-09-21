@@ -109,6 +109,8 @@ import {
   readCorpusAreaTags,
   buildFlowAreas,
   buildSurfaceCatalogs,
+  buildWebAuthorCatalog,
+  catalogReadMaterial,
   readCachedMatch,
   matchProviderControls,
   realizationAssignmentFingerprint,
@@ -119,6 +121,7 @@ import {
   flowGenerationInputComponents,
   flowSettleVerdict,
   flowAreaIdForDoc,
+  webAuthorKeyMaterial,
   workerCacheKey,
   workerRecipeMaterial,
   FlowSetSchema,
@@ -353,11 +356,11 @@ async function probeSessionCache<T>(
   cacheName: string,
   key: string,
   schema: z.ZodType<T>,
-  /** The key this kind computed before its formula changed — probed the same
-   *  way the run reads it, so an estimate never quotes work a hit will skip. */
-  legacyKey?: string,
+  /** The keys this kind computed before its formula changed — probed the same
+   *  way the run reads them, so an estimate never quotes work a hit will skip. */
+  ...legacyKeys: readonly string[]
 ): Promise<T | null> {
-  const raw = await getCacheEntryOrLegacy(repoRoot, cacheName, key, legacyKey ?? key).catch(() => null);
+  const raw = await getCacheEntryOrLegacy(repoRoot, cacheName, key, ...legacyKeys).catch(() => null);
   if (raw === null) return null;
   const parsed = schema.safeParse(raw);
   return parsed.success ? parsed.data : null;
@@ -863,6 +866,13 @@ async function planGuardRealizationStages(
     );
     const priorByFlow = new Map((readGuardManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]));
     const committedScenarios = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]));
+    // The run's own web authoring catalog, built the same way, so this prices
+    // the web keys the run computes rather than ones only it can reach.
+    const catalogResources = catalog?.resources;
+    const authorCatalog =
+      recipe && serverIndex
+        ? buildWebAuthorCatalog(catalogs.get('web')?.interfaces ?? [], serverIndex, recipe.web?.app, catalogResources)
+        : null;
     let matchCalls = 0;
     let workerItems = 0;
     for (const flow of flows) {
@@ -876,8 +886,12 @@ async function planGuardRealizationStages(
         assignment: string;
         interfaces: string[];
         webCatalog?: string;
-        /** The three above in the order the worker key folds them. */
+        /** The bag the worker key folds now — the web arm being what the
+         *  session is handed, not the whole catalog. */
         fingerprints: string[];
+        /** The same bag under the retired web formula: the old worker key and
+         *  the legacy settle hash both fold the whole author catalog. */
+        legacyFingerprints: string[];
       }[] = [];
       let unknown = false;
       for (const catalog of matchable) {
@@ -901,19 +915,23 @@ async function planGuardRealizationStages(
         const assignment = realizationAssignmentFingerprint(preparedPlan);
         const interfaces = preparedPlan.interfaces.map((j) => j.fingerprint);
         const webCatalog = catalog.surface === 'web' ? catalog.fingerprint : undefined;
+        const webAuthor = catalog.surface === 'web' && authorCatalog
+          ? webAuthorKeyMaterial(authorCatalog, preparedPlan.interfaces, flow, catalogResources)
+          : undefined;
         plannedPairs.push({
           surface: catalog.surface,
           assignment,
           interfaces,
           webCatalog,
-          fingerprints: [assignment, ...interfaces, ...(webCatalog ? [webCatalog] : [])],
+          fingerprints: [assignment, ...interfaces, ...(webAuthor ? [webAuthor] : [])],
+          legacyFingerprints: [assignment, ...interfaces, ...(webCatalog ? [webCatalog] : [])],
         });
 
       }
       const previousDrivers = priorByFlow.get(flow.id)?.scenarios.flatMap(s => s.drivers ?? []) ?? [];
       plannedPairs.sort((a, b) => Number(previousDrivers.includes(b.surface)) - Number(previousDrivers.includes(a.surface)) || a.surface.localeCompare(b.surface));
       plannedPairs.splice(1);
-      interfaceFingerprints.push(...plannedPairs.flatMap(p => p.fingerprints));
+      interfaceFingerprints.push(...plannedPairs.flatMap(p => p.legacyFingerprints));
       interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe));
       const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
       const prior = priorByFlow.get(flow.id);
@@ -927,7 +945,12 @@ async function planGuardRealizationStages(
           sectionKeys,
           assignmentFingerprints: plannedPairs.map((p) => p.assignment),
           interfaceFingerprints: plannedPairs.flatMap((p) => p.interfaces),
-          ...(plannedPairs[0]?.webCatalog ? { webCatalogFingerprint: plannedPairs[0].webCatalog } : {}),
+          ...(plannedPairs[0]?.webCatalog
+            ? {
+                webCatalogFingerprint: plannedPairs[0].webCatalog,
+                webCatalogReads: authorCatalog ? catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []) : [],
+              }
+            : {}),
           prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe),
           recipeSlice: flowRecipeSliceFingerprint(recipe ?? null, chosenSurface),
           roster: flowRosterFingerprint(recipe ?? null, priorScenarios),
@@ -977,12 +1000,26 @@ async function planGuardRealizationStages(
           FLOW_WORKER_CACHE_NAME,
           key,
           CachedWorkerEntrySchema,
+          // The web arm's retired formula under this stage version, then the
+          // key every surface wore while the prompt was in it.
+          workerCacheKey(
+            `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
+            flow,
+            pair.surface,
+            sectionKeys,
+            pair.legacyFingerprints,
+            workerRecipeMaterial({
+              recipeSlice: flowRecipeSliceFingerprint(recipe ?? null, pair.surface),
+              roster: seedRosterFingerprint(recipe ?? null),
+              preparations: preparationsFingerprint(repoRoot, recipe ?? null),
+            }),
+          ),
           workerCacheKey(
             flowWorkerPromptFingerprint(pair.surface),
             flow,
             pair.surface,
             sectionKeys,
-            pair.fingerprints,
+            pair.legacyFingerprints,
             plan.recipeFingerprint,
           ),
         );

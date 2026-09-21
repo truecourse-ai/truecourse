@@ -10,6 +10,7 @@
 export {
   generateGuards,
   looksWorldMutating,
+  buildWebAuthorCatalog,
   workerCacheKey,
   workerRecipeMaterial,
   // Single-step mode (`only`): the pipeline's session
@@ -481,4 +482,4 @@ export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteSta
 
 export { completeRealization } from './match.js'
 
-export { createAuthorCatalog, scopedAuthorResources, AUTHOR_CATALOG_VERSION, AUTHOR_TOOL_RESULT_CHARS, AUTHOR_INITIAL_BYTES, type AuthorCatalog, type CatalogSearch, type CatalogGet } from './author-catalog.js'
+export { createAuthorCatalog, scopedAuthorResources, catalogReadMaterial, recordCatalogReads, webAuthorKeyMaterial, webSetupCandidates, AUTHOR_CATALOG_VERSION, AUTHOR_TOOL_RESULT_CHARS, AUTHOR_INITIAL_BYTES, type AuthorCatalog, type CatalogReadLog, type CatalogSearch, type CatalogGet } from './author-catalog.js'
