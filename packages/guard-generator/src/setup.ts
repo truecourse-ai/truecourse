@@ -66,6 +66,8 @@ import {
   loadResolvedExternals,
   computeRecipeFingerprint,
   computePreparationFingerprint,
+  preparationFingerprintComponents,
+  recipeFingerprintComponents,
   preparationCatalog,
   dependenciesPath,
   loadDependencyCatalog,
@@ -99,6 +101,7 @@ import type {
   Interface,
   MapperDiagnostic,
 } from '@truecourse/shared'
+import { movedNamedInputs } from '@truecourse/shared'
 import { GUARD_COMPOSE_FILE } from './datastore-compose.js'
 import { discoverRecipe, type RecipeDiscoveryPhase, type RecipeRepairFn } from './recipe-discovery.js'
 import { detectEcosystems, routesFromInterfaces, type ApiRouteRef } from './recipe-propose.js'
@@ -513,6 +516,22 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const fact = (step: GuardSetupStepKey, line: string): void => opts.onStepFact?.(step, line)
   const steps: GuardSetupTaxonomyStep[] = []
   const settled = settledFingerprints(repoRoot, opts.refresh === true)
+  /** The detection snapshot, once the detect step has read it: a catalog input. */
+  let detectionSnapshot = ''
+  /**
+   * Record a step's row with its inputs BY NAME, read off the tree as the row
+   * is recorded, which is the state its fingerprint was computed over. A step
+   * whose settled fingerprint no longer holds says which input moved it; a
+   * refresh re-opens every step on request, so it names none.
+   */
+  const pushStep = (row: GuardSetupTaxonomyStep): void => {
+    const inputComponents = stepInputComponents(repoRoot, row.key, detectionSnapshot)
+    steps.push({ ...row, ...(Object.keys(inputComponents).length > 0 ? { inputComponents } : {}) })
+    const settledFp = settled(row.key)
+    if (settledFp === null || settledFp === row.inputFingerprint) return
+    const moved = movedNamedInputs((priorReport?.steps ?? []).find((r) => r.key === row.key)?.inputComponents, inputComponents)
+    fact(row.key, moved ? `re-opened: ${moved.join(', ') || 'no named input'} moved` : 're-opened: the settled row names no inputs')
+  }
 
   // Asked BEFORE any step installs or builds anything: what this tree carries
   // right now is what a run of this repository is handed, and the seed's
@@ -613,7 +632,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     // neither discovery nor the live probe re-runs. `refresh` bypasses this.
     recipe = preexisting
     recipeStep = { status: 'ok', outcome: 'exists' }
-    steps.push({ key: 'recipe', status: 'skipped', reason: 'unchanged', inputFingerprint: recipeInputFp })
+    pushStep({ key: 'recipe', status: 'skipped', reason: 'unchanged', inputFingerprint: recipeInputFp })
     fact('recipe', 'unchanged since the last setup, from cache: neither re-derived nor re-probed')
     opts.onStepDone?.('recipe', 'unchanged — reused without re-verifying')
   } else {
@@ -725,7 +744,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       })
     }
     const sessionRunId = discovery.status === 'discovered' ? discovery.sessionRunId : undefined
-    steps.push({
+    pushStep({
       key: 'recipe',
       status: 'ok',
       inputFingerprint: recipeInputFp,
@@ -770,7 +789,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const database = mapped.database ?? null
   const datastoreUrls = mapped.datastoreUrls ?? []
   const detectionSnapshotJson = canonicalDetectionJson(detectedExternals, database, datastoreUrls)
-  steps.push({ key: 'detect', status: 'ok', inputFingerprint: '' })
+  detectionSnapshot = detectionSnapshotJson
+  pushStep({ key: 'detect', status: 'ok', inputFingerprint: '' })
   for (const service of detectedExternals) fact('detect', detectedServiceFact(service))
   if (database) {
     fact(
@@ -871,7 +891,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       const catalogFpPost = catalogFpOf()
       const enriched = catalogFpPost !== catalogFpPre
       if (settledSession !== catalogSessionFp || enriched) writeCatalogSettle(repoRoot, catalogSessionFpOf())
-      steps.push({ key: 'catalog', status: enriched ? 'ok' : 'skipped', ...(!enriched ? { reason: 'unchanged' } : {}), inputFingerprint: catalogFpPost })
+      pushStep({ key: 'catalog', status: enriched ? 'ok' : 'skipped', ...(!enriched ? { reason: 'unchanged' } : {}), inputFingerprint: catalogFpPost })
       fact(
         'catalog',
         enriched
@@ -899,7 +919,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
           fingerprint: catalogFpPre,
         })
         if (result.status === 'ok') writeCatalogSettle(repoRoot, catalogSessionFpOf())
-        steps.push(
+        pushStep(
           result.status === 'ok'
             ? {
                 key: 'catalog',
@@ -937,7 +957,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       } else {
         // No session wired (a test seam, or the deterministic-only edition): the
         // deterministic half is the whole step.
-        steps.push({ key: 'catalog', status: 'ok', inputFingerprint: catalogFpOf() })
+        pushStep({ key: 'catalog', status: 'ok', inputFingerprint: catalogFpOf() })
         for (const line of externalsSkeletonFacts(externalsStep)) fact('catalog', line)
         fact('catalog', 'no catalog session is wired into this run; the deterministic skeleton was the whole step')
         for (const line of catalogEntryFacts(repoRoot)) fact('catalog', line)
@@ -975,7 +995,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
     } else if (settled('interfaces') === interfacesFp && authoredExists && opts.replace !== true &&
       webScreensNeedingReadables(readInterfaceCatalog(repoRoot), readAuthoredInterfaceCatalog(repoRoot)).size === 0) {
-      steps.push({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
+      pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
       fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')
       opts.onStepDone?.('interfaces', 'unchanged')
     } else if (opts.authorInterfaces) {
@@ -988,7 +1008,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         interfaces: mapped.interfaces,
         diagnostics: mapped.diagnostics,
       })
-      steps.push({
+      pushStep({
         key: 'interfaces',
         status: result.status,
         ...(result.reason ? { reason: result.reason } : {}),
@@ -1014,7 +1034,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       for (const change of result.changes ?? []) fact('interfaces', `catalog edit: ${change}`)
       opts.onStepDone?.('interfaces', result.reason ?? result.status)
     } else {
-      steps.push({
+      pushStep({
         key: 'interfaces',
         status: 'skipped',
         reason:
@@ -1059,7 +1079,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             ...declaredNames(existingSeed),
           }
         : { status: 'skipped', reason: 'unchanged since the last run, which drafted no seed either' }
-      steps.push({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
+      pushStep({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
       fact(
         'seed',
         existingSeed
@@ -1093,7 +1113,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         onPhase: (running, done) => phases.enter({ running, done }),
       })
       seedStep = seedRun.step
-      steps.push({
+      pushStep({
         key: 'seed',
         status: seedStep.status,
         ...(seedStep.reason ? { reason: seedStep.reason } : {}),
@@ -1146,7 +1166,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       opts.onStepDone?.('preparations', 'existing private preparation profiles preserved')
     } else if (settled('preparations') === preparationFp &&
       preparationCatalog(preparationRecipe, repoRoot).length === Object.keys(preparationRecipe.preparations ?? {}).length) {
-      steps.push({ key: 'preparations', status: 'skipped', reason: 'unchanged', inputFingerprint: preparationFp })
+      pushStep({ key: 'preparations', status: 'skipped', reason: 'unchanged', inputFingerprint: preparationFp })
       fact('preparations', 'every private preparation profile is unchanged since the last setup, from cache')
       for (const line of preparationFacts(preparationRecipe, repoRoot)) fact('preparations', line)
       opts.onStepDone?.('preparations', 'unchanged')
@@ -1156,7 +1176,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             specExcerpts: readSpecExcerpts(repoRoot), fingerprint: preparationFp,
             onPhase: (running, done) => phases.enter({ running, done }) })
         : { status: 'skipped' as const, reason: 'private preparation authoring is unavailable; only profiles with runner-verified baseline checks are usable' }
-      steps.push({ key: 'preparations', status: result.status, ...(result.reason ? { reason: result.reason } : {}),
+      pushStep({ key: 'preparations', status: result.status, ...(result.reason ? { reason: result.reason } : {}),
         inputFingerprint: opts.preparationSession ? computePreparationFingerprint(repoRoot) : 'authoring-unavailable', ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
       // The session's findings are its outcome, read in the session itself;
       // the step only counts them.
@@ -1181,12 +1201,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   if (!preparationFailure && enter('auth')) {
     const authFp = authFingerprint(repoRoot)
     if (settled('auth') === authFp) {
-      steps.push({ key: 'auth', status: 'skipped', reason: 'unchanged', inputFingerprint: authFp })
+      pushStep({ key: 'auth', status: 'skipped', reason: 'unchanged', inputFingerprint: authFp })
       fact('auth', 'the supplied entries are unchanged since the last setup, from cache: no proof session ran')
       opts.onStepDone?.('auth', 'unchanged')
     } else if (opts.verifyAuth) {
       const result = await opts.verifyAuth({ repoRoot, recipe: reloadRecipe(repoRoot) ?? current, fingerprint: authFp })
-      steps.push({
+      pushStep({
         key: 'auth',
         status: result.status,
         ...(result.reason ? { reason: result.reason } : {}),
@@ -1197,7 +1217,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       if ((result.facts ?? []).length === 0 && result.reason) fact('auth', firstReasonLine(result.reason))
       opts.onStepDone?.('auth', result.reason ?? result.status)
     } else {
-      steps.push({
+      pushStep({
         key: 'auth',
         status: 'skipped',
         reason:
@@ -1380,13 +1400,17 @@ function writeCatalogSettle(repoRoot: string, fingerprint: string): void {
  *  the interfaces step re-runs when a screen appeared, moved, or vanished.
  *  Exported for the pre-flight estimate's settled check. */
 export function interfacesFingerprint(repoRoot: string): string {
-  const catalog = readInterfaceCatalog(repoRoot)
-  const pairs = (catalog?.resources?.['web'] ?? [])
+  return createHash('sha256')
+    .update(`${derivedWebPlacePairs(repoRoot)}::${computeRecipeFingerprint(repoRoot)}`)
+    .digest('hex')
+}
+
+/** The derived web places as sorted `(id, address)` lines. */
+function derivedWebPlacePairs(repoRoot: string): string {
+  return (readInterfaceCatalog(repoRoot)?.resources?.['web'] ?? [])
     .map((place) => `${place.id}\x00${place.address ?? ''}`)
     .sort()
-  return createHash('sha256')
-    .update(`${pairs.join('\n')}::${computeRecipeFingerprint(repoRoot)}`)
-    .digest('hex')
+    .join('\n')
 }
 
 function seedFingerprint(recipeFingerprint: string, depsContent: string): string {
@@ -1415,6 +1439,43 @@ export function authFingerprint(repoRoot: string): string {
     // fall through to the raw bytes
   }
   return createHash('sha256').update(`auth::${material}`).digest('hex')
+}
+
+/**
+ * A step's fingerprint inputs BY NAME, off the tree as it stands: what each
+ * step fingerprint above folds, one digest per input, so two rows of the same
+ * step can be compared input by input. `detect` has no fingerprint and no inputs.
+ */
+function stepInputComponents(
+  repoRoot: string,
+  key: GuardSetupTaxonomyKey,
+  detectionJson: string,
+): Record<string, string> {
+  const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex').slice(0, 16)
+  const recipeParts = (): Record<string, string> =>
+    Object.fromEntries(Object.entries(recipeFingerprintComponents(repoRoot)).map(([part, value]) => [`recipe.${part}`, value]))
+  switch (key) {
+    case 'recipe': {
+      const manifests: Record<string, string> = {}
+      for (const rel of FINGERPRINT_INPUTS) {
+        const abs = path.join(repoRoot, rel)
+        if (fs.existsSync(abs) && fs.statSync(abs).isFile()) manifests[rel] = digest(fs.readFileSync(abs))
+      }
+      return manifests
+    }
+    case 'detect':
+      return {}
+    case 'catalog':
+      return { detection: digest(detectionJson), ...recipeParts() }
+    case 'interfaces':
+      return { places: digest(derivedWebPlacePairs(repoRoot)), ...recipeParts() }
+    case 'seed':
+      return recipeParts()
+    case 'preparations':
+      return preparationFingerprintComponents(repoRoot)
+    case 'auth':
+      return { supplied: digest(authFingerprint(repoRoot)) }
+  }
 }
 
 /**

@@ -83,6 +83,12 @@ export const GuardSetupTaxonomyStepSchema = z
      * and always runs).
      */
     inputFingerprint: z.string(),
+    /**
+     * The inputs behind `inputFingerprint`, by NAME (input → its digest), read
+     * off the same tree, so a step that re-opens can say which input moved.
+     * Absent on a row written before the field.
+     */
+    inputComponents: z.record(z.string(), z.string()).optional(),
     reason: z.string().optional(),
     /** The sessions-store run that carried this step's agent sessions, if any. */
     sessionRunId: z.string().optional(),

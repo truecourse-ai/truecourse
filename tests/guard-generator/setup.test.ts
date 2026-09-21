@@ -448,6 +448,27 @@ describe('runGuardSetup — skip when settled', () => {
     expect(probe.calls).toBe(1)
   })
 
+  it('a step that re-opens names the input that moved', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } })
+    const probe = probeStub()
+    const seed = seedSeam()
+    const first = await runAndPersist(r, { probe: probe.probe, seedSession: seed.seam })
+    expect(Object.keys(first.steps.find((s) => s.key === 'seed')?.inputComponents ?? {})).toContain('recipe.manifests')
+
+    // A dependency bump: the root manifest moves, and nothing else does.
+    const manifest = JSON.parse(fs.readFileSync(path.join(r, 'package.json'), 'utf-8')) as Record<string, unknown>
+    fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ ...manifest, version: '9.9.9' }))
+    const facts: string[] = []
+    await runAndPersist(r, {
+      probe: probe.probe,
+      seedSession: seed.seam,
+      onStepFact: (step, line) => facts.push(`${step} | ${line}`),
+    })
+    expect(facts).toContain('recipe | re-opened: package.json moved')
+    expect(facts).toContain('seed | re-opened: recipe.manifests moved')
+  })
+
   // The seed's cold-clone proof is where the recipe's `install`/`build` first
   // run in a tree that did not grow across the session's attempts. A failure
   // there is the RECIPE gate giving way, found late: the run fails on it and
