@@ -30,7 +30,7 @@ import {
   type DocAreaTags,
   type DocCandidate,
 } from '@truecourse/spec-consolidator';
-import { getCacheEntry } from '@truecourse/llm';
+import { getCacheEntryOrLegacy } from '@truecourse/llm';
 import type { z } from 'zod';
 import { WRAP_UP_TURNS, type SessionBudget } from '@truecourse/agent-loop';
 import {
@@ -41,6 +41,7 @@ import {
   DocVerdictSchema,
   curateDocBriefing,
   curateDocCacheKey,
+  curateDocLegacyCacheKey,
   type DocVerdict,
 } from '../spec-scan/curate-doc.js';
 import {
@@ -54,6 +55,7 @@ import {
   collectAreaVocab,
   settleAreasBriefing,
   settleAreasCacheKey,
+  settleAreasLegacyCacheKey,
   settleAreasGate,
   type AreaSettlement,
 } from '../spec-scan/settle-areas.js';
@@ -66,6 +68,7 @@ import {
   deriveOverlapWorkItems,
   overlapBriefing,
   overlapSessionCacheKey,
+  overlapSessionLegacyCacheKey,
   type OverlapWorkItem,
 } from '../spec-scan/overlap.js';
 import {
@@ -90,6 +93,7 @@ import {
   flowPrerequisiteStateMaterial,
   proposeRecipe,
   recipeCacheKey,
+  recipeLegacyCacheKey,
   RECIPE_CACHE_NAME,
   RecipeProposalSchema,
   SEED_CACHE_NAME,
@@ -134,11 +138,13 @@ import {
   extractSessionBriefing,
   extractContextSchema,
   extractSessionCacheKey,
+  extractSessionLegacyCacheKey,
   FLOWS_SESSION_BUDGET,
   FLOWS_SESSION_CACHE_NAME,
   FLOWS_SESSION_KIND,
   FLOWS_SESSION_SYSTEM_PROMPT,
   flowsSessionCacheKey,
+  flowsSessionLegacyCacheKey,
   FLOW_WORKER_BUDGET,
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
@@ -199,6 +205,7 @@ import {
   SEED_SESSION_KIND,
   SeedSessionOutcomeSchema,
   seedSessionCacheKey,
+  seedSessionLegacyCacheKey,
 } from '../guard-setup/index.js';
 import {
   RECONCILE_INTERFACES_BUDGET,
@@ -342,8 +349,11 @@ async function probeSessionCache<T>(
   cacheName: string,
   key: string,
   schema: z.ZodType<T>,
+  /** The key this kind computed before its formula changed — probed the same
+   *  way the run reads it, so an estimate never quotes work a hit will skip. */
+  legacyKey?: string,
 ): Promise<T | null> {
-  const raw = await getCacheEntry(repoRoot, cacheName, key).catch(() => null);
+  const raw = await getCacheEntryOrLegacy(repoRoot, cacheName, key, legacyKey ?? key).catch(() => null);
   if (raw === null) return null;
   const parsed = schema.safeParse(raw);
   return parsed.success ? parsed.data : null;
@@ -421,6 +431,7 @@ export async function estimateScanTokens(
       CURATE_DOC_CACHE_NAME,
       curateDocCacheKey({ identity, doc }, instructionParts),
       DocVerdictSchema,
+      curateDocLegacyCacheKey({ identity, doc }, instructionParts),
     );
     if (cached) cachedVerdicts.set(doc.path, cached);
     else curateMissDocs.push(doc);
@@ -460,6 +471,7 @@ export async function estimateScanTokens(
         SETTLE_AREAS_CACHE_NAME,
         settleAreasCacheKey(vocab, instructionParts),
         AreaSettlementSchema,
+        settleAreasLegacyCacheKey(vocab, instructionParts),
       );
       settleItems = settlement ? 0 : 1;
       settleMin = settleItems;
@@ -504,6 +516,7 @@ export async function estimateScanTokens(
       OVERLAP_SESSION_CACHE_NAME,
       overlapSessionCacheKey(item, instructionParts),
       OverlapOutcomeSchema,
+      overlapSessionLegacyCacheKey(item, instructionParts),
     );
     if (!cached) overlapMissItems.push(item);
   }
@@ -684,6 +697,7 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
       EXTRACT_SESSION_CACHE_NAME,
       extractSessionCacheKey(doc, prerequisites.targets),
       extractContextSchema(prerequisites.targets),
+      extractSessionLegacyCacheKey(doc, prerequisites.targets),
     );
     if (!cached) {
       extractItems++;
@@ -723,7 +737,13 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
     const areas = buildFlowAreas(inputs);
     let areaCalls = 0;
     for (const area of areas) {
-      const cached = await probeSessionCache(repoRoot, FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey(area), FlowSetSchema);
+      const cached = await probeSessionCache(
+        repoRoot,
+        FLOWS_SESSION_CACHE_NAME,
+        flowsSessionCacheKey(area),
+        FlowSetSchema,
+        flowsSessionLegacyCacheKey(area),
+      );
       if (!cached) areaCalls++;
     }
     const areasWithClaims = areas.filter((a) => a.claims.length > 0).length;
@@ -1096,6 +1116,7 @@ export async function estimateGuardSetup(
       RECIPE_CACHE_NAME,
       recipeCacheKey(computeRecipeFingerprint(repoRoot)),
       RecipeProposalSchema,
+      recipeLegacyCacheKey(computeRecipeFingerprint(repoRoot)),
     );
     repairMax = cached ? 0 : 1;
     repairItems = cached ? 0 : proposeRecipe(repoRoot).ok ? 0 : 1;
@@ -1137,6 +1158,7 @@ export async function estimateGuardSetup(
             SEED_CACHE_NAME,
             seedSessionCacheKey(computeSeedStepFingerprint(repoRoot)),
             SeedSessionOutcomeSchema,
+            seedSessionLegacyCacheKey(legacySeedStepFingerprint(repoRoot)),
           )
         : null;
     seedMax = cached ? 0 : 1;

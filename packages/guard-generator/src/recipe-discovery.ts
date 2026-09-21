@@ -25,7 +25,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import {
   loadRecipe,
   resolveEntry,
@@ -50,9 +50,9 @@ import {
   type RouteManifestApp,
 } from '@truecourse/guard-runner'
 import { isCreditsExhausted, type DatastoreUrlRef } from '@truecourse/shared'
+import { LEGACY_RECIPE_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
 import {
-  RECIPE_PROMPT_FINGERPRINT,
   type RecipeAppInventoryEntry,
   type RecipeDiscoveryInput,
   type RecipeRetryContext,
@@ -352,6 +352,13 @@ export interface DiscoverRecipeOptions {
 }
 
 /**
+ * THE RECIPE STAGE'S VERSION, bumped by hand. A reworded proposal prompt does
+ * not make a verified recipe wrong, so the prompt is not in the key; a prompt
+ * change that fixes WRONG output bumps this in the same commit.
+ */
+export const RECIPE_STAGE_VERSION = 1
+
+/**
  * The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`, plus
  * the compose PROJECT when the caller named one. Exported so the repair session
  * keeps the exact key: a proposal the one-shot era settled stays a hit in the
@@ -364,7 +371,17 @@ export interface DiscoverRecipeOptions {
  * setup). A key with no project keys exactly as it always did.
  */
 export function recipeCacheKey(inputsFingerprint: string, composeProject?: string): string {
-  const material = `${RECIPE_PROMPT_FINGERPRINT}::${inputsFingerprint}${composeProject ? `::${composeProject}` : ''}`
+  return recipeKeyOver(`recipe-v${RECIPE_STAGE_VERSION}`, inputsFingerprint, composeProject)
+}
+
+/** {@link recipeCacheKey} as it was computed while the prompt was in it — the key
+ *  a miss falls back to. Delete with the legacy hash. */
+export function recipeLegacyCacheKey(inputsFingerprint: string, composeProject?: string): string {
+  return recipeKeyOver(LEGACY_RECIPE_PROMPT_FINGERPRINT, inputsFingerprint, composeProject)
+}
+
+function recipeKeyOver(stage: string, inputsFingerprint: string, composeProject?: string): string {
+  const material = `${stage}::${inputsFingerprint}${composeProject ? `::${composeProject}` : ''}`
   return createHash('sha256').update(material).digest('hex')
 }
 
@@ -566,7 +583,12 @@ export async function discoverRecipe(
   // The LLM proposal is cached on the discovery-input fingerprint — unchanged
   // inputs reuse the prior proposal, but verification always re-runs.
   let proposal: RecipeProposal | null = null
-  const cached = await getCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint, composeProject))
+  const cached = await getCacheEntryOrLegacy(
+    repoRoot,
+    RECIPE_CACHE_NAME,
+    recipeCacheKey(inputsFingerprint, composeProject),
+    recipeLegacyCacheKey(inputsFingerprint, composeProject),
+  )
   if (cached) {
     const parsed = RecipeProposalSchema.safeParse(cached)
     if (parsed.success) proposal = parsed.data

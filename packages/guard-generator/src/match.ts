@@ -21,7 +21,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import { canonicalStringify } from '@truecourse/shared/openapi'
 import {
   GUARD_OBSERVATION_CAPABILITIES,
@@ -40,8 +40,8 @@ import {
   type InterfaceStep,
 } from '@truecourse/shared'
 import { RealizationMatchSchema, type RealizationStep, type RealizationGap, type RealizationMatch } from './schemas.js'
+import { LEGACY_MATCH_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import {
-  MATCH_PROMPT_FINGERPRINT,
   type InterfaceDigest,
   type MatchIssues,
   type MatchUserContext,
@@ -194,8 +194,16 @@ function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
 // ---------------------------------------------------------------------------
 
 /**
- * A (flow, surface) match's content key: the flow's milestone composition, the
- * surface's catalog fingerprint, the matching prompt, and the format version.
+ * THE MATCH STAGE'S VERSION, bumped by hand. A reworded matching prompt does
+ * not make a cached verdict wrong, so the prompt is not in the key; when a
+ * prompt change fixes WRONG output, this is bumped in the same commit and every
+ * flow re-matches.
+ */
+export const MATCH_STAGE_VERSION = 1
+
+/**
+ * A (flow, surface) match's content key: the stage version, the flow's milestone
+ * composition, the surface's catalog fingerprint and the format version.
  * Editing a doc that moves the flow's fingerprint, or a code change that moves the
  * surface, re-matches; nothing else does.
  */
@@ -204,10 +212,29 @@ export function matchCacheKey(
   catalog: Pick<SurfaceCatalog, 'surface' | 'fingerprint'>,
   providerControls: readonly ResolvedProviderControl[] = [],
 ): string {
+  return matchKeyOver(`match-v${MATCH_STAGE_VERSION}`, flow, catalog, providerControls)
+}
+
+/** {@link matchCacheKey} as it was computed while the prompt was in it — the key
+ *  a miss falls back to. Delete with the legacy hash. */
+export function matchLegacyCacheKey(
+  flow: Pick<GuardFlow, 'fingerprint'>,
+  catalog: Pick<SurfaceCatalog, 'surface' | 'fingerprint'>,
+  providerControls: readonly ResolvedProviderControl[] = [],
+): string {
+  return matchKeyOver(LEGACY_MATCH_PROMPT_FINGERPRINT, flow, catalog, providerControls)
+}
+
+function matchKeyOver(
+  stage: string,
+  flow: Pick<GuardFlow, 'fingerprint'>,
+  catalog: Pick<SurfaceCatalog, 'surface' | 'fingerprint'>,
+  providerControls: readonly ResolvedProviderControl[],
+): string {
   return createHash('sha256')
     .update(
       [
-        MATCH_PROMPT_FINGERPRINT,
+        stage,
         'case-assignments-v2',
         JSON.stringify(GUARD_OBSERVATION_CAPABILITIES[catalog.surface] ?? []),
         JSON.stringify(providerControls.length ? [PROVIDER_CONTROL_VERSION, providerControls.map(c => JSON.stringify(c)).sort()] : []),
@@ -252,7 +279,7 @@ export async function readCachedMatch(
 ): Promise<{ plan: RealizationPlan | null } | null> {
   cacheKey ??= matchCacheKey(flow, catalog, providerControls)
   if (!capabilityPartition(flow, catalog.surface).flow.milestones.length) return { plan: null }
-  const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
+  const cached = await getCacheEntryOrLegacy(repoRoot, MATCH_CACHE_NAME, cacheKey, matchLegacyCacheKey(flow, catalog, providerControls))
   if (!cached) return null
   const parsed = RealizationMatchSchema.safeParse(cached)
   if (!parsed.success || parsed.data.unrealizable) return null
@@ -600,7 +627,7 @@ export async function matchFlow(
   const markIdentity = (data: unknown): Promise<void> =>
     setCacheEntry(repoRoot, MATCH_IDENTITY_CACHE_NAME, identityKey, { verdict: verdictDigest(data) })
 
-  const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
+  const cached = await getCacheEntryOrLegacy(repoRoot, MATCH_CACHE_NAME, cacheKey, matchLegacyCacheKey(flow, catalog, providerControls))
   if (cached) {
     const parsed = RealizationMatchSchema.safeParse(cached)
     if (parsed.success && !parsed.data.unrealizable) {

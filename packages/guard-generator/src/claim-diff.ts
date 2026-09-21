@@ -17,12 +17,13 @@ import type { GuardPrerequisiteTarget } from '@truecourse/shared'
  * the document to extraction exactly as before the gate existed.
  */
 import { createHash } from 'node:crypto'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import { guardManifestSections, isCreditsExhausted, type GuardManifest } from '@truecourse/shared'
 import { extractSectionTexts, nodeRefContext, normalizeSectionText } from '@truecourse/guard-runner'
 import { snapExtraction, type ReuseExtractionSeam } from './extract.js'
 import { flowSectionKey } from './flows.js'
-import { CLAIM_DIFF_PROMPT_FINGERPRINT, type ClaimDiffSectionInput } from './prompts.js'
+import { type ClaimDiffSectionInput } from './prompts.js'
+import { LEGACY_CLAIM_DIFF_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { ClaimDiffSchema, type ClaimDiff } from './schemas.js'
 import type { ClaimDiffRunner } from './runners.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
@@ -73,16 +74,33 @@ export async function rememberDocTexts(repoRoot: string, docs: readonly GuardDoc
   }
 }
 
-/** The gate's cache key: doctrine :: section :: old text :: new text :: prior
- *  claims. The same edit judged against the same prior is judged once. */
+/**
+ * THE CLAIM-DIFF STAGE'S VERSION, bumped by hand. A reworded prompt does not
+ * make a cosmetic-vs-substantive verdict wrong; a prompt change that fixes
+ * WRONG output bumps this in the same commit.
+ */
+export const CLAIM_DIFF_STAGE_VERSION = 1
+
+/** The gate's cache key: stage version :: section :: old text :: new text ::
+ *  prior claims. The same edit judged against the same prior is judged once. */
 export function claimDiffCacheKey(section: ClaimDiffSectionInput): string {
+  return claimDiffKeyOver(`claim-diff-v${CLAIM_DIFF_STAGE_VERSION}`, section)
+}
+
+/** {@link claimDiffCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to. Delete with the legacy hash. */
+export function claimDiffLegacyCacheKey(section: ClaimDiffSectionInput): string {
+  return claimDiffKeyOver(LEGACY_CLAIM_DIFF_PROMPT_FINGERPRINT, section)
+}
+
+function claimDiffKeyOver(stage: string, section: ClaimDiffSectionInput): string {
   const prior = JSON.stringify({
     claims: [...section.priorClaims].map((c) => [c.claim, c.reason]).sort(),
     untestable: section.priorUntestable ?? null,
   })
   return createHash('sha256')
     .update(
-      [CLAIM_DIFF_PROMPT_FINGERPRINT, section.doc, section.anchor, normalizeSectionText(section.oldText), normalizeSectionText(section.newText), prior].join('\0'),
+      [stage, section.doc, section.anchor, normalizeSectionText(section.oldText), normalizeSectionText(section.newText), prior].join('\0'),
     )
     .digest('hex')
 }
@@ -177,7 +195,9 @@ async function judge(
   result: ClaimDiffGateResult,
 ): Promise<ClaimDiff | null> {
   const key = claimDiffCacheKey(section)
-  const cached = ClaimDiffSchema.safeParse(await getCacheEntry(input.repoRoot, CLAIM_DIFF_CACHE_NAME, key).catch(() => null))
+  const cached = ClaimDiffSchema.safeParse(
+    await getCacheEntryOrLegacy(input.repoRoot, CLAIM_DIFF_CACHE_NAME, key, claimDiffLegacyCacheKey(section)).catch(() => null),
+  )
   if (cached.success) return cached.data
   let lastError = 'invalid reply'
   for (let attempt = 0; attempt < 2; attempt++) {

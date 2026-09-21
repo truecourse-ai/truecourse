@@ -119,6 +119,8 @@ import {
   flowRecipeSliceFingerprint,
   flowRosterFingerprint,
   flowPreparationFingerprint,
+  seedRosterFingerprint,
+  preparationsFingerprint,
 } from '@truecourse/guard-runner'
 import {
   guardCoverageProgress,
@@ -195,6 +197,7 @@ import {
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
+import { LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
 import { persistExtractedClaims } from './claims-persist.js'
 import {
@@ -207,7 +210,6 @@ import { parseOpenApiSpec } from '@truecourse/shared/openapi'
 import {
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
-  WORLD_CLASSIFY_PROMPT_FINGERPRINT,
   type AuthorMilestone,
   type AuthorUserContext,
   type InterfaceContractHint,
@@ -215,7 +217,7 @@ import {
   type ExternalServiceHint,
   type FidelityUserContext,
 } from './prompts.js'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import { WorldClassifySchema, rawScenarioSchemaFor, type RawGeneratedScenario } from './schemas.js'
 import { EMPTY_CLAIM_DIFF_GATE, docContentHash, rememberDocTexts, reuseCosmeticExtractions } from './claim-diff.js'
 import {
@@ -258,7 +260,7 @@ import {
   type RealizationPlan,
   type SurfaceCatalog,
 } from './match.js'
-import { groundProbes, type ProbeTranscript } from './ground.js'
+import { groundProbes, groundInputsFingerprint, type ProbeTranscript } from './ground.js'
 import { scenarioCompositionDefect } from './validate.js'
 import { mineExampleBlocks, exampleFidelityDefect, type DocExampleBlock } from './examples.js'
 import { discoverRecipe } from './recipe-discovery.js'
@@ -305,6 +307,13 @@ const ENTRY_PREFLIGHT_ANCHOR = '(entry preflight)'
  *  call over a whole corpus is the call most likely to time out, and a lost
  *  classification degrades the run's blast-radius protection. */
 const WORLD_CLASSIFY_CHUNK_SIZE = 40
+
+/**
+ * THE WORLD-CLASSIFY STAGE'S VERSION, bumped by hand. Rewording the prompt does
+ * not make a stored "this flow mutates the shared world" verdict wrong; a
+ * prompt change that fixes WRONG output bumps this in the same commit.
+ */
+const WORLD_CLASSIFY_STAGE_VERSION = 1
 
 /** Phrases that mark a flow as a SUSPECT world-mutator when the classifier is
  *  unavailable — deliberately coarse (a false positive only serializes a flow;
@@ -788,17 +797,19 @@ function defaultConcurrency(): number {
  * computes the keys (cache name `guard/generate`, kept from the one-shot stage).
  */
 export function workerCacheKey(
-  promptFingerprint: string,
+  stage: string,
   flow: Pick<GuardFlow, 'fingerprint'>,
   surface: GuardDriverId,
   sectionKeys: readonly string[],
   interfaceFingerprints: readonly string[],
-  recipeFingerprint: string,
+  /** The recipe the session can read: its surface's slice, the whole roster it
+   *  may draw fixtures from, and every preparation profile it may choose. */
+  recipe: string,
   edit?: { priorShas: readonly string[] },
 ): string {
   const parts = [
-    promptFingerprint,
-    recipeFingerprint,
+    stage,
+    recipe,
     surface,
     flow.fingerprint,
     [...sectionKeys].sort().join('~'),
@@ -808,6 +819,20 @@ export function workerCacheKey(
   // the from-scratch recipe, so committed entries keep hitting.
   if (edit) parts.push('edit', [...edit.priorShas].sort().join('~'))
   return createHash('sha256').update(parts.join('::')).digest('hex')
+}
+
+/**
+ * The recipe half of {@link workerCacheKey}: everything about the recipe an
+ * authoring session can reach, and nothing else. The session picks its own
+ * preparation profile and its own fixtures inside the session, so a key
+ * computed BEFORE it runs folds the whole offer rather than guessing.
+ */
+export function workerRecipeMaterial(material: {
+  recipeSlice: string
+  roster: string
+  preparations: string
+}): string {
+  return [material.recipeSlice, material.roster, material.preparations].join('~')
 }
 
 // ---------------------------------------------------------------------------
@@ -861,12 +886,20 @@ export type WorkerFidelityVerdict =
 /** Core's fidelity judge: cache hit → verdict; miss → one depth-1 child session. */
 export type WorkerFidelityJudge = (input: WorkerFidelityInput) => Promise<WorkerFidelityVerdict>
 
-/** The key material core folds (with its own prompt fingerprint) into
+/** The key material core folds (with its own stage version) into
  *  {@link workerCacheKey} — every behavior-affecting input, nothing else. */
 export interface FlowWorkerCacheMaterial {
   flowFingerprint: string
   sectionKeys: readonly string[]
   interfaceFingerprints: readonly string[]
+  /** This surface's recipe slice. */
+  recipeSlice: string
+  /** The whole seed roster the session may draw fixtures and credentials from. */
+  roster: string
+  /** Every declared preparation profile, with its script bytes. */
+  preparations: string
+  /** The whole recipe fingerprint, for the OLD key a miss falls back to.
+   *  Delete with the legacy hash. */
   recipeFingerprint: string
   /** `edit` when the briefing carries the flow's committed scenarios to edit;
    *  `scratch` otherwise (the key then matches every pre-edit-mode entry). */
@@ -2156,12 +2189,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     for (let i = 0; i < classifyInputs.length; i += WORLD_CLASSIFY_CHUNK_SIZE) {
       chunks.push(classifyInputs.slice(i, i + WORLD_CLASSIFY_CHUNK_SIZE))
     }
+    const chunkKeyOver = (stage: string, chunk: typeof classifyInputs): string =>
+      createHash('sha256').update(`${stage}\0${JSON.stringify(chunk)}`).digest('hex')
     for (const chunk of chunks) {
-      const chunkKey = createHash('sha256')
-        .update(`${WORLD_CLASSIFY_PROMPT_FINGERPRINT}\0${JSON.stringify(chunk)}`)
-        .digest('hex')
+      const chunkKey = chunkKeyOver(`world-classify-v${WORLD_CLASSIFY_STAGE_VERSION}`, chunk)
       const cached = WorldClassifySchema.safeParse(
-        await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, chunkKey),
+        await getCacheEntryOrLegacy(
+          repoRoot,
+          WORLD_CLASSIFY_CACHE_NAME,
+          chunkKey,
+          chunkKeyOver(LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT, chunk),
+        ),
       )
       if (cached.success) {
         for (const id of cached.data.mutators) destructiveFlowIds.add(id)
@@ -2299,7 +2337,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       claimTexts,
       resolvedEntry: resolvedEntryMemo,
       displayEntry: recipe.entry,
-      recipeFingerprint,
+      inputsFingerprint: groundInputsFingerprint(recipe),
+      legacyRecipeFingerprint: recipeFingerprint,
       recipeEnv: recipe.env,
       onProbesPlanned: (n) => {
         groundPlanned += n
@@ -3241,6 +3280,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               ...task.plan.interfaces.map((j) => j.fingerprint),
               ...(task.surface === 'web' ? [authorCatalog.fingerprint] : []),
             ],
+            recipeSlice: flowRecipeSliceFingerprint(recipe, task.surface),
+            roster: seedRosterFingerprint(recipe),
+            preparations: preparationsFingerprint(repoRoot, recipe),
             recipeFingerprint,
             mode: editMode ? 'edit' : 'scratch',
             priorShas: priorScenarios.map((p) => sha256Hex(p.yaml)),

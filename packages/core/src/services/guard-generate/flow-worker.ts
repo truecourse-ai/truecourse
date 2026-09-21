@@ -39,6 +39,7 @@ import {
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_WEB_SYSTEM_PROMPT,
   workerCacheKey,
+  workerRecipeMaterial,
   AUTHOR_CATALOG_VERSION,
   type FlowWorkerTask,
   type WorkerFidelityJudge,
@@ -188,6 +189,14 @@ const PROMPT_FINGERPRINT_BY_SURFACE: Partial<Record<GuardDriverId, string>> = {
   web: FLOW_WORKER_WEB_PROMPT_FINGERPRINT,
 }
 
+/**
+ * THE FLOW-WORKER STAGE'S VERSION, bumped by hand. A cached scenario was
+ * authored, run and proven; rewording the prompt that wrote it does not make it
+ * wrong. A prompt change that fixes WRONG output bumps this in the same commit
+ * and every flow re-authors.
+ */
+export const FLOW_WORKER_STAGE_VERSION = 1
+
 /** The system prompt one surface's workers author under. */
 export function flowWorkerSystemPrompt(surface: GuardDriverId): string {
   return SYSTEM_PROMPT_BY_SURFACE[surface] ?? FLOW_WORKER_CLI_SYSTEM_PROMPT
@@ -207,15 +216,31 @@ export function flowWorkerPromptFingerprint(surface: GuardDriverId): string {
 export function flowWorkerCacheKey(task: FlowWorkerTask): string {
   const m = task.cacheMaterial
   return workerCacheKey(
+    `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
+    { fingerprint: m.flowFingerprint },
+    task.surface,
+    m.sectionKeys,
+    m.interfaceFingerprints,
+    workerRecipeMaterial(m),
+    // Edit mode folds the briefed priors in: a from-scratch task keys exactly
+    // as before, so every committed entry survives; an edit never serves a
+    // scratch hit and vice versa.
+    m.mode === 'edit' ? { priorShas: m.priorShas } : undefined,
+  )
+}
+
+/** {@link flowWorkerCacheKey} as it was computed while the surface's prompt and
+ *  the whole recipe fingerprint were in it — the key a miss falls back to.
+ *  Delete with the legacy hash. */
+export function flowWorkerLegacyCacheKey(task: FlowWorkerTask): string {
+  const m = task.cacheMaterial
+  return workerCacheKey(
     flowWorkerPromptFingerprint(task.surface),
     { fingerprint: m.flowFingerprint },
     task.surface,
     m.sectionKeys,
     m.interfaceFingerprints,
     m.recipeFingerprint,
-    // Edit mode folds the briefed priors in: a from-scratch task keys exactly
-    // as before, so every committed entry survives; an edit never serves a
-    // scratch hit and vice versa.
     m.mode === 'edit' ? { priorShas: m.priorShas } : undefined,
   )
 }

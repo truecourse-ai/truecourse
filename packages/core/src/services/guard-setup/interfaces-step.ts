@@ -40,6 +40,7 @@ import type {
 } from '@truecourse/guard-generator';
 import {
   computeRecipeFingerprint,
+  recipeContractFingerprint,
   guardInterfacesPath,
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
@@ -228,7 +229,8 @@ async function runReconcile(
     repoRoot: input.repoRoot,
     diagnostics: disputes,
     entry: resolveEntry(input.repoRoot, [...input.recipe.entry!]),
-    recipeFingerprint: computeRecipeFingerprint(input.repoRoot),
+    recipeContract: recipeContractFingerprint(input.repoRoot),
+    legacyRecipeFingerprint: computeRecipeFingerprint(input.repoRoot),
     driver: async () => {
       acquired = await context.acquire();
       return acquired.driver;

@@ -11,6 +11,7 @@ export {
   generateGuards,
   looksWorldMutating,
   workerCacheKey,
+  workerRecipeMaterial,
   // Single-step mode (`only`): the pipeline's session
   // steps in order. `@truecourse/core` enforces the cache-only replay of the
   // prior ones against these.
@@ -69,6 +70,8 @@ export {
   realizationAssignmentFingerprint,
   partitionPlanPreparations,
   matchCacheKey,
+  matchLegacyCacheKey,
+  MATCH_STAGE_VERSION,
   MATCH_CACHE_NAME,
   type MatchOutcome,
   type MatchPlan,
@@ -162,6 +165,7 @@ export {
   discoverRecipe,
   verifyProposal,
   recipeCacheKey,
+  recipeLegacyCacheKey,
   staticProposalComplaints,
   failureReport,
   RECIPE_CACHE_NAME,
@@ -220,6 +224,7 @@ export {
   deriveExpansionProbes,
   captureProbes,
   groundProbes,
+  groundInputsFingerprint,
   defaultProbeExecutor,
   GROUND_CACHE_NAME,
   MAX_PROBES_PER_BATCH,
@@ -381,6 +386,7 @@ export {
   reuseCosmeticExtractions,
   rememberDocTexts,
   claimDiffCacheKey,
+  claimDiffLegacyCacheKey,
   docContentHash,
   CLAIM_DIFF_CACHE_NAME,
   DOC_TEXT_CACHE_NAME,

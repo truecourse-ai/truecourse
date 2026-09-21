@@ -402,6 +402,9 @@ export interface GuardSetupSeedSessionInput {
   existingScript?: { scriptPath: string; scriptContent: string }
   /** The seed step's PRE-RUN input fingerprint — the session's cache key. */
   fingerprint: string
+  /** The step's fingerprint under its OLD formula, for the key a miss falls
+   *  back to. Delete with the legacy hash. */
+  legacyFingerprint: string
   /**
    * Whether setup was handed a FRESH CHECKOUT — a git repository carrying
    * nothing git ignores beyond what the caller materialized into it. A cloned
@@ -1120,6 +1123,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         }),
         requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,
+        legacyFingerprint: legacySeedStepFingerprint(repoRoot),
         freshCheckout,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
@@ -1919,6 +1923,8 @@ async function runSeedStep(args: {
   requiredResources: RequiredResource[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
+  /** The same, under the step's OLD formula — the old key's half. */
+  legacyFingerprint: string
   /** Whether the tree setup was handed is a fresh checkout — the cold proof's gate. */
   freshCheckout: boolean
   onPhase: (running: string, done: string) => void
@@ -2012,6 +2018,7 @@ async function runSeedStep(args: {
         })()
       : {}),
     fingerprint: args.fingerprint,
+    legacyFingerprint: args.legacyFingerprint,
     freshCheckout: args.freshCheckout,
     onPhase: args.onPhase,
   })

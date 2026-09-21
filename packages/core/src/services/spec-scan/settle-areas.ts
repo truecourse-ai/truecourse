@@ -29,6 +29,7 @@ import {
   type VocabMap,
 } from '@truecourse/spec-consolidator'
 import { promptFingerprint } from '../agent/session-cache.js'
+import { LEGACY_SETTLE_AREAS_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
   docTitle,
   docsWithLabelTool,
@@ -182,6 +183,13 @@ The outcome is one object: { "concernMerges": {...}, "productMerges": {...}, "pr
 export const SETTLE_AREAS_PROMPT_FINGERPRINT = promptFingerprint(SETTLE_AREAS_SYSTEM_PROMPT)
 
 /**
+ * THE SETTLE-AREAS STAGE'S VERSION, bumped by hand. A reworded prompt does not
+ * make a settled vocabulary wrong; a prompt change that fixes WRONG output
+ * bumps this in the same commit.
+ */
+export const SETTLE_AREAS_STAGE_VERSION = 1
+
+/**
  * The cache key covers everything the BRIEFING says — which, since the map
  * moved into it, is the labels AND the docs behind them. So a corpus that
  * gained, lost or re-tagged a doc settles again (the settlement was judged
@@ -190,8 +198,18 @@ export const SETTLE_AREAS_PROMPT_FINGERPRINT = promptFingerprint(SETTLE_AREAS_SY
  * appendable tail (step 6's orchestrator `instructions` land there).
  */
 export function settleAreasCacheKey(vocab: AreaVocabView, extraParts: readonly string[] = []): string {
+  return settleAreasKeyOver(`settle-areas-v${SETTLE_AREAS_STAGE_VERSION}`, vocab, extraParts)
+}
+
+/** {@link settleAreasCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to. Delete with the legacy hash. */
+export function settleAreasLegacyCacheKey(vocab: AreaVocabView, extraParts: readonly string[] = []): string {
+  return settleAreasKeyOver(LEGACY_SETTLE_AREAS_PROMPT_FINGERPRINT, vocab, extraParts)
+}
+
+function settleAreasKeyOver(stage: string, vocab: AreaVocabView, extraParts: readonly string[]): string {
   return scanCacheKey([
-    SETTLE_AREAS_PROMPT_FINGERPRINT,
+    stage,
     labelMapKeyPart(vocab.products),
     labelMapKeyPart(vocab.concerns),
     [...vocab.overThreshold].sort().join(','),

@@ -21,8 +21,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { createSandbox, executeStep, type StepCapture } from '@truecourse/guard-runner'
+import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
+import { createSandbox, executeStep, flowRecipeSliceFingerprint, type Recipe, type StepCapture } from '@truecourse/guard-runner'
 
 export const GROUND_CACHE_NAME = 'guard/ground'
 /** Hard per-probe wall-clock; a probe that hangs is killed and recorded timed-out. */
@@ -356,8 +356,11 @@ export interface CaptureProbesOptions {
   resolvedEntry: string[]
   /** The recipe entry as written (repo-relative) — for the readable display command. */
   displayEntry: readonly string[]
-  /** The recipe input fingerprint — the cache key's stable component. */
-  recipeFingerprint: string
+  /** {@link groundInputsFingerprint} — the cache key's stable component. */
+  inputsFingerprint: string
+  /** The whole recipe fingerprint, for the OLD key a miss falls back to.
+   *  Delete with the legacy hash. */
+  legacyRecipeFingerprint: string
   recipeEnv?: Record<string, string>
   /** Test seam; production uses {@link defaultProbeExecutor}. */
   exec?: ProbeExecutor
@@ -367,7 +370,7 @@ export interface CaptureProbesOptions {
 
 /**
  * Capture each probe's transcript, content-keyed-cached under `guard/ground` on
- * `(recipeFingerprint, argv)` — a cache hit runs NO subprocess. Transcripts are
+ * `(inputsFingerprint, argv)` — a cache hit runs NO subprocess. Transcripts are
  * returned in probe order. Probes are deterministic given the recipe, so the key
  * needs nothing more (the caller only reaches here once the build succeeded).
  */
@@ -375,8 +378,13 @@ export async function captureProbes(opts: CaptureProbesOptions): Promise<ProbeTr
   const exec = opts.exec ?? defaultProbeExecutor
   return Promise.all(
     opts.probes.map(async (argv) => {
-      const key = groundCacheKey(opts.recipeFingerprint, argv)
-      const cached = await getCacheEntry(opts.repoRoot, GROUND_CACHE_NAME, key)
+      const key = groundCacheKey(opts.inputsFingerprint, argv)
+      const cached = await getCacheEntryOrLegacy(
+        opts.repoRoot,
+        GROUND_CACHE_NAME,
+        key,
+        groundCacheKey(opts.legacyRecipeFingerprint, argv),
+      )
       if (cached) {
         const parsed = ProbeTranscriptSchema.safeParse(cached)
         if (parsed.success) {
@@ -401,8 +409,11 @@ export interface GroundProbesOptions {
   resolvedEntry: string[]
   /** The recipe entry as written (repo-relative) — display command + derivation. */
   displayEntry: readonly string[]
-  /** The recipe input fingerprint — the cache key's stable component. */
-  recipeFingerprint: string
+  /** {@link groundInputsFingerprint} — the cache key's stable component. */
+  inputsFingerprint: string
+  /** The whole recipe fingerprint, for the OLD key a miss falls back to.
+   *  Delete with the legacy hash. */
+  legacyRecipeFingerprint: string
   recipeEnv?: Record<string, string>
   /** Test seam; production uses {@link defaultProbeExecutor}. */
   exec?: ProbeExecutor
@@ -421,7 +432,7 @@ export interface GroundProbesOptions {
  * {@link MAX_PROBES_PER_BATCH}. Expansion helps are admitted BEFORE fragments, so
  * a fragment-heavy batch can never starve a help surface (the priority order:
  * bare → `--help` → subcommand `--help`s → exact fragments). Caching is unchanged
- * — `(recipeFingerprint, argv)`; only the derivation is two-phase. Returns every
+ * — `(inputsFingerprint, argv)`; only the derivation is two-phase. Returns every
  * transcript, phase-1 then phase-2.
  */
 export async function groundProbes(opts: GroundProbesOptions): Promise<ProbeTranscript[]> {
@@ -437,7 +448,8 @@ export async function groundProbes(opts: GroundProbesOptions): Promise<ProbeTran
       probes,
       resolvedEntry: opts.resolvedEntry,
       displayEntry: opts.displayEntry,
-      recipeFingerprint: opts.recipeFingerprint,
+      inputsFingerprint: opts.inputsFingerprint,
+      legacyRecipeFingerprint: opts.legacyRecipeFingerprint,
       recipeEnv: opts.recipeEnv,
       exec: opts.exec,
       onProbeCaptured: opts.onProbeCaptured,
@@ -524,9 +536,26 @@ function repoPackageProgramNames(repoRoot: string): string[] {
   return names
 }
 
-/** Cache key: recipe fingerprint + the probe argv (resolved entry is machine-specific, excluded). */
-function groundCacheKey(recipeFingerprint: string, argv: string[]): string {
-  return createHash('sha256').update(`${recipeFingerprint}::${argv.join(' ')}`).digest('hex')
+/**
+ * What a probe's transcript can depend on, and nothing else: the entry argv it
+ * invokes (the cli slice) and the env the sandbox hands that process. A probe
+ * runs the BUILT program, and no key here has ever folded the source that built
+ * it, so folding the whole recipe fingerprint only re-ran probes for edits —
+ * a dependency bump, a seed rewrite, a catalog entry — that cannot change a
+ * `--help` transcript.
+ */
+export function groundInputsFingerprint(recipe: Recipe): string {
+  return createHash('sha256')
+    .update(flowRecipeSliceFingerprint(recipe, 'cli'))
+    .update('::')
+    .update(JSON.stringify(Object.entries(recipe.env ?? {}).sort()))
+    .digest('hex')
+}
+
+/** Cache key: the ground inputs + the probe argv (the resolved entry is
+ *  machine-specific, and excluded). */
+function groundCacheKey(inputsFingerprint: string, argv: string[]): string {
+  return createHash('sha256').update(`${inputsFingerprint}::${argv.join(' ')}`).digest('hex')
 }
 
 function toTranscript(argv: string[], displayArgv: string[], capture: StepCapture): ProbeTranscript {

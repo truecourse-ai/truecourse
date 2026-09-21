@@ -40,6 +40,7 @@ import {
   collectWorkDocs,
   planGuardWork,
   workerCacheKey,
+  workerRecipeMaterial,
   type FlowWorkerTask,
   type GuardDoc,
   type WorkerFidelityInput,
@@ -54,6 +55,8 @@ import {
   FLOW_WORKER_BUDGET,
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
+  FLOW_WORKER_STAGE_VERSION,
+  flowWorkerLegacyCacheKey,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
   FLOW_WORKER_WEB_SYSTEM_PROMPT,
   FLOW_WORKER_SESSION_KIND,
@@ -283,17 +286,20 @@ describe('flowWorkerSessionDef', () => {
 describe('flowWorkerCacheKey', () => {
   const base = fakeTask().task
 
-  it('is the one-shot authorCacheKey recipe with the SESSION prompt fingerprint', () => {
+  it('folds the stage version and the recipe the session can read, never the prompt', () => {
     expect(flowWorkerCacheKey(base)).toBe(
       workerCacheKey(
-        FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
+        `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
         { fingerprint: base.cacheMaterial.flowFingerprint },
         'cli',
         base.cacheMaterial.sectionKeys,
         base.cacheMaterial.interfaceFingerprints,
-        base.cacheMaterial.recipeFingerprint,
+        workerRecipeMaterial(base.cacheMaterial),
       ),
     )
+    // The old key — the surface's prompt over the whole recipe fingerprint —
+    // stays computable, so a committed entry is served once on the way over.
+    expect(flowWorkerLegacyCacheKey(base)).not.toBe(flowWorkerCacheKey(base))
     expect(flowWorkerPromptFingerprint('cli')).toBe(FLOW_WORKER_CLI_PROMPT_FINGERPRINT)
     expect(flowWorkerPromptFingerprint('api')).toBe(FLOW_WORKER_API_PROMPT_FINGERPRINT)
     expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).not.toBe(FLOW_WORKER_API_PROMPT_FINGERPRINT)
@@ -307,8 +313,13 @@ describe('flowWorkerCacheKey', () => {
     expect(move({ flowFingerprint: 'other' })).not.toBe(key)
     expect(move({ sectionKeys: ['other'] })).not.toBe(key)
     expect(move({ interfaceFingerprints: ['other'] })).not.toBe(key)
-    expect(move({ recipeFingerprint: 'other' })).not.toBe(key)
+    expect(move({ recipeSlice: 'other' })).not.toBe(key)
+    expect(move({ roster: 'other' })).not.toBe(key)
+    expect(move({ preparations: 'other' })).not.toBe(key)
     expect(move({}, 'api')).not.toBe(key)
+    // The whole recipe fingerprint rides along for the OLD key alone: a
+    // dependency bump moves it and re-authors nothing.
+    expect(move({ recipeFingerprint: 'other' })).toBe(key)
     // The flow ID and work item are bookkeeping, not key material.
     expect(flowWorkerCacheKey({ ...base, flowId: 'renamed', workItem: 'flow:renamed:cli' })).toBe(key)
   })

@@ -23,6 +23,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { LEGACY_FLOWS_SESSION_PROMPT_FINGERPRINT, LEGACY_FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
 import { isRunnableDriver } from '@truecourse/shared'
 import {
@@ -128,6 +129,14 @@ One object: { "epics": [ { "title", "goal", "notes"?, "startingState"?, "compose
 
 export const FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FLOWS_EPIC_SESSION_SYSTEM_PROMPT)
 
+/**
+ * THE SYNTHESIS STAGES' VERSIONS, bumped by hand. Rewording either prompt does
+ * not make a synthesized flow set wrong; a prompt change that fixes WRONG
+ * output bumps its version in the same commit.
+ */
+export const FLOWS_STAGE_VERSION = 1
+export const FLOWS_EPIC_STAGE_VERSION = 1
+
 function sha(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
@@ -142,14 +151,28 @@ function sha(text: string): string {
  * unrelated route churn.
  */
 export function flowsSessionCacheKey(area: FlowSynthesisArea): string {
-  return sha(
-    `${FLOWS_SESSION_PROMPT_FINGERPRINT}::${area.areaId}::${sha(flowAreaClaimsMaterial(area))}::${sha(flowAreaOutlinesMaterial(area))}`,
-  )
+  return flowsKeyOver(`flows-v${FLOWS_STAGE_VERSION}`, area)
 }
 
-/** The epic session's cache key: its prompt fingerprint over the digests hash. */
+/** {@link flowsSessionCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to. Delete with the legacy hash. */
+export function flowsSessionLegacyCacheKey(area: FlowSynthesisArea): string {
+  return flowsKeyOver(LEGACY_FLOWS_SESSION_PROMPT_FINGERPRINT, area)
+}
+
+function flowsKeyOver(stage: string, area: FlowSynthesisArea): string {
+  return sha(`${stage}::${area.areaId}::${sha(flowAreaClaimsMaterial(area))}::${sha(flowAreaOutlinesMaterial(area))}`)
+}
+
+/** The epic session's cache key: its stage version over the digests hash. */
 export function flowsEpicSessionCacheKey(digests: readonly FlowDigest[]): string {
-  return sha(`${FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT}::${sha(flowEpicDigestsMaterial(digests))}`)
+  return sha(`flows-epic-v${FLOWS_EPIC_STAGE_VERSION}::${sha(flowEpicDigestsMaterial(digests))}`)
+}
+
+/** {@link flowsEpicSessionCacheKey} as it was computed while the prompt was in
+ *  it — the key a miss falls back to. Delete with the legacy hash. */
+export function flowsEpicSessionLegacyCacheKey(digests: readonly FlowDigest[]): string {
+  return sha(`${LEGACY_FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT}::${sha(flowEpicDigestsMaterial(digests))}`)
 }
 
 /** The work items, as the session index and the transcripts record them. A

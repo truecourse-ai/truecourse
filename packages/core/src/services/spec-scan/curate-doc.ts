@@ -30,6 +30,7 @@ import {
 } from '@truecourse/spec-consolidator'
 import { planDocChunks } from '@truecourse/shared'
 import { promptFingerprint } from '../agent/session-cache.js'
+import { LEGACY_CURATE_DOC_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
   DOC_CHUNK_CHARS,
   corpusVocabTool,
@@ -163,6 +164,14 @@ One object: { "keep": true|false, "reason": "short explanation", "subject": "thi
 export const CURATE_DOC_PROMPT_FINGERPRINT = promptFingerprint(CURATE_DOC_SYSTEM_PROMPT)
 
 /**
+ * THE CURATE-DOC STAGE'S VERSION, bumped by hand. A reworded prompt does not
+ * make a keep/skip judgment wrong, and this cache IS the scan's skip: a moved
+ * key re-curates every document a workspace has. A prompt change that fixes
+ * WRONG output bumps this in the same commit, deliberately.
+ */
+export const CURATE_DOC_STAGE_VERSION = 1
+
+/**
  * The cache key: prompt fingerprint :: identity fingerprint :: path :: content
  * hash. Tool results are deliberately OUTSIDE the key — they are how the
  * session reads inputs the key already names. `extraParts` is the appendable
@@ -189,8 +198,27 @@ export function curateDocCacheKey(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
 ): string {
+  return curateDocKeyOver(`curate-doc-v${CURATE_DOC_STAGE_VERSION}`, input, extraParts)
+}
+
+/** {@link curateDocCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to. Curate-doc's cache IS its skip, so without
+ *  this a changed key re-curates every document in every workspace once.
+ *  Delete with the legacy hash. */
+export function curateDocLegacyCacheKey(
+  input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
+  extraParts: readonly string[] = [],
+): string {
+  return curateDocKeyOver(LEGACY_CURATE_DOC_PROMPT_FINGERPRINT, input, extraParts)
+}
+
+function curateDocKeyOver(
+  stage: string,
+  input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
+  extraParts: readonly string[],
+): string {
   return scanCacheKey([
-    CURATE_DOC_PROMPT_FINGERPRINT,
+    stage,
     identityFingerprint(input.identity),
     input.doc.path,
     input.doc.contentHash,

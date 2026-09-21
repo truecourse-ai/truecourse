@@ -107,6 +107,7 @@ import {
   DocVerdictSchema,
   curateDocBriefing,
   curateDocCacheKey,
+  curateDocLegacyCacheKey,
   curateDocSessionDef,
   curateDocWorkItem,
   docOriginCachePart,
@@ -123,6 +124,7 @@ import {
   collectAreaVocab,
   settleAreasBriefing,
   settleAreasCacheKey,
+  settleAreasLegacyCacheKey,
   settleAreasGate,
   settleAreasSessionDef,
   type AreaSettlement,
@@ -135,6 +137,7 @@ import {
   deriveOverlapWorkItems,
   overlapBriefing,
   overlapSessionCacheKey,
+  overlapSessionLegacyCacheKey,
   overlapSessionDef,
   overlapWorkItem,
   openedSectionKey,
@@ -345,6 +348,9 @@ interface CachedPoolOptions<TItem, TOutcome> {
   items: readonly TItem[]
   workItem(item: TItem): string
   cacheKey(item: TItem): string
+  /** The key this kind computed before its formula changed; a miss under
+   *  `cacheKey` falls back to it. Delete with the legacy hash. */
+  legacyCacheKey?(item: TItem): string
   schema: z.ZodType<TOutcome>
   session(item: TItem): SessionDef<TOutcome>
   briefing(item: TItem): string
@@ -412,6 +418,7 @@ async function runCachedSessionPool<TItem, TOutcome>(
       repoRoot: opts.repoRoot,
       cacheName: opts.cacheName,
       key: opts.cacheKey(item),
+      ...(opts.legacyCacheKey ? { legacyKey: opts.legacyCacheKey(item) } : {}),
       schema: opts.schema,
       run: () => {
         toRun.push(item)
@@ -815,6 +822,7 @@ export async function runSpecScanSessions(
     items: curateItems,
     workItem: (doc) => curateDocWorkItem(doc.path),
     cacheKey: (doc) => curateDocCacheKey({ identity, doc }, [...instructionParts, ...originParts(doc)]),
+    legacyCacheKey: (doc) => curateDocLegacyCacheKey({ identity, doc }, [...instructionParts, ...originParts(doc)]),
     schema: DocVerdictSchema,
     session: (doc) => curateDocSessionDef({ doc, universe, liveVocab }),
     briefing: (doc) => curateDocBriefing(doc, identity, instructions, originOf(doc)),
@@ -956,6 +964,7 @@ export async function runSpecScanSessions(
       items: [SETTLE_AREAS_WORK_ITEM],
       workItem: () => SETTLE_AREAS_WORK_ITEM,
       cacheKey: () => settleAreasCacheKey(vocabView, instructionParts),
+      legacyCacheKey: () => settleAreasLegacyCacheKey(vocabView, instructionParts),
       schema: AreaSettlementSchema,
       session: () => settleAreasSessionDef({ vocab: vocabView, universe }),
       briefing: () => settleAreasBriefing(vocabView, universe, instructions),
@@ -1093,6 +1102,7 @@ export async function runSpecScanSessions(
     items: overlapItems,
     workItem: (item) => overlapWorkItem(item.areaId, item.cluster),
     cacheKey: (item) => overlapSessionCacheKey(item, instructionParts),
+    legacyCacheKey: (item) => overlapSessionLegacyCacheKey(item, instructionParts),
     schema: OverlapOutcomeSchema,
     session: (item) => overlapSessionDef({ item, universe }),
     briefing: (item) => overlapBriefing(item, instructions),

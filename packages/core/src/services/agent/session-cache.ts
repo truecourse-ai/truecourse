@@ -30,7 +30,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import type { SessionOutcome } from '@truecourse/agent-loop'
 import type { z } from 'zod'
 
@@ -39,8 +39,11 @@ export interface CachedSessionOptions<TOutcome> {
   /** Cache directory name, e.g. `'guard/generate'` — reuse a legacy stage's
    *  name where its keys survive the move to sessions. */
   cacheName: string
-  /** sha256 over the prompt fingerprint + every behavior-affecting input. */
+  /** sha256 over the stage version + every behavior-affecting input. */
   key: string
+  /** The key this kind computed before its formula changed, read on a miss and
+   *  re-saved under `key`. Delete with the legacy hash. */
+  legacyKey?: string
   /** The outcome schema of the session kind — gates a cached value on read. */
   schema: z.ZodType<TOutcome>
   /** Runs the session on a miss. Its outcome is returned as-is (and written
@@ -57,7 +60,12 @@ export interface CachedSessionOptions<TOutcome> {
 export async function cachedSessionOutcome<TOutcome>(
   opts: CachedSessionOptions<TOutcome>,
 ): Promise<SessionOutcome<TOutcome> & { fromCache?: true }> {
-  const cached = await getCacheEntry(opts.repoRoot, opts.cacheName, opts.key).catch(() => null)
+  const cached = await getCacheEntryOrLegacy(
+    opts.repoRoot,
+    opts.cacheName,
+    opts.key,
+    opts.legacyKey ?? opts.key,
+  ).catch(() => null)
   if (cached !== null) {
     const parsed = opts.schema.safeParse(cached)
     // A malformed entry is a miss: the schema moved (or the entry rotted), and
@@ -85,10 +93,12 @@ export async function cachedSessionOutcome<TOutcome>(
 }
 
 /**
- * The prompt half of a cache key: `sha256(systemPrompt).slice(0, 16)`, the
- * same convention the one-shot stages use — so editing a session kind's system
- * prompt invalidates exactly that kind's cache and nothing else. Fold it into
- * the material `key` is hashed over alongside every behavior-affecting input.
+ * A system prompt's fingerprint: `sha256(systemPrompt).slice(0, 16)`. NOT a
+ * cache-key ingredient any more — a session's output for unchanged inputs is
+ * almost always what a reworded prompt would produce too, so each kind folds a
+ * hand-bumped STAGE VERSION where this used to sit, and the frozen literals in
+ * `../legacy-prompt-fingerprints.js` rebuild the old keys for the fallback read.
+ * It survives as the diagnostic it also always was.
  */
 export function promptFingerprint(systemPrompt: string): string {
   return createHash('sha256').update(systemPrompt, 'utf-8').digest('hex').slice(0, 16)

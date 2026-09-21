@@ -112,12 +112,46 @@ describe('cachedSessionOutcome', () => {
   })
 })
 
+describe('the old key', () => {
+  it('serves an entry stored under it, skips the session, and re-saves under the new key', async () => {
+    const session = vi.fn(async () => completed({ tasks: ['web/never-run'] }))
+    await setCacheEntry(repo, CACHE_NAME, 'the-old-key', { tasks: ['web/sign-in'] })
+
+    const outcome = await cachedSessionOutcome({
+      repoRoot: repo,
+      cacheName: CACHE_NAME,
+      key: KEY,
+      legacyKey: 'the-old-key',
+      schema,
+      run: session,
+    })
+
+    expect(session).not.toHaveBeenCalled()
+    expect(outcome).toMatchObject({ status: 'completed', fromCache: true, output: { tasks: ['web/sign-in'] } })
+    // Paid once: the next run finds it under the new key directly.
+    expect(await entry()).toEqual({ tasks: ['web/sign-in'] })
+  })
+
+  it('runs the session when neither key holds anything', async () => {
+    const session = vi.fn(async () => completed({ tasks: ['web/settings'] }))
+    await cachedSessionOutcome({
+      repoRoot: repo,
+      cacheName: CACHE_NAME,
+      key: KEY,
+      legacyKey: 'the-old-key',
+      schema,
+      run: session,
+    })
+    expect(session).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('promptFingerprint', () => {
   it('is 16 deterministic hex chars that move with the prompt', () => {
     const prompt = 'you author the web tasks of one place'
     expect(promptFingerprint(prompt)).toMatch(/^[0-9a-f]{16}$/)
     expect(promptFingerprint(prompt)).toBe(promptFingerprint(prompt))
-    // One character of the prompt invalidates exactly this kind's cache.
+    // A diagnostic now, not key material: no stage folds it.
     expect(promptFingerprint(prompt + '.')).not.toBe(promptFingerprint(prompt))
   })
 })

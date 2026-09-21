@@ -14,6 +14,7 @@
  */
 
 import fs from 'node:fs';
+import { LEGACY_ADJUDICATE_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { SessionBudget, SessionDef } from '@truecourse/agent-loop';
@@ -91,6 +92,13 @@ End with exactly one JSON object matching the schema you were given:
 export const ADJUDICATE_PROMPT_FINGERPRINT = promptFingerprint(ADJUDICATE_SYSTEM_PROMPT);
 
 /**
+ * THE ADJUDICATE STAGE'S VERSION, bumped by hand. A verdict on a failure whose
+ * identity has not moved is not made wrong by a reworded prompt; a prompt
+ * change that fixes WRONG output bumps this in the same commit.
+ */
+export const ADJUDICATE_STAGE_VERSION = 1;
+
+/**
  * The behavior hash — what the scenario DOES, exactly the fidelity cache's
  * `scenarioBehavior` recipe: title, setup, steps, normalize. Editing the
  * scenario re-adjudicates its failure even when the recorded actual is
@@ -111,10 +119,20 @@ export function scenarioBehaviorHash(scenario: GuardScenario | undefined): strin
 /** The verdict cache key — see the module note. Exported for the estimate,
  *  which probes the SAME entries the run would (never a parallel guess). */
 export function adjudicationCacheKey(item: AdjudicationItem): string {
+  return adjudicationKeyOver(`adjudicate-v${ADJUDICATE_STAGE_VERSION}`, item);
+}
+
+/** {@link adjudicationCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to. Delete with the legacy hash. */
+export function adjudicationLegacyCacheKey(item: AdjudicationItem): string {
+  return adjudicationKeyOver(LEGACY_ADJUDICATE_PROMPT_FINGERPRINT, item);
+}
+
+function adjudicationKeyOver(stage: string, item: AdjudicationItem): string {
   return createHash('sha256')
     .update(
       [
-        ADJUDICATE_PROMPT_FINGERPRINT,
+        stage,
         item.flowId ?? '',
         item.surface,
         String(item.step),

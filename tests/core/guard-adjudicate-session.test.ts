@@ -37,6 +37,8 @@ import {
 import {
   ADJUDICATE_CACHE_NAME,
   ADJUDICATE_PROMPT_FINGERPRINT,
+  ADJUDICATE_STAGE_VERSION,
+  adjudicationLegacyCacheKey,
   adjudicationCacheKey,
   adjudicationSessionDef,
   scenarioBehaviorHash,
@@ -129,14 +131,14 @@ describe('adjudicationCacheKey', () => {
    * it by hand is the only assertion that actually pins the fingerprint is in
    * there — a "changing `actual` changes the key" check would pass without it.
    */
-  it('is the sha256 of prompt-fingerprint :: identity :: behavior hash', () => {
+  it('is the sha256 of stage version :: identity :: behavior hash', () => {
     const scenario = scenarioDoc('scn.a')
     const subject = item({ flowId: 'flow.a', scenario })
 
     const expected = createHash('sha256')
       .update(
         [
-          ADJUDICATE_PROMPT_FINGERPRINT,
+          `adjudicate-v${ADJUDICATE_STAGE_VERSION}`,
           'flow.a',
           'cli',
           '3',
@@ -148,6 +150,9 @@ describe('adjudicationCacheKey', () => {
       .digest('hex')
 
     expect(adjudicationCacheKey(subject)).toBe(expected)
+    // Rewording the prompt does not re-adjudicate an unchanged failure; the old
+    // key is still readable, so nothing is re-run on the way over.
+    expect(adjudicationLegacyCacheKey(subject)).not.toBe(adjudicationCacheKey(subject))
     expect(ADJUDICATE_PROMPT_FINGERPRINT).toHaveLength(16)
   })
 

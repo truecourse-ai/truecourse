@@ -37,7 +37,7 @@ import type {
   SessionOutcome,
   SessionPersistence,
 } from '@truecourse/agent-loop'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import {
   GUARD_REVIEW_POLICY_VERSION,
   ExtractOutcomeSchema,
@@ -84,6 +84,7 @@ import {
   extractSessionBriefing,
   extractContextSchema,
   extractSessionCacheKey,
+  extractSessionLegacyCacheKey,
   extractSessionCacheKeyForContentHash,
   extractSessionDef,
   extractSessionWorkItem,
@@ -95,9 +96,11 @@ import {
   flowSetRefusalReason,
   flowsEpicSessionBriefing,
   flowsEpicSessionCacheKey,
+  flowsEpicSessionLegacyCacheKey,
   flowsEpicSessionDef,
   flowsSessionBriefing,
   flowsSessionCacheKey,
+  flowsSessionLegacyCacheKey,
   flowsSessionDef,
   flowsSessionWorkItem,
   type FlowsCheckerContext,
@@ -109,6 +112,7 @@ import {
   FLOW_WORKER_SESSION_KIND,
   cacheableWorkerOutcome,
   flowWorkerCacheKey,
+  flowWorkerLegacyCacheKey,
   flowWorkerSessionDef,
   flowWorkerSystemPrompt,
   type CachedWorkerEntry,
@@ -219,6 +223,9 @@ interface CachedPoolOptions<TItem, TOutcome> {
   items: readonly TItem[]
   workItem(item: TItem): string
   cacheKey(item: TItem): string
+  /** The key this kind computed before its formula changed; a miss under
+   *  `cacheKey` falls back to it. Delete with the legacy hash. */
+  legacyCacheKey?(item: TItem): string
   schema: z.ZodType<TOutcome>
   session(item: TItem): SessionDef<TOutcome>
   briefing(item: TItem): string
@@ -302,6 +309,7 @@ async function runCachedGuardPool<TItem, TOutcome>(
       repoRoot: opts.repoRoot,
       cacheName: opts.cacheName,
       key: opts.cacheKey(item),
+      ...(opts.legacyCacheKey ? { legacyKey: opts.legacyCacheKey(item) } : {}),
       schema: opts.schema,
       run: () => {
         toRun.push(item)
@@ -465,6 +473,7 @@ export function createGuardGenerateSessionSeams(
       items: input.docs,
       workItem: (doc) => extractSessionWorkItem(doc.doc),
       cacheKey: (doc) => extractSessionCacheKey(doc, input.prerequisiteTargets),
+      legacyCacheKey: (doc) => extractSessionLegacyCacheKey(doc, input.prerequisiteTargets),
       schema: extractContextSchema(input.prerequisiteTargets),
       session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets }),
       briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets),
@@ -512,6 +521,7 @@ export function createGuardGenerateSessionSeams(
       items: input.areas,
       workItem: (area) => flowsSessionWorkItem(area.areaId, area.chunk),
       cacheKey: (area) => flowsSessionCacheKey(area),
+      legacyCacheKey: (area) => flowsSessionLegacyCacheKey(area),
       schema: FlowSetSchema,
       session: (area) => flowsSessionDef({ area, universe, checker }),
       briefing: (area) => flowsSessionBriefing(area, input.grounding),
@@ -556,6 +566,7 @@ export function createGuardGenerateSessionSeams(
       items: [FLOWS_EPIC_WORK_ITEM],
       workItem: () => FLOWS_EPIC_WORK_ITEM,
       cacheKey: () => flowsEpicSessionCacheKey(input.digests),
+      legacyCacheKey: () => flowsEpicSessionLegacyCacheKey(input.digests),
       schema: EpicSynthesisSchema,
       session: () => flowsEpicSessionDef({ digests: input.digests, claims: input.claims }),
       briefing: () => flowsEpicSessionBriefing(input.digests),
@@ -620,7 +631,12 @@ export function createGuardGenerateSessionSeams(
         // rejected scenario, and re-serving it would re-flag and treadmill.
         const hit = task.taint
           ? null
-          : await getCacheEntry(opts.repoRoot, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task)).catch(() => null)
+          : await getCacheEntryOrLegacy(
+              opts.repoRoot,
+              FLOW_WORKER_CACHE_NAME,
+              flowWorkerCacheKey(task),
+              flowWorkerLegacyCacheKey(task),
+            ).catch(() => null)
         if (hit !== null) {
           const parsed = CachedWorkerEntrySchema.safeParse(hit)
           if (parsed.success) {
