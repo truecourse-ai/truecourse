@@ -11,7 +11,7 @@ import {
 import { completeRealization } from './match.js'
 import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
-import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowInvocationGaps } from './prerequisites.js'
+import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 import { reconcileRemaining, type RepairIssue } from './worker-repair.js'
 import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
@@ -844,6 +844,37 @@ export function workerRecipeMaterial(material: {
   return [material.recipeSlice, material.roster, material.preparations].join('~')
 }
 
+/**
+ * The interface bag one (flow, surface) worker key folds — under the current
+ * formula, and under the retired one beside it. The run and the pre-flight
+ * estimate both build it HERE: a bag either of them assembled on its own would
+ * price a key the other never probes, which is how the estimate came to quote a
+ * full re-author for work the run served from cache.
+ */
+export function flowWorkerKeyFingerprints(input: {
+  /** The prerequisite SHAPE the current key folds, already digested. */
+  prerequisiteShape: string
+  /** The resolved-state material the retired key folded in its place. */
+  legacyPrerequisiteMaterial: string
+  /** The realization plan's assignment fingerprint. */
+  assignment: string
+  /** The planned interfaces' fingerprints. */
+  interfaces: readonly string[]
+  /** Web only: what the session is handed, and the whole author catalog the
+   *  retired formula folded instead. */
+  web?: { handed: string; catalog: string }
+}): { fingerprints: string[]; legacyFingerprints: string[] } {
+  const common = [input.assignment, ...input.interfaces]
+  return {
+    fingerprints: [input.prerequisiteShape, ...common, ...(input.web ? [input.web.handed] : [])],
+    legacyFingerprints: [
+      input.legacyPrerequisiteMaterial,
+      ...common,
+      ...(input.web ? [input.web.catalog] : []),
+    ],
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The FLOW-WORKER session seam. Typed here because the
 // engine cannot depend on `@truecourse/core`, which owns the sessions; the
@@ -910,9 +941,10 @@ export interface FlowWorkerCacheMaterial {
   /** The whole recipe fingerprint, for the OLD key a miss falls back to.
    *  Delete with the legacy hash. */
   recipeFingerprint: string
-  /** {@link interfaceFingerprints} as the retired formula folded it — the web
-   *  arm carried the WHOLE author catalog where it now carries what the session
-   *  is handed. Absent when the two agree. Delete with the legacy hash. */
+  /** {@link interfaceFingerprints} as the retired formula folded it — the
+   *  prerequisites' resolved STATE where the bag now carries their shape, and
+   *  on web the WHOLE author catalog where it now carries what the session is
+   *  handed. Absent when the two agree. Delete with the legacy hash. */
   legacyInterfaceFingerprints?: readonly string[]
   /** `edit` when the briefing carries the flow's committed scenarios to edit;
    *  `scratch` otherwise (the key then matches every pre-edit-mode entry). */
@@ -2019,6 +2051,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           }
         : {}),
       prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe),
+      prerequisiteShape: flowPrerequisiteShapeFingerprint(flow, prerequisiteResolution.targets, recipe),
       // A flow with no plan is realized on no surface, so it folds the cli
       // slice as a stable stand-in: the estimate makes the same choice, and a
       // flow that later gains a plan re-opens on the surface it gained.
@@ -3310,11 +3343,23 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // The shared catalog, recorded per task: what this session is served is
         // what its flow's settle compare folds.
         const reads = task.surface === 'web' ? readLogFor(ref) : undefined
-        const commonFingerprints = [
-          flowPrerequisiteStateMaterial(task.work.flow, prerequisiteResolution.targets, recipe),
-          realizationAssignmentFingerprint(task.plan),
-          ...task.plan.interfaces.map((j) => j.fingerprint),
-        ]
+        const keyFingerprints = flowWorkerKeyFingerprints({
+          prerequisiteShape: flowPrerequisiteShapeFingerprint(task.work.flow, prerequisiteResolution.targets, recipe),
+          legacyPrerequisiteMaterial: flowPrerequisiteStateMaterial(task.work.flow, prerequisiteResolution.targets, recipe),
+          assignment: realizationAssignmentFingerprint(task.plan),
+          interfaces: task.plan.interfaces.map((j) => j.fingerprint),
+          // The web arm folds what the session is HANDED, not the whole catalog
+          // it may search: one unrelated screen's readables moving used to
+          // re-key every web flow.
+          ...(task.surface === 'web'
+            ? {
+                web: {
+                  handed: webAuthorKeyMaterial(authorCatalog, task.plan.interfaces, task.work.flow, mapped.resources),
+                  catalog: authorCatalog.fingerprint,
+                },
+              }
+            : {}),
+        })
         return {
           workItem: `flow:${task.work.flow.id}:${task.surface}`,
           flowId: task.work.flow.id,
@@ -3333,18 +3378,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           cacheMaterial: {
             flowFingerprint: task.work.flow.fingerprint,
             sectionKeys: task.work.sectionKeys,
-            interfaceFingerprints: [
-              ...commonFingerprints,
-              // The web arm folds what the session is HANDED, not the whole
-              // catalog it may search: one unrelated screen's readables moving
-              // used to re-key every web flow.
-              ...(task.surface === 'web'
-                ? [webAuthorKeyMaterial(authorCatalog, task.plan.interfaces, task.work.flow, mapped.resources)]
-                : []),
-            ],
-            ...(task.surface === 'web'
-              ? { legacyInterfaceFingerprints: [...commonFingerprints, authorCatalog.fingerprint] }
-              : {}),
+            interfaceFingerprints: keyFingerprints.fingerprints,
+            legacyInterfaceFingerprints: keyFingerprints.legacyFingerprints,
             recipeSlice: flowRecipeSliceFingerprint(recipe, task.surface),
             roster: seedRosterFingerprint(recipe),
             preparations: preparationsFingerprint(repoRoot, recipe),

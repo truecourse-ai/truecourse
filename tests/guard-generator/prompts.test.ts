@@ -734,6 +734,7 @@ describe('guard-generator prompts', () => {
       assignmentFingerprints: [],
       interfaceFingerprints: ['sha256:interface'],
       prerequisiteMaterial: '',
+      prerequisiteShape: '',
       recipeSlice: 'slice',
       roster: 'roster',
       preparation: 'preparation',

@@ -91,6 +91,8 @@ import {
   buildServerRouteIndex,
   bindRealizationServer,
   flowPrerequisiteStateMaterial,
+  flowPrerequisiteShapeFingerprint,
+  flowWorkerKeyFingerprints,
   proposeRecipe,
   recipeCacheKey,
   recipeLegacyCacheKey,
@@ -884,16 +886,18 @@ async function planGuardRealizationStages(
       // pair is the only unknown — and it is counted as both a match call and a
       // worker session.
       const interfaceFingerprints: string[] = [];
+      // The two prerequisite materials the run folds: the shape every current
+      // key carries, and the resolved state the retired ones did.
+      const prerequisiteShape = flowPrerequisiteShapeFingerprint(flow, prerequisites.targets, recipe);
+      const prerequisiteMaterial = flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe);
       const plannedPairs: {
         surface: GuardDriverId;
         assignment: string;
         interfaces: string[];
         webCatalog?: string;
-        /** The bag the worker key folds now — the web arm being what the
-         *  session is handed, not the whole catalog. */
+        /** The bag the worker key folds now, and the one it folded before —
+         *  both built by the engine, so this probes the run's own keys. */
         fingerprints: string[];
-        /** The same bag under the retired web formula: the old worker key and
-         *  the legacy settle hash both fold the whole author catalog. */
         legacyFingerprints: string[];
       }[] = [];
       let unknown = false;
@@ -926,16 +930,23 @@ async function planGuardRealizationStages(
           assignment,
           interfaces,
           webCatalog,
-          fingerprints: [assignment, ...interfaces, ...(webAuthor ? [webAuthor] : [])],
-          legacyFingerprints: [assignment, ...interfaces, ...(webCatalog ? [webCatalog] : [])],
+          ...flowWorkerKeyFingerprints({
+            prerequisiteShape,
+            legacyPrerequisiteMaterial: prerequisiteMaterial,
+            assignment,
+            interfaces,
+            ...(webAuthor && webCatalog ? { web: { handed: webAuthor, catalog: webCatalog } } : {}),
+          }),
         });
 
       }
       const previousDrivers = priorByFlow.get(flow.id)?.scenarios.flatMap(s => s.drivers ?? []) ?? [];
       plannedPairs.sort((a, b) => Number(previousDrivers.includes(b.surface)) - Number(previousDrivers.includes(a.surface)) || a.surface.localeCompare(b.surface));
       plannedPairs.splice(1);
-      interfaceFingerprints.push(...plannedPairs.flatMap(p => p.legacyFingerprints));
-      interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe));
+      // The LEGACY SETTLE bag, which is its own formula: the whole catalog on
+      // web, and the resolved state exactly once.
+      interfaceFingerprints.push(...plannedPairs.flatMap(p => [p.assignment, ...p.interfaces, ...(p.webCatalog ? [p.webCatalog] : [])]));
+      interfaceFingerprints.push(prerequisiteMaterial);
       const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
       const prior = priorByFlow.get(flow.id);
       const priorScenarios = (prior?.scenarios ?? []).flatMap((s) => committedScenarios.get(s.id) ?? []);
@@ -954,7 +965,8 @@ async function planGuardRealizationStages(
                 webCatalogReads: authorCatalog ? catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []) : [],
               }
             : {}),
-          prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe),
+          prerequisiteMaterial,
+          prerequisiteShape,
           recipeSlice: flowRecipeSliceFingerprint(recipe ?? null, chosenSurface),
           roster: flowRosterFingerprint(recipe ?? null, priorScenarios),
           preparation: flowPreparationFingerprint(repoRoot, recipe ?? null, priorScenarios),

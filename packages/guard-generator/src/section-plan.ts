@@ -252,7 +252,11 @@ export interface FlowGenerationInputParts {
   /** Each catalog entry the flow's web session was served, with its CURRENT
    *  fingerprint. Present (possibly empty) for a flow with a web plan. */
   webCatalogReads?: readonly string[]
+  /** The resolved dependency STATE — for {@link legacyFlowGenerationInputsHash}'s
+   *  bag alone. */
   prerequisiteMaterial: string
+  /** What the flow's prerequisites ARE, as a scenario depends on them. */
+  prerequisiteShape: string
   /** The recipe slice of the surface this flow is realized on. */
   recipeSlice: string
   /** The seed roster entries the flow's committed scenarios name. */
@@ -288,7 +292,11 @@ export function flowGenerationInputComponents(parts: FlowGenerationInputParts): 
     sections: digest(parts.sectionKeys),
     assignment: digest(parts.assignmentFingerprints),
     interfaces: digest(parts.interfaceFingerprints),
-    prerequisites: digest([parts.prerequisiteMaterial]),
+    // A NEW name, because the retired `prerequisites` folded resolved state: a
+    // stored value under that name would compare unequal for every flow that
+    // has one, and re-open all of them at once. Under its own name the stored
+    // one is simply ignored and this one is filled in with no session.
+    'prerequisites.shape': digest([parts.prerequisiteShape]),
     policy: String(GUARD_REVIEW_POLICY_VERSION),
     'recipe.slice': digest([parts.recipeSlice]),
     roster: digest([parts.roster]),

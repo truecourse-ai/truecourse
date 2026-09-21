@@ -240,7 +240,76 @@ export function flowInvocationGaps(
   }) ?? [])
 }
 
-/** Account availability affects work selection; secret rotation never affects its hash. */
+/**
+ * THE SHAPE a flow's scenarios are written AGAINST — what a prerequisite is,
+ * never what the machine currently holds of it. Per case, in milestone order:
+ * each declared prerequisite's resolved dependency name, whether it resolves at
+ * all, the mode it is required in, the credential VARIABLE NAMES a scenario may
+ * (or must not) override, and the external services the dependency is reached
+ * through with their base-URL variable names. Registered instance URLs, secret
+ * values and which instance is selected belong to the RUN, not to the scenario,
+ * so none of them is here: registering an account or rotating a key re-authors
+ * nothing.
+ *
+ * Which PRINCIPAL a scenario acts as reaches its key through the roster and the
+ * surface's recipe slice, where the seeded credentials each role is minted under
+ * are folded by name; nothing about a role lives on a prerequisite target.
+ *
+ * ONE bit of availability is in here on purpose: `authorable`, computed by the
+ * very gates {@link partitionFlowPrerequisites} drops a case on. It is what
+ * decides between a GAP and a scenario — a flow blocked on an unregistered
+ * dependency must re-open when that dependency is registered, and the gap it
+ * settled with records no input the compare could otherwise see. It moves for
+ * that flip and for nothing finer: not the URL, not the secret, not which
+ * instance answered.
+ *
+ * A flow that names controlled providers also folds their resolution, which is
+ * shape for the same reason — a provider the world supplies is scripted through
+ * a proxy and one it does not is stubbed, and the two are different scenarios.
+ */
+export function flowPrerequisiteShapeFingerprint(
+  flow: GuardFlow,
+  targets: readonly GuardPrerequisiteTarget[],
+  recipe?: Recipe,
+): string {
+  const cases = flow.milestones.flatMap((m) =>
+    (m.verification?.cases ?? []).map((c) => {
+      const prerequisites = c.prerequisites ?? []
+      return {
+        prerequisites: prerequisites.map((p) => {
+          const resolved = resolveGuardPrerequisite(p.dependency, targets)
+          const target = resolved.kind === 'resolved' ? resolved.target : null
+          return {
+            dependency: target?.name ?? p.dependency,
+            resolution: resolved.kind,
+            mode: p.mode,
+            credentialEnv: [...(target?.credentialEnv ?? [])].sort(),
+            providers: (target?.providers ?? [])
+              .map((provider) => ({ service: provider.service, baseUrlEnvs: [...provider.baseUrlEnvs].sort() }))
+              .sort((a, b) => a.service.localeCompare(b.service)),
+          }
+        }),
+        authorable:
+          prerequisiteProblems(prerequisites.filter((p) => p.mode === 'provided'), targets).length === 0,
+      }
+    }),
+  )
+  const controls = flow.milestones.flatMap((m) => m.verification?.cases?.flatMap((c) => c.providerControls ?? []) ?? [])
+  const material =
+    recipe && controls.length
+      ? [providerControlStateMaterial(controls, 'api', targets, recipe), cases]
+      : [cases]
+  return createHash('sha256').update(JSON.stringify(material)).digest('hex')
+}
+
+/**
+ * The RESOLVED-STATE material the settle hash and the worker key folded before
+ * the shape replaced them: every provided prerequisite paired with the state of
+ * the dependency it resolves to, so registering or unregistering any instance
+ * re-authored every flow that named it. Kept byte-identical because the frozen
+ * legacy hash and the old worker key are computed from it; nothing new folds it.
+ * Delete it with the legacy hash.
+ */
 export function flowPrerequisiteStateMaterial(flow: GuardFlow, targets: readonly GuardPrerequisiteTarget[], recipe?: Recipe): string {
   const controls = flow.milestones.flatMap(m => m.verification?.cases?.flatMap(c => c.providerControls ?? []) ?? [])
   const accounts = flow.milestones.flatMap(

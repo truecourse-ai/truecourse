@@ -417,6 +417,37 @@ describe('the flow-worker pool’s cache', () => {
     expect(constructions).toBe(0)
   })
 
+  it('an entry under the retired bag’s key is served with no session and re-saved under the new one', async () => {
+    const r = docRepo()
+    // The bag used to carry the prerequisites' resolved STATE where it now
+    // carries their shape, so every task with one has an old key. Without the
+    // fallback read, the first run after the change re-authors the corpus.
+    const { task, calls } = fakeTask({
+      cacheMaterial: {
+        ...fakeTask().task.cacheMaterial,
+        interfaceFingerprints: ['prereq-shape', 'iface-1'],
+        legacyInterfaceFingerprints: ['[["currencybeacon","provided"]]', 'iface-1'],
+      },
+    })
+    const [legacyKey] = flowWorkerLegacyCacheKeys(task)
+    expect(legacyKey).not.toBe(flowWorkerCacheKey(task))
+    await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, legacyKey, {
+      outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
+      scenarioYaml: YAML,
+      version: GUARD_REVIEW_POLICY_VERSION,
+      reviews: [reviewFor(YAML)],
+    })
+
+    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
+
+    expect(summary).toMatchObject({ ran: 0, fromCache: 1, failed: 0 })
+    expect(calls.prepare).toBe(0)
+    expect(constructions).toBe(0)
+    expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toMatchObject({
+      scenarioYaml: YAML,
+    })
+  })
+
   it('carries a web task’s read-set through the cache in both directions', async () => {
     const r = docRepo()
     // A HIT stands in for the session, so the flow records what that session read.

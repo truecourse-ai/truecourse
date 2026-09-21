@@ -13,6 +13,7 @@ export {
   buildWebAuthorCatalog,
   workerCacheKey,
   workerRecipeMaterial,
+  flowWorkerKeyFingerprints,
   // Single-step mode (`only`): the pipeline's session
   // steps in order. `@truecourse/core` enforces the cache-only replay of the
   // prior ones against these.
@@ -507,7 +508,7 @@ export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
 
 export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'
 
-export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowInvocationGaps } from './prerequisites.js'
+export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 
 export { completeRealization } from './match.js'
 

@@ -137,6 +137,7 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     webCatalogFingerprint: 'w',
     webCatalogReads: ['web/home:abc'],
     prerequisiteMaterial: 'p',
+    prerequisiteShape: 'ps',
     recipeSlice: 'rs',
     roster: 'ro',
     preparation: 'pr',
@@ -156,7 +157,9 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     // read is the component.
     expect(moved({ webCatalogFingerprint: 'w2' })).toEqual([])
     expect(moved({ webCatalogReads: ['web/home:moved'] })).toEqual(['webCatalog.reads'])
-    expect(moved({ prerequisiteMaterial: 'p2' })).toEqual(['prerequisites'])
+    // The resolved STATE rides the legacy bag alone; the shape is the component.
+    expect(moved({ prerequisiteMaterial: 'p2' })).toEqual([])
+    expect(moved({ prerequisiteShape: 'ps2' })).toEqual(['prerequisites.shape'])
     expect(moved({ recipeSlice: 'rs2' })).toEqual(['recipe.slice'])
     expect(moved({ roster: 'ro2' })).toEqual(['roster'])
     expect(moved({ preparation: 'pr2' })).toEqual(['preparation'])
@@ -176,6 +179,7 @@ describe('flowSettleVerdict — the three compare rules and the one legacy check
     assignmentFingerprints: ['a'],
     interfaceFingerprints: ['i'],
     prerequisiteMaterial: 'p',
+    prerequisiteShape: 'ps',
     recipeSlice: 'rs',
     roster: 'ro',
     preparation: 'pr',
@@ -183,9 +187,10 @@ describe('flowSettleVerdict — the three compare rules and the one legacy check
   const legacyHash = 'sha256:' + 'a'.repeat(64)
 
   it('settles a row whose stored names all still match, ignoring the ones it retired', () => {
-    // A row from the old scheme: it carries `prompts` and `recipe.*`, which no
-    // longer exist, and lacks the three the scheme gained.
-    const stored = { flow: components.flow, sections: components.sections, prompts: 'deadbeefdeadbeef', 'recipe.manifests': 'cafecafecafecafe' }
+    // A row from the old scheme: it carries `prompts`, `recipe.*` and the
+    // state-folding `prerequisites`, none of which exist any more, and lacks
+    // the ones the scheme gained.
+    const stored = { flow: components.flow, sections: components.sections, prompts: 'deadbeefdeadbeef', 'recipe.manifests': 'cafecafecafecafe', prerequisites: 'f00df00df00df00d' }
     expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash, generationInputs: stored }, components, legacyHash: 'sha256:other' }))
       .toEqual({ settled: true, moved: [] })
   })
