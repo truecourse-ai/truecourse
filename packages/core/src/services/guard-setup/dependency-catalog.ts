@@ -56,7 +56,7 @@ import {
   type GuardDependencyPredicate,
 } from '@truecourse/shared';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
-import { cachedSessionOutcome, promptFingerprint } from '../agent/session-cache.js';
+import { cachedSessionOutcome } from '../agent/session-cache.js';
 import { LEGACY_DEPENDENCY_CATALOG_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js';
 import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';

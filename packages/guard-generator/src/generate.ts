@@ -1991,6 +1991,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       interfaceFingerprints: [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint)),
       ...(plans.has('web') ? { webCatalogFingerprint: catalogs.get('web')!.fingerprint } : {}),
       prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe),
+      // A flow with no plan is realized on no surface, so it folds the cli
+      // slice as a stable stand-in: the estimate makes the same choice, and a
+      // flow that later gains a plan re-opens on the surface it gained.
       recipeSlice: flowRecipeSliceFingerprint(recipe, chosen ?? 'cli'),
       roster: flowRosterFingerprint(recipe, priorScenarios),
       preparation: flowPreparationFingerprint(repoRoot, recipe, priorScenarios),

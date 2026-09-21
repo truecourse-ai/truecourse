@@ -120,6 +120,7 @@ import {
   flowSettleVerdict,
   flowAreaIdForDoc,
   workerCacheKey,
+  workerRecipeMaterial,
   FlowSetSchema,
   RECIPE_SYSTEM_PROMPT,
   MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
@@ -151,6 +152,7 @@ import {
   FLOW_WORKER_SESSION_KIND,
   flowWorkerSystemPrompt,
   flowWorkerPromptFingerprint,
+  FLOW_WORKER_STAGE_VERSION,
   CachedWorkerEntrySchema,
   FIDELITY_SESSION_BUDGET,
   FIDELITY_SESSION_KIND,
@@ -175,6 +177,8 @@ import {
   flowRecipeSliceFingerprint,
   flowRosterFingerprint,
   flowPreparationFingerprint,
+  seedRosterFingerprint,
+  preparationsFingerprint,
   resolvePrerequisites,
   buildRouteManifest,
   loadDependencyCatalog,
@@ -807,12 +811,12 @@ interface GuardRealizationPlan {
  * IS what the run will use) AND the interface snapshot exists: matching then
  * probes the SAME `.cache/guard/match` entries the run reads, and the worker
  * count probes the SAME `guard/generate` worker-cache keys (the kept
- * `workerCacheKey` recipe under the session prompt fingerprints) for the flows
+ * `workerCacheKey` recipe under the worker stage version) for the flows
  * whose composition moved since the manifest. Otherwise both fall back to the
  * honest ceiling — flow count estimated from source obligations, one worker per (flow, surface).
  *
- * The ceiling is what the COST is priced at either way (`maxCalls`), so a prompt
- * change (which re-works every flow) can never exceed the quoted bill. A
+ * The ceiling is what the COST is priced at either way (`maxCalls`), so a stage
+ * version bump (which re-works every flow) can never exceed the quoted bill. A
  * TAINTED flow skips its cache read at run time — the estimate cannot read the
  * taint ledger's future, so a tainted hit is a small under-count, bounded by
  * the ceiling.
@@ -954,15 +958,34 @@ async function planGuardRealizationStages(
       // hit (a settled one still pays a deterministic confirmation run — free in
       // token terms); a miss is one session.
       for (const pair of plannedPairs) {
+        // The run's own key, over the run's own material — and the old key
+        // beside it, so an entry the run will serve is never priced as work.
         const key = workerCacheKey(
-          flowWorkerPromptFingerprint(pair.surface),
+          `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
           flow,
           pair.surface,
           sectionKeys,
           pair.fingerprints,
-          plan.recipeFingerprint,
+          workerRecipeMaterial({
+            recipeSlice: flowRecipeSliceFingerprint(recipe ?? null, pair.surface),
+            roster: seedRosterFingerprint(recipe ?? null),
+            preparations: preparationsFingerprint(repoRoot, recipe ?? null),
+          }),
         );
-        const hit = await probeSessionCache(repoRoot, FLOW_WORKER_CACHE_NAME, key, CachedWorkerEntrySchema);
+        const hit = await probeSessionCache(
+          repoRoot,
+          FLOW_WORKER_CACHE_NAME,
+          key,
+          CachedWorkerEntrySchema,
+          workerCacheKey(
+            flowWorkerPromptFingerprint(pair.surface),
+            flow,
+            pair.surface,
+            sectionKeys,
+            pair.fingerprints,
+            plan.recipeFingerprint,
+          ),
+        );
         if (!hit) workerItems++;
       }
     }
