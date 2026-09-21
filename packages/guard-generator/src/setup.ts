@@ -348,6 +348,8 @@ export type GuardSetupInterfacesStepResult = {
   /** What this run disputed/noticed — recorded on the step row, never stored
    *  in the catalog. */
   diagnostics?: MapperDiagnostic[]
+  /** Re-authored tasks whose key moved through a reworded label alone. */
+  labelRekeys?: number
   /** The reconcile session's per-subject verdicts, when one ran. */
   resolutions?: GuardSetupInterfaceResolution[]
   /** The catalog edits the resolutions produced, one line each. */
@@ -1019,7 +1021,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
         ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
         ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
+        ...(result.labelRekeys !== undefined ? { labelRekeys: result.labelRekeys } : {}),
       })
+      if (result.labelRekeys) {
+        fact('interfaces', `${result.labelRekeys} re-authored task${result.labelRekeys === 1 ? '' : 's'} moved a key through a reworded label alone`)
+      }
       if (result.resolutions && result.resolutions.length > 0) {
         fact(
           'interfaces',

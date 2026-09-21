@@ -36,6 +36,7 @@ import {
   type InterfaceContract,
   type InterfaceSequenceNode,
   type InterfaceStep,
+  isLabelOnlyRekey,
 } from '@truecourse/shared'
 
 function iface(steps: InterfaceStep[], over: Partial<Interface> = {}): Interface {
@@ -311,6 +312,27 @@ describe('interface schemas', () => {
     })
     expect(InterfacesFileSchema.parse(base).source).toBeUndefined()
     expect(() => InterfacesFileSchema.parse({ ...base, source: { cli: 'guessed' } })).toThrow()
+  })
+})
+
+describe('isLabelOnlyRekey', () => {
+  const screen = (steps: InterfaceStep[]): Pick<Interface, 'type' | 'entry' | 'steps'> => ({
+    type: 'web',
+    entry: { command: ['web', 'board'] },
+    steps,
+  })
+  const save: InterfaceStep = { kind: 'click', target: { role: 'button', name: 'Save' } }
+
+  it('is true when only a step label reads differently', () => {
+    const reworded: InterfaceStep = { kind: 'click', target: { role: 'button', name: 'Save changes' } }
+    expect(isLabelOnlyRekey(screen([INPUT, save]), screen([INPUT, reworded]))).toBe(true)
+  })
+
+  it('is false when nothing moved, and when the task itself changed', () => {
+    expect(isLabelOnlyRekey(screen([INPUT, save]), screen([INPUT, save]))).toBe(false)
+    expect(isLabelOnlyRekey(screen([INPUT, save]), screen([save]))).toBe(false)
+    const link: InterfaceStep = { kind: 'click', target: { role: 'link', name: 'Save' } }
+    expect(isLabelOnlyRekey(screen([save]), screen([link]))).toBe(false)
   })
 })
 

@@ -62,6 +62,7 @@ import {
 } from '@truecourse/guard-runner'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import type { InterfaceResource, InterfacesFile, MapperDiagnostic } from '@truecourse/shared'
+import { isLabelOnlyRekey } from '@truecourse/shared'
 import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
   AUTHORED_SURFACE,
@@ -147,6 +148,11 @@ export interface AuthorRunResult {
   places: PlaceResult[]
   /** Tasks written across the run. */
   authored: number
+  /**
+   * Re-authored tasks whose fingerprint moved through a reworded step label
+   * alone ({@link isLabelOnlyRekey}): a key that moved with nothing behind it.
+   */
+  labelRekeys: number
   /** The authored catalog path, when anything was written. */
   path?: string
   /** Places whose tasks and readable facts are already established. */
@@ -273,6 +279,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const prepared = new Map<string, PreparedPlace['place']>()
   const spent = { turns: 0, tokens: 0, costUsd: 0 }
   let authoredCount = 0
+  let labelRekeys = 0
   let path: string | undefined
 
   // THE CLUSTERS: the places that read the same modules, grouped. They
@@ -348,6 +355,11 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
           // Validate and write synchronously before the loop marks the session
           // completed. No peer can change the catalog between these operations.
           if (result.candidate) {
+            const before = new Map((authored?.interfaces ?? []).map((task) => [task.id, task]))
+            for (const task of result.candidate.interfaces) {
+              const prior = before.get(task.id)
+              if (prior && isLabelOnlyRekey(prior, task)) labelRekeys++
+            }
             const written = writeAuthoredCatalog({
               repoRoot: opts.repoRoot,
               candidate: result.candidate,
@@ -430,6 +442,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   return {
     places: results,
     authored: authoredCount,
+    labelRekeys,
     ...(path ? { path } : {}),
     skipped,
     findings,

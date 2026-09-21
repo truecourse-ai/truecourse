@@ -66,6 +66,8 @@ import { describeSessionFailure, type GuardSetupSessionContext } from './session
 export interface InterfacesAuthorRun {
   runId: string;
   authored: number;
+  /** Re-authored tasks whose key moved through a reworded label alone. */
+  labelRekeys?: number;
   skipped: string[];
   places: { status: string; placeId?: string; problems?: string[] }[];
   diagnostics: MapperDiagnostic[];
@@ -176,6 +178,7 @@ export function buildInterfacesStep(
           notes,
         ),
         sessionRunId: run.runId,
+        ...(input.replace && run.labelRekeys !== undefined ? { labelRekeys: run.labelRekeys } : {}),
         ...recorded,
       };
     } catch (error) {

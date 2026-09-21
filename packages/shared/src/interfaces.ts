@@ -1850,3 +1850,31 @@ export function interfaceFingerprint(
   const body = [iface.type, entryIdentity, ...iface.steps.map(stepIdentity)].join('\n')
   return `sha256:${crypto.createHash('sha256').update(body, 'utf-8').digest('hex')}`
 }
+
+/**
+ * True when two versions of a task differ in fingerprint ONLY through the
+ * wording of a step's label: the same type, entry, step kinds and modes, with
+ * a `target` or `within` name that reads differently. A web step's identity is
+ * the label the author chose, so a re-authored screen can move a task's key
+ * without the task changing; this is how often that happens, measured.
+ */
+export function isLabelOnlyRekey(
+  before: Pick<Interface, 'type' | 'entry' | 'steps'>,
+  after: Pick<Interface, 'type' | 'entry' | 'steps'>,
+): boolean {
+  if (interfaceFingerprint(before) === interfaceFingerprint(after)) return false
+  const unlabelled = (iface: Pick<Interface, 'type' | 'entry' | 'steps'>): string =>
+    interfaceFingerprint({
+      ...iface,
+      steps: iface.steps.map((step) =>
+        'target' in step
+          ? {
+              ...step,
+              target: { ...step.target, name: '' },
+              ...(step.within ? { within: { ...step.within, name: '' } } : {}),
+            }
+          : step,
+      ),
+    })
+  return unlabelled(before) === unlabelled(after)
+}

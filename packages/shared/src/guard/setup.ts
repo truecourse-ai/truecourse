@@ -103,6 +103,11 @@ export const GuardSetupTaxonomyStepSchema = z
     resolutions: z.array(GuardSetupInterfaceResolutionSchema).optional(),
     /** INTERFACES step only: the catalog edits the resolutions produced, one line each. */
     changes: z.array(z.string()).optional(),
+    /**
+     * INTERFACES step only: re-authored tasks whose fingerprint moved through a
+     * reworded step label alone. Recorded when an authoring run re-authored a place.
+     */
+    labelRekeys: z.number().int().nonnegative().optional(),
   })
   .strict()
   .superRefine((step, ctx) => {
