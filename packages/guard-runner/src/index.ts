@@ -478,4 +478,14 @@ export { PreparationQualificationSchema, observationBinding, observationConfigur
 export type { PreparationQualification } from './preparation-observation.js';
 
 export { RecipePreparationBaselineCheckSchema } from './recipe.js';
+
+export {
+  recipeContractFingerprint,
+  flowRecipeSliceFingerprint,
+  seedRosterFingerprint,
+  flowRosterFingerprint,
+  flowPreparationFingerprint,
+  preparationsFingerprint,
+  dependencyCatalogIdentity,
+} from './recipe-slices.js'
 export { type ResolvedProviderControl, resolveProviderControl, providerControlStateMaterial, scenarioProviderControlProblems, PROVIDER_CONTROL_VERSION } from './provider-control.js'
