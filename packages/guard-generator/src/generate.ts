@@ -116,7 +116,9 @@ import {
   type EntryPreflightResult,
   createGuardSharedWorld,
   isWorldBootFailure,
-  recipeFingerprintComponents,
+  flowRecipeSliceFingerprint,
+  flowRosterFingerprint,
+  flowPreparationFingerprint,
 } from '@truecourse/guard-runner'
 import {
   guardCoverageProgress,
@@ -184,9 +186,11 @@ import {
   collectWorkDocs,
   hasGuardUniverse,
   sectionInputsKey,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
   flowInterfaceFingerprintBag,
+  flowSettleDigest,
+  flowSettleVerdict,
   type FlowGenerationInputParts,
   type GuardDoc,
   type SectionInput,
@@ -1081,7 +1085,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   const recipe: Recipe = recipeResult.recipe
   const recipeFingerprint = recipeResult.fingerprint
-  const recipeParts = recipeFingerprintComponents(repoRoot)
   fact(
     'index',
     recipeResult.status === 'exists'
@@ -1941,6 +1944,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const chosen = [...plans.keys()].sort((a, b) => Number(previousDrivers.includes(b)) - Number(previousDrivers.includes(a)) || a.localeCompare(b))[0]
     for (const surface of plans.keys()) if (surface !== chosen) plans.delete(surface)
 
+    const prior = priorFlows.get(flow.id)
+    // The flow's own committed scenarios: which seeded rows it names and which
+    // preparation it runs on are read straight off them, so a manifest row
+    // written before those components existed gets them for free.
+    const priorScenarios = (prior?.scenarios ?? []).flatMap(
+      (s) => committedScenariosById.get(s.id) ?? [],
+    )
     const inputParts: FlowGenerationInputParts = {
       flowFingerprint: flow.fingerprint,
       sectionKeys,
@@ -1948,17 +1958,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       interfaceFingerprints: [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint)),
       ...(plans.has('web') ? { webCatalogFingerprint: catalogs.get('web')!.fingerprint } : {}),
       prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe),
-      recipeParts,
+      recipeSlice: flowRecipeSliceFingerprint(recipe, chosen ?? 'cli'),
+      roster: flowRosterFingerprint(recipe, priorScenarios),
+      preparation: flowPreparationFingerprint(repoRoot, recipe, priorScenarios),
     }
     const interfaceFingerprints = flowInterfaceFingerprintBag(inputParts)
     const inputComponents = flowGenerationInputComponents(inputParts)
-    const inputsHash = flowGenerationInputsHash({
+    const inputsHash = flowSettleDigest(inputComponents)
+    const legacyHash = legacyFlowGenerationInputsHash({
       flowFingerprint: flow.fingerprint,
       sectionKeys,
       interfaceFingerprints,
       recipeFingerprint,
     })
-    const prior = priorFlows.get(flow.id)
+    const settle = flowSettleVerdict({ prior, components: inputComponents, legacyHash })
     // A settled entry that leaves a planned surface unaccounted for (no test, no
     // gap) is a hole nothing can heal: its hash skips the flow forever. Its hash is
     // DISREGARDED, so the flow re-runs here and settles honestly — no migration.
@@ -1967,14 +1980,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         scenarioPreparationDefect(flow, recipe, committedScenariosById.get(s.id)!) ||
         scenarioCasePrerequisiteProblems(flow, committedScenariosById.get(s.id)!, prerequisiteResolution.targets, undefined, recipe).length ||
         scenarioFullFlowDefect(flow.milestones, committedScenariosById.get(s.id)!.steps, s.caseEvidence ?? []))))
-    let changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior) || invalidCaseReview
+    let changed = !settle.settled || (prior !== undefined && violatesSettleInvariant(prior)) || invalidCaseReview
     // THE PER-FLOW CLAIM-DIFF GATE: when the only inputs that moved are bound
     // sections the gate judged cosmetic (their prior extraction was reused, so
-    // the claims — and this flow's fingerprint — are byte-identical), the hash
-    // recomputed over the sections' PRIOR fingerprints equals the committed one
-    // and the flow stays unchanged. The unchanged branch re-stamps the NEW hash,
-    // so the next generate is a genuine no-op. A settle-invariant violation
-    // still wins: an unaccounted surface must re-run regardless.
+    // the claims — and this flow's fingerprint — are byte-identical), the flow
+    // settles against the sections' PRIOR fingerprints and stays unchanged. The
+    // unchanged branch re-stamps the CURRENT components, so the next generate is
+    // a genuine no-op. A settle-invariant violation still wins: an unaccounted
+    // surface must re-run regardless.
     if (changed && prior && !invalidCaseReview && prior.generationInputsHash !== null && !violatesSettleInvariant(prior) && claimDiff.cosmetic.size > 0) {
       let substituted = false
       const priorSectionKeys = boundSections.map((s) => {
@@ -1983,17 +1996,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         substituted = true
         return sectionInputsKey({ ...s, fingerprint: priorFingerprint })
       })
-      if (
+      const cosmetic =
         substituted &&
-        flowGenerationInputsHash({
-          flowFingerprint: flow.fingerprint,
-          sectionKeys: priorSectionKeys,
-          interfaceFingerprints,
-          recipeFingerprint,
-        }) === prior.generationInputsHash
-      ) {
-        changed = false
-      }
+        flowSettleVerdict({
+          prior,
+          components: flowGenerationInputComponents({ ...inputParts, sectionKeys: priorSectionKeys }),
+          legacyHash: legacyFlowGenerationInputsHash({
+            flowFingerprint: flow.fingerprint,
+            sectionKeys: priorSectionKeys,
+            interfaceFingerprints,
+            recipeFingerprint,
+          }),
+        }).settled
+      if (cosmetic) changed = false
     }
     if (!changed && prior) {
       // Unchanged ⇒ authoring does not run, so the gaps the AUTHOR stage settled last
@@ -2018,10 +2033,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         inputComponents,
         prior,
         changed,
-        // Only a stored hash that stopped matching has moved inputs to name; a
-        // flow that was new, unsettled or re-opened by an invariant has none.
-        ...(changed && prior && prior.generationInputsHash !== null && prior.generationInputsHash !== inputsHash
-          ? { movedInputs: movedNamedInputs(prior.generationInputs, inputComponents) }
+        // Only a settled row the compare re-opened has moved inputs to name; a
+        // flow that was new, unsettled or re-opened by an invariant has none,
+        // and a row checked the legacy way names them as unrecorded.
+        ...(changed && prior && prior.generationInputsHash !== null && !settle.settled
+          ? { movedInputs: settle.moved }
           : {}),
       },
       errors: localErrors,

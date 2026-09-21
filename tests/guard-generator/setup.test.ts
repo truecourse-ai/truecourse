@@ -454,19 +454,26 @@ describe('runGuardSetup — skip when settled', () => {
     const probe = probeStub()
     const seed = seedSeam()
     const first = await runAndPersist(r, { probe: probe.probe, seedSession: seed.seam })
-    expect(Object.keys(first.steps.find((s) => s.key === 'seed')?.inputComponents ?? {})).toContain('recipe.manifests')
+    // The seed step keys on the recipe's CONTRACT and the catalog's identity —
+    // never on a dependency version it does not read.
+    expect(Object.keys(first.steps.find((s) => s.key === 'seed')?.inputComponents ?? {})).toEqual([
+      'recipe.contract',
+      'catalog',
+    ])
 
-    // A dependency bump: the root manifest moves, and nothing else does.
+    // A dependency bump: the root manifest moves, and nothing else does. The
+    // recipe step re-opens on it (the manifests are its subject); the seed does not.
     const manifest = JSON.parse(fs.readFileSync(path.join(r, 'package.json'), 'utf-8')) as Record<string, unknown>
     fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ ...manifest, version: '9.9.9' }))
     const facts: string[] = []
-    await runAndPersist(r, {
+    const second = await runAndPersist(r, {
       probe: probe.probe,
       seedSession: seed.seam,
       onStepFact: (step, line) => facts.push(`${step} | ${line}`),
     })
     expect(facts).toContain('recipe | re-opened: package.json moved')
-    expect(facts).toContain('seed | re-opened: recipe.manifests moved')
+    expect(facts.filter((line) => line.startsWith('seed | re-opened'))).toEqual([])
+    expect(statuses(second)).toMatchObject({ seed: 'skipped:unchanged' })
   })
 
   // The seed's cold-clone proof is where the recipe's `install`/`build` first

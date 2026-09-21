@@ -11,6 +11,7 @@ import {
   unaccountedSurfaces,
   violatesSettleInvariant,
   movedNamedInputs,
+  movedSchemeInputs,
   type GuardManifestFlow,
 } from '@truecourse/shared'
 
@@ -94,5 +95,20 @@ describe('movedNamedInputs', () => {
 
   it('keeps "nothing was recorded" apart from "nothing moved"', () => {
     expect(movedNamedInputs(undefined, { flow: 'a' })).toBeNull()
+  })
+})
+
+describe('movedSchemeInputs', () => {
+  it('compares only the names both records carry', () => {
+    expect(movedSchemeInputs({ flow: 'a', sections: 'b' }, { flow: 'a', sections: 'x' })).toEqual(['sections'])
+    expect(movedSchemeInputs({ flow: 'a', sections: 'b' }, { flow: 'a', sections: 'b' })).toEqual([])
+  })
+
+  it('ignores a name the scheme retired, so dropping an input re-opens nothing', () => {
+    expect(movedSchemeInputs({ flow: 'a', prompts: 'old' }, { flow: 'a' })).toEqual([])
+  })
+
+  it('fills a name the scheme gained, so adding an input re-opens nothing', () => {
+    expect(movedSchemeInputs({ flow: 'a' }, { flow: 'a', roster: 'r' })).toEqual([])
   })
 })

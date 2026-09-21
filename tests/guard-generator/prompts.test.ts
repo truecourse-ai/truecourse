@@ -12,7 +12,8 @@ import {
   FIDELITY_PROMPT_FINGERPRINT,
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
+  flowGenerationInputComponents,
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
   buildMatchUserPrompt,
@@ -714,25 +715,34 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('not "response status is 201"')
   })
 
-  it('the cli prompt roll re-plans every flow — the fingerprint is folded into generationInputsHash', () => {
-    // The incremental gate compares a flow's RECORDED manifest hash with the current
-    // one; the current one folds GENERATE_PROMPT_FINGERPRINT, so rolling the prompt
-    // makes every committed cli flow mismatch and re-plan — which is exactly how a
-    // new authoring capability converts the flows that settled `blocked-on` for want
-    // of it, with no migration and no manual invalidation.
+  it('rolling an authoring prompt re-plans no committed flow', () => {
+    // A committed flow has been run and proven; rewording the prompt that wrote
+    // it does not make it wrong. So no prompt fingerprint appears among a flow's
+    // settle components, and the legacy hash folds the FROZEN literals, which no
+    // prompt edit can move. A capability that must re-author the flows waiting
+    // on it bumps its stage version by hand instead.
     const inputs = {
       flowFingerprint: 'sha256:flow',
       sectionKeys: ['sha256:section'],
       interfaceFingerprints: ['sha256:interface'],
       recipeFingerprint: 'sha256:recipe',
     }
-    const hash = flowGenerationInputsHash(inputs)
-    // The hash these very inputs produced under the PRE-roll cli prompt
-    // (fingerprint 81604a8d9fa37b2e, before per-step env) — a recorded manifest
-    // entry carrying it no longer matches, so its flow becomes work again.
-    expect(hash).not.toBe('sha256:974e06334928305e277513d603a023ebb6f4704f9d0913b672eb865c00079332')
-    // Deterministic for the inputs themselves: nothing else re-plans.
-    expect(flowGenerationInputsHash(inputs)).toBe(hash)
+    expect(legacyFlowGenerationInputsHash(inputs)).toBe(legacyFlowGenerationInputsHash(inputs))
+    const components = flowGenerationInputComponents({
+      flowFingerprint: 'sha256:flow',
+      sectionKeys: ['sha256:section'],
+      assignmentFingerprints: [],
+      interfaceFingerprints: ['sha256:interface'],
+      prerequisiteMaterial: '',
+      recipeSlice: 'slice',
+      roster: 'roster',
+      preparation: 'preparation',
+    })
+    for (const name of Object.keys(components)) expect(name).not.toContain('prompt')
+    for (const value of Object.values(components)) {
+      expect(value).not.toBe(GENERATE_PROMPT_FINGERPRINT)
+      expect(value).not.toBe(MATCH_PROMPT_FINGERPRINT)
+    }
   })
 
   it('the cli authoring prompt offers per-step env (the same command under several environments)', () => {

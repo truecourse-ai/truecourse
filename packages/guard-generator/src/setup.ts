@@ -68,6 +68,8 @@ import {
   computePreparationFingerprint,
   preparationFingerprintComponents,
   recipeFingerprintComponents,
+  recipeContractFingerprint,
+  dependencyCatalogIdentity,
   preparationCatalog,
   dependenciesPath,
   loadDependencyCatalog,
@@ -101,7 +103,7 @@ import type {
   Interface,
   MapperDiagnostic,
 } from '@truecourse/shared'
-import { movedNamedInputs } from '@truecourse/shared'
+import { movedNamedInputs, movedSchemeInputs } from '@truecourse/shared'
 import { GUARD_COMPOSE_FILE } from './datastore-compose.js'
 import { discoverRecipe, type RecipeDiscoveryPhase, type RecipeRepairFn } from './recipe-discovery.js'
 import { detectEcosystems, routesFromInterfaces, type ApiRouteRef } from './recipe-propose.js'
@@ -517,9 +519,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   /** One line naming one thing a step did. */
   const fact = (step: GuardSetupStepKey, line: string): void => opts.onStepFact?.(step, line)
   const steps: GuardSetupTaxonomyStep[] = []
-  const settled = settledFingerprints(repoRoot, opts.refresh === true)
+  const settled = settledSteps(repoRoot, opts.refresh === true)
   /** The detection snapshot, once the detect step has read it: a catalog input. */
   let detectionSnapshot = ''
+  /** Whether a step's settled row still holds — its named inputs when it has
+   *  them, else its old fingerprint one last time. */
+  const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
+    stepSettled(repoRoot, key, settled(key), legacyFingerprint, detectionSnapshot)
   /**
    * Record a step's row with its inputs BY NAME, read off the tree as the row
    * is recorded, which is the state its fingerprint was computed over. A step
@@ -529,9 +535,9 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const pushStep = (row: GuardSetupTaxonomyStep): void => {
     const inputComponents = stepInputComponents(repoRoot, row.key, detectionSnapshot)
     steps.push({ ...row, ...(Object.keys(inputComponents).length > 0 ? { inputComponents } : {}) })
-    const settledFp = settled(row.key)
-    if (settledFp === null || settledFp === row.inputFingerprint) return
-    const moved = movedNamedInputs((priorReport?.steps ?? []).find((r) => r.key === row.key)?.inputComponents, inputComponents)
+    const settledRow = settled(row.key)
+    if (settledRow === null || settledRow.inputFingerprint === row.inputFingerprint) return
+    const moved = movedNamedInputs(settledRow.inputComponents, inputComponents)
     fact(row.key, moved ? `re-opened: ${moved.join(', ') || 'no named input'} moved` : 're-opened: the settled row names no inputs')
   }
 
@@ -629,7 +635,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     recipeStep = { status: 'ok', outcome: 'exists' }
     fact('recipe', 'replayed from recipe.json: not re-derived, not probed')
     opts.onStepDone?.('recipe', 'replayed from recipe.json — not re-derived, not probed')
-  } else if (preexisting && settled('recipe') === recipeInputFp) {
+  } else if (preexisting && holds('recipe', recipeInputFp)) {
     // Settled: the subject is byte-identical to what the last run verified, so
     // neither discovery nor the live probe re-runs. `refresh` bypasses this.
     recipe = preexisting
@@ -885,7 +891,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       fact('catalog', 'replayed: scenarios/dependencies.json stands as it is')
       for (const line of catalogEntryFacts(repoRoot)) fact('catalog', line)
       opts.onStepDone?.('catalog', 'replayed — scenarios/dependencies.json stands as it is')
-    } else if (settled('catalog') === catalogFpPre || settleSkip) {
+    } else if (holds('catalog', catalogFpPre) || settleSkip) {
       // The skeleton is still run for the legacy report field — with unchanged
       // detection and an unchanged recipe it derives nothing and writes nothing —
       // but no session is spent.
@@ -995,7 +1001,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       }
       fact('interfaces', 'replayed: the authored catalog stands as it is')
       opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
-    } else if (settled('interfaces') === interfacesFp && authoredExists && opts.replace !== true &&
+    } else if (holds('interfaces', legacyInterfacesFingerprint(repoRoot)) && authoredExists && opts.replace !== true &&
       webScreensNeedingReadables(readInterfaceCatalog(repoRoot), readAuthoredInterfaceCatalog(repoRoot)).size === 0) {
       pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
       fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')
@@ -1059,8 +1065,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const current = reloadRecipe(repoRoot) ?? recipe
 
   // ---- Step 5: the one seed — data AND auth. SOFT. -------------------------
-  const seedFpOf = (): string =>
-    seedFingerprint(computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
+  const seedFpOf = (): string => computeSeedStepFingerprint(repoRoot)
   let seedStep: GuardSetupSeedStep | undefined
   /** A recipe defect the seed's cold-clone proof surfaced: the run fails on it. */
   let recipeFailure: string | undefined
@@ -1074,7 +1079,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       }
       fact('seed', 'replayed: the declared `api.seed` stands as it is, nothing was drafted or proved')
       opts.onStepDone?.('seed', 'replayed — the declared `api.seed` stands as it is')
-    } else if (settled('seed') === seedFpPre) {
+    } else if (holds('seed', legacySeedStepFingerprint(repoRoot))) {
       const existingSeed = current.api?.seed
       seedStep = existingSeed
         ? {
@@ -1170,7 +1175,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       fact('preparations', 'replayed: the existing private preparation profiles stand as they are')
       for (const line of preparationFacts(preparationRecipe, repoRoot)) fact('preparations', line)
       opts.onStepDone?.('preparations', 'existing private preparation profiles preserved')
-    } else if (settled('preparations') === preparationFp &&
+    } else if (holds('preparations', preparationFp) &&
       preparationCatalog(preparationRecipe, repoRoot).length === Object.keys(preparationRecipe.preparations ?? {}).length) {
       pushStep({ key: 'preparations', status: 'skipped', reason: 'unchanged', inputFingerprint: preparationFp })
       fact('preparations', 'every private preparation profile is unchanged since the last setup, from cache')
@@ -1183,7 +1188,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             onPhase: (running, done) => phases.enter({ running, done }) })
         : { status: 'skipped' as const, reason: 'private preparation authoring is unavailable; only profiles with runner-verified baseline checks are usable' }
       pushStep({ key: 'preparations', status: result.status, ...(result.reason ? { reason: result.reason } : {}),
-        inputFingerprint: opts.preparationSession ? computePreparationFingerprint(repoRoot) : 'authoring-unavailable', ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
+        inputFingerprint: opts.preparationSession ? computePreparationFingerprint(repoRoot) : UNSETTLEABLE_FINGERPRINT, ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
       // The session's findings are its outcome, read in the session itself;
       // the step only counts them.
       const findings = result.findings ?? []
@@ -1206,7 +1211,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // registration) without demoting the run.
   if (!preparationFailure && enter('auth')) {
     const authFp = authFingerprint(repoRoot)
-    if (settled('auth') === authFp) {
+    if (holds('auth', authFp)) {
       pushStep({ key: 'auth', status: 'skipped', reason: 'unchanged', inputFingerprint: authFp })
       fact('auth', 'the supplied entries are unchanged since the last setup, from cache: no proof session ran')
       opts.onStepDone?.('auth', 'unchanged')
@@ -1402,10 +1407,20 @@ function writeCatalogSettle(repoRoot: string, fingerprint: string): void {
   )
 }
 
-/** Sorted derived web place `(id, address)` pairs :: the recipe fingerprint —
- *  the interfaces step re-runs when a screen appeared, moved, or vanished.
+/** Sorted derived web place `(id, address)` pairs :: the recipe CONTRACT — the
+ *  interfaces step re-runs when a screen appeared, moved or vanished, or when
+ *  the promise it derives against changed. A dependency bump, a catalog edit
+ *  and a seed rewrite reach none of it.
  *  Exported for the pre-flight estimate's settled check. */
 export function interfacesFingerprint(repoRoot: string): string {
+  return createHash('sha256')
+    .update(`${derivedWebPlacePairs(repoRoot)}::${recipeContractFingerprint(repoRoot)}`)
+    .digest('hex')
+}
+
+/** {@link interfacesFingerprint} as it was computed before the slices — the one
+ *  check a settled row with no components gets. Delete with the legacy hash. */
+export function legacyInterfacesFingerprint(repoRoot: string): string {
   return createHash('sha256')
     .update(`${derivedWebPlacePairs(repoRoot)}::${computeRecipeFingerprint(repoRoot)}`)
     .digest('hex')
@@ -1419,15 +1434,25 @@ function derivedWebPlacePairs(repoRoot: string): string {
     .join('\n')
 }
 
-function seedFingerprint(recipeFingerprint: string, depsContent: string): string {
-  const depsHash = createHash('sha256').update(depsContent).digest('hex')
-  return createHash('sha256').update(`${recipeFingerprint}::${depsHash}`).digest('hex')
+/**
+ * The seed step's fingerprint off the tree as it stands — the estimate's
+ * settled check, the exact value the running step computes, and the seed
+ * session's cache key. The recipe CONTRACT plus the catalog's IDENTITY: which
+ * classes of starting state exist, never how the catalog session worded them,
+ * and never a dependency version the seed does not read.
+ */
+export function computeSeedStepFingerprint(repoRoot: string): string {
+  return createHash('sha256')
+    .update(`${recipeContractFingerprint(repoRoot)}::${dependencyCatalogIdentity(repoRoot)}`)
+    .digest('hex')
 }
 
-/** The seed step's fingerprint off the tree as it stands — the estimate's
- *  settled check, and the exact value the running step computes. */
-export function computeSeedStepFingerprint(repoRoot: string): string {
-  return seedFingerprint(computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
+/** {@link computeSeedStepFingerprint} as it was computed before the slices —
+ *  the one check a settled row with no components gets, and the seed session's
+ *  old cache key. Delete with the legacy hash. */
+export function legacySeedStepFingerprint(repoRoot: string): string {
+  const depsHash = createHash('sha256').update(dependenciesFileContent(repoRoot)).digest('hex')
+  return createHash('sha256').update(`${computeRecipeFingerprint(repoRoot)}::${depsHash}`).digest('hex')
 }
 
 /** The catalog's SUPPLIED entries, canonically — what the auth step consumes. A
@@ -1474,9 +1499,15 @@ function stepInputComponents(
     case 'catalog':
       return { detection: digest(detectionJson), ...recipeParts() }
     case 'interfaces':
-      return { places: digest(derivedWebPlacePairs(repoRoot)), ...recipeParts() }
+      return {
+        places: digest(derivedWebPlacePairs(repoRoot)),
+        'recipe.contract': digest(recipeContractFingerprint(repoRoot)),
+      }
     case 'seed':
-      return recipeParts()
+      return {
+        'recipe.contract': digest(recipeContractFingerprint(repoRoot)),
+        catalog: digest(dependencyCatalogIdentity(repoRoot)),
+      }
     case 'preparations':
       return preparationFingerprintComponents(repoRoot)
     case 'auth':
@@ -1485,28 +1516,67 @@ function stepInputComponents(
 }
 
 /**
- * The prior run's settled fingerprints, per step. A row settles when it ran
- * `ok` — or when it was itself a `skipped`/`unchanged` carry-forward of an
- * earlier `ok`, so a third run does not bounce back to re-running. `blocked`
- * and every real `skipped` reason never settle: those steps re-evaluate every
- * run (cheaply — their gates refuse again) until the state moves.
+ * The fingerprint a step records when it could not read its own inputs — it ran
+ * without the session it needs, so there is nothing to settle on. Such a row
+ * never settles, whatever it carries beside the fingerprint.
+ */
+const UNSETTLEABLE_FINGERPRINT = 'authoring-unavailable'
+
+/** A settled step row, as the next run's gate reads it. */
+export interface SettledStepRow {
+  inputFingerprint: string
+  /** The row's inputs by name; absent on a row written before they existed. */
+  inputComponents?: Record<string, string>
+}
+
+/**
+ * The prior run's settled rows, per step. A row settles when it ran `ok` — or
+ * when it was itself a `skipped`/`unchanged` carry-forward of an earlier `ok`,
+ * so a third run does not bounce back to re-running. `blocked` and every real
+ * `skipped` reason never settle: those steps re-evaluate every run (cheaply —
+ * their gates refuse again) until the state moves.
  *
  * Exported for the pre-flight estimate, which probes the SAME settled rows the
  * run will skip on.
  */
-export function settledFingerprints(
+export function settledSteps(
   repoRoot: string,
   refresh: boolean,
-): (key: GuardSetupTaxonomyKey) => string | null {
+): (key: GuardSetupTaxonomyKey) => SettledStepRow | null {
   if (refresh) return () => null
   const prior = readGuardSetup(repoRoot)
-  const byKey = new Map<GuardSetupTaxonomyKey, string>()
+  const byKey = new Map<GuardSetupTaxonomyKey, SettledStepRow>()
   for (const row of prior?.steps ?? []) {
+    if (row.inputFingerprint === UNSETTLEABLE_FINGERPRINT) continue
     if (row.status === 'ok' || (row.status === 'skipped' && (row.reason === 'unchanged' || row.key === 'preparations'))) {
-      byKey.set(row.key, row.inputFingerprint)
+      byKey.set(row.key, {
+        inputFingerprint: row.inputFingerprint,
+        ...(row.inputComponents ? { inputComponents: row.inputComponents } : {}),
+      })
     }
   }
   return (key) => byKey.get(key) ?? null
+}
+
+/**
+ * Does a settled step row still hold? The flow compare's rule, for the step
+ * spine: a row WITH named inputs is compared name by name under the step's
+ * current scheme, so changing what a step folds re-opens nothing by itself. A
+ * row that predates the names is compared against the step's OLD fingerprint,
+ * once — it then settles again with names, and never takes this path twice.
+ */
+export function stepSettled(
+  repoRoot: string,
+  key: GuardSetupTaxonomyKey,
+  settled: SettledStepRow | null,
+  legacyFingerprint: string,
+  detectionJson = '',
+): boolean {
+  if (!settled) return false
+  if (settled.inputComponents) {
+    return movedSchemeInputs(settled.inputComponents, stepInputComponents(repoRoot, key, detectionJson)).length === 0
+  }
+  return settled.inputFingerprint === legacyFingerprint
 }
 
 /** The catalog step's one-line detail: the skeleton's account + the session's. */

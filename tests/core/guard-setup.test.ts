@@ -35,8 +35,8 @@ import {
   proposeRecipe,
   recipeCacheKey,
   RECIPE_CACHE_NAME,
-  interfacesFingerprint,
-  computeSeedStepFingerprint,
+  legacyInterfacesFingerprint,
+  legacySeedStepFingerprint,
   authFingerprint,
   ecosystemFingerprint,
   type GuardSetupSeedSession,
@@ -420,8 +420,10 @@ function settledRepo(): string {
       // The catalog fingerprint folds the detection snapshot, which only an
       // analysis pass can produce — the estimate only asks whether a row settled.
       { key: 'catalog', status: 'ok', inputFingerprint: 'settled-catalog' },
-      { key: 'interfaces', status: 'ok', inputFingerprint: interfacesFingerprint(r) },
-      { key: 'seed', status: 'ok', inputFingerprint: computeSeedStepFingerprint(r) },
+      // A spine an older build wrote: no named inputs, so each row is checked
+      // against the step's OLD fingerprint once and settles.
+      { key: 'interfaces', status: 'ok', inputFingerprint: legacyInterfacesFingerprint(r) },
+      { key: 'seed', status: 'ok', inputFingerprint: legacySeedStepFingerprint(r) },
       { key: 'preparations', status: 'ok', inputFingerprint: computePreparationFingerprint(r) },
       { key: 'auth', status: 'ok', inputFingerprint: authFingerprint(r) },
     ],

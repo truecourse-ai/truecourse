@@ -1995,16 +1995,18 @@ describe('generateGuards — the per-flow pipeline', () => {
     expect(ids).toEqual(['limits', 'limits-2'])
 
     // Re-run against a STALE manifest: both flows re-author and must land on the
-    // SAME ids (each frees its own before assigning), never colliding.
+    // SAME ids (each frees its own before assigning), never colliding. Stale
+    // means the settle record is gone, names and all — a hash alone is only ever
+    // checked the legacy way.
     writeManifest(r, {
-      flows: readManifest(r)!.flows.map((f) => ({ ...f, generationInputsHash: 'sha256:stale' })),
+      flows: readManifest(r)!.flows.map(({ generationInputs: _named, ...f }) => ({ ...f, generationInputsHash: 'sha256:stale' })),
     })
     const second = await runGenerate(opts)
     expect(second.written.map((w) => w.id).sort()).toEqual(ids)
     expect(new Set(loadScenarios(r).scenarios.map((s) => s.id)).size).toBe(2)
   }, 90_000)
 
-  it('names the settle input that re-opened a flow', async () => {
+  it('names the settle input that re-opened a flow, and a dependency bump names none', async () => {
     const r = seed()
     const opts = {
       repoRoot: r,
@@ -2014,21 +2016,37 @@ describe('generateGuards — the per-flow pipeline', () => {
     const first = await runGenerate(opts)
     expect(first.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
     const stored = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
-    expect(Object.keys(stored.generationInputs ?? {})).toEqual(expect.arrayContaining(['flow', 'sections', 'interfaces', 'recipe.manifests']))
+    expect(Object.keys(stored.generationInputs ?? {})).toEqual(
+      expect.arrayContaining(['flow', 'sections', 'interfaces', 'recipe.slice', 'roster', 'preparation']),
+    )
 
-    // A dependency bump moves the recipe fingerprint and nothing a flow reads.
+    // A dependency bump moves the recipe fingerprint and nothing a flow reads,
+    // so no flow re-opens and nothing is re-authored.
     fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }))
+    const second = await runGenerate(opts)
+    expect(second.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
+    expect(second.written).toEqual([])
+
+    // One stored component no longer matches: that flow re-opens, by name.
+    writeManifest(r, {
+      flows: readManifest(r)!.flows.map((f) => ({
+        ...f,
+        generationInputs: { ...f.generationInputs, sections: 'f'.repeat(16) },
+      })),
+    })
     const facts: string[] = []
-    const second = await runGenerate({ ...opts, onFact: (_step, line) => facts.push(line) })
-    expect(second.flows.reopened).toEqual({ flows: 1, byInput: { 'recipe.manifests': 1 }, unrecorded: 0 })
-    expect(facts).toContain('1 flow re-opened: 1 recipe.manifests, 0 interfaces, 0 sections')
+    const third = await runGenerate({ ...opts, onFact: (_step, line) => facts.push(line) })
+    expect(third.flows.reopened).toEqual({ flows: 1, byInput: { sections: 1 }, unrecorded: 0 })
+    expect(facts).toContain('1 flow re-opened: 1 sections, 0 interfaces')
 
     // An entry stored before the inputs were named can only say it moved.
     writeManifest(r, {
       flows: readManifest(r)!.flows.map(({ generationInputs: _named, ...f }) => ({ ...f, generationInputsHash: `sha256:${'0'.repeat(64)}` })),
     })
-    const third = await runGenerate(opts)
-    expect(third.flows.reopened).toEqual({ flows: 1, byInput: {}, unrecorded: 1 })
+    const fourth = await runGenerate(opts)
+    expect(fourth.flows.reopened).toEqual({ flows: 1, byInput: {}, unrecorded: 1 })
+    // And it leaves with names, so the next run compares them.
+    expect(readManifest(r)!.flows[0].generationInputs).toBeDefined()
   }, 90_000)
 
   it('stops after synthesis when the internal seam asks it to', async () => {

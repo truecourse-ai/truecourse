@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   workerCacheKey,
   sectionInputsKey,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
   planGuardWork,
   type SectionInput,
   type FlowWorkerSessionSeam,
@@ -100,7 +100,7 @@ describe('planGuardWork — securityFingerprint stamping', () => {
         flowFingerprint: s.fingerprint,
         bindings: [{ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }],
         scenarios: [],
-        generationInputsHash: flowGenerationInputsHash({
+        generationInputsHash: legacyFlowGenerationInputsHash({
           flowFingerprint: s.fingerprint,
           sectionKeys: [sectionInputsKey(s)],
           interfaceFingerprints: INTERFACES,

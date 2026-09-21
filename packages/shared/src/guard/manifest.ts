@@ -317,6 +317,32 @@ export function movedNamedInputs(
 }
 
 /**
+ * THE COMPONENT COMPARE — the names that moved between a record of named
+ * inputs stored on a settled row and the record the CURRENT scheme computes.
+ * Three rules, and they are what makes changing a key formula free:
+ *
+ * - a name on BOTH sides must match, or it moved;
+ * - a name stored but no longer in the scheme is ignored, so retiring an input
+ *   re-opens nothing;
+ * - a name in the scheme but missing from the stored row is filled in, not
+ *   moved, so adding an input re-opens nothing either.
+ *
+ * Which means a formula change is a change to a list of names, with no scheme
+ * version, no re-stamp and no migration pass. The price is that a genuinely
+ * changed input can only be seen through a name both records carry, which is
+ * why {@link movedNamedInputs} — the reporting question, "what is different
+ * about these two rows" — stays a different function.
+ */
+export function movedSchemeInputs(
+  prior: Readonly<Record<string, string>>,
+  current: Readonly<Record<string, string>>,
+): string[] {
+  return Object.keys(current)
+    .filter((name) => name in prior && prior[name] !== current[name])
+    .sort()
+}
+
+/**
  * One live section's manifest coverage, DERIVED from the flow-keyed manifest — the
  * per-section pivot the coverage surfaces join on (sections stay the staleness
  * anchor). Never persisted: `guardManifestSections` recomputes it per read.

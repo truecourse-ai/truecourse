@@ -93,9 +93,12 @@ import {
   RECIPE_CACHE_NAME,
   RecipeProposalSchema,
   SEED_CACHE_NAME,
-  settledFingerprints,
+  settledSteps,
+  stepSettled,
   interfacesFingerprint,
+  legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  legacySeedStepFingerprint,
   authFingerprint,
   collectWorkDocs,
   snapExtraction,
@@ -108,7 +111,9 @@ import {
   partitionPlanPreparations,
   readFlowsFile,
   sectionInputsKey,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
+  flowGenerationInputComponents,
+  flowSettleVerdict,
   flowAreaIdForDoc,
   workerCacheKey,
   FlowSetSchema,
@@ -152,6 +157,7 @@ import {
   GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect,
   runnableDriverIds,
   violatesSettleInvariant,
+  type GuardSetupTaxonomyKey,
   dismissedClaimKey,
   ExtractOutcomeSchema,
   type GuardDriverId,
@@ -160,6 +166,9 @@ import {
 import {
   computeRecipeFingerprint,
   computePreparationFingerprint,
+  flowRecipeSliceFingerprint,
+  flowRosterFingerprint,
+  flowPreparationFingerprint,
   resolvePrerequisites,
   buildRouteManifest,
   loadDependencyCatalog,
@@ -838,7 +847,14 @@ async function planGuardRealizationStages(
       // pair is the only unknown — and it is counted as both a match call and a
       // worker session.
       const interfaceFingerprints: string[] = [];
-      const plannedPairs: { surface: GuardDriverId; fingerprints: string[] }[] = [];
+      const plannedPairs: {
+        surface: GuardDriverId;
+        assignment: string;
+        interfaces: string[];
+        webCatalog?: string;
+        /** The three above in the order the worker key folds them. */
+        fingerprints: string[];
+      }[] = [];
       let unknown = false;
       for (const catalog of matchable) {
         if (!flowDriversToMatch(flow).includes(catalog.surface)) continue;
@@ -858,12 +874,16 @@ async function planGuardRealizationStages(
         }
         const preparedPlan = partitionPlanPreparations(flow, cached.plan, availablePreparations).plan;
         if (!preparedPlan || !completeRealization(flow, preparedPlan)) continue;
-        const fingerprints = [
-          realizationAssignmentFingerprint(preparedPlan),
-          ...preparedPlan.interfaces.map((j) => j.fingerprint),
-          ...(catalog.surface === 'web' ? [catalog.fingerprint] : []),
-        ];
-        plannedPairs.push({ surface: catalog.surface, fingerprints });
+        const assignment = realizationAssignmentFingerprint(preparedPlan);
+        const interfaces = preparedPlan.interfaces.map((j) => j.fingerprint);
+        const webCatalog = catalog.surface === 'web' ? catalog.fingerprint : undefined;
+        plannedPairs.push({
+          surface: catalog.surface,
+          assignment,
+          interfaces,
+          webCatalog,
+          fingerprints: [assignment, ...interfaces, ...(webCatalog ? [webCatalog] : [])],
+        });
 
       }
       const previousDrivers = priorByFlow.get(flow.id)?.scenarios.flatMap(s => s.drivers ?? []) ?? [];
@@ -872,18 +892,35 @@ async function planGuardRealizationStages(
       interfaceFingerprints.push(...plannedPairs.flatMap(p => p.fingerprints));
       interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe));
       const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
-      const inputsHash = flowGenerationInputsHash({
-        flowFingerprint: flow.fingerprint,
-        sectionKeys,
-        interfaceFingerprints,
-        recipeFingerprint: plan.recipeFingerprint,
-      });
       const prior = priorByFlow.get(flow.id);
+      const priorScenarios = (prior?.scenarios ?? []).flatMap((s) => committedScenarios.get(s.id) ?? []);
+      const chosenSurface = plannedPairs[0]?.surface ?? 'cli';
+      // The run's own settle compare, over the same components it computes.
+      const settle = flowSettleVerdict({
+        prior,
+        components: flowGenerationInputComponents({
+          flowFingerprint: flow.fingerprint,
+          sectionKeys,
+          assignmentFingerprints: plannedPairs.map((p) => p.assignment),
+          interfaceFingerprints: plannedPairs.flatMap((p) => p.interfaces),
+          ...(plannedPairs[0]?.webCatalog ? { webCatalogFingerprint: plannedPairs[0].webCatalog } : {}),
+          prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe),
+          recipeSlice: flowRecipeSliceFingerprint(recipe ?? null, chosenSurface),
+          roster: flowRosterFingerprint(recipe ?? null, priorScenarios),
+          preparation: flowPreparationFingerprint(repoRoot, recipe ?? null, priorScenarios),
+        }),
+        legacyHash: legacyFlowGenerationInputsHash({
+          flowFingerprint: flow.fingerprint,
+          sectionKeys,
+          interfaceFingerprints,
+          recipeFingerprint: plan.recipeFingerprint,
+        }),
+      });
       // Same work selection the run makes: a settled entry that leaves a planned
-      // surface unaccounted for is WORK, whatever its hash says.
+      // surface unaccounted for is WORK, whatever its components say.
       const changed =
-        unknown || !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior) ||
-        prior.scenarios.length > 1 || prior.scenarios.some(s => {
+        unknown || !settle.settled || (prior !== undefined && violatesSettleInvariant(prior)) ||
+        (prior?.scenarios.length ?? 0) > 1 || (prior?.scenarios ?? []).some(s => {
           const scenario = committedScenarios.get(s.id);
           return s.reviewed === false || !scenario || s.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
             !!scenarioFullFlowDefect(flow.milestones, scenario.steps, s.caseEvidence ?? []);
@@ -1041,7 +1078,10 @@ export async function estimateGuardSetup(
   } catch {
     recipe = undefined; // a broken recipe is re-derived, so it costs the session
   }
-  const settled = settledFingerprints(repoRoot, refresh);
+  const settled = settledSteps(repoRoot, refresh);
+  /** The run's own gate, step by step: named inputs when the row has them. */
+  const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
+    stepSettled(repoRoot, key, settled(key), legacyFingerprint);
 
   // ---- recipe repair: loop only on the failure path -------------------------
   // Zero whenever a recipe exists (discovery reuses it) or the settled proposal
@@ -1072,7 +1112,7 @@ export async function estimateGuardSetup(
   const derivedCatalog = readInterfaceCatalog(repoRoot);
   const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
   const interfacesSettled =
-    !replace && authoredCatalog !== null && settled('interfaces') === interfacesFingerprint(repoRoot) &&
+    !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
     webScreensNeedingReadables(derivedCatalog, authoredCatalog).size === 0;
   const staleAuthoredIds = new Set(
     staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
@@ -1086,7 +1126,7 @@ export async function estimateGuardSetup(
   // ---- seed: real cache key when the step will run --------------------------
   const seedGateOpen =
     !recipe || (recipe.api !== undefined && (recipe.api.seed === undefined || refresh));
-  const seedSettled = recipe !== undefined && settled('seed') === computeSeedStepFingerprint(repoRoot);
+  const seedSettled = recipe !== undefined && holds('seed', legacySeedStepFingerprint(repoRoot));
   let seedItems = 0;
   let seedMax = 0;
   if (seedGateOpen && !seedSettled) {
@@ -1106,7 +1146,7 @@ export async function estimateGuardSetup(
   // ---- private preparations: one authoring session per changed recipe --------
   // A profile is not evidence that this setup step already settled. The runtime
   // skips only its current recorded fingerprint; old setups must run this step.
-  const preparationSettled = recipe !== undefined && settled('preparations') === computePreparationFingerprint(repoRoot) &&
+  const preparationSettled = recipe !== undefined && holds('preparations', computePreparationFingerprint(repoRoot)) &&
     preparationCatalog(recipe, repoRoot).length === Object.keys(recipe.preparations ?? {}).length;
   const preparationItems = preparationSettled ? 0 : 1;
   // Upstream recipe/seed work can move the fingerprint before this step starts.
@@ -1119,7 +1159,7 @@ export async function estimateGuardSetup(
   const authRuns =
     suppliedEntries > 0 &&
     recipe?.entry !== undefined &&
-    settled('auth') !== authFingerprint(repoRoot);
+    !holds('auth', authFingerprint(repoRoot));
   const authItems = authRuns ? suppliedEntries : 0;
 
   const setupStage = (input: {
