@@ -226,7 +226,7 @@ import {
   type ExternalServiceHint,
   type FidelityUserContext,
 } from './prompts.js'
-import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { WorldClassifySchema, rawScenarioSchemaFor, type RawGeneratedScenario } from './schemas.js'
 import { EMPTY_CLAIM_DIFF_GATE, docContentHash, rememberDocTexts, reuseCosmeticExtractions } from './claim-diff.js'
 import {
@@ -2251,27 +2251,68 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       title: w.flow.title,
       milestones: w.flow.milestones.map((m) => m.claimTitle),
     }))
+    type ClassifyInput = (typeof classifyInputs)[number]
     const WORLD_CLASSIFY_CACHE_NAME = 'guard/world-classify'
-    const chunks: (typeof classifyInputs)[] = []
-    for (let i = 0; i < classifyInputs.length; i += WORLD_CLASSIFY_CHUNK_SIZE) {
-      chunks.push(classifyInputs.slice(i, i + WORLD_CLASSIFY_CHUNK_SIZE))
+    // A verdict is stored PER FLOW, under that flow's own input. The calls are
+    // still batched — the prompt answers a whole list at once — but the chunks
+    // were POSITIONAL, so one flow added at the front re-keyed every chunk
+    // after it and re-bought the lot. The value keeps the reply's shape: a
+    // one-flow list naming the flow when it mutates, and empty when it does not.
+    const flowKey = (flow: ClassifyInput): string =>
+      createHash('sha256')
+        .update(`world-classify-flow-v${WORLD_CLASSIFY_STAGE_VERSION}\0${JSON.stringify(flow)}`)
+        .digest('hex')
+    const record = async (flow: ClassifyInput, mutates: boolean): Promise<void> => {
+      if (mutates) destructiveFlowIds.add(flow.id)
+      await setCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, flowKey(flow), {
+        mutators: mutates ? [flow.id] : [],
+      })
     }
-    const chunkKeyOver = (stage: string, chunk: typeof classifyInputs): string =>
-      createHash('sha256').update(`${stage}\0${JSON.stringify(chunk)}`).digest('hex')
-    for (const chunk of chunks) {
-      const chunkKey = chunkKeyOver(`world-classify-v${WORLD_CLASSIFY_STAGE_VERSION}`, chunk)
+    const chunksOf = (flows: readonly ClassifyInput[]): ClassifyInput[][] => {
+      const out: ClassifyInput[][] = []
+      for (let i = 0; i < flows.length; i += WORLD_CLASSIFY_CHUNK_SIZE) {
+        out.push(flows.slice(i, i + WORLD_CLASSIFY_CHUNK_SIZE))
+      }
+      return out
+    }
+
+    const unresolved = new Map<string, ClassifyInput>()
+    for (const flow of classifyInputs) {
       const cached = WorldClassifySchema.safeParse(
-        await getCacheEntryOrLegacy(
-          repoRoot,
-          WORLD_CLASSIFY_CACHE_NAME,
-          chunkKey,
-          chunkKeyOver(LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT, chunk),
-        ),
+        await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, flowKey(flow)),
       )
       if (cached.success) {
-        for (const id of cached.data.mutators) destructiveFlowIds.add(id)
+        if (cached.data.mutators.includes(flow.id)) destructiveFlowIds.add(flow.id)
         continue
       }
+      unresolved.set(flow.id, flow)
+    }
+
+    // THE RETIRED POSITIONAL CHUNKS, read once per forty flows: the old key is
+    // exactly this run's slicing of this run's changed set, so an unchanged set
+    // finds its whole stored answer and every flow in it is written out
+    // individually. A set that moved simply misses, as it did before.
+    if (unresolved.size > 0) {
+      const chunkKeyOver = (stage: string, chunk: readonly ClassifyInput[]): string =>
+        createHash('sha256').update(`${stage}\0${JSON.stringify(chunk)}`).digest('hex')
+      for (const chunk of chunksOf(classifyInputs)) {
+        if (!chunk.some((flow) => unresolved.has(flow.id))) continue
+        const stored =
+          (await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME,
+            chunkKeyOver(`world-classify-v${WORLD_CLASSIFY_STAGE_VERSION}`, chunk))) ??
+          (await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME,
+            chunkKeyOver(LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT, chunk)))
+        const cached = WorldClassifySchema.safeParse(stored)
+        if (!cached.success) continue
+        const mutators = new Set(cached.data.mutators)
+        for (const flow of chunk) {
+          if (!unresolved.delete(flow.id)) continue
+          await record(flow, mutators.has(flow.id))
+        }
+      }
+    }
+
+    for (const chunk of chunksOf([...unresolved.values()])) {
       const known = new Set(chunk.map((f) => f.id))
       let settled = false
       let lastError = 'invalid reply'
@@ -2280,9 +2321,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           const raw = await worldClassifyRunner(chunk)
           const parsed = WorldClassifySchema.safeParse(raw)
           if (parsed.success) {
-            const mutators = parsed.data.mutators.filter((id) => known.has(id))
-            await setCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, chunkKey, { mutators })
-            for (const id of mutators) destructiveFlowIds.add(id)
+            const mutators = new Set(parsed.data.mutators.filter((id) => known.has(id)))
+            for (const flow of chunk) await record(flow, mutators.has(flow.id))
             settled = true
           }
         } catch (e) {
@@ -2293,6 +2333,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         }
       }
       if (!settled) {
+        // Fail CLOSED, and cache nothing: the keyword guess is what this run
+        // does without an answer, never an answer the next run inherits.
         const suspects = chunk.filter(looksWorldMutating).map((f) => f.id)
         for (const id of suspects) destructiveFlowIds.add(id)
         errors.push({

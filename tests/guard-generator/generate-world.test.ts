@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { GuardSessionSummary } from '@truecourse/guard-generator'
@@ -31,9 +32,12 @@ import {
   writeDoc,
   writeRecipe,
 } from './helpers.js'
+import { setCacheEntry } from '@truecourse/llm'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
 afterEach(() => {
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {
@@ -232,6 +236,112 @@ describe('generateGuards — classifier loss fails closed', () => {
     expect(waves.tasks[0]).toMatch(/adding/)
     const fallback = res.errors.filter((e) => /deterministic fallback scheduled 1 suspect/.test(e.message))
     expect(fallback).toHaveLength(1)
+  }, 60_000)
+
+  it('classifies only the flows it has no verdict for, however the set is sliced', async () => {
+    installMemoryKvCache()
+    const r = seed(TWO_FLOWS)
+    const classified: string[][] = []
+    const mutators: string[] = []
+    const run = (interfaces: Parameters<typeof runGenerate>[0]['interfaces']) =>
+      runGenerate({
+        repoRoot: r,
+        interfaces,
+        extractSession: extractSessionBy({}),
+        worldClassifyRunner: async (flows) => {
+          classified.push(flows.map((f) => f.id))
+          return { mutators: flows.filter((f) => f.id.includes('delet')).map((f) => f.id) }
+        },
+        flowWorkerSession: async ({ tasks, epicTasks, mutatorTasks, onTask }) => {
+          mutators.push(...mutatorTasks.map((t) => t.flowId))
+          const all = [...tasks, ...epicTasks, ...mutatorTasks]
+          const byTask = new Map()
+          onTask?.(0, all.length)
+          for (const t of all) {
+            byTask.set(t.workItem, {
+              kind: 'outcome',
+              outcome: { kind: 'blocked', perMilestone: [{ order: 1, capability: 'x' }] },
+            })
+          }
+          return { byTask, summary: sessionSummary('guard-generate.flow-worker', { ran: all.length }) }
+        },
+      })
+
+    expect((await run(interfacesOf(r, cliInterface(['add']), cliInterface(['admin', 'delete-user'])))).status).toBe('ok')
+    expect(classified).toHaveLength(1)
+    expect(classified[0]).toHaveLength(2)
+    expect(mutators).toEqual(['deleting-accounts'])
+
+    // A third flow, and both interfaces moved so every flow is work again —
+    // which is where the retired positional chunks re-bought the two verdicts
+    // this run already has. Nothing the classifier reads about them changed.
+    writeDoc(r, DOC, [TWO_FLOWS, '', '## archiving', '`relkit archive <id>` archives a task.'].join('\n'))
+    mutators.length = 0
+    const second = await run(interfacesOf(r,
+      cliInterface(['add'], ['--json']),
+      cliInterface(['admin', 'delete-user'], ['--force']),
+      cliInterface(['archive'])))
+
+    expect(second.status).toBe('ok')
+    // One call, carrying the one flow nothing had judged yet…
+    expect(classified).toHaveLength(2)
+    expect(classified[1]).toHaveLength(1)
+    expect(classified[1][0]).toMatch(/archiv/)
+    // …and the stored verdict still schedules the flow it was about.
+    expect(mutators).toEqual(['deleting-accounts'])
+  }, 60_000)
+
+  it('takes each flow’s verdict out of the retired batch entry, once', async () => {
+    installMemoryKvCache()
+    const r = seed(TWO_FLOWS)
+    // Round 1 loses the call, so nothing is cached — but it hands over the
+    // exact batch the retired key was computed over.
+    let batch: { id: string; title: string; milestones: string[] }[] = []
+    const blocked = flowWorkerSessionOf(async () => ({
+      kind: 'outcome' as const,
+      outcome: { kind: 'blocked' as const, perMilestone: [{ order: 1, capability: 'x' }] },
+    }))
+    await runGenerate({
+      repoRoot: r,
+      interfaces: interfacesOf(r, cliInterface(['add']), cliInterface(['admin', 'delete-user'])),
+      extractSession: extractSessionBy({}),
+      worldClassifyRunner: async (flows) => {
+        batch = flows.map((f) => ({ id: f.id, title: f.title, milestones: [...f.milestones] }))
+        throw new Error('lost')
+      },
+      flowWorkerSession: blocked,
+    })
+    expect(batch).toHaveLength(2)
+
+    // The entry a run before per-flow verdicts left behind: one key over the
+    // whole positional slice.
+    await setCacheEntry(r, 'guard/world-classify',
+      createHash('sha256').update(`world-classify-v1\0${JSON.stringify(batch)}`).digest('hex'),
+      { mutators: [batch[1].id] })
+
+    const mutators: string[] = []
+    const second = await runGenerate({
+      repoRoot: r,
+      // Both interfaces moved, so both flows are work again — what the
+      // classifier reads about them did not.
+      interfaces: interfacesOf(r, cliInterface(['add'], ['--json']), cliInterface(['admin', 'delete-user'], ['--force'])),
+      extractSession: extractSessionBy({}),
+      worldClassifyRunner: async () => {
+        throw new Error('the batch entry should have answered')
+      },
+      flowWorkerSession: async ({ tasks, epicTasks, mutatorTasks, onTask }) => {
+        mutators.push(...mutatorTasks.map((t) => t.flowId))
+        const all = [...tasks, ...epicTasks, ...mutatorTasks]
+        const byTask = new Map()
+        onTask?.(0, all.length)
+        for (const t of all) {
+          byTask.set(t.workItem, { kind: 'outcome', outcome: { kind: 'blocked', perMilestone: [{ order: 1, capability: 'x' }] } })
+        }
+        return { byTask, summary: sessionSummary('guard-generate.flow-worker', { ran: all.length }) }
+      },
+    })
+    expect(second.errors).toEqual([])
+    expect(mutators).toEqual([batch[1].id])
   }, 60_000)
 
   it('looksWorldMutating flags credential phrases and passes additive flows', () => {
