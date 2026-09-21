@@ -89,7 +89,7 @@ describe('deriveWebAuthoringContext', () => {
 
     const { catalog } = await mapInterfaces(repo, { probeExec: null });
     expect(catalog.resources?.web?.map((place) => place.address)).toEqual(['/tasks']);
-    expect(planWorkItems(catalog, null).map((item) => item.place.id)).toEqual(['tasks']);
+    expect(planWorkItems(catalog, null, '').map((item) => item.place.id)).toEqual(['tasks']);
     const { contexts } = await deriveWebAuthoringContext(repo, { catalog });
     expect(contexts.get('tasks')?.module).toBe('app/tasks/page.tsx');
     expect(contexts.get('tasks')?.renders).toEqual(['components/task-list.tsx']);

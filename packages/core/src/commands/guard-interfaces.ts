@@ -31,7 +31,11 @@ import {
   type ReconcileComplete,
   type StateReconciliation,
 } from '../services/interface-author/index.js';
-import { readAuthoredInterfaceCatalog, readInterfaceCatalog } from '@truecourse/guard-runner';
+import {
+  readAuthoredInterfaceCatalog,
+  readInterfaceCatalog,
+  recipeContractFingerprint,
+} from '@truecourse/guard-runner';
 import {
   extractJsonValue,
   type LlmTransport,
@@ -76,7 +80,7 @@ export function readGuardInterfacesAuthorView(repoRoot: string): GuardInterfaces
   const derived = readInterfaceCatalog(repoRoot);
   const authored = readAuthoredInterfaceCatalog(repoRoot);
   return {
-    places: planWorkItems(derived, authored).map((item) => ({
+    places: planWorkItems(derived, authored, recipeContractFingerprint(repoRoot)).map((item) => ({
       id: item.place.id,
       kind: item.place.kind,
       title: item.place.title,
@@ -102,6 +106,8 @@ export interface RunGuardInterfaceAuthorOptions {
   places?: readonly string[];
   /** Re-author places that already carry tasks. */
   replace?: boolean;
+  /** Retry the screens whose last session never settled, whatever their inputs say. */
+  refresh?: boolean;
   limit?: number;
   /** How many sessions run at once; the authoring default answers otherwise. */
   concurrency?: number;
@@ -221,6 +227,7 @@ export async function runGuardInterfaceAuthoring(
       context: context.contexts,
       ...(opts.places ? { places: opts.places } : {}),
       ...(opts.replace !== undefined ? { replace: opts.replace } : {}),
+      ...(opts.refresh !== undefined ? { refresh: opts.refresh } : {}),
       ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),

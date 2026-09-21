@@ -190,7 +190,8 @@ import {
   preparationCatalog,
   readGuardDecisions,
   readAuthoredInterfaceCatalog,
-  webScreensNeedingReadables,
+  recipeContractFingerprint,
+  webScreensNeedingAuthoring,
   readInterfaceCatalog,
   readMergedInterfaceCatalog,
   readManifest as readGuardManifest,
@@ -1192,13 +1193,18 @@ export async function estimateGuardSetup(
   // ---- interfaces: reconcile + authoring, both off the on-disk halves -------
   const derivedCatalog = readInterfaceCatalog(repoRoot);
   const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
+  const interfaceRecipeContract = recipeContractFingerprint(repoRoot);
   const interfacesSettled =
     !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
-    webScreensNeedingReadables(derivedCatalog, authoredCatalog).size === 0;
+    webScreensNeedingAuthoring({
+      derived: derivedCatalog,
+      authored: authoredCatalog,
+      recipeContract: interfaceRecipeContract,
+    }).size === 0;
   const staleAuthoredIds = new Set(
     staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
   );
-  const authorable = planWorkItems(derivedCatalog, authoredCatalog).filter(
+  const authorable = planWorkItems(derivedCatalog, authoredCatalog, interfaceRecipeContract).filter(
     (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.needsAuthoring),
   );
   const authorItems = interfacesSettled ? 0 : authorable.length;

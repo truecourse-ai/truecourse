@@ -422,6 +422,16 @@ export {
 } from './store.js'
 
 export {
+  INTERFACE_AUTHOR_STAGE_VERSION,
+  screenAuthoringFingerprint,
+  unsettledAuthoring,
+  webScreenAuthoringStates,
+  webScreensNeedingAuthoring,
+  type WebScreenAuthoringInput,
+  type WebScreenAuthoringState,
+} from './interface-authoring.js'
+
+export {
   buildDocSectionIndex,
   extractSectionTexts,
   splitTopLevelSections,

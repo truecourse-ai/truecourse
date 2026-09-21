@@ -1526,6 +1526,33 @@ export const MapperDiagnosticSchema = z
 export type MapperDiagnostic = z.infer<typeof MapperDiagnosticSchema>
 
 /**
+ * What an authoring session settled on ONE screen. The four words are the
+ * authoring run's own terminal states: `authored` = tasks or readable facts
+ * landed, `empty` = the session established that there is neither, `rejected` =
+ * the outcome broke a rule the write path enforces, `failed` = the session
+ * never reached an outcome. There is deliberately no `partial`: a screen the
+ * write path accepted is complete by the session's own claim, since an accepted
+ * outcome states every readable kind of every place it declares.
+ */
+export const InterfaceAuthoringStatusSchema = z.enum(['authored', 'empty', 'rejected', 'failed'])
+export type InterfaceAuthoringStatus = z.infer<typeof InterfaceAuthoringStatusSchema>
+
+/**
+ * ONE screen's row of the authoring ledger: what its last session settled, and
+ * the digest of the inputs it settled over. A screen whose status did not settle
+ * (`failed`, `rejected`) is work again only when that digest MOVES — so a dead
+ * provider costs one screen one run, not one screen every run forever.
+ */
+export const InterfaceAuthoringRecordSchema = z
+  .object({
+    status: InterfaceAuthoringStatusSchema,
+    /** The digest of everything that decides what a session for this screen produces. */
+    inputFingerprint: z.string().min(1),
+  })
+  .strict()
+export type InterfaceAuthoringRecord = z.infer<typeof InterfaceAuthoringRecordSchema>
+
+/**
  * `.truecourse/guard/interfaces.json` — the last mapping's catalog (gitignored).
  *
  * ONE SHAPE, TWO HOMES: the same shape validates
@@ -1590,6 +1617,20 @@ const InterfacesFileShapeSchema = z
     resources: z.record(z.string(), z.array(InterfaceResourceSchema)).optional(),
     /** Per interface TYPE (a driver-registry id) → how that catalog was derived. */
     source: z.record(z.string(), InterfaceCatalogSourceSchema).optional(),
+    /**
+     * THE AUTHORING LEDGER: web screen id → what authoring settled there
+     * ({@link InterfaceAuthoringRecordSchema}). Only `interfaces.authored.json`
+     * carries it — it is a fact about the SESSIONS that wrote this half, and
+     * nothing derives it — and it is keyed by place id rather than per area
+     * because web is the one surface authoring writes.
+     *
+     * It is what makes a screen's settlement readable instead of inferred: a
+     * screen used to count as done once it carried a task and some readables,
+     * which cannot tell a screen whose session failed from one that never ran.
+     * Additive and optional: a file written before it parses unchanged, and
+     * every screen it does not name is judged by that old inference ONCE.
+     */
+    authoring: z.record(z.string(), InterfaceAuthoringRecordSchema).optional(),
   })
   .strict()
 

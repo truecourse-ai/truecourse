@@ -465,6 +465,10 @@ export function candidateAuthored(
     interfaces: overlay(kept, stamped.interfaces),
     ...registry('states', authored?.states, stamped.states),
     ...registry('resources', authored?.resources, resources),
+    // The authoring ledger is bookkeeping about the file's own sessions, so it
+    // travels untouched: this fragment's own row is recorded by the run's fold,
+    // after the outcome is known.
+    ...(authored?.authoring ? { authoring: authored.authoring } : {}),
   }
 }
 

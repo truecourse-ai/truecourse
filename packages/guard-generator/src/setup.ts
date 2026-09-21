@@ -80,7 +80,7 @@ import {
   writeGuardSetup,
   readInterfaceCatalog,
   readAuthoredInterfaceCatalog,
-  webScreensNeedingReadables,
+  webScreensNeedingAuthoring,
   resolveSeedScript,
   FINGERPRINT_INPUTS,
   RecipeSchema,
@@ -93,6 +93,7 @@ import type {
   DatastoreUrlRef,
   DetectedExternalService,
   GuardSetupExternalsStep,
+  GuardSetupFailedScreen,
   GuardSetupInterfaceResolution,
   GuardSetupRecipeStep,
   GuardSetupReport,
@@ -352,6 +353,9 @@ export type GuardSetupInterfacesStepResult = {
   diagnostics?: MapperDiagnostic[]
   /** Re-authored tasks whose key moved through a reworded label alone. */
   labelRekeys?: number
+  /** Screens whose authoring has not settled — they retry on a refresh, or when
+   *  their own inputs move, and never merely because a setup ran again. */
+  failedScreens?: GuardSetupFailedScreen[]
   /** The reconcile session's per-subject verdicts, when one ran. */
   resolutions?: GuardSetupInterfaceResolution[]
   /** The catalog edits the resolutions produced, one line each. */
@@ -1005,7 +1009,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       fact('interfaces', 'replayed: the authored catalog stands as it is')
       opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
     } else if (holds('interfaces', legacyInterfacesFingerprint(repoRoot)) && authoredExists && opts.replace !== true &&
-      webScreensNeedingReadables(readInterfaceCatalog(repoRoot), readAuthoredInterfaceCatalog(repoRoot)).size === 0) {
+      webScreensNeedingAuthoring({
+        derived: readInterfaceCatalog(repoRoot),
+        authored: readAuthoredInterfaceCatalog(repoRoot),
+        recipeContract: recipeContractFingerprint(repoRoot),
+      }).size === 0) {
       pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
       fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')
       opts.onStepDone?.('interfaces', 'unchanged')
@@ -1023,7 +1031,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         key: 'interfaces',
         status: result.status,
         ...(result.reason ? { reason: result.reason } : {}),
-        inputFingerprint: interfacesFingerprint(repoRoot),
+        // The fingerprint this step PLANNED over: the step writes only the
+        // authored half, which no input of its key reads, so the row records
+        // the same value before and after the run rather than re-reading a tree
+        // the authoring may have moved underneath it.
+        inputFingerprint: interfacesFp,
         ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
         // The step row is where run reporting lands (diagnostics are NEVER
         // stored in the catalog, and 01-D left the dashboard silent on them).
@@ -1031,7 +1043,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
         ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
         ...(result.labelRekeys !== undefined ? { labelRekeys: result.labelRekeys } : {}),
+        ...(result.failedScreens && result.failedScreens.length > 0
+          ? { failedScreens: result.failedScreens }
+          : {}),
       })
+      for (const screen of result.failedScreens ?? []) {
+        fact('interfaces', `${screen.place}: not authored (${screen.reason ?? 'the session did not settle'}) — refresh to retry`)
+      }
       if (result.labelRekeys) {
         fact('interfaces', `${result.labelRekeys} re-authored task${result.labelRekeys === 1 ? '' : 's'} moved a key through a reworded label alone`)
       }

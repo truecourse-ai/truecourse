@@ -71,6 +71,22 @@ export const GuardSetupInterfaceResolutionSchema = z
   .strict()
 export type GuardSetupInterfaceResolution = z.infer<typeof GuardSetupInterfaceResolutionSchema>
 
+/**
+ * One screen whose authoring session did not settle. The step records these
+ * because the ledger now holds them: such a screen is NOT re-attempted on the
+ * next setup (its inputs have not moved), so the report is what tells a person
+ * there is something to ask for a refresh of.
+ */
+export const GuardSetupFailedScreenSchema = z
+  .object({
+    /** The web place id the session was given. */
+    place: z.string().min(1),
+    /** Why it did not settle, in the run's own words. */
+    reason: z.string().min(1).optional(),
+  })
+  .strict()
+export type GuardSetupFailedScreen = z.infer<typeof GuardSetupFailedScreenSchema>
+
 export const GuardSetupTaxonomyStepSchema = z
   .object({
     key: GuardSetupTaxonomyKeySchema,
@@ -108,6 +124,12 @@ export const GuardSetupTaxonomyStepSchema = z
      * reworded step label alone. Recorded when an authoring run re-authored a place.
      */
     labelRekeys: z.number().int().nonnegative().optional(),
+    /**
+     * INTERFACES step only: the screens whose sessions did not settle this run.
+     * They keep their place in the catalog and are not re-attempted until their
+     * inputs move or somebody asks for a refresh.
+     */
+    failedScreens: z.array(GuardSetupFailedScreenSchema).optional(),
   })
   .strict()
   .superRefine((step, ctx) => {

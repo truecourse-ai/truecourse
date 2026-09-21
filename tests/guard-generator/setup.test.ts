@@ -33,6 +33,8 @@ import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
   dependenciesPath,
+  recipeContractFingerprint,
+  screenAuthoringFingerprint,
 } from '@truecourse/guard-runner'
 import {
   runGuardSetup,
@@ -1084,6 +1086,38 @@ describe('runGuardSetup — the interfaces step', () => {
     const complete = step()
     await runGuardSetup(baseOpts(r, { authorInterfaces: complete.seam }))
     expect(complete.inputs).toHaveLength(0)
+  })
+
+  // A screen whose session died leaves a ledger row instead of nothing, so the
+  // step has settled its whole work list and the next setup spends no session
+  // on it. Retrying it is a refresh, which the report asks for by name.
+  it('settles around a screen the ledger holds as unsettled', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    writeCatalogs(r, { authored: true })
+    const first = await runGuardSetup(baseOpts(r, { authorInterfaces: step().seam }))
+    writeGuardSetup(r, first.report)
+
+    const file = JSON.parse(fs.readFileSync(guardAuthoredInterfacesPath(r), 'utf-8'))
+    file.authoring = {
+      root: {
+        status: 'failed',
+        inputFingerprint: screenAuthoringFingerprint({
+          derived: DERIVED,
+          place: DERIVED.resources!.web[0],
+          recipeContract: recipeContractFingerprint(r),
+        }),
+      },
+    }
+    fs.writeFileSync(guardAuthoredInterfacesPath(r), JSON.stringify(file))
+
+    const second = step()
+    const two = await runGuardSetup(baseOpts(r, { authorInterfaces: second.seam }))
+    expect(second.inputs).toHaveLength(0)
+    expect(two.report.steps.find((s) => s.key === 'interfaces')).toMatchObject({
+      status: 'skipped',
+      reason: 'unchanged',
+    })
   })
 
   it('--replace never skips, and the seam is told', async () => {
