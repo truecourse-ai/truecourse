@@ -75,6 +75,7 @@ import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js
 import {
   AUTHORED_SURFACE,
   AuthoredFragmentSchema,
+  draftPlaceIndex,
   registryStates,
   stampFragment,
   validateFragment,
@@ -89,9 +90,9 @@ import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem } from './sessi
 import { recordAuthoringLedger, writeAuthoredCatalog } from './write.js'
 
 /**
- * Where a screen's accepted fragment is stored, keyed on the digest of what the
- * session ran over ({@link screenAuthoringFingerprint}). There is no legacy key:
- * authoring had no cache before this one.
+ * Where a screen's accepted fragment is stored, keyed on the digest of what its
+ * session ran over — the same value its ledger row records. There is no legacy
+ * key: authoring had no cache before this one.
  */
 export const INTERFACE_AUTHOR_CACHE_NAME = 'guard/interfaces-author'
 
@@ -361,7 +362,10 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
       const before = new Map((authored?.interfaces ?? []).map((task) => [task.id, task]))
       for (const task of result.candidate.interfaces) {
         const prior = before.get(task.id)
-        if (prior && isLabelOnlyRekey(prior, task)) labelRekeys++
+        // A key that MOVED, and moved for a rewording alone. A step whose
+        // locator resolves to a declared readable is not re-keyed by its label
+        // any more, and the stored fingerprints say so before the labels do.
+        if (prior && prior.fingerprint !== task.fingerprint && isLabelOnlyRekey(prior, task)) labelRekeys++
       }
       const written = writeAuthoredCatalog({
         repoRoot: opts.repoRoot,
@@ -599,7 +603,13 @@ function preparePlace(input: PrepareInput): PreparedPlace {
 
   const unresolved = [...(input.fragment.unresolved ?? [])]
   const findings = [...(input.fragment.findings ?? [])]
-  const { fragment, raced } = pruneRacedTasks(input.fragment, briefedWith, authored, replaceable)
+  const { fragment, raced } = pruneRacedTasks(
+    input.fragment,
+    briefedWith,
+    authored,
+    replaceable,
+    draftPlaceIndex(derived, authored, input.fragment.resources ?? []),
+  )
   const racedField = raced.length > 0 ? { raced } : {}
   if (fragment.interfaces.length === 0 && (fragment.resources?.length ?? 0) === 0) {
     // Either the session honestly found nothing, or everything it found was
@@ -664,6 +674,9 @@ export function pruneRacedTasks(
   briefedWith: InterfacesFile | null,
   authored: InterfacesFile | null,
   replaceable: ReadonlySet<string>,
+  /** The places the draft stands on, so both sides of the fingerprint
+   *  comparison are computed the way the write path computes one. */
+  places?: ReadonlyMap<string, InterfaceResource>,
 ): { fragment: AuthoredFragment; raced: string[] } {
   const before = new Set((briefedWith?.interfaces ?? []).map((iface) => iface.id))
   const landedIds = new Set<string>()
@@ -676,7 +689,7 @@ export function pruneRacedTasks(
   if (landedIds.size === 0) return { fragment, raced: [] }
 
   const raced: string[] = []
-  const kept = stampFragment(fragment).interfaces.filter((task) => {
+  const kept = stampFragment(fragment, places).interfaces.filter((task) => {
     if (!landedIds.has(task.id) && !landedFingerprints.has(task.fingerprint)) return true
     raced.push(task.id)
     return false

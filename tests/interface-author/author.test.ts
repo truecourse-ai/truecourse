@@ -1039,6 +1039,82 @@ describe('re-running', () => {
     })
   })
 
+  /**
+   * A TASK'S IDENTITY, where the screen declares what it shows. A step whose
+   * locator resolves to a declared readable is that readable, so re-wording the
+   * control leaves every scenario grounded on the task exactly where it was.
+   */
+  describe('the re-authored task identity', () => {
+    const control = (id: string, role: 'textbox' | 'button', name: string) =>
+      ({ id, control: { role, name }, states: ['disabled' as const] })
+    const rootWith = (path: string, add: string): AuthoredFragment['resources'] => [
+      {
+        ...DERIVED.resources!.web[0],
+        readables: {
+          markers: [],
+          elements: [],
+          controls: [control('path-field', 'textbox', path), control('add-button', 'button', add)],
+          rows: [],
+        },
+      },
+    ]
+    const withSteps = (path: string, add: string): AuthoredFragment => ({
+      ...HOME_FRAGMENT,
+      interfaces: [
+        {
+          ...HOME_TASK,
+          steps: [
+            { kind: 'input', target: { role: 'textbox', name: path } },
+            { kind: 'activate', target: { role: 'button', name: add } },
+          ],
+        },
+      ],
+      resources: rootWith(path, add),
+    })
+
+    const reauthor = (fragment: AuthoredFragment) =>
+      authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async () => ({ kind: 'outcome', value: fragment })).driver,
+        persistence: memoryPersistence().persistence,
+        places: ['root'],
+        replace: true,
+      })
+
+    it('holds through a reworded control, and counts no re-key', async () => {
+      await reauthor(withSteps('Repository path', 'Add Repository'))
+      const before = readAuthoredFile().interfaces[0].fingerprint
+
+      const result = await reauthor(withSteps('Path to the repository', 'Add repository'))
+
+      expect(readAuthoredFile().interfaces[0].steps).toEqual([
+        { kind: 'input', target: { role: 'textbox', name: 'Path to the repository' } },
+        { kind: 'activate', target: { role: 'button', name: 'Add repository' } },
+      ])
+      expect(readAuthoredFile().interfaces[0].fingerprint).toBe(before)
+      expect(result.labelRekeys).toBe(0)
+    })
+
+    it('moves when the reworded target resolves to nothing, and says so', async () => {
+      await reauthor(withSteps('Repository path', 'Add Repository'))
+      const before = readAuthoredFile().interfaces[0].fingerprint
+
+      // The readables no longer name the button, so its label is its identity.
+      const result = await reauthor({
+        ...withSteps('Repository path', 'Add repository'),
+        resources: [
+          {
+            ...DERIVED.resources!.web[0],
+            readables: { markers: [], elements: [], controls: [control('path-field', 'textbox', 'Repository path')], rows: [] },
+          },
+        ],
+      })
+
+      expect(readAuthoredFile().interfaces[0].fingerprint).not.toBe(before)
+      expect(result.labelRekeys).toBe(1)
+    })
+  })
+
   it('refuses a place the catalog does not have', async () => {
     const { persistence } = memoryPersistence()
     const { driver } = scriptedDriver(async () => ({ kind: 'outcome', value: { interfaces: [] } }))

@@ -6,10 +6,12 @@
  * produces. Two things are deliberately NOT the model's to
  * write:
  *
- * - **The fingerprint.** It is `sha256` over `type` + `entry` + `steps`
- *   ({@link interfaceFingerprint}), so it is a FUNCTION of the draft, computed
- *   here. A model-written fingerprint is a fact that can disagree with its own
- *   entry, and every scenario grounded on it would inherit the disagreement.
+ * - **The fingerprint.** It is `sha256` over `type` + `entry` + `steps`, with a
+ *   step that resolves to a declared readable folding that readable's identity
+ *   rather than its label ({@link resolvedInterfaceFingerprint}), so it is a
+ *   FUNCTION of the draft, computed here. A model-written fingerprint is a fact
+ *   that can disagree with its own entry, and every scenario grounded on it
+ *   would inherit the disagreement.
  * - **`origin`.** Stamped by the merge that joins the two catalog halves, never
  *   declared by a file — the field exists precisely because a declared one lied
  *   for months (see {@link InterfaceOriginSchema}).
@@ -37,7 +39,7 @@ import {
   InterfaceStateIdSchema,
   InterfaceStateSchema,
   InterfacesFileSchema,
-  interfaceFingerprint,
+  resolvedInterfaceFingerprint,
   type Interface,
   type InterfaceResource,
   type InterfaceState,
@@ -234,8 +236,20 @@ export function registryStates(
 /** A task with the fingerprint computed for it — a complete {@link Interface}. */
 export type StampedTask = AuthoredTask & { fingerprint: string }
 
-/** Fingerprint every task of a fragment — the one field authoring never writes. */
-export function stampFragment(fragment: AuthoredFragment): {
+/**
+ * Fingerprint every task of a fragment — the one field authoring never writes.
+ *
+ * With the draft's PLACES in hand, a step whose locator matches a readable the
+ * place declares folds that readable's identity instead of its label
+ * ({@link resolvedInterfaceFingerprint}), so re-wording a control no longer
+ * re-authors the scenarios grounded on the task. Without them (a bare check of
+ * a fragment) every step keeps its label, which is the fingerprint every stored
+ * catalog already carries.
+ */
+export function stampFragment(
+  fragment: AuthoredFragment,
+  places?: ReadonlyMap<string, InterfaceResource>,
+): {
   interfaces: StampedTask[]
   states: InterfaceState[]
   resources: InterfaceResource[]
@@ -243,11 +257,42 @@ export function stampFragment(fragment: AuthoredFragment): {
   return {
     interfaces: fragment.interfaces.map((task) => ({
       ...task,
-      fingerprint: interfaceFingerprint({ type: task.type, entry: task.entry, steps: task.steps }),
+      fingerprint: resolvedInterfaceFingerprint(
+        { type: task.type, entry: task.entry, steps: task.steps },
+        task.at ? places?.get(task.at) : undefined,
+      ),
     })),
     states: [...(fragment.states ?? [])],
     resources: [...(fragment.resources ?? [])],
   }
+}
+
+/**
+ * Every web place a draft stands on: both catalog halves, with the draft's own
+ * enrichments laid over them exactly as the write path lays them (a supplied
+ * readable kind replaces that kind, an omitted one keeps what was established).
+ * This is what a step's locator resolves against, and what the file records —
+ * one merge, so the stamped identity and the stored place cannot disagree.
+ */
+export function draftPlaceIndex(
+  derived: InterfacesFile | null,
+  authored: InterfacesFile | null,
+  resources: readonly InterfaceResource[] = [],
+): Map<string, InterfaceResource> {
+  const places = new Map<string, InterfaceResource>()
+  for (const place of [
+    ...(derived?.resources?.[AUTHORED_SURFACE] ?? []),
+    ...(authored?.resources?.[AUTHORED_SURFACE] ?? []),
+    ...resources,
+  ]) {
+    const prior = places.get(place.id)
+    places.set(place.id, {
+      ...prior,
+      ...place,
+      ...(place.readables ? { readables: { ...prior?.readables, ...place.readables } } : {}),
+    })
+  }
+  return places
 }
 
 export interface FragmentValidation {
@@ -309,7 +354,11 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   const fragment = draft.data
   const replaceable = input.replaceable ?? new Set<string>()
   const errors: string[] = []
-  const stamped = stampFragment(fragment)
+  // The places the draft would leave behind — built before the tasks are
+  // stamped, because a step's identity resolves against the readables the same
+  // fragment declares.
+  const drafted = draftPlaceIndex(derived, authored, fragment.resources ?? [])
+  const stamped = stampFragment(fragment, drafted)
 
   // ---- 1. one id, one thing ------------------------------------------------
   const seenIds = new Set<string>()
@@ -328,9 +377,19 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
 
   // ---- 2. one fingerprint, one task ---------------------------------------
+  // A web entry is indexed under its STORED key and under the key it would be
+  // stamped with now: the two differ for every task authored before its place
+  // declared its readables, and a duplicate must be caught under either.
   const twins = new Map<string, string>()
   for (const iface of [...(derived?.interfaces ?? []), ...(authored?.interfaces ?? [])]) {
-    if (!replaceable.has(iface.id)) twins.set(iface.fingerprint, iface.id)
+    if (replaceable.has(iface.id)) continue
+    twins.set(iface.fingerprint, iface.id)
+    if (iface.type === AUTHORED_SURFACE) {
+      twins.set(
+        resolvedInterfaceFingerprint(iface, iface.at ? drafted.get(iface.at) : undefined),
+        iface.id,
+      )
+    }
   }
   for (const task of stamped.interfaces) {
     const twin = twins.get(task.fingerprint)
@@ -464,22 +523,8 @@ export function candidateAuthored(
   // Catalog merging overlays whole resources. Materialize each enrichment over
   // both prior halves before storing it, retaining omitted fields and readable
   // kinds. An explicit [] replaces a kind; absence never erases established facts.
-  const baseline = new Map<string, InterfaceResource>()
-  for (const place of [...(derived?.resources?.[AUTHORED_SURFACE] ?? []), ...(authored?.resources?.[AUTHORED_SURFACE] ?? [])]) {
-    const prior = baseline.get(place.id)
-    baseline.set(place.id, {
-      ...prior, ...place,
-      ...(place.readables ? { readables: { ...prior?.readables, ...place.readables } } : {}),
-    })
-  }
-  const resources = stamped.resources.map((place) => {
-    const prior = baseline.get(place.id)
-    return {
-      ...prior,
-      ...place,
-      ...(place.readables ? { readables: { ...prior?.readables, ...place.readables } } : {}),
-    }
-  })
+  const merged = draftPlaceIndex(derived, authored, stamped.resources)
+  const resources = stamped.resources.map((place) => merged.get(place.id)!)
   return {
     version: 2,
     generatedAt: authored?.generatedAt ?? '',

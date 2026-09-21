@@ -114,7 +114,6 @@ export function buildInterfacesStep(
       'diagnostics' | 'resolutions' | 'changes' | 'reconcileFromCache'
     > = {};
 
-
     // ---- Half 1: reconcile the cli disputes. --------------------------------
     const disputes = reconcilable(input.diagnostics);
     if (disputes.length > 0) recorded.diagnostics = [...disputes];

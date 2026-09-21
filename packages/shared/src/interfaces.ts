@@ -28,6 +28,7 @@ import {
   GUARD_WEB_STATES,
   GuardWebLocatorSchema,
   GuardWebScopeSchema,
+  type GuardWebLocator,
   type GuardWebScope,
 } from './guard/web-steps.js'
 
@@ -1881,6 +1882,13 @@ function stepIdentity(step: InterfaceStep): string {
 export function interfaceFingerprint(
   iface: Pick<Interface, 'type' | 'entry' | 'steps'>,
 ): string {
+  return fingerprintOver(iface, iface.steps.map(stepIdentity))
+}
+
+function fingerprintOver(
+  iface: Pick<Interface, 'type' | 'entry'>,
+  stepIdentities: readonly string[],
+): string {
   const entryIdentity =
     'command' in iface.entry
       ? iface.entry.command.map(normalizeToken).join(' ')
@@ -1888,8 +1896,81 @@ export function interfaceFingerprint(
           normalizeToken(iface.entry.method).toUpperCase(),
           normalizeToken(iface.entry.path),
         ].join(' ')
-  const body = [iface.type, entryIdentity, ...iface.steps.map(stepIdentity)].join('\n')
+  const body = [iface.type, entryIdentity, ...stepIdentities].join('\n')
   return `sha256:${crypto.createHash('sha256').update(body, 'utf-8').digest('hex')}`
+}
+
+/**
+ * {@link interfaceFingerprint} with a web step's identity taken from the ENTITY
+ * its locator resolves to, rather than from the label the author wrote for it.
+ *
+ * A web step is identified by a role and an accessible name, so a re-authored
+ * screen moves a task's key whenever a session words the same button
+ * differently — and every scenario grounded on that task is re-authored for a
+ * rewording. Where the step's locator matches a readable the place DECLARES,
+ * the pair (place id, readable id) names the same control whatever it is called,
+ * so that is what the fold carries.
+ *
+ * Resolution is deterministic and deliberately narrow, because a wrong match
+ * merges two tasks into one:
+ *
+ *  - only `controls` and `elements` are candidates, the two readable kinds that
+ *    carry a role+name locator, and only those with an `id` — the id IS the
+ *    identity;
+ *  - role, name and `exact` must match exactly, and exactly one readable may
+ *    match. Two readables that read alike stay unresolved;
+ *  - a step or a readable carrying `within` (or a readable carrying `pick`) is
+ *    unresolved: the scope is part of how the label is disambiguated, and
+ *    matching across it would be a guess.
+ *
+ * A step that resolves nothing keeps `stepIdentity` verbatim, so an interface
+ * whose steps all fail to resolve — every entry written before places declared
+ * their readables — fingerprints byte-identically to before. This is why the
+ * function is separate rather than an option on the one above: a STORED
+ * fingerprint is authoritative everywhere it is read, so only the authoring
+ * write path computes one this way, and nothing recomputes a stored one.
+ */
+export function resolvedInterfaceFingerprint(
+  iface: Pick<Interface, 'type' | 'entry' | 'steps'>,
+  place: Pick<InterfaceResource, 'id' | 'readables'> | undefined,
+): string {
+  return fingerprintOver(
+    iface,
+    iface.steps.map((step) => resolvedStepIdentity(step, place) ?? stepIdentity(step)),
+  )
+}
+
+/** The step's identity through the readable it resolves to, or nothing. */
+function resolvedStepIdentity(
+  step: InterfaceStep,
+  place: Pick<InterfaceResource, 'id' | 'readables'> | undefined,
+): string | undefined {
+  if (!place || !('target' in step) || step.within) return undefined
+  const named = [...(place.readables?.controls ?? []).map((fact) => ({ id: fact.id, locator: fact.control })),
+    ...(place.readables?.elements ?? []).map((fact) => ({ id: fact.id, locator: fact.element }))]
+  const matches = named.filter(
+    (candidate): candidate is { id: string; locator: typeof candidate.locator } =>
+      candidate.id !== undefined && sameSurfaceHandle(candidate.locator, step.target),
+  )
+  if (matches.length !== 1) return undefined
+  return [
+    step.kind,
+    'resolved',
+    place.id,
+    matches[0].id,
+    ...(step.kind === 'input' && step.mode === 'select' ? ['select'] : []),
+  ].join('\u0000')
+}
+
+/** Does a readable's locator address the same element as a step's target? */
+function sameSurfaceHandle(locator: GuardWebLocator, target: InterfaceTarget): boolean {
+  if (!('role' in locator) || locator.within || locator.pick) return false
+  return (
+    locator.role === target.role &&
+    locator.name !== undefined &&
+    normalizeToken(locator.name) === normalizeToken(target.name) &&
+    (locator.exact ?? false) === (target.exact ?? false)
+  )
 }
 
 /**
