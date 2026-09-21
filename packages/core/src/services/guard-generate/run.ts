@@ -45,6 +45,7 @@ import {
   settledScenariosOf,
   type ExtractOutcome,
   type GuardFlowWorkerOutcome,
+  type GuardPrerequisiteTarget,
 } from '@truecourse/shared'
 import {
   GENERATE_SESSION_STEPS,
@@ -86,6 +87,7 @@ import {
   extractSessionCacheKey,
   extractSessionLegacyCacheKey,
   extractSessionCacheKeyForContentHash,
+  extractSessionLegacyCacheKeyForContentHash,
   extractSessionDef,
   extractSessionWorkItem,
 } from './extract.js'
@@ -843,25 +845,33 @@ export function createGuardGenerateSessionSeams(
   // The claim-diff gate's view of the extract cache. `lookup` reads the raw
   // outcome cached for the doc's PRIOR content; `reuse` copies it under the
   // doc's CURRENT key so the pool above hits without a session. Both address
-  // the cache through the same key recipe the pool uses, so a prompt edit
-  // (which re-keys every doc) naturally finds no prior and re-extracts.
+  // the cache through the same key recipe the pool uses — including its OLD
+  // key, because the prior extraction the gate is looking for was written
+  // before the formula changed, and not finding it costs a full re-extraction
+  // of every edited document.
+  const priorExtraction = async (
+    doc: GuardDoc,
+    priorContentHash: string,
+    targets: readonly GuardPrerequisiteTarget[],
+  ): Promise<unknown | null> =>
+    getCacheEntryOrLegacy(
+      opts.repoRoot,
+      EXTRACT_SESSION_CACHE_NAME,
+      extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
+      extractSessionLegacyCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
+    ).catch(() => null)
+
   const reuseExtraction: ReuseExtractionSeam = {
     async lookup(doc, priorContentHash, targets = []) {
-      const cached = await getCacheEntry(
-        opts.repoRoot,
-        EXTRACT_SESSION_CACHE_NAME,
-        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
-      ).catch(() => null)
-      const parsed = extractContextSchema(targets).safeParse(cached)
+      const parsed = extractContextSchema(targets).safeParse(
+        await priorExtraction(doc, priorContentHash, targets),
+      )
       return parsed.success ? parsed.data : null
     },
     async reuse(doc, priorContentHash, targets = []) {
-      const cached = await getCacheEntry(
-        opts.repoRoot,
-        EXTRACT_SESSION_CACHE_NAME,
-        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
-      ).catch(() => null)
-      const parsed = extractContextSchema(targets).safeParse(cached)
+      const parsed = extractContextSchema(targets).safeParse(
+        await priorExtraction(doc, priorContentHash, targets),
+      )
       if (!parsed.success) return
       await setCacheEntry(opts.repoRoot, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc, targets), parsed.data).catch(
         () => undefined,

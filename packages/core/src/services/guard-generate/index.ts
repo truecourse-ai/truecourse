@@ -15,6 +15,7 @@ export {
   extractSessionCacheKey,
   extractSessionLegacyCacheKey,
   extractSessionCacheKeyForContentHash,
+  extractSessionLegacyCacheKeyForContentHash,
   extractDocContentHash,
   extractSessionWorkItem,
   extractSessionDef,

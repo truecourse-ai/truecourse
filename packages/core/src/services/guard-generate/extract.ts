@@ -236,7 +236,13 @@ export function extractSessionCacheKeyForContentHash(contentHash: string, suppre
 /** {@link extractSessionCacheKey} as it was computed while the prompt was in it
  *  — the key a miss falls back to. Delete with the legacy hash. */
 export function extractSessionLegacyCacheKey(doc: Pick<GuardDoc, 'content' | 'suppressedQuotes'>, targets: readonly GuardPrerequisiteTarget[] = []): string {
-  return extractKeyOver(LEGACY_EXTRACT_SESSION_PROMPT_FINGERPRINT, extractDocContentHash(doc.content), doc.suppressedQuotes, targets)
+  return extractSessionLegacyCacheKeyForContentHash(extractDocContentHash(doc.content), doc.suppressedQuotes, targets)
+}
+
+/** {@link extractSessionLegacyCacheKey} from an already-computed content hash —
+ *  what the claim-diff gate addresses a PRIOR extraction by. */
+export function extractSessionLegacyCacheKeyForContentHash(contentHash: string, suppressedQuotes: readonly string[], targets: readonly GuardPrerequisiteTarget[] = []): string {
+  return extractKeyOver(LEGACY_EXTRACT_SESSION_PROMPT_FINGERPRINT, contentHash, suppressedQuotes, targets)
 }
 
 function extractKeyOver(stage: string, contentHash: string, suppressedQuotes: readonly string[], targets: readonly GuardPrerequisiteTarget[]): string {
