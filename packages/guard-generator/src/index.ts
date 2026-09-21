@@ -180,9 +180,14 @@ export {
   type VerifiableProposal,
   type VerifyContext,
   type ProposalVerdict,
+  repairExistingRecipe,
+  recipeRepairCacheKey,
   type RecipeRepairContext,
   type RecipeRepairResult,
   type RecipeRepairFn,
+  type RecipeRepairScope,
+  type RepairExistingRecipeOptions,
+  type RepairExistingRecipeResult,
 } from './recipe-discovery.js'
 
 // Needs vs provides — the deterministic detector behind the recipe gate, and
@@ -199,6 +204,14 @@ export {
   type UnprovidedNeed,
   type NeedAnswer,
 } from './recipe-needs.js'
+export {
+  NEEDS_REPAIR_FIELDS,
+  foldRepairedRecipe,
+  changedRecipeFields,
+  outOfScopeChanges,
+  needsScopeRefusal,
+  movedFlowSlices,
+} from './recipe-scope.js'
 
 export {
   proposeRecipe,
