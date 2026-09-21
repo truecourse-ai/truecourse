@@ -71,9 +71,11 @@ the three is a per-workspace GRANT (`ENTERPRISE_FEATURES` in
 `@truecourse/shared`: `connections`, `repository-providers`, `workspaces`),
 held as one row per (workspace, feature) in `workspace_entitlements` — the
 `entitlements` seam in core, `PgEntitlementsStore` in data-store, granted and
-revoked from the operator console (`/api/operator/entitlements`, operator-only
-and answering 404 to anyone else, unmounted in local mode, beside the credits
-console). What a workspace may use is the grant AND the bundle:
+revoked from the operator console (the page at `/operator/entitlements` over
+the routes of the same name, operator-only and answering 404 to anyone else,
+unmounted in local mode, beside the credits console). The page is one toggle
+per feature per workspace: a grant is one click, a revoke asks first and names
+the sources it will pause. What a workspace may use is the grant AND the bundle:
 `services/entitlements.service.ts` intersects them, and LOCAL MODE holds
 everything the bundle carries, since one developer on one machine is the whole
 deployment and there is no operator to grant anything. Enforcement is three

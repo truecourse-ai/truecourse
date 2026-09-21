@@ -20,11 +20,9 @@
  */
 
 import {
-  CONTEXT_CONNECTION_KINDS,
-  CONTEXT_CONNECTION_PROVIDERS,
   ENTERPRISE_FEATURES,
+  ENTERPRISE_FEATURE_SOURCE_KINDS,
   editionOf,
-  type ContextSourceKind,
   type Edition,
   type EnterpriseFeature,
 } from '@truecourse/shared';
@@ -107,19 +105,6 @@ export async function grantWorkspaceFeature(input: {
   return readWorkspaceEntitlements(input.workspaceOrgId);
 }
 
-/**
- * The context source kinds a feature reads through, which are what a revoke
- * has to stop. Only the document connections have any: a repository provider
- * and a second workspace feed no source.
- */
-const FEATURE_SOURCE_KINDS: Record<EnterpriseFeature, readonly ContextSourceKind[]> = {
-  connections: CONTEXT_CONNECTION_PROVIDERS.flatMap(
-    (provider) => CONTEXT_CONNECTION_KINDS[provider],
-  ),
-  'repository-providers': [],
-  workspaces: [],
-};
-
 export interface EntitlementRevoke {
   /** Whether the workspace held it at all; false is a no-op, not a failure. */
   revoked: boolean;
@@ -138,7 +123,7 @@ export async function revokeWorkspaceFeature(input: {
   feature: EnterpriseFeature;
 }): Promise<EntitlementRevoke> {
   const revoked = await revokeEntitlement(input.workspaceOrgId, input.feature);
-  const kinds = FEATURE_SOURCE_KINDS[input.feature];
+  const kinds = ENTERPRISE_FEATURE_SOURCE_KINDS[input.feature];
   const paused =
     kinds.length > 0
       ? await pauseContextSourcesOfKinds(

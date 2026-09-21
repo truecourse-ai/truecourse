@@ -39,6 +39,9 @@ import type {
   CreditAdjustRequest,
   CreditMovementResponse,
   OperatorCreditsResponse,
+  OperatorEntitlementsResponse,
+  OperatorEntitlementMovementRequest,
+  OperatorEntitlementMovementResponse,
   JobsResponse,
   NotificationsResponse,
   AuthUser,
@@ -1223,6 +1226,34 @@ export function grantCredits(body: CreditGrantRequest): Promise<CreditMovementRe
 
 export function adjustCredits(body: CreditAdjustRequest): Promise<CreditMovementResponse> {
   return fetchApi<CreditMovementResponse>('/api/operator/credits/adjust', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Entitlements: which enterprise features each workspace may use, and the two
+// movements an operator makes. The operator's own addresses, under the credits
+// console's rule: 404 to anyone who is not one.
+// ---------------------------------------------------------------------------
+
+export function fetchOperatorEntitlements(): Promise<OperatorEntitlementsResponse> {
+  return fetchApi<OperatorEntitlementsResponse>('/api/operator/entitlements');
+}
+
+export function grantEntitlement(
+  body: OperatorEntitlementMovementRequest,
+): Promise<OperatorEntitlementMovementResponse> {
+  return fetchApi<OperatorEntitlementMovementResponse>('/api/operator/entitlements/grant', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function revokeEntitlement(
+  body: OperatorEntitlementMovementRequest,
+): Promise<OperatorEntitlementMovementResponse> {
+  return fetchApi<OperatorEntitlementMovementResponse>('/api/operator/entitlements/revoke', {
     method: 'POST',
     body: JSON.stringify(body),
   });

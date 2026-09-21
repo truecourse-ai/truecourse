@@ -32,6 +32,7 @@ import HomePage from './pages/HomePage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
 import OperatorCreditsPage from './pages/OperatorCreditsPage';
+import OperatorEntitlementsPage from './pages/OperatorEntitlementsPage';
 import SourcePage from './pages/SourcePage';
 import SourcesPage from './pages/SourcesPage';
 import RepoConsole from './repo/RepoConsole';
@@ -94,6 +95,7 @@ export function DashboardRoutes() {
       {/* The operator's own surface: not in the sidebar, and the routes behind
           it answer 404 to anyone who is not one. */}
       <Route path="operator/credits" element={<OperatorCreditsPage />} />
+      <Route path="operator/entitlements" element={<OperatorEntitlementsPage />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   );

@@ -10,6 +10,12 @@
  * and keeps it closed for the next.
  */
 
+import {
+  CONTEXT_CONNECTION_KINDS,
+  CONTEXT_CONNECTION_PROVIDERS,
+  type ContextSourceKind,
+} from './context.js'
+
 export type Edition = 'community' | 'enterprise'
 
 /**
@@ -33,6 +39,23 @@ export const ENTERPRISE_FEATURE_LABEL: Record<EnterpriseFeature, string> = {
 
 export function isEnterpriseFeature(value: string): value is EnterpriseFeature {
   return (ENTERPRISE_FEATURES as readonly string[]).includes(value)
+}
+
+/**
+ * The context source kinds a feature READS THROUGH, which are what a revoke
+ * has to stop and what the operator's console warns it will. Only the document
+ * connections have any: a repository provider and a second workspace feed no
+ * source. One map, because the server pauses by it and the console names it.
+ */
+export const ENTERPRISE_FEATURE_SOURCE_KINDS: Record<
+  EnterpriseFeature,
+  readonly ContextSourceKind[]
+> = {
+  connections: CONTEXT_CONNECTION_PROVIDERS.flatMap(
+    (provider) => CONTEXT_CONNECTION_KINDS[provider],
+  ),
+  'repository-providers': [],
+  workspaces: [],
 }
 
 /**
@@ -74,6 +97,14 @@ export interface OperatorEntitlementRow {
 
 export interface OperatorEntitlementsResponse {
   workspaces: OperatorEntitlementRow[]
+}
+
+/** What an operator's grant or revoke names: one workspace, one feature. */
+export interface OperatorEntitlementMovementRequest {
+  workspaceOrgId: string
+  feature: EnterpriseFeature
+  /** Why, on a grant. A revoke keeps nothing: the row it deleted is gone. */
+  note?: string
 }
 
 /** What a grant or a revoke left behind. */
