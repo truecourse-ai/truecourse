@@ -23,7 +23,12 @@ import type {
   SessionRunInput,
   TurnUsage,
 } from '../../packages/agent-loop/src/index'
-import { authorWebInterfaces, planWorkItems } from '../../packages/core/src/services/interface-author/author'
+import {
+  INTERFACE_AUTHOR_CACHE_NAME,
+  authorWebInterfaces,
+  planWorkItems,
+} from '../../packages/core/src/services/interface-author/author'
+import { installMemoryKvCache, resetKvCacheStore, type MemoryKvCacheStore } from '../helpers/memory-kv-cache'
 import { readGuardInterfaces } from '../../packages/core/src/commands/guard-read'
 import { collectGuardSetupBundle, materializeGuardSetupBundle } from '../../packages/core/src/services/guard-setup/bundle'
 import { setGuardStore, type GuardStore } from '../../packages/core/src/lib/guard-store'
@@ -930,6 +935,107 @@ describe('re-running', () => {
       // nothing at all.
       const second = await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence })
       expect(second.places).toEqual([])
+    })
+  })
+
+  /**
+   * THE CACHE. A screen whose inputs have not moved is served the fragment its
+   * last session handed back: the same catalog, the same ledger row, no spend.
+   * The entries live in the workspace's KV store, so a fresh clone with a warm
+   * cache authors nothing at all.
+   */
+  describe('the authoring cache', () => {
+    const script: Script = async (place) =>
+      place === 'root'
+        ? { kind: 'outcome', value: { ...HOME_FRAGMENT, findings: ['README.md says "Add repo"; Home.tsx renders "Add Repository"'] } }
+        : { kind: 'outcome', value: REPORT_FRAGMENT }
+
+    /** Author both screens once, into the in-memory cache. */
+    async function warm(): Promise<MemoryKvCacheStore> {
+      const store = installMemoryKvCache()
+      const { persistence } = memoryPersistence()
+      await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence })
+      expect(store.list().filter((entry) => entry.cacheName === INTERFACE_AUTHOR_CACHE_NAME)).toHaveLength(2)
+      return store
+    }
+
+    /** What a fresh clone hands the run: the derived half, and nothing authored. */
+    function asFreshClone(): void {
+      fs.rmSync(guardAuthoredInterfacesPath(repo))
+    }
+
+    afterEach(() => resetKvCacheStore())
+
+    it('writes the same catalog from the cache as the sessions wrote, and spends nothing', async () => {
+      await warm()
+      const authoredBySessions = readAuthoredFile()
+      asFreshClone()
+
+      const { persistence } = memoryPersistence()
+      const result = await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          throw new Error(`no session should have opened for ${place}`)
+        }).driver,
+        persistence,
+      })
+
+      expect(result.places.map((p) => [p.placeId, p.status, p.fromCache])).toEqual([
+        ['root', 'authored', true],
+        ['repos-repoid', 'authored', true],
+      ])
+      expect(result.spent).toEqual({ turns: 0, tokens: 0, costUsd: 0 })
+      const fromCache = readAuthoredFile()
+      expect(fromCache.interfaces).toEqual(authoredBySessions.interfaces)
+      expect(fromCache.resources).toEqual(authoredBySessions.resources)
+      expect(fromCache.states).toEqual(authoredBySessions.states)
+      expect(fromCache.authoring).toEqual(authoredBySessions.authoring)
+      // And the finding the session reported is reported again, so the findings
+      // ledger of a cached run says what a live one would.
+      expect(result.findings).toEqual([
+        { placeId: 'root', note: 'README.md says "Add repo"; Home.tsx renders "Add Repository"' },
+      ])
+    })
+
+    it("misses when a screen's inputs moved", async () => {
+      await warm()
+      asFreshClone()
+      fs.writeFileSync(
+        guardInterfacesPath(repo),
+        JSON.stringify({
+          ...DERIVED,
+          resources: { web: [{ ...DERIVED.resources!.web[0], address: '/home' }, DERIVED.resources!.web[1]] },
+        }),
+      )
+
+      const started: string[] = []
+      const { persistence } = memoryPersistence()
+      await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          started.push(place)
+          return { kind: 'outcome', value: { interfaces: [] } }
+        }).driver,
+        persistence,
+      })
+
+      expect(started).toEqual(['root'])
+    })
+
+    it('reads no cached fragment on an explicit re-author', async () => {
+      await warm()
+      const started: string[] = []
+      const { persistence } = memoryPersistence()
+      await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          started.push(place)
+          return { kind: 'outcome', value: place === 'root' ? HOME_FRAGMENT : REPORT_FRAGMENT }
+        }).driver,
+        persistence,
+        replace: true,
+      })
+      expect(started.sort()).toEqual(['repos-repoid', 'root'])
     })
   })
 

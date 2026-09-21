@@ -51,6 +51,7 @@ export {
   type PlaceBriefingInput,
 } from './session.js'
 export {
+  INTERFACE_AUTHOR_CACHE_NAME,
   authorWebInterfaces,
   defaultAuthorConcurrency,
   planWorkItems,

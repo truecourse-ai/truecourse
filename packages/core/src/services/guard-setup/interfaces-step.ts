@@ -75,7 +75,7 @@ export interface InterfacesAuthorRun {
   /** Re-authored tasks whose key moved through a reworded label alone. */
   labelRekeys?: number;
   skipped: string[];
-  places: { status: string; placeId?: string; problems?: string[] }[];
+  places: { status: string; placeId?: string; problems?: string[]; fromCache?: boolean }[];
   diagnostics: MapperDiagnostic[];
   spent: { turns: number; tokens: number; costUsd: number };
   /** The state reconciliation that closed the run, when anything was authored. */
@@ -176,8 +176,11 @@ export function buildInterfacesStep(
         replace: input.replace,
         refresh: input.refresh,
       });
-      context.addSpend(run.places.length, run.spent);
-      for (const place of run.places) {
+      // A screen served from its cached fragment ran no session, so it is
+      // neither counted nor noted: the run record would show work nobody did.
+      const ran = run.places.filter((place) => !place.fromCache);
+      context.addSpend(ran.length, run.spent);
+      for (const place of ran) {
         context.note(place.status === 'failed' || place.status === 'rejected' ? 'failed' : 'completed');
       }
       // The stale-place reports ride the SAME step row as the cli disputes —
@@ -216,7 +219,8 @@ export function buildInterfacesStep(
         reason: joinNotes(
           allFailed
             ? `every authoring session failed (${run.places.length} place(s))`
-            : `authored ${run.authored} task(s) across ${run.places.length - failed.length} place(s)`,
+            : `authored ${run.authored} task(s) across ${run.places.length - failed.length} place(s)` +
+              (run.places.length > ran.length ? `, ${run.places.length - ran.length} from cache` : ''),
           notes,
         ),
         sessionRunId: run.runId,

@@ -60,36 +60,54 @@ export interface CachedSessionOptions<TOutcome> {
 export async function cachedSessionOutcome<TOutcome>(
   opts: CachedSessionOptions<TOutcome>,
 ): Promise<SessionOutcome<TOutcome> & { fromCache?: true }> {
+  const cached = await readCachedSessionOutput(opts)
+  if (cached !== null) {
+    return {
+      status: 'completed',
+      output: cached,
+      pendingQuestions: [],
+      spent: { turns: 0, tokens: 0, costUsd: 0 },
+      fromCache: true,
+    }
+  }
+
+  const outcome = await opts.run()
+  if (outcome.status === 'completed') {
+    await storeCachedSessionOutput(opts, outcome.output)
+  }
+  return outcome
+}
+
+/**
+ * The READ half, for a pool that runs its own sessions: the stored output for
+ * these inputs, or `null` on a miss. A value the schema no longer accepts is a
+ * miss too — the schema moved (or the entry rotted), and the honest response is
+ * to re-run and overwrite, never to fail the run.
+ */
+export async function readCachedSessionOutput<TOutcome>(
+  opts: Pick<CachedSessionOptions<TOutcome>, 'repoRoot' | 'cacheName' | 'key' | 'legacyKey' | 'schema'>,
+): Promise<TOutcome | null> {
   const cached = await getCacheEntryOrLegacy(
     opts.repoRoot,
     opts.cacheName,
     opts.key,
     opts.legacyKey ?? opts.key,
   ).catch(() => null)
-  if (cached !== null) {
-    const parsed = opts.schema.safeParse(cached)
-    // A malformed entry is a miss: the schema moved (or the entry rotted), and
-    // the honest response is to re-run and overwrite, never to fail the run.
-    if (parsed.success) {
-      return {
-        status: 'completed',
-        output: parsed.data,
-        pendingQuestions: [],
-        spent: { turns: 0, tokens: 0, costUsd: 0 },
-        fromCache: true,
-      }
-    }
-  }
+  if (cached === null) return null
+  const parsed = opts.schema.safeParse(cached)
+  return parsed.success ? parsed.data : null
+}
 
-  const outcome = await opts.run()
-  if (outcome.status === 'completed') {
-    // Store the output only, not the envelope — `spent`/`pendingQuestions` are
-    // facts about the run that produced it, and a hit reports its own (zero).
-    await setCacheEntry(opts.repoRoot, opts.cacheName, opts.key, outcome.output).catch(
-      () => undefined,
-    )
-  }
-  return outcome
+/**
+ * The WRITE half. The output only, never the envelope — `spent` and
+ * `pendingQuestions` are facts about the run that produced it, and a hit
+ * reports its own (zero). Only a session that COMPLETED is ever stored.
+ */
+export async function storeCachedSessionOutput<TOutcome>(
+  opts: Pick<CachedSessionOptions<TOutcome>, 'repoRoot' | 'cacheName' | 'key'>,
+  output: TOutcome,
+): Promise<void> {
+  await setCacheEntry(opts.repoRoot, opts.cacheName, opts.key, output).catch(() => undefined)
 }
 
 /**

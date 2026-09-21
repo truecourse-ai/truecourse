@@ -220,7 +220,9 @@ import {
   RECONCILE_INTERFACES_SESSION_KIND,
 } from '../guard-setup/reconcile-interfaces.js';
 import {
+  AuthoredFragmentSchema,
   INTERFACE_AUTHOR_BUDGET,
+  INTERFACE_AUTHOR_CACHE_NAME,
   INTERFACE_AUTHOR_SESSION_KIND,
   planWorkItems,
 } from '../interface-author/index.js';
@@ -1207,7 +1209,16 @@ export async function estimateGuardSetup(
   const authorable = planWorkItems(derivedCatalog, authoredCatalog, interfaceRecipeContract).filter(
     (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.needsAuthoring),
   );
-  const authorItems = interfacesSettled ? 0 : authorable.length;
+  // A screen whose fragment is cached costs nothing, exactly as the run reads
+  // it — an explicit re-author reads no cache, so every screen is priced.
+  const authorCached = await Promise.all(
+    authorable.map((item) =>
+      interfacesSettled || replace || refresh
+        ? null
+        : probeSessionCache(repoRoot, INTERFACE_AUTHOR_CACHE_NAME, item.inputFingerprint, AuthoredFragmentSchema),
+    ),
+  );
+  const authorItems = interfacesSettled ? 0 : authorCached.filter((hit) => hit === null).length;
   const reconcileMax = interfacesSettled ? 0 : 1;
 
   // ---- seed: real cache key when the step will run --------------------------

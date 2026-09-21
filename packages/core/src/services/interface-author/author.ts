@@ -70,9 +70,11 @@ import type {
   MapperDiagnostic,
 } from '@truecourse/shared'
 import { isLabelOnlyRekey } from '@truecourse/shared'
+import { readCachedSessionOutput, storeCachedSessionOutput } from '../agent/session-cache.js'
 import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
   AUTHORED_SURFACE,
+  AuthoredFragmentSchema,
   registryStates,
   stampFragment,
   validateFragment,
@@ -85,6 +87,19 @@ import { placeSourcePack } from './place-pack.js'
 import { ownTaskContext } from './catalog-context.js'
 import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem } from './session.js'
 import { recordAuthoringLedger, writeAuthoredCatalog } from './write.js'
+
+/**
+ * Where a screen's accepted fragment is stored, keyed on the digest of what the
+ * session ran over ({@link screenAuthoringFingerprint}). There is no legacy key:
+ * authoring had no cache before this one.
+ */
+export const INTERFACE_AUTHOR_CACHE_NAME = 'guard/interfaces-author'
+
+/** An explicit ask to author again reads no cached fragment: the point of both
+ *  `replace` and `refresh` is to spend a session. */
+function reauthoring(opts: Pick<AuthorRunOptions, 'replace' | 'refresh'>): boolean {
+  return opts.replace === true || opts.refresh === true
+}
 
 export interface AuthorRunOptions {
   repoRoot: string
@@ -132,7 +147,10 @@ export type AuthorProgress =
 /** What one place's session produced. Every terminal state is one of these. */
 export interface PlaceResult {
   placeId: string
-  sessionId: string
+  /** Absent when the screen was served from the cache and no session ran. */
+  sessionId?: string
+  /** The fragment came out of the cache — nothing was spent on this screen. */
+  fromCache?: true
   /** `authored` = tasks or resources landed; `empty` = the session found neither;
    *  `rejected` = the outcome broke a rule the write path enforces;
    *  `failed` = the session itself did not reach an outcome. */
@@ -325,10 +343,73 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   )
   if (Object.keys(migrated).length > 0) recordLedger(migrated)
 
+  /**
+   * Fold one accepted fragment: validate it against the catalog as it stands,
+   * write what it authored, and record the screen's row. Both paths into the
+   * catalog run through here — the live session's outcome and the cached
+   * fragment a hit serves — so a hit writes exactly what the session wrote.
+   * `false` means the fragment was refused, which for a hit is a miss.
+   */
+  const foldFragment = (
+    item: AuthorWorkItem,
+    fragment: AuthoredFragment,
+    replaceable: ReadonlySet<string>,
+    briefedWith: InterfacesFile | null,
+  ): PreparedPlace => {
+    const result = preparePlace({ item, fragment, derived, authored, briefedWith, replaceable })
+    if (result.candidate) {
+      const before = new Map((authored?.interfaces ?? []).map((task) => [task.id, task]))
+      for (const task of result.candidate.interfaces) {
+        const prior = before.get(task.id)
+        if (prior && isLabelOnlyRekey(prior, task)) labelRekeys++
+      }
+      const written = writeAuthoredCatalog({
+        repoRoot: opts.repoRoot,
+        candidate: result.candidate,
+        derived,
+        now: opts.now,
+      })
+      authored = written.file
+      path = written.path
+      authoredCount += result.place.taskIds.length
+    }
+    return result
+  }
+
+  // THE CACHE PROBE, before any session starts. A screen whose inputs have not
+  // moved is served from the fragment its last session handed back, folded in
+  // work-list order exactly as a peer that already landed would be — so the
+  // sessions that DO run are briefed with it. An entry the catalog no longer
+  // accepts (a peer took an id since) is a miss like any other.
+  const pending: AuthorWorkItem[] = []
+  for (const item of work) {
+    const cached = reauthoring(opts)
+      ? null
+      : await readCachedSessionOutput({
+          repoRoot: opts.repoRoot,
+          cacheName: INTERFACE_AUTHOR_CACHE_NAME,
+          key: item.inputFingerprint,
+          schema: AuthoredFragmentSchema,
+        })
+    if (cached === null) {
+      pending.push(item)
+      continue
+    }
+    const result = foldFragment(item, cached, new Set(), authored)
+    if (result.place.status === 'rejected') {
+      pending.push(item)
+      continue
+    }
+    const place: PlaceResult = { ...result.place, spent: { turns: 0, tokens: 0, costUsd: 0 }, fromCache: true }
+    results.push(place)
+    recordLedger({ [item.place.id]: { status: place.status, inputFingerprint: item.inputFingerprint } })
+    opts.onProgress?.({ kind: 'place-done', place })
+  }
+
   // THE CLUSTERS: the places that read the same modules, grouped. They
   // become the pool's serial groups — one worker per cluster, members in order.
   const clusters = clusterPlaces({
-    places: work.map((item) => item.place.id),
+    places: pending.map((item) => item.place.id),
     context: opts.context ?? new Map(),
   })
   const clusterOf = new Map<string, PlaceCluster>()
@@ -340,7 +421,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   // list IS the schedule — LPT here means the longest serial chain starts at
   // t=0 instead of last. The REPORT is unaffected: results are re-sorted to
   // the work-list order below, whatever order the sessions ran in.
-  const itemOf = new Map(work.map((item) => [item.place.id, item]))
+  const itemOf = new Map(pending.map((item) => [item.place.id, item]))
   const scheduled = orderClustersLongestFirst(clusters).flatMap((cluster) =>
     cluster.places.map((placeId) => itemOf.get(placeId)!),
   )
@@ -364,7 +445,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   // between the two lies everything its peers landed while it was thinking. For
   // a peer of the same cluster there is nothing there: it already folded.
   const briefed = new Map<string, InterfacesFile | null>()
-  const placeOf = new Map(work.map((item) => [placeWorkItem(item.place.id), item.place.id]))
+  const placeOf = new Map(pending.map((item) => [placeWorkItem(item.place.id), item.place.id]))
 
   await runSessionPool<AuthorWorkItem, AuthoredFragment>({
     items: scheduled,
@@ -386,32 +467,12 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
           scope: scopeOf(item),
         }),
         validateOutcome(fragment) {
-          const result = preparePlace({
-            item, fragment, derived, authored,
-            briefedWith: briefed.get(item.place.id) ?? null,
-            replaceable,
-          })
+          // Validate and write synchronously before the loop marks the session
+          // completed. No peer can change the catalog between these operations.
+          const result = foldFragment(item, fragment, replaceable, briefed.get(item.place.id) ?? null)
           prepared.set(item.place.id, result.place)
           if (result.place.status === 'rejected') {
             return `The catalog cannot accept this outcome. Correct these problems, run check_draft on the corrected pieces, and return the draftId of the check that accepted them:\n- ${result.place.problems.join('\n- ')}`
-          }
-          // Validate and write synchronously before the loop marks the session
-          // completed. No peer can change the catalog between these operations.
-          if (result.candidate) {
-            const before = new Map((authored?.interfaces ?? []).map((task) => [task.id, task]))
-            for (const task of result.candidate.interfaces) {
-              const prior = before.get(task.id)
-              if (prior && isLabelOnlyRekey(prior, task)) labelRekeys++
-            }
-            const written = writeAuthoredCatalog({
-              repoRoot: opts.repoRoot,
-              candidate: result.candidate,
-              derived,
-              now: opts.now,
-            })
-            authored = written.file
-            path = written.path
-            authoredCount += result.place.taskIds.length
           }
         },
       }
@@ -455,7 +516,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     onSessionEvent: (workItem, event) => opts.onSessionEvent?.(placeOf.get(workItem)!, event),
     // Persistence happens in validateOutcome; the fold records final spend
     // and failures after any corrections have finished.
-    fold: (item, outcome, sessionId) => {
+    fold: async (item, outcome, sessionId) => {
       const last = prepared.get(item.place.id)
       const place: PlaceResult = outcome.status === 'completed'
         ? { ...last!, sessionId, spent: outcome.spent }
@@ -474,6 +535,14 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
       recordLedger({
         [item.place.id]: { status: place.status, inputFingerprint: item.inputFingerprint },
       })
+      // The fragment an accepted outcome produced, under this screen's digest:
+      // the next run over the same inputs folds it instead of buying it again.
+      if (outcome.status === 'completed' && (place.status === 'authored' || place.status === 'empty')) {
+        await storeCachedSessionOutput(
+          { repoRoot: opts.repoRoot, cacheName: INTERFACE_AUTHOR_CACHE_NAME, key: item.inputFingerprint },
+          outcome.output,
+        )
+      }
       spent.turns += place.spent.turns
       spent.tokens += place.spent.tokens
       spent.costUsd += place.spent.costUsd
@@ -515,7 +584,7 @@ interface PrepareInput {
   authored: InterfacesFile | null
   /** The catalog the session was briefed with; the difference is its peers' work. */
   briefedWith: InterfacesFile | null
-  replaceable: Set<string>
+  replaceable: ReadonlySet<string>
 }
 
 interface PreparedPlace {
