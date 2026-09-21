@@ -711,7 +711,9 @@ describe('guardSetupInProcess — hosted injection', () => {
   }, 120_000);
 
   // An eager run is VISIBLE from the moment it starts — including one that dies
-  // before any session exists, which a lazy, driver-first run leaves unrecorded.
+  // at the recipe gate, which a lazy, driver-first run leaves unrecorded. The
+  // dead server reaches a boot repair first, and the session it could not run
+  // is part of the record.
   it('opens the run eagerly with the step checklist, and closes it failed with the reason', async () => {
     const r = fixtureRepo();
     writeRecipe(r, { serve: ['node', path.join(r, 'missing.mjs')], readyTimeoutMs: 4000 });
@@ -731,7 +733,9 @@ describe('guardSetupInProcess — hosted injection', () => {
 
     expect(report.status).toBe('failed');
     const [run] = await listStoredSessionRuns(key, 'guard-setup');
-    expect(run.sessions).toEqual([]);
+    expect(run.sessions.map((s) => [s.kind, s.status])).toEqual([
+      ['guard-setup.recipe-repair', 'failed'],
+    ]);
     expect(run.status).toBe('failed');
     expect(run.error).toEqual({ message: report.reason, kind: 'setup' });
     expect(run.llm).toEqual({ mode: 'claude-code', provider: 'test', model: 'scripted' });

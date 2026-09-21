@@ -117,6 +117,7 @@ import {
   repairExistingRecipe,
   type RecipeDiscoveryPhase,
   type RecipeRepairFn,
+  type RepairExistingRecipeResult,
 } from './recipe-discovery.js'
 import {
   needsFingerprint,
@@ -732,84 +733,128 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     fact('recipe', 'replayed from recipe.json: not re-derived, not probed')
     opts.onStepDone?.('recipe', 'replayed from recipe.json — not re-derived, not probed')
   } else if (preexisting && !rederive) {
-    // THE STANDING RECIPE. Nothing re-derives it, and the one question asked
-    // here is whether the repository now needs something it does not provide.
+    // THE STANDING RECIPE. Nothing re-derives it, and the two questions asked
+    // here are whether the repository now needs something it does not provide,
+    // and whether what it declares still starts.
     const { world, inputFingerprint } = await detectWorld()
     const diff = recipeNeedsDiff({ repoRoot, recipe: preexisting, world })
     for (const entry of diff.unprovided) fact('recipe', unprovidedNeedFact(entry))
     const toRepair = recipeNeedsOf(diff)
-    const needs = diff.unprovided.length > 0 ? { unprovidedNeeds: diff.unprovided.map(recordedNeed) } : {}
     recipe = preexisting
-    recipeStep = { status: 'ok', outcome: 'exists', ...needs }
+    recipeStep = {
+      status: 'ok',
+      outcome: 'exists',
+      ...(diff.unprovided.length > 0 ? { unprovidedNeeds: diff.unprovided.map(recordedNeed) } : {}),
+    }
+    let sessionRunId: string | undefined
+
+    /** What every repair of this recipe is handed beside its scope. */
+    const repairArgs = {
+      recipe: preexisting,
+      database: async () => {
+        const db = world.database
+        return db ? { type: db.type, driver: db.driver } : null
+      },
+      datastores: async () => world.datastoreUrls,
+      ...(opts.composeKey ? { composeKey: opts.composeKey } : {}),
+      onPhase: (phase: RecipeDiscoveryPhase) => phases.enter(recipePhase(phase)),
+    }
+    /** Take a settled repair onto the run: the recipe, the row, the facts. */
+    const applyRepair = (repaired: RepairExistingRecipeResult): void => {
+      sessionRunId = repaired.sessionRunId ?? sessionRunId
+      if (repaired.status !== 'repaired') {
+        if (repaired.status === 'unchanged') {
+          fact('recipe', 'the repair session settled on the recipe as it stands; nothing was rewritten')
+        }
+        return
+      }
+      recipe = repaired.recipe
+      fact('recipe', `repaired in place, ${repaired.changed.join(', ')} rewritten in ${repaired.wrotePath}`)
+      for (const surface of repaired.movedSlices) {
+        fact('recipe', `repair moved the slice: every ${surface} flow re-authors against the changed recipe`)
+      }
+      recipeStep = {
+        ...recipeStep,
+        outcome: 'discovered',
+        source: 'llm',
+        wrotePath: repaired.wrotePath,
+        ...(repaired.movedSlices.length > 0 ? { movedFlowSlices: [...repaired.movedSlices] } : {}),
+      }
+    }
+    /** The recipe gate giving way: the row and the run both carry the reason. */
+    const stop = (reason: string): GuardSetupResult => {
+      recipeStep = { ...recipeStep, status: 'failed', reason }
+      return failed(reason, {
+        recipe: recipeStep,
+        steps: [
+          ...steps,
+          {
+            key: 'recipe',
+            status: 'failed',
+            reason,
+            inputFingerprint,
+            ...(sessionRunId ? { sessionRunId } : {}),
+          },
+        ],
+      })
+    }
+    /**
+     * VERIFICATION — boot the recipe's servers and call a real route on each.
+     * Honest only over a tree something has built, so a checkout with no
+     * dependencies and no build output is not probed at all: a boot failure
+     * there reports the checkout, and the run that builds this repository
+     * verifies the recipe's boot for real. A dead server is handed to ONE
+     * boot-scoped repair before the gate gives way, since failing instead
+     * leaves the row failed, which is what makes the next run throw the whole
+     * recipe away and derive a new one. Returns the reason, or null.
+     */
+    const verifyStanding = async (repairedAlready: boolean): Promise<string | null> => {
+      if (freshCheckout && !repairedAlready) {
+        fact('recipe', 'nothing is built in this checkout, so the recipe was not re-probed: the run that builds it verifies its boot')
+        return null
+      }
+      let probes = await probeRecipe(recipe)
+      let dead = probes.find((p) => !p.ok)
+      if (dead && opts.repair && !repairedAlready) {
+        const failure = deadServerReason(dead)
+        const fixed = await repairExistingRecipe(repoRoot, {
+          ...repairArgs,
+          repair: opts.repair,
+          scope: { kind: 'boot', failure, failureClass: 'endpoint-probe' },
+        })
+        if (fixed.status === 'failed') {
+          fact('recipe', `the recipe no longer starts, and the repair did not settle: ${firstReasonLine(fixed.reason)}`)
+        }
+        applyRepair(fixed)
+        if (fixed.status === 'repaired') {
+          probes = await probeRecipe(recipe)
+          dead = probes.find((p) => !p.ok)
+        }
+      }
+      if (probes.length > 0) recipeStep.probes = probes
+      opts.onStepDone?.('recipe', recipeSummary(recipeStep, probes))
+      return dead ? deadServerReason(dead) : null
+    }
+
     if (toRepair.length > 0 && opts.repair) {
       // SCOPED REPAIR. The session is handed the recipe and the named needs and
       // may answer with the world the app runs in and nothing else; the fold
       // refuses a proposal that reaches further, and `verifyProposal` is still
       // the gate that decides whether anything reaches disk.
       const repaired = await repairExistingRecipe(repoRoot, {
+        ...repairArgs,
         repair: opts.repair,
-        recipe: preexisting,
         scope: { kind: 'needs', unprovided: toRepair },
-        database: async () => {
-          const db = world.database
-          return db ? { type: db.type, driver: db.driver } : null
-        },
-        datastores: async () => world.datastoreUrls,
-        ...(opts.composeKey ? { composeKey: opts.composeKey } : {}),
-        onPhase: (phase) => phases.enter(recipePhase(phase)),
       })
       if (repaired.status === 'failed') {
+        sessionRunId = repaired.sessionRunId ?? sessionRunId
         fact('recipe', `the recipe does not provide what the repository needs, and the repair did not settle: ${firstReasonLine(repaired.reason)}`)
-        recipeStep = { status: 'failed', reason: repaired.reason, ...needs }
-        return failed(repaired.reason, {
-          recipe: recipeStep,
-          steps: [
-            ...steps,
-            {
-              key: 'recipe',
-              status: 'failed',
-              reason: repaired.reason,
-              inputFingerprint,
-              ...(repaired.sessionRunId ? { sessionRunId: repaired.sessionRunId } : {}),
-            },
-          ],
-        })
+        return stop(repaired.reason)
       }
-      if (repaired.status === 'repaired') {
-        recipe = repaired.recipe
-        fact('recipe', `repaired in place, ${repaired.changed.join(', ')} rewritten in ${repaired.wrotePath}`)
-        for (const surface of repaired.movedSlices) {
-          fact('recipe', `repair moved the slice: every ${surface} flow re-authors against the changed recipe`)
-        }
-        recipeStep = {
-          status: 'ok',
-          outcome: 'discovered',
-          source: 'llm',
-          wrotePath: repaired.wrotePath,
-          ...(repaired.movedSlices.length > 0 ? { movedFlowSlices: [...repaired.movedSlices] } : {}),
-        }
-      } else {
-        fact('recipe', 'the repair session settled on the recipe as it stands; nothing was rewritten')
-      }
-      const probes = await probeRecipe(recipe)
-      if (probes.length > 0) recipeStep.probes = probes
-      const dead = probes.find((p) => !p.ok)
-      if (dead) {
-        const reason = deadServerReason(dead)
-        recipeStep.status = 'failed'
-        recipeStep.reason = reason
-        return failed(reason, {
-          recipe: recipeStep,
-          steps: [...steps, { key: 'recipe', status: 'failed', reason, inputFingerprint }],
-        })
-      }
-      pushStep({
-        key: 'recipe',
-        status: 'ok',
-        inputFingerprint,
-        ...(repaired.sessionRunId ? { sessionRunId: repaired.sessionRunId } : {}),
-      })
-      opts.onStepDone?.('recipe', recipeSummary(recipeStep, probes))
+      applyRepair(repaired)
+      const reason = await verifyStanding(true)
+      if (reason) return stop(reason)
+      pushStep({ key: 'recipe', status: 'ok', inputFingerprint, ...(sessionRunId ? { sessionRunId } : {}) })
     } else if (toRepair.length === 0 && holds('recipe', legacyRecipeFp)) {
       // Settled: the repository needs nothing the recipe does not provide, and
       // the needs have not moved since the last run verified them. `refresh`
@@ -822,27 +867,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       opts.onStepDone?.('recipe', 'unchanged — reused without re-verifying')
     } else {
       // The needs moved, or one is unprovided with no repair seam wired in.
-      // Either way the recipe stands; verification is the live probe, and it is
-      // only honest over a tree something has built — a fresh checkout carries
-      // no dependencies and no build output, so a boot failure there would
-      // report the checkout and buy a repair session on a healthy recipe.
-      const probes = freshCheckout ? [] : await probeRecipe(recipe)
-      if (freshCheckout) {
-        fact('recipe', 'nothing is built in this checkout, so the recipe was not re-probed: the run that builds it verifies its boot')
-      }
-      if (probes.length > 0) recipeStep.probes = probes
-      const dead = probes.find((p) => !p.ok)
-      if (dead) {
-        const reason = deadServerReason(dead)
-        recipeStep.status = 'failed'
-        recipeStep.reason = reason
-        return failed(reason, {
-          recipe: recipeStep,
-          steps: [...steps, { key: 'recipe', status: 'failed', reason, inputFingerprint }],
-        })
-      }
-      pushStep({ key: 'recipe', status: 'ok', inputFingerprint })
-      opts.onStepDone?.('recipe', recipeSummary(recipeStep, probes))
+      // Either way the recipe stands and verification is what says whether it
+      // still holds.
+      const reason = await verifyStanding(false)
+      if (reason) return stop(reason)
+      pushStep({ key: 'recipe', status: 'ok', inputFingerprint, ...(sessionRunId ? { sessionRunId } : {}) })
     }
   } else {
     // A RE-DERIVATION (a refresh, or a recipe the last run failed) writes what

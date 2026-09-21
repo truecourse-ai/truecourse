@@ -854,6 +854,47 @@ describe('runGuardSetup — scoped repair', () => {
     expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(before)
   }, 120_000)
 
+  // A standing recipe that no longer starts is exactly what a repair is for.
+  // Failing the run instead leaves the row failed, which is what makes the NEXT
+  // run throw the whole recipe away and derive a new one.
+  it('hands a dead server to a boot repair, and reports the slice it moved', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const scopes: RecipeRepairContext[] = []
+    let booted = 0
+
+    const report = await runAndPersist(r, {
+      // Dead until the repair lands, alive afterwards.
+      probe: async () => {
+        booted++
+        return booted === 1
+          ? [{ server: 'default', path: '/health', ok: false, error: 'connection refused' }]
+          : [{ server: 'default', path: '/health', status: 200, ok: true }]
+      },
+      repair: async (ctx) => {
+        scopes.push(ctx)
+        return {
+          proposal: {
+            build: 'true',
+            api: {
+              serve: ['node', path.join(r, 'server.mjs')],
+              healthPath: '/orgs',
+              env: { SEED_STORE: path.join(r, 'store.json') },
+            },
+          },
+        }
+      },
+    })
+
+    expect(scopes).toHaveLength(1)
+    expect(scopes[0]!.existing?.scope.kind).toBe('boot')
+    expect(booted).toBe(2)
+    expect(statuses(report).recipe).toBe('ok')
+    // The health path is a field every api flow's key folds.
+    expect(report.recipe.movedFlowSlices).toEqual(['api'])
+    expect(JSON.parse(fs.readFileSync(recipePath(r), 'utf-8')).api.healthPath).toBe('/orgs')
+  }, 120_000)
+
   it('reports the needs nobody but a person can answer, and opens no session for them', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
