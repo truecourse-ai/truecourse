@@ -185,6 +185,21 @@ export {
   type RecipeRepairFn,
 } from './recipe-discovery.js'
 
+// Needs vs provides — the deterministic detector behind the recipe gate, and
+// the scope a repair of a standing recipe is held to.
+export {
+  recipeNeeds,
+  recipeNeedsDiff,
+  recipeNeedsOf,
+  needsFingerprint,
+  parseDetectionSnapshot,
+  type DetectedWorld,
+  type RecipeNeed,
+  type RecipeNeedsDiff,
+  type UnprovidedNeed,
+  type NeedAnswer,
+} from './recipe-needs.js'
+
 export {
   proposeRecipe,
   routesFromInterfaces,

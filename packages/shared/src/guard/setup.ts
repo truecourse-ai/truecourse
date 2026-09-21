@@ -165,6 +165,24 @@ export const GuardSetupServerProbeSchema = z
   .strict()
 export type GuardSetupServerProbe = z.infer<typeof GuardSetupServerProbeSchema>
 
+/**
+ * ONE thing the repository's own code needs of the world a run boots, that the
+ * recipe does not provide. `answer` says where the answer belongs: `recipe` is
+ * the engine's (a service to bring up, a variable to point at it, which a
+ * scoped repair writes), `registration` is a person's (an account for a third
+ * party nobody may fabricate) and changes no recipe at all.
+ */
+export const GuardSetupUnprovidedNeedSchema = z
+  .object({
+    /** The need's identity, stable across runs (`datastore:redis:REDIS_URL`). */
+    need: z.string().min(1),
+    /** What providing it would mean, in the engine's own words. */
+    provides: z.string().min(1),
+    answer: z.enum(['recipe', 'registration']),
+  })
+  .strict()
+export type GuardSetupUnprovidedNeed = z.infer<typeof GuardSetupUnprovidedNeedSchema>
+
 /** Step 1 — the recipe, the only hard gate. */
 export const GuardSetupRecipeStepSchema = z
   .object({
@@ -182,6 +200,20 @@ export const GuardSetupRecipeStepSchema = z
     todos: z.array(z.string()).optional(),
     /** The per-server live endpoint probes; empty for a cli-only recipe. */
     probes: z.array(GuardSetupServerProbeSchema).optional(),
+    /**
+     * What the repository needs and this recipe does not provide, as the needs
+     * comparison found it. The `recipe`-answered entries are what a scoped
+     * repair was briefed with; the `registration`-answered ones are the honest
+     * to-do list and changed nothing.
+     */
+    unprovidedNeeds: z.array(GuardSetupUnprovidedNeedSchema).optional(),
+    /**
+     * Surfaces whose flow recipe SLICE a repair moved. Only a boot-driven
+     * repair may move one, and every committed flow on that surface re-authors
+     * because of it — which is why the run records it beside the recipe rather
+     * than leaving generate's reopened report to be read without it.
+     */
+    movedFlowSlices: z.array(z.string().min(1)).optional(),
   })
   .strict()
 export type GuardSetupRecipeStep = z.infer<typeof GuardSetupRecipeStepSchema>
