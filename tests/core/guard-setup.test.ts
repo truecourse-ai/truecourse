@@ -38,7 +38,7 @@ import {
   legacyInterfacesFingerprint,
   legacySeedStepFingerprint,
   authFingerprint,
-  ecosystemFingerprint,
+  legacyRecipeStepFingerprint,
   type GuardSetupSeedSession,
 } from '@truecourse/guard-generator';
 import type { GuardSetupReport, InterfacesFile } from '@truecourse/shared';
@@ -415,7 +415,7 @@ function settledRepo(): string {
     status: 'ok',
     recipe: { status: 'ok', outcome: 'exists' },
     steps: [
-      { key: 'recipe', status: 'ok', inputFingerprint: ecosystemFingerprint(r) },
+      { key: 'recipe', status: 'ok', inputFingerprint: legacyRecipeStepFingerprint(r) },
       { key: 'detect', status: 'ok', inputFingerprint: '' },
       // The catalog fingerprint folds the detection snapshot, which only an
       // analysis pass can produce — the estimate only asks whether a row settled.
@@ -526,11 +526,13 @@ describe('guardSetupInProcess', () => {
     await guardSetupInProcess(r, { tracker, interfaces: interfaces(), ...inertSeams });
 
     // Step 1 reuses the existing recipe, so what it spends its time on is the
-    // live probe: booting the server and calling a real route on it.
-    expect(details.get('recipe')?.[0]).toBe('probing a live route');
-    // The analysis pass is reported against whichever step first needs it — here
-    // step 2, because step 1 never had to derive a route surface.
-    expect(details.get('detect')?.[0]).toBe('analyzing the repository');
+    // analysis pass its needs comparison reads, then the live probe: booting
+    // the server and calling a real route on it.
+    expect(details.get('recipe')?.[0]).toBe('analyzing the repository');
+    expect(details.get('recipe')?.some((line) => line.endsWith('probing a live route'))).toBe(true);
+    // The pass is reported against whichever step first needs it, and step 2
+    // reads the same memoized one back — so it announces nothing of its own.
+    expect(details.get('detect') ?? []).not.toContain('analyzing the repository');
     // The catalog session is the one long thing inside step 3.
     expect(details.get('catalog')?.[0]).toBe('classifying the dependency catalog');
   }, 120_000);

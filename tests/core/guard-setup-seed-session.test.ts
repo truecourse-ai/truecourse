@@ -34,7 +34,7 @@ import {
 import {
   collectProbeCandidates,
   computeSeedStepFingerprint,
-  ecosystemFingerprint,
+  legacyRecipeStepFingerprint,
   legacySeedStepFingerprint,
   runGuardSetup,
   type GuardSetupOptions,
@@ -1968,11 +1968,12 @@ describe('runGuardSetup — the seed step honors confirmSeedReplace', () => {
 // Root-cause cleanup: one FINGERPRINT_INPUTS list
 // ---------------------------------------------------------------------------
 
-describe('ecosystemFingerprint', () => {
-  // `FINGERPRINT_INPUTS` used to be mirrored privately in two packages. It is
-  // exported now, and this pins that the setup step really hashes THAT list —
-  // path-tagged, present files only, and never the recipe (whose own edits are
-  // the step's OUTPUT, not its subject).
+describe('legacyRecipeStepFingerprint', () => {
+  // The recipe step's OLD subject, kept as the one check a row written before
+  // the needs got. `FINGERPRINT_INPUTS` used to be mirrored privately in two
+  // packages; it is exported now, and this pins that the legacy value really
+  // hashes THAT list — path-tagged, present files only, and never the recipe
+  // (whose own edits were never the step's subject).
   it('is the runner’s own input list, hashed directly', () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -1988,11 +1989,11 @@ describe('ecosystemFingerprint', () => {
       expected.update('\0');
     }
 
-    expect(ecosystemFingerprint(r)).toBe(expected.digest('hex'));
+    expect(legacyRecipeStepFingerprint(r)).toBe(expected.digest('hex'));
     // The recipe is folded by `computeRecipeFingerprint`, never here.
-    const before = ecosystemFingerprint(r);
+    const before = legacyRecipeStepFingerprint(r);
     writeRecipe(r, { readyTimeoutMs: 9000 });
-    expect(ecosystemFingerprint(r)).toBe(before);
+    expect(legacyRecipeStepFingerprint(r)).toBe(before);
     expect(computeRecipeFingerprint(r)).not.toBe(before);
   });
 });
