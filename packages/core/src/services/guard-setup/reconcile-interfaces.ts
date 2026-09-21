@@ -438,7 +438,7 @@ export async function runReconcileInterfacesSession(
     repoRoot: opts.repoRoot,
     cacheName: RECONCILE_INTERFACES_CACHE_NAME,
     key: reconcileInterfacesCacheKey(opts.diagnostics, opts.recipeContract),
-    legacyKey: reconcileInterfacesLegacyCacheKey(opts.diagnostics, opts.legacyRecipeFingerprint),
+    legacyKeys: [reconcileInterfacesLegacyCacheKey(opts.diagnostics, opts.legacyRecipeFingerprint)],
     schema: ReconcileResolutionsSchema,
     run: async () => {
       const driver = await opts.driver()

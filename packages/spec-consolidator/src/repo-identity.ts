@@ -583,6 +583,25 @@ export function stripForNames(text: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * IS THE CONNECTED-REPOSITORY LIST PART OF A WORKSPACE'S IDENTITY?
+ *
+ * It was, and connecting one repository therefore re-curated every document the
+ * workspace had: the list is in the identity fingerprint, the fingerprint is in
+ * every curate-doc cache key, and that cache IS the scan's skip. The names the
+ * documents actually call the products survive as the aliases, which the block
+ * still prints, so the list bought little for what it cost.
+ *
+ * The key and the BLOCK read this one flag together, and they must: a briefing
+ * that states an input the key ignores makes the cache serve a verdict formed
+ * against something the next run never says.
+ *
+ * Before flipping this back, or trusting the drop, run the scan harness over
+ * ONE workspace with each setting and compare the keep/skip decisions document
+ * by document. A decision that moves means the list was doing work.
+ */
+const WORKSPACE_IDENTITY_NAMES_REPOSITORIES = false;
+
+/**
  * Exactly the identity data that reaches the prompt, canonicalized: lowercased,
  * aliases sorted and capped. Sorting is what keeps the fingerprint independent
  * of doc-discovery order — corpus-derived aliases arrive in whatever order the
@@ -594,7 +613,7 @@ export function stripForNames(text: string): string {
  * changes what the classifier is told the product IS, so every doc re-judges
  * once. That is the contract, not an accident.
  */
-function canonicalIdentity(id: RepoIdentity): string {
+function canonicalIdentity(id: RepoIdentity, namesRepositories: boolean): string {
   const aliases = [...new Set(id.aliases.map((a) => a.toLowerCase()))].sort().slice(0, MAX_ALIASES);
   const base = {
     name: id.name.toLowerCase(),
@@ -607,7 +626,7 @@ function canonicalIdentity(id: RepoIdentity): string {
   return JSON.stringify({
     ...base,
     scope: 'workspace',
-    repositories: [...new Set(id.repositories ?? [])].sort(),
+    ...(namesRepositories ? { repositories: [...new Set(id.repositories ?? [])].sort() } : {}),
   });
 }
 
@@ -618,7 +637,22 @@ function canonicalIdentity(id: RepoIdentity): string {
  * changed.
  */
 export function identityFingerprint(id: RepoIdentity | null): string {
-  const payload = id === null ? 'none' : canonicalIdentity(id);
+  return fingerprintOver(id, WORKSPACE_IDENTITY_NAMES_REPOSITORIES);
+}
+
+/**
+ * {@link identityFingerprint} as it was computed while the workspace's
+ * repository list was part of its identity — the key a curate-doc miss falls
+ * back to, so dropping the list costs no workspace a re-curation. Identical to
+ * the current fingerprint for a repository identity, which never named one.
+ * Delete with the legacy keys.
+ */
+export function legacyIdentityFingerprint(id: RepoIdentity | null): string {
+  return fingerprintOver(id, true);
+}
+
+function fingerprintOver(id: RepoIdentity | null, namesRepositories: boolean): string {
+  const payload = id === null ? 'none' : canonicalIdentity(id, namesRepositories);
   return createHash('sha256').update(`identity::${payload}`).digest('hex').slice(0, 16);
 }
 
@@ -652,13 +686,19 @@ export function identityBlock(id: RepoIdentity | null): string {
  * The workspace flavour of the block: the subject is not ONE product but every
  * connected repository's, because one curation now spans them all. A document
  * about ANY of them is ours — the third-party judgment is otherwise the same.
+ *
+ * Whether the connected repositories are listed here is the one flag the cache
+ * key reads too (see {@link WORKSPACE_IDENTITY_NAMES_REPOSITORIES}). With
+ * nothing left to attribute against, the block is omitted altogether and the
+ * curator judges content alone, exactly as it does for an unidentified repo.
  */
 function workspaceIdentityBlock(id: RepoIdentity): string {
   const aliases = id.aliases.slice(0, MAX_ALIASES);
+  const repositories = WORKSPACE_IDENTITY_NAMES_REPOSITORIES ? id.repositories ?? [] : [];
+  if (!id.name && !id.description && aliases.length === 0 && repositories.length === 0) return '';
   const lines = ['--- IDENTITY: the workspace being scanned ---'];
   if (id.name) lines.push(`This workspace is: ${id.name}`);
   if (id.description) lines.push(`What it is: ${id.description}`);
-  const repositories = id.repositories ?? [];
   if (repositories.length > 0) {
     lines.push('Its products are the repositories it has connected:');
     for (const repo of repositories) lines.push(`  - ${repo}`);

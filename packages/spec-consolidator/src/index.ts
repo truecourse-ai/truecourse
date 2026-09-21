@@ -120,6 +120,7 @@ export {
   coresOf,
   aliasMatcher,
   identityFingerprint,
+  legacyIdentityFingerprint,
   identityBlock,
   stripForNames,
   taglineFromReadme,

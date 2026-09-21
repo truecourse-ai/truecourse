@@ -41,7 +41,7 @@ import {
   DocVerdictSchema,
   curateDocBriefing,
   curateDocCacheKey,
-  curateDocLegacyCacheKey,
+  curateDocLegacyCacheKeys,
   type DocVerdict,
 } from '../spec-scan/curate-doc.js';
 import {
@@ -443,7 +443,7 @@ export async function estimateScanTokens(
       CURATE_DOC_CACHE_NAME,
       curateDocCacheKey({ identity, doc }, instructionParts),
       DocVerdictSchema,
-      curateDocLegacyCacheKey({ identity, doc }, instructionParts),
+      ...curateDocLegacyCacheKeys({ identity, doc }, instructionParts),
     );
     if (cached) cachedVerdicts.set(doc.path, cached);
     else curateMissDocs.push(doc);

@@ -599,7 +599,7 @@ export function buildCatalogSession(
         repoRoot: input.repoRoot,
         cacheName: DEPENDENCY_CATALOG_CACHE_NAME,
         key: catalogCacheKey(input.fingerprint),
-        legacyKey: catalogLegacyCacheKey(input.fingerprint),
+        legacyKeys: [catalogLegacyCacheKey(input.fingerprint)],
         schema: CatalogDraftSchema,
         run: async () => {
           const { driver, persistence } = await context.acquire();

@@ -202,7 +202,10 @@ describe('the workspace Document scan', () => {
     for (const briefing of briefings) {
       expect(briefing).toContain('IDENTITY: the workspace being scanned');
       expect(briefing).toContain('This workspace is: Acme');
-      expect(briefing).toContain('- acme/widgets');
+      // The products are named by the aliases their documents use, not by the
+      // connected-repository list: connecting one must re-curate nothing.
+      expect(briefing).toContain('Also written as: widgets');
+      expect(briefing).not.toContain('acme/widgets\n');
     }
     expect(briefings.find((b) => b.includes(SITE_SOURCE))).toContain('SOURCE: Stripe Docs (site)');
     expect(briefings.find((b) => b.includes('users.md'))).toContain(

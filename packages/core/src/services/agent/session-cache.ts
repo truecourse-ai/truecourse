@@ -41,9 +41,10 @@ export interface CachedSessionOptions<TOutcome> {
   cacheName: string
   /** sha256 over the stage version + every behavior-affecting input. */
   key: string
-  /** The key this kind computed before its formula changed, read on a miss and
-   *  re-saved under `key`. Delete with the legacy hash. */
-  legacyKey?: string
+  /** The keys this kind computed before its formula changed, newest formula
+   *  first: a miss reads them in turn and re-saves the hit under `key`.
+   *  Delete with the legacy hash. */
+  legacyKeys?: readonly string[]
   /** The outcome schema of the session kind — gates a cached value on read. */
   schema: z.ZodType<TOutcome>
   /** Runs the session on a miss. Its outcome is returned as-is (and written
@@ -85,13 +86,13 @@ export async function cachedSessionOutcome<TOutcome>(
  * to re-run and overwrite, never to fail the run.
  */
 export async function readCachedSessionOutput<TOutcome>(
-  opts: Pick<CachedSessionOptions<TOutcome>, 'repoRoot' | 'cacheName' | 'key' | 'legacyKey' | 'schema'>,
+  opts: Pick<CachedSessionOptions<TOutcome>, 'repoRoot' | 'cacheName' | 'key' | 'legacyKeys' | 'schema'>,
 ): Promise<TOutcome | null> {
   const cached = await getCacheEntryOrLegacy(
     opts.repoRoot,
     opts.cacheName,
     opts.key,
-    opts.legacyKey ?? opts.key,
+    ...(opts.legacyKeys ?? []),
   ).catch(() => null)
   if (cached === null) return null
   const parsed = opts.schema.safeParse(cached)

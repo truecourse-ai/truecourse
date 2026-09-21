@@ -1457,7 +1457,7 @@ export function buildSeedSession(
         repoRoot: input.repoRoot,
         cacheName: SEED_CACHE_NAME,
         key: seedSessionCacheKey(input.fingerprint),
-        legacyKey: seedSessionLegacyCacheKey(input.legacyFingerprint),
+        legacyKeys: [seedSessionLegacyCacheKey(input.legacyFingerprint)],
         schema: SeedSessionOutcomeSchema,
         run: async () => {
           const { driver, persistence } = await context.acquire();

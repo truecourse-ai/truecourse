@@ -121,7 +121,7 @@ describe('the old key', () => {
       repoRoot: repo,
       cacheName: CACHE_NAME,
       key: KEY,
-      legacyKey: 'the-old-key',
+      legacyKeys: ['the-old-key'],
       schema,
       run: session,
     })
@@ -138,7 +138,7 @@ describe('the old key', () => {
       repoRoot: repo,
       cacheName: CACHE_NAME,
       key: KEY,
-      legacyKey: 'the-old-key',
+      legacyKeys: ['the-old-key'],
       schema,
       run: session,
     })

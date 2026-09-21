@@ -23,11 +23,16 @@ import {
 } from '../helpers/memory-kv-cache'
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
 import {
+  CURATE_DOC_CACHE_NAME,
   CURATE_DOC_SESSION_KIND,
   CURATE_DOC_SYSTEM_PROMPT,
+  DocVerdictSchema,
   curateDocBriefing,
   curateDocCacheKey,
+  curateDocLegacyCacheKeys,
 } from '../../packages/core/src/services/spec-scan/curate-doc'
+import { readCachedSessionOutput } from '../../packages/core/src/services/agent/session-cache'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { curateInProcess } from '../../packages/core/src/commands/spec-in-process'
 import {
   corpusFilePath,
@@ -232,6 +237,57 @@ describe('the curate-doc prompt and briefing', () => {
     expect(curateDocCacheKey({ identity: IDENTITY, doc: { ...doc, path: 'docs/other.md' } })).not.toBe(key)
     // The instructions tail (step 6) moves every scan key.
     expect(curateDocCacheKey({ identity: IDENTITY, doc }, ['fp'])).not.toBe(key)
+  })
+
+  // Connecting a repository used to re-curate every document a workspace had:
+  // the list of them sat in the identity, the identity in every key. What the
+  // documents call the products — the aliases — still decides both.
+  describe('a workspace identity', () => {
+    const doc = { path: 'docs/api.md', contentHash: 'h1' }
+    const workspace = (repositories: string[], aliases = ['Widgets']): RepoIdentity => ({
+      scope: 'workspace',
+      repositories,
+      name: 'Acme',
+      aliases,
+      sources: ['workspace'],
+    })
+
+    it('keys and briefs the same however many repositories are connected', () => {
+      const one = workspace(['acme/widgets'])
+      const two = workspace(['acme/widgets', 'acme/docs'])
+      expect(curateDocCacheKey({ identity: two, doc })).toBe(curateDocCacheKey({ identity: one, doc }))
+      expect(curateDocBriefing(docCandidate(doc.path, '# Api\n'), two)).toBe(
+        curateDocBriefing(docCandidate(doc.path, '# Api\n'), one),
+      )
+      expect(curateDocBriefing(docCandidate(doc.path, '# Api\n'), two)).not.toContain('acme/widgets')
+    })
+
+    it('still moves with the names the documents may call the products', () => {
+      expect(curateDocCacheKey({ identity: workspace(['acme/widgets'], ['Gadgets']), doc })).not.toBe(
+        curateDocCacheKey({ identity: workspace(['acme/widgets']), doc }),
+      )
+    })
+
+    it('serves a verdict stored under the listing key with no session, once', async () => {
+      const identity = workspace(['acme/widgets', 'acme/docs'])
+      const [listed] = curateDocLegacyCacheKeys({ identity, doc })
+      const key = curateDocCacheKey({ identity, doc })
+      expect(listed).not.toBe(key)
+      const verdict = { keep: true, reason: 'spec', areas: [{ product: 'core', concern: 'api' }] }
+      await setCacheEntry(repo, CURATE_DOC_CACHE_NAME, listed, verdict)
+
+      expect(
+        await readCachedSessionOutput({
+          repoRoot: repo,
+          cacheName: CURATE_DOC_CACHE_NAME,
+          key,
+          legacyKeys: curateDocLegacyCacheKeys({ identity, doc }),
+          schema: DocVerdictSchema,
+        }),
+      ).toMatchObject({ keep: true })
+      // …and it is under the new key afterwards, so the fallback is paid once.
+      expect(await getCacheEntry(repo, CURATE_DOC_CACHE_NAME, key)).toMatchObject({ keep: true })
+    })
   })
 })
 

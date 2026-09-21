@@ -25,6 +25,7 @@ import {
   docBody,
   identityBlock,
   identityFingerprint,
+  legacyIdentityFingerprint,
   type DocCandidate,
   type RepoIdentity,
 } from '@truecourse/spec-consolidator'
@@ -198,32 +199,40 @@ export function curateDocCacheKey(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
 ): string {
-  return curateDocKeyOver(`curate-doc-v${CURATE_DOC_STAGE_VERSION}`, input, extraParts)
+  return curateDocKeyOver(
+    `curate-doc-v${CURATE_DOC_STAGE_VERSION}`,
+    identityFingerprint(input.identity),
+    input.doc,
+    extraParts,
+  )
 }
 
-/** {@link curateDocCacheKey} as it was computed while the prompt was in it —
- *  the key a miss falls back to. Curate-doc's cache IS its skip, so without
- *  this a changed key re-curates every document in every workspace once.
- *  Delete with the legacy hash. */
-export function curateDocLegacyCacheKey(
+/**
+ * {@link curateDocCacheKey} under the formulas that came before it, newest
+ * first: the workspace identity while it still named the connected
+ * repositories, and that same identity while the prompt was in the key. A miss
+ * reads them in turn. Curate-doc's cache IS the scan's skip, so without this a
+ * changed key re-curates every document in every workspace once.
+ * Delete with the legacy hash.
+ */
+export function curateDocLegacyCacheKeys(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
-): string {
-  return curateDocKeyOver(LEGACY_CURATE_DOC_PROMPT_FINGERPRINT, input, extraParts)
+): string[] {
+  const listed = legacyIdentityFingerprint(input.identity)
+  return [
+    curateDocKeyOver(`curate-doc-v${CURATE_DOC_STAGE_VERSION}`, listed, input.doc, extraParts),
+    curateDocKeyOver(LEGACY_CURATE_DOC_PROMPT_FINGERPRINT, listed, input.doc, extraParts),
+  ]
 }
 
 function curateDocKeyOver(
   stage: string,
-  input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
+  identity: string,
+  doc: Pick<DocCandidate, 'path' | 'contentHash'>,
   extraParts: readonly string[],
 ): string {
-  return scanCacheKey([
-    stage,
-    identityFingerprint(input.identity),
-    input.doc.path,
-    input.doc.contentHash,
-    ...extraParts,
-  ])
+  return scanCacheKey([stage, identity, doc.path, doc.contentHash, ...extraParts])
 }
 
 export interface CurateDocSessionInput {

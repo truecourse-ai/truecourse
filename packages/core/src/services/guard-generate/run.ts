@@ -225,9 +225,9 @@ interface CachedPoolOptions<TItem, TOutcome> {
   items: readonly TItem[]
   workItem(item: TItem): string
   cacheKey(item: TItem): string
-  /** The key this kind computed before its formula changed; a miss under
-   *  `cacheKey` falls back to it. Delete with the legacy hash. */
-  legacyCacheKey?(item: TItem): string
+  /** The keys this kind computed before its formula changed, newest first; a
+   *  miss under `cacheKey` reads them in turn. Delete with the legacy hash. */
+  legacyCacheKeys?(item: TItem): readonly string[]
   schema: z.ZodType<TOutcome>
   session(item: TItem): SessionDef<TOutcome>
   briefing(item: TItem): string
@@ -311,7 +311,7 @@ async function runCachedGuardPool<TItem, TOutcome>(
       repoRoot: opts.repoRoot,
       cacheName: opts.cacheName,
       key: opts.cacheKey(item),
-      ...(opts.legacyCacheKey ? { legacyKey: opts.legacyCacheKey(item) } : {}),
+      ...(opts.legacyCacheKeys ? { legacyKeys: opts.legacyCacheKeys(item) } : {}),
       schema: opts.schema,
       run: () => {
         toRun.push(item)
@@ -475,7 +475,7 @@ export function createGuardGenerateSessionSeams(
       items: input.docs,
       workItem: (doc) => extractSessionWorkItem(doc.doc),
       cacheKey: (doc) => extractSessionCacheKey(doc, input.prerequisiteTargets),
-      legacyCacheKey: (doc) => extractSessionLegacyCacheKey(doc, input.prerequisiteTargets),
+      legacyCacheKeys: (doc) => [extractSessionLegacyCacheKey(doc, input.prerequisiteTargets)],
       schema: extractContextSchema(input.prerequisiteTargets),
       session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets }),
       briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets),
@@ -523,7 +523,7 @@ export function createGuardGenerateSessionSeams(
       items: input.areas,
       workItem: (area) => flowsSessionWorkItem(area.areaId, area.chunk),
       cacheKey: (area) => flowsSessionCacheKey(area),
-      legacyCacheKey: (area) => flowsSessionLegacyCacheKey(area),
+      legacyCacheKeys: (area) => [flowsSessionLegacyCacheKey(area)],
       schema: FlowSetSchema,
       session: (area) => flowsSessionDef({ area, universe, checker }),
       briefing: (area) => flowsSessionBriefing(area, input.grounding),
@@ -568,7 +568,7 @@ export function createGuardGenerateSessionSeams(
       items: [FLOWS_EPIC_WORK_ITEM],
       workItem: () => FLOWS_EPIC_WORK_ITEM,
       cacheKey: () => flowsEpicSessionCacheKey(input.digests),
-      legacyCacheKey: () => flowsEpicSessionLegacyCacheKey(input.digests),
+      legacyCacheKeys: () => [flowsEpicSessionLegacyCacheKey(input.digests)],
       schema: EpicSynthesisSchema,
       session: () => flowsEpicSessionDef({ digests: input.digests, claims: input.claims }),
       briefing: () => flowsEpicSessionBriefing(input.digests),
