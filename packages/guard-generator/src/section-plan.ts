@@ -241,6 +241,62 @@ export function flowGenerationInputsHash(input: {
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
 }
 
+/**
+ * The inputs of {@link flowGenerationInputsHash}, taken apart. The hash folds
+ * `interfaceFingerprints` as one bag; here the bag's members keep their names.
+ */
+export interface FlowGenerationInputParts {
+  flowFingerprint: string
+  sectionKeys: readonly string[]
+  /** Each plan's realization-assignment fingerprint. */
+  assignmentFingerprints: readonly string[]
+  /** The planned interfaces' fingerprints. */
+  interfaceFingerprints: readonly string[]
+  /** The whole web catalog's fingerprint, when the flow has a web plan. */
+  webCatalogFingerprint?: string
+  prerequisiteMaterial: string
+  /** The recipe fingerprint by part, as `recipeFingerprintComponents` names them. */
+  recipeParts: Readonly<Record<string, string>>
+}
+
+/** The `interfaceFingerprints` bag {@link flowGenerationInputsHash} folds for these parts. */
+export function flowInterfaceFingerprintBag(parts: FlowGenerationInputParts): string[] {
+  return [
+    ...parts.assignmentFingerprints,
+    ...parts.interfaceFingerprints,
+    ...(parts.webCatalogFingerprint ? [parts.webCatalogFingerprint] : []),
+    parts.prerequisiteMaterial,
+  ]
+}
+
+/**
+ * A flow's settle inputs BY NAME, stored beside its hash so a later generate
+ * can say which input moved. Every value is a short digest: the record is for
+ * comparing a name against itself across two runs, never for recomputing the hash.
+ */
+export function flowGenerationInputComponents(parts: FlowGenerationInputParts): Record<string, string> {
+  const digest = (values: readonly string[]): string =>
+    createHash('sha256').update([...values].sort().join('\0')).digest('hex').slice(0, 16)
+  const components: Record<string, string> = {
+    flow: digest([parts.flowFingerprint]),
+    sections: digest(parts.sectionKeys),
+    assignment: digest(parts.assignmentFingerprints),
+    interfaces: digest(parts.interfaceFingerprints),
+    prerequisites: digest([parts.prerequisiteMaterial]),
+    prompts: digest([
+      MATCH_PROMPT_FINGERPRINT,
+      GENERATE_PROMPT_FINGERPRINT,
+      GENERATE_API_PROMPT_FINGERPRINT,
+      GENERATE_WEB_PROMPT_FINGERPRINT,
+      FIDELITY_PROMPT_FINGERPRINT,
+    ]),
+    policy: String(GUARD_REVIEW_POLICY_VERSION),
+  }
+  if (parts.webCatalogFingerprint) components.webCatalog = digest([parts.webCatalogFingerprint])
+  for (const [part, value] of Object.entries(parts.recipeParts)) components[`recipe.${part}`] = value
+  return components
+}
+
 /** Whether a corpus exists — the corpus is generation's only doc authority. */
 export function hasGuardUniverse(repoRoot: string): boolean {
   return fs.existsSync(corpusFilePath(repoRoot))

@@ -2004,6 +2004,33 @@ describe('generateGuards — the per-flow pipeline', () => {
     expect(new Set(loadScenarios(r).scenarios.map((s) => s.id)).size).toBe(2)
   }, 90_000)
 
+  it('names the settle input that re-opened a flow', async () => {
+    const r = seed()
+    const opts = {
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
+    }
+    const first = await runGenerate(opts)
+    expect(first.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
+    const stored = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
+    expect(Object.keys(stored.generationInputs ?? {})).toEqual(expect.arrayContaining(['flow', 'sections', 'interfaces', 'recipe.manifests']))
+
+    // A dependency bump moves the recipe fingerprint and nothing a flow reads.
+    fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }))
+    const facts: string[] = []
+    const second = await runGenerate({ ...opts, onFact: (_step, line) => facts.push(line) })
+    expect(second.flows.reopened).toEqual({ flows: 1, byInput: { 'recipe.manifests': 1 }, unrecorded: 0 })
+    expect(facts).toContain('1 flow re-opened: 1 recipe.manifests, 0 interfaces, 0 sections')
+
+    // An entry stored before the inputs were named can only say it moved.
+    writeManifest(r, {
+      flows: readManifest(r)!.flows.map(({ generationInputs: _named, ...f }) => ({ ...f, generationInputsHash: `sha256:${'0'.repeat(64)}` })),
+    })
+    const third = await runGenerate(opts)
+    expect(third.flows.reopened).toEqual({ flows: 1, byInput: {}, unrecorded: 1 })
+  }, 90_000)
+
   it('stops after synthesis when the internal seam asks it to', async () => {
     const r = seed()
     let matchCalls = 0

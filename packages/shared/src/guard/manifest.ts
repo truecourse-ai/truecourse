@@ -183,6 +183,12 @@ export const GuardManifestFlowSchema = z
     interfaces: z.array(GuardManifestFlowInterfacesSchema).default([]),
     /** Hash of the inputs the generator used; unset until a generator authors. */
     generationInputsHash: z.string().nullable().default(null),
+    /**
+     * The settle inputs behind `generationInputsHash`, by NAME (component →
+     * its fingerprint), so a hash that moved can say which input moved it.
+     * Written with the hash; absent on a manifest written before the field.
+     */
+    generationInputs: z.record(z.string(), z.string()).optional(),
     /** Per-surface gaps: why a surface has no scenario. */
     gaps: z.array(GuardManifestGapSchema).default([]),
     /** Prior scenarios an editing worker deliberately dropped (see
@@ -293,6 +299,21 @@ export function unaccountedSurfaces(flow: GuardManifestFlow): GuardDriverId[] {
  */
 export function violatesSettleInvariant(flow: GuardManifestFlow): boolean {
   return flow.generationInputsHash !== null && unaccountedSurfaces(flow).length > 0
+}
+
+/**
+ * The names of the inputs that differ between a stored record of named inputs
+ * (a flow's `generationInputs`, a setup step's `inputComponents`) and the one
+ * computed now, sorted. A name present on one side only counts as moved.
+ * `null` when nothing was stored, so "nothing moved" and "cannot tell" stay apart.
+ */
+export function movedNamedInputs(
+  prior: Readonly<Record<string, string>> | undefined,
+  current: Readonly<Record<string, string>>,
+): string[] | null {
+  if (!prior) return null
+  const names = new Set([...Object.keys(prior), ...Object.keys(current)])
+  return [...names].filter((name) => prior[name] !== current[name]).sort()
 }
 
 /**

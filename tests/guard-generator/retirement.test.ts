@@ -19,8 +19,12 @@ import { readManifest, loadScenarios } from '@truecourse/guard-runner'
 import {
   generateGuards,
   flowGenerationInputsHash,
+  flowGenerationInputComponents,
+  flowInterfaceFingerprintBag,
+  type FlowGenerationInputParts,
   type GenerateGuardsOptions,
 } from '@truecourse/guard-generator'
+import { movedNamedInputs } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -120,6 +124,39 @@ describe('flowGenerationInputsHash — the frozen retirement salt', () => {
     expect(
       flowGenerationInputsHash({ ...base, sectionKeys: ['b', 'a'], interfaceFingerprints: ['y', 'x'] }),
     ).toBe(flowGenerationInputsHash({ ...base, sectionKeys: ['a', 'b'], interfaceFingerprints: ['x', 'y'] }))
+  })
+})
+
+describe('flowGenerationInputComponents — the hash, by name', () => {
+  const parts: FlowGenerationInputParts = {
+    flowFingerprint: 'f',
+    sectionKeys: ['s1', 's2'],
+    assignmentFingerprints: ['a'],
+    interfaceFingerprints: ['i1', 'i2'],
+    webCatalogFingerprint: 'w',
+    prerequisiteMaterial: 'p',
+    recipeParts: { manifests: 'm', seed: '' },
+  }
+
+  it('moves exactly the named component when one input moves', () => {
+    const base = flowGenerationInputComponents(parts)
+    const moved = (over: Partial<FlowGenerationInputParts>): string[] =>
+      movedNamedInputs(base, flowGenerationInputComponents({ ...parts, ...over }))!
+    expect(moved({})).toEqual([])
+    expect(moved({ flowFingerprint: 'f2' })).toEqual(['flow'])
+    expect(moved({ sectionKeys: ['s1', 's3'] })).toEqual(['sections'])
+    expect(moved({ sectionKeys: ['s2', 's1'] })).toEqual([])
+    expect(moved({ assignmentFingerprints: ['a2'] })).toEqual(['assignment'])
+    expect(moved({ interfaceFingerprints: ['i1'] })).toEqual(['interfaces'])
+    expect(moved({ webCatalogFingerprint: 'w2' })).toEqual(['webCatalog'])
+    expect(moved({ prerequisiteMaterial: 'p2' })).toEqual(['prerequisites'])
+    expect(moved({ recipeParts: { manifests: 'm2', seed: '' } })).toEqual(['recipe.manifests'])
+  })
+
+  it('folds into the hash every member the bag always carried', () => {
+    expect([...flowInterfaceFingerprintBag(parts)].sort()).toEqual(['a', 'i1', 'i2', 'p', 'w'])
+    const { webCatalogFingerprint: _none, ...noWeb } = parts
+    expect([...flowInterfaceFingerprintBag(noWeb)].sort()).toEqual(['a', 'i1', 'i2', 'p'])
   })
 })
 

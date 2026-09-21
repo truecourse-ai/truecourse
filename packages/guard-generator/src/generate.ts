@@ -116,6 +116,7 @@ import {
   type EntryPreflightResult,
   createGuardSharedWorld,
   isWorldBootFailure,
+  recipeFingerprintComponents,
 } from '@truecourse/guard-runner'
 import {
   guardCoverageProgress,
@@ -138,6 +139,7 @@ import {
   runnableDriverIds,
   unaccountedSurfaces,
   violatesSettleInvariant,
+  movedNamedInputs,
   runRefusalError,
   type GuardAutoResolutionEntry,
   type GuardAutoResolutionSource,
@@ -183,6 +185,9 @@ import {
   hasGuardUniverse,
   sectionInputsKey,
   flowGenerationInputsHash,
+  flowGenerationInputComponents,
+  flowInterfaceFingerprintBag,
+  type FlowGenerationInputParts,
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
@@ -1073,6 +1078,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   const recipe: Recipe = recipeResult.recipe
   const recipeFingerprint = recipeResult.fingerprint
+  const recipeParts = recipeFingerprintComponents(repoRoot)
   fact(
     'index',
     recipeResult.status === 'exists'
@@ -1925,12 +1931,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const chosen = [...plans.keys()].sort((a, b) => Number(previousDrivers.includes(b)) - Number(previousDrivers.includes(a)) || a.localeCompare(b))[0]
     for (const surface of plans.keys()) if (surface !== chosen) plans.delete(surface)
 
-    const interfaceFingerprints = [...plans.values()].flatMap((p) => [
-      realizationAssignmentFingerprint(p),
-      ...p.interfaces.map((j) => j.fingerprint),
-      ...(p.surface === 'web' ? [catalogs.get('web')!.fingerprint] : []),
-    ])
-    interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe))
+    const inputParts: FlowGenerationInputParts = {
+      flowFingerprint: flow.fingerprint,
+      sectionKeys,
+      assignmentFingerprints: [...plans.values()].map((p) => realizationAssignmentFingerprint(p)),
+      interfaceFingerprints: [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint)),
+      ...(plans.has('web') ? { webCatalogFingerprint: catalogs.get('web')!.fingerprint } : {}),
+      prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe),
+      recipeParts,
+    }
+    const interfaceFingerprints = flowInterfaceFingerprintBag(inputParts)
+    const inputComponents = flowGenerationInputComponents(inputParts)
     const inputsHash = flowGenerationInputsHash({
       flowFingerprint: flow.fingerprint,
       sectionKeys,
@@ -1994,8 +2005,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         serverBySurface,
         gaps,
         inputsHash,
+        inputComponents,
         prior,
         changed,
+        // Only a stored hash that stopped matching has moved inputs to name; a
+        // flow that was new, unsettled or re-opened by an invariant has none.
+        ...(changed && prior && prior.generationInputsHash !== null && prior.generationInputsHash !== inputsHash
+          ? { movedInputs: movedNamedInputs(prior.generationInputs, inputComponents) }
+          : {}),
       },
       errors: localErrors,
       matchCalls: localMatchCalls,
@@ -2078,6 +2095,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   const changedWorks = works.filter((w) => w.changed)
   flowsReport.skipped = works.length - changedWorks.length
+  flowsReport.reopened = reopenedFlowsReport(changedWorks)
+  for (const w of changedWorks) {
+    if (w.movedInputs === undefined) continue
+    fact('match', `flow ${w.flow.id} re-opened: ${w.movedInputs ? `${w.movedInputs.join(', ') || 'no named input'} moved` : 'stored entry names no inputs'}`)
+  }
+  if (flowsReport.reopened.flows > 0) fact('match', reopenedFlowsLine(flowsReport.reopened))
 
   // WORLD CLASSIFICATION (blast-radius scheduling, the generate side): batched,
   // cached calls decide which changed flows MUTATE the shared world — credential
@@ -4375,8 +4398,38 @@ interface FlowWork {
   /** Why the other surfaces have no scenario. */
   gaps: GuardManifestGap[]
   inputsHash: string
+  /** The settle inputs behind `inputsHash`, by name. */
+  inputComponents: Record<string, string>
   prior?: GuardManifestFlow
   changed: boolean
+  /**
+   * Set when the flow's stored hash no longer matches: the named inputs that
+   * moved, or `null` when the stored entry recorded none.
+   */
+  movedInputs?: string[] | null
+}
+
+/** Roll the re-opened flows' moved inputs up into the report's counts. */
+function reopenedFlowsReport(changedWorks: readonly FlowWork[]): NonNullable<GuardFlowsReport['reopened']> {
+  const report: NonNullable<GuardFlowsReport['reopened']> = { flows: 0, byInput: {}, unrecorded: 0 }
+  for (const w of changedWorks) {
+    if (w.movedInputs === undefined) continue
+    report.flows++
+    if (w.movedInputs === null) report.unrecorded++
+    else for (const name of w.movedInputs) report.byInput[name] = (report.byInput[name] ?? 0) + 1
+  }
+  return report
+}
+
+/** "45 flows re-opened: 45 recipe.manifests, 0 sections, 0 interfaces". The
+ *  spec and code inputs are always named, so a zero there reads as a finding. */
+function reopenedFlowsLine(reopened: NonNullable<GuardFlowsReport['reopened']>): string {
+  const counts = { sections: 0, interfaces: 0, ...reopened.byInput }
+  const parts = Object.entries(counts)
+    .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
+    .map(([name, n]) => `${n} ${name}`)
+  if (reopened.unrecorded > 0) parts.push(`${reopened.unrecorded} with no recorded inputs`)
+  return `${reopened.flows} flow${reopened.flows === 1 ? '' : 's'} re-opened: ${parts.join(', ')}`
 }
 
 /** A committed scenario's yaml + parsed form, indexed by id for edit mode. */
@@ -4466,6 +4519,7 @@ function manifestEntry(
       .filter((j) => j.interfaceIds.length > 0)
       .sort((a, b) => a.surface.localeCompare(b.surface)),
     generationInputsHash,
+    ...(generationInputsHash !== null ? { generationInputs: work.inputComponents } : {}),
     gaps: work.gaps.slice().sort((a, b) => a.surface.localeCompare(b.surface) || a.kind.localeCompare(b.kind)),
   }
 }
