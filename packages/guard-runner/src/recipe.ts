@@ -1065,32 +1065,91 @@ export function loadRecipe(repoRoot: string, recipeFile: string): LoadedRecipe |
   return { recipe: result.data, fingerprint: computeRecipeFingerprint(repoRoot) }
 }
 
+const PREPARATION_SEMANTICS_VERSION = 'guard-preparations:5-qualified-observations-runtime-diagnostics'
+
 /** Version preparation semantics independently so cached unsupported outcomes can be retried once. */
 export function computePreparationFingerprint(repoRoot: string): string {
-  const hash = crypto.createHash('sha256').update('guard-preparations:5-qualified-observations-runtime-diagnostics\n')
+  const hash = crypto.createHash('sha256').update(`${PREPARATION_SEMANTICS_VERSION}\n`)
     .update(computeRecipeFingerprint(repoRoot));
+  for (const chunk of preparationSourceMaterial(repoRoot)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+/**
+ * {@link computePreparationFingerprint} by named input: the semantics version,
+ * the qualified observation sources, and the recipe fingerprint's own parts.
+ */
+export function preparationFingerprintComponents(repoRoot: string): Record<string, string> {
+  const sources = crypto.createHash('sha256')
+  for (const chunk of preparationSourceMaterial(repoRoot)) sources.update(chunk)
+  const components: Record<string, string> = { version: PREPARATION_SEMANTICS_VERSION, sources: sources.digest('hex').slice(0, 16) }
+  for (const [part, value] of Object.entries(recipeFingerprintComponents(repoRoot))) components[`recipe.${part}`] = value
+  return components
+}
+
+/** The qualified observation sources the preparation fingerprint folds: path, then content hash. */
+function preparationSourceMaterial(repoRoot: string): string[] {
   try {
     const recipe = RecipeSchema.parse(JSON.parse(fs.readFileSync(recipePath(repoRoot), 'utf8')));
     const paths = new Set(Object.values(recipe.preparations ?? {}).flatMap(p =>
       (p.baselineChecks ?? []).flatMap(c => (c.qualification?.sources ?? []).map(s => s.path))));
-    for (const relative of [...paths].sort()) {
-      hash.update(relative);
-      try { hash.update(observationSource(repoRoot, relative).sha256); } catch { hash.update('missing'); }
-    }
-  } catch { hash.update('no-qualified-recipe'); }
-  return hash.digest('hex');
+    return [...paths].sort().flatMap((relative) => {
+      try { return [relative, observationSource(repoRoot, relative).sha256]; } catch { return [relative, 'missing']; }
+    });
+  } catch { return ['no-qualified-recipe']; }
 }
+
+/** The named parts of the recipe fingerprint, in the order the digest folds them. */
+export const RECIPE_FINGERPRINT_PARTS = ['manifests', 'file', 'preparations', 'seed', 'dependencies'] as const
+export type RecipeFingerprintPart = (typeof RECIPE_FINGERPRINT_PARTS)[number]
 
 /** Hash the present discovery-input files (sorted, path-tagged) into one digest. */
 export function computeRecipeFingerprint(repoRoot: string): string {
   const hash = crypto.createHash('sha256')
+  const material = recipeFingerprintMaterial(repoRoot)
+  for (const part of RECIPE_FINGERPRINT_PARTS) {
+    for (const chunk of material[part]) hash.update(chunk)
+  }
+  return `sha256:${hash.digest('hex')}`
+}
+
+/**
+ * One digest per named part of {@link computeRecipeFingerprint}, over the same
+ * bytes. The fingerprint says THAT the recipe inputs moved; this says WHICH:
+ * a dependency bump (`manifests`), a recipe edit (`file`), a preparation script, the
+ * seed script, or the dependency catalog. Short digests, for comparing a part
+ * against itself across two runs. A part with nothing on disk is `''`.
+ */
+export function recipeFingerprintComponents(repoRoot: string): Record<RecipeFingerprintPart, string> {
+  const material = recipeFingerprintMaterial(repoRoot)
+  const digest = (chunks: readonly (string | Buffer)[]): string => {
+    if (chunks.length === 0) return ''
+    const hash = crypto.createHash('sha256')
+    for (const chunk of chunks) hash.update(chunk)
+    return hash.digest('hex').slice(0, 16)
+  }
+  return {
+    manifests: digest(material.manifests),
+    file: digest(material.file),
+    preparations: digest(material.preparations),
+    seed: digest(material.seed),
+    dependencies: digest(material.dependencies),
+  }
+}
+
+/** The bytes each part of the recipe fingerprint folds, in fold order. */
+function recipeFingerprintMaterial(repoRoot: string): Record<RecipeFingerprintPart, (string | Buffer)[]> {
+  const material: Record<RecipeFingerprintPart, (string | Buffer)[]> = {
+    manifests: [],
+    file: [],
+    preparations: [],
+    seed: [],
+    dependencies: [],
+  }
   for (const rel of FINGERPRINT_INPUTS) {
     const abs = path.join(repoRoot, rel)
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue
-    hash.update(rel)
-    hash.update('\0')
-    hash.update(fs.readFileSync(abs))
-    hash.update('\0')
+    material.manifests.push(rel, '\0', fs.readFileSync(abs), '\0')
   }
   // Fold the recipe file itself so a recipe edit (its serve argv, health path, or
   // the DECLARED credential capability set — names + headers + env sources) re-keys
@@ -1099,28 +1158,17 @@ export function computeRecipeFingerprint(repoRoot: string): string {
   const recipeAbs = recipePath(repoRoot)
   if (fs.existsSync(recipeAbs) && fs.statSync(recipeAbs).isFile()) {
     const raw = fs.readFileSync(recipeAbs, 'utf-8')
-    hash.update('recipe.json')
-    hash.update('\0')
-    hash.update(hashableRecipeText(raw))
-    hash.update('\0')
+    material.file.push('recipe.json', '\0', hashableRecipeText(raw), '\0')
     // The seed SCRIPT is a recipe input the recipe only NAMES (`api.seed.script`):
     // its content decides what rows exist when a scenario runs, so editing it must
     // re-author the flows that were authored against those rows — the same rule
     // `provides` already obeys. Absent, unreadable, or pointing outside the repo:
     // nothing is folded, and staleness is exactly what it was before the field.
     for (const preparationScript of resolvePreparationScripts(repoRoot, raw)) {
-      hash.update(path.relative(repoRoot, preparationScript))
-      hash.update('\0')
-      hash.update(fs.readFileSync(preparationScript))
-      hash.update('\0')
+      material.preparations.push(path.relative(repoRoot, preparationScript), '\0', fs.readFileSync(preparationScript), '\0')
     }
     const scriptAbs = resolveSeedScript(repoRoot, raw)
-    if (scriptAbs) {
-      hash.update('api.seed.script')
-      hash.update('\0')
-      hash.update(fs.readFileSync(scriptAbs))
-      hash.update('\0')
-    }
+    if (scriptAbs) material.seed.push('api.seed.script', '\0', fs.readFileSync(scriptAbs), '\0')
   }
   // The COMMITTED dependency catalog is a recipe-class input: it declares which
   // classes of starting state exist and how a scenario may obtain each one, so
@@ -1131,12 +1179,9 @@ export function computeRecipeFingerprint(repoRoot: string): string {
   // hashes exactly as it did before the file existed.
   const dependenciesAbs = dependenciesPath(repoRoot)
   if (fs.existsSync(dependenciesAbs) && fs.statSync(dependenciesAbs).isFile()) {
-    hash.update('dependencies.json')
-    hash.update('\0')
-    hash.update(fs.readFileSync(dependenciesAbs))
-    hash.update('\0')
+    material.dependencies.push('dependencies.json', '\0', fs.readFileSync(dependenciesAbs), '\0')
   }
-  return `sha256:${hash.digest('hex')}`
+  return material
 }
 
 /**
