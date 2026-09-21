@@ -48,6 +48,9 @@ import { mergeInterfaceCatalogs } from '@truecourse/guard-runner'
 /** The surface this pass authors. Web is the only one nothing derives. */
 export const AUTHORED_SURFACE = 'web'
 
+/** What a place has to answer for before the write path accepts it. */
+const READABLE_KINDS = ['markers', 'elements', 'controls', 'rows'] as const
+
 /** `web/<kebab-slug>` — the id shape every authored task is held to. */
 const AUTHORED_ID = /^web\/[a-z0-9]+(?:-[a-z0-9]+)*$/
 
@@ -282,7 +285,7 @@ export interface ValidateFragmentInput {
  * Hold a fragment to every rule at once and return the file it would produce.
  * The schema does the structural half (ids resolve in the area registry, a
  * screen sits on nothing, a state id is not a sentence, a step's target is an
- * ARIA role and an accessible name); this adds the four rules that are about
+ * ARIA role and an accessible name); this adds the five rules that are about
  * AUTHORING rather than about the shape:
  *
  *  1. an id names one thing — no collision with a derived or authored entry;
@@ -292,7 +295,10 @@ export interface ValidateFragmentInput {
  *     `navigate` step, and when both the address and the place are known they
  *     have to agree;
  *  4. a state id names one world catalog-wide — a draft references what the
- *     registry already defines and never redefines it as something else.
+ *     registry already defines and never redefines it as something else;
+ *  5. a place the draft declares answers for all four readable kinds, counting
+ *     what this screen's earlier sessions established — an omitted kind is
+ *     unknown, and nothing returns to a screen the ledger has settled.
  */
 export function validateFragment(input: ValidateFragmentInput): FragmentValidation {
   const { derived, authored } = input
@@ -362,6 +368,22 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
       if (screenFor(place.id, places)?.id !== input.scope.screenId) {
         errors.push(`\`${place.id}\` is not a resource of \`${input.scope.screenId}\` — enrich only this screen and its nested places`)
       }
+    }
+  }
+
+  // ---- 5. a declared place answers for all four readable kinds -------------
+  // An omitted kind means UNKNOWN, and the run has no way back to it: the
+  // screen's ledger row says the session settled, so nobody reads that place
+  // again. The four arrays are cheap to state and the empty one is a claim, so
+  // the session states them — they are never filled in here, because "the page
+  // shows nothing of this kind" is a reading nobody but the session made.
+  for (const place of stamped.resources) {
+    const readables = places.get(place.id)?.readables
+    const unstated = READABLE_KINDS.filter((kind) => readables?.[kind] === undefined)
+    if (unstated.length > 0) {
+      errors.push(
+        `\`${place.id}\` leaves ${unstated.map((kind) => `\`${kind}\``).join(', ')} unstated — state each of \`markers\`, \`elements\`, \`controls\` and \`rows\` explicitly, \`[]\` when this place has none of that kind`,
+      )
     }
   }
   for (const task of stamped.interfaces) {

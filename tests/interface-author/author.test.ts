@@ -69,6 +69,9 @@ const DERIVED: InterfacesFile = {
   source: { api: 'tree', web: 'tree' },
 }
 
+/** The four empty kinds — what a place that shows nothing of them claims. */
+const NO_READABLES = { markers: [], elements: [], controls: [], rows: [] } as const
+
 const HOME_TASK = {
   id: 'web/add-repository-by-path',
   type: 'web' as const,
@@ -105,7 +108,7 @@ const REPORT_FRAGMENT: AuthoredFragment = {
       to: 'rules-dialog',
     },
   ],
-  resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid' }],
+  resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid', readables: NO_READABLES }],
 }
 
 beforeEach(() => {
@@ -304,7 +307,7 @@ describe('a session that authors', () => {
       const address = DERIVED.resources!.web.find(r => r.id === place)!.address!
       const draft: AuthoredFragment = {
         interfaces: [{ ...HOME_TASK, id: 'web/save', at: 'editor-dialog', entry: { method: 'GET', path: address } }],
-        resources: [{ id: 'editor-dialog', kind: 'dialog', title: 'Editor', of: place }],
+        resources: [{ id: 'editor-dialog', kind: 'dialog', title: 'Editor', of: place, readables: NO_READABLES }],
         states: HOME_FRAGMENT.states,
       }
       const checked = await callTool(input, 'check_draft', draft)
@@ -521,7 +524,7 @@ describe('concurrent state definitions', () => {
     const saved = new Promise<void>(resolve => { rootSaved = resolve })
     const home: AuthoredFragment = {
       ...HOME_FRAGMENT,
-      resources: [{ id: 'root', kind: 'screen', title: '/', address: '/' }],
+      resources: [{ id: 'root', kind: 'screen', title: '/', address: '/', readables: NO_READABLES }],
     }
     const detail: AuthoredFragment = {
       ...REPORT_FRAGMENT,
@@ -529,7 +532,7 @@ describe('concurrent state definitions', () => {
       states: [{ id: 'repository-registered', description: 'The requested repository is registered.' }],
       resources: [
         ...REPORT_FRAGMENT.resources!,
-        { id: 'repos-repoid', kind: 'screen', title: '/repos/{repoId}', address: '/repos/{repoId}' },
+        { id: 'repos-repoid', kind: 'screen', title: '/repos/{repoId}', address: '/repos/{repoId}', readables: NO_READABLES },
       ],
     }
     const repaired: AuthoredFragment = {
@@ -619,6 +622,46 @@ describe('an outcome that breaks a rule', () => {
     // whole of what the file gains.
     expect(readAuthoredFile().interfaces).toEqual([])
     expect(readAuthoredFile().authoring).toEqual({ root: { status: 'failed', inputFingerprint: expect.any(String) } })
+  })
+
+  /**
+   * A place with an unstated readable kind is refused rather than completed
+   * here: the empty array is a CLAIM about what the session read, and nothing
+   * comes back to the screen once its ledger row settles.
+   */
+  it('turns back a place that leaves a readable kind unstated, and fills none in', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async () => ({
+      kind: 'outcome',
+      value: {
+        interfaces: [],
+        resources: [{ ...DERIVED.resources!.web[0], readables: { markers: [], elements: [], controls: [] } }],
+      } satisfies AuthoredFragment,
+    }))
+
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+
+    expect(result.places[0].status).toBe('failed')
+    expect(result.places[0].problems.join('\n')).toContain(
+      '`root` leaves `rows` unstated — state each of `markers`, `elements`, `controls` and `rows` explicitly, `[]` when this place has none of that kind',
+    )
+    expect(readAuthoredFile().resources).toBeUndefined()
+  })
+
+  it('accepts the same place once every kind is stated', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async () => ({
+      kind: 'outcome',
+      value: {
+        interfaces: [],
+        resources: [{ ...DERIVED.resources!.web[0], readables: NO_READABLES }],
+      } satisfies AuthoredFragment,
+    }))
+
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+
+    expect(result.places[0].status).toBe('authored')
+    expect(readAuthoredFile().resources!.web[0].readables).toEqual(NO_READABLES)
   })
 
   it('records an empty fragment as an honest result, not a failure', async () => {
