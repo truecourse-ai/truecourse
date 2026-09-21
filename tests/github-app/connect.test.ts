@@ -1,6 +1,6 @@
 import express, { type Express, type Request } from 'express';
 import request from 'supertest';
-import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
@@ -16,6 +16,11 @@ import type { ConnectDeps } from '../../packages/github-app/src/connect';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
 import type { UserInstallation } from '../../packages/github-app/src/oauth';
 import { MemoryInstallationStore, seedInstallation as seed, githubRepoRecord } from './memory-store';
+import {
+  installDescribedWorkspaces,
+  installWorkspaceProfiles,
+  resetWorkspaceProfiles,
+} from '../helpers/workspace-profile';
 
 type AccountLookup = NonNullable<ConnectDeps['lookupInstallationAccount']>;
 type UserInstallations = ConnectDeps['userInstallationsFor'];
@@ -111,7 +116,14 @@ beforeEach(() => {
     accountType: 'Organization',
   }));
   userInstallations = vi.fn<UserInstallations>(async () => [ACME]);
+  // Nothing connects into a workspace that has not said what its product is;
+  // the refusal has a suite of its own below.
+  installDescribedWorkspaces();
   app = mount();
+});
+
+afterEach(() => {
+  resetWorkspaceProfiles();
 });
 
 const seedInstallation = (orgs: string[]) => seed(store, 100, orgs);
@@ -838,5 +850,60 @@ describe('the account behind an installation', () => {
     // The dialog falls back to `#<id>` on an empty login — nothing 502s.
     expect((res.body as GithubConnectStatusResponse).installations[0]!.accountLogin).toBe('');
     expect(await store.getInstallation(157207108)).toMatchObject({ accountLogin: '' });
+  });
+});
+
+/**
+ * NOTHING CONNECTS INTO A WORKSPACE THAT HAS NOT SAID WHAT ITS PRODUCT IS.
+ *
+ * A workspace's documentation is kept or dropped by whether it describes that
+ * product, so a workspace with no statement of it has nothing to attribute
+ * against — and the two routes that bring a repository in refuse before they
+ * write a row. The refusal carries a CODE, so the client can offer the page
+ * where the sentence is set rather than showing a wall.
+ */
+describe('connecting into a workspace that has not described itself', () => {
+  beforeEach(() => {
+    installWorkspaceProfiles([]);
+  });
+
+  it('refuses to link a repository, and writes nothing', async () => {
+    await seedInstallation(['org_A']);
+    const res = await request(app)
+      .post('/api/ee/github/repos/link')
+      .send({ repoFullName: 'acme/api', installationId: 100, defaultBranch: 'main' })
+      .expect(409);
+    expect(res.body).toMatchObject({ error: 'workspace-description-required' });
+    expect(res.body.message).toMatch(/Settings/);
+    expect(await store.getRepo('acme/api')).toBeNull();
+  });
+
+  it('refuses to attach an installation the person picked', async () => {
+    const offer = signConnectOffer(
+      {
+        orgId: 'org_A',
+        userId: 'u1',
+        origin: 'settings',
+        installations: [{ installationId: 100, accountLogin: 'acme', accountType: 'Organization' }],
+        expiresAt: Date.now() + CONNECT_STATE_TTL_MS,
+      },
+      STATE_SECRET,
+    );
+    const res = await request(app)
+      .post('/api/ee/github/installations/attach')
+      .send({ offer, installationIds: [100] })
+      .expect(409);
+    expect(res.body).toMatchObject({ error: 'workspace-description-required' });
+    expect(await store.getInstallation(100)).toBeNull();
+  });
+
+  it('connects once the workspace has said it', async () => {
+    installDescribedWorkspaces();
+    await seedInstallation(['org_A']);
+    await request(app)
+      .post('/api/ee/github/repos/link')
+      .send({ repoFullName: 'acme/api', installationId: 100, defaultBranch: 'main' })
+      .expect(201);
+    expect(await store.getRepo('acme/api')).toMatchObject({ workspaceOrgId: 'org_A' });
   });
 });

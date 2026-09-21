@@ -11,7 +11,9 @@ import { Router, type Request, type Response } from 'express';
 import { WorkOS } from '@workos-inc/node';
 import type { OrganizationMembership, User } from '@workos-inc/node';
 import type { AuthResult, AuthUser, AuthVerifier } from '@truecourse/shared';
+import { BAD_WORKSPACE_DESCRIPTION, normalizeWorkspaceDescription } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
+import { saveWorkspaceProfile } from '@truecourse/core/lib/workspace-profile-store';
 import type { WorkosConfig } from './config.js';
 import { parseCookies, serializeCookie } from './cookies.js';
 import { captureWorkspaceCreated } from '../observability/posthog.js';
@@ -618,10 +620,16 @@ export function createAuthRouter(
   });
 
   // Self-serve onboarding: a signed-in user who belongs to no organization
-  // (AuthKit signups land org-less) names a workspace; we create the WorkOS
-  // org, add them as a member, and RE-MINT the session into it so the cookie
-  // carries `organizationId` (everything org-scoped keys off that). Idempotent:
-  // a user who already has an org gets it back without creating a second one.
+  // (AuthKit signups land org-less) names AND DESCRIBES a workspace; we create
+  // the WorkOS org, add them as a member, and RE-MINT the session into it so the
+  // cookie carries `organizationId` (everything org-scoped keys off that).
+  // Idempotent: a user who already has an org gets it back without creating a
+  // second one, and the description they typed is not applied to it — that one
+  // was described when it was made.
+  //
+  // The description is collected here rather than asked for later because
+  // nothing connects into a workspace that has no description, so a workspace
+  // created without one would begin at a refusal.
   router.post('/workspace', async (req, res) => {
     const sealed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (!sealed) {
@@ -632,6 +640,13 @@ export function createAuthRouter(
     const name = typeof raw === 'string' ? raw.trim() : '';
     if (!name || name.length > 80) {
       res.status(400).json({ error: 'A workspace name (1–80 characters) is required.' });
+      return;
+    }
+    const description = normalizeWorkspaceDescription(
+      (req.body as { description?: unknown })?.description,
+    );
+    if (!description) {
+      res.status(400).json({ error: BAD_WORKSPACE_DESCRIPTION });
       return;
     }
     try {
@@ -670,6 +685,7 @@ export function createAuthRouter(
         organizationId: org.id,
         userId: authed.user.id,
       });
+      await saveWorkspaceProfile(org.id, description);
       captureWorkspaceCreated({
         userId: authed.user.id,
         email: authed.user.email,

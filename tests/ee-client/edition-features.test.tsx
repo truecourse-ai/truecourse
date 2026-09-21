@@ -84,6 +84,7 @@ describe('Settings › Connections', () => {
     renderAt('/settings');
     const sections = await screen.findByRole('navigation', { name: 'Settings sections' });
     expect(within(sections).getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Workspace',
       'Members',
       'Repositories',
       'Models',

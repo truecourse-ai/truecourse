@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { RunStarter } from '@/components/sessions/run-model';
 import { triggerFor } from '@/dashboard/data/run-triggers';
+import { toastDescribeWorkspace } from '@/dashboard/data/workspace-profile';
 
 /**
  * The one no-provider error toast, shared by every surface that hits the wall:
@@ -50,6 +51,9 @@ export function useRunTrigger(repoId: string): RunStarter {
         .then((outcome) => {
           switch (outcome.kind) {
             case 'started':
+              return;
+            case 'no-description':
+              toastDescribeWorkspace(navigate, outcome.message);
               return;
             case 'not-configured':
               toastNoLlmProvider(navigate, outcome.message);

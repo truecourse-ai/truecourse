@@ -30,6 +30,7 @@ vi.mock('../../apps/dashboard/server/src/observability/posthog', async (importOr
 }));
 
 import { createTestApp, stubJobs, TEST_ORG, type StubJobs } from '../helpers/test-app';
+import { installWorkspaceProfiles } from '../helpers/workspace-profile';
 import {
   captureAction,
   EVENTS,
@@ -126,6 +127,19 @@ describe('POST /api/context/scan', () => {
     jobs.answer = { status: 'busy' };
     const res = await request(app).post('/api/context/scan').expect(409);
     expect(res.body.error).toMatch(/already running/i);
+  });
+
+  // THE BACKSTOP. Every entry point that brings material in is gated, but this
+  // is where the attribution happens: a scan whose workspace has said nothing
+  // about its product has no subject to judge a document against, and that is
+  // the failure the whole rule exists to prevent. It refuses before anything is
+  // queued, and before the provider is even probed.
+  it('refuses, and queues nothing, when the workspace has not said what its product is', async () => {
+    installWorkspaceProfiles([]);
+    const res = await request(app).post('/api/context/scan').expect(409);
+    expect(res.body).toMatchObject({ error: 'workspace-description-required' });
+    expect(res.body.message).toMatch(/Settings/);
+    expect(jobs.contextScans).toEqual([]);
   });
 });
 

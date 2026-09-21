@@ -40,6 +40,12 @@ implicit workspace, and folders on this machine can be connected as repositories
 It needs `DATABASE_URL` and `TRUECOURSE_SECRET_KEY`; the compose defaults are in
 `.env.example`.
 
+First stop is **Settings › Workspace**: say what your product is, in one
+sentence. Documentation is kept or dropped by whether it describes that product,
+so nothing connects — no repository, no documentation source, no scan — until the
+workspace has said it. A hosted workspace states it when it is created; a local
+one has no Create workspace dialog, so that page is where it is set.
+
 ## Run it on Claude Code
 
 To run on your own Claude Code login instead of an API key:

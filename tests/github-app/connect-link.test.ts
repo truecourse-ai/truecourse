@@ -10,8 +10,12 @@
  */
 import express, { type Express, type Request } from 'express';
 import request from 'supertest';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AuthUser } from '@truecourse/shared';
+import {
+  installDescribedWorkspaces,
+  resetWorkspaceProfiles,
+} from '../helpers/workspace-profile';
 import {
   createConnectRouter,
   type OnRepoLinked,
@@ -70,6 +74,12 @@ function unlink(app: Express, repoFullName = REPO) {
 beforeEach(async () => {
   store = new MemoryInstallationStore();
   await seedInstallation(store, 42, [ORG], { accountLogin: 'mushgev', accountType: 'User' });
+  // Nothing connects into a workspace that has not said what its product is.
+  installDescribedWorkspaces();
+});
+
+afterEach(() => {
+  resetWorkspaceProfiles();
 });
 
 describe('connect — the post-link seam', () => {

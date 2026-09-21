@@ -35,3 +35,4 @@ export {
 export { PgSessionRunStore } from './session-run-store.js';
 export { PgUsageStore } from './usage-store.js';
 export { PgCreditsStore } from './credits-store.js';
+export { PgWorkspaceProfileStore } from './workspace-profile-store.js';

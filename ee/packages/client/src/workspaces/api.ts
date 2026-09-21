@@ -11,11 +11,17 @@ export function listWorkspaces(): Promise<WorkspacesResponse> {
   return fetchApi<WorkspacesResponse>('/api/auth/workspaces');
 }
 
-/** Create one and go into it. The session comes back in the new organization. */
-export function createWorkspace(name: string): Promise<{ user: AuthUser }> {
+/**
+ * Create one and go into it. The session comes back in the new organization.
+ *
+ * A workspace is named AND DESCRIBED: the description is what every document it
+ * holds is attributed against, and nothing connects into a workspace without
+ * one, so it is stated where the workspace begins.
+ */
+export function createWorkspace(name: string, description: string): Promise<{ user: AuthUser }> {
   return fetchApi<{ user: AuthUser }>('/api/auth/workspaces', {
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, description }),
   });
 }
 

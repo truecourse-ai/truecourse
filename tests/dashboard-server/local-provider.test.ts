@@ -23,6 +23,11 @@ import {
 } from '../../apps/dashboard/server/src/services/work-tree.service';
 import { removeRepoRunState } from '../../apps/dashboard/server/src/services/repo-removal.service';
 import { MemoryInstallationStore } from '../github-app/memory-store';
+import {
+  installDescribedWorkspaces,
+  installWorkspaceProfiles,
+  resetWorkspaceProfiles,
+} from '../helpers/workspace-profile';
 
 // A folder has no webhook, so the provider watches it. Chokidar's own event
 // timing is not what these cases are about — that a folder is watched while it
@@ -81,9 +86,13 @@ beforeEach(() => {
     next();
   });
   app.use('/api/local', mount.router);
+  // A folder is material entering the workspace like any other, so it waits on
+  // the workspace having said what its product is.
+  installDescribedWorkspaces();
 });
 
 afterEach(() => {
+  resetWorkspaceProfiles();
   mount.stop();
   setRepoProviderLookup(null);
   setWorkTreeProvider('local', null);
@@ -199,5 +208,33 @@ describe('a run over a connected folder', () => {
     fs.rmSync(dir, { recursive: true, force: true });
 
     await expect(acquireWorkTree('local/orders-api')).rejects.toThrow(/not a folder/);
+  });
+});
+
+/**
+ * LOCAL MODE HAS NO CREATE WORKSPACE DIALOG: its one workspace is implicit, so
+ * the sentence is set in Settings › Workspace and nowhere else. Until it is,
+ * a folder connects no more than a hosted repository does — the refusal carries
+ * the code that sends the developer to that page.
+ */
+describe('connecting a folder into a workspace that has not described itself', () => {
+  it('refuses, and writes no row', async () => {
+    installWorkspaceProfiles([]);
+    const dir = folder('orders-api');
+
+    const res = await request(app).post('/api/local/repos').send({ path: dir }).expect(409);
+    expect(res.body).toMatchObject({ error: 'workspace-description-required' });
+    expect(res.body.message).toMatch(/Settings/);
+    expect(await store.getRepo('local/orders-api')).toBeNull();
+    expect(setups).toEqual([]);
+  });
+
+  it('connects once the workspace has said it', async () => {
+    const profiles = installWorkspaceProfiles([]);
+    await profiles.save(ORG, 'Orders API, a fulfilment service for online shops.');
+    const dir = folder('orders-api');
+
+    await request(app).post('/api/local/repos').send({ path: dir }).expect(201);
+    expect(await store.getRepo('local/orders-api')).toMatchObject({ provider: 'local' });
   });
 });

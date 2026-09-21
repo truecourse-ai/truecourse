@@ -23,6 +23,7 @@ import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { setContextStore } from '@truecourse/core/lib/context-store';
 import { setUsageStore } from '@truecourse/core/lib/usage-store';
 import { setCreditsStore } from '@truecourse/core/lib/credits-store';
+import { setWorkspaceProfileStore } from '@truecourse/core/lib/workspace-profile-store';
 import { setRegistryStore } from '@truecourse/core/config/registry';
 import { setSessionRunBackend } from '@truecourse/core/lib/sessions-store';
 import { setKvCacheStore } from '@truecourse/llm';
@@ -37,6 +38,7 @@ import {
   PgLlmConfigStore,
   PgUsageStore,
   PgCreditsStore,
+  PgWorkspaceProfileStore,
   purgeRepoData,
 } from '@truecourse/data-store';
 import { setWorkspaceLlmConfigStore } from './services/workspace-llm.service.js';
@@ -157,6 +159,10 @@ export function installDbStores(
   // movement of it. The platform key itself is never here: it is the server's
   // environment, read per run.
   setCreditsStore(new PgCreditsStore(db));
+  // What the workspace says its product is — the one thing about a workspace
+  // that is ours rather than the identity provider's, and the whole subject the
+  // Document scan attributes a document against.
+  setWorkspaceProfileStore(new PgWorkspaceProfileStore(db));
   // Each workspace names ONE model, and its transport ignores the per-stage
 
   sessionRuns = new PgSessionRunStore(db, lockPool);

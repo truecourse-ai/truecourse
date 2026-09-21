@@ -140,11 +140,9 @@ export function createContextScanTask(
         // The scan owns its own run record (it opens one after the estimate
         // gate), so the credits gate wraps the engine call itself: a scan that
         // met an empty balance paused, whatever the engine called it.
-        const repositories = await repositoriesOf(deps, org);
         const result = await withCredits(meter, () =>
           runScan({
             workspaceOrgId: org,
-            repositories,
             tracker: checklistTracker(ctx),
             driver: llm.driver(),
             transportMode: llm.mode,
@@ -255,17 +253,6 @@ async function coalesceFollowUp(
     await deps.rescan({ workspaceOrgId: org, source: 'rescan' });
   } catch (err) {
     log.warn(`[context] could not queue the follow-up scan for ${org}: ${(err as Error).message}`);
-  }
-}
-
-/** The connected repositories of the workspace, for the identity block. */
-async function repositoriesOf(deps: ContextScanTaskDeps, org: string): Promise<string[]> {
-  if (!deps.ripple) return [];
-  try {
-    return (await deps.ripple(org).listRepos()).map((repo) => repo.repoFullName);
-  } catch (err) {
-    log.warn(`[context] could not list ${org}'s repositories: ${(err as Error).message}`);
-    return [];
   }
 }
 

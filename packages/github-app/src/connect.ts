@@ -29,6 +29,10 @@
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import {
+  requireWorkspaceDescription,
+  WorkspaceDescriptionRequiredError,
+} from '@truecourse/core/lib/workspace-profile-store';
+import {
   GITHUB_INSTALL_ORIGINS,
   type GithubConnectOutcome,
   type GithubInstallOrigin,
@@ -66,6 +70,22 @@ function userOf(req: Request): AuthUser | null {
 
 function orgIdOf(req: Request): string | null {
   return userOf(req)?.organizationId ?? null;
+}
+
+/**
+ * Nothing connects into a workspace that has not said what its product is: its
+ * documentation would be attributed against nothing. Answers true when it
+ * refused, so the caller stops; the refusal carries the code the client acts on.
+ */
+async function refusedUndescribed(orgId: string, res: Response): Promise<boolean> {
+  try {
+    await requireWorkspaceDescription(orgId);
+    return false;
+  } catch (err) {
+    if (!(err instanceof WorkspaceDescriptionRequiredError)) throw err;
+    res.status(err.statusCode).json({ error: err.code, message: err.message });
+    return true;
+  }
 }
 
 function toInstallationSummary(
@@ -673,6 +693,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       res.status(401).json({ error: 'unauthenticated' });
       return;
     }
+    if (await refusedUndescribed(orgId, res)) return;
     const body = (req.body ?? {}) as Partial<GithubAttachRequest>;
     const offer = offerFor(body.offer, user, orgId);
     if (!offer) {
@@ -774,6 +795,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       res.status(401).json({ error: 'unauthenticated' });
       return;
     }
+    if (await refusedUndescribed(orgId, res)) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const { repoFullName, installationId, defaultBranch, blocking } = body;
     if (

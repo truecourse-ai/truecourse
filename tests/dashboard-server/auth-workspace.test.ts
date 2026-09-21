@@ -3,6 +3,11 @@ import request from 'supertest';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createAuthRouter } from '../../apps/dashboard/server/src/auth/workos-auth';
 import { captureWorkspaceCreated } from '../../apps/dashboard/server/src/observability/posthog';
+import {
+  TEST_WORKSPACE_DESCRIPTION,
+  installWorkspaceProfiles,
+  type MemoryWorkspaceProfiles,
+} from '../helpers/workspace-profile';
 
 // The signup event leaves through the analytics module; here it is a spy, so
 // the route's one call is asserted and nothing is sent.
@@ -126,22 +131,33 @@ function makeApp(workos: unknown): Express {
 describe('POST /api/auth/workspace', () => {
   let calls: Calls;
   let app: Express;
+  let profiles: MemoryWorkspaceProfiles;
 
   beforeEach(() => {
     vi.mocked(captureWorkspaceCreated).mockClear();
     const m = makeWorkos();
     calls = m.calls;
     app = makeApp(m.workos);
+    // A workspace is named AND described when it is created: the description is
+    // what its documents are attributed against, and nothing connects without one.
+    profiles = installWorkspaceProfiles([]);
   });
 
   it('creates the org + membership, re-mints the session into it, and sets the cookie', async () => {
     const res = await request(app)
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-no-org')
-      .send({ name: '  Acme Inc.  ' })
+      .send({ name: '  Acme Inc.  ', description: TEST_WORKSPACE_DESCRIPTION })
       .expect(200);
 
     expect(calls.createOrg).toEqual([{ name: 'Acme Inc.' }]); // trimmed
+    // The sentence is stored with the workspace, where the scan reads it.
+    expect(profiles.all()).toEqual([
+      expect.objectContaining({
+        workspaceOrgId: 'org_new',
+        description: TEST_WORKSPACE_DESCRIPTION,
+      }),
+    ]);
     expect(calls.membership).toEqual([{ organizationId: 'org_new', userId: 'user_1' }]);
     expect(calls.refresh).toEqual([{ organizationId: 'org_new' }]); // org-scoped refresh
     expect(res.body.user.organizationId).toBe('org_new');
@@ -172,7 +188,7 @@ describe('POST /api/auth/workspace', () => {
     const res = await request(makeApp(m.workos))
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-has-org')
-      .send({ name: 'Another' })
+      .send({ name: 'Another', description: TEST_WORKSPACE_DESCRIPTION })
       .expect(200);
 
     expect(m.calls.createOrg).toEqual([]); // no second org
@@ -196,7 +212,7 @@ describe('POST /api/auth/workspace', () => {
     const res = await request(makeApp(m.workos))
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-no-org')
-      .send({ name: 'Acme' })
+      .send({ name: 'Acme', description: TEST_WORKSPACE_DESCRIPTION })
       .expect(200);
 
     expect(m.calls.createOrg).toEqual([]);
@@ -223,7 +239,7 @@ describe('POST /api/auth/workspace', () => {
     const res = await request(makeApp(m.workos))
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-no-org')
-      .send({ name: 'Acme' })
+      .send({ name: 'Acme', description: TEST_WORKSPACE_DESCRIPTION })
       .expect(200);
 
     expect(m.calls.createOrg).toEqual([{ name: 'Acme' }]);
@@ -234,7 +250,7 @@ describe('POST /api/auth/workspace', () => {
     await request(app)
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-no-org')
-      .send({ name: '   ' })
+      .send({ name: '   ', description: TEST_WORKSPACE_DESCRIPTION })
       .expect(400);
     expect(calls.createOrg).toEqual([]);
   });
@@ -243,14 +259,24 @@ describe('POST /api/auth/workspace', () => {
     await request(app)
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-no-org')
-      .send({ name: 'x'.repeat(81) })
+      .send({ name: 'x'.repeat(81), description: TEST_WORKSPACE_DESCRIPTION })
       .expect(400);
+  });
+
+  it('rejects a workspace that says nothing about its product, with no WorkOS calls', async () => {
+    await request(app)
+      .post('/api/auth/workspace')
+      .set('Cookie', 'tc_session=sealed-no-org')
+      .send({ name: 'Acme Inc.' })
+      .expect(400);
+    expect(calls.createOrg).toEqual([]);
+    expect(profiles.all()).toEqual([]);
   });
 
   it('returns 401 when there is no session cookie', async () => {
     await request(app)
       .post('/api/auth/workspace')
-      .send({ name: 'Acme' })
+      .send({ name: 'Acme', description: TEST_WORKSPACE_DESCRIPTION })
       .expect(401);
     expect(calls.createOrg).toEqual([]);
   });
