@@ -10,8 +10,9 @@
 
 import { describe, it, expect, afterEach } from 'vitest'
 import {
+  buildSurfaceCatalogs,
   matchCacheKey,
-  matchLegacyCacheKey,
+  matchLegacyCacheKeys,
   readCachedMatch,
   claimDiffCacheKey,
   claimDiffLegacyCacheKey,
@@ -29,8 +30,8 @@ const INTERFACE: Interface = {
   id: 'cli/version',
   type: 'cli',
   title: 'print the version',
-  entry: 'relkit --version',
-  steps: [{ kind: 'run', args: ['--version'] }],
+  entry: { command: ['relkit'] },
+  steps: [{ kind: 'invoke', command: ['relkit', '--version'], flags: [] }],
   fingerprint: 'sha256:iface',
 } as unknown as Interface
 
@@ -46,7 +47,7 @@ const FLOW: GuardFlow = {
   composedOf: [],
 } as unknown as GuardFlow
 
-const CATALOG = { surface: 'cli' as const, fingerprint: 'sha256:catalog', interfaces: [INTERFACE] }
+const CATALOG = buildSurfaceCatalogs([INTERFACE]).get('cli')!
 
 describe('getCacheEntryOrLegacy', () => {
   it('serves an entry stored under the old key and re-saves it under the new one', async () => {
@@ -55,6 +56,16 @@ describe('getCacheEntryOrLegacy', () => {
 
     expect(await getCacheEntryOrLegacy('repo', 'stage', 'new', 'old')).toEqual({ verdict: 'kept' })
     expect(await getCacheEntry('repo', 'stage', 'new')).toEqual({ verdict: 'kept' })
+    expect(store.size).toBe(2)
+  })
+
+  it('reads each old formula in turn, newest first', async () => {
+    const store = installMemoryKvCache()
+    await setCacheEntry('repo', 'stage', 'oldest', { verdict: 'kept' })
+
+    expect(await getCacheEntryOrLegacy('repo', 'stage', 'new', 'old', 'oldest')).toEqual({ verdict: 'kept' })
+    expect(await getCacheEntry('repo', 'stage', 'new')).toEqual({ verdict: 'kept' })
+    expect(await getCacheEntry('repo', 'stage', 'old')).toBeNull()
     expect(store.size).toBe(2)
   })
 
@@ -70,11 +81,13 @@ describe('getCacheEntryOrLegacy', () => {
 })
 
 describe('a stage whose key formula moved', () => {
-  it('match: a verdict stored under today’s key is served with zero calls', async () => {
+  // Two formulas came before the identity key: the whole catalog fingerprint
+  // under this stage version, and that same fingerprint under the prompt's.
+  it.each([0, 1])('match: a verdict stored under old key %i is served with zero calls', async (index) => {
     installMemoryKvCache()
-    const legacy = matchLegacyCacheKey(FLOW, CATALOG)
+    const legacy = matchLegacyCacheKeys(FLOW, CATALOG)[index]
     const current = matchCacheKey(FLOW, CATALOG)
-    expect(legacy).not.toBe(current)
+    expect(new Set([...matchLegacyCacheKeys(FLOW, CATALOG), current]).size).toBe(3)
     await setCacheEntry('/repo', 'guard/match', legacy, {
       plan: [{ interfaceId: 'cli/version', milestone: 1 }],
       gaps: [],

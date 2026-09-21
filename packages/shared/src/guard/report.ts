@@ -928,14 +928,14 @@ export const GuardGenerateReportSchema = z
     /** Live claim-diff gate calls this run made (cache hits excluded). */
     claimDiffCalls: z.number().int().nonnegative().optional(),
     /**
-     * Match calls made although the surface's interface ids and structure had
-     * not moved since the flow's last verdict, so authored catalog prose alone
-     * missed the cache; `sameVerdict` of them returned what the flow already had.
+     * Cached match verdicts SERVED although the surface's authored context
+     * (purpose, at/to, the states) had moved since the verdict was stored. The
+     * key folds the surface's identity alone, so a prose edit re-plans nothing;
+     * this counts the flows that kept a plan an edited catalog might have
+     * changed, which is what would justify folding the prose of the interfaces
+     * a plan walks.
      */
-    matchProseOnly: z
-      .object({ misses: z.number().int().nonnegative(), sameVerdict: z.number().int().nonnegative() })
-      .strict()
-      .optional(),
+    matchContextMoved: z.number().int().nonnegative().optional(),
     /** Prior scenarios editing workers deliberately dropped this run, each with
      *  the vanished obligation it named. Absent on reports that predate
      *  incremental authoring. */
