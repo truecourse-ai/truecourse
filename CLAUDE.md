@@ -78,13 +78,20 @@ per feature per workspace: a grant is one click, a revoke asks first and names
 the sources it will pause. What a workspace may use is the grant AND the bundle:
 `services/entitlements.service.ts` intersects them, and LOCAL MODE holds
 everything the bundle carries, since one developer on one machine is the whole
-deployment and there is no operator to grant anything. Enforcement is three
-places — the feature's context drivers are not built for an ungranted workspace
-(so Add context never offers `jira` or `confluence`), `/api/connections` refuses
-one 403, and Settings › Connections is drawn on the grant. REVOKING pauses the
-workspace's sources of that feature's kinds with the reason, exactly as removing
-the connection does (`pauseContextSourcesOfKinds`), and leaves their documents,
-so a later grant is a Resume.
+deployment and there is no operator to grant anything. A grant is enforced
+where the feature is USED, never where it is mounted: for Connections, its
+context drivers are not built for an ungranted workspace (so Add context never
+offers `jira` or `confluence`), `/api/connections` refuses one 403, and
+Settings › Connections is drawn on the grant. For more than one workspace, what
+the grant buys is MAKING another — `POST /api/auth/workspaces` refuses 403
+without it and Create workspace is drawn on it, while the list and the switch
+never are, since withholding those shuts a person inside a workspace whose
+grant lapsed with the way out drawn from the grant they no longer hold; the
+switcher falls back to the shell's own workspace block when a workspace has
+neither the grant nor anywhere to switch to. REVOKING pauses the workspace's
+sources of that feature's kinds with the reason, exactly as removing the
+connection does (`pauseContextSourcesOfKinds`), and leaves their documents, so
+a later grant is a Resume.
 
 The dependency runs ONE WAY, from `ee/` inward: no open source file reaches
 into `ee/`, and the one seam on each side is pinned by

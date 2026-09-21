@@ -92,13 +92,21 @@ function makeWorkos(
   return { workos, calls };
 }
 
-function makeApp(workos: unknown): Express {
+/**
+ * The router over a faked WorkOS. The workspace is GRANTED more than one
+ * unless a case says otherwise, since that is what every case but the grant's
+ * own is about.
+ */
+function makeApp(workos: unknown, granted = true): Express {
   const app = express();
   app.use(express.json());
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const tools = createWorkspaceSessionTools(workos as any, cfg as any);
   /* eslint-enable @typescript-eslint/no-explicit-any */
-  app.use('/api/auth/workspaces', createWorkspacesRouter(tools));
+  app.use(
+    '/api/auth/workspaces',
+    createWorkspacesRouter(tools, async (_org, feature) => granted && feature === 'workspaces'),
+  );
   return app;
 }
 
@@ -227,6 +235,61 @@ describe('POST /api/auth/workspaces', () => {
     const m = makeWorkos();
     await request(makeApp(m.workos)).post('/api/auth/workspaces').send({ name: 'Acme' }).expect(401);
     expect(m.calls.createOrg).toEqual([]);
+  });
+});
+
+/**
+ * The GRANT is what buys another workspace, so the create asks for it and the
+ * two reads do not. A workspace whose grant lapsed keeps every workspace its
+ * people are in and every way back into them; what it has lost is the making
+ * of one more.
+ */
+describe('/api/auth/workspaces and the grant', () => {
+  it('refuses to create for a workspace that was never granted more than one', async () => {
+    const m = makeWorkos({ existingOrg: 'org_ws_a', memberships: [WS_A] });
+    const res = await request(makeApp(m.workos, false))
+      .post('/api/auth/workspaces')
+      .set('Cookie', 'tc_session=sealed')
+      .send({ name: 'Second' })
+      .expect(403);
+
+    expect(res.body.error).toBe(
+      'More than one workspace is not part of this workspace’s plan. Ask TrueCourse to open it.',
+    );
+    expect(m.calls.createOrg).toEqual([]);
+    expect(m.calls.membership).toEqual([]);
+    expect(m.calls.refresh).toEqual([]);
+  });
+
+  it('refuses to create for a session in no workspace, which has no grant to read', async () => {
+    const m = makeWorkos({ existingOrg: null });
+    await request(makeApp(m.workos))
+      .post('/api/auth/workspaces')
+      .set('Cookie', 'tc_session=sealed')
+      .send({ name: 'First' })
+      .expect(403);
+    expect(m.calls.createOrg).toEqual([]);
+  });
+
+  it('still lists and still switches without the grant', async () => {
+    const m = makeWorkos({ existingOrg: 'org_ws_a', memberships: [WS_A, WS_B] });
+    const app = makeApp(m.workos, false);
+
+    const listed = await request(app)
+      .get('/api/auth/workspaces')
+      .set('Cookie', 'tc_session=sealed')
+      .expect(200);
+    expect(listed.body.workspaces.map((w: { id: string }) => w.id)).toEqual([
+      'org_ws_a',
+      'org_ws_b',
+    ]);
+
+    const moved = await request(app)
+      .post('/api/auth/workspaces/switch')
+      .set('Cookie', 'tc_session=sealed')
+      .send({ organizationId: 'org_ws_b' })
+      .expect(200);
+    expect(moved.body.user.organizationId).toBe('org_ws_b');
   });
 });
 

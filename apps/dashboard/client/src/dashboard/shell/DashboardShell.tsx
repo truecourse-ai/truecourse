@@ -34,7 +34,7 @@ import {
   Check,
   type LucideIcon,
 } from 'lucide-react';
-import { useAuth, useEntitlement } from '@/auth/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import { Brand } from '@/components/brand';
 import { DiscordIcon } from '@/components/DiscordIcon';
 import { EVENTS, trackEvent } from '@/lib/posthog';
@@ -44,6 +44,7 @@ import { useDashboardState } from './dashboard-state';
 import { useDashboardUser } from './use-dashboard-user';
 import { useOnboarding } from './use-onboarding';
 import { registeredWorkspaceSwitcher } from './registry';
+import { WorkspaceNameBlock } from './WorkspaceNameBlock';
 
 // A `disabled` entry is shown but not a link: the page is parked, and hiding
 // it would make the menu lie about what the product has.
@@ -136,42 +137,21 @@ function useClickOutside(open: boolean, close: () => void) {
 }
 
 /**
- * The workspace the session is in: its initial and its name. There is one, so
- * there is nothing to choose between — an edition with more than one registers
- * a switcher that replaces this block.
+ * The block, or the switcher an edition with more than one workspace registers
+ * in its place.
  *
- * Local mode is always this block: there is one implicit workspace and no
+ * Local mode is always the block: there is one implicit workspace and no
  * identity provider to move a session through, so the server mounts no
- * `/api/auth/workspaces` routes for a switcher to call. So is a workspace that
- * was never granted more than one — the switcher is that grant's surface, and
- * a workspace holding some other enterprise feature is not thereby in two
- * places. Both are checked here, once, rather than inside whatever was
- * registered.
+ * `/api/auth/workspaces` routes for a switcher to call. The GRANT is not asked
+ * for here. Moving between workspaces a person is already in is never withheld
+ * — what the grant buys is making another one — and the switcher draws the
+ * block itself when that person has only the one.
  */
 function WorkspaceBlock({ collapsed }: { collapsed: boolean }) {
   const Switcher = registeredWorkspaceSwitcher();
-  const { workspace } = useDashboardState();
   const local = useServerMode() === 'local';
-  const manyWorkspaces = useEntitlement('workspaces');
-  if (Switcher && !local && manyWorkspaces) return <Switcher collapsed={collapsed} />;
-
-  // Nobody is signed in: there is no workspace to name.
-  if (!workspace) return null;
-
-  return (
-    <div className={collapsed ? 'flex justify-center px-0 py-1' : 'px-2 py-1'}>
-      <div className={collapsed ? '' : 'flex w-full items-center gap-2 px-1.5 py-1.5'}>
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
-          {workspace.initial}
-        </span>
-        {!collapsed && (
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-            {workspace.name}
-          </span>
-        )}
-      </div>
-    </div>
-  );
+  if (Switcher && !local) return <Switcher collapsed={collapsed} />;
+  return <WorkspaceNameBlock collapsed={collapsed} />;
 }
 
 /**

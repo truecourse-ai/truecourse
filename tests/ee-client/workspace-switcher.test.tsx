@@ -147,8 +147,8 @@ function renderShell() {
 
 /**
  * The same shell, told how the server runs, the way `/api/capabilities` tells
- * it. WHICH workspace may switch is the session's answer, not this one's, so it
- * is set on `world.entitlements` before rendering.
+ * it. WHICH workspace may make another is the session's answer, not this one's,
+ * so it is set on `world.entitlements` before rendering.
  */
 function renderShellIn(mode: ServerMode) {
   render(
@@ -299,18 +299,28 @@ describe('the workspace switcher and the server mode', () => {
 
   // A client built with this edition can reach a server that booted without its
   // bundle, and it can serve a workspace that was never granted more than one.
-  // Either way the session holds nothing, and the switcher would have nothing
-  // to call.
-  it('leaves the one-workspace block in place for a workspace that holds no such grant', async () => {
-    serve({ entitlements: [] });
+  // Either way the session holds nothing, and there is nothing to choose
+  // between: the block this switcher replaced is what the workspace gets back.
+  it('leaves the one-workspace block in place for a workspace with no grant and nowhere to go', async () => {
+    serve({ entitlements: [], workspaces: [WORKSPACES[0]!] });
     renderShellIn('hosted');
 
     expect((await screen.findAllByText('Acme')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Switch workspace' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Create workspace' })).toBeNull();
-    const reads = (window.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
-      (call) => String(call[0]).includes('/api/auth/workspaces'),
-    );
-    expect(reads).toEqual([]);
+  });
+
+  // Withholding the switch would shut someone inside a workspace whose grant
+  // lapsed, with the way out drawn from the grant they no longer hold. So the
+  // ones they are in stay reachable, and only Create workspace goes.
+  it('still reaches the other workspaces without the grant, and offers no Create', async () => {
+    const user = userEvent.setup();
+    serve({ entitlements: [] });
+    renderShellIn('hosted');
+
+    await user.click(await switcher());
+    expect(await screen.findByRole('button', { name: /Northwind Labs/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Acme/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create workspace' })).toBeNull();
   });
 });
