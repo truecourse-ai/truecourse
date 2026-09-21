@@ -927,6 +927,15 @@ export const GuardGenerateReportSchema = z
     cosmeticSections: z.number().int().nonnegative().optional(),
     /** Live claim-diff gate calls this run made (cache hits excluded). */
     claimDiffCalls: z.number().int().nonnegative().optional(),
+    /**
+     * Match calls made although the surface's interface ids and structure had
+     * not moved since the flow's last verdict, so authored catalog prose alone
+     * missed the cache; `sameVerdict` of them returned what the flow already had.
+     */
+    matchProseOnly: z
+      .object({ misses: z.number().int().nonnegative(), sameVerdict: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
     /** Prior scenarios editing workers deliberately dropped this run, each with
      *  the vanished obligation it named. Absent on reports that predate
      *  incremental authoring. */

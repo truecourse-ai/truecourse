@@ -22,6 +22,7 @@
 
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { canonicalStringify } from '@truecourse/shared/openapi'
 import {
   GUARD_OBSERVATION_CAPABILITIES,
   isCreditsExhausted,
@@ -218,6 +219,23 @@ export function matchCacheKey(
     .digest('hex')
 }
 
+/** The cache holding one marker per (flow, surface IDENTITY): the digest of the last settled verdict. */
+const MATCH_IDENTITY_CACHE_NAME = 'guard/match-identity'
+
+/**
+ * {@link matchCacheKey} over the surface's IDENTITY in place of its catalog
+ * fingerprint: sorted interface ids with each one's structural fingerprint, and
+ * none of the authored `context` prose the catalog fingerprint folds.
+ */
+function matchIdentityKey(
+  flow: Pick<GuardFlow, 'fingerprint'>,
+  catalog: Pick<SurfaceCatalog, 'surface' | 'interfaces'>,
+  providerControls: readonly ResolvedProviderControl[],
+): string {
+  const identity = catalog.interfaces.map((j) => `${j.id}:${j.fingerprint || interfaceFingerprint(j)}`).sort().join('\n')
+  return matchCacheKey(flow, { surface: catalog.surface, fingerprint: `identity:${identity}` }, providerControls)
+}
+
 /**
  * The cached verdict for one (flow, surface), re-validated against the live
  * catalog — `null` when nothing is cached (or the entry can no longer be trusted,
@@ -309,9 +327,19 @@ export interface RealizationPlan {
 
 /** A flow's verdict on one surface: a plan, a stated refusal, or a stage failure. */
 export type MatchOutcome =
-  | { kind: 'plan'; plan: RealizationPlan; gaps: RealizationGap[]; calls: number }
-  | { kind: 'gap'; gaps: RealizationGap[]; calls: number }
+  | { kind: 'plan'; plan: RealizationPlan; gaps: RealizationGap[]; calls: number; proseOnlyMiss?: ProseOnlyMiss }
+  | { kind: 'gap'; gaps: RealizationGap[]; calls: number; proseOnlyMiss?: ProseOnlyMiss }
   | { kind: 'error'; reason: string; calls: number }
+
+/**
+ * Set on a verdict the model was CALLED for although the surface's identity
+ * (its interface ids and their structure) had not moved since an earlier
+ * verdict for the same flow: only catalog prose moved the cache key.
+ * `sameVerdict` says whether the call returned what the earlier one had.
+ */
+export interface ProseOnlyMiss {
+  sameVerdict: boolean
+}
 
 /** Validation of one raw match reply against the flow and the surface's catalog. */
 interface MatchValidation {
@@ -565,12 +593,23 @@ export async function matchFlow(
       : { kind: 'gap', gaps, calls }
   }
 
+  // The identity marker: written beside every settled verdict, read on a miss.
+  // A miss that finds one was caused by catalog prose alone.
+  const identityKey = matchIdentityKey(flow, catalog, providerControls)
+  const verdictDigest = (data: unknown): string => createHash('sha256').update(canonicalStringify(data)).digest('hex')
+  const markIdentity = (data: unknown): Promise<void> =>
+    setCacheEntry(repoRoot, MATCH_IDENTITY_CACHE_NAME, identityKey, { verdict: verdictDigest(data) })
+
   const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
   if (cached) {
     const parsed = RealizationMatchSchema.safeParse(cached)
     if (parsed.success && !parsed.data.unrealizable) {
       const settled = settle(parsed.data, 0)
-      if (settled) return settled
+      if (settled) {
+        // A verdict cached before the marker existed gets one now.
+        if (!(await getCacheEntry(repoRoot, MATCH_IDENTITY_CACHE_NAME, identityKey))) await markIdentity(cached)
+        return settled
+      }
     }
   }
 
@@ -602,8 +641,12 @@ export async function matchFlow(
       const data = settled.kind === 'plan'
         ? { plan: settled.plan.steps.map((s) => ({ interfaceId: s.interface.id, milestone: s.milestone, ...(s.checks ? { checks: s.checks } : {}), ...(s.note ? { note: s.note } : {}) })), gaps: settled.gaps }
         : settled.kind === 'gap' ? { gaps: settled.gaps } : null
-      if (data) await setCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey, data)
-      return settled
+      if (!data || settled.kind === 'error') return settled
+      const marker = (await getCacheEntry(repoRoot, MATCH_IDENTITY_CACHE_NAME, identityKey)) as { verdict?: unknown } | null
+      await setCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey, data)
+      await markIdentity(data)
+      // A cached entry that failed re-validation also lands here; prose did not cause that call.
+      return marker && !cached ? { ...settled, proseOnlyMiss: { sameVerdict: marker.verdict === verdictDigest(data) } } : settled
     }
     const partial = settle(independentMatchPortions(matchableFlow, catalog, parsed.data), calls, true)
     if (partial?.kind === 'plan') retained = partial

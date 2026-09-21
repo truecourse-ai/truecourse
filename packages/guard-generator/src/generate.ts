@@ -442,6 +442,9 @@ export interface GuardGenerateResult {
   cosmeticSections?: number
   /** Live claim-diff gate calls this run made (cache hits excluded). */
   claimDiffCalls?: number
+  /** Match calls made for catalog prose alone, and how many of them returned
+   *  the verdict the flow already had. Absent on the abort results. */
+  matchProseOnly?: { misses: number; sameVerdict: number }
   /** Prior scenarios editing workers deliberately dropped this run, with the
    *  vanished obligation each named (also persisted on the manifest flow). */
   retiredScenarios?: (GuardManifestRetiredScenario & { flowId: string })[]
@@ -1734,6 +1737,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // call and is counted nowhere; an `unrealizable` verdict is an ANSWER, not a loss.
   let matchCalls = 0
   let matchCallErrors = 0
+  // Match calls made although the surface's identity had not moved: catalog
+  // prose alone missed the cache. `sameVerdict` of them changed nothing.
+  const matchProseOnly = { misses: 0, sameVerdict: 0 }
   let firstMatchError: string | undefined
   /** A pair settles as exactly one of these; the three tally to the pair total. */
   type PairOutcome = 'matched' | 'no match' | 'blocked'
@@ -1856,6 +1862,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       localMatchCalls++
       const outcome = await limit(() => matchFlow(repoRoot, eligibleFlow, surfaceCatalog, matchRunner, undefined, matchProviderControls(eligibleFlow, surface, prerequisiteResolution.targets, recipe)))
       if (outcome.kind === 'plan' || outcome.kind === 'gap') {
+        if (outcome.proseOnlyMiss) {
+          matchProseOnly.misses++
+          if (outcome.proseOnlyMiss.sameVerdict) matchProseOnly.sameVerdict++
+        }
         for (const gap of outcome.gaps) gaps.push({ surface,
           kind: gap.kind === 'mapping' ? 'no-interface' : 'blocked-on',
           reason: `Milestone ${gap.milestone}: ${gap.reason}`,
@@ -2101,6 +2111,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     fact('match', `flow ${w.flow.id} re-opened: ${w.movedInputs ? `${w.movedInputs.join(', ') || 'no named input'} moved` : 'stored entry names no inputs'}`)
   }
   if (flowsReport.reopened.flows > 0) fact('match', reopenedFlowsLine(flowsReport.reopened))
+  if (matchProseOnly.misses > 0) {
+    fact('match', `${matchProseOnly.misses} match call${matchProseOnly.misses === 1 ? '' : 's'} made for catalog prose alone, ${matchProseOnly.sameVerdict} with the same verdict as before`)
+  }
 
   // WORLD CLASSIFICATION (blast-radius scheduling, the generate side): batched,
   // cached calls decide which changed flows MUTATE the shared world — credential
@@ -4350,6 +4363,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     noChanges: changedWorks.length === 0 && removedFlows === 0 && prunedFlows === 0,
     cosmeticSections: claimDiff.cosmetic.size,
     claimDiffCalls: claimDiff.calls,
+    matchProseOnly,
     retiredScenarios: retiredReport,
     written,
     coverageGaps,

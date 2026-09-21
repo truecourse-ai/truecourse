@@ -35,6 +35,22 @@ describe('matching incomplete catalogs and verification capabilities', () => {
     expect(await matchFlow(root, f, catalog, runner)).toMatchObject({ kind: 'plan', calls: 0 })
     expect(runner).toHaveBeenCalledTimes(1)
   })
+  it('says when a call was made for catalog context alone, and whether the verdict held', async () => {
+    const root = repo(); const f = flow()
+    const verdict = { plan: [1, 2].map((milestone) => ({ interfaceId: control.id, milestone })) }
+    const runner = vi.fn(async () => verdict)
+    expect((await matchFlow(root, f, catalog, runner)) as { proseOnlyMiss?: unknown }).not.toHaveProperty('proseOnlyMiss')
+
+    // The same interface, its authored context reworded: the catalog key moves, the identity does not.
+    const reworded = buildSurfaceCatalogs([{ ...control, endState: 'no dialog open' }]).get('web')!
+    expect(reworded.fingerprint).not.toBe(catalog.fingerprint)
+    expect(await matchFlow(root, f, reworded, runner)).toMatchObject({ calls: 1, proseOnlyMiss: { sameVerdict: true } })
+
+    // A structural change is a real miss, and says nothing.
+    const moved = buildSurfaceCatalogs([{ ...control, fingerprint: 'sha256:moved' }]).get('web')!
+    expect(await matchFlow(root, f, moved, runner)).not.toHaveProperty('proseOnlyMiss')
+    expect(runner).toHaveBeenCalledTimes(3)
+  })
   it('gives a catalog-only refusal one re-ask, then reports mapping gaps, not absent behavior', async () => {
     const runner = vi.fn(async () => ({ unrealizable: 'No pagination interface' }))
     expect(await matchFlow(repo(), flow(), catalog, runner)).toMatchObject({ kind: 'gap', calls: 2,
