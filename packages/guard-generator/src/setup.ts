@@ -1577,8 +1577,12 @@ export function stepSettled(
   detectionJson = '',
 ): boolean {
   if (!settled) return false
-  if (settled.inputComponents) {
-    return movedSchemeInputs(settled.inputComponents, stepInputComponents(repoRoot, key, detectionJson)).length === 0
+  const current = stepInputComponents(repoRoot, key, detectionJson)
+  // Names that share nothing with the step's scheme prove nothing about it:
+  // such a row is compared like one that has none.
+  const stored = settled.inputComponents
+  if (stored && Object.keys(current).some((name) => name in stored)) {
+    return movedSchemeInputs(stored, current).length === 0
   }
   return settled.inputFingerprint === legacyFingerprint
 }
