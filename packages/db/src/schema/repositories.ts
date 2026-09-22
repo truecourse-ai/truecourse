@@ -35,6 +35,12 @@ export const providerAccounts = pgTable(
     accountId: text('account_id').notNull(),
     accountLogin: text('account_login').notNull(),
     accountType: text('account_type').notNull(),
+    /**
+     * The permissions the account granted the App, as the provider names them
+     * (`{ checks: 'write', ... }`): what the App may post back. Null until the
+     * provider's installation event first said.
+     */
+    permissions: jsonb('permissions').$type<Record<string, string>>(),
     createdAt: ts('created_at').notNull(),
     updatedAt: ts('updated_at').notNull(),
   },

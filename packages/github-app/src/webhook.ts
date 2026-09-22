@@ -8,7 +8,12 @@
 
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
-import type { RepositoryRecord, RepositoryStore } from '@truecourse/shared';
+import type {
+  PullRequestRecord,
+  PullRequestStore,
+  RepositoryRecord,
+  RepositoryStore,
+} from '@truecourse/shared';
 import { verifyWebhookSignature } from './signature.js';
 import { GITHUB_PROVIDER, installationOf } from './provider.js';
 import type { InstallationStore } from './store/types.js';
@@ -37,11 +42,46 @@ export interface SourcePushTrigger {
   workspaceOrgId: string;
 }
 
+/**
+ * A pull request event, with what it means for its check. The row is already
+ * written when this fires. `effect`: `check` — judge the head (a new head, a
+ * reopen, a base change, ready for review); `draft` — cancel what is in
+ * flight and say the draft is checked when ready; `close` — cancel what is in
+ * flight; `none` — the row moved, nothing to do (a title edit).
+ */
+export interface PullRequestTrigger {
+  pr: PullRequestRecord;
+  installationId: number;
+  effect: 'check' | 'draft' | 'close' | 'none';
+}
+
+/**
+ * Someone asked GitHub to re-run a check. `checkId` names ours (the check
+ * run's `external_id`) for one check; null for a whole suite, meaning every
+ * check of that head.
+ */
+export interface CheckRerunTrigger {
+  repoFullName: string;
+  workspaceOrgId: string;
+  installationId: number;
+  headSha: string;
+  checkId: string | null;
+}
+
 export interface WebhookDeps {
   secret: string;
   store: InstallationStore;
   /** The connected repositories, whichever provider brought them. */
   repos: RepositoryStore;
+  /**
+   * The pull requests. Without it the pull request and check events are
+   * acknowledged and ignored, as every unhandled event is.
+   */
+  pulls?: PullRequestStore;
+  /** A pull request event, after its row was written (fire-and-forget). */
+  onPullRequest?: (trigger: PullRequestTrigger) => void;
+  /** A re-run asked for on GitHub (fire-and-forget). */
+  onCheckRerun?: (trigger: CheckRerunTrigger) => void;
   /**
    * A push to the default branch of a connected repository (fire-and-forget).
    * The pushed commit is already on the repository's row when this fires.
@@ -73,7 +113,41 @@ export interface WebhookDeps {
 
 interface InstallationPayload {
   action: string;
-  installation: { id: number; account: { login: string; type: string } };
+  installation: {
+    id: number;
+    account: { login: string; type: string };
+    permissions?: Record<string, string>;
+  };
+}
+
+interface PullRequestPayload {
+  action: string;
+  number: number;
+  pull_request: {
+    number: number;
+    title: string;
+    state: 'open' | 'closed';
+    draft: boolean;
+    merged: boolean;
+    user: { login: string };
+    head: { sha: string; ref: string; repo: { full_name: string } | null };
+    base: { ref: string; repo: { full_name: string } };
+    created_at: string;
+    closed_at: string | null;
+    updated_at: string;
+  };
+  /** On `edited`, the fields that changed with their previous values. */
+  changes?: { base?: { ref: { from: string } } };
+  repository: { full_name: string };
+  installation?: { id: number };
+}
+
+interface CheckRerunPayload {
+  action: string;
+  check_run?: { external_id: string | null; head_sha: string };
+  check_suite?: { head_sha: string };
+  repository: { full_name: string };
+  installation?: { id: number };
 }
 
 interface InstallationRepositoriesPayload {
@@ -148,6 +222,13 @@ async function dispatch(
     case 'push':
       await handlePush(deps, payload as PushPayload);
       break;
+    case 'pull_request':
+      await handlePullRequest(deps, payload as PullRequestPayload);
+      break;
+    case 'check_run':
+    case 'check_suite':
+      await handleCheckRerun(deps, payload as CheckRerunPayload);
+      break;
     default:
       // Unhandled event — ignore.
       break;
@@ -180,12 +261,15 @@ async function handleInstallation(
   // created (and other lifecycle events) — upsert the installation's account.
   // Its workspace links are the connect callback's to write, and a re-sent
   // event never touches them.
+  // Every event carries the permissions as granted now, `new_permissions_accepted`
+  // included; a payload without them keeps what the row knows.
   const now = new Date().toISOString();
   const existing = await deps.store.getInstallation(installation.id);
   await deps.store.saveInstallation({
     installationId: installation.id,
     accountLogin: installation.account.login,
     accountType: installation.account.type,
+    ...(installation.permissions ? { permissions: installation.permissions } : {}),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   });
@@ -257,5 +341,106 @@ async function handlePush(
     defaultBranch: payload.repository.default_branch,
     commitSha: payload.after,
     workspaceOrgId: link.workspaceOrgId,
+  });
+}
+
+/**
+ * The workspace a repository's pull requests belong to: the one that
+ * connected it in Code, when the event came through the installation the
+ * connection reads through; else the one whose context source reads it (the
+ * spec half alone applies then), when that workspace holds the installation.
+ * Null when nobody does, and the event is ignored.
+ */
+async function workspaceOfRepository(
+  deps: WebhookDeps,
+  repoFullName: string,
+  installationId: number,
+): Promise<string | null> {
+  const link = await deps.repos.getRepo(repoFullName);
+  if (link) {
+    return link.enabled && installationOf(link) === installationId ? link.workspaceOrgId : null;
+  }
+  const workspaceOrgId = await deps.sourceWorkspaceOf(repoFullName);
+  if (workspaceOrgId === null) return null;
+  const installation = await deps.store.getInstallation(installationId);
+  return installation?.workspaceOrgIds.includes(workspaceOrgId) ? workspaceOrgId : null;
+}
+
+/**
+ * A pull request opened, moved, redrafted or closed. The row is written as
+ * GitHub last saw it and the host is told what that means for the check;
+ * an action about labels, reviewers or the like changes nothing here.
+ */
+async function handlePullRequest(deps: WebhookDeps, payload: PullRequestPayload): Promise<void> {
+  if (!deps.pulls || !payload.installation) return;
+  const effect = pullRequestEffect(payload);
+  if (effect === null) return;
+  const repoFullName = payload.repository.full_name;
+  const workspaceOrgId = await workspaceOfRepository(deps, repoFullName, payload.installation.id);
+  if (workspaceOrgId === null) return;
+
+  const p = payload.pull_request;
+  const pr: PullRequestRecord = {
+    repoFullName,
+    number: p.number,
+    workspaceOrgId,
+    provider: GITHUB_PROVIDER,
+    title: p.title,
+    authorLogin: p.user.login,
+    headSha: p.head.sha,
+    headRef: p.head.ref,
+    baseRef: p.base.ref,
+    headRepoFullName: p.head.repo?.full_name ?? null,
+    draft: p.draft,
+    state: p.state === 'closed' ? (p.merged ? 'merged' : 'closed') : 'open',
+    // GitHub's stamps, in the shape the store hands them back.
+    openedAt: new Date(p.created_at).toISOString(),
+    closedAt: p.closed_at === null ? null : new Date(p.closed_at).toISOString(),
+    updatedAt: new Date(p.updated_at).toISOString(),
+  };
+  await deps.pulls.savePullRequest(pr);
+  log.info(`[github-app] ${repoFullName}#${pr.number} ${payload.action} → ${effect}`);
+  deps.onPullRequest?.({ pr, installationId: payload.installation.id, effect });
+}
+
+/** What an action means for the check, or null for one that means nothing here. */
+function pullRequestEffect(payload: PullRequestPayload): PullRequestTrigger['effect'] | null {
+  const draft = payload.pull_request.draft;
+  switch (payload.action) {
+    case 'opened':
+    case 'reopened':
+    case 'synchronize':
+    case 'ready_for_review':
+      return draft ? 'draft' : 'check';
+    case 'converted_to_draft':
+      return 'draft';
+    case 'edited':
+      // A new base is a new comparison; a new title is just a new title.
+      return payload.changes?.base ? (draft ? 'draft' : 'check') : 'none';
+    case 'closed':
+      return 'close';
+    default:
+      return null;
+  }
+}
+
+/**
+ * "Re-run" pressed on GitHub: on one check run (ours is the one whose
+ * `external_id` we minted) or on the whole suite of a head.
+ */
+async function handleCheckRerun(deps: WebhookDeps, payload: CheckRerunPayload): Promise<void> {
+  if (!deps.pulls || !deps.onCheckRerun || !payload.installation) return;
+  if (payload.action !== 'rerequested') return;
+  const headSha = payload.check_run?.head_sha ?? payload.check_suite?.head_sha;
+  if (!headSha) return;
+  const repoFullName = payload.repository.full_name;
+  const workspaceOrgId = await workspaceOfRepository(deps, repoFullName, payload.installation.id);
+  if (workspaceOrgId === null) return;
+  deps.onCheckRerun({
+    repoFullName,
+    workspaceOrgId,
+    installationId: payload.installation.id,
+    headSha,
+    checkId: payload.check_run?.external_id || null,
   });
 }

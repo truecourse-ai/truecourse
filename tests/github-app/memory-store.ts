@@ -26,18 +26,24 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
   private repos = new Map<string, RepositoryRecord>();
 
   private record(account: InstallationAccount): InstallationRecord {
-    return { ...account, workspaceOrgIds: [...(this.links.get(account.installationId) ?? [])] };
+    return {
+      ...account,
+      permissions: account.permissions ?? null,
+      workspaceOrgIds: [...(this.links.get(account.installationId) ?? [])],
+    };
   }
 
   async saveInstallation(rec: InstallationAccount): Promise<void> {
-    const { installationId, accountLogin, accountType, createdAt, updatedAt } = rec;
+    const { installationId, accountLogin, accountType, permissions, createdAt, updatedAt } = rec;
     // As the Postgres upsert does: an empty name never unnames a known row,
-    // and a row that exists keeps its createdAt.
+    // a save with no permissions keeps the known ones, and a row that exists
+    // keeps its createdAt.
     const existing = this.installations.get(installationId);
     this.installations.set(installationId, {
       installationId,
       accountLogin: accountLogin || existing?.accountLogin || '',
       accountType: accountType || existing?.accountType || '',
+      permissions: permissions ?? existing?.permissions ?? null,
       createdAt: existing?.createdAt ?? createdAt,
       updatedAt,
     });

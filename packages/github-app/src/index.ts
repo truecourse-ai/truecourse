@@ -51,6 +51,8 @@ export {
   type WebhookDeps,
   type BaselineTrigger,
   type SourcePushTrigger,
+  type PullRequestTrigger,
+  type CheckRerunTrigger,
 } from './webhook.js';
 export {
   createConnectRouter,
