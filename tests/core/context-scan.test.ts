@@ -387,7 +387,7 @@ describe('a pull request’s scan', () => {
     const runs = await listStoredSessionRuns(workspaceSessionsKey(ORG), 'spec-scan');
     // Newest first: the pull request's scan, then the workspace's own.
     expect(runs.map((r) => r.pullRequest)).toEqual([
-      { number: 7, headSha: 'head-7', checkId: 'check_1' },
+      { repoFullName: PR.repoFullName, number: 7, headSha: 'head-7', checkId: 'check_1' },
       undefined,
     ]);
     expect(runs[0]?.gitRef).toBe('head-7');

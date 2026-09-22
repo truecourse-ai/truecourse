@@ -56,6 +56,12 @@ export function jobRepoFullName(job: JobView): string | null {
   return job.key.slice(prefix.length).replace(/#\d+$/, '');
 }
 
+/** The pull request a check job is for, off the same key; null for every other job. */
+export function jobPullRequest(job: JobView): number | null {
+  const match = job.type === 'repo.pr-check' ? /#(\d+)$/.exec(job.key ?? '') : null;
+  return match ? Number(match[1]) : null;
+}
+
 /**
  * What a waiting job is waiting for, in one line: the work holding its lane
  * when the workspace's jobs name one, and the queue itself when they do not.

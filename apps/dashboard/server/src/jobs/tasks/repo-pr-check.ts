@@ -562,7 +562,7 @@ export function createRepoPullRequestCheckTask(
             }
           },
           meter,
-          { pullRequest: { number, headSha, checkId: check.id } },
+          { pullRequest: { repoFullName, number, headSha, checkId: check.id } },
         ).then((result) => ({
           result,
           notification: 'reason' in (result ?? {}) ? notificationFor(result as PullRequestCheckJobResult) : null,

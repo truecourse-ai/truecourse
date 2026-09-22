@@ -136,6 +136,8 @@ const RunRecordFieldsSchema = z.object({
    */
   pullRequest: z
     .object({
+      /** The repository the pull request is of: a check's scan is a WORKSPACE run and names no repository of its own. */
+      repoFullName: z.string(),
       number: z.number().int().positive(),
       headSha: z.string(),
       /** The check the run belongs to; the scan a check ran carries it too. */

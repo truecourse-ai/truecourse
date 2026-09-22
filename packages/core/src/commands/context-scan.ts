@@ -191,6 +191,7 @@ export async function workspaceContextScanInProcess(
               disableScopeOrchestration: true,
               gitRef: pullRequest.headSha,
               pullRequest: {
+                repoFullName: pullRequest.repoFullName,
                 number: pullRequest.number,
                 headSha: pullRequest.headSha,
                 ...(pullRequest.checkId ? { checkId: pullRequest.checkId } : {}),

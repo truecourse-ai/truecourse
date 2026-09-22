@@ -68,6 +68,13 @@ export interface RepositoryProvider {
   mode?: ServerMode;
   /** How it connects a repository from inside the app, when it does. */
   connect?: RepositoryConnect;
+  /**
+   * Whether repositories of this provider have pull requests the product
+   * checks. The pull request column and filter draw only when a connected
+   * repository's provider says so, so a folder on this machine never shows an
+   * empty column.
+   */
+  pullRequests?: boolean;
 }
 
 /**
