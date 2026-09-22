@@ -509,7 +509,7 @@ export function createRepoPullRequestCheckTask(
                 return decide(new CheckSettled('build-failed', 'failure', { ...report, codeHalf: 'ran' }));
               }
               const headFlows = readGuardRunFlowSummaryFromTree(tree.dir, latest) ?? {};
-              await persistGuardRun(ref, tree.dir, latest, { coverage: { sections: {}, flows: headFlows } });
+              await persistGuardRun(ref, tree.dir, latest, { provenance, coverage: { sections: {}, flows: headFlows } });
               activityTracker.done('run');
 
               await ctx.phase('compare');
