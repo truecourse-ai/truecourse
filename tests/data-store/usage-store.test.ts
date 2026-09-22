@@ -91,6 +91,11 @@ describe('PgUsageStore', () => {
       startedAt: '2026-06-10T09:55:00.000Z',
       finishedAt: '2026-06-10T10:20:00.000Z',
       model: 'claude-opus-5-1',
+      // Each bucket on its own, and the four added up.
+      inputTokens: 105,
+      outputTokens: 11,
+      cacheReadTokens: 1000,
+      cacheCreateTokens: 50,
       tokens: 1166,
       calls: 3,
     });

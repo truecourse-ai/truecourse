@@ -94,6 +94,11 @@ export interface UsageRunRecord {
   jobType: string;
   repoFullName: string | null;
   costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  /** The four buckets added up. */
   tokens: number;
   calls: number;
   /** The model the run ran on. Every row of a run names the same one; a run a

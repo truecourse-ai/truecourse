@@ -20,6 +20,7 @@ import {
   usageQuery,
   usageRuns,
   usageSeries,
+  usageTokenSplit,
   usageTotals,
   type UsageRequest,
 } from '../../apps/dashboard/server/src/services/usage.service';
@@ -192,6 +193,37 @@ describe('the usage query', () => {
   });
 });
 
+describe('the token split', () => {
+  const buckets = (over: Partial<Parameters<typeof usageTokenSplit>[0]> = {}) => ({
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreateTokens: 0,
+    ...over,
+  });
+
+  it('is the cached share of everything read', () => {
+    expect(usageTokenSplit(buckets({ inputTokens: 3_000, outputTokens: 800, cacheReadTokens: 27_000 }))).toEqual({
+      input: 3_000,
+      output: 800,
+      cached: 27_000,
+      cacheHitRate: 0.9,
+    });
+  });
+
+  it('counts a cache write as input read at full price, never as cached', () => {
+    expect(
+      usageTokenSplit(buckets({ inputTokens: 1_000, cacheCreateTokens: 4_000, cacheReadTokens: 5_000 })),
+    ).toEqual({ input: 5_000, output: 0, cached: 5_000, cacheHitRate: 0.5 });
+  });
+
+  it('has no rate when nothing was cached at all, and a true zero when a written cache was never read', () => {
+    expect(usageTokenSplit(buckets({ inputTokens: 1_000, outputTokens: 10 })).cacheHitRate).toBeNull();
+    expect(usageTokenSplit(buckets()).cacheHitRate).toBeNull();
+    expect(usageTokenSplit(buckets({ inputTokens: 1_000, cacheCreateTokens: 1_000 })).cacheHitRate).toBe(0);
+  });
+});
+
 describe('the usage reads', () => {
   it('adds the period up, tokens and all', async () => {
     await installed.store.record(delta({ cacheReadTokens: 400, cacheCreateTokens: 50, calls: 3 }));
@@ -204,9 +236,36 @@ describe('the usage reads', () => {
       cacheReadTokens: 400,
       cacheCreateTokens: 50,
       tokens: 1550,
+      // A cache write is input; the hit rate is 400 of the 1,450 read.
+      split: { input: 1050, output: 100, cached: 400, cacheHitRate: 400 / 1450 },
       calls: 3,
       runs: 1,
     });
+  });
+
+  it('carries each run’s own split, so one run can be set against another', async () => {
+    await installed.store.record(
+      delta({ jobId: 'cheap', inputTokens: 2_000, outputTokens: 500, cacheReadTokens: 28_000, cacheCreateTokens: 0 }),
+    );
+    await installed.store.record(
+      delta({ jobId: 'dear', inputTokens: 20_000, outputTokens: 500, cacheReadTokens: 0, cacheCreateTokens: 0 }),
+    );
+    const period = resolveUsagePeriod(request(), NOW);
+
+    const runs = await usageRuns(usageQuery(request(), period, REPOS), REPOS);
+    const cheap = runs.find((row) => row.jobId === 'cheap')!;
+    const dear = runs.find((row) => row.jobId === 'dear')!;
+    // The cheap run is the bigger total; the split is what tells them apart.
+    expect(cheap.tokens).toBeGreaterThan(dear.tokens);
+    expect(cheap).toMatchObject({
+      inputTokens: 2_000,
+      outputTokens: 500,
+      cacheReadTokens: 28_000,
+      cacheCreateTokens: 0,
+      tokens: 30_500,
+      split: { input: 2_000, output: 500, cached: 28_000, cacheHitRate: 28_000 / 30_000 },
+    });
+    expect(dear.split).toEqual({ input: 20_000, output: 500, cached: 0, cacheHitRate: null });
   });
 
   it('fills every bucket of the period, gaps as zeros, split by job type', async () => {

@@ -55,6 +55,7 @@ const USAGE: UsageResponse = {
     cacheReadTokens: 800_000,
     cacheCreateTokens: 0,
     tokens: 2_000_000,
+    split: { input: 1_000_000, output: 200_000, cached: 800_000, cacheHitRate: 800_000 / 1_800_000 },
     calls: 412,
     runs: 2,
   },
@@ -79,7 +80,12 @@ const USAGE: UsageResponse = {
       repository: 'acme/web',
       repoId: 'web',
       costUsd: 10,
+      inputTokens: 500_000,
+      outputTokens: 200_000,
+      cacheReadTokens: 800_000,
+      cacheCreateTokens: 100_000,
       tokens: 1_600_000,
+      split: { input: 600_000, output: 200_000, cached: 800_000, cacheHitRate: 800_000 / 1_400_000 },
       calls: 380,
       model: 'claude-opus-5',
       startedAt: '2026-09-15T09:00:00.000Z',
@@ -95,7 +101,12 @@ const USAGE: UsageResponse = {
       repository: null,
       repoId: null,
       costUsd: 2.5,
+      inputTokens: 380_000,
+      outputTokens: 20_000,
+      cacheReadTokens: 0,
+      cacheCreateTokens: 0,
       tokens: 400_000,
+      split: { input: 380_000, output: 20_000, cached: 0, cacheHitRate: null },
       calls: 32,
       model: 'claude-opus-5',
       startedAt: '2026-09-15T08:00:00.000Z',
@@ -120,6 +131,7 @@ const EMPTY: UsageResponse = {
     cacheReadTokens: 0,
     cacheCreateTokens: 0,
     tokens: 0,
+    split: { input: 0, output: 0, cached: 0, cacheHitRate: null },
     calls: 0,
     runs: 0,
   },
@@ -204,8 +216,11 @@ describe('Settings › Usage', () => {
     // One band per job type that spent, named in the product's words.
     expect(within(chart).getByText('Flow generation')).toBeInTheDocument();
     expect(within(chart).getByText('Document scan')).toBeInTheDocument();
-    // The total, once, beneath the chart.
+    // The total, once, beneath the chart, and its tokens split beneath that.
     expect(screen.getByText('$12.50')).toBeInTheDocument();
+    expect(
+      screen.getByText('1.0M input · 200.0K output · 800.0K cached · 44% cache hits'),
+    ).toBeInTheDocument();
 
     const runs = screen.getByRole('list', { name: 'Runs' });
     const rows = within(runs).getAllByRole('listitem');
@@ -214,10 +229,15 @@ describe('Settings › Usage', () => {
     expect(rows[0]).toHaveTextContent('acme/web');
     expect(rows[0]).toHaveTextContent('Finished');
     expect(rows[0]).toHaveTextContent('$10.00');
-    expect(rows[0]).toHaveTextContent('1.6M tokens');
+    // The run's tokens split the way the period's do, cache writes counted as input.
+    expect(rows[0]).toHaveTextContent('600.0K input · 200.0K output · 800.0K cached · 57% cache hits');
     // The workspace's own work belongs to no repository and says so by saying nothing.
     expect(rows[1]).toHaveTextContent('Document scan');
     expect(rows[1]).toHaveTextContent('Failed');
+    // A run that cached nothing shows no cached figure and no rate, never a 0%.
+    expect(rows[1]).toHaveTextContent('380.0K input · 20.0K output');
+    expect(rows[1]).not.toHaveTextContent('cached');
+    expect(rows[1]).not.toHaveTextContent('cache hits');
 
     // The numbers appear once more, at the bottom, as the list's tally.
     const tally = screen.getByRole('group', { name: 'Runs tally' });
@@ -252,6 +272,24 @@ describe('Settings › Usage', () => {
     expect(screen.getByText('2.0M')).toBeInTheDocument();
     expect(screen.queryByText('$12.50')).toBeNull();
     expect(state.calls).toHaveLength(before);
+  });
+
+  it('shows no cached figure or rate for a period nothing was cached in', async () => {
+    serve({
+      usage: {
+        ...USAGE,
+        totals: {
+          ...USAGE.totals,
+          cacheReadTokens: 0,
+          split: { input: 1_000_000, output: 200_000, cached: 0, cacheHitRate: null },
+        },
+      },
+    });
+    renderUsage();
+
+    // The line says exactly the two figures there are, with nothing cached after them.
+    const line = await screen.findByText('1.0M input · 200.0K output');
+    expect(line).toHaveTextContent(/^1\.0M input · 200\.0K output$/);
   });
 
   it('puts the period in the address and reads it back', async () => {

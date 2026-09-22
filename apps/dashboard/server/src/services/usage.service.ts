@@ -37,6 +37,7 @@ import {
   type UsageResponse,
   type UsageRunRow,
   type UsageSeriesPoint,
+  type UsageTokenSplit,
   type UsageTotals,
 } from '@truecourse/shared';
 
@@ -287,6 +288,31 @@ export function usageQuery(
   return query;
 }
 
+/** The four stored token buckets, which never overlap. */
+export interface UsageTokenBuckets {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+}
+
+/**
+ * The buckets as the page reads them: a cache write is input (read at full
+ * price on its way into the cache), a cache read is cached, and the hit rate is
+ * the cached share of everything read. No caching reported at all is no rate.
+ */
+export function usageTokenSplit(buckets: UsageTokenBuckets): UsageTokenSplit {
+  const input = buckets.inputTokens + buckets.cacheCreateTokens;
+  const cached = buckets.cacheReadTokens;
+  const caching = buckets.cacheReadTokens + buckets.cacheCreateTokens > 0;
+  return {
+    input,
+    output: buckets.outputTokens,
+    cached,
+    cacheHitRate: caching ? cached / (input + cached) : null,
+  };
+}
+
 /** The period's spend in one line. */
 export async function usageTotals(query: UsageQuery): Promise<UsageTotals> {
   const totals = await readUsageTotals(query);
@@ -298,6 +324,7 @@ export async function usageTotals(query: UsageQuery): Promise<UsageTotals> {
     cacheCreateTokens: totals.cacheCreateTokens,
     tokens:
       totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheCreateTokens,
+    split: usageTokenSplit(totals),
     calls: totals.calls,
     runs: totals.runs,
   };
@@ -349,7 +376,12 @@ export async function usageRuns(
     // says so — it just has nowhere to open.
     repoId: (row.repoFullName && slugs.get(row.repoFullName)) ?? null,
     costUsd: exact(row.costUsd),
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    cacheReadTokens: row.cacheReadTokens,
+    cacheCreateTokens: row.cacheCreateTokens,
     tokens: row.tokens,
+    split: usageTokenSplit(row),
     calls: row.calls,
     model: row.model,
     startedAt: row.startedAt,

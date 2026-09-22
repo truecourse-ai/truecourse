@@ -9,8 +9,9 @@
  *
  * Under it the trend: one quiet band per job type over the period's days (its
  * weeks, once a day per point stops being readable), the period's total once
- * beneath it, and a toggle that swaps what is measured from money to tokens.
- * Then the runs that spent it, four corners each, opening the conversation
+ * beneath it with its tokens split into input, output and cached, and a toggle
+ * that swaps what is measured from money to tokens. Then the runs that spent
+ * it, four corners each, carrying the same split and opening the conversation
  * they belong to.
  *
  * Nothing is composed here: the server folded every number, named every value
@@ -27,6 +28,7 @@ import {
   type UsagePeriod,
   type UsageResponse,
   type UsageRunRow,
+  type UsageTokenSplit,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import {
@@ -117,6 +119,25 @@ const OUTCOME_ORDER: JobStatus[] = [
 
 /** What the chart measures. */
 type Measure = 'cost' | 'tokens';
+
+/** A share as a whole percent; a share too small to round to one still reads as some. */
+function formatShare(share: number): string {
+  const percent = Math.round(share * 100);
+  return percent === 0 && share > 0 ? '<1%' : `${percent}%`;
+}
+
+/**
+ * The split as one dot-separated tally. With no prompt caching reported there
+ * is no cached figure and no hit rate to show, rather than a zero that reads as
+ * a cache that missed.
+ */
+function splitWords(split: UsageTokenSplit): string {
+  const words = [`${formatTokens(split.input)} input`, `${formatTokens(split.output)} output`];
+  if (split.cacheHitRate !== null) {
+    words.push(`${formatTokens(split.cached)} cached`, `${formatShare(split.cacheHitRate)} cache hits`);
+  }
+  return words.join(' · ');
+}
 
 /** The page's one read, re-made whenever the address moves. */
 function useUsage(query: string): { usage: UsageResponse | null; error: string | null } {
@@ -403,6 +424,9 @@ export function UsageTab() {
                   {period === 'custom' ? 'the chosen days' : `the last ${PERIOD_LABEL[period]}`}
                 </span>
               </p>
+              <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">
+                {splitWords(usage.totals.split)}
+              </p>
             </div>
 
             <EntityList<UsageRunRow>
@@ -437,7 +461,7 @@ export function UsageTab() {
                   </span>
                   <span className="flex w-full items-center gap-2 text-[11px] text-muted-foreground">
                     <span className="min-w-0 truncate tabular-nums">
-                      {formatUsd(row.costUsd)} · {formatTokens(row.tokens)} tokens
+                      {formatUsd(row.costUsd)} · {splitWords(row.split)}
                       {row.model && ` · ${row.model}`}
                     </span>
                     <span className="ml-auto shrink-0 tabular-nums">
