@@ -170,8 +170,8 @@ import {
   readRecipeRaw,
   readScenarioFile,
   writeGuardDecisions as writeGuardDecisionsStore,
+  versionAt as at,
   type GuardRunCoverage,
-  type VersionAt,
 } from '../lib/guard-store.js'
 import { readGuardExternalSetupIndex } from './guard-externals.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
@@ -192,13 +192,10 @@ export {
 // Commit resolution (hosted)
 // ---------------------------------------------------------------------------
 
-/** Where a store read lands: the pinned commit's newest version, else the scope's current one. */
-const at = (commit?: string): VersionAt => (commit ? { commitSha: commit } : {})
-
 /** The baseline commit — the default-branch anchor guard reads fall back to
  *  when no explicit ref is given (hosted): the commit the default branch's
- *  CURRENT scenario set (else its current report) was produced at, which is the
- *  newest version of its series. `undefined` when there is none yet. */
+ *  CURRENT state was produced at — its newest scenario set or its newest
+ *  report, whichever was stored last. `undefined` when there is none yet. */
 async function guardBaselineCommit(repoKey: string): Promise<string | undefined> {
   return (await getGuardStore().readGuardBaselineCommit(repoKey)) ?? undefined
 }

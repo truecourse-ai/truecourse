@@ -61,6 +61,15 @@ export interface VersionAt {
 }
 
 /**
+ * Where a commit-pinned read lands: the newest version at `commit` when one is
+ * named, else the scope's current one. The one spelling of that rule, so a
+ * reader that takes an optional `?commit=` never composes it by hand.
+ */
+export function versionAt(commit?: string, scope?: string): VersionAt {
+  return { ...(scope ? { scope } : {}), ...(commit ? { commitSha: commit } : {}) };
+}
+
+/**
  * HEAD sha, or `''` when `repoRoot` is not a git repo. Working-tree dirtiness is
  * intentionally NOT reflected in the key: two saves at the same HEAD collide by
  * design — the Postgres store upserts the manifest row and content-addressing

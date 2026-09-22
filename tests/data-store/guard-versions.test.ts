@@ -1,8 +1,9 @@
 /**
  * The versioned guard series: every save is a new version with its
  * provenance, a version is addressable by id whatever its scope, a rollback
- * is a copy that becomes current, and retention trims a series while the
- * content pool is swept of what no surviving version references.
+ * is a copy that becomes current (with the report it was paired with copied
+ * beside it, both saying what they restored), and retention trims a series
+ * while the content pool is swept of what no surviving version references.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -12,8 +13,10 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { eq, sql } from 'drizzle-orm';
-import { schema, MIGRATIONS_DIR, content, guardScenarioSets, workspaceSpecSets, type Db } from '@truecourse/db';
+import { schema, MIGRATIONS_DIR, content, guardResults, guardScenarioSets, workspaceSpecSets, type Db } from '@truecourse/db';
+import type { GuardGenerateReport } from '@truecourse/shared';
 import {
+  ContentStore,
   PgGuardStore,
   PgSpecStore,
   VERSION_RETENTION,
@@ -21,6 +24,7 @@ import {
   sweepRepoVersions,
   sweepStoredVersions,
 } from '../../packages/data-store/src/index';
+import { sweepCutoff } from '../../packages/data-store/src/retention';
 
 const REPO = 'acme/api';
 const ORG = 'org_acme';
@@ -56,6 +60,28 @@ async function saveSet(commit: string, body: string, opts: { scope?: string; run
     return versionId;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** A generate report stamped `generatedAt`, written at `commit` beside the set just saved there. */
+async function saveReport(commit: string, generatedAt: string, evidence: Record<string, string> = {}): Promise<void> {
+  const report: GuardGenerateReport = {
+    generatedAt,
+    status: 'ok',
+    sectionsTotal: 1,
+    sectionsChanged: 1,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    coverageGaps: [],
+    birthFindings: [],
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+  };
+  await store.writeGuardResult({ repoKey: REPO, commitSha: commit }, report, { producedByRun: `gen-${commit}`, model: 'opus' });
+  if (Object.keys(evidence).length > 0) {
+    await store.writeGuardResultEvidence({ repoKey: REPO, commitSha: commit }, 'birth', evidence);
   }
 }
 
@@ -102,11 +128,39 @@ describe('guard versions', () => {
     await tick();
 
     const restored = await store.restoreGuardScenarioSet(REPO, v1, { producedByRun: null, model: null });
-    expect(restored).toMatchObject({ artifact: 'scenarios', commitSha: 'c1', scope: 'default', fileCount: 1 });
+    expect(restored).toMatchObject({ artifact: 'scenarios', commitSha: 'c1', scope: 'default', fileCount: 1, restoredFrom: v1 });
     expect(restored!.id).not.toBe(v1);
     expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/core/one.yaml')).toBe('one');
-    expect((await store.listGuardVersions(REPO, 'scenarios')).map((v) => v.commitSha)).toEqual(['c1', 'c2', 'c1']);
+    const versions = await store.listGuardVersions(REPO, 'scenarios');
+    expect(versions.map((v) => [v.commitSha, v.restoredFrom])).toEqual([['c1', v1], ['c2', null], ['c1', null]]);
+    expect(await store.readGuardVersion(REPO, 'scenarios', restored!.id)).toMatchObject({ restoredFrom: v1 });
     expect(await store.restoreGuardScenarioSet(REPO, 'nope')).toBeNull();
+  });
+
+  it('a rollback brings back the report its set was born with, evidence and all', async () => {
+    // Two generates at ONE commit — the shape a decision-triggered regenerate has.
+    const v1 = await saveSet('c1', 'one');
+    await saveReport('c1', '2026-01-01T00:00:00Z', { 'transcript.md': 'born with one' });
+    await tick();
+    await saveSet('c1', 'two');
+    await saveReport('c1', '2026-01-02T00:00:00Z');
+    await tick();
+    // A report a run produced is nobody's copy.
+    const [current] = await store.listGuardVersions(REPO, 'report');
+    expect(current).toMatchObject({ restoredFrom: null, producedByRun: 'gen-c1', fileCount: null });
+
+    await store.restoreGuardScenarioSet(REPO, v1);
+
+    // The newest report at the commit — what the repo view reads — is the
+    // copy of the first generate's, not the second's, and it says so.
+    expect((await store.readGuardResult(REPO, { commitSha: 'c1' }))?.generatedAt).toBe('2026-01-01T00:00:00Z');
+    const reports = await store.listGuardVersions(REPO, 'report');
+    expect(reports).toHaveLength(3);
+    expect(reports[0]).toMatchObject({ restoredFrom: reports[2]!.id, producedByRun: null });
+    // The copy carries the evidence manifest, so the transcripts stay referenced and readable.
+    const [copy] = await db.select({ evidence: guardResults.evidence }).from(guardResults).where(eq(guardResults.id, reports[0]!.id));
+    expect(Object.keys(copy!.evidence as Record<string, string>)).toEqual(['birth/transcript.md']);
+    expect(await store.readGuardEvidenceAt(REPO, '.truecourse/guard/evidence/gen-x/birth', 'transcript.md')).toBe('born with one');
   });
 
   it('retention keeps the newest versions and anything young, and sweeps the pool behind the rest', async () => {
@@ -145,6 +199,24 @@ describe('guard versions', () => {
     });
     await sweepRepoVersions(db, REPO);
     expect(await bodiesInPool(contentScope.guard(REPO))).toContain('in flight');
+  });
+
+  it('a save that re-puts an old orphaned body renews its grace, so a concurrent sweep leaves it', async () => {
+    const v1 = await saveSet('c1', 'one');
+    await tick();
+    await saveSet('c2', 'two');
+    // The first version is gone (an earlier deployment's upsert, say) and its
+    // body is an old orphan the boot sweep is about to take.
+    await db.delete(guardScenarioSets).where(eq(guardScenarioSets.id, v1));
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    await db.execute(sql`update content set created_at = ${old} where scope = ${contentScope.guard(REPO)}`);
+    // A save re-references that exact body: it is put again before its row lands...
+    await saveSet('c3', 'one');
+    // ...and a sweep that computed its live set BEFORE that row (an empty one
+    // here) must not take it: the re-put moved the body inside the grace.
+    await new ContentStore(db).gc(contentScope.guard(REPO), new Set(), sweepCutoff());
+    expect(await bodiesInPool(contentScope.guard(REPO))).toContain('one');
+    expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/core/one.yaml')).toBe('one');
   });
 
   it('the boot sweep covers every repository and every workspace', async () => {

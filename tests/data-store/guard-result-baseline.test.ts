@@ -1,9 +1,10 @@
 /**
  * The commit a repository's guard views anchor on: what the default branch's
- * CURRENT state was produced at. The newest scenario set's commit names it,
- * a report alone names it when no set was stored (a blocked corpus), a
- * version under another scope never does, and the purge takes it with
- * everything else.
+ * CURRENT state was produced at — the newest of its scenario sets and its
+ * reports, whichever was stored last. A generate stores both at one commit; a
+ * blocked generate stores a report alone, and that report is the state. A
+ * version under another scope never anchors, and the purge takes the anchor
+ * with everything else.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -71,26 +72,35 @@ describe('PgGuardStore guard baseline', () => {
     expect(await store.readGuardBaselineCommit(REPO, 'pr/1')).toBe('prhead1');
   });
 
-  it('anchors on the newest scenario set, by when it was stored', async () => {
+  it('anchors on whichever of the newest set and the newest report was stored last', async () => {
     await saveSet('main1');
     await tick();
     await saveSet('main2');
-    await tick();
-    // A report written later at another commit does not move the anchor: the
-    // set is what the views read, and its commit is the one they are labelled by.
-    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main3' }, report('2026-01-09T00:00:00Z'));
     expect(await store.readGuardBaselineCommit(REPO)).toBe('main2');
+    await tick();
+    // A blocked generate at a later commit stores its report and no set: that
+    // report is the current state, and the views must find it at the anchor.
+    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main3' }, { ...report('2026-01-09T00:00:00Z'), status: 'open-conflicts' });
+    expect(await store.readGuardBaselineCommit(REPO)).toBe('main3');
+    expect((await store.readGuardResult(REPO, { commitSha: 'main3' }))?.status).toBe('open-conflicts');
+    await tick();
+    await saveSet('main4');
+    expect(await store.readGuardBaselineCommit(REPO)).toBe('main4');
     expect(await store.readGuardBaselineCommit('other/repo')).toBeNull();
   });
 
-  it('a rollback moves the anchor to the restored version’s commit', async () => {
+  it('a rollback moves the anchor to the restored version’s commit, and the report there is its pair', async () => {
     await saveSet('main1');
+    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main1' }, report('2026-01-01T00:00:00Z'));
     await tick();
     await saveSet('main2');
+    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main2' }, report('2026-01-02T00:00:00Z'));
     const [, older] = await store.listGuardVersions(REPO, 'scenarios');
     await tick();
     await store.restoreGuardScenarioSet(REPO, older!.id);
     expect(await store.readGuardBaselineCommit(REPO)).toBe('main1');
+    expect((await store.readGuardResult(REPO, { commitSha: 'main1' }))?.generatedAt).toBe('2026-01-01T00:00:00Z');
+    expect((await store.readGuardResult(REPO))?.generatedAt).toBe('2026-01-01T00:00:00Z');
   });
 
   it('falls back to the newest report when no set was ever stored', async () => {

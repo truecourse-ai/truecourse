@@ -38,7 +38,7 @@ import type { RepoRef, VersionAt, VersionProvenance } from './repo-ref.js';
 // home for store scope handles) and re-exported here so guard callers share one
 // definition — the same convention spec-store.ts follows.
 export type { RepoRef, VersionAt, VersionProvenance } from './repo-ref.js';
-export { DEFAULT_SCOPE } from './repo-ref.js';
+export { DEFAULT_SCOPE, versionAt } from './repo-ref.js';
 
 /** How wide a history read is: one scope's trend (the default branch's unless
  *  named) or every stored run of every scope. */
@@ -149,10 +149,11 @@ export interface GuardStore {
     provenance?: VersionProvenance,
   ): Promise<void>;
   /**
-   * The commit the scope's CURRENT state was produced at: the newest scenario
-   * set's, else — for a scope whose generate stored a report and no set — the
-   * newest report's. `null` when it holds neither. The repo-level guard views
-   * anchor on it: it names the set they read.
+   * The commit the scope's CURRENT state was produced at: the newest of its
+   * scenario sets and its reports, whichever was stored last — a generate
+   * stores both at one commit, a blocked generate a report alone. `null` when
+   * it holds neither. The repo-level guard views anchor on it: it names the
+   * set and the report they read.
    */
   readGuardBaselineCommit(repoKey: string, scope?: string): Promise<string | null>;
 

@@ -24,7 +24,7 @@ import type {
 } from '@truecourse/core/lib/spec-store';
 import { ContentStore, contentScope } from './content-store.js';
 import { iso } from './iso.js';
-import { newVersionId, sweepWorkspaceVersions } from './version-sweep.js';
+import { newVersionId, sweepWorkspaceSeries } from './version-sweep.js';
 
 /** The `docs` artifact: the scan's document snapshot, bodies by content sha. */
 interface SpecDocsManifest {
@@ -70,7 +70,7 @@ export class PgSpecStore implements SpecStore {
       sourceCommit: provenance.sourceCommit ?? null,
       createdAt: now.toISOString(),
     });
-    await sweepWorkspaceVersions(this.db, ref.workspaceOrgId);
+    await sweepWorkspaceSeries(this.db, ref.workspaceOrgId, scopeOf(ref), artifact);
   }
 
   async loadWorkspaceSpec<T = unknown>(

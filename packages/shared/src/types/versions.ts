@@ -31,6 +31,12 @@ export interface GuardVersion extends StoredVersion {
   commitSha: string;
   /** Files in a scenario set or a setup bundle; null on a report. */
   fileCount: number | null;
+  /**
+   * The version this one is a rollback's copy of, when it is one: a restored
+   * scenario set names the set it restored, and the report copied beside it
+   * names the report it was paired with. Null on a version a run produced.
+   */
+  restoredFrom: string | null;
 }
 
 /** The two workspace series. Decisions are a ledger people edit, not a series. */
