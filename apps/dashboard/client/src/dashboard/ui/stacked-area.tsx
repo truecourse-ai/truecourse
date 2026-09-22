@@ -44,6 +44,7 @@ export function StackedArea<K extends string>({
   controls,
   numbersAtRest = true,
   formatValue = (value) => String(value),
+  valueNote,
 }: {
   label: string;
   /** Bottom first: the first series sits on the baseline. */
@@ -61,6 +62,11 @@ export function StackedArea<K extends string>({
   numbersAtRest?: boolean;
   /** How a value READS — money, tokens. Plain numbers by default. */
   formatValue?: (value: number) => string;
+  /**
+   * What every value IS, when a word beside the number is not enough — `tokens
+   * (input + cached)`. Said once, after the date, whenever the values are.
+   */
+  valueNote?: string;
 }) {
   const [active, setActive] = useState<number | null>(null);
   const id = useId();
@@ -114,6 +120,7 @@ export function StackedArea<K extends string>({
         {(active !== null || numbersAtRest) && (
           <span className="text-[11px] tabular-nums text-muted-foreground" aria-live="polite">
             {dateWord(point.at)}
+            {valueNote && ` · ${valueNote}`}
           </span>
         )}
         <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -164,6 +171,7 @@ export function StackedArea<K extends string>({
         >
           <title id={`${id}-title`}>{label}</title>
           <desc id={`${id}-desc`}>
+            {valueNote && `${valueNote}. `}
             {points.map((p) => `${dateWord(p.at)}: ${series.map((s) => `${formatValue(p.values[s.key] ?? 0)} ${s.label.toLowerCase()}`).join(', ')}`).join('; ')}
           </desc>
           {/* Muted at rest, full colour under the pointer or keyboard focus:

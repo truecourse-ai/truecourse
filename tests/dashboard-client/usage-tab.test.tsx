@@ -5,7 +5,7 @@
  * the server folded, whose filter values the server faceted and whose period
  * the server resolved. What is asserted here is what the page DOES with that
  * answer — the trend it draws and the total beneath it, the runs list and what
- * a row opens, the measure the chart plots, and the control row,
+ * a row opens, the measure the chart plots and the token kinds it sums, and the control row,
  * whose every choice lands in the address and is read back from it.
  */
 
@@ -263,32 +263,54 @@ describe('Settings › Usage', () => {
     expect(address()).toBe('/agent/run_gen');
   });
 
-  it('plots the one measure picked, per job type, without asking the server again', async () => {
+  it('plots cost per job type, or the sum of the toggled token kinds, without asking the server again', async () => {
     const state = serve();
     renderUsage();
 
     const chart = await screen.findByRole('region', { name: 'Spend over time' });
     const measures = within(chart).getByRole('group', { name: 'Measure' });
-    // Four measures, no summed token count among them.
-    expect(within(measures).getAllByRole('button').map((b) => b.textContent)).toEqual([
-      'Cost',
-      'Input',
-      'Output',
-      'Cached',
-    ]);
+    // Two measures; the kinds are toggles of the Tokens measure, not measures.
+    expect(within(measures).getAllByRole('button').map((b) => b.textContent)).toEqual(['Cost', 'Tokens']);
+    expect(within(chart).queryByRole('group', { name: 'Token kinds' })).toBeNull();
     const plotted = () => within(chart).getByRole('img').querySelector('desc')!.textContent;
+    // Cost: one band per job type.
     expect(plotted()).toContain('Sep 15: $2.50 document scan, $10.00 flow generation');
 
     const before = state.calls.length;
-    await userEvent.click(within(measures).getByRole('button', { name: 'Output' }));
-    expect(within(measures).getByRole('button', { name: 'Output' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(within(measures).getByRole('button', { name: 'Tokens' }));
+    const kinds = within(chart).getByRole('group', { name: 'Token kinds' });
+    const kind = (name: string) => within(kinds).getByRole('button', { name });
+    expect(within(kinds).getAllByRole('button').map((b) => b.textContent)).toEqual(['Input', 'Output', 'Cached']);
+    // Every kind on by default: each job type's input + output + cached.
+    for (const name of ['Input', 'Output', 'Cached']) expect(kind(name)).toHaveAttribute('aria-pressed', 'true');
+    expect(plotted()).toContain('tokens (input + output + cached)');
+    expect(plotted()).toContain('Sep 15: 400.0K document scan, 1.6M flow generation');
+
+    // Turning a kind off takes it out of every band's sum.
+    await userEvent.click(kind('Output'));
+    expect(kind('Output')).toHaveAttribute('aria-pressed', 'false');
+    expect(plotted()).toContain('tokens (input + cached)');
+    expect(plotted()).toContain('Sep 15: 380.0K document scan, 1.4M flow generation');
+
+    await userEvent.click(kind('Input'));
+    expect(plotted()).toContain('Sep 15: 0 document scan, 800.0K flow generation');
+
+    // The last kind on stays on.
+    expect(kind('Cached')).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(kind('Cached'));
+    expect(kind('Cached')).toHaveAttribute('aria-pressed', 'true');
+    expect(plotted()).toContain('Sep 15: 0 document scan, 800.0K flow generation');
+
+    // Output alone fills the chart with output.
+    await userEvent.click(kind('Output'));
+    await userEvent.click(kind('Cached'));
+    expect(plotted()).toContain('tokens (output). ');
     expect(plotted()).toContain('Sep 15: 20.0K document scan, 200.0K flow generation');
 
-    await userEvent.click(within(measures).getByRole('button', { name: 'Input' }));
-    expect(plotted()).toContain('Sep 15: 380.0K document scan, 600.0K flow generation');
-
-    await userEvent.click(within(measures).getByRole('button', { name: 'Cached' }));
-    expect(plotted()).toContain('Sep 15: 0 document scan, 800.0K flow generation');
+    // Cost reads as it always has.
+    await userEvent.click(within(measures).getByRole('button', { name: 'Cost' }));
+    expect(within(chart).queryByRole('group', { name: 'Token kinds' })).toBeNull();
+    expect(plotted()).toContain('Sep 15: $2.50 document scan, $10.00 flow generation');
 
     // The period's total beneath stays what it is, each number said once.
     expect(screen.getByText('$12.50')).toBeInTheDocument();
@@ -316,7 +338,12 @@ describe('Settings › Usage', () => {
     expect(line).toHaveTextContent(/^1\.0M input · 200\.0K output$/);
     // Nor does the chart offer to plot a cache that held nothing.
     const measures = screen.getByRole('group', { name: 'Measure' });
-    expect(within(measures).queryByRole('button', { name: 'Cached' })).toBeNull();
+    await userEvent.click(within(measures).getByRole('button', { name: 'Tokens' }));
+    const kinds = screen.getByRole('group', { name: 'Token kinds' });
+    expect(within(kinds).getAllByRole('button').map((b) => b.textContent)).toEqual(['Input', 'Output']);
+    expect(screen.getByRole('img', { name: 'Spend over time' }).querySelector('desc')!.textContent).toContain(
+      'tokens (input + output)',
+    );
   });
 
   it('puts the period in the address and reads it back', async () => {

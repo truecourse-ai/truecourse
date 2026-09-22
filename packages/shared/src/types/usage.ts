@@ -105,9 +105,6 @@ export interface UsageAmount {
   cached: number;
 }
 
-/** What the trend can plot, one number per job type per bucket. */
-export type UsageMeasure = keyof UsageAmount;
-
 /** One point of the trend: a day, or the week that starts on it. */
 export interface UsageSeriesPoint extends UsageAmount {
   /** The bucket's first day, `YYYY-MM-DD` where the reader is. */
