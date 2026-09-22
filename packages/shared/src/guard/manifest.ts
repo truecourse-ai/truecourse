@@ -217,6 +217,13 @@ export const GuardManifestFlowSchema = z
      * `guard generate` prunes it and its gaps die with it.
      */
     orphaned: z.boolean().optional(),
+    /**
+     * Why the flow left the corpus, when synthesis said: the reconciliation's
+     * retirement reason ("the claims no longer describe a sign-up step"), written
+     * with the `orphaned` mark so every reader can say why instead of only that.
+     * Absent on an entry orphaned before the reason was recorded.
+     */
+    orphanedReason: z.string().min(1).optional(),
   })
   .strict()
 export type GuardManifestFlow = z.infer<typeof GuardManifestFlowSchema>

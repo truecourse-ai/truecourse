@@ -1059,6 +1059,8 @@ export const GuardFlowDetailSchema = z
      * payload's answer to "why is this detail hollow".
      */
     orphaned: z.boolean().optional(),
+    /** Why it left the corpus, when the reconciliation that retired it said. */
+    orphanedReason: z.string().optional(),
     generatedAt: z.string().nullable(),
     runId: z.string().nullable(),
     ranAt: z.string().nullable(),

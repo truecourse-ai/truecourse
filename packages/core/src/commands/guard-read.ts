@@ -516,7 +516,12 @@ export async function readGuardRunFlowSummary(
   const view = await loadFlowView(repoKey, await runSummaryCommit(repoKey, latest), latest)
   if (!view) return null
   const summary: GuardRunFlowSummary = {}
+  // Only the flows the repository HAS: a manifest entry kept for its stale
+  // scenarios after synthesis retired the flow is history, not coverage, and
+  // counting it would carry every corpus the repository ever had into the
+  // trend. The run that last exercised it keeps its own summary.
   for (const flowId of allFlowIds(view)) {
+    if (flowOrphaned(flowId, view.join)) continue
     summary[flowId] = guardFlowPlainStatus(flowListItem(flowId, view))
   }
   return Object.keys(summary).length > 0 ? summary : null
@@ -1883,8 +1888,12 @@ export async function readGuardFlowDetail(
     errors: flowErrors(flowId, join, view.result),
     // No goal and no milestones above is a FACT about an orphaned flow, not a hole:
     // the corpus it was derived from no longer carries it. The flag lets the reader
-    // be told that, in one sentence, where the goal would have been.
+    // be told that, in one sentence, where the goal would have been — and the
+    // reason, when the reconciliation that retired it left one.
     ...(flowOrphaned(flowId, join) ? { orphaned: true } : {}),
+    ...(flowOrphaned(flowId, join) && join.manifestFlows.get(flowId)?.orphanedReason
+      ? { orphanedReason: join.manifestFlows.get(flowId)!.orphanedReason }
+      : {}),
     generatedAt: view.result?.generatedAt ?? null,
     runId: view.latest?.run.runId ?? null,
     ranAt: view.latest?.run.ranAt ?? null,

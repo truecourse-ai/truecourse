@@ -700,6 +700,7 @@ export function GuardFlowDetail({
           detail.orphaned && (
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
               {GUARD_UNDERIVED_SENTENCE}
+              {detail.orphanedReason && ` Retired: ${detail.orphanedReason}.`}
             </p>
           )
         )}
