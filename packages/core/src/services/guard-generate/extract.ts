@@ -32,6 +32,7 @@ import {
   type GuardPrerequisiteTarget,
 } from '@truecourse/shared'
 import {
+  carryPriorCaseIdentity,
   mergeSettledSections,
   priorClaimsToAccount,
   reconciliationProblems,
@@ -420,7 +421,7 @@ function checkedExtractionSchema(doc: GuardDoc, prerequisiteTargets: readonly Gu
     // so the draft is snapped once here for the merge; the seam's fold re-snaps
     // the whole outcome anyway.
     const snapped = snapExtraction(canonical, doc.sections)
-    return mergeSettledSections(snapped, prior)
+    return mergeSettledSections({ ...snapped, claims: carryPriorCaseIdentity(snapped, prior) }, prior)
   })
 }
 

@@ -118,6 +118,7 @@ export {
   isSystemicSessionLoss,
   reconciliationProblems,
   mergeSettledSections,
+  carryPriorCaseIdentity,
   priorClaimsToAccount,
   type DocClaims,
   type ExtractResult,
