@@ -68,7 +68,12 @@ import { createClaudeCodeSessionDriver } from '../services/llm/session-driver.js
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
-import { createGuardGenerateLeafSessions } from '../services/guard-generate/leaf-sessions.js';
+import {
+  CLAIM_DIFF_SESSION_KIND,
+  MATCH_SESSION_KIND,
+  WORLD_CLASSIFY_SESSION_KIND,
+  createGuardGenerateLeafSessions,
+} from '../services/guard-generate/leaf-sessions.js';
 import { createRecipeProposeSession } from '../services/guard-setup/recipe-propose.js';
 import {
   createGuardGenerateSessionSeams,
@@ -159,16 +164,19 @@ export const GUARD_GENERATE_STEPS = [
  * Which session kinds do each step's work — stamped onto the run record's
  * checklist so a surface reading run.json can file every session under its
  * step. The fidelity judge is a child the flow worker dispatches, so it rides
- * the author step with its parent. A step listed empty is deterministic (or a
- * direct LLM stage, like `match`) and owns no session.
+ * the author step with its parent; the world classification decides how the
+ * workers are scheduled, so it rides there too; the claim-diff gate runs
+ * before extraction and rides the extract step. A step listed empty is
+ * deterministic and owns no session. A kind no step claims is shown under its
+ * own raw id, after the list.
  */
 const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   index: [],
-  extract: [EXTRACT_SESSION_KIND],
+  extract: [CLAIM_DIFF_SESSION_KIND, EXTRACT_SESSION_KIND],
   interfaces: [],
   flows: [FLOWS_SESSION_KIND],
-  match: [],
-  author: [FLOW_WORKER_SESSION_KIND, FIDELITY_SESSION_KIND],
+  match: [MATCH_SESSION_KIND],
+  author: [WORLD_CLASSIFY_SESSION_KIND, FLOW_WORKER_SESSION_KIND, FIDELITY_SESSION_KIND],
   validate: [],
 };
 

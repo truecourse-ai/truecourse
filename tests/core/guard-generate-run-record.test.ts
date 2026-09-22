@@ -83,11 +83,11 @@ describe('guard generate run record', () => {
     // run.json files every session under its step instead of after the list.
     expect(checklist?.items.map((i) => [i.key, i.sessionKinds])).toEqual([
       ['index', []],
-      ['extract', ['guard-generate.extract']],
+      ['extract', ['guard-generate.claim-diff', 'guard-generate.extract']],
       ['interfaces', []],
       ['flows', ['guard-generate.flows']],
-      ['match', []],
-      ['author', ['guard-generate.flow-worker', 'guard-generate.fidelity']],
+      ['match', ['guard-generate.match']],
+      ['author', ['guard-generate.world-classify', 'guard-generate.flow-worker', 'guard-generate.fidelity']],
       ['validate', []],
     ]);
   });
