@@ -150,7 +150,8 @@ export function createRepoGuardRunTask(
         const result = await withCredits(meter, () =>
           runGuard(tree.dir, {
             tracker: mirrorTracker(ctx, GUARD_RUN_STEPS),
-            ...(llm ? { judgeDriver: llm.driver(), sessionsKey: repoFullName } : {}),
+            ...(llm ? { judgeDriver: llm.driver(), transportMode: llm.mode, sessionsKey: repoFullName } : {}),
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
           }),
         );
         // A stop the user asked for: the harness settles the row cancelled, and

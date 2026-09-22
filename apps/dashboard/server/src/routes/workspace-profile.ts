@@ -10,10 +10,13 @@
  *
  * The sentence is not decoration. It is the whole subject the Document scan
  * attributes a document against, so saving a new one re-judges every document
- * in the workspace once (it is part of the curation cache key).
+ * in the workspace once (it is part of the curation cache key) — and moves the
+ * workspace's changed-at stamp, so Context's Scan button shows the corpus as
+ * behind until that scan runs.
  */
 
 import { Router, type Request, type Response } from 'express';
+import { markContextChanged } from '@truecourse/core/lib/context-store';
 import {
   readWorkspaceProfile,
   saveWorkspaceProfile,
@@ -53,6 +56,9 @@ export function createWorkspaceProfileRouter(): Router {
       return;
     }
     const saved = await saveWorkspaceProfile(org, description);
+    // Every kept/skipped verdict was formed against the old sentence: the
+    // corpus is stale from this moment, whatever else changed.
+    await markContextChanged(org, saved.updatedAt);
     const body: WorkspaceProfileResponse = {
       description: saved.description,
       updatedAt: saved.updatedAt,

@@ -25,6 +25,12 @@ import {
   resetWorkspaceProfiles,
   type MemoryWorkspaceProfiles,
 } from '../helpers/workspace-profile';
+import { memoryContextStore } from '../helpers/memory-context-store';
+import {
+  contextChangedAt,
+  resetContextStore,
+  setContextStore,
+} from '@truecourse/core/lib/context-store';
 
 /** Local mode issues no invite links; the store is handed over and never read. */
 const deps = { inviteLinks: new MemoryInviteLinkStore(), manyWorkspaces: false };
@@ -208,6 +214,11 @@ describe('the local workspace saying what its product is', () => {
 
   beforeEach(() => {
     profiles = installWorkspaceProfiles([]);
+    setContextStore(memoryContextStore());
+  });
+
+  afterEach(() => {
+    resetContextStore();
   });
 
   it('reads as not set on a fresh checkout, and is set from the one page every mode has', async () => {
@@ -215,6 +226,7 @@ describe('the local workspace saying what its product is', () => {
 
     const before = await request(app).get('/api/workspace/profile').expect(200);
     expect(before.body).toEqual({ description: null, updatedAt: null });
+    expect(await contextChangedAt(LOCAL_ORG_ID)).toBeNull();
 
     const saved = await request(app)
       .put('/api/workspace/profile')
@@ -224,6 +236,9 @@ describe('the local workspace saying what its product is', () => {
     // scan's identity block carries.
     expect(saved.body.description).toBe('Orders API, a fulfilment service for online shops.');
     expect(saved.body.updatedAt).toBeTruthy();
+    // The sentence is part of every curation verdict's key, so the corpus is
+    // stale from this moment: the workspace's changed-at stamp moves with it.
+    expect(await contextChangedAt(LOCAL_ORG_ID)).toBe(saved.body.updatedAt);
 
     // It is the machine's ONE implicit workspace that holds it.
     expect(profiles.all()).toEqual([

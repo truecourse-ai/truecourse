@@ -196,7 +196,7 @@ export function createRepoGuardGenerateTask(
               const driver = llm.driver();
               ({ guard } = await runGenerate(tree.dir, {
                 driver,
-                        transportMode: llm.mode,
+                transportMode: llm.mode,
                 attribution: driver.attribution,
                 sessionsKey: repoFullName,
                 sessionRun: activityRun,

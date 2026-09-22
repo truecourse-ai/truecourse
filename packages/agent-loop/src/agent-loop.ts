@@ -82,6 +82,18 @@ export interface AgentLoopInput<TOutcome> {
    */
   resume?: { of: string; cursor?: unknown };
   signal?: AbortSignal;
+  /**
+   * TWO CLOCKS, both optional — a session with neither is bounded by turns
+   * and tokens only. `stallTimeoutMs`: no event from the driver for this long
+   * while a turn is in flight stops the session as a stalled provider stream.
+   * `timeoutMs`: the session's whole wall clock. Either stop is an abort the
+   * driver sees through its signal, recorded as a transport failure naming
+   * the clock. The stall clock is re-armed by EVERY driver event and by
+   * nothing else, so it fits a session whose turns are model-only: a tool
+   * that runs for minutes emits nothing while it runs.
+   */
+  stallTimeoutMs?: number;
+  timeoutMs?: number;
   /** Clock + id mint, injectable for tests. */
   now?: () => string;
   mintSessionId?: () => string;
@@ -250,8 +262,19 @@ function startSession<TOutcome>(
     else pendingSteers.push(message);
   };
 
+  // The two clocks (see `AgentLoopInput`). The stall clock is armed for the
+  // life of each driver run and re-armed by every event it emits; the ceiling
+  // runs once for the whole session. Either firing records why under
+  // `stoppedFor`, which the abort failure then names instead of the caller.
+  let stoppedFor: string | undefined;
+  let stallTimer: ReturnType<typeof setTimeout> | undefined;
+  let ceilingTimer: ReturnType<typeof setTimeout> | undefined;
+  let rearmStall: () => void = () => {};
+  const disarmStall = (): void => clearTimeout(stallTimer);
+
   const track = (body: SessionEventBody & { raw?: RawPayload }): void => {
     append(body);
+    rearmStall();
     switch (body.type) {
       case 'assistant-turn': {
         turns += 1;
@@ -359,6 +382,28 @@ function startSession<TOutcome>(
     if (input.signal?.aborted) onAbort();
     else input.signal?.addEventListener('abort', onAbort, { once: true });
 
+    // A clock firing is the same abort, under its own name. One that fires
+    // after the caller already aborted changes nothing.
+    const stopFor = (detail: string): void => {
+      if (controller.signal.aborted) return;
+      stoppedFor = detail;
+      onAbort();
+    };
+    const stallMs = input.stallTimeoutMs;
+    if (stallMs) {
+      rearmStall = () => {
+        clearTimeout(stallTimer);
+        stallTimer = setTimeout(
+          () => stopFor(`stalled: no event from the driver for ${stallMs}ms`),
+          stallMs,
+        );
+      };
+    }
+    if (input.timeoutMs) {
+      const ceilingMs = input.timeoutMs;
+      ceilingTimer = setTimeout(() => stopFor(`timed out after ${ceilingMs}ms`), ceilingMs);
+    }
+
     // The shell validates args against each tool's input schema before its
     // `execute` runs, in either driver, and owns the ToolContext (drivers
     // pass a ctx of their own; it is ignored).
@@ -436,6 +481,7 @@ function startSession<TOutcome>(
       initialMessages: readonly string[] = input.initialMessages,
     ): Promise<DriverResult> => {
       try {
+        rearmStall();
         handle = driver.runSession({
           def: wrappedDef,
           initialMessages,
@@ -462,6 +508,8 @@ function startSession<TOutcome>(
           retryability: 'none',
         };
         return { kind: 'failure', failure };
+      } finally {
+        disarmStall();
       }
     };
 
@@ -563,7 +611,7 @@ function startSession<TOutcome>(
       if (interruptCause !== undefined || ++outcomeRefusals >
         def.budget.turns * (def.budget.maxResumes + 1) + WRAP_UP_TURNS) {
         if (interruptCause === 'context') return fail({ kind: 'context-exhausted', retryability: 'none' }, result.resumeCursor);
-        if (interruptCause === 'aborted') return fail({ kind: 'transport', detail: 'aborted by caller', class: 'unknown', retryability: 'none' }, result.resumeCursor);
+        if (interruptCause === 'aborted') return fail({ kind: 'transport', detail: stoppedFor ?? 'aborted by caller', class: 'unknown', retryability: 'none' }, result.resumeCursor);
         return fail({ kind: 'budget-exhausted', notReached: correction, retryability: 'none' }, result.resumeCursor);
       }
       const events = [...priorEvents, ...persistence.readEvents(sessionId)];
@@ -614,7 +662,7 @@ function startSession<TOutcome>(
     }
     if (interruptCause === 'aborted') {
       return fail(
-        { kind: 'transport', detail: 'aborted by caller', class: 'unknown', retryability: 'none' },
+        { kind: 'transport', detail: stoppedFor ?? 'aborted by caller', class: 'unknown', retryability: 'none' },
         result.resumeCursor,
       );
     }
@@ -634,7 +682,11 @@ function startSession<TOutcome>(
   })();
 
   return {
-    outcome: outcome.finally(() => persistence.flush?.()),
+    outcome: outcome.finally(() => {
+      disarmStall();
+      clearTimeout(ceilingTimer);
+      persistence.flush?.();
+    }),
     steer: (message) => handle?.steer(message),
     status: () => status,
   };

@@ -13,9 +13,18 @@
  * APPENDED rather than folded in — so the prompt fingerprint each stage caches
  * under still names the prompt it always did, and a repo's warm cache survives
  * the move.
+ *
+ * ONE RE-ASK PER LEAF, AND IT IS THE ENGINE'S WHERE THE ENGINE HAS ONE. The
+ * match keeps its own corrective loop (it quotes the invalid answer back with
+ * the catalog issues it found), so its session takes exactly one turn and
+ * hands the RAW answer over, schema-valid or not — a shell repair stacked
+ * under it would double the spend and hide the very output the engine quotes.
+ * The claim diff and the world classification have no loop of their own, so
+ * theirs is the shell's single schema repair.
  */
 
 import type { SessionDriver, SessionPersistence } from '@truecourse/agent-loop'
+import { z } from 'zod'
 import {
   CLAIM_DIFF_SYSTEM_PROMPT,
   ClaimDiffSchema,
@@ -29,7 +38,6 @@ import {
   type ClaimDiff,
   type ClaimDiffRunner,
   type MatchRunner,
-  type RealizationMatch,
   type WorldClassify,
   type WorldClassifyRunner,
 } from '@truecourse/guard-generator'
@@ -77,15 +85,21 @@ export function createGuardGenerateLeafSessions(opts: CreateLeafSessionsOptions)
 
   return {
     matchRunner: (ctx) =>
-      match.ask<RealizationMatch>({
+      match.ask<unknown>({
         session: {
           kind: MATCH_SESSION_KIND,
           title: 'Realization match',
           systemPrompt: withOutcomeDelivery(MATCH_SYSTEM_PROMPT),
-          outcomeSchema: RealizationMatchSchema,
+          // The shape the model is asked for, and the raw answer handed back:
+          // the engine validates and re-asks itself (see above).
+          outcomeSchema: z.unknown(),
+          outcomeInputSchema: RealizationMatchSchema,
+          reasks: 0,
           tokenCeiling: 200_000,
         },
-        workItem: `${ctx.flow.id}:${ctx.surface}`,
+        // A re-ask after an invalid answer is a separate ask about the same
+        // pair — the work item says which, so the run reads honestly.
+        workItem: `${ctx.flow.id}:${ctx.surface}${ctx.correction ? ' (re-ask)' : ''}`,
         briefing: buildMatchUserPrompt(ctx),
       }),
 

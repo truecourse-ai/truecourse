@@ -854,8 +854,12 @@ export interface GuardRunInProcessOptions {
    * by default) until its cost/value is settled.
    */
   judgeDriver?: SessionDriver;
+  /** The mode that driver runs in — what the verdict's run record states. `api` unless told. */
+  transportMode?: LlmTransportMode;
   /** Where that record is keyed, when `repoRoot` is an ephemeral clone. */
   sessionsKey?: string;
+  /** The run's cancel: a verdict session in flight is cut short with it. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -894,7 +898,10 @@ export async function guardRunInProcess(
 
   // Failure-only, fail-soft, and unable to change a verdict — see the doc above.
   // The verdict's run record is LAZY: a run whose web steps all pass never
-  // creates one, which is the overwhelming majority of runs.
+  // creates one, which is the overwhelming majority of runs. Scenarios settle
+  // in parallel, so two failing steps can ask in the same tick: the opener is
+  // assigned synchronously (nothing is awaited before the `??=` lands) and both
+  // share the one record.
   const judgeRecord: { opened: Promise<SessionRunStore> | null } = { opened: null };
   const acquireJudgeSession = async (): Promise<{
     driver: SessionDriver;
@@ -904,78 +911,98 @@ export async function guardRunInProcess(
     if (!driver) throw new Error('this run has no driver to judge a screenshot on');
     judgeRecord.opened ??= createStoredSessionRun(options.sessionsKey ?? repoRoot, {
       command: 'guard-run',
-      gitRef: await resolveCommitSha(repoRoot),
+      gitRef: commit ?? '',
     }).then((store) => {
-      store.setLlm({ mode: 'api', ...driver.attribution });
+      store.setLlm({ mode: options.transportMode ?? 'api', ...driver.attribution });
       return store;
     });
     return { driver, persistence: (await judgeRecord.opened).persistence };
   };
   const visualJudge =
     options.visualJudge ??
-    (options.judgeDriver ? createGuardVisualJudge(repoRoot, { acquire: acquireJudgeSession }) : undefined);
+    (options.judgeDriver
+      ? createGuardVisualJudge(repoRoot, {
+          acquire: acquireJudgeSession,
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
 
-  const result = mergeLoadErrors(
-    await getGuardExecutor()({
-      checkoutDir: repoRoot,
-      recipe: loaded.recipe,
-      scenarios: selected,
-      // The `scenario` filter was applied HERE, so the run has to be told what it
-      // filtered out: a scoped run merges into the recorded board, and only the ids
-      // that left the corpus may drop off it.
-      corpusIds,
-      branch,
-      commit,
-      persist: true,
-      ...(visualJudge ? { visualJudge } : {}),
-      onPhase: (phase, total) => {
-        if (phase === 'build') tracker?.start('build');
-        else {
-          tracker?.done('build');
-          tracker?.start('run', `0/${total} scenarios`);
-        }
-      },
-      onScenarioSettled: (done, total, scenarioResult) => {
-        tracker?.detail('run', `${done}/${total} scenarios`);
-        options.onScenarioResult?.(scenarioResult);
-      },
-    }),
-    loadErrors,
-  );
-  if (result.status === 'ok') {
-    const n = result.latest.summary.total;
-    tracker?.done('run', `${n} scenario${n === 1 ? '' : 's'}`);
-  } else if (result.status === 'build-failed') {
-    const tail = buildOutputTail(result.build.output, 3).split('\n').join(' | ').slice(0, 300);
-    tracker?.error('build', `Build failed (\`${result.build.command}\`)${result.build.timedOut ? ' — timed out' : ''}${tail ? `: ${tail}` : ''}`);
-  } else if (result.status === 'entry-preflight-failed') {
-    // Build succeeded but the entry can't start — the run never began; mark the build
-    // phase (where the entry is prepared) errored so the popup shows the sticky error.
-    tracker?.error('build', `Entry failed to start: \`${result.preflight.entry}\` (rebuild via \`${result.buildCommand}\`)`);
-  } else if (result.status === 'missing-external-env') {
-    // A declared external API account is only partly configured — resolved in the
-    // build phase, before any server boots; same treatment as a missing credential env.
-    tracker?.error('build', result.message);
-  } else if (result.status === 'missing-credential-env') {
-    // A declared api credential's env var is unset at run start — resolved in the
-    // build phase, before any server boots; mark it errored so the spinner doesn't hang.
-    tracker?.error('build', result.message);
-  } else if (result.status === 'seed-failed') {
-    // The api seed command failed — runs in the build phase (after services.up,
-    // before any server boots); mark it errored so the spinner doesn't hang.
-    tracker?.error('build', result.message);
-  } else if (result.status === 'credential-request-failed') {
-    // A `fromRequest` credential's login failed — runs against the preflight boot,
-    // still inside the build phase; same treatment as a failed seed.
-    tracker?.error('build', result.message);
-  }
   // The verdict record, when any verdict was asked for: the run it belongs to
-  // is over either way, so it is closed on the run's own outcome.
-  if (judgeRecord.opened) {
+  // is over either way — settled, thrown or cancelled — so it is closed on
+  // EVERY exit rather than left `running` for the boot sweep to find.
+  const closeJudgeRecord = async (status: 'completed' | 'failed'): Promise<void> => {
+    if (!judgeRecord.opened) return;
     const store = await judgeRecord.opened.catch(() => null);
-    store?.finish(result.status === 'ok' ? 'completed' : 'failed');
+    store?.finish(status);
+  };
+
+  let result: RunGuardResult;
+  try {
+    result = await runScenarios();
+  } catch (err) {
+    await closeJudgeRecord('failed');
+    throw err;
   }
+  await closeJudgeRecord(result.status === 'ok' ? 'completed' : 'failed');
   return result;
+
+  async function runScenarios(): Promise<RunGuardResult> {
+    const result = mergeLoadErrors(
+      await getGuardExecutor()({
+        checkoutDir: repoRoot,
+        recipe: loaded.recipe,
+        scenarios: selected,
+        // The `scenario` filter was applied HERE, so the run has to be told what it
+        // filtered out: a scoped run merges into the recorded board, and only the ids
+        // that left the corpus may drop off it.
+        corpusIds,
+        branch,
+        commit,
+        persist: true,
+        ...(visualJudge ? { visualJudge } : {}),
+        onPhase: (phase, total) => {
+          if (phase === 'build') tracker?.start('build');
+          else {
+            tracker?.done('build');
+            tracker?.start('run', `0/${total} scenarios`);
+          }
+        },
+        onScenarioSettled: (done, total, scenarioResult) => {
+          tracker?.detail('run', `${done}/${total} scenarios`);
+          options.onScenarioResult?.(scenarioResult);
+        },
+      }),
+      loadErrors,
+    );
+    if (result.status === 'ok') {
+      const n = result.latest.summary.total;
+      tracker?.done('run', `${n} scenario${n === 1 ? '' : 's'}`);
+    } else if (result.status === 'build-failed') {
+      const tail = buildOutputTail(result.build.output, 3).split('\n').join(' | ').slice(0, 300);
+      tracker?.error('build', `Build failed (\`${result.build.command}\`)${result.build.timedOut ? ' — timed out' : ''}${tail ? `: ${tail}` : ''}`);
+    } else if (result.status === 'entry-preflight-failed') {
+      // Build succeeded but the entry can't start — the run never began; mark the build
+      // phase (where the entry is prepared) errored so the popup shows the sticky error.
+      tracker?.error('build', `Entry failed to start: \`${result.preflight.entry}\` (rebuild via \`${result.buildCommand}\`)`);
+    } else if (result.status === 'missing-external-env') {
+      // A declared external API account is only partly configured — resolved in the
+      // build phase, before any server boots; same treatment as a missing credential env.
+      tracker?.error('build', result.message);
+    } else if (result.status === 'missing-credential-env') {
+      // A declared api credential's env var is unset at run start — resolved in the
+      // build phase, before any server boots; mark it errored so the spinner doesn't hang.
+      tracker?.error('build', result.message);
+    } else if (result.status === 'seed-failed') {
+      // The api seed command failed — runs in the build phase (after services.up,
+      // before any server boots); mark it errored so the spinner doesn't hang.
+      tracker?.error('build', result.message);
+    } else if (result.status === 'credential-request-failed') {
+      // A `fromRequest` credential's login failed — runs against the preflight boot,
+      // still inside the build phase; same treatment as a failed seed.
+      tracker?.error('build', result.message);
+    }
+    return result;
+  }
 }
 
 /**

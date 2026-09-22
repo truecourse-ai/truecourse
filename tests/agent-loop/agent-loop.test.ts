@@ -1041,6 +1041,116 @@ describe('runAgentLoop abort', () => {
 });
 
 // ---------------------------------------------------------------------------
+// the two clocks
+// ---------------------------------------------------------------------------
+
+describe('runAgentLoop clocks', () => {
+  const untilAborted = (signal: AbortSignal): Promise<void> =>
+    new Promise((resolve) => {
+      if (signal.aborted) resolve();
+      else signal.addEventListener('abort', () => resolve(), { once: true });
+    });
+
+  it('stops a session whose driver goes quiet, naming the stall', async () => {
+    const { driver } = fakeDriver(async ({ input }) => {
+      await untilAborted(input.signal);
+      return endedWithoutOutcome();
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: makeDef(),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+      stallTimeoutMs: 20,
+    }).outcome;
+
+    expect(outcome.status).toBe('failed');
+    if (outcome.status !== 'failed') throw new Error('unreachable');
+    expect(outcome.failure).toMatchObject({
+      kind: 'transport',
+      detail: 'stalled: no event from the driver for 20ms',
+    });
+  });
+
+  it('every driver event re-arms the stall clock', async () => {
+    const { driver } = fakeDriver(async ({ emit }) => {
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 12));
+        await emit({ type: 'assistant-turn', text: `turn ${i}`, usage: usage(1) });
+      }
+      return { kind: 'outcome', value: { verdict: 'kept' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: makeDef(),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+      stallTimeoutMs: 40,
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+  });
+
+  it('stops a session at its wall clock however lively the stream, naming the ceiling', async () => {
+    const { driver } = fakeDriver(async ({ input, emit }) => {
+      while (!input.signal.aborted) {
+        await new Promise((r) => setTimeout(r, 5));
+        await emit({ type: 'assistant-turn', text: 'still going', usage: usage(1) });
+      }
+      return endedWithoutOutcome();
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: makeDef({ budget: { turns: 1000, maxResumes: 0, tokenCeiling: 1_000_000 } }),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+      stallTimeoutMs: 1000,
+      timeoutMs: 40,
+    }).outcome;
+
+    expect(outcome.status).toBe('failed');
+    if (outcome.status !== 'failed') throw new Error('unreachable');
+    expect(outcome.failure).toMatchObject({ kind: 'transport', detail: 'timed out after 40ms' });
+  });
+
+  it('a caller abort keeps its own name even when a clock fires afterwards', async () => {
+    const { driver } = fakeDriver(async ({ input }) => {
+      await untilAborted(input.signal);
+      // Linger past the stall clock before settling.
+      await new Promise((r) => setTimeout(r, 30));
+      return endedWithoutOutcome();
+    });
+    const { persistence } = memoryPersistence();
+    const controller = new AbortController();
+    const handle = runAgentLoop({
+      def: makeDef(),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+      signal: controller.signal,
+      stallTimeoutMs: 10,
+    });
+    await tick();
+    controller.abort();
+    const outcome = await handle.outcome;
+
+    if (outcome.status !== 'failed') throw new Error('unreachable');
+    expect(outcome.failure).toMatchObject({ kind: 'transport', detail: 'aborted by caller' });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // questions + steering
 // ---------------------------------------------------------------------------
 

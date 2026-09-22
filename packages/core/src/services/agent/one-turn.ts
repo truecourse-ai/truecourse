@@ -13,6 +13,11 @@
  * (`outcomeSchemaRepairs` for the shape, `validateOutcome` for the substance).
  * It never resumes: a leaf question that died is asked again from scratch by
  * whoever asked it, which is what its cache entry being absent already means.
+ *
+ * And it is bounded in TIME as well as turns: a provider stream that goes
+ * quiet mid-answer is stopped by the stall clock, and the whole session by its
+ * ceiling (`config/llm-timeouts.ts`) — the one kind of session with nothing
+ * else that could take long.
  */
 
 import {
@@ -25,6 +30,7 @@ import {
   type SessionPersistence,
 } from '@truecourse/agent-loop'
 import type { z } from 'zod'
+import { resolveOneTurnTimeoutMs, resolveStallTimeoutMs } from '../../config/llm-timeouts.js'
 
 /**
  * How a one-turn session DELIVERS the answer an output-only stage prompt asks
@@ -98,6 +104,9 @@ export interface OneTurnRun<TOutcome> {
   persistence: SessionPersistence
   sessionId?: string
   signal?: AbortSignal
+  /** The two clocks, when a caller has reason to set its own; the environment's otherwise. */
+  stallTimeoutMs?: number
+  timeoutMs?: number
   mintSessionId?: () => string
   now?: () => string
 }
@@ -114,6 +123,8 @@ export function runOneTurnSession<TOutcome>(run: OneTurnRun<TOutcome>): Promise<
     persistence: run.persistence,
     sessionId: run.sessionId ?? mint(),
     ...(run.signal ? { signal: run.signal } : {}),
+    stallTimeoutMs: run.stallTimeoutMs ?? resolveStallTimeoutMs(),
+    timeoutMs: run.timeoutMs ?? resolveOneTurnTimeoutMs(),
     ...(run.mintSessionId ? { mintSessionId: run.mintSessionId } : {}),
     ...(run.now ? { now: run.now } : {}),
   }).outcome

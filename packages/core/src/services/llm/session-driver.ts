@@ -21,7 +21,7 @@ import {
 } from '@truecourse/llm-claude-agent';
 import type { SessionDriver, SessionLlm } from '@truecourse/agent-loop';
 import { resolveClaudeBinary } from '@truecourse/shared';
-import { resolveModel } from '../../config/llm-models.js';
+import { resolveFallbackModel, resolveModel } from '../../config/llm-models.js';
 import type { LlmApiConfig, LlmTransportMode } from './provider-config.js';
 import { buildProviderConfig, pricingFor } from './provider.js';
 
@@ -63,14 +63,18 @@ export function createApiSessionDriverFor(
 /**
  * The claude-code session driver — the Agent SDK on the `claude` login of
  * whoever runs this process. Operator mode
- * (`TRUECOURSE_LLM_TRANSPORT=claude-code`) hands it to every run.
+ * (`TRUECOURSE_LLM_TRANSPORT=claude-code`) hands it to every run, on the one
+ * operator model, with `TRUECOURSE_FALLBACK_MODEL` as the retry when that
+ * model is overloaded.
  */
 export function createClaudeCodeSessionDriver(
   opts: SessionDriverOptions = {},
 ): ConfiguredSessionDriver {
+  const fallbackModel = resolveFallbackModel();
   const driver = createClaudeAgentSessionDriver({
     pathToClaudeCodeExecutable: resolveClaudeBinary(),
     model: resolveModel(),
+    ...(fallbackModel ? { fallbackModel } : {}),
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
     ...(opts.providerStateDir ? { sessionStore: providerSessionStore(opts.providerStateDir) } : {}),
   });

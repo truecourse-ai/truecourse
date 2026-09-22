@@ -13,7 +13,10 @@ import type { OrganizationMembership, User } from '@workos-inc/node';
 import type { AuthResult, AuthUser, AuthVerifier } from '@truecourse/shared';
 import { BAD_WORKSPACE_DESCRIPTION, normalizeWorkspaceDescription } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
-import { saveWorkspaceProfile } from '@truecourse/core/lib/workspace-profile-store';
+import {
+  readWorkspaceProfile,
+  saveWorkspaceProfile,
+} from '@truecourse/core/lib/workspace-profile-store';
 import type { WorkosConfig } from './config.js';
 import { parseCookies, serializeCookie } from './cookies.js';
 import { captureWorkspaceCreated } from '../observability/posthog.js';
@@ -149,6 +152,18 @@ async function resolveIsMember(
     .finally(() => membershipInFlight.delete(key));
   membershipInFlight.set(key, pending);
   return pending;
+}
+
+/**
+ * Give a workspace the sentence typed for it when it has none. A create that
+ * made the org and the membership but failed at the profile save leaves a
+ * workspace nothing can connect to; the retry lands on the idempotent paths,
+ * and this is where the typed description completes it. A workspace that has
+ * already said what it builds keeps its own sentence.
+ */
+async function describeIfUndescribed(organizationId: string, description: string): Promise<void> {
+  if (await readWorkspaceProfile(organizationId)) return;
+  await saveWorkspaceProfile(organizationId, description);
 }
 
 /** The organization the session claims, when the user is still in it; null otherwise. */
@@ -664,6 +679,7 @@ export function createAuthRouter(
       // member removed from the workspace it names is in none.
       const current = await standingOrganization(workos, authed.user.id, authed.organizationId);
       if (current) {
+        await describeIfUndescribed(current, description);
         res.json({ user: toAuthUser(authed.user, current) });
         return;
       }
@@ -673,6 +689,7 @@ export function createAuthRouter(
       // workspace.
       const adopted = await adoptExistingOrganization(workos, cfg, sealed, authed.user.id);
       if (adopted) {
+        await describeIfUndescribed(adopted.organizationId, description);
         res.setHeader('Set-Cookie', adopted.setCookie);
         res.json({
           user: toAuthUser(adopted.user, adopted.organizationId, adopted.organizationName),

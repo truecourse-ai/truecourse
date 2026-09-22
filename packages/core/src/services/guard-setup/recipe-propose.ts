@@ -12,13 +12,18 @@
  *
  * The prompt and the briefing are the engine's own, verbatim, so the fingerprint
  * the recipe cache keys on still names the prompt it always did.
+ *
+ * So is the re-ask: the engine quotes an invalid proposal back once itself,
+ * so this session takes exactly one turn and hands the RAW answer over,
+ * schema-valid or not. A shell repair under it would double the spend and hide
+ * the output the engine quotes.
  */
 
+import { z } from 'zod'
 import {
   RECIPE_SYSTEM_PROMPT,
   RecipeProposalSchema,
   buildRecipeUserPrompt,
-  type RecipeProposal,
   type RecipeRunner,
 } from '@truecourse/guard-generator'
 import { createLeafSessionSeam, type LeafSessionContext, type LeafSessionSeam } from '../agent/leaf-session.js'
@@ -50,12 +55,14 @@ export function createRecipeProposeSession(opts: CreateRecipeProposeOptions): Re
   })
   return {
     runner: (input) =>
-      seam.ask<RecipeProposal>({
+      seam.ask<unknown>({
         session: {
           kind: RECIPE_PROPOSE_SESSION_KIND,
           title: 'Recipe proposal',
           systemPrompt: withOutcomeDelivery(RECIPE_SYSTEM_PROMPT),
-          outcomeSchema: RecipeProposalSchema,
+          outcomeSchema: z.unknown(),
+          outcomeInputSchema: RecipeProposalSchema,
+          reasks: 0,
           tokenCeiling: 150_000,
         },
         // A retry after a failed verification, and a re-ask after an invalid

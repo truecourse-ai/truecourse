@@ -224,6 +224,48 @@ describe('POST /api/auth/workspace', () => {
     expect(res.headers['set-cookie']?.[0]).toContain('tc_session=sealed%3Aorg_invited');
   });
 
+  it('a retry after the profile save failed completes the workspace with the typed sentence', async () => {
+    // The first submit made the org and the membership, then the profile save
+    // threw: the workspace exists and nothing can connect to it. The retry
+    // lands on the adopt path (the user now has a membership) and fills the
+    // missing sentence instead of dropping it.
+    const m = makeWorkos({
+      memberships: [
+        { id: 'om_1', organizationId: 'org_half', organizationName: 'Acme', status: 'active', userId: 'user_1' },
+      ],
+    });
+    const res = await request(makeApp(m.workos))
+      .post('/api/auth/workspace')
+      .set('Cookie', 'tc_session=sealed-no-org')
+      .send({ name: 'Acme', description: TEST_WORKSPACE_DESCRIPTION })
+      .expect(200);
+
+    expect(m.calls.createOrg).toEqual([]);
+    expect(res.body.user.organizationId).toBe('org_half');
+    expect(profiles.all()).toEqual([
+      expect.objectContaining({ workspaceOrgId: 'org_half', description: TEST_WORKSPACE_DESCRIPTION }),
+    ]);
+  });
+
+  it('never overwrites what a workspace already says it builds', async () => {
+    profiles = installWorkspaceProfiles(['org_existing'], 'The sentence its creator wrote.');
+    const m = makeWorkos({
+      existingOrg: 'org_existing',
+      memberships: [
+        { id: 'om_existing', organizationId: 'org_existing', organizationName: 'Existing', status: 'active', userId: 'user_1' },
+      ],
+    });
+    await request(makeApp(m.workos))
+      .post('/api/auth/workspace')
+      .set('Cookie', 'tc_session=sealed-has-org')
+      .send({ name: 'Another', description: TEST_WORKSPACE_DESCRIPTION })
+      .expect(200);
+
+    expect(profiles.all()).toEqual([
+      expect.objectContaining({ workspaceOrgId: 'org_existing', description: 'The sentence its creator wrote.' }),
+    ]);
+  });
+
   it('creates a workspace for a user whose only membership is inactive', async () => {
     const m = makeWorkos({
       memberships: [

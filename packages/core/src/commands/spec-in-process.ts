@@ -25,7 +25,6 @@ import {
   type RepoIdentity,
 } from '@truecourse/spec-consolidator';
 import type { LlmTransportMode } from '../services/llm/provider-config.js';
-import { resolveModel } from '../config/llm-models.js';
 import { openConflicts } from '@truecourse/shared';
 
 export type {

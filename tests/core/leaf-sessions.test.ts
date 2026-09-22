@@ -110,12 +110,30 @@ describe('a leaf judgement is one session, with no tools and one turn', () => {
 
   it('runs tool-less, for one turn plus its single re-ask, and never resumes', async () => {
     const { stub, leaves } = seams((kind) => outcome(ANSWERS[kind]));
-    await leaves.matchRunner(MATCH_CTX);
+    await leaves.claimDiffRunner(CLAIM_DIFF_SECTION);
 
     const def = stub.calls[0].def;
     expect(def.tools).toEqual([]);
     expect(def.budget).toMatchObject({ turns: 2, maxResumes: 0 });
     expect(def.outcomeSchemaRepairs).toBe(1);
+  });
+
+  it('a leaf whose engine re-asks itself takes ONE turn and hands the raw answer over', async () => {
+    // The match and the recipe proposal quote an invalid answer back with
+    // their own correction: a shell repair under that would double the spend
+    // and hide the output they quote, so the session repairs nothing.
+    const invalid = { nonsense: true };
+    const { stub, leaves, recipe } = seams(() => outcome(invalid));
+
+    await expect(leaves.matchRunner(MATCH_CTX)).resolves.toEqual(invalid);
+    await expect(recipe.runner(RECIPE_INPUT)).resolves.toEqual(invalid);
+
+    for (const call of stub.calls) {
+      expect(call.def.budget).toMatchObject({ turns: 1, maxResumes: 0 });
+      expect(call.def.outcomeSchemaRepairs).toBe(0);
+      // The model is still asked for the engine's shape.
+      expect(call.def.outcomeInputSchema).toBeDefined();
+    }
   });
 
   it('opens with the engine’s own briefing, and nothing else', async () => {
