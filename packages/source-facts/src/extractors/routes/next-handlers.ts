@@ -1,6 +1,6 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
-import { canonicalRoutePath, nextAppSegments, type RouteRegistration } from '@truecourse/shared'
-import { nextAppRouterForFile } from '@truecourse/shared/next-routing-node'
+import { canonicalRoutePath, nextAppSegments, nextDynamicSegment, type RouteRegistration } from '@truecourse/shared'
+import { nextRouterForFile } from '@truecourse/shared/next-routing-node'
 import path from 'node:path'
 import { stringLiteral } from '../outbound-requests.js'
 
@@ -119,7 +119,7 @@ function hasTypeKeyword(node: SyntaxNode): boolean {
 
 export function extractNextAppRoutes(tree: Tree, filePath: string): RouteRegistration[] {
   if (!/(?:^|[/\\])route\.(?:ts|js)$/.test(filePath)) return []
-  const router = nextAppRouterForFile(filePath)
+  const router = nextRouterForFile(filePath, 'app')
   if (!router) return []
   const relative = path.resolve(filePath).split(path.sep).join('/').slice(router.length + 1).split('/').slice(0, -1)
   const parent = nextAppSegments(relative)
@@ -140,4 +140,195 @@ export function extractNextAppRoutes(tree: Tree, filePath: string): RouteRegistr
       endColumn: node.endPosition.column,
     },
   })))
+}
+
+// ---------------------------------------------------------------------------
+// Routes declared as a FILE under `pages/api/` — the Next.js pages router.
+//
+// A pages-router handler is ONE default export that answers every method at
+// its file's address; nothing in the export names a method. What does is the
+// body: `req.method === 'POST'`, `switch (req.method) { case 'GET': … }`,
+// `['GET', 'HEAD'].includes(req.method)`, or a next-connect router whose chain
+// (`router.get(…).post(…)`) the file default-exports. Every such literal is a
+// method the handler distinguishes, and the union is the operations it serves.
+// A handler that distinguishes none answers every method — `GET` is emitted
+// for it, since a GET does reach it, rather than a guessed set.
+// ---------------------------------------------------------------------------
+
+const PAGES_API_FILE = /\.(?:tsx|jsx|ts|js|mjs)$/
+
+/** Callee names that mint a next-connect style router. */
+const ROUTER_FACTORIES = new Set(['createRouter', 'createEdgeRouter', 'nc', 'nextConnect'])
+
+export function extractNextPagesApiRoutes(tree: Tree, filePath: string): RouteRegistration[] {
+  const normalized = path.resolve(filePath).split(path.sep).join('/')
+  if (!PAGES_API_FILE.test(normalized)) return []
+  const router = nextRouterForFile(filePath, 'pages')
+  if (!router) return []
+  const relative = normalized.slice(router.length + 1).split('/')
+  if (relative[0] !== 'api') return []
+  const root = tree.rootNode
+  const handler = defaultExport(root)
+  if (!handler) return []
+
+  const directories = relative.slice(1, -1)
+  const leaf = relative[relative.length - 1]!.replace(PAGES_API_FILE, '')
+  const segmentsOf = (optional: 'parent' | 'catch-all'): string[] | null => {
+    const segments: string[] = []
+    for (const name of [...directories, leaf]) {
+      if (name === leaf && name === 'index') continue
+      const segment = nextDynamicSegment(name, optional)
+      if (segment !== null) segments.push(segment)
+    }
+    return segments
+  }
+  const parent = segmentsOf('parent')
+  const catchAll = segmentsOf('catch-all')
+  if (!parent || !catchAll) return []
+  if (catchAll.some((segment, index) => segment.startsWith('{...') && index !== catchAll.length - 1)) return []
+  const paths = [...new Set([canonicalRoutePath(['api', ...parent].join('/')), canonicalRoutePath(['api', ...catchAll].join('/'))])]
+
+  const methods = [...new Set([...comparedMethods(root), ...routerChainMethods(root)])]
+  const served = methods.length > 0 ? methods : ['GET']
+  return served.flatMap((method) => paths.map((routePath) => ({
+    httpMethod: method as RouteRegistration['httpMethod'],
+    path: routePath,
+    handlerName: handler.name,
+    location: {
+      filePath,
+      startLine: handler.node.startPosition.row + 1,
+      startColumn: handler.node.startPosition.column,
+      endLine: handler.node.endPosition.row + 1,
+      endColumn: handler.node.endPosition.column,
+    },
+  })))
+}
+
+/** The file's default export and the name it was declared under, if any. */
+function defaultExport(root: SyntaxNode): { node: SyntaxNode; name: string } | null {
+  for (const statement of root.namedChildren) {
+    if (!statement || statement.type !== 'export_statement' || hasTypeKeyword(statement)) continue
+    if (!statement.children.some((node) => node?.type === 'default')) continue
+    const declaration = statement.childForFieldName('declaration')
+    const value = statement.childForFieldName('value')
+    const named = declaration?.childForFieldName('name')?.text
+    if (named) return { node: statement, name: named }
+    if (value?.type === 'identifier') return { node: statement, name: value.text }
+    return { node: statement, name: '' }
+  }
+  return null
+}
+
+/** Every HTTP method literal the file compares a `.method` member against. */
+function comparedMethods(root: SyntaxNode): string[] {
+  const out: string[] = []
+  // `(req.method)`, `req.method ?? ''`, `req.method as string` all read the member.
+  const unwrap = (node: SyntaxNode | null): SyntaxNode | null => {
+    let current = node
+    while (current) {
+      if (['parenthesized_expression', 'as_expression', 'satisfies_expression', 'non_null_expression'].includes(current.type)) {
+        current = current.namedChild(0)
+      } else if (current.type === 'binary_expression' && ['??', '||'].includes(current.childForFieldName('operator')?.text ?? '')) {
+        current = current.childForFieldName('left')
+      } else {
+        return current
+      }
+    }
+    return null
+  }
+  const isMethodMember = (node: SyntaxNode | null): boolean => {
+    const member = unwrap(node)
+    return member?.type === 'member_expression' && member.childForFieldName('property')?.text === 'method'
+  }
+  const literalMethod = (node: SyntaxNode | null): string | null => {
+    const text = node ? stringLiteral(node) : null
+    return text && METHODS.has(text.toUpperCase()) ? text.toUpperCase() : null
+  }
+  const walk = (node: SyntaxNode): void => {
+    if (node.type === 'binary_expression') {
+      const left = node.childForFieldName('left')
+      const right = node.childForFieldName('right')
+      const operator = node.childForFieldName('operator')?.text
+      if (operator && ['===', '!==', '==', '!='].includes(operator)) {
+        const literal = isMethodMember(left) ? literalMethod(right) : isMethodMember(right) ? literalMethod(left) : null
+        if (literal) out.push(literal)
+      }
+    }
+    if (node.type === 'switch_statement' && isMethodMember(node.childForFieldName('value'))) {
+      const body = node.childForFieldName('body')
+      for (const clause of body?.namedChildren ?? []) {
+        if (clause?.type !== 'switch_case') continue
+        const literal = literalMethod(clause.childForFieldName('value'))
+        if (literal) out.push(literal)
+      }
+    }
+    // `['GET', 'HEAD'].includes(req.method)` — membership in a literal list.
+    if (node.type === 'call_expression') {
+      const callee = node.childForFieldName('function')
+      const args = node.childForFieldName('arguments')
+      if (
+        callee?.type === 'member_expression' &&
+        callee.childForFieldName('property')?.text === 'includes' &&
+        callee.childForFieldName('object')?.type === 'array' &&
+        isMethodMember(args?.namedChild(0) ?? null)
+      ) {
+        for (const element of callee.childForFieldName('object')!.namedChildren) {
+          const literal = literalMethod(element)
+          if (literal) out.push(literal)
+        }
+      }
+    }
+    for (const child of node.namedChildren) if (child) walk(child)
+  }
+  walk(root)
+  return out
+}
+
+/**
+ * The methods a next-connect style router chain registers: `router.get(…)`
+ * where `router` is bound in this file to a router factory call. The receiver
+ * gate is what keeps an ORM's `.delete({...})` out of the surface.
+ */
+function routerChainMethods(root: SyntaxNode): string[] {
+  const routers = new Set<string>()
+  for (const statement of root.namedChildren) {
+    if (!statement) continue
+    const declaration = statement.type === 'export_statement' ? statement.childForFieldName('declaration') : statement
+    if (declaration?.type !== 'lexical_declaration' && declaration?.type !== 'variable_declaration') continue
+    for (const declarator of declaration.namedChildren) {
+      const name = declarator?.childForFieldName('name')
+      let value = declarator?.childForFieldName('value')
+      while (value && ['parenthesized_expression', 'as_expression', 'satisfies_expression', 'non_null_expression'].includes(value.type)) {
+        value = value.namedChild(0)
+      }
+      if (name?.type !== 'identifier' || value?.type !== 'call_expression') continue
+      const callee = value.childForFieldName('function')
+      const calleeName = callee?.type === 'identifier' ? callee.text : callee?.type === 'member_expression' ? callee.childForFieldName('property')?.text : undefined
+      if (calleeName && ROUTER_FACTORIES.has(calleeName)) routers.add(name.text)
+    }
+  }
+  if (routers.size === 0) return []
+  const out: string[] = []
+  const chainRoot = (node: SyntaxNode): SyntaxNode => {
+    let current = node
+    while (current.type === 'member_expression' || current.type === 'call_expression') {
+      const inner = current.type === 'member_expression' ? current.childForFieldName('object') : current.childForFieldName('function')
+      if (!inner) break
+      current = inner
+    }
+    return current
+  }
+  const walk = (node: SyntaxNode): void => {
+    if (node.type === 'call_expression') {
+      const callee = node.childForFieldName('function')
+      if (callee?.type === 'member_expression') {
+        const method = callee.childForFieldName('property')?.text.toUpperCase()
+        const base = chainRoot(callee)
+        if (method && METHODS.has(method) && base.type === 'identifier' && routers.has(base.text)) out.push(method)
+      }
+    }
+    for (const child of node.namedChildren) if (child) walk(child)
+  }
+  walk(root)
+  return out
 }

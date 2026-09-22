@@ -28,23 +28,29 @@ export function discoverNextAppRoots(repoRoot: string, files: readonly string[])
   return roots.sort()
 }
 
-/** Resolve a file against its nearest package/config, never a guessed `app` ancestor. */
-export function nextAppRouterForFile(filePath: string): string | null {
+/**
+ * The router root (`<app>/app` or `<app>/pages`, `src/` variants included) a
+ * file sits under, resolved against its nearest Next.js package or config,
+ * never a guessed ancestor. `null` when the file is not under that router of a
+ * Next.js app.
+ */
+export function nextRouterForFile(filePath: string, router: 'app' | 'pages'): string | null {
   const file = path.resolve(filePath)
   let directory = path.dirname(file)
   while (true) {
     const entries = directoryFiles(directory)
     const config = entries.some((entry) => NEXT_CONFIG.test(entry))
     if (config || manifestDeclaresNext(readManifest(directory))) {
-      // Include directory evidence even if app/ is empty: it still shadows src/app/.
-      let hasApp = false
-      try { hasApp = fs.statSync(path.join(directory, 'app')).isDirectory() } catch { /* absent */ }
+      // A top-level router directory shadows its `src/` twin even when empty,
+      // so its presence is evidence on its own.
+      let hasDirect = false
+      try { hasDirect = fs.statSync(path.join(directory, router)).isDirectory() } catch { /* absent */ }
       const normalized = directory.split(path.sep).join('/')
       const normalizedFile = file.split(path.sep).join('/')
       return nearestNextRoot(nextRouterRoots({
         nextAppRoots: [normalized],
-        files: hasApp ? [normalizedFile, `${normalized}/app/`] : [normalizedFile],
-      }, 'app'), normalizedFile)
+        files: hasDirect ? [normalizedFile, `${normalized}/${router}/`] : [normalizedFile],
+      }, router), normalizedFile)
     }
     // A separate package or repository cannot borrow its parent's Next dependency.
     if (entries.includes('package.json') || entries.includes('.git')) return null
@@ -52,4 +58,9 @@ export function nextAppRouterForFile(filePath: string): string | null {
     if (parent === directory) return null
     directory = parent
   }
+}
+
+/** The app-router root a file sits under; see {@link nextRouterForFile}. */
+export function nextAppRouterForFile(filePath: string): string | null {
+  return nextRouterForFile(filePath, 'app')
 }
