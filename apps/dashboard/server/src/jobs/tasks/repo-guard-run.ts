@@ -168,8 +168,7 @@ export function createRepoGuardRunTask(
         // A run opens no session record of its own; the judge's model, when
         // it was on, is the one model the stored run was on.
         await persistGuardRun(ref, tree.dir, result.latest, {
-          producedByRun: null,
-          model: judge?.attribution.model ?? null,
+          provenance: { producedByRun: null, model: judge?.attribution.model ?? null },
         });
 
         const { summary } = result.latest;

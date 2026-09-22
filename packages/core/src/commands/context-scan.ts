@@ -93,8 +93,31 @@ export interface WorkspaceContextScanResult {
   noChanges: boolean;
 }
 
+/**
+ * A pull request's scan: the workspace's documents with ONE source's replaced
+ * by what the pull request's head holds. What it produces is the pull
+ * request's corpus, stored under the pull request's scope and never promoted:
+ * the workspace's corpus, decisions and staleness are left exactly as they
+ * were, and the judge's recommendations are applied nowhere.
+ */
+export interface PullRequestScan {
+  repoFullName: string;
+  number: number;
+  /** The head the documents were read at; stored as the corpus's source commit. */
+  headSha: string;
+  /** The check this scan belongs to, on the run record. */
+  checkId?: string;
+  /** The workspace series the corpus lands in (`pr/<owner>/<repo>#<n>`). */
+  scope: string;
+  /** The source whose documents the head replaces. */
+  sourceId: string;
+  documents: readonly { docPath: string; body: string }[];
+}
+
 export interface WorkspaceContextScanOptions {
   workspaceOrgId: string;
+  /** Scan a pull request's documents instead of the workspace's own. */
+  pullRequest?: PullRequestScan;
   /** Seams the caller threads in: progress, cancellation, the run's driver. */
   tracker?: CurateInProcessOptions['tracker'];
   driver?: CurateInProcessOptions['driver'];
@@ -127,9 +150,17 @@ export async function workspaceContextScanInProcess(
     loadWorkspaceSpec<DecisionsFile>(ref, 'decisions'),
   ]);
 
+  const pullRequest = options.pullRequest;
+  // A pull request replaces ONE source's documents; a source the workspace
+  // does not have would replace nothing and judge the head as unchanged.
+  if (pullRequest && !sources.some((source) => source.id === pullRequest.sourceId)) {
+    throw new Error(
+      `${pullRequest.repoFullName}#${pullRequest.number} names context source "${pullRequest.sourceId}", which this workspace does not have.`,
+    );
+  }
   const tmp = fs.mkdtempSync(path.join(options.tmpRoot ?? os.tmpdir(), 'tc-ws-scan-'));
   try {
-    const materialized = await materializeWorkspaceDocuments(org, tmp, sources, documents);
+    const materialized = await materializeWorkspaceDocuments(org, tmp, sources, documents, pullRequest);
     const decisions = storedDecisions ?? EMPTY_DECISIONS;
     // The engine reads decisions from the tree, the same channel a repository
     // uses; what the run settles comes back on the result and is stored below.
@@ -152,6 +183,20 @@ export async function workspaceContextScanInProcess(
         sessionsKey: workspaceSessionsKey(org),
         scopeSources,
         docOrigins: materialized.origins,
+        // A pull request's scan settles nothing for the workspace: no verdict
+        // is applied, no scope session spent, and the run names the head.
+        ...(pullRequest
+          ? {
+              skipAutoApply: true,
+              disableScopeOrchestration: true,
+              gitRef: pullRequest.headSha,
+              pullRequest: {
+                number: pullRequest.number,
+                headSha: pullRequest.headSha,
+                ...(pullRequest.checkId ? { checkId: pullRequest.checkId } : {}),
+              },
+            }
+          : {}),
         deferRunCompletion: true,
         ...(options.tracker ? { tracker: options.tracker } : {}),
         ...(options.driver ? { driver: options.driver } : {}),
@@ -167,11 +212,18 @@ export async function workspaceContextScanInProcess(
       // The stamp is the artifact's own record of where a document came from,
       // so nothing downstream has to re-derive it from a ref.
       const corpus = stampCorpusSources(curate.corpus, sources);
-      // The versions this scan writes say which run wrote them and on which model.
-      const provenance = { producedByRun: runId, model: options.driver?.attribution.model ?? null };
-      await saveWorkspaceSpec(ref, 'corpus', corpus, provenance);
-      await saveWorkspaceSpec(ref, 'decisions', curate.decisions);
-      await saveWorkspaceSpecDocs(ref, snapshotBodies(corpus, materialized.bodies), provenance);
+      // The versions this scan writes say which run wrote them and on which
+      // model. A pull request's land under its own scope, naming the head,
+      // and its decisions are not the workspace's to keep.
+      const provenance = {
+        producedByRun: runId,
+        model: options.driver?.attribution.model ?? null,
+        ...(pullRequest ? { sourceCommit: pullRequest.headSha } : {}),
+      };
+      const target = pullRequest ? { workspaceOrgId: org, scope: pullRequest.scope } : ref;
+      await saveWorkspaceSpec(target, 'corpus', corpus, provenance);
+      if (!pullRequest) await saveWorkspaceSpec(ref, 'decisions', curate.decisions);
+      await saveWorkspaceSpecDocs(target, snapshotBodies(corpus, materialized.bodies), provenance);
       await closeRun(org, runId, options.signal?.aborted ? 'interrupted' : 'completed');
 
       return {
@@ -247,13 +299,15 @@ interface MaterializedWorkspace {
 /**
  * Write every document of every source into `treeDir` at its ref. A document
  * whose body the workspace no longer holds is skipped (the ledger row outlived
- * its body) rather than written empty — the next sync fetches it back.
+ * its body) rather than written empty — the next sync fetches it back. A pull
+ * request's documents stand in for its source's, as the head holds them.
  */
 async function materializeWorkspaceDocuments(
   org: string,
   treeDir: string,
   sources: readonly ContextSource[],
   documents: readonly ContextDocument[],
+  pullRequest?: PullRequestScan,
 ): Promise<MaterializedWorkspace> {
   const byId = new Map(sources.map((source) => [source.id, source]));
   const perSource = new Map<string, number>();
@@ -261,28 +315,45 @@ async function materializeWorkspaceDocuments(
   const bodies = new Map<string, string>();
   let count = 0;
 
-  for (const doc of documents) {
-    const source = byId.get(doc.sourceId);
-    if (!source) continue; // a ledger row whose source is gone names no universe
-    const body = await readContextBody(org, doc.contentHash);
-    if (body === null) continue;
-    const docRef = contextDocRef(doc.sourceId, doc.docPath);
+  const place = (source: ContextSource, docPath: string, body: string, updatedAt: string | null): void => {
+    const docRef = contextDocRef(source.id, docPath);
     const dest = path.join(treeDir, ...docRef.split('/'));
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, body, 'utf-8');
     // Discovery dates a doc by its mtime when there is no git history, and the
     // scratch tree has none: stamp the file with when the document last changed
     // AT ITS SOURCE so the corpus carries that, not the scan's own clock.
-    const stamp = new Date(doc.updatedAt);
-    if (!Number.isNaN(stamp.getTime())) fs.utimesSync(dest, stamp, stamp);
-    origins.set(docRef, {
-      sourceId: source.id,
-      sourceTitle: source.title,
-      sourceKind: source.kind,
-    });
+    const stamp = updatedAt === null ? null : new Date(updatedAt);
+    if (stamp && !Number.isNaN(stamp.getTime())) fs.utimesSync(dest, stamp, stamp);
+    origins.set(docRef, { sourceId: source.id, sourceTitle: source.title, sourceKind: source.kind });
     bodies.set(docRef, body);
-    perSource.set(doc.sourceId, (perSource.get(doc.sourceId) ?? 0) + 1);
+    perSource.set(source.id, (perSource.get(source.id) ?? 0) + 1);
     count += 1;
+  };
+
+  for (const doc of documents) {
+    const source = byId.get(doc.sourceId);
+    if (!source) continue; // a ledger row whose source is gone names no universe
+    // The head's documents stand in for this source's.
+    if (pullRequest && doc.sourceId === pullRequest.sourceId) continue;
+    const body = await readContextBody(org, doc.contentHash);
+    if (body === null) continue;
+    place(source, doc.docPath, body, doc.updatedAt);
+  }
+  const prSource = pullRequest ? byId.get(pullRequest.sourceId) : undefined;
+  if (pullRequest && prSource) {
+    // A document the head left as the ledger holds it keeps the date it last
+    // changed at its source; one the head changed is dated by the scan.
+    const ledger = new Map(
+      documents
+        .filter((doc) => doc.sourceId === prSource.id)
+        .map((doc) => [doc.docPath, doc] as const),
+    );
+    for (const doc of pullRequest.documents) {
+      const known = ledger.get(doc.docPath);
+      const unchanged = known !== undefined && (await readContextBody(org, known.contentHash)) === doc.body;
+      place(prSource, doc.docPath, doc.body, unchanged ? known.updatedAt : null);
+    }
   }
 
   const facts = sources

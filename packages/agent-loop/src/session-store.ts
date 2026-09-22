@@ -126,6 +126,19 @@ const RunRecordFieldsSchema = z.object({
    * cleanly, or one written before the field existed, has none.
    */
   error: RunErrorSchema.optional(),
+  /**
+   * The pull request this run judged, when it did: a check's run, or the
+   * scan a check ran over the head's documents. The Agent page's column and
+   * filter read it; absent on every other run.
+   */
+  pullRequest: z
+    .object({
+      number: z.number().int().positive(),
+      headSha: z.string(),
+      /** The check the run belongs to; the scan a check ran carries it too. */
+      checkId: z.string().optional(),
+    })
+    .optional(),
   sessions: z.array(SessionIndexEntrySchema),
 });
 

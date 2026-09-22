@@ -22,8 +22,14 @@ export interface MemoryKvCacheEntry {
 export class MemoryKvCacheStore implements KvCacheStore {
   private readonly entries = new Map<string, MemoryKvCacheEntry>();
 
-  private at(scope: string, cacheName: string, key: string): string {
-    return [scope, cacheName, key].join(' ');
+  /**
+   * Keyed as the Postgres store keys: by cache and key alone. The scope (the
+   * tree a run works in) is recorded on the entry and ignored for the lookup,
+   * so two runs over two scratch trees share what one of them judged, as they
+   * do in production.
+   */
+  private at(_scope: string, cacheName: string, key: string): string {
+    return [cacheName, key].join(' ');
   }
 
   async get(scope: string, cacheName: string, key: string): Promise<unknown | null> {

@@ -133,6 +133,7 @@ export class PgSessionRunStore implements SessionRunBackend {
     await this.reconcile([repoKey]);
     const record: Record = {
       command: opts.command, runId: randomUUID(), gitRef: opts.gitRef,
+      ...(opts.pullRequest ? { pullRequest: opts.pullRequest } : {}),
       startedAt: (opts.now?.() ?? new Date()).toISOString(), status: 'running', sessions: [], activityStream: 'ai-sdk-v1',
     };
     await this.db.transaction(async tx => {

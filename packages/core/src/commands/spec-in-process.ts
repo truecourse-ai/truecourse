@@ -52,7 +52,11 @@ import {
 } from '../services/spec-scan/curate-doc.js';
 import { SETTLE_AREAS_SESSION_KIND } from '../services/spec-scan/settle-areas.js';
 import { OVERLAP_SESSION_KIND } from '../services/spec-scan/overlap.js';
-import { createStoredSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import {
+  createStoredSessionRun,
+  type CreateSessionRunOptions,
+  type SessionRunStartedInfo,
+} from '../lib/sessions-store.js';
 import { resolveCommitSha, type WorkspaceRef } from '../lib/repo-ref.js';
 import {
   createClaudeCodeSessionDriver,
@@ -227,6 +231,19 @@ export interface CurateInProcessOptions {
   /** Skip the overlap sessions (the workspace corpus sync passes this). */
   disableOverlapDetection?: boolean;
   /**
+   * Apply none of the judge's high-confidence recommendations: the decisions
+   * this scan settles are not stored (a pull request's scan).
+   */
+  skipAutoApply?: boolean;
+  /**
+   * The run record's commit, when the tree has none to resolve: a workspace
+   * scan reads a scratch tree, and a pull request's scan names the head it
+   * read the documents at.
+   */
+  gitRef?: string;
+  /** The pull request this scan judges, stamped on its run record. */
+  pullRequest?: CreateSessionRunOptions['pullRequest'];
+  /**
    * Skip the scope-orchestrator session (stored verdicts still apply). The
    * workspace corpus sync passes this — its scratch tree (and the decisions
    * materialized into it) is deleted after the run, so a scope session there
@@ -325,8 +342,12 @@ export async function curateInProcess(
 
   // The run record every session's transcript is appended to.
   // Created after the estimate gate, so a declined scan leaves no run record.
-  const gitRef = await resolveCommitSha(repoRoot);
-  const run = await createStoredSessionRun(options.sessionsKey ?? repoRoot, { command: 'spec-scan', gitRef });
+  const gitRef = options.gitRef ?? (await resolveCommitSha(repoRoot));
+  const run = await createStoredSessionRun(options.sessionsKey ?? repoRoot, {
+    command: 'spec-scan',
+    gitRef,
+    ...(options.pullRequest ? { pullRequest: options.pullRequest } : {}),
+  });
   options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
   // Mirror the step checklist into the run record as the run's own display:
   // the dashboard can only see what run.json carries, and the early phases
@@ -427,6 +448,7 @@ export async function curateInProcess(
         ...(options.previousCorpus
           ? { priorOverlaps: options.previousCorpus.areas.flatMap((area) => area.overlaps) }
           : {}),
+        ...(options.skipAutoApply ? { skipAutoApply: true } : {}),
         ...(options.scopeSources ? { scopeSources: options.scopeSources } : {}),
         ...(options.docOrigins ? { docOrigins: options.docOrigins } : {}),
         ...(options.only !== undefined ? { only: options.only } : {}),

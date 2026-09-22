@@ -251,6 +251,12 @@ export interface SpecScanSessionsOptions {
    */
   priorOverlaps?: readonly OverlapLike[]
   /**
+   * Leave the judge's high-confidence recommendations as recommendations: a
+   * scan whose decisions are not this workspace's to write (a pull request's)
+   * applies none of them.
+   */
+  skipAutoApply?: boolean
+  /**
    * Skip the scope-orchestrator session (stored scope verdicts still apply).
    * The workspace corpus sync passes this: its doc tree is a transient scratch
    * materialization whose decisions are deleted with it, so a scope session
@@ -1307,7 +1313,9 @@ export async function runSpecScanSessions(
     })
     fact('verify', 'corpus.json written')
     effectiveDecisions = pruneOrphanedConflictResolutions(repoRoot, corpus, decisions)
-    const auto = autoApplyHighConfidenceRecommendations(repoRoot, corpus, effectiveDecisions)
+    const auto = opts.skipAutoApply
+      ? { decisions: effectiveDecisions, applied: [] }
+      : autoApplyHighConfidenceRecommendations(repoRoot, corpus, effectiveDecisions)
     effectiveDecisions = auto.decisions
     autoResolvedConflicts = auto.applied
     for (const applied of auto.applied) {

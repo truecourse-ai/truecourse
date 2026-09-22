@@ -57,6 +57,7 @@ import {
   writeGuardResult,
   writeGuardResultEvidence,
   writeGuardRunCoverage,
+  type GuardRunCoverage,
   type RepoRef,
   type VersionProvenance,
 } from '@truecourse/core/lib/guard-store';
@@ -75,13 +76,16 @@ function writeFile(file: string, body: string): void {
 
 /**
  * Put the repo's stored guard state into `treeDir`: the CURRENT scenario set
- * and report of the default branch (the newest version of each). Returns the
- * commit the current set came from, or `null` when the repo has never
- * generated — a first generate starts from nothing, which is fine.
+ * and report of the default branch (the newest version of each), or — with
+ * `commitSha` — the newest stored at that exact commit, which is what a pull
+ * request check starts from. Returns the commit the set came from, or `null`
+ * when there is none: a first generate starts from nothing, which is fine,
+ * and a check with no base stops.
  */
 export async function materializeStoredGuardState(
   repoKey: string,
   treeDir: string,
+  opts: { commitSha?: string } = {},
 ): Promise<string | null> {
   // The dashboard dismisses into the store; the generator reads the clone's
   // `scenarios/decisions.json`. Without this, every dismissed claim is
@@ -91,25 +95,29 @@ export async function materializeStoredGuardState(
     writeFile(guardDecisionsPath(treeDir), JSON.stringify(decisions, null, 2) + '\n');
   }
 
-  const baseline = await readGuardBaselineCommit(repoKey);
+  const baseline = opts.commitSha ?? (await readGuardBaselineCommit(repoKey));
   if (!baseline) return null;
 
-  // The newest version of each: the set rolled back to is what the next
-  // generate reconciles against, and a rollback re-stores the report that set
-  // was born with beside it, so the scope's newest report is its pair — or
-  // the blocked report of a generate that stored no set, carried forward.
-  const manifest = await readManifest(repoKey);
+  // Unpinned: the newest version of each, whatever commit it was written at —
+  // the set rolled back to is what the next generate reconciles against, and
+  // a rollback re-stores the report that set was born with beside it, so the
+  // scope's newest report is its pair, or the blocked report of a generate
+  // that stored no set, carried forward. Pinned: the newest at that commit,
+  // and nothing when it holds no set.
+  const at = opts.commitSha ? { commitSha: opts.commitSha } : {};
+  const manifest = await readManifest(repoKey, at);
+  if (opts.commitSha && !manifest) return null;
   if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
   // Every file of the set, not only the scenario yaml: the committed flows and
   // claims beside the manifest are what synthesis reconciles against, and a
   // clone without them makes every flow look new.
-  for (const rel of await storedScenarioSetFiles(repoKey, treeDir)) {
-    const body = await readScenarioFile(repoKey, rel);
+  for (const rel of await storedScenarioSetFiles(repoKey, treeDir, at)) {
+    const body = await readScenarioFile(repoKey, rel, at);
     if (body == null) continue;
     assertSafeRel(rel);
     writeFile(safeJoin(treeDir, rel), body);
   }
-  const report = await readGuardResult(repoKey);
+  const report = await readGuardResult(repoKey, at);
   if (report) writeCloneGuardResult(treeDir, report);
   return baseline;
 }
@@ -180,18 +188,34 @@ async function persistBirthEvidence(
  * `provenance`, its SECTION and FLOW summaries, then every scenario's evidence
  * bundle, which attaches to that run row. The snapshot is written first, since
  * the evidence manifest lives on it, and the summaries are derived against the
- * run that is now stored.
+ * run that is now stored — unless the caller hands them over (`coverage`), as
+ * a pull request's check does: its flows are derived from the head's tree, and
+ * its sections are nobody's trend.
  */
 export async function persistGuardRun(
   ref: RepoRef,
   treeDir: string,
   run: GuardLatest,
-  provenance?: VersionProvenance,
+  opts: { provenance?: VersionProvenance; coverage?: Pick<GuardRunCoverage, 'sections' | 'flows'> } = {},
 ): Promise<void> {
   // The stored record says where it ran: this is the hosted runner's run.
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
-  await writeGuardLatest(ref.repoKey, latest, { scope: ref.scope, ...(provenance ? { provenance } : {}) });
-  await recordGuardRunCoverage(ref.repoKey, latest);
+  await writeGuardLatest(ref.repoKey, latest, { scope: ref.scope, ...(opts.provenance ? { provenance: opts.provenance } : {}) });
+  if (opts.coverage) {
+    // Best-effort, as the derived one is: the run is stored; its coverage is a summary.
+    try {
+      await writeGuardRunCoverage(ref.repoKey, {
+        runId: latest.run.runId,
+        ranAt: latest.run.ranAt,
+        commit: latest.run.commit,
+        ...opts.coverage,
+      });
+    } catch (err) {
+      log.warn(`[Guard] the coverage of ${ref.repoKey} run ${latest.run.runId} was not recorded: ${(err as Error).message}`);
+    }
+  } else {
+    await recordGuardRunCoverage(ref.repoKey, latest);
+  }
   const runId = latest.run.runId;
   for (const scenario of latest.scenarios) {
     if (!scenario.evidencePath) continue;
