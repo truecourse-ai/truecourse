@@ -21,6 +21,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
+  CREDITS_EXHAUSTED,
   CREDITS_PRICES_UNAVAILABLE,
   CREDITS_PRICES_UNAVAILABLE_MESSAGE,
   usageJobTypeWord,
@@ -112,7 +113,7 @@ export async function refusedWithoutCredits(
         .json({ error: CREDITS_PRICES_UNAVAILABLE, message: check.message, credits: check });
       return true;
     }
-    res.status(409).json({ error: 'credits-exhausted', message: check.message, credits: check });
+    res.status(409).json({ error: CREDITS_EXHAUSTED, message: check.message, credits: check });
     return true;
   }
   if ((req.body as { confirmCredits?: unknown } | undefined)?.confirmCredits === true) return false;

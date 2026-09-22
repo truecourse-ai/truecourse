@@ -42,6 +42,7 @@ import { createAppError } from '@truecourse/core/lib/errors';
 import {
   CREDITS_PRICES_UNAVAILABLE,
   CREDITS_PRICES_UNAVAILABLE_MESSAGE,
+  CREDITS_PROVIDER_UNAVAILABLE,
   LLM_CREDITS_PROVIDER,
   LLM_PROVIDER_KINDS,
   type LlmConfigUpdate,
@@ -168,7 +169,7 @@ export function offeredProviderChoices(): LlmProviderChoice[] {
 
 /** The workspace chose credits, and this server holds no platform key to run them on. */
 export class CreditsProviderUnavailableError extends Error {
-  readonly code = 'credits-provider-unavailable';
+  readonly code = CREDITS_PROVIDER_UNAVAILABLE;
   constructor() {
     super(
       'This server has no credits provider configured. Set an API key of your own in Settings → Models.',

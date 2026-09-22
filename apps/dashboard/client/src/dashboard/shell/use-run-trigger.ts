@@ -34,6 +34,17 @@ export function toastNoLlmProvider(navigate: (to: string) => void, description: 
   });
 }
 
+/** An empty credit balance: the remedy is the Credits tab, not waiting. */
+export function toastOutOfCredits(navigate: (to: string) => void, description: string): void {
+  toast.error('Out of credits', {
+    description,
+    action: {
+      label: 'Open Credits',
+      onClick: () => navigate('/settings/credits'),
+    },
+  });
+}
+
 export function useRunTrigger(repoId: string): RunStarter {
   const navigate = useNavigate();
   const [pending, setPending] = useState(false);
@@ -63,6 +74,9 @@ export function useRunTrigger(repoId: string): RunStarter {
               return;
             case 'prices-unavailable':
               toast.error('Prices are not available yet', { description: outcome.message });
+              return;
+            case 'no-credits':
+              toastOutOfCredits(navigate, outcome.message);
               return;
             case 'busy':
               toast.error('A run is already in progress');

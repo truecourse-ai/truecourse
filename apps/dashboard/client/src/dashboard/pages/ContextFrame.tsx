@@ -25,7 +25,7 @@ import { toast } from 'sonner';
 import { PageHeader, SideMenu } from '@/dashboard/ui/bits';
 import { startContextScan } from '@/dashboard/data/scan';
 import { toastDescribeWorkspace } from '@/dashboard/data/workspace-profile';
-import { toastNoLlmProvider } from '@/dashboard/shell/use-run-trigger';
+import { toastNoLlmProvider, toastOutOfCredits } from '@/dashboard/shell/use-run-trigger';
 import { useWorkspaceRuns } from '@/dashboard/shell/use-workspace-runs';
 import { useContextSources, useContextStaleness } from '@/dashboard/shell/use-context';
 import { AddContextDialog } from './AddContextDialog';
@@ -65,6 +65,9 @@ function ScanButton({ stale, scanning }: { stale: boolean; scanning: boolean }) 
             return;
           case 'prices-unavailable':
             toast.error('Prices are not available yet', { description: outcome.message });
+            return;
+          case 'no-credits':
+            toastOutOfCredits(navigate, outcome.message);
             return;
           case 'busy':
             toast.error('A document scan is already running');

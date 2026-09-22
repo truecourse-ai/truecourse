@@ -35,6 +35,9 @@ export function usdOfCredits(credits: number): number {
 
 // --- the pause ------------------------------------------------------
 
+/** The code the pause travels under, and the refusal a start answers with on an empty balance. */
+export const CREDITS_EXHAUSTED = 'credits-exhausted';
+
 /**
  * The workspace cannot spend: its balance is at or below zero. Thrown BEFORE a
  * call or a turn, so a run overshoots by at most the one call in flight.
@@ -49,7 +52,7 @@ export function usdOfCredits(credits: number): number {
  * a caller that met the pause as a parked session has neither in hand.
  */
 export class CreditsExhaustedError extends Error {
-  readonly code = 'credits-exhausted';
+  readonly code = CREDITS_EXHAUSTED;
   constructor(
     readonly workspaceOrgId?: string,
     readonly balance?: number,
@@ -66,7 +69,7 @@ export function isCreditsExhausted(err: unknown): err is CreditsExhaustedError {
     err instanceof CreditsExhaustedError ||
     (typeof err === 'object' &&
       err !== null &&
-      (err as { code?: unknown }).code === 'credits-exhausted')
+      (err as { code?: unknown }).code === CREDITS_EXHAUSTED)
   );
 }
 
@@ -218,6 +221,14 @@ export const CREDITS_PRICES_UNAVAILABLE = 'credits-prices-unavailable';
 /** What a person is told when {@link CREDITS_PRICES_UNAVAILABLE} refuses a start. */
 export const CREDITS_PRICES_UNAVAILABLE_MESSAGE =
   'Model prices are not available yet, so a run on TrueCourse credits cannot be charged. Try again in a few minutes.';
+
+
+/**
+ * The refusal code a start answers with when the workspace chose TrueCourse
+ * credits on a server that holds no platform key to run them on. Its remedy is
+ * the same as an unconfigured provider's: a key of the workspace's own.
+ */
+export const CREDITS_PROVIDER_UNAVAILABLE = 'credits-provider-unavailable';
 
 /** How a start was answered when the workspace spends credits. */
 export type CreditsStartVerdict = 'ok' | 'confirm' | 'refused';
