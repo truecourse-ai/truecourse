@@ -6,10 +6,12 @@
  * produces. Two things are deliberately NOT the model's to
  * write:
  *
- * - **The fingerprint.** It is `sha256` over `type` + `entry` + `steps`
- *   ({@link interfaceFingerprint}), so it is a FUNCTION of the draft, computed
- *   here. A model-written fingerprint is a fact that can disagree with its own
- *   entry, and every scenario grounded on it would inherit the disagreement.
+ * - **The fingerprint.** It is `sha256` over `type` + `entry` + `steps`, with a
+ *   step that resolves to a declared readable folding that readable's identity
+ *   rather than its label ({@link resolvedInterfaceFingerprint}), so it is a
+ *   FUNCTION of the draft, computed here. A model-written fingerprint is a fact
+ *   that can disagree with its own entry, and every scenario grounded on it
+ *   would inherit the disagreement.
  * - **`origin`.** Stamped by the merge that joins the two catalog halves, never
  *   declared by a file — the field exists precisely because a declared one lied
  *   for months (see {@link InterfaceOriginSchema}).
@@ -37,7 +39,7 @@ import {
   InterfaceStateIdSchema,
   InterfaceStateSchema,
   InterfacesFileSchema,
-  interfaceFingerprint,
+  resolvedInterfaceFingerprint,
   type Interface,
   type InterfaceResource,
   type InterfaceState,
@@ -47,6 +49,9 @@ import { mergeInterfaceCatalogs } from '@truecourse/guard-runner'
 
 /** The surface this pass authors. Web is the only one nothing derives. */
 export const AUTHORED_SURFACE = 'web'
+
+/** What a place has to answer for before the write path accepts it. */
+const READABLE_KINDS = ['markers', 'elements', 'controls', 'rows'] as const
 
 /** `web/<kebab-slug>` — the id shape every authored task is held to. */
 const AUTHORED_ID = /^web\/[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -231,8 +236,20 @@ export function registryStates(
 /** A task with the fingerprint computed for it — a complete {@link Interface}. */
 export type StampedTask = AuthoredTask & { fingerprint: string }
 
-/** Fingerprint every task of a fragment — the one field authoring never writes. */
-export function stampFragment(fragment: AuthoredFragment): {
+/**
+ * Fingerprint every task of a fragment — the one field authoring never writes.
+ *
+ * With the draft's PLACES in hand, a step whose locator matches a readable the
+ * place declares folds that readable's identity instead of its label
+ * ({@link resolvedInterfaceFingerprint}), so re-wording a control no longer
+ * re-authors the scenarios grounded on the task. Without them (a bare check of
+ * a fragment) every step keeps its label, which is the fingerprint every stored
+ * catalog already carries.
+ */
+export function stampFragment(
+  fragment: AuthoredFragment,
+  places?: ReadonlyMap<string, InterfaceResource>,
+): {
   interfaces: StampedTask[]
   states: InterfaceState[]
   resources: InterfaceResource[]
@@ -240,11 +257,42 @@ export function stampFragment(fragment: AuthoredFragment): {
   return {
     interfaces: fragment.interfaces.map((task) => ({
       ...task,
-      fingerprint: interfaceFingerprint({ type: task.type, entry: task.entry, steps: task.steps }),
+      fingerprint: resolvedInterfaceFingerprint(
+        { type: task.type, entry: task.entry, steps: task.steps },
+        task.at ? places?.get(task.at) : undefined,
+      ),
     })),
     states: [...(fragment.states ?? [])],
     resources: [...(fragment.resources ?? [])],
   }
+}
+
+/**
+ * Every web place a draft stands on: both catalog halves, with the draft's own
+ * enrichments laid over them exactly as the write path lays them (a supplied
+ * readable kind replaces that kind, an omitted one keeps what was established).
+ * This is what a step's locator resolves against, and what the file records —
+ * one merge, so the stamped identity and the stored place cannot disagree.
+ */
+export function draftPlaceIndex(
+  derived: InterfacesFile | null,
+  authored: InterfacesFile | null,
+  resources: readonly InterfaceResource[] = [],
+): Map<string, InterfaceResource> {
+  const places = new Map<string, InterfaceResource>()
+  for (const place of [
+    ...(derived?.resources?.[AUTHORED_SURFACE] ?? []),
+    ...(authored?.resources?.[AUTHORED_SURFACE] ?? []),
+    ...resources,
+  ]) {
+    const prior = places.get(place.id)
+    places.set(place.id, {
+      ...prior,
+      ...place,
+      ...(place.readables ? { readables: { ...prior?.readables, ...place.readables } } : {}),
+    })
+  }
+  return places
 }
 
 export interface FragmentValidation {
@@ -282,7 +330,7 @@ export interface ValidateFragmentInput {
  * Hold a fragment to every rule at once and return the file it would produce.
  * The schema does the structural half (ids resolve in the area registry, a
  * screen sits on nothing, a state id is not a sentence, a step's target is an
- * ARIA role and an accessible name); this adds the four rules that are about
+ * ARIA role and an accessible name); this adds the five rules that are about
  * AUTHORING rather than about the shape:
  *
  *  1. an id names one thing — no collision with a derived or authored entry;
@@ -292,7 +340,10 @@ export interface ValidateFragmentInput {
  *     `navigate` step, and when both the address and the place are known they
  *     have to agree;
  *  4. a state id names one world catalog-wide — a draft references what the
- *     registry already defines and never redefines it as something else.
+ *     registry already defines and never redefines it as something else;
+ *  5. a place the draft declares answers for all four readable kinds, counting
+ *     what this screen's earlier sessions established — an omitted kind is
+ *     unknown, and nothing returns to a screen the ledger has settled.
  */
 export function validateFragment(input: ValidateFragmentInput): FragmentValidation {
   const { derived, authored } = input
@@ -303,7 +354,11 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   const fragment = draft.data
   const replaceable = input.replaceable ?? new Set<string>()
   const errors: string[] = []
-  const stamped = stampFragment(fragment)
+  // The places the draft would leave behind — built before the tasks are
+  // stamped, because a step's identity resolves against the readables the same
+  // fragment declares.
+  const drafted = draftPlaceIndex(derived, authored, fragment.resources ?? [])
+  const stamped = stampFragment(fragment, drafted)
 
   // ---- 1. one id, one thing ------------------------------------------------
   const seenIds = new Set<string>()
@@ -322,9 +377,19 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
 
   // ---- 2. one fingerprint, one task ---------------------------------------
+  // A web entry is indexed under its STORED key and under the key it would be
+  // stamped with now: the two differ for every task authored before its place
+  // declared its readables, and a duplicate must be caught under either.
   const twins = new Map<string, string>()
   for (const iface of [...(derived?.interfaces ?? []), ...(authored?.interfaces ?? [])]) {
-    if (!replaceable.has(iface.id)) twins.set(iface.fingerprint, iface.id)
+    if (replaceable.has(iface.id)) continue
+    twins.set(iface.fingerprint, iface.id)
+    if (iface.type === AUTHORED_SURFACE) {
+      twins.set(
+        resolvedInterfaceFingerprint(iface, iface.at ? drafted.get(iface.at) : undefined),
+        iface.id,
+      )
+    }
   }
   for (const task of stamped.interfaces) {
     const twin = twins.get(task.fingerprint)
@@ -362,6 +427,22 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
       if (screenFor(place.id, places)?.id !== input.scope.screenId) {
         errors.push(`\`${place.id}\` is not a resource of \`${input.scope.screenId}\` — enrich only this screen and its nested places`)
       }
+    }
+  }
+
+  // ---- 5. a declared place answers for all four readable kinds -------------
+  // An omitted kind means UNKNOWN, and the run has no way back to it: the
+  // screen's ledger row says the session settled, so nobody reads that place
+  // again. The four arrays are cheap to state and the empty one is a claim, so
+  // the session states them — they are never filled in here, because "the page
+  // shows nothing of this kind" is a reading nobody but the session made.
+  for (const place of stamped.resources) {
+    const readables = places.get(place.id)?.readables
+    const unstated = READABLE_KINDS.filter((kind) => readables?.[kind] === undefined)
+    if (unstated.length > 0) {
+      errors.push(
+        `\`${place.id}\` leaves ${unstated.map((kind) => `\`${kind}\``).join(', ')} unstated — state each of \`markers\`, \`elements\`, \`controls\` and \`rows\` explicitly, \`[]\` when this place has none of that kind`,
+      )
     }
   }
   for (const task of stamped.interfaces) {
@@ -442,22 +523,8 @@ export function candidateAuthored(
   // Catalog merging overlays whole resources. Materialize each enrichment over
   // both prior halves before storing it, retaining omitted fields and readable
   // kinds. An explicit [] replaces a kind; absence never erases established facts.
-  const baseline = new Map<string, InterfaceResource>()
-  for (const place of [...(derived?.resources?.[AUTHORED_SURFACE] ?? []), ...(authored?.resources?.[AUTHORED_SURFACE] ?? [])]) {
-    const prior = baseline.get(place.id)
-    baseline.set(place.id, {
-      ...prior, ...place,
-      ...(place.readables ? { readables: { ...prior?.readables, ...place.readables } } : {}),
-    })
-  }
-  const resources = stamped.resources.map((place) => {
-    const prior = baseline.get(place.id)
-    return {
-      ...prior,
-      ...place,
-      ...(place.readables ? { readables: { ...prior?.readables, ...place.readables } } : {}),
-    }
-  })
+  const merged = draftPlaceIndex(derived, authored, stamped.resources)
+  const resources = stamped.resources.map((place) => merged.get(place.id)!)
   return {
     version: 2,
     generatedAt: authored?.generatedAt ?? '',
@@ -465,6 +532,10 @@ export function candidateAuthored(
     interfaces: overlay(kept, stamped.interfaces),
     ...registry('states', authored?.states, stamped.states),
     ...registry('resources', authored?.resources, resources),
+    // The authoring ledger is bookkeeping about the file's own sessions, so it
+    // travels untouched: this fragment's own row is recorded by the run's fold,
+    // after the outcome is known.
+    ...(authored?.authoring ? { authoring: authored.authoring } : {}),
   }
 }
 

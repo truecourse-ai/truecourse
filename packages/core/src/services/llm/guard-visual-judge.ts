@@ -30,8 +30,9 @@
  */
 
 import fs from 'node:fs';
+import { LEGACY_VISUAL_JUDGE_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { createHash } from 'node:crypto';
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
+import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm';
 import {
   GuardVisualJudgmentSchema,
   type GuardVisualJudgment,
@@ -131,6 +132,13 @@ function fingerprint(text: string): string {
  *  change re-judges every failure instead of serving stale verdicts. */
 export const VISUAL_JUDGE_PROMPT_FINGERPRINT = fingerprint(VISUAL_JUDGE_SYSTEM_PROMPT);
 
+/**
+ * THE VISUAL-JUDGE STAGE'S VERSION, bumped by hand. The same pixels and the
+ * same mismatch get the same verdict; a prompt change that fixes WRONG output
+ * bumps this in the same commit.
+ */
+export const VISUAL_JUDGE_STAGE_VERSION = 1;
+
 /** On a re-ask, the invalid reply quoted back so the model can see its own miss. */
 export interface VisualJudgeCorrection {
   invalidOutput: string;
@@ -227,10 +235,27 @@ export function visualJudgeCacheKey(
   input: GuardVisualJudgeInput,
   screenshot: Buffer,
 ): string {
+  return visualJudgeKeyOver(`visual-judge-v${VISUAL_JUDGE_STAGE_VERSION}`, input, screenshot);
+}
+
+/** {@link visualJudgeCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to. Delete with the legacy hash. */
+export function visualJudgeLegacyCacheKey(
+  input: GuardVisualJudgeInput,
+  screenshot: Buffer,
+): string {
+  return visualJudgeKeyOver(LEGACY_VISUAL_JUDGE_PROMPT_FINGERPRINT, input, screenshot);
+}
+
+function visualJudgeKeyOver(
+  stage: string,
+  input: GuardVisualJudgeInput,
+  screenshot: Buffer,
+): string {
   return createHash('sha256')
     .update(
       [
-        VISUAL_JUDGE_PROMPT_FINGERPRINT,
+        stage,
         createHash('sha256').update(screenshot).digest('hex'),
         (input.claim ?? '').replace(/\s+/g, ' ').trim(),
         input.expectation,
@@ -265,7 +290,12 @@ export async function runVisualJudge(
   if (screenshot.length === 0) return { status: 'skipped', reason: 'screenshot-unreadable' };
 
   const cacheKey = visualJudgeCacheKey(input, screenshot);
-  const cached = await getCacheEntry(repoRoot, VISUAL_JUDGE_CACHE_NAME, cacheKey).catch(() => null);
+  const cached = await getCacheEntryOrLegacy(
+    repoRoot,
+    VISUAL_JUDGE_CACHE_NAME,
+    cacheKey,
+    visualJudgeLegacyCacheKey(input, screenshot),
+  ).catch(() => null);
   if (cached) {
     const parsed = GuardVisualJudgmentSchema.safeParse(cached);
     if (parsed.success) return { status: 'judged', judgment: parsed.data };

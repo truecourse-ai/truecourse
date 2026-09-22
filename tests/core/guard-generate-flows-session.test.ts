@@ -50,6 +50,8 @@ import {
   FLOWS_SESSION_CACHE_NAME,
   FLOWS_SESSION_KIND,
   FLOWS_SESSION_PROMPT_FINGERPRINT,
+  FLOWS_STAGE_VERSION,
+  flowsSessionLegacyCacheKey,
   FLOWS_SESSION_SYSTEM_PROMPT,
   flowSetRefusalReason,
   flowsEpicSessionBriefing,
@@ -563,14 +565,18 @@ describe('flowsSessionBriefing', () => {
 
 describe('the session cache keys', () => {
   // The key-parity property the pre-flight estimate stands on: the key is
-  // recomputable from the EXPORTED material alone (prompt fingerprint, area id,
-  // claims, outlines) — grounding is deliberately not part of it.
+  // recomputable from the EXPORTED material alone (stage version, area id,
+  // claims, outlines) — grounding is deliberately not part of it, and neither
+  // is the prompt.
   it('is recomputable from the exported material, and nothing else', () => {
     const sha = (t: string): string => createHash('sha256').update(t).digest('hex')
     const expected = sha(
-      `${FLOWS_SESSION_PROMPT_FINGERPRINT}::${AREA.areaId}::${sha(flowAreaClaimsMaterial(AREA))}::${sha(flowAreaOutlinesMaterial(AREA))}`,
+      `flows-v${FLOWS_STAGE_VERSION}::${AREA.areaId}::${sha(flowAreaClaimsMaterial(AREA))}::${sha(flowAreaOutlinesMaterial(AREA))}`,
     )
     expect(flowsSessionCacheKey(AREA)).toBe(expected)
+    // The old key stays computable, so a synthesized area is not re-synthesized
+    // on the way over.
+    expect(flowsSessionLegacyCacheKey(AREA)).not.toBe(expected)
   })
 
   it('moves with the area id, the claims and the outlines', () => {
@@ -603,8 +609,8 @@ describe('the session cache keys', () => {
     const base = flowsEpicSessionCacheKey(DIGESTS)
     expect(base).toMatch(/^[0-9a-f]{64}$/)
     expect(flowsEpicSessionCacheKey([DIGESTS[0]])).not.toBe(base)
-    // The area and epic keys never collide (different prompt fingerprints).
-    expect(FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT).not.toBe(flowsSessionCacheKey(AREA))
+    // The area and epic keys never collide (different stage names).
+    expect(flowsEpicSessionCacheKey(DIGESTS)).not.toBe(flowsSessionCacheKey(AREA))
   })
 
   it('the work items and the cache name are what the plan named', () => {

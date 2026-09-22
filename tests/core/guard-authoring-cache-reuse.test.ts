@@ -1,9 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { flowFingerprint, GUARD_REVIEW_POLICY_VERSION, type GuardFlow } from '@truecourse/shared'
-import { collectWorkDocs, planGuardWork, type FlowSynthesisArea } from '@truecourse/guard-generator'
+import { setCacheEntry } from '@truecourse/llm'
+import { flowFingerprint, GUARD_REVIEW_POLICY_VERSION, interfaceFingerprint, movedSchemeInputs, type GuardFlow, type Interface } from '@truecourse/shared'
+import { buildRouteManifest, loadRecipe, readMergedInterfaceCatalog, recipePath } from '@truecourse/guard-runner'
+import {
+  buildServerRouteIndex,
+  buildWebAuthorCatalog,
+  collectWorkDocs,
+  planGuardWork,
+  readFlowsFile,
+  type FlowSynthesisArea,
+} from '@truecourse/guard-generator'
 import { buildSurfaceCatalogs, matchCacheKey, matchFlow, MATCH_CACHE_NAME, readCachedMatch } from '../../packages/guard-generator/src/match.js'
-import { createAuthorCatalog } from '../../packages/guard-generator/src/author-catalog.js'
+import { flowGenerationInputComponents, type FlowGenerationInputParts } from '../../packages/guard-generator/src/section-plan.js'
+import {
+  catalogReadMaterial,
+  createAuthorCatalog,
+  recordCatalogReads,
+  webAuthorKeyMaterial,
+} from '../../packages/guard-generator/src/author-catalog.js'
 import { buildAuthorUserPrompt } from '../../packages/guard-generator/src/prompts.js'
 import type { FlowWorkerTask } from '../../packages/guard-generator/src/generate.js'
 import { createGuardGenerateSessionSeams } from '../../packages/core/src/services/guard-generate/run.js'
@@ -11,14 +25,25 @@ import { EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey } from '../../packag
 import { FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey } from '../../packages/core/src/services/guard-generate/flows.js'
 import { CachedWorkerEntrySchema, flowWorkerCacheKey, flowWorkerPromptFingerprint } from '../../packages/core/src/services/guard-generate/flow-worker.js'
 import { authoringFixture } from '../fixtures/guard-authoring-benchmark/fixture.js'
-import { makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe } from '../guard-generator/helpers.js'
+import {
+  extractSessionBy,
+  FIXTURE_WEB_SERVER,
+  flowWorkerSessionOf,
+  interfacesOf,
+  makeTempRepo,
+  rmrf,
+  runGenerate,
+  writeCorpus,
+  writeDoc,
+  writeRecipe,
+} from '../guard-generator/helpers.js'
 import { memoryPersistence, stubDriver } from './spec-scan-session-stub.js'
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const roots: string[] = []
 beforeEach(() => { installMemoryKvCache() })
 afterEach(() => { resetKvCacheStore(); while (roots.length) rmrf(roots.pop()!) })
-const DOC = 'docs/tasks.md', ANCHOR = 'tasks/creating-tasks', CLAIM = '`relkit add <title>` creates a task'
+const DOC = 'docs/tasks.md', WEB_DOC = 'docs/app.md', ANCHOR = 'tasks/creating-tasks', CLAIM = '`relkit add <title>` creates a task'
 function seededRepo() {
   const root = makeTempRepo(); roots.push(root)
   writeRecipe(root); writeCorpus(root, [{ ref: DOC }]); writeDoc(root, DOC, '# Tasks\n\n## Creating tasks\n\n`relkit add <title>` creates a task.\n')
@@ -26,6 +51,25 @@ function seededRepo() {
   const area: FlowSynthesisArea = { areaId: 'tasks', claims: [{ doc: DOC, anchor: ANCHOR, title: CLAIM, driver: 'cli' }],
     docs: [{ doc: DOC, outline: doc.sections.map(s => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })) }] }
   return { root, doc, area }
+}
+
+/** The flow the web fixture's own action realizes — the shortlist's terms. */
+function webFlow(): GuardFlow {
+  const milestones = [{ order: 1, doc: 'synthetic.md', anchor: 'creation', claimTitle: 'Creating an organisation displays its dialog', proofDrivers: ['web' as const] }]
+  return { id: 'organisation', title: 'Create organisation', goal: 'Show the creation dialog', fingerprint: flowFingerprint(milestones),
+    milestones, bindings: [{ doc: 'synthetic.md', anchor: 'creation', fingerprint: 'sha256:doc' }], composedOf: [], synthesisInputsHash: 'same' }
+}
+
+/** Everything a flow's settle record folds except the web read-set under test. */
+const BASE_PARTS: FlowGenerationInputParts = {
+  flowFingerprint: 'sha256:flow',
+  sectionKeys: ['docs/app.md#creation:abc'],
+  assignmentFingerprints: ['assignment'],
+  interfaceFingerprints: ['sha256:organisation'],
+  prerequisiteMaterial: 'none',
+  recipeSlice: 'slice',
+  roster: 'roster',
+  preparation: 'preparation',
 }
 
 describe('author-only changes retain upstream cache compatibility', () => {
@@ -76,31 +120,117 @@ describe('author-only changes retain upstream cache compatibility', () => {
     expect(await matchFlow(root, missing, catalog, calls)).toMatchObject({ calls: 1 })
     expect(calls).toHaveBeenCalledTimes(2)
   })
-  it('web author contract misses preserve old rows; review migration is independent of CLI/API input keys', async () => {
-    const root = makeTempRepo(); roots.push(root)
+  it('keys a web worker on what its session is handed, not on every screen in the catalog', async () => {
     const f = authoringFixture()
-    const before = createAuthorCatalog(f.interfaces, f.resources)
-    const updatedResources = structuredClone(f.resources)
-    updatedResources.web[1].readables = { markers: [{ id: 'permission-marker', text: 'Manager access required' }] }
-    const after = createAuthorCatalog(f.interfaces, updatedResources)
-    expect(before.fingerprint).not.toBe(after.fingerprint)
-    const task = (surface: 'cli' | 'api' | 'web', catalog = before): FlowWorkerTask => ({ surface, catalog,
+    const flow = webFlow()
+    const catalog = createAuthorCatalog(f.interfaces, f.resources)
+    const material = (resources: typeof f.resources): string =>
+      webAuthorKeyMaterial(createAuthorCatalog(f.interfaces, resources), [f.own], flow, resources)
+
+    // An unrelated screen's readables: the whole catalog moves, the material
+    // handed to THIS flow's session does not.
+    const unrelated = structuredClone(f.resources)
+    unrelated.web[1].readables = { markers: [{ id: 'permission-marker', text: 'Manager access required' }] }
+    expect(createAuthorCatalog(f.interfaces, unrelated).fingerprint).not.toBe(catalog.fingerprint)
+    expect(material(unrelated)).toBe(material(f.resources))
+
+    // The resource the flow's own action sits on does move it.
+    const own = structuredClone(f.resources)
+    own.web[0].address = '/organisations?tab=all'
+    expect(material(own)).not.toBe(material(f.resources))
+
+    const task = (surface: 'cli' | 'api' | 'web', web: string): FlowWorkerTask => ({ surface,
       cacheMaterial: { flowFingerprint: 'same-flow', sectionKeys: ['same-section'], recipeFingerprint: 'same-recipe',
-        interfaceFingerprints: ['matched-interface', ...(surface === 'web' ? [catalog.fingerprint] : [])], mode: 'scratch', priorShas: [] } } as unknown as FlowWorkerTask)
-    const oldWeb = flowWorkerCacheKey(task('web', before)), newWeb = flowWorkerCacheKey(task('web', after))
-    await setCacheEntry(root, 'guard/generate', oldWeb, { retained: true })
-    expect(oldWeb).not.toBe(newWeb)
-    expect(await getCacheEntry(root, 'guard/generate', newWeb)).toBeNull()
-    expect(await getCacheEntry(root, 'guard/generate', oldWeb)).toEqual({ retained: true })
+        interfaceFingerprints: ['matched-interface', ...(surface === 'web' ? [web] : [])], mode: 'scratch', priorShas: [] } } as unknown as FlowWorkerTask)
+    expect(flowWorkerCacheKey(task('web', material(unrelated)))).toBe(flowWorkerCacheKey(task('web', material(f.resources))))
+    expect(flowWorkerCacheKey(task('web', material(own)))).not.toBe(flowWorkerCacheKey(task('web', material(f.resources))))
     for (const surface of ['cli', 'api'] as const) {
       // Only web consumes the catalog dependency. The actual worker helper
       // cannot accidentally include a catalog supplied on another surface.
-      expect(flowWorkerCacheKey(task(surface, after))).toBe(flowWorkerCacheKey(task(surface, before)))
+      expect(flowWorkerCacheKey(task(surface, material(own)))).toBe(flowWorkerCacheKey(task(surface, material(f.resources))))
       expect(flowWorkerPromptFingerprint(surface)).not.toBe(flowWorkerPromptFingerprint('web'))
     }
     const cached = { version: GUARD_REVIEW_POLICY_VERSION - 1,
       outcome: { kind: 'settled', scenarioYamlSha: 'sha', expectedReds: [] }, scenarioYaml: 'yaml', reviews: [] }
     expect(CachedWorkerEntrySchema.safeParse(cached).success).toBe(false)
     expect(CachedWorkerEntrySchema.safeParse({ ...cached, version: GUARD_REVIEW_POLICY_VERSION }).success).toBe(true)
+  })
+
+  it('settles a web flow against the entries its session read, and nothing else', () => {
+    const f = authoringFixture()
+    const catalog = createAuthorCatalog(f.interfaces, f.resources)
+    // A session that searched for its own action and fetched the invite screen.
+    const log = recordCatalogReads(catalog)
+    log.catalog.search({ query: 'create organisation', limit: 1 })
+    log.catalog.get({ ids: [f.late.id] })
+    // The fetched action arrives with the resources it sits on, which the
+    // session reads with it.
+    const served = [f.late.id, f.own.id, 'members', 'organisations'].sort()
+    expect(log.ids()).toEqual(served)
+    // An error page serves nothing, so nothing is recorded.
+    expect(log.catalog.get({ ids: ['web/absent'] }).isError).toBe(true)
+    expect(log.ids()).toEqual(served)
+
+    const settle = (interfaces = f.interfaces, resources = f.resources): string =>
+      flowGenerationInputComponents({
+        ...BASE_PARTS,
+        webCatalogReads: catalogReadMaterial(createAuthorCatalog(interfaces, resources), log.ids()),
+      })['webCatalog.reads']
+
+    // An unrelated archive panel the session never read leaves the flow settled.
+    const elsewhere = structuredClone(f.resources)
+    elsewhere.web[2].description = 'Re-authored archive record'
+    expect(settle(f.interfaces, elsewhere)).toBe(settle())
+
+    // A panel it DID read re-opens it, and so does one that has left the catalog.
+    const read = structuredClone(f.resources)
+    read.web[1].readables = { markers: [{ id: 'permission-marker', text: 'Manager access required' }] }
+    expect(settle(f.interfaces, read)).not.toBe(settle())
+    expect(settle(f.interfaces.filter((i) => i.id !== f.late.id))).not.toBe(settle())
+  })
+
+  it('hands a web worker the catalog material the pre-flight estimate rebuilds offline', async () => {
+    const root = makeTempRepo(); roots.push(root)
+    writeRecipe(root, { web: { serve: ['node', FIXTURE_WEB_SERVER], healthPath: '/health' } })
+    writeCorpus(root, [{ ref: WEB_DOC }])
+    writeDoc(root, WEB_DOC, '## home\nThe home page shows the heading "Guard Web Fixture".')
+    const shape = { type: 'web' as const, entry: { command: ['/'] }, steps: [{ kind: 'navigate' as const, route: '/' }] }
+    const home: Interface = { id: 'web/home', title: 'Home', ...shape, fingerprint: interfaceFingerprint(shape) }
+
+    const tasks: FlowWorkerTask[] = []
+    await runGenerate({
+      repoRoot: root,
+      interfaces: interfacesOf(root, home),
+      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        tasks.push(task)
+        return { kind: 'outcome', outcome: { kind: 'blocked', perMilestone: [{ order: 1, capability: 'credentials' }] } }
+      }),
+      browserPreflight: async () => ({ ok: true }),
+    })
+
+    // Everything the estimate has offline: the persisted snapshot and recipe.
+    const task = tasks.find((t) => t.surface === 'web')!
+    const recipe = loadRecipe(root, recipePath(root))!.recipe
+    const snapshot = readMergedInterfaceCatalog(root)!
+    const catalog = buildWebAuthorCatalog(
+      buildSurfaceCatalogs(snapshot.interfaces).get('web')!.interfaces,
+      buildServerRouteIndex(buildRouteManifest(root), recipe),
+      recipe.web?.app,
+      snapshot.resources,
+    )
+    // The plan walks the repo's one web interface.
+    const flow = readFlowsFile(root)!.flows.find((f) => f.id === task.flowId)!
+    expect(task.cacheMaterial.interfaceFingerprints).toContain(webAuthorKeyMaterial(catalog, [home], flow, snapshot.resources))
+  }, 60_000)
+
+  it('fills the read-set in with no session for a row that predates it', () => {
+    const current = flowGenerationInputComponents({ ...BASE_PARTS, webCatalogReads: ['web/create-organisation:abc'] })
+    const { 'webCatalog.reads': _absent, ...stored } = current
+    // A stored row carrying no read-set gains the name and re-opens nothing;
+    // once it carries one, a moved entry does re-open it.
+    expect(movedSchemeInputs(stored, current)).toEqual([])
+    expect(movedSchemeInputs(current, flowGenerationInputComponents({ ...BASE_PARTS, webCatalogReads: ['web/create-organisation:moved'] })))
+      .toEqual(['webCatalog.reads'])
   })
 })

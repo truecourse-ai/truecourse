@@ -1,10 +1,15 @@
 import { describe, it, expect, afterEach, beforeEach, vi, type MockInstance } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import {
   loadRecipe,
   resolveEntry,
   computeRecipeFingerprint,
+  recipeFingerprintComponents,
+  computePreparationFingerprint,
+  preparationFingerprintComponents,
+  dependenciesPath,
   resolveApiCredentials,
   credentialShapeWarning,
   CredentialResolutionError,
@@ -124,6 +129,54 @@ describe('RecipeSchema — a shell no-op is never an entry (the sqlfluff defect)
     const r = repo()
     writeRawRecipe(r, { build: 'pnpm build', entry: ['node', 'dist/truerc.js'] })
     expect(loadRecipe(r, recipePath(r))?.recipe.entry).toEqual(['node', 'dist/truerc.js'])
+  })
+})
+
+describe('recipeFingerprintComponents', () => {
+  it('names the part that moved, and only that part', () => {
+    const r = repo()
+    writeRawRecipe(r, { build: 'true', entry: ['node', 'cli.js'] })
+    const before = recipeFingerprintComponents(r)
+    expect(before.seed).toBe('')
+
+    fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }))
+    const bumped = recipeFingerprintComponents(r)
+    expect(bumped).toEqual({ ...before, manifests: bumped.manifests })
+    expect(bumped.manifests).not.toBe(before.manifests)
+
+    fs.mkdirSync(path.dirname(dependenciesPath(r)), { recursive: true })
+    fs.writeFileSync(dependenciesPath(r), JSON.stringify({ dependencies: [] }))
+    const catalogued = recipeFingerprintComponents(r)
+    expect(catalogued).toEqual({ ...bumped, dependencies: catalogued.dependencies })
+    expect(catalogued.dependencies).not.toBe('')
+  })
+
+  it('the fingerprint is the digest of the parts in order, path-tagged and NUL-separated', () => {
+    const r = repo()
+    const manifest = fs.readFileSync(path.join(r, 'package.json'))
+    fs.mkdirSync(path.dirname(dependenciesPath(r)), { recursive: true })
+    fs.writeFileSync(dependenciesPath(r), '{"dependencies":[]}')
+    const expected = crypto
+      .createHash('sha256')
+      .update('package.json').update('\0').update(manifest).update('\0')
+      .update('dependencies.json').update('\0').update('{"dependencies":[]}').update('\0')
+      .digest('hex')
+    expect(computeRecipeFingerprint(r)).toBe(`sha256:${expected}`)
+  })
+
+  it('the preparation fingerprint folds the recipe contract, never a dependency version', () => {
+    const r = repo()
+    const before = preparationFingerprintComponents(r)
+    const fingerprint = computePreparationFingerprint(r)
+    fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }))
+    expect(computePreparationFingerprint(r)).toBe(fingerprint)
+    expect(preparationFingerprintComponents(r)).toEqual(before)
+    // A recipe edit is the contract moving, and the component says so.
+    fs.mkdirSync(path.dirname(recipePath(r)), { recursive: true })
+    fs.writeFileSync(recipePath(r), JSON.stringify({ entry: ['node', 'cli.js'], env: { MODE: 'test' } }))
+    const after = preparationFingerprintComponents(r)
+    expect(computePreparationFingerprint(r)).not.toBe(fingerprint)
+    expect(Object.keys(after).filter((name) => after[name] !== before[name])).toEqual(['recipe.contract'])
   })
 })
 

@@ -761,6 +761,21 @@ export const GuardFlowsReportSchema = z
     noFlowClaims: z.number().int().nonnegative(),
     /** Areas whose synthesis failed — their claims produced no flow this run. */
     unsettledAreas: z.array(GuardUnsettledFlowAreaSchema).default([]),
+    /**
+     * Why settled flows re-opened this run. `flows` is how many had a stored
+     * hash that no longer matched; `byInput` counts, per named settle input,
+     * the flows it moved for (one flow counts under every input that moved);
+     * `unrecorded` counts the flows whose stored entry named no inputs, so
+     * nothing can be said about them. Absent on a report written before the field.
+     */
+    reopened: z
+      .object({
+        flows: z.number().int().nonnegative(),
+        byInput: z.record(z.string(), z.number().int().nonnegative()),
+        unrecorded: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 export type GuardFlowsReport = z.infer<typeof GuardFlowsReportSchema>
@@ -912,6 +927,15 @@ export const GuardGenerateReportSchema = z
     cosmeticSections: z.number().int().nonnegative().optional(),
     /** Live claim-diff gate calls this run made (cache hits excluded). */
     claimDiffCalls: z.number().int().nonnegative().optional(),
+    /**
+     * Cached match verdicts SERVED although the surface's authored context
+     * (purpose, at/to, the states) had moved since the verdict was stored. The
+     * key folds the surface's identity alone, so a prose edit re-plans nothing;
+     * this counts the flows that kept a plan an edited catalog might have
+     * changed, which is what would justify folding the prose of the interfaces
+     * a plan walks.
+     */
+    matchContextMoved: z.number().int().nonnegative().optional(),
     /** Prior scenarios editing workers deliberately dropped this run, each with
      *  the vanished obligation it named. Absent on reports that predate
      *  incremental authoring. */

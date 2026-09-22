@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SessionRunInput } from '../../packages/agent-loop/src/index';
-import { computeRecipeFingerprint } from '@truecourse/guard-runner';
+import { recipeContractFingerprint } from '@truecourse/guard-runner';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import {
   InterfacesFileSchema,
@@ -337,7 +337,8 @@ describe('runReconcileInterfacesSession', () => {
       repoRoot: repo,
       diagnostics: disputes,
       entry: ENTRY,
-      recipeFingerprint: 'fp-1',
+      recipeContract: 'fp-1',
+      legacyRecipeFingerprint: 'legacy-fp-1',
       driver: async () => {
         acquired++;
         return stub.driver;
@@ -364,7 +365,8 @@ describe('runReconcileInterfacesSession', () => {
       repoRoot: repo,
       diagnostics: disputes,
       entry: ENTRY,
-      recipeFingerprint: 'fp-1',
+      recipeContract: 'fp-1',
+      legacyRecipeFingerprint: 'legacy-fp-1',
       driver: async () => {
         throw new Error('the driver must not be acquired on a cache hit');
       },
@@ -374,7 +376,7 @@ describe('runReconcileInterfacesSession', () => {
     expect(second.sessionId).toBeUndefined();
   });
 
-  it('keys on WHAT is disputed, not on derivation order — and re-asks when the recipe moves', () => {
+  it('keys on WHAT is disputed, not on derivation order — and re-asks when the contract moves', () => {
     const forward = reconcileInterfacesCacheKey([treeMissingFlag, probeMissingFlag], 'fp-1');
     const reversed = reconcileInterfacesCacheKey([probeMissingFlag, treeMissingFlag], 'fp-1');
     const moved = reconcileInterfacesCacheKey([treeMissingFlag, probeMissingFlag], 'fp-2');
@@ -466,7 +468,7 @@ function seedReconcileCache(
   diagnostics: readonly MapperDiagnostic[],
   resolutions: InterfaceResolution[],
 ): Promise<void> {
-  const key = reconcileInterfacesCacheKey(diagnostics, computeRecipeFingerprint(repo));
+  const key = reconcileInterfacesCacheKey(diagnostics, recipeContractFingerprint(repo));
   return setCacheEntry(repo, RECONCILE_INTERFACES_CACHE_NAME, key, { resolutions });
 }
 

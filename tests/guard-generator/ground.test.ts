@@ -1,14 +1,17 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
-import { resolveEntry } from '@truecourse/guard-runner'
+import fs from 'node:fs'
+import path from 'node:path'
+import { resolveEntry, loadRecipe, recipePath, dependenciesPath } from '@truecourse/guard-runner'
 import {
   captureProbes,
+  groundInputsFingerprint,
   defaultProbeExecutor,
   buildAuthorUserPrompt,
   type ProbeExecutor,
   type ProbeTranscript,
   type AuthorUserContext,
 } from '@truecourse/guard-generator'
-import { makeTempRepo, rmrf, FIXTURE_BIN } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, FIXTURE_BIN } from './helpers.js'
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
@@ -28,6 +31,30 @@ function repo(): string {
 // The recipe entry the fixture repos use: `node <relkit bin>`.
 // (Probe derivation is covered by ground-probes.test.ts.)
 const ENTRY = ['node', FIXTURE_BIN]
+
+describe('groundInputsFingerprint', () => {
+  it('follows the entry, its env and the root manifests; never the seed or the catalog', () => {
+    const r = repo()
+    fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '1.0.0' }))
+    writeRecipe(r)
+    const recipe = loadRecipe(r, recipePath(r))!.recipe
+    const before = groundInputsFingerprint(r, recipe)
+    expect(groundInputsFingerprint(r, recipe)).toBe(before)
+
+    // A seed script and a catalog entry cannot change what `--help` prints.
+    fs.mkdirSync(path.dirname(dependenciesPath(r)), { recursive: true })
+    fs.writeFileSync(dependenciesPath(r), JSON.stringify({ dependencies: [] }))
+    fs.writeFileSync(path.join(r, 'seed.mjs'), '// drafted\n')
+    expect(groundInputsFingerprint(r, recipe)).toBe(before)
+
+    // The program's own manifest can: `--version` prints what is in it.
+    fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }))
+    const bumped = groundInputsFingerprint(r, recipe)
+    expect(bumped).not.toBe(before)
+    // So can the env the probe runs under.
+    expect(groundInputsFingerprint(r, { ...recipe, env: { MODE: 'test' } })).not.toBe(bumped)
+  })
+})
 
 describe('captureProbes — real fixture CLI', () => {
   it('captures exit code + stdout/stderr per probe against relkit', async () => {

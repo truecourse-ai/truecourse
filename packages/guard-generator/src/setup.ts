@@ -12,11 +12,16 @@
  *                                                    above this package); the adapter
  *                                                    fails before calling in.
  *   0.5  a corpus must exist                       — HARD: setup runs after scan.
- *   1    the recipe                                — HARD. Discovery
- *                                                    (deterministic → the repair
- *                                                    session or the one-shot LLM →
- *                                                    verify by running) plus a live
- *                                                    endpoint probe per declared server.
+ *   1    the recipe                                — HARD. A repo with none gets
+ *                                                    discovery (deterministic → the
+ *                                                    repair session or the one-shot
+ *                                                    LLM → verify by running); a repo
+ *                                                    that has one gets the NEEDS
+ *                                                    comparison instead, and a scoped
+ *                                                    repair only when the recipe does
+ *                                                    not provide what the code needs.
+ *                                                    Either way, a live endpoint probe
+ *                                                    per declared server.
  *   2    detect                                    — one `mapInterfaces` pass; free.
  *   3    the catalog                               — SOFT. The externals declaration
  *                                                    skeleton (det) + the
@@ -66,6 +71,10 @@ import {
   loadResolvedExternals,
   computeRecipeFingerprint,
   computePreparationFingerprint,
+  legacyPreparationFingerprint,
+  preparationFingerprintComponents,
+  recipeContractFingerprint,
+  dependencyCatalogIdentity,
   preparationCatalog,
   dependenciesPath,
   loadDependencyCatalog,
@@ -76,7 +85,7 @@ import {
   writeGuardSetup,
   readInterfaceCatalog,
   readAuthoredInterfaceCatalog,
-  webScreensNeedingReadables,
+  webScreensNeedingAuthoring,
   resolveSeedScript,
   FINGERPRINT_INPUTS,
   RecipeSchema,
@@ -89,6 +98,7 @@ import type {
   DatastoreUrlRef,
   DetectedExternalService,
   GuardSetupExternalsStep,
+  GuardSetupFailedScreen,
   GuardSetupInterfaceResolution,
   GuardSetupRecipeStep,
   GuardSetupReport,
@@ -96,11 +106,28 @@ import type {
   GuardSetupServerProbe,
   GuardSetupTaxonomyKey,
   GuardSetupTaxonomyStep,
+  GuardSetupUnprovidedNeed,
   Interface,
   MapperDiagnostic,
 } from '@truecourse/shared'
+import { movedNamedInputs, movedSchemeInputs } from '@truecourse/shared'
 import { GUARD_COMPOSE_FILE } from './datastore-compose.js'
-import { discoverRecipe, type RecipeDiscoveryPhase, type RecipeRepairFn } from './recipe-discovery.js'
+import {
+  discoverRecipe,
+  repairExistingRecipe,
+  type RecipeDiscoveryPhase,
+  type RecipeRepairFn,
+  type RepairExistingRecipeResult,
+} from './recipe-discovery.js'
+import {
+  needsFingerprint,
+  parseDetectionSnapshot,
+  recipeNeeds,
+  recipeNeedsDiff,
+  recipeNeedsOf,
+  type DetectedWorld,
+  type UnprovidedNeed,
+} from './recipe-needs.js'
 import { detectEcosystems, routesFromInterfaces, type ApiRouteRef } from './recipe-propose.js'
 import { probeApiServers } from './endpoint-probe.js'
 import { deriveExternalsSkeleton } from './externals-skeleton.js'
@@ -232,8 +259,11 @@ export interface GuardSetupOptions {
   onStepFact?: (step: GuardSetupStepKey, line: string) => void
   // --- the session seams ---
   /**
-   * The recipe-repair session (step 9), passed through to `discoverRecipe`.
-   * Absent ⇒ the legacy one-shot `recipeRunner` fallback runs instead.
+   * The recipe-repair session (step 9), in both situations that reach it: the
+   * failure path of discovery for a repo with no recipe, and the SCOPED repair
+   * of a standing one the needs comparison found wanting. Absent ⇒ discovery
+   * falls back to the one-shot `recipeRunner`, and an unprovided need is
+   * reported and left standing rather than repaired.
    */
   repair?: RecipeRepairFn
   /**
@@ -300,6 +330,9 @@ export interface GuardSetupCatalogSessionInput {
   skeleton: { declared: string[]; alreadyDeclared: string[]; undeclarable: string[] }
   /** The catalog step's PRE-RUN input fingerprint — the session's cache key. */
   fingerprint: string
+  /** The same fingerprint under the formula the key used to fold, for the OLD
+   *  key a miss falls back to. Delete with the legacy hash. */
+  legacyFingerprint: string
 }
 
 export type GuardSetupCatalogSessionResult =
@@ -345,6 +378,11 @@ export type GuardSetupInterfacesStepResult = {
   /** What this run disputed/noticed — recorded on the step row, never stored
    *  in the catalog. */
   diagnostics?: MapperDiagnostic[]
+  /** Re-authored tasks whose key moved through a reworded label alone. */
+  labelRekeys?: number
+  /** Screens whose authoring has not settled — they retry on a refresh, or when
+   *  their own inputs move, and never merely because a setup ran again. */
+  failedScreens?: GuardSetupFailedScreen[]
   /** The reconcile session's per-subject verdicts, when one ran. */
   resolutions?: GuardSetupInterfaceResolution[]
   /** The catalog edits the resolutions produced, one line each. */
@@ -395,6 +433,9 @@ export interface GuardSetupSeedSessionInput {
   existingScript?: { scriptPath: string; scriptContent: string }
   /** The seed step's PRE-RUN input fingerprint — the session's cache key. */
   fingerprint: string
+  /** The step's fingerprint under its OLD formula, for the key a miss falls
+   *  back to. Delete with the legacy hash. */
+  legacyFingerprint: string
   /**
    * Whether setup was handed a FRESH CHECKOUT — a git repository carrying
    * nothing git ignores beyond what the caller materialized into it. A cloned
@@ -512,7 +553,27 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   /** One line naming one thing a step did. */
   const fact = (step: GuardSetupStepKey, line: string): void => opts.onStepFact?.(step, line)
   const steps: GuardSetupTaxonomyStep[] = []
-  const settled = settledFingerprints(repoRoot, opts.refresh === true)
+  const settled = settledSteps(repoRoot, opts.refresh === true)
+  /** The detection snapshot, once the detect step has read it: a catalog input. */
+  let detectionSnapshot = ''
+  /** Whether a step's settled row still holds — its named inputs when it has
+   *  them, else its old fingerprint one last time. */
+  const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
+    stepSettled(repoRoot, key, settled(key), legacyFingerprint, detectionSnapshot)
+  /**
+   * Record a step's row with its inputs BY NAME, read off the tree as the row
+   * is recorded, which is the state its fingerprint was computed over. A step
+   * whose settled fingerprint no longer holds says which input moved it; a
+   * refresh re-opens every step on request, so it names none.
+   */
+  const pushStep = (row: GuardSetupTaxonomyStep): void => {
+    const inputComponents = stepInputComponents(repoRoot, row.key, detectionSnapshot)
+    steps.push({ ...row, ...(Object.keys(inputComponents).length > 0 ? { inputComponents } : {}) })
+    const settledRow = settled(row.key)
+    if (settledRow === null || settledRow.inputFingerprint === row.inputFingerprint) return
+    const moved = movedNamedInputs(settledRow.inputComponents, inputComponents)
+    fact(row.key, moved ? `re-opened: ${moved.join(', ') || 'no named input'} moved` : 're-opened: the settled row names no inputs')
+  }
 
   // Asked BEFORE any step installs or builds anything: what this tree carries
   // right now is what a run of this repository is handed, and the seed's
@@ -563,10 +624,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   }
 
   // ONE analysis pass feeds every step — memoized exactly as generate memoizes it.
-  // Which STEP pays for it depends on the repo (the recipe step derives from the
-  // route surface; a repo that already has one first needs it at detect), so the
-  // phase is reported from here, against whichever step is running when the pass
-  // actually starts.
+  // Which STEP pays for it depends on the repo (a repo with no recipe maps while
+  // discovery proposes one; a repo that has one maps for the needs comparison the
+  // recipe gate makes), so the phase is reported from here, against whichever
+  // step is running when the pass actually starts.
   let mappedOnce: ReturnType<typeof mapSafely> | null = null
   let mappedWithRecipe = false
   const mapOnce = (): ReturnType<typeof mapSafely> => {
@@ -577,14 +638,45 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     }
     return mappedOnce
   }
+  /**
+   * The analysis pass over a tree that HAS a recipe. Discovery maps BEFORE one
+   * exists (its route and datastore reads feed the proposal), and a mapping with
+   * no entry to probe leaves the cli catalog empty of any program no extractor
+   * reads — so a mapping that predates the recipe is thrown away and taken
+   * again, once, as soon as one is on disk.
+   */
+  const mapWithRecipe = (): ReturnType<typeof mapSafely> => {
+    if (mappedOnce && !mappedWithRecipe && fs.existsSync(recipePath(repoRoot))) mappedOnce = null
+    return mapOnce()
+  }
+  /**
+   * This run's detection snapshot and the recipe step's one settle input: the
+   * NEEDS the repository declares. Taken here rather than at detect because the
+   * recipe gate is the first thing that asks — the snapshot is shared, not taken
+   * twice, and the catalog step keys on the same string.
+   */
+  const detectWorld = async (): Promise<{ world: DetectedWorld; inputFingerprint: string }> => {
+    const mapped = await mapWithRecipe()
+    const world: DetectedWorld = {
+      externalServices: mapped.externalServices,
+      database: mapped.database,
+      datastoreUrls: mapped.datastoreUrls,
+    }
+    detectionSnapshot = canonicalDetectionJson(mapped.externalServices, mapped.database, mapped.datastoreUrls)
+    return { world, inputFingerprint: recipeStepFingerprint(needsFingerprint(recipeNeeds(world))) }
+  }
 
   // ---- Step 1: the recipe. A failure prevents later setup. -----------------
   opts.onStep?.('recipe')
   phases.step('recipe')
-  // The recipe step's fingerprint is the SUBJECT (the ecosystem manifests), never
-  // its own output: an edited recipe.json re-runs nothing here, a moved lockfile
-  // re-runs everything — the step re-derives when the repo moved.
-  const recipeInputFp = ecosystemFingerprint(repoRoot)
+  // The recipe step's subject is what the repository NEEDS of the world a run
+  // boots — never a file's bytes. A recipe was proved by really installing,
+  // building and booting this application, so re-deriving it is a rewording:
+  // a dependency bump, a reformatted lockfile and a renamed script all leave
+  // the needs exactly as they were, and a re-derivation over them re-authors a
+  // corpus for nothing. The rows an older build wrote name manifests instead,
+  // and are compared against the old fingerprint once (see `stepSettled`).
+  const legacyRecipeFp = legacyRecipeStepFingerprint(repoRoot)
   const preexisting = reloadRecipe(repoRoot)
   // A recipe the last run FAILED is never reused. Discovery answers `exists`
   // for whatever sits at the recipe path, and the recipe travels in the setup
@@ -596,6 +688,41 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     (priorReport?.steps ?? []).some((row) => row.key === 'recipe' && row.status === 'failed')
   let recipe: Recipe
   let recipeStep: GuardSetupRecipeStep
+
+  /**
+   * The live endpoint probe — the half verification does not do. See
+   * `endpoint-probe.ts` for why any HTTP status (401 and 404 included) is a
+   * pass. It BOOTS the recipe's servers, so it is only ever run over a tree
+   * something has built.
+   */
+  const probeRecipe = async (subject: Recipe): Promise<GuardSetupServerProbe[]> => {
+    if (!subject.api) return []
+    const probes = await (opts.probe ?? probeApiServers)({
+      repoRoot,
+      recipe: subject,
+      manifest: buildRouteManifest(repoRoot),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      onServer: (done, total) => {
+        const line = total === 1 ? 'probing a live route' : `probing live routes ${done}/${total}`
+        if (done === 0) phases.enter({ running: line, done: 'route probe' })
+        else phases.tick(line)
+      },
+    })
+    for (const probe of probes) {
+      fact(
+        'recipe',
+        probe.ok
+          ? `probed \`${probe.server}\`: GET ${probe.path} answered ${probe.status ?? 'without a status'}`
+          : `probed \`${probe.server}\`: GET ${probe.path} did not answer, ${firstReasonLine(probe.error ?? 'no reason reported')}`,
+      )
+    }
+    return probes
+  }
+  /** Why a dead server stops setup — step 1 is the one hard gate. */
+  const deadServerReason = (probe: GuardSetupServerProbe): string =>
+    `the recipe's server "${probe.server}" is declared but not reachable: ${probe.error}. ` +
+    `Every api scenario would fail identically against it, so setup stops here rather than preparing a world nothing can run in.`
+
   if (replayed('recipe')) {
     // Single-step mode, a later step: the recipe on disk IS the artifact every
     // step downstream reads. Neither discovery nor the repair session nor the
@@ -608,14 +735,147 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     recipeStep = { status: 'ok', outcome: 'exists' }
     fact('recipe', 'replayed from recipe.json: not re-derived, not probed')
     opts.onStepDone?.('recipe', 'replayed from recipe.json — not re-derived, not probed')
-  } else if (preexisting && settled('recipe') === recipeInputFp) {
-    // Settled: the subject is byte-identical to what the last run verified, so
-    // neither discovery nor the live probe re-runs. `refresh` bypasses this.
+  } else if (preexisting && !rederive) {
+    // THE STANDING RECIPE. Nothing re-derives it, and the two questions asked
+    // here are whether the repository now needs something it does not provide,
+    // and whether what it declares still starts.
+    const { world, inputFingerprint } = await detectWorld()
+    const diff = recipeNeedsDiff({ repoRoot, recipe: preexisting, world })
+    for (const entry of diff.unprovided) fact('recipe', unprovidedNeedFact(entry))
+    const toRepair = recipeNeedsOf(diff)
     recipe = preexisting
-    recipeStep = { status: 'ok', outcome: 'exists' }
-    steps.push({ key: 'recipe', status: 'skipped', reason: 'unchanged', inputFingerprint: recipeInputFp })
-    fact('recipe', 'unchanged since the last setup, from cache: neither re-derived nor re-probed')
-    opts.onStepDone?.('recipe', 'unchanged — reused without re-verifying')
+    recipeStep = {
+      status: 'ok',
+      outcome: 'exists',
+      ...(diff.unprovided.length > 0 ? { unprovidedNeeds: diff.unprovided.map(recordedNeed) } : {}),
+    }
+    let sessionRunId: string | undefined
+
+    /** What every repair of this recipe is handed beside its scope. */
+    const repairArgs = {
+      recipe: preexisting,
+      database: async () => {
+        const db = world.database
+        return db ? { type: db.type, driver: db.driver } : null
+      },
+      datastores: async () => world.datastoreUrls,
+      ...(opts.composeKey ? { composeKey: opts.composeKey } : {}),
+      onPhase: (phase: RecipeDiscoveryPhase) => phases.enter(recipePhase(phase)),
+    }
+    /** Take a settled repair onto the run: the recipe, the row, the facts. */
+    const applyRepair = (repaired: RepairExistingRecipeResult): void => {
+      sessionRunId = repaired.sessionRunId ?? sessionRunId
+      if (repaired.status !== 'repaired') {
+        if (repaired.status === 'unchanged') {
+          fact('recipe', 'the repair session settled on the recipe as it stands; nothing was rewritten')
+        }
+        return
+      }
+      recipe = repaired.recipe
+      fact('recipe', `repaired in place, ${repaired.changed.join(', ')} rewritten in ${repaired.wrotePath}`)
+      for (const surface of repaired.movedSlices) {
+        fact('recipe', `repair moved the slice: every ${surface} flow re-authors against the changed recipe`)
+      }
+      recipeStep = {
+        ...recipeStep,
+        outcome: 'discovered',
+        source: 'llm',
+        wrotePath: repaired.wrotePath,
+        ...(repaired.movedSlices.length > 0 ? { movedFlowSlices: [...repaired.movedSlices] } : {}),
+      }
+    }
+    /** The recipe gate giving way: the row and the run both carry the reason. */
+    const stop = (reason: string): GuardSetupResult => {
+      recipeStep = { ...recipeStep, status: 'failed', reason }
+      return failed(reason, {
+        recipe: recipeStep,
+        steps: [
+          ...steps,
+          {
+            key: 'recipe',
+            status: 'failed',
+            reason,
+            inputFingerprint,
+            ...(sessionRunId ? { sessionRunId } : {}),
+          },
+        ],
+      })
+    }
+    /**
+     * VERIFICATION — boot the recipe's servers and call a real route on each.
+     * Honest only over a tree something has built, so a checkout with no
+     * dependencies and no build output is not probed at all: a boot failure
+     * there reports the checkout, and the run that builds this repository
+     * verifies the recipe's boot for real. A dead server is handed to ONE
+     * boot-scoped repair before the gate gives way, since failing instead
+     * leaves the row failed, which is what makes the next run throw the whole
+     * recipe away and derive a new one. Returns the reason, or null.
+     */
+    const verifyStanding = async (repairedAlready: boolean): Promise<string | null> => {
+      if (freshCheckout && !repairedAlready) {
+        fact('recipe', 'nothing is built in this checkout, so the recipe was not re-probed: the run that builds it verifies its boot')
+        return null
+      }
+      let probes = await probeRecipe(recipe)
+      let dead = probes.find((p) => !p.ok)
+      if (dead && opts.repair && !repairedAlready) {
+        const failure = deadServerReason(dead)
+        const fixed = await repairExistingRecipe(repoRoot, {
+          ...repairArgs,
+          repair: opts.repair,
+          scope: { kind: 'boot', failure, failureClass: 'endpoint-probe' },
+        })
+        if (fixed.status === 'failed') {
+          fact('recipe', `the recipe no longer starts, and the repair did not settle: ${firstReasonLine(fixed.reason)}`)
+        }
+        applyRepair(fixed)
+        if (fixed.status === 'repaired') {
+          probes = await probeRecipe(recipe)
+          dead = probes.find((p) => !p.ok)
+        }
+      }
+      if (probes.length > 0) recipeStep.probes = probes
+      opts.onStepDone?.('recipe', recipeSummary(recipeStep, probes))
+      return dead ? deadServerReason(dead) : null
+    }
+
+    if (toRepair.length > 0 && opts.repair) {
+      // SCOPED REPAIR. The session is handed the recipe and the named needs and
+      // may answer with the world the app runs in and nothing else; the fold
+      // refuses a proposal that reaches further, and `verifyProposal` is still
+      // the gate that decides whether anything reaches disk.
+      const repaired = await repairExistingRecipe(repoRoot, {
+        ...repairArgs,
+        repair: opts.repair,
+        scope: { kind: 'needs', unprovided: toRepair },
+      })
+      if (repaired.status === 'failed') {
+        sessionRunId = repaired.sessionRunId ?? sessionRunId
+        fact('recipe', `the recipe does not provide what the repository needs, and the repair did not settle: ${firstReasonLine(repaired.reason)}`)
+        return stop(repaired.reason)
+      }
+      applyRepair(repaired)
+      const reason = await verifyStanding(true)
+      if (reason) return stop(reason)
+      pushStep({ key: 'recipe', status: 'ok', inputFingerprint, ...(sessionRunId ? { sessionRunId } : {}) })
+    } else if (toRepair.length === 0 && holds('recipe', legacyRecipeFp)) {
+      // Settled: the repository needs nothing the recipe does not provide, and
+      // the needs have not moved since the last run verified them. `refresh`
+      // bypasses this.
+      pushStep({ key: 'recipe', status: 'skipped', reason: 'unchanged', inputFingerprint })
+      fact(
+        'recipe',
+        'the needs have not moved and the recipe provides every one of them, from cache: neither re-derived nor re-probed',
+      )
+      opts.onStepDone?.('recipe', 'unchanged — reused without re-verifying')
+    } else {
+      // The needs moved, or one is unprovided with no repair seam wired in.
+      // Either way the recipe stands and verification is what says whether it
+      // still holds.
+      const reason = await verifyStanding(false)
+      if (reason) return stop(reason)
+      pushStep({ key: 'recipe', status: 'ok', inputFingerprint, ...(sessionRunId ? { sessionRunId } : {}) })
+    }
   } else {
     // A RE-DERIVATION (a refresh, or a recipe the last run failed) writes what
     // discovery derived — which knows nothing about the blocks it never proposes
@@ -647,7 +907,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             key: 'recipe',
             status: 'failed',
             reason: discovery.reason,
-            inputFingerprint: recipeInputFp,
+            inputFingerprint: (await detectWorld()).inputFingerprint,
             ...(discovery.sessionRunId ? { sessionRunId: discovery.sessionRunId } : {}),
           },
         ],
@@ -687,48 +947,27 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       for (const todo of discovery.todos) fact('recipe', `left for a human to fill in: ${todo}`)
     }
 
-    // The live endpoint probe — the half verification does not do. See `endpoint-probe.ts`
-    // for why any HTTP status (401 and 404 included) is a pass.
-    const manifest = buildRouteManifest(repoRoot)
-    const probes: GuardSetupServerProbe[] = recipe.api
-      ? await (opts.probe ?? probeApiServers)({
-          repoRoot,
-          recipe,
-          manifest,
-          ...(opts.signal ? { signal: opts.signal } : {}),
-          onServer: (done, total) => {
-            const line = total === 1 ? 'probing a live route' : `probing live routes ${done}/${total}`
-            if (done === 0) phases.enter({ running: line, done: 'route probe' })
-            else phases.tick(line)
-          },
-        })
-      : []
+    // The needs the row settles on are read AFTER the recipe landed, off the
+    // mapping that sees it: a pass taken before it exists has no entry to probe
+    // and reports a different world.
+    const { inputFingerprint } = await detectWorld()
+    const probes = await probeRecipe(recipe)
     if (probes.length > 0) recipeStep.probes = probes
-    for (const probe of probes) {
-      fact(
-        'recipe',
-        probe.ok
-          ? `probed \`${probe.server}\`: GET ${probe.path} answered ${probe.status ?? 'without a status'}`
-          : `probed \`${probe.server}\`: GET ${probe.path} did not answer, ${firstReasonLine(probe.error ?? 'no reason reported')}`,
-      )
-    }
     const deadServer = probes.find((p) => !p.ok)
     if (deadServer) {
-      const reason =
-        `the recipe's server "${deadServer.server}" is declared but not reachable: ${deadServer.error}. ` +
-        `Every api scenario would fail identically against it, so setup stops here rather than preparing a world nothing can run in.`
+      const reason = deadServerReason(deadServer)
       recipeStep.status = 'failed'
       recipeStep.reason = reason
       return failed(reason, {
         recipe: recipeStep,
-        steps: [...steps, { key: 'recipe', status: 'failed', reason, inputFingerprint: recipeInputFp }],
+        steps: [...steps, { key: 'recipe', status: 'failed', reason, inputFingerprint }],
       })
     }
     const sessionRunId = discovery.status === 'discovered' ? discovery.sessionRunId : undefined
-    steps.push({
+    pushStep({
       key: 'recipe',
       status: 'ok',
-      inputFingerprint: recipeInputFp,
+      inputFingerprint,
       ...(sessionRunId ? { sessionRunId } : {}),
     })
     opts.onStepDone?.('recipe', recipeSummary(recipeStep, probes))
@@ -760,17 +999,14 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // ---- Step 2: detect. Deterministic, free, no LLM — always runs. ----------
   opts.onStep?.('detect')
   phases.step('detect')
-  // Discovery may have mapped the tree BEFORE the recipe existed (its route and
-  // datastore reads feed the proposal). A mapping with no recipe has no entry to
-  // probe, so a cli no extractor reads came out empty — map again now that the
-  // recipe is on disk and the verification build left its entry runnable.
-  if (mappedOnce && !mappedWithRecipe) mappedOnce = null
-  const mapped = await mapOnce()
-  const detectedExternals = mapped.externalServices ?? []
-  const database = mapped.database ?? null
-  const datastoreUrls = mapped.datastoreUrls ?? []
+  // The same pass the recipe gate read its needs off, with the recipe on disk.
+  const mapped = await mapWithRecipe()
+  const detectedExternals = mapped.externalServices
+  const database = mapped.database
+  const datastoreUrls = mapped.datastoreUrls
   const detectionSnapshotJson = canonicalDetectionJson(detectedExternals, database, datastoreUrls)
-  steps.push({ key: 'detect', status: 'ok', inputFingerprint: '' })
+  detectionSnapshot = detectionSnapshotJson
+  pushStep({ key: 'detect', status: 'ok', inputFingerprint: '' })
   for (const service of detectedExternals) fact('detect', detectedServiceFact(service))
   if (database) {
     fact(
@@ -798,15 +1034,25 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // ---- Step 3: the catalog — the externals skeleton (det) + the session. ---
   // SOFT throughout: the hard gate already held, and a catalog that could not be
   // classified is a reported step, never a failed setup.
+  // The recipe as the catalog step reads it: the contract before the seed
+  // step, which (with the preparations step) writes the recipe later in this
+  // same run. A dependency version reaches neither the classification nor
+  // the skeleton, so the manifests are not here either.
   const catalogFpOf = (): string =>
+    catalogFingerprint(detectionSnapshotJson, recipeContractFingerprint(repoRoot, 'seed'), dependenciesFileContent(repoRoot))
+  /** {@link catalogFpOf} as it was computed before the slices — the one check a
+   *  settled row with no components gets, and the session's old cache key.
+   *  Delete with the legacy hash. */
+  const legacyCatalogFpOf = (): string =>
     catalogFingerprint(detectionSnapshotJson, computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
   // The session's own settle gate. Its additions are LLM-nondeterministic, so
   // a re-run can grow the catalog, which moves the recipe fingerprint, which
   // re-authors every flow. This fingerprint deliberately excludes the catalog
   // it produces (feeding the session's OUTPUT back into its gate is what made
   // the churn self-sustaining) and the full recipe fingerprint (which folds the
-  // catalog too): it hashes only what the session derives FROM — detection, the
-  // recipe's own text, and the seed script. While it holds, the stored catalog
+  // catalog too): it hashes only what the session derives FROM — detection and
+  // the recipe contract as it stands before the seed step, which writes the
+  // recipe after this step in the same run. While it holds, the stored catalog
   // stands byte-for-byte; the add-only fold already protects curated entries
   // whenever the session does run.
   // Detection IDENTITY without evidence: the evidence entries carry absolute
@@ -829,7 +1075,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       .sort((a, b) => a.service.localeCompare(b.service)),
     database: database ? { type: database.type, driver: database.driver } : null,
   })
-  const catalogSessionFpOf = (): string => {
+  const catalogSessionFpOf = (): string =>
+    `sha256:${createHash('sha256').update(`${stableDetectionJson}::${recipeContractFingerprint(repoRoot, 'seed')}`).digest('hex')}`
+  /** {@link catalogSessionFpOf} as the settle record was written before the
+   *  slices: the recipe's whole text and the seed script. A record under it
+   *  holds once, then re-settles under the new value. Delete with the legacy hash. */
+  const legacyCatalogSessionFpOf = (): string => {
     let recipeRaw = ''
     try {
       recipeRaw = fs.readFileSync(recipePath(repoRoot), 'utf-8')
@@ -852,7 +1103,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     // rather than re-classifying — it is a curated artifact of the stored
     // bundle, and `refresh` remains the explicit way to re-derive it.
     const settleSkip =
-      catalogOnDisk && (settledSession === catalogSessionFp || (settledSession === null && opts.refresh !== true))
+      catalogOnDisk &&
+      (settledSession === catalogSessionFp ||
+        settledSession === legacyCatalogSessionFpOf() ||
+        (settledSession === null && opts.refresh !== true))
     if (replayed('catalog')) {
       // Prior step: the catalog on disk stands as it is. Not even the
       // deterministic skeleton runs — it WRITES `api.externals` into the recipe,
@@ -863,7 +1117,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       fact('catalog', 'replayed: scenarios/dependencies.json stands as it is')
       for (const line of catalogEntryFacts(repoRoot)) fact('catalog', line)
       opts.onStepDone?.('catalog', 'replayed — scenarios/dependencies.json stands as it is')
-    } else if (settled('catalog') === catalogFpPre || settleSkip) {
+    } else if (holds('catalog', legacyCatalogFpOf()) || settleSkip) {
       // The skeleton is still run for the legacy report field — with unchanged
       // detection and an unchanged recipe it derives nothing and writes nothing —
       // but no session is spent.
@@ -871,7 +1125,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       const catalogFpPost = catalogFpOf()
       const enriched = catalogFpPost !== catalogFpPre
       if (settledSession !== catalogSessionFp || enriched) writeCatalogSettle(repoRoot, catalogSessionFpOf())
-      steps.push({ key: 'catalog', status: enriched ? 'ok' : 'skipped', ...(!enriched ? { reason: 'unchanged' } : {}), inputFingerprint: catalogFpPost })
+      pushStep({ key: 'catalog', status: enriched ? 'ok' : 'skipped', ...(!enriched ? { reason: 'unchanged' } : {}), inputFingerprint: catalogFpPost })
       fact(
         'catalog',
         enriched
@@ -897,9 +1151,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             undeclarable: externalsStep.undeclarable,
           },
           fingerprint: catalogFpPre,
+          legacyFingerprint: legacyCatalogFpOf(),
         })
         if (result.status === 'ok') writeCatalogSettle(repoRoot, catalogSessionFpOf())
-        steps.push(
+        pushStep(
           result.status === 'ok'
             ? {
                 key: 'catalog',
@@ -937,7 +1192,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       } else {
         // No session wired (a test seam, or the deterministic-only edition): the
         // deterministic half is the whole step.
-        steps.push({ key: 'catalog', status: 'ok', inputFingerprint: catalogFpOf() })
+        pushStep({ key: 'catalog', status: 'ok', inputFingerprint: catalogFpOf() })
         for (const line of externalsSkeletonFacts(externalsStep)) fact('catalog', line)
         fact('catalog', 'no catalog session is wired into this run; the deterministic skeleton was the whole step')
         for (const line of catalogEntryFacts(repoRoot)) fact('catalog', line)
@@ -973,9 +1228,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       }
       fact('interfaces', 'replayed: the authored catalog stands as it is')
       opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
-    } else if (settled('interfaces') === interfacesFp && authoredExists && opts.replace !== true &&
-      webScreensNeedingReadables(readInterfaceCatalog(repoRoot), readAuthoredInterfaceCatalog(repoRoot)).size === 0) {
-      steps.push({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
+    } else if (holds('interfaces', legacyInterfacesFingerprint(repoRoot)) && authoredExists && opts.replace !== true &&
+      webScreensNeedingAuthoring({
+        derived: readInterfaceCatalog(repoRoot),
+        authored: readAuthoredInterfaceCatalog(repoRoot),
+        recipeContract: recipeContractFingerprint(repoRoot, 'seed'),
+      }).size === 0) {
+      pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
       fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')
       opts.onStepDone?.('interfaces', 'unchanged')
     } else if (opts.authorInterfaces) {
@@ -988,18 +1247,32 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         interfaces: mapped.interfaces,
         diagnostics: mapped.diagnostics,
       })
-      steps.push({
+      pushStep({
         key: 'interfaces',
         status: result.status,
         ...(result.reason ? { reason: result.reason } : {}),
-        inputFingerprint: interfacesFingerprint(repoRoot),
+        // The fingerprint this step PLANNED over: the step writes only the
+        // authored half, which no input of its key reads, so the row records
+        // the same value before and after the run rather than re-reading a tree
+        // the authoring may have moved underneath it.
+        inputFingerprint: interfacesFp,
         ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
         // The step row is where run reporting lands (diagnostics are NEVER
         // stored in the catalog, and 01-D left the dashboard silent on them).
         ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
         ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
         ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
+        ...(result.labelRekeys !== undefined ? { labelRekeys: result.labelRekeys } : {}),
+        ...(result.failedScreens && result.failedScreens.length > 0
+          ? { failedScreens: result.failedScreens }
+          : {}),
       })
+      for (const screen of result.failedScreens ?? []) {
+        fact('interfaces', `${screen.place}: not authored (${screen.reason ?? 'the session did not settle'}) — refresh to retry`)
+      }
+      if (result.labelRekeys) {
+        fact('interfaces', `${result.labelRekeys} re-authored task${result.labelRekeys === 1 ? '' : 's'} moved a key through a reworded label alone`)
+      }
       if (result.resolutions && result.resolutions.length > 0) {
         fact(
           'interfaces',
@@ -1014,7 +1287,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       for (const change of result.changes ?? []) fact('interfaces', `catalog edit: ${change}`)
       opts.onStepDone?.('interfaces', result.reason ?? result.status)
     } else {
-      steps.push({
+      pushStep({
         key: 'interfaces',
         status: 'skipped',
         reason:
@@ -1033,8 +1306,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const current = reloadRecipe(repoRoot) ?? recipe
 
   // ---- Step 5: the one seed — data AND auth. SOFT. -------------------------
-  const seedFpOf = (): string =>
-    seedFingerprint(computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
+  const seedFpOf = (): string => computeSeedStepFingerprint(repoRoot)
   let seedStep: GuardSetupSeedStep | undefined
   /** A recipe defect the seed's cold-clone proof surfaced: the run fails on it. */
   let recipeFailure: string | undefined
@@ -1048,7 +1320,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       }
       fact('seed', 'replayed: the declared `api.seed` stands as it is, nothing was drafted or proved')
       opts.onStepDone?.('seed', 'replayed — the declared `api.seed` stands as it is')
-    } else if (settled('seed') === seedFpPre) {
+    } else if (holds('seed', legacySeedStepFingerprint(repoRoot))) {
       const existingSeed = current.api?.seed
       seedStep = existingSeed
         ? {
@@ -1059,7 +1331,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             ...declaredNames(existingSeed),
           }
         : { status: 'skipped', reason: 'unchanged since the last run, which drafted no seed either' }
-      steps.push({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
+      pushStep({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
       fact(
         'seed',
         existingSeed
@@ -1089,11 +1361,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         }),
         requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,
+        legacyFingerprint: legacySeedStepFingerprint(repoRoot),
         freshCheckout,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
       seedStep = seedRun.step
-      steps.push({
+      pushStep({
         key: 'seed',
         status: seedStep.status,
         ...(seedStep.reason ? { reason: seedStep.reason } : {}),
@@ -1116,7 +1389,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
           key: 'recipe',
           status: 'failed',
           reason: recipeFailure,
-          inputFingerprint: recipeInputFp,
+          inputFingerprint: steps[recipeRow]?.inputFingerprint ?? legacyRecipeFp,
           ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
         }
         if (recipeRow >= 0) steps[recipeRow] = row
@@ -1144,9 +1417,9 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       fact('preparations', 'replayed: the existing private preparation profiles stand as they are')
       for (const line of preparationFacts(preparationRecipe, repoRoot)) fact('preparations', line)
       opts.onStepDone?.('preparations', 'existing private preparation profiles preserved')
-    } else if (settled('preparations') === preparationFp &&
+    } else if (holds('preparations', legacyPreparationFingerprint(repoRoot)) &&
       preparationCatalog(preparationRecipe, repoRoot).length === Object.keys(preparationRecipe.preparations ?? {}).length) {
-      steps.push({ key: 'preparations', status: 'skipped', reason: 'unchanged', inputFingerprint: preparationFp })
+      pushStep({ key: 'preparations', status: 'skipped', reason: 'unchanged', inputFingerprint: preparationFp })
       fact('preparations', 'every private preparation profile is unchanged since the last setup, from cache')
       for (const line of preparationFacts(preparationRecipe, repoRoot)) fact('preparations', line)
       opts.onStepDone?.('preparations', 'unchanged')
@@ -1156,8 +1429,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             specExcerpts: readSpecExcerpts(repoRoot), fingerprint: preparationFp,
             onPhase: (running, done) => phases.enter({ running, done }) })
         : { status: 'skipped' as const, reason: 'private preparation authoring is unavailable; only profiles with runner-verified baseline checks are usable' }
-      steps.push({ key: 'preparations', status: result.status, ...(result.reason ? { reason: result.reason } : {}),
-        inputFingerprint: opts.preparationSession ? computePreparationFingerprint(repoRoot) : 'authoring-unavailable', ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
+      pushStep({ key: 'preparations', status: result.status, ...(result.reason ? { reason: result.reason } : {}),
+        inputFingerprint: opts.preparationSession ? computePreparationFingerprint(repoRoot) : UNSETTLEABLE_FINGERPRINT, ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
       // The session's findings are its outcome, read in the session itself;
       // the step only counts them.
       const findings = result.findings ?? []
@@ -1180,13 +1453,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // registration) without demoting the run.
   if (!preparationFailure && enter('auth')) {
     const authFp = authFingerprint(repoRoot)
-    if (settled('auth') === authFp) {
-      steps.push({ key: 'auth', status: 'skipped', reason: 'unchanged', inputFingerprint: authFp })
+    if (holds('auth', authFp)) {
+      pushStep({ key: 'auth', status: 'skipped', reason: 'unchanged', inputFingerprint: authFp })
       fact('auth', 'the supplied entries are unchanged since the last setup, from cache: no proof session ran')
       opts.onStepDone?.('auth', 'unchanged')
     } else if (opts.verifyAuth) {
       const result = await opts.verifyAuth({ repoRoot, recipe: reloadRecipe(repoRoot) ?? current, fingerprint: authFp })
-      steps.push({
+      pushStep({
         key: 'auth',
         status: result.status,
         ...(result.reason ? { reason: result.reason } : {}),
@@ -1197,7 +1470,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       if ((result.facts ?? []).length === 0 && result.reason) fact('auth', firstReasonLine(result.reason))
       opts.onStepDone?.('auth', result.reason ?? result.status)
     } else {
-      steps.push({
+      pushStep({
         key: 'auth',
         status: 'skipped',
         reason:
@@ -1298,13 +1571,22 @@ async function isFreshCheckout(repoRoot: string): Promise<boolean> {
 }
 
 /**
- * sha256 over the present ecosystem manifests, path-tagged like the runner's —
- * the runner's own `FINGERPRINT_INPUTS` list (the recipe file itself is folded
- * separately by `computeRecipeFingerprint`, which is exactly why it is not
- * hashed here: the recipe step re-runs when the SUBJECT moved, not when its
- * own output moved). Exported for the pre-flight estimate's settled check.
+ * THE RECIPE STEP's fingerprint — the NEEDS the repository declares, and
+ * nothing else. What is installed, built and served was proved by a real boot,
+ * so the step re-opens when the application starts asking for something new,
+ * never when a manifest was reformatted.
  */
-export function ecosystemFingerprint(repoRoot: string): string {
+export function recipeStepFingerprint(needsFp: string): string {
+  return createHash('sha256').update(`recipe-needs::${needsFp}`).digest('hex')
+}
+
+/**
+ * The recipe step's fingerprint as it was computed while its subject was the
+ * ecosystem manifests: sha256 over the present ones, path-tagged like the
+ * runner's own `FINGERPRINT_INPUTS` list. The one check a settled row written
+ * before the needs got it. Delete with the legacy hash.
+ */
+export function legacyRecipeStepFingerprint(repoRoot: string): string {
   const hash = createHash('sha256')
   for (const rel of FINGERPRINT_INPUTS) {
     const abs = path.join(repoRoot, rel)
@@ -1341,8 +1623,8 @@ function dependenciesFileContent(repoRoot: string): string {
   }
 }
 
-function catalogFingerprint(detectionJson: string, recipeFingerprint: string, depsContent: string): string {
-  return createHash('sha256').update(`${detectionJson}::${recipeFingerprint}::${depsContent}`).digest('hex')
+function catalogFingerprint(detectionJson: string, recipeContract: string, depsContent: string): string {
+  return createHash('sha256').update(`${detectionJson}::${recipeContract}::${depsContent}`).digest('hex')
 }
 
 /**
@@ -1376,28 +1658,55 @@ function writeCatalogSettle(repoRoot: string, fingerprint: string): void {
   )
 }
 
-/** Sorted derived web place `(id, address)` pairs :: the recipe fingerprint —
- *  the interfaces step re-runs when a screen appeared, moved, or vanished.
+/** Sorted derived web place `(id, address)` pairs :: the recipe CONTRACT as it
+ *  stands before the seed step — the interfaces step re-runs when a screen
+ *  appeared, moved or vanished, or when the promise it derives against changed.
+ *  A dependency bump, a catalog edit, and the seed and preparations the later
+ *  steps of the same run write reach none of it.
  *  Exported for the pre-flight estimate's settled check. */
 export function interfacesFingerprint(repoRoot: string): string {
-  const catalog = readInterfaceCatalog(repoRoot)
-  const pairs = (catalog?.resources?.['web'] ?? [])
-    .map((place) => `${place.id}\x00${place.address ?? ''}`)
-    .sort()
   return createHash('sha256')
-    .update(`${pairs.join('\n')}::${computeRecipeFingerprint(repoRoot)}`)
+    .update(`${derivedWebPlacePairs(repoRoot)}::${recipeContractFingerprint(repoRoot, 'seed')}`)
     .digest('hex')
 }
 
-function seedFingerprint(recipeFingerprint: string, depsContent: string): string {
-  const depsHash = createHash('sha256').update(depsContent).digest('hex')
-  return createHash('sha256').update(`${recipeFingerprint}::${depsHash}`).digest('hex')
+/** {@link interfacesFingerprint} as it was computed before the slices — the one
+ *  check a settled row with no components gets. Delete with the legacy hash. */
+export function legacyInterfacesFingerprint(repoRoot: string): string {
+  return createHash('sha256')
+    .update(`${derivedWebPlacePairs(repoRoot)}::${computeRecipeFingerprint(repoRoot)}`)
+    .digest('hex')
 }
 
-/** The seed step's fingerprint off the tree as it stands — the estimate's
- *  settled check, and the exact value the running step computes. */
+/** The derived web places as sorted `(id, address)` lines. */
+function derivedWebPlacePairs(repoRoot: string): string {
+  return (readInterfaceCatalog(repoRoot)?.resources?.['web'] ?? [])
+    .map((place) => `${place.id}\x00${place.address ?? ''}`)
+    .sort()
+    .join('\n')
+}
+
+/**
+ * The seed step's fingerprint off the tree as it stands — the estimate's
+ * settled check, the exact value the running step computes, and the seed
+ * session's cache key. The recipe CONTRACT before the preparations step (the
+ * seed's own block is in it: the row is stamped after the seed wrote, and a
+ * seed deleted by hand re-opens the step) plus the catalog's IDENTITY: which
+ * classes of starting state exist, never how the catalog session worded them,
+ * and never a dependency version the seed does not read.
+ */
 export function computeSeedStepFingerprint(repoRoot: string): string {
-  return seedFingerprint(computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
+  return createHash('sha256')
+    .update(`${recipeContractFingerprint(repoRoot, 'preparations')}::${dependencyCatalogIdentity(repoRoot)}`)
+    .digest('hex')
+}
+
+/** {@link computeSeedStepFingerprint} as it was computed before the slices —
+ *  the one check a settled row with no components gets, and the seed session's
+ *  old cache key. Delete with the legacy hash. */
+export function legacySeedStepFingerprint(repoRoot: string): string {
+  const depsHash = createHash('sha256').update(dependenciesFileContent(repoRoot)).digest('hex')
+  return createHash('sha256').update(`${computeRecipeFingerprint(repoRoot)}::${depsHash}`).digest('hex')
 }
 
 /** The catalog's SUPPLIED entries, canonically — what the auth step consumes. A
@@ -1418,28 +1727,112 @@ export function authFingerprint(repoRoot: string): string {
 }
 
 /**
- * The prior run's settled fingerprints, per step. A row settles when it ran
- * `ok` — or when it was itself a `skipped`/`unchanged` carry-forward of an
- * earlier `ok`, so a third run does not bounce back to re-running. `blocked`
- * and every real `skipped` reason never settle: those steps re-evaluate every
- * run (cheaply — their gates refuse again) until the state moves.
+ * A step's fingerprint inputs BY NAME, off the tree as it stands: what each
+ * step fingerprint above folds, one digest per input, so two rows of the same
+ * step can be compared input by input. `detect` has no fingerprint and no inputs.
+ */
+function stepInputComponents(
+  repoRoot: string,
+  key: GuardSetupTaxonomyKey,
+  detectionJson: string,
+): Record<string, string> {
+  const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex').slice(0, 16)
+  switch (key) {
+    case 'recipe':
+      // Off the detection snapshot the row was recorded with, so the needs the
+      // gate compares are the needs of the world this run actually saw.
+      return { needs: digest(needsFingerprint(recipeNeeds(parseDetectionSnapshot(detectionJson)))) }
+    case 'detect':
+      return {}
+    case 'catalog':
+      return {
+        detection: digest(detectionJson),
+        'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'seed')),
+        catalog: digest(dependenciesFileContent(repoRoot)),
+      }
+    case 'interfaces':
+      return {
+        places: digest(derivedWebPlacePairs(repoRoot)),
+        'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'seed')),
+      }
+    case 'seed':
+      return {
+        'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'preparations')),
+        catalog: digest(dependencyCatalogIdentity(repoRoot)),
+      }
+    case 'preparations':
+      return preparationFingerprintComponents(repoRoot)
+    case 'auth':
+      return { supplied: digest(authFingerprint(repoRoot)) }
+  }
+}
+
+/**
+ * The fingerprint a step records when it could not read its own inputs — it ran
+ * without the session it needs, so there is nothing to settle on. Such a row
+ * never settles, whatever it carries beside the fingerprint.
+ */
+const UNSETTLEABLE_FINGERPRINT = 'authoring-unavailable'
+
+/** A settled step row, as the next run's gate reads it. */
+export interface SettledStepRow {
+  inputFingerprint: string
+  /** The row's inputs by name; absent on a row written before they existed. */
+  inputComponents?: Record<string, string>
+}
+
+/**
+ * The prior run's settled rows, per step. A row settles when it ran `ok` — or
+ * when it was itself a `skipped`/`unchanged` carry-forward of an earlier `ok`,
+ * so a third run does not bounce back to re-running. `blocked` and every real
+ * `skipped` reason never settle: those steps re-evaluate every run (cheaply —
+ * their gates refuse again) until the state moves.
  *
  * Exported for the pre-flight estimate, which probes the SAME settled rows the
  * run will skip on.
  */
-export function settledFingerprints(
+export function settledSteps(
   repoRoot: string,
   refresh: boolean,
-): (key: GuardSetupTaxonomyKey) => string | null {
+): (key: GuardSetupTaxonomyKey) => SettledStepRow | null {
   if (refresh) return () => null
   const prior = readGuardSetup(repoRoot)
-  const byKey = new Map<GuardSetupTaxonomyKey, string>()
+  const byKey = new Map<GuardSetupTaxonomyKey, SettledStepRow>()
   for (const row of prior?.steps ?? []) {
+    if (row.inputFingerprint === UNSETTLEABLE_FINGERPRINT) continue
     if (row.status === 'ok' || (row.status === 'skipped' && (row.reason === 'unchanged' || row.key === 'preparations'))) {
-      byKey.set(row.key, row.inputFingerprint)
+      byKey.set(row.key, {
+        inputFingerprint: row.inputFingerprint,
+        ...(row.inputComponents ? { inputComponents: row.inputComponents } : {}),
+      })
     }
   }
   return (key) => byKey.get(key) ?? null
+}
+
+/**
+ * Does a settled step row still hold? The flow compare's rule, for the step
+ * spine: a row WITH named inputs is compared name by name under the step's
+ * current scheme, so changing what a step folds re-opens nothing by itself. A
+ * row that predates the names is compared against the step's OLD fingerprint,
+ * once — it then settles again with names, and never takes this path twice.
+ */
+export function stepSettled(
+  repoRoot: string,
+  key: GuardSetupTaxonomyKey,
+  settled: SettledStepRow | null,
+  legacyFingerprint: string,
+  detectionJson = '',
+): boolean {
+  if (!settled) return false
+  const current = stepInputComponents(repoRoot, key, detectionJson)
+  // Names that share nothing with the step's scheme prove nothing about it:
+  // such a row is compared like one that has none.
+  const stored = settled.inputComponents
+  if (stored && Object.keys(current).some((name) => name in stored)) {
+    return movedSchemeInputs(stored, current).length === 0
+  }
+  return settled.inputFingerprint === legacyFingerprint
 }
 
 /** The catalog step's one-line detail: the skeleton's account + the session's. */
@@ -1482,6 +1875,16 @@ function detectedServiceFact(service: DetectedExternalService): string {
   const credentialEnvs = (service.credentialEnvs ?? []).map((e) => e.envVar)
   if (credentialEnvs.length > 0) parts.push(`credential from ${credentialEnvs.join(', ')}`)
   return parts.join('; ')
+}
+
+/** One need nothing provides, as a line and as the row records it. */
+function unprovidedNeedFact(entry: UnprovidedNeed): string {
+  const where = entry.answer === 'recipe' ? 'the recipe must provide' : 'someone must register'
+  return `${entry.need.id} is not provided: ${where} ${entry.provides}`
+}
+
+function recordedNeed(entry: UnprovidedNeed): GuardSetupUnprovidedNeed {
+  return { need: entry.need.id, provides: entry.provides, answer: entry.answer }
 }
 
 /** The host of a detected URL literal, when it parses. */
@@ -1782,6 +2185,8 @@ async function runSeedStep(args: {
   requiredResources: RequiredResource[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
+  /** The same, under the step's OLD formula — the old key's half. */
+  legacyFingerprint: string
   /** Whether the tree setup was handed is a fresh checkout — the cold proof's gate. */
   freshCheckout: boolean
   onPhase: (running: string, done: string) => void
@@ -1875,6 +2280,7 @@ async function runSeedStep(args: {
         })()
       : {}),
     fingerprint: args.fingerprint,
+    legacyFingerprint: args.legacyFingerprint,
     freshCheckout: args.freshCheckout,
     onPhase: args.onPhase,
   })

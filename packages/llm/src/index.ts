@@ -12,4 +12,5 @@ export {
   resetKvCacheStore,
   getCacheEntry,
   setCacheEntry,
+  getCacheEntryOrLegacy,
 } from './cache-store.js';

@@ -172,7 +172,9 @@ export function placeBriefing({
     `Existing resource definitions, including readable facts. Reuse ids and owning places.`,
     JSON.stringify([place, ...nested], null, 2),
     `Return resource enrichments even when no new task is needed (interfaces: []).`,
-    `Omitted readable kinds stay unknown or retain existing facts; [] establishes none.`,
+    `Every place you declare states all four readable kinds — markers, elements,`,
+    `controls, rows — unless an earlier session already established that kind here.`,
+    `[] establishes none; an omitted kind is refused, because nothing comes back to it.`,
   )
   if (ownTaskContext) lines.push('', ownTaskContext)
   if (sourcePack) lines.push('', sourcePack)
@@ -402,7 +404,7 @@ Use the shared readable and locator schemas supplied in the outcome:
 
 Readable locators use the existing user-visible vocabulary: role/name, label, placeholder, text, title or alt, never CSS, XPath or test ids. Use \`when\` to state source conditions, including permissions, loading, empty states and selected tabs. Readable ids are optional; reuse existing ids and keep new names stable within the owning resource.
 
-For every resource you can fully inspect, consider all four kinds. An explicit [] means you established that it has none of that kind. Omit a kind if you cannot establish it, and explain the gap in \`unresolved\`. Never fill arrays just to populate a table, and never mark uninspected content empty. Existing kinds omitted from an enrichment are preserved; a supplied kind replaces that kind, so include its surviving established facts. Readables alone are a valid outcome with \`interfaces: []\`. They do not require a new task or changed task steps.
+Every place you declare states ALL FOUR kinds: \`markers\`, \`elements\`, \`controls\`, \`rows\`. An explicit [] means you established that it has none of that kind, and the write path REFUSES a place that leaves a kind unstated — nothing returns to this screen once your outcome is accepted, so an omitted kind stays unknown forever. Read the place well enough to answer for each kind; where you truly cannot, say what you could not inspect in \`unresolved\` and still state the kind. Never fill arrays just to populate a table, and never mark uninspected content empty. Existing kinds established by an earlier session of this screen are preserved when you omit them; a supplied kind replaces that kind, so include its surviving established facts. Readables alone are a valid outcome with \`interfaces: []\`. They do not require a new task or changed task steps.
 
 Every fact must come from source you READ (or source already provided in the briefing pack). Use the session's read_file/search_repo tools for evidence, and run check_draft on the resource facts as well as the tasks. These tools provide source evidence, not live browser observation; do not claim to have inspected runtime state.
 

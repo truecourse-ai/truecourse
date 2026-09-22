@@ -55,6 +55,7 @@ import {
   type VocabMap,
 } from '@truecourse/spec-consolidator'
 import { promptFingerprint } from '../agent/session-cache.js'
+import { LEGACY_OVERLAP_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
   docTitle,
   instructionsBriefingBlock,
@@ -204,6 +205,13 @@ The outcome is one object: { "overlaps": [...], "notReached": [...] }. A group w
 /** Exported for the step-7 estimate rework (probe the REAL keys). */
 export const OVERLAP_SESSION_PROMPT_FINGERPRINT = promptFingerprint(OVERLAP_SESSION_SYSTEM_PROMPT)
 
+/**
+ * THE OVERLAP STAGE'S VERSION, bumped by hand. A reworded prompt does not make
+ * a settled disagreement wrong; a prompt change that fixes WRONG output bumps
+ * this in the same commit.
+ */
+export const OVERLAP_STAGE_VERSION = 1
+
 /** One session's work: a chunk of one collision cluster — docs + ranked pairs. */
 export interface OverlapWorkItem {
   /** The ONE area every pair of this chunk is assigned to (item 119). */
@@ -276,9 +284,19 @@ export function deriveOverlapWorkItems(
  * orchestrator `instructions` land there).
  */
 export function overlapSessionCacheKey(item: OverlapWorkItem, extraParts: readonly string[] = []): string {
+  return overlapKeyOver(`overlap-v${OVERLAP_STAGE_VERSION}`, item, extraParts)
+}
+
+/** {@link overlapSessionCacheKey} as it was computed while the prompt was in it
+ *  — the key a miss falls back to. Delete with the legacy hash. */
+export function overlapSessionLegacyCacheKey(item: OverlapWorkItem, extraParts: readonly string[] = []): string {
+  return overlapKeyOver(LEGACY_OVERLAP_SESSION_PROMPT_FINGERPRINT, item, extraParts)
+}
+
+function overlapKeyOver(stage: string, item: OverlapWorkItem, extraParts: readonly string[]): string {
   const hashes = item.docs.map((d) => d.contentHash).sort()
   return scanCacheKey([
-    OVERLAP_SESSION_PROMPT_FINGERPRINT,
+    stage,
     item.areaId,
     hashes.join(','),
     pairsFingerprint(item.pairs),

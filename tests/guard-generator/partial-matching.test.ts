@@ -35,6 +35,29 @@ describe('matching incomplete catalogs and verification capabilities', () => {
     expect(await matchFlow(root, f, catalog, runner)).toMatchObject({ kind: 'plan', calls: 0 })
     expect(runner).toHaveBeenCalledTimes(1)
   })
+  it('serves a verdict across a reworded context, says so once, and re-matches a moved surface', async () => {
+    const root = repo(); const f = flow()
+    const verdict = { plan: [1, 2].map((milestone) => ({ interfaceId: control.id, milestone })) }
+    const runner = vi.fn(async () => verdict)
+    expect((await matchFlow(root, f, catalog, runner)) as { contextMoved?: unknown }).not.toHaveProperty('contextMoved')
+
+    // The same interface, its authored context reworded: the catalog fingerprint
+    // moves, the surface's identity does not, so the stored verdict stands free.
+    const reworded = buildSurfaceCatalogs([{ ...control, endState: 'no dialog open' }]).get('web')!
+    expect(reworded.fingerprint).not.toBe(catalog.fingerprint)
+    expect(reworded.identity).toBe(catalog.identity)
+    expect(await matchFlow(root, f, reworded, runner)).toMatchObject({ kind: 'plan', calls: 0, contextMoved: true })
+    // Counted once per move: the marker now names the context it was served under.
+    expect(await matchFlow(root, f, reworded, runner)).not.toHaveProperty('contextMoved')
+
+    // A structural change — and a new interface id — are real misses.
+    const moved = buildSurfaceCatalogs([{ ...control, fingerprint: 'sha256:moved' }]).get('web')!
+    expect(await matchFlow(root, f, moved, runner)).toMatchObject({ calls: 1 })
+    const grown = buildSurfaceCatalogs([control, { ...control, id: 'web/confirm-add' }]).get('web')!
+    expect(grown.identity).not.toBe(catalog.identity)
+    expect(await matchFlow(root, f, grown, runner)).toMatchObject({ calls: 1 })
+    expect(runner).toHaveBeenCalledTimes(3)
+  })
   it('gives a catalog-only refusal one re-ask, then reports mapping gaps, not absent behavior', async () => {
     const runner = vi.fn(async () => ({ unrealizable: 'No pagination interface' }))
     expect(await matchFlow(repo(), flow(), catalog, runner)).toMatchObject({ kind: 'gap', calls: 2,
@@ -97,8 +120,10 @@ describe('matching incomplete catalogs and verification capabilities', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('SAME detail')
     expect(MATCH_SYSTEM_PROMPT).toContain('Do not require a Refresh button')
   })
-  it('invalidates matching when control preconditions change', () => {
-    expect(buildSurfaceCatalogs([{ ...control, startingState: 'second-page' }]).get('web')!.fingerprint).not.toBe(catalog.fingerprint)
+  it('reads a changed control precondition as context, not as a moved surface', () => {
+    const repreconditioned = buildSurfaceCatalogs([{ ...control, startingState: 'second-page' }]).get('web')!
+    expect(repreconditioned.fingerprint).not.toBe(catalog.fingerprint)
+    expect(repreconditioned.identity).toBe(catalog.identity)
   })
 
   it('plans zero model calls when all obligations require unavailable inspection', async () => {

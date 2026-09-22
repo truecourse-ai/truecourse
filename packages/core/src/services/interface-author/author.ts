@@ -57,14 +57,25 @@ import type {
 import {
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
+  recipeContractFingerprint,
   staleAuthoredPlaceDiagnostics,
-  webScreensNeedingReadables,
+  unsettledAuthoring,
+  webScreenAuthoringStates,
 } from '@truecourse/guard-runner'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
-import type { InterfaceResource, InterfacesFile, MapperDiagnostic } from '@truecourse/shared'
+import type {
+  InterfaceAuthoringRecord,
+  InterfaceResource,
+  InterfacesFile,
+  MapperDiagnostic,
+} from '@truecourse/shared'
+import { isLabelOnlyRekey } from '@truecourse/shared'
+import { readCachedSessionOutput, storeCachedSessionOutput } from '../agent/session-cache.js'
 import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
   AUTHORED_SURFACE,
+  AuthoredFragmentSchema,
+  draftPlaceIndex,
   registryStates,
   stampFragment,
   validateFragment,
@@ -76,7 +87,20 @@ import { clusterPack, type ClusterPack } from './pack.js'
 import { placeSourcePack } from './place-pack.js'
 import { ownTaskContext } from './catalog-context.js'
 import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem } from './session.js'
-import { writeAuthoredCatalog } from './write.js'
+import { recordAuthoringLedger, writeAuthoredCatalog } from './write.js'
+
+/**
+ * Where a screen's accepted fragment is stored, keyed on the digest of what its
+ * session ran over — the same value its ledger row records. There is no legacy
+ * key: authoring had no cache before this one.
+ */
+export const INTERFACE_AUTHOR_CACHE_NAME = 'guard/interfaces-author'
+
+/** An explicit ask to author again reads no cached fragment: the point of both
+ *  `replace` and `refresh` is to spend a session. */
+function reauthoring(opts: Pick<AuthorRunOptions, 'replace' | 'refresh'>): boolean {
+  return opts.replace === true || opts.refresh === true
+}
 
 export interface AuthorRunOptions {
   repoRoot: string
@@ -86,6 +110,13 @@ export interface AuthorRunOptions {
   places?: readonly string[]
   /** Re-author places that already carry authored tasks (their tasks may be replaced). */
   replace?: boolean
+  /**
+   * Re-open the screens whose ledger row says they never settled, whatever
+   * their inputs say, and read no cached fragment. This is the explicit ask —
+   * a person pressing refresh after a provider outage — and the only thing that
+   * retries a failed screen whose inputs have not moved.
+   */
+  refresh?: boolean
   /** Stop after this many places — the cheap way to try one session first. */
   limit?: number
   /**
@@ -117,7 +148,10 @@ export type AuthorProgress =
 /** What one place's session produced. Every terminal state is one of these. */
 export interface PlaceResult {
   placeId: string
-  sessionId: string
+  /** Absent when the screen was served from the cache and no session ran. */
+  sessionId?: string
+  /** The fragment came out of the cache — nothing was spent on this screen. */
+  fromCache?: true
   /** `authored` = tasks or resources landed; `empty` = the session found neither;
    *  `rejected` = the outcome broke a rule the write path enforces;
    *  `failed` = the session itself did not reach an outcome. */
@@ -147,6 +181,11 @@ export interface AuthorRunResult {
   places: PlaceResult[]
   /** Tasks written across the run. */
   authored: number
+  /**
+   * Re-authored tasks whose fingerprint moved through a reworded step label
+   * alone ({@link isLabelOnlyRekey}): a key that moved with nothing behind it.
+   */
+  labelRekeys: number
   /** The authored catalog path, when anything was written. */
   path?: string
   /** Places whose tasks and readable facts are already established. */
@@ -174,6 +213,10 @@ export interface AuthorWorkItem {
   existing: string[]
   /** Tasks or readable facts still need a source reading. */
   needsAuthoring: boolean
+  /** What the ledger says authoring settled here, when it says anything. */
+  record?: InterfaceAuthoringRecord
+  /** The digest this screen's session runs over — its ledger row and cache key. */
+  inputFingerprint: string
 }
 
 /**
@@ -181,28 +224,22 @@ export interface AuthorWorkItem {
  * authored tasks already located on it (directly, or through a dialog/panel that
  * sits on it). A screen is the unit because it is what a derivation produces and
  * what an address names — the places nested on it are authored as part of it.
+ *
+ * Whether a screen is WORK is the ledger's answer ({@link webScreenAuthoringStates}),
+ * which is why the recipe contract is a parameter: it is one of the inputs each
+ * screen's row settled over.
  */
 export function planWorkItems(
   derived: InterfacesFile | null,
   authored: InterfacesFile | null,
+  recipeContract: string,
 ): AuthorWorkItem[] {
-  const places = placeIndex(derived, authored)
-  const screens = [...places.values()].filter((place) => place.kind === 'screen')
-
-  const located = new Map<string, string[]>()
-  for (const task of authored?.interfaces ?? []) {
-    if (task.type !== AUTHORED_SURFACE) continue
-    const screen = task.at ? screenOf(task.at, places) : screenAt(routeOf(task), screens)
-    if (!screen) continue
-    located.set(screen, [...(located.get(screen) ?? []), task.id])
-  }
-  const missing = webScreensNeedingReadables(derived, authored)
-  return screens.map((place) => ({
-    place,
-    existing: located.get(place.id) ?? [],
-    needsAuthoring: missing.has(place.id) || (
-      !located.has(place.id) && !authored?.resources?.web?.some((p) => p.id === place.id && p.readables)
-    ),
+  return webScreenAuthoringStates({ derived, authored, recipeContract }).map((state) => ({
+    place: state.place,
+    existing: state.tasks,
+    needsAuthoring: state.needsAuthoring,
+    ...(state.record ? { record: state.record } : {}),
+    inputFingerprint: state.inputFingerprint,
   }))
 }
 
@@ -225,8 +262,9 @@ function placeIndex(
 export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<AuthorRunResult> {
   const derived = readInterfaceCatalog(opts.repoRoot)
   let authored = readAuthoredInterfaceCatalog(opts.repoRoot)
+  const recipeContract = recipeContractFingerprint(opts.repoRoot, 'seed')
 
-  const all = planWorkItems(derived, authored)
+  const all = planWorkItems(derived, authored, recipeContract)
 
   // THE STALE-PLACE RULE — a WORK-LIST rule, never a merge rule.
   // An authored screen the derivation no longer produces (in a repo whose
@@ -261,7 +299,10 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const selected = all.filter((item) => {
     if (stale.has(item.place.id)) return false
     if (named) return named.has(item.place.id)
-    if (!item.needsAuthoring && !opts.replace) {
+    // An explicit refresh re-opens what never settled, whatever its inputs say:
+    // a screen whose provider died is exactly the screen nothing else retries.
+    const retry = opts.refresh === true && item.record !== undefined && unsettledAuthoring(item.record)
+    if (!item.needsAuthoring && !opts.replace && !retry) {
       skipped.push(item.place.id)
       return false
     }
@@ -273,12 +314,106 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const prepared = new Map<string, PreparedPlace['place']>()
   const spent = { turns: 0, tokens: 0, costUsd: 0 }
   let authoredCount = 0
+  let labelRekeys = 0
   let path: string | undefined
+
+  /** Lay rows over the ledger and keep the in-memory catalog in step. */
+  const recordLedger = (rows: Readonly<Record<string, InterfaceAuthoringRecord>>): void => {
+    const written = recordAuthoringLedger({
+      repoRoot: opts.repoRoot,
+      authored,
+      derived,
+      rows,
+      ...(opts.now ? { now: opts.now } : {}),
+    })
+    authored = written.file
+    path = written.path
+  }
+
+  // THE LEDGER'S MIGRATION, judged once: a screen with no row that the old
+  // inference calls done gets one for free, with the digest it stands at now.
+  // From here on its settlement is recorded rather than re-inferred, and it
+  // cost no session to say so.
+  const migrated = Object.fromEntries(
+    all
+      .filter((item) => item.record === undefined && !item.needsAuthoring && !stale.has(item.place.id))
+      .map((item) => [
+        item.place.id,
+        { status: 'authored', inputFingerprint: item.inputFingerprint } as const,
+      ]),
+  )
+  if (Object.keys(migrated).length > 0) recordLedger(migrated)
+
+  /**
+   * Fold one accepted fragment: validate it against the catalog as it stands,
+   * write what it authored, and record the screen's row. Both paths into the
+   * catalog run through here — the live session's outcome and the cached
+   * fragment a hit serves — so a hit writes exactly what the session wrote.
+   * `false` means the fragment was refused, which for a hit is a miss.
+   */
+  const foldFragment = (
+    item: AuthorWorkItem,
+    fragment: AuthoredFragment,
+    replaceable: ReadonlySet<string>,
+    briefedWith: InterfacesFile | null,
+  ): PreparedPlace => {
+    const result = preparePlace({ item, fragment, derived, authored, briefedWith, replaceable })
+    if (result.candidate) {
+      const before = new Map((authored?.interfaces ?? []).map((task) => [task.id, task]))
+      for (const task of result.candidate.interfaces) {
+        const prior = before.get(task.id)
+        // A key that MOVED, and moved for a rewording alone. A step whose
+        // locator resolves to a declared readable is not re-keyed by its label
+        // any more, and the stored fingerprints say so before the labels do.
+        if (prior && prior.fingerprint !== task.fingerprint && isLabelOnlyRekey(prior, task)) labelRekeys++
+      }
+      const written = writeAuthoredCatalog({
+        repoRoot: opts.repoRoot,
+        candidate: result.candidate,
+        derived,
+        now: opts.now,
+      })
+      authored = written.file
+      path = written.path
+      authoredCount += result.place.taskIds.length
+    }
+    return result
+  }
+
+  // THE CACHE PROBE, before any session starts. A screen whose inputs have not
+  // moved is served from the fragment its last session handed back, folded in
+  // work-list order exactly as a peer that already landed would be — so the
+  // sessions that DO run are briefed with it. An entry the catalog no longer
+  // accepts (a peer took an id since) is a miss like any other.
+  const pending: AuthorWorkItem[] = []
+  for (const item of work) {
+    const cached = reauthoring(opts)
+      ? null
+      : await readCachedSessionOutput({
+          repoRoot: opts.repoRoot,
+          cacheName: INTERFACE_AUTHOR_CACHE_NAME,
+          key: item.inputFingerprint,
+          schema: AuthoredFragmentSchema,
+        })
+    if (cached === null) {
+      pending.push(item)
+      continue
+    }
+    const result = foldFragment(item, cached, new Set(), authored)
+    if (result.place.status === 'rejected') {
+      pending.push(item)
+      continue
+    }
+    const place: PlaceResult = { ...result.place, spent: { turns: 0, tokens: 0, costUsd: 0 }, fromCache: true }
+    results.push(place)
+    recordLedger({ [item.place.id]: { status: place.status, inputFingerprint: item.inputFingerprint } })
+    opts.onProgress?.({ kind: 'place-done', place })
+  }
 
   // THE CLUSTERS: the places that read the same modules, grouped. They
   // become the pool's serial groups — one worker per cluster, members in order.
   const clusters = clusterPlaces({
-    places: work.map((item) => item.place.id),
+    places: pending.map((item) => item.place.id),
     context: opts.context ?? new Map(),
   })
   const clusterOf = new Map<string, PlaceCluster>()
@@ -290,7 +425,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   // list IS the schedule — LPT here means the longest serial chain starts at
   // t=0 instead of last. The REPORT is unaffected: results are re-sorted to
   // the work-list order below, whatever order the sessions ran in.
-  const itemOf = new Map(work.map((item) => [item.place.id, item]))
+  const itemOf = new Map(pending.map((item) => [item.place.id, item]))
   const scheduled = orderClustersLongestFirst(clusters).flatMap((cluster) =>
     cluster.places.map((placeId) => itemOf.get(placeId)!),
   )
@@ -314,7 +449,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   // between the two lies everything its peers landed while it was thinking. For
   // a peer of the same cluster there is nothing there: it already folded.
   const briefed = new Map<string, InterfacesFile | null>()
-  const placeOf = new Map(work.map((item) => [placeWorkItem(item.place.id), item.place.id]))
+  const placeOf = new Map(pending.map((item) => [placeWorkItem(item.place.id), item.place.id]))
 
   await runSessionPool<AuthorWorkItem, AuthoredFragment>({
     items: scheduled,
@@ -336,27 +471,12 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
           scope: scopeOf(item),
         }),
         validateOutcome(fragment) {
-          const result = preparePlace({
-            item, fragment, derived, authored,
-            briefedWith: briefed.get(item.place.id) ?? null,
-            replaceable,
-          })
+          // Validate and write synchronously before the loop marks the session
+          // completed. No peer can change the catalog between these operations.
+          const result = foldFragment(item, fragment, replaceable, briefed.get(item.place.id) ?? null)
           prepared.set(item.place.id, result.place)
           if (result.place.status === 'rejected') {
             return `The catalog cannot accept this outcome. Correct these problems, run check_draft on the corrected pieces, and return the draftId of the check that accepted them:\n- ${result.place.problems.join('\n- ')}`
-          }
-          // Validate and write synchronously before the loop marks the session
-          // completed. No peer can change the catalog between these operations.
-          if (result.candidate) {
-            const written = writeAuthoredCatalog({
-              repoRoot: opts.repoRoot,
-              candidate: result.candidate,
-              derived,
-              now: opts.now,
-            })
-            authored = written.file
-            path = written.path
-            authoredCount += result.place.taskIds.length
           }
         },
       }
@@ -400,7 +520,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     onSessionEvent: (workItem, event) => opts.onSessionEvent?.(placeOf.get(workItem)!, event),
     // Persistence happens in validateOutcome; the fold records final spend
     // and failures after any corrections have finished.
-    fold: (item, outcome, sessionId) => {
+    fold: async (item, outcome, sessionId) => {
       const last = prepared.get(item.place.id)
       const place: PlaceResult = outcome.status === 'completed'
         ? { ...last!, sessionId, spent: outcome.spent }
@@ -413,6 +533,20 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
             resumable: outcome.resumable,
           }
       results.push(place)
+      // The ledger row, whatever the verdict: a screen that failed is a screen
+      // this run REACHED, and recording that is what stops the next run paying
+      // for the same failure. The digest is the one the work list planned over.
+      recordLedger({
+        [item.place.id]: { status: place.status, inputFingerprint: item.inputFingerprint },
+      })
+      // The fragment an accepted outcome produced, under this screen's digest:
+      // the next run over the same inputs folds it instead of buying it again.
+      if (outcome.status === 'completed' && (place.status === 'authored' || place.status === 'empty')) {
+        await storeCachedSessionOutput(
+          { repoRoot: opts.repoRoot, cacheName: INTERFACE_AUTHOR_CACHE_NAME, key: item.inputFingerprint },
+          outcome.output,
+        )
+      }
       spent.turns += place.spent.turns
       spent.tokens += place.spent.tokens
       spent.costUsd += place.spent.costUsd
@@ -430,6 +564,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   return {
     places: results,
     authored: authoredCount,
+    labelRekeys,
     ...(path ? { path } : {}),
     skipped,
     findings,
@@ -453,7 +588,7 @@ interface PrepareInput {
   authored: InterfacesFile | null
   /** The catalog the session was briefed with; the difference is its peers' work. */
   briefedWith: InterfacesFile | null
-  replaceable: Set<string>
+  replaceable: ReadonlySet<string>
 }
 
 interface PreparedPlace {
@@ -468,7 +603,13 @@ function preparePlace(input: PrepareInput): PreparedPlace {
 
   const unresolved = [...(input.fragment.unresolved ?? [])]
   const findings = [...(input.fragment.findings ?? [])]
-  const { fragment, raced } = pruneRacedTasks(input.fragment, briefedWith, authored, replaceable)
+  const { fragment, raced } = pruneRacedTasks(
+    input.fragment,
+    briefedWith,
+    authored,
+    replaceable,
+    draftPlaceIndex(derived, authored, input.fragment.resources ?? []),
+  )
   const racedField = raced.length > 0 ? { raced } : {}
   if (fragment.interfaces.length === 0 && (fragment.resources?.length ?? 0) === 0) {
     // Either the session honestly found nothing, or everything it found was
@@ -533,6 +674,9 @@ export function pruneRacedTasks(
   briefedWith: InterfacesFile | null,
   authored: InterfacesFile | null,
   replaceable: ReadonlySet<string>,
+  /** The places the draft stands on, so both sides of the fingerprint
+   *  comparison are computed the way the write path computes one. */
+  places?: ReadonlyMap<string, InterfaceResource>,
 ): { fragment: AuthoredFragment; raced: string[] } {
   const before = new Set((briefedWith?.interfaces ?? []).map((iface) => iface.id))
   const landedIds = new Set<string>()
@@ -545,7 +689,7 @@ export function pruneRacedTasks(
   if (landedIds.size === 0) return { fragment, raced: [] }
 
   const raced: string[] = []
-  const kept = stampFragment(fragment).interfaces.filter((task) => {
+  const kept = stampFragment(fragment, places).interfaces.filter((task) => {
     if (!landedIds.has(task.id) && !landedFingerprints.has(task.fingerprint)) return true
     raced.push(task.id)
     return false
@@ -618,15 +762,3 @@ function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): s
   return undefined
 }
 
-/** The route a task starts at — its first navigate step, else its entry. */
-function routeOf(task: { steps: readonly { kind: string }[]; entry: unknown }): string | undefined {
-  const first = task.steps[0] as { kind: string; route?: string } | undefined
-  if (first?.kind === 'navigate') return first.route
-  const entry = task.entry as { path?: string }
-  return entry.path
-}
-
-function screenAt(address: string | undefined, screens: readonly InterfaceResource[]): string | undefined {
-  if (!address) return undefined
-  return screens.find((screen) => screen.address === address)?.id
-}

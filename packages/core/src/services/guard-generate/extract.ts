@@ -21,6 +21,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { LEGACY_EXTRACT_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
 import {
   verificationBoundaryProblems,
@@ -203,6 +204,13 @@ One object: { "claims": [ { "claim", "driver", "alternativeDrivers"?, "verificat
 export const EXTRACT_SESSION_PROMPT_FINGERPRINT = promptFingerprint(EXTRACT_SESSION_SYSTEM_PROMPT)
 
 /**
+ * THE EXTRACT STAGE'S VERSION, bumped by hand. Rewording the prompt does not
+ * make a document's extracted claims wrong; a prompt change that fixes WRONG
+ * output bumps this in the same commit and every document re-extracts.
+ */
+export const EXTRACT_STAGE_VERSION = 1
+
+/**
  * The per-doc cache key: prompt fingerprint :: the doc's
  * content hash [:: its suppression key, appended ONLY when quotes are
  * suppressed — so an unsuppressed doc keys off its text alone and a resolved
@@ -222,10 +230,26 @@ export function extractDocContentHash(content: string): string {
 
 /** {@link extractSessionCacheKey} from an already-computed content hash. */
 export function extractSessionCacheKeyForContentHash(contentHash: string, suppressedQuotes: readonly string[], targets: readonly GuardPrerequisiteTarget[] = []): string {
+  return extractKeyOver(`extract-v${EXTRACT_STAGE_VERSION}`, contentHash, suppressedQuotes, targets)
+}
+
+/** {@link extractSessionCacheKey} as it was computed while the prompt was in it
+ *  — the key a miss falls back to. Delete with the legacy hash. */
+export function extractSessionLegacyCacheKey(doc: Pick<GuardDoc, 'content' | 'suppressedQuotes'>, targets: readonly GuardPrerequisiteTarget[] = []): string {
+  return extractSessionLegacyCacheKeyForContentHash(extractDocContentHash(doc.content), doc.suppressedQuotes, targets)
+}
+
+/** {@link extractSessionLegacyCacheKey} from an already-computed content hash —
+ *  what the claim-diff gate addresses a PRIOR extraction by. */
+export function extractSessionLegacyCacheKeyForContentHash(contentHash: string, suppressedQuotes: readonly string[], targets: readonly GuardPrerequisiteTarget[] = []): string {
+  return extractKeyOver(LEGACY_EXTRACT_SESSION_PROMPT_FINGERPRINT, contentHash, suppressedQuotes, targets)
+}
+
+function extractKeyOver(stage: string, contentHash: string, suppressedQuotes: readonly string[], targets: readonly GuardPrerequisiteTarget[]): string {
   const context = targets.map(t => [t.name, [...t.aliases].sort(), [...t.credentialEnv].sort(),
     (t.providers ?? []).map(p => [p.service, [...p.baseUrlEnvs].sort()]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))])
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
-  const base = `${EXTRACT_SESSION_PROMPT_FINGERPRINT}::${contentHash}${context.length ? `::${JSON.stringify(context)}` : ''}`
+  const base = `${stage}::${contentHash}${context.length ? `::${JSON.stringify(context)}` : ''}`
   const suppression = suppressionKey(suppressedQuotes)
   return createHash('sha256').update(suppression ? `${base}::${suppression}` : base).digest('hex')
 }

@@ -56,7 +56,8 @@ import {
   type GuardDependencyPredicate,
 } from '@truecourse/shared';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
-import { cachedSessionOutcome, promptFingerprint } from '../agent/session-cache.js';
+import { cachedSessionOutcome } from '../agent/session-cache.js';
+import { LEGACY_DEPENDENCY_CATALOG_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js';
 import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
@@ -558,9 +559,24 @@ export interface BuildCatalogSessionOptions {
   onSessionEvent?: (workItem: string, event: SessionEvent) => void;
 }
 
+/**
+ * THE CATALOG STAGE'S VERSION, bumped by hand. Rewording the prompt does not
+ * reclassify a dependency; a prompt change that fixes WRONG output bumps this
+ * in the same commit.
+ */
+const CATALOG_STAGE_VERSION = 1;
+
+/** {@link catalogCacheKey} as it was computed while the prompt was in it — the
+ *  key a miss falls back to. Delete with the legacy hash. */
+function catalogLegacyCacheKey(stepFingerprint: string): string {
+  return createHash('sha256')
+    .update(`${LEGACY_DEPENDENCY_CATALOG_PROMPT_FINGERPRINT}::${stepFingerprint}`)
+    .digest('hex');
+}
+
 function catalogCacheKey(stepFingerprint: string): string {
   return createHash('sha256')
-    .update(`${promptFingerprint(SYSTEM_PROMPT)}::${stepFingerprint}`)
+    .update(`catalog-v${CATALOG_STAGE_VERSION}::${stepFingerprint}`)
     .digest('hex');
 }
 
@@ -583,6 +599,13 @@ export function buildCatalogSession(
         repoRoot: input.repoRoot,
         cacheName: DEPENDENCY_CATALOG_CACHE_NAME,
         key: catalogCacheKey(input.fingerprint),
+        // The step fingerprint under its old formula, under both key formulas,
+        // then this fingerprint under the old key formula.
+        legacyKeys: [
+          catalogCacheKey(input.legacyFingerprint),
+          catalogLegacyCacheKey(input.legacyFingerprint),
+          catalogLegacyCacheKey(input.fingerprint),
+        ],
         schema: CatalogDraftSchema,
         run: async () => {
           const { driver, persistence } = await context.acquire();

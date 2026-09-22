@@ -70,6 +70,8 @@ export {
   loadRecipe,
   resolveEntry,
   computeRecipeFingerprint,
+  recipeFingerprintComponents,
+  RECIPE_FINGERPRINT_PARTS,
   FINGERPRINT_INPUTS,
   resolveApiCredentials,
   credentialShapeWarning,
@@ -419,6 +421,16 @@ export {
 } from './store.js'
 
 export {
+  INTERFACE_AUTHOR_STAGE_VERSION,
+  screenAuthoringFingerprint,
+  unsettledAuthoring,
+  webScreenAuthoringStates,
+  webScreensNeedingAuthoring,
+  type WebScreenAuthoringInput,
+  type WebScreenAuthoringState,
+} from './interface-authoring.js'
+
+export {
   buildDocSectionIndex,
   extractSectionTexts,
   splitTopLevelSections,
@@ -464,7 +476,6 @@ export * from './prerequisites.js'
 
 export { preparationOwnedEnvKeys, bindPreparationPostgres } from './preparation-postgres.js'
 
-export { computePreparationFingerprint } from './recipe.js'
 
 export { preparationDependencyBriefing, resolvePreparationDependencies } from './preparation-dependencies.js'
 
@@ -475,4 +486,18 @@ export { PreparationQualificationSchema, observationBinding, observationConfigur
 export type { PreparationQualification } from './preparation-observation.js';
 
 export { RecipePreparationBaselineCheckSchema } from './recipe.js';
+
+export {
+  recipeContractFingerprint,
+  computePreparationFingerprint,
+  legacyPreparationFingerprint,
+  preparationFingerprintComponents,
+  flowRecipeSliceFingerprint,
+  seedRosterFingerprint,
+  flowRosterFingerprint,
+  flowPreparationFingerprint,
+  preparationsFingerprint,
+  dependencyCatalogIdentity,
+} from './recipe-slices.js'
+export type { RecipeWritingStep } from './recipe-slices.js'
 export { type ResolvedProviderControl, resolveProviderControl, providerControlStateMaterial, scenarioProviderControlProblems, PROVIDER_CONTROL_VERSION } from './provider-control.js'

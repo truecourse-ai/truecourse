@@ -1,8 +1,17 @@
-import { createAuthorCatalog, scopedAuthorResources, type AuthorCatalog } from './author-catalog.js'
+import {
+  createAuthorCatalog,
+  catalogReadMaterial,
+  recordCatalogReads,
+  scopedAuthorResources,
+  webAuthorKeyMaterial,
+  webSetupCandidates,
+  type AuthorCatalog,
+  type CatalogReadLog,
+} from './author-catalog.js'
 import { completeRealization } from './match.js'
 import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
-import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowInvocationGaps } from './prerequisites.js'
+import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 import { reconcileRemaining, type RepairIssue } from './worker-repair.js'
 import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
@@ -116,6 +125,11 @@ import {
   type EntryPreflightResult,
   createGuardSharedWorld,
   isWorldBootFailure,
+  flowRecipeSliceFingerprint,
+  flowRosterFingerprint,
+  flowPreparationFingerprint,
+  seedRosterFingerprint,
+  preparationsFingerprint,
 } from '@truecourse/guard-runner'
 import {
   guardCoverageProgress,
@@ -138,6 +152,7 @@ import {
   runnableDriverIds,
   unaccountedSurfaces,
   violatesSettleInvariant,
+  movedNamedInputs,
   runRefusalError,
   type GuardAutoResolutionEntry,
   type GuardAutoResolutionSource,
@@ -182,10 +197,16 @@ import {
   collectWorkDocs,
   hasGuardUniverse,
   sectionInputsKey,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
+  flowGenerationInputComponents,
+  flowInterfaceFingerprintBag,
+  flowSettleDigest,
+  flowSettleVerdict,
+  type FlowGenerationInputParts,
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
+import { LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
 import { persistExtractedClaims } from './claims-persist.js'
 import {
@@ -198,7 +219,6 @@ import { parseOpenApiSpec } from '@truecourse/shared/openapi'
 import {
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
-  WORLD_CLASSIFY_PROMPT_FINGERPRINT,
   type AuthorMilestone,
   type AuthorUserContext,
   type InterfaceContractHint,
@@ -249,7 +269,7 @@ import {
   type RealizationPlan,
   type SurfaceCatalog,
 } from './match.js'
-import { groundProbes, type ProbeTranscript } from './ground.js'
+import { groundProbes, groundInputsFingerprint, type ProbeTranscript } from './ground.js'
 import { scenarioCompositionDefect } from './validate.js'
 import { mineExampleBlocks, exampleFidelityDefect, type DocExampleBlock } from './examples.js'
 import { discoverRecipe } from './recipe-discovery.js'
@@ -296,6 +316,13 @@ const ENTRY_PREFLIGHT_ANCHOR = '(entry preflight)'
  *  call over a whole corpus is the call most likely to time out, and a lost
  *  classification degrades the run's blast-radius protection. */
 const WORLD_CLASSIFY_CHUNK_SIZE = 40
+
+/**
+ * THE WORLD-CLASSIFY STAGE'S VERSION, bumped by hand. Rewording the prompt does
+ * not make a stored "this flow mutates the shared world" verdict wrong; a
+ * prompt change that fixes WRONG output bumps this in the same commit.
+ */
+const WORLD_CLASSIFY_STAGE_VERSION = 1
 
 /** Phrases that mark a flow as a SUSPECT world-mutator when the classifier is
  *  unavailable — deliberately coarse (a false positive only serializes a flow;
@@ -437,6 +464,9 @@ export interface GuardGenerateResult {
   cosmeticSections?: number
   /** Live claim-diff gate calls this run made (cache hits excluded). */
   claimDiffCalls?: number
+  /** Cached match verdicts served although the surface's authored prose had
+   *  moved under them. Absent on the abort results. */
+  matchContextMoved?: number
   /** Prior scenarios editing workers deliberately dropped this run, with the
    *  vanished obligation each named (also persisted on the manifest flow). */
   retiredScenarios?: (GuardManifestRetiredScenario & { flowId: string })[]
@@ -776,17 +806,19 @@ function defaultConcurrency(): number {
  * computes the keys (cache name `guard/generate`, kept from the one-shot stage).
  */
 export function workerCacheKey(
-  promptFingerprint: string,
+  stage: string,
   flow: Pick<GuardFlow, 'fingerprint'>,
   surface: GuardDriverId,
   sectionKeys: readonly string[],
   interfaceFingerprints: readonly string[],
-  recipeFingerprint: string,
+  /** The recipe the session can read: its surface's slice, the whole roster it
+   *  may draw fixtures from, and every preparation profile it may choose. */
+  recipe: string,
   edit?: { priorShas: readonly string[] },
 ): string {
   const parts = [
-    promptFingerprint,
-    recipeFingerprint,
+    stage,
+    recipe,
     surface,
     flow.fingerprint,
     [...sectionKeys].sort().join('~'),
@@ -796,6 +828,51 @@ export function workerCacheKey(
   // the from-scratch recipe, so committed entries keep hitting.
   if (edit) parts.push('edit', [...edit.priorShas].sort().join('~'))
   return createHash('sha256').update(parts.join('::')).digest('hex')
+}
+
+/**
+ * The recipe half of {@link workerCacheKey}: everything about the recipe an
+ * authoring session can reach, and nothing else. The session picks its own
+ * preparation profile and its own fixtures inside the session, so a key
+ * computed BEFORE it runs folds the whole offer rather than guessing.
+ */
+export function workerRecipeMaterial(material: {
+  recipeSlice: string
+  roster: string
+  preparations: string
+}): string {
+  return [material.recipeSlice, material.roster, material.preparations].join('~')
+}
+
+/**
+ * The interface bag one (flow, surface) worker key folds — under the current
+ * formula, and under the retired one beside it. The run and the pre-flight
+ * estimate both build it HERE: a bag either of them assembled on its own would
+ * price a key the other never probes, which is how the estimate came to quote a
+ * full re-author for work the run served from cache.
+ */
+export function flowWorkerKeyFingerprints(input: {
+  /** The prerequisite SHAPE the current key folds, already digested. */
+  prerequisiteShape: string
+  /** The resolved-state material the retired key folded in its place. */
+  legacyPrerequisiteMaterial: string
+  /** The realization plan's assignment fingerprint. */
+  assignment: string
+  /** The planned interfaces' fingerprints. */
+  interfaces: readonly string[]
+  /** Web only: what the session is handed, and the whole author catalog the
+   *  retired formula folded instead. */
+  web?: { handed: string; catalog: string }
+}): { fingerprints: string[]; legacyFingerprints: string[] } {
+  const common = [input.assignment, ...input.interfaces]
+  return {
+    fingerprints: [input.prerequisiteShape, ...common, ...(input.web ? [input.web.handed] : [])],
+    legacyFingerprints: [
+      input.legacyPrerequisiteMaterial,
+      ...common,
+      ...(input.web ? [input.web.catalog] : []),
+    ],
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -849,13 +926,26 @@ export type WorkerFidelityVerdict =
 /** Core's fidelity judge: cache hit → verdict; miss → one depth-1 child session. */
 export type WorkerFidelityJudge = (input: WorkerFidelityInput) => Promise<WorkerFidelityVerdict>
 
-/** The key material core folds (with its own prompt fingerprint) into
+/** The key material core folds (with its own stage version) into
  *  {@link workerCacheKey} — every behavior-affecting input, nothing else. */
 export interface FlowWorkerCacheMaterial {
   flowFingerprint: string
   sectionKeys: readonly string[]
   interfaceFingerprints: readonly string[]
+  /** This surface's recipe slice. */
+  recipeSlice: string
+  /** The whole seed roster the session may draw fixtures and credentials from. */
+  roster: string
+  /** Every declared preparation profile, with its script bytes. */
+  preparations: string
+  /** The whole recipe fingerprint, for the OLD key a miss falls back to.
+   *  Delete with the legacy hash. */
   recipeFingerprint: string
+  /** {@link interfaceFingerprints} as the retired formula folded it — the
+   *  prerequisites' resolved STATE where the bag now carries their shape, and
+   *  on web the WHOLE author catalog where it now carries what the session is
+   *  handed. Absent when the two agree. Delete with the legacy hash. */
+  legacyInterfaceFingerprints?: readonly string[]
   /** `edit` when the briefing carries the flow's committed scenarios to edit;
    *  `scratch` otherwise (the key then matches every pre-edit-mode entry). */
   mode: 'scratch' | 'edit'
@@ -893,8 +983,15 @@ export interface FlowWorkerTask {
    *  from-scratch author. */
   prior?: { scenarios: readonly { id: string; yaml: string }[] }
   cacheMaterial: FlowWorkerCacheMaterial
-  /** Web-only immutable catalog access. */
+  /** Web-only immutable catalog access, recording what it serves this task. */
   catalog?: AuthorCatalog
+  /** Web only: the catalog entry ids this task's session was served — the
+   *  flow's settle record folds exactly those entries' fingerprints. Core
+   *  writes them into the cache entry beside the outcome. */
+  catalogReads?(): string[]
+  /** Web only: adopt the read-set a cached entry was stored with, so a worker
+   *  cache HIT records what the live session would have. */
+  replayCatalogReads?(ids: readonly string[]): void
   /**
    * Render the briefing — today's `buildAuthorCtx` payload through
    * `buildAuthorUserPrompt`, plus (epics) the members' settled scenarios.
@@ -1073,6 +1170,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   const recipe: Recipe = recipeResult.recipe
   const recipeFingerprint = recipeResult.fingerprint
+  // The recipe material a flow's key folds, constant for the run: computed
+  // once here, not once per flow and again per authoring task.
+  const recipeSlices = new Map<GuardDriverId, string>()
+  const recipeSliceOf = (surface: GuardDriverId): string => {
+    let slice = recipeSlices.get(surface)
+    if (slice === undefined) recipeSlices.set(surface, (slice = flowRecipeSliceFingerprint(recipe, surface)))
+    return slice
+  }
+  const seedRoster = seedRosterFingerprint(recipe)
+  const preparationsOffer = preparationsFingerprint(repoRoot, recipe)
   fact(
     'index',
     recipeResult.status === 'exists'
@@ -1502,7 +1609,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // not itself walk when a SETUP step needs one (sign up, then sign in, then test
   // favorites). Empty for a repo with no api interfaces — the block simply renders not.
   const apiInterfaces = catalogs.get('api')?.interfaces ?? []
-  const authorCatalog = createAuthorCatalog((catalogs.get('web')?.interfaces ?? []).filter(i => !servedByOtherApp(serverIndex, recipe.web?.app, interfaceEntryPath(i))), mapped.resources)
+  const authorCatalog = buildWebAuthorCatalog(catalogs.get('web')?.interfaces ?? [], serverIndex, recipe.web?.app, mapped.resources)
   // The counts describe what this run GROUNDED ON — the surface catalogs, not the
   // catalog file — which is why the total is their sum. They are read when flows
   // settle unrealized, and an entry the matcher never sees (an RPC-derived
@@ -1716,6 +1823,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     errors: GuardGenerateError[]
     matchCalls: number
     matchCallErrors: number
+    /** Cached verdicts this flow was served across a moved catalog context. */
+    contextMoved: number
     firstMatchError: string | undefined
     /** This flow's match lines, filed in flow order by the fold below. */
     facts: string[]
@@ -1728,6 +1837,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // call and is counted nowhere; an `unrealizable` verdict is an ANSWER, not a loss.
   let matchCalls = 0
   let matchCallErrors = 0
+  // Cached verdicts served although the surface's authored prose had moved
+  // since they were stored — the identity key's trade, counted.
+  let matchContextMoved = 0
   let firstMatchError: string | undefined
   /** A pair settles as exactly one of these; the three tally to the pair total. */
   type PairOutcome = 'matched' | 'no match' | 'blocked'
@@ -1751,6 +1863,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const localFacts: string[] = []
     let localMatchCalls = 0
     let localMatchCallErrors = 0
+    let localContextMoved = 0
     let localFirstMatchError: string | undefined
     const noteSurface = (surface: GuardDriverId, line: string): void => {
       localFacts.push(`${flow.id} x ${surface}: ${line}`)
@@ -1771,7 +1884,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         message: `flow "${flow.id}" binds no live section — re-run generate after re-scanning the corpus`,
       })
       localFacts.push(`${flow.id}: skipped, it binds no live section`)
-      return { errors: localErrors, matchCalls: localMatchCalls, matchCallErrors: localMatchCallErrors, firstMatchError: localFirstMatchError, facts: localFacts }
+      return { errors: localErrors, matchCalls: localMatchCalls, matchCallErrors: localMatchCallErrors, contextMoved: localContextMoved, firstMatchError: localFirstMatchError, facts: localFacts }
     }
     const sections = new Map<number, SectionInput>()
     for (const m of flow.milestones) {
@@ -1850,6 +1963,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       localMatchCalls++
       const outcome = await limit(() => matchFlow(repoRoot, eligibleFlow, surfaceCatalog, matchRunner, undefined, matchProviderControls(eligibleFlow, surface, prerequisiteResolution.targets, recipe)))
       if (outcome.kind === 'plan' || outcome.kind === 'gap') {
+        if (outcome.contextMoved) localContextMoved++
         for (const gap of outcome.gaps) gaps.push({ surface,
           kind: gap.kind === 'mapping' ? 'no-interface' : 'blocked-on',
           reason: `Milestone ${gap.milestone}: ${gap.reason}`,
@@ -1925,19 +2039,46 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const chosen = [...plans.keys()].sort((a, b) => Number(previousDrivers.includes(b)) - Number(previousDrivers.includes(a)) || a.localeCompare(b))[0]
     for (const surface of plans.keys()) if (surface !== chosen) plans.delete(surface)
 
-    const interfaceFingerprints = [...plans.values()].flatMap((p) => [
-      realizationAssignmentFingerprint(p),
-      ...p.interfaces.map((j) => j.fingerprint),
-      ...(p.surface === 'web' ? [catalogs.get('web')!.fingerprint] : []),
-    ])
-    interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe))
-    const inputsHash = flowGenerationInputsHash({
+    const prior = priorFlows.get(flow.id)
+    // The flow's own committed scenarios: which seeded rows it names and which
+    // preparation it runs on are read straight off them, so a manifest row
+    // written before those components existed gets them for free.
+    const priorScenarios = (prior?.scenarios ?? []).flatMap(
+      (s) => committedScenariosById.get(s.id) ?? [],
+    )
+    const inputParts: FlowGenerationInputParts = {
+      flowFingerprint: flow.fingerprint,
+      sectionKeys,
+      assignmentFingerprints: [...plans.values()].map((p) => realizationAssignmentFingerprint(p)),
+      interfaceFingerprints: [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint)),
+      ...(plans.has('web')
+        ? {
+            webCatalogFingerprint: catalogs.get('web')!.fingerprint,
+            // What the flow's LAST session read, priced against the catalog as
+            // it stands now. A flow that re-authors re-stamps this below with
+            // what its new session read.
+            webCatalogReads: catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []),
+          }
+        : {}),
+      prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe),
+      prerequisiteShape: flowPrerequisiteShapeFingerprint(flow, prerequisiteResolution.targets, recipe),
+      // A flow with no plan is realized on no surface, so it folds the cli
+      // slice as a stable stand-in: the estimate makes the same choice, and a
+      // flow that later gains a plan re-opens on the surface it gained.
+      recipeSlice: recipeSliceOf(chosen ?? 'cli'),
+      roster: flowRosterFingerprint(recipe, priorScenarios),
+      preparation: flowPreparationFingerprint(repoRoot, recipe, priorScenarios),
+    }
+    const interfaceFingerprints = flowInterfaceFingerprintBag(inputParts)
+    const inputComponents = flowGenerationInputComponents(inputParts)
+    const inputsHash = flowSettleDigest(inputComponents)
+    const legacyHash = legacyFlowGenerationInputsHash({
       flowFingerprint: flow.fingerprint,
       sectionKeys,
       interfaceFingerprints,
       recipeFingerprint,
     })
-    const prior = priorFlows.get(flow.id)
+    const settle = flowSettleVerdict({ prior, components: inputComponents, legacyHash })
     // A settled entry that leaves a planned surface unaccounted for (no test, no
     // gap) is a hole nothing can heal: its hash skips the flow forever. Its hash is
     // DISREGARDED, so the flow re-runs here and settles honestly — no migration.
@@ -1946,14 +2087,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         scenarioPreparationDefect(flow, recipe, committedScenariosById.get(s.id)!) ||
         scenarioCasePrerequisiteProblems(flow, committedScenariosById.get(s.id)!, prerequisiteResolution.targets, undefined, recipe).length ||
         scenarioFullFlowDefect(flow.milestones, committedScenariosById.get(s.id)!.steps, s.caseEvidence ?? []))))
-    let changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior) || invalidCaseReview
+    let changed = !settle.settled || (prior !== undefined && violatesSettleInvariant(prior)) || invalidCaseReview
     // THE PER-FLOW CLAIM-DIFF GATE: when the only inputs that moved are bound
     // sections the gate judged cosmetic (their prior extraction was reused, so
-    // the claims — and this flow's fingerprint — are byte-identical), the hash
-    // recomputed over the sections' PRIOR fingerprints equals the committed one
-    // and the flow stays unchanged. The unchanged branch re-stamps the NEW hash,
-    // so the next generate is a genuine no-op. A settle-invariant violation
-    // still wins: an unaccounted surface must re-run regardless.
+    // the claims — and this flow's fingerprint — are byte-identical), the flow
+    // settles against the sections' PRIOR fingerprints and stays unchanged. The
+    // unchanged branch re-stamps the CURRENT components, so the next generate is
+    // a genuine no-op. A settle-invariant violation still wins: an unaccounted
+    // surface must re-run regardless.
     if (changed && prior && !invalidCaseReview && prior.generationInputsHash !== null && !violatesSettleInvariant(prior) && claimDiff.cosmetic.size > 0) {
       let substituted = false
       const priorSectionKeys = boundSections.map((s) => {
@@ -1962,17 +2103,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         substituted = true
         return sectionInputsKey({ ...s, fingerprint: priorFingerprint })
       })
-      if (
+      const cosmetic =
         substituted &&
-        flowGenerationInputsHash({
-          flowFingerprint: flow.fingerprint,
-          sectionKeys: priorSectionKeys,
-          interfaceFingerprints,
-          recipeFingerprint,
-        }) === prior.generationInputsHash
-      ) {
-        changed = false
-      }
+        flowSettleVerdict({
+          prior,
+          components: flowGenerationInputComponents({ ...inputParts, sectionKeys: priorSectionKeys }),
+          legacyHash: legacyFlowGenerationInputsHash({
+            flowFingerprint: flow.fingerprint,
+            sectionKeys: priorSectionKeys,
+            interfaceFingerprints,
+            recipeFingerprint,
+          }),
+        }).settled
+      if (cosmetic) changed = false
     }
     if (!changed && prior) {
       // Unchanged ⇒ authoring does not run, so the gaps the AUTHOR stage settled last
@@ -1994,12 +2137,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         serverBySurface,
         gaps,
         inputsHash,
+        inputComponents,
+        inputParts,
         prior,
         changed,
+        // Only a settled row the compare re-opened has moved inputs to name; a
+        // flow that was new, unsettled or re-opened by an invariant has none,
+        // and a row checked the legacy way names them as unrecorded.
+        ...(changed && prior && prior.generationInputsHash !== null && !settle.settled
+          ? { movedInputs: settle.moved }
+          : {}),
       },
       errors: localErrors,
       matchCalls: localMatchCalls,
       matchCallErrors: localMatchCallErrors,
+      contextMoved: localContextMoved,
       firstMatchError: localFirstMatchError,
       facts: localFacts,
     }
@@ -2015,6 +2167,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     errors.push(...result.errors)
     matchCalls += result.matchCalls
     matchCallErrors += result.matchCallErrors
+    matchContextMoved += result.contextMoved
     firstMatchError ??= result.firstMatchError
     for (const line of result.facts) fact('match', line)
     if (result.work) works.push(result.work)
@@ -2078,6 +2231,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   const changedWorks = works.filter((w) => w.changed)
   flowsReport.skipped = works.length - changedWorks.length
+  flowsReport.reopened = reopenedFlowsReport(changedWorks)
+  for (const w of changedWorks) {
+    if (w.movedInputs === undefined) continue
+    fact('match', `flow ${w.flow.id} re-opened: ${w.movedInputs ? `${w.movedInputs.join(', ') || 'no named input'} moved` : 'stored entry names no inputs'}`)
+  }
+  if (flowsReport.reopened.flows > 0) fact('match', reopenedFlowsLine(flowsReport.reopened))
+  if (matchContextMoved > 0) {
+    fact('match', `${matchContextMoved} cached match verdict${matchContextMoved === 1 ? '' : 's'} served although the surface's authored context had moved`)
+  }
 
   // WORLD CLASSIFICATION (blast-radius scheduling, the generate side): batched,
   // cached calls decide which changed flows MUTATE the shared world — credential
@@ -2099,22 +2261,66 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       title: w.flow.title,
       milestones: w.flow.milestones.map((m) => m.claimTitle),
     }))
+    type ClassifyInput = (typeof classifyInputs)[number]
     const WORLD_CLASSIFY_CACHE_NAME = 'guard/world-classify'
-    const chunks: (typeof classifyInputs)[] = []
-    for (let i = 0; i < classifyInputs.length; i += WORLD_CLASSIFY_CHUNK_SIZE) {
-      chunks.push(classifyInputs.slice(i, i + WORLD_CLASSIFY_CHUNK_SIZE))
-    }
-    for (const chunk of chunks) {
-      const chunkKey = createHash('sha256')
-        .update(`${WORLD_CLASSIFY_PROMPT_FINGERPRINT}\0${JSON.stringify(chunk)}`)
+    // A verdict is stored PER FLOW, under that flow's own input. The calls are
+    // still batched — the prompt answers a whole list at once — but the chunks
+    // were POSITIONAL, so one flow added at the front re-keyed every chunk
+    // after it and re-bought the lot. The value keeps the reply's shape: a
+    // one-flow list naming the flow when it mutates, and empty when it does not.
+    const flowKey = (flow: ClassifyInput): string =>
+      createHash('sha256')
+        .update(`world-classify-flow-v${WORLD_CLASSIFY_STAGE_VERSION}\0${JSON.stringify(flow)}`)
         .digest('hex')
+    const record = async (flow: ClassifyInput, mutates: boolean): Promise<void> => {
+      if (mutates) destructiveFlowIds.add(flow.id)
+      // The verdict stands whether or not the store took it: a lost write
+      // costs the next run one call, never this run its answer.
+      await setCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, flowKey(flow), {
+        mutators: mutates ? [flow.id] : [],
+      }).catch(() => undefined)
+    }
+    const chunksOf = (flows: readonly ClassifyInput[]): ClassifyInput[][] => {
+      const out: ClassifyInput[][] = []
+      for (let i = 0; i < flows.length; i += WORLD_CLASSIFY_CHUNK_SIZE) {
+        out.push(flows.slice(i, i + WORLD_CLASSIFY_CHUNK_SIZE))
+      }
+      return out
+    }
+
+    const unresolved = new Map<string, ClassifyInput>()
+    for (const flow of classifyInputs) {
       const cached = WorldClassifySchema.safeParse(
-        await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, chunkKey),
+        await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, flowKey(flow)),
       )
       if (cached.success) {
-        for (const id of cached.data.mutators) destructiveFlowIds.add(id)
+        if (cached.data.mutators.includes(flow.id)) destructiveFlowIds.add(flow.id)
         continue
       }
+      unresolved.set(flow.id, flow)
+    }
+
+    // THE RETIRED POSITIONAL CHUNKS, read once per forty flows: the old key —
+    // the prompt fingerprint over this run's slicing of this run's changed set
+    // — is exactly what shipped before per-flow verdicts, so an unchanged set
+    // finds its whole stored answer and every flow in it is written out
+    // individually. A set that moved simply misses, as it did before.
+    if (unresolved.size > 0) {
+      for (const chunk of chunksOf(classifyInputs)) {
+        if (!chunk.some((flow) => unresolved.has(flow.id))) continue
+        const stored = await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME,
+          createHash('sha256').update(`${LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT}\0${JSON.stringify(chunk)}`).digest('hex'))
+        const cached = WorldClassifySchema.safeParse(stored)
+        if (!cached.success) continue
+        const mutators = new Set(cached.data.mutators)
+        for (const flow of chunk) {
+          if (!unresolved.delete(flow.id)) continue
+          await record(flow, mutators.has(flow.id))
+        }
+      }
+    }
+
+    for (const chunk of chunksOf([...unresolved.values()])) {
       const known = new Set(chunk.map((f) => f.id))
       let settled = false
       let lastError = 'invalid reply'
@@ -2123,9 +2329,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           const raw = await worldClassifyRunner(chunk)
           const parsed = WorldClassifySchema.safeParse(raw)
           if (parsed.success) {
-            const mutators = parsed.data.mutators.filter((id) => known.has(id))
-            await setCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, chunkKey, { mutators })
-            for (const id of mutators) destructiveFlowIds.add(id)
+            const mutators = new Set(parsed.data.mutators.filter((id) => known.has(id)))
+            for (const flow of chunk) await record(flow, mutators.has(flow.id))
             settled = true
           }
         } catch (e) {
@@ -2136,6 +2341,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         }
       }
       if (!settled) {
+        // Fail CLOSED, and cache nothing: the keyword guess is what this run
+        // does without an answer, never an answer the next run inherits.
         const suspects = chunk.filter(looksWorldMutating).map((f) => f.id)
         for (const id of suspects) destructiveFlowIds.add(id)
         errors.push({
@@ -2247,7 +2454,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       claimTexts,
       resolvedEntry: resolvedEntryMemo,
       displayEntry: recipe.entry,
-      recipeFingerprint,
+      inputsFingerprint: groundInputsFingerprint(repoRoot, recipe),
+      legacyRecipeFingerprint: recipeFingerprint,
       recipeEnv: recipe.env,
       onProbesPlanned: (n) => {
         groundPlanned += n
@@ -2333,6 +2541,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // settles.
   const failedTests = new Map<string, { candidate: BirthCandidate; finding: GuardBirthFinding }[]>()
   const taskByKey = new Map(authorTasks.map((t) => [taskKey(t), t]))
+  // What each web task's session is SERVED out of the shared catalog. Kept at
+  // run scope because the flow's settle record is written long after the pool
+  // has finished, and memoized per task so a re-made task keeps its reads.
+  const catalogReadsByTask = new Map<string, CatalogReadLog>()
+  const readLogFor = (ref: string): CatalogReadLog => {
+    const existing = catalogReadsByTask.get(ref)
+    if (existing) return existing
+    const log = recordCatalogReads(authorCatalog)
+    catalogReadsByTask.set(ref, log)
+    return log
+  }
 
   /**
    * The server-binding SAFETY NET, for the flows the route gates could not classify at
@@ -3171,6 +3390,26 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const editMode = priorScenarios.length > 0
         const observations = new WorkerObservations(task.surface)
         observationStores.add(observations)
+        // The shared catalog, recorded per task: what this session is served is
+        // what its flow's settle compare folds.
+        const reads = task.surface === 'web' ? readLogFor(ref) : undefined
+        const keyFingerprints = flowWorkerKeyFingerprints({
+          prerequisiteShape: flowPrerequisiteShapeFingerprint(task.work.flow, prerequisiteResolution.targets, recipe),
+          legacyPrerequisiteMaterial: flowPrerequisiteStateMaterial(task.work.flow, prerequisiteResolution.targets, recipe),
+          assignment: realizationAssignmentFingerprint(task.plan),
+          interfaces: task.plan.interfaces.map((j) => j.fingerprint),
+          // The web arm folds what the session is HANDED, not the whole catalog
+          // it may search: one unrelated screen's readables moving used to
+          // re-key every web flow.
+          ...(task.surface === 'web'
+            ? {
+                web: {
+                  handed: webAuthorKeyMaterial(authorCatalog, task.plan.interfaces, task.work.flow, mapped.resources),
+                  catalog: authorCatalog.fingerprint,
+                },
+              }
+            : {}),
+        })
         return {
           workItem: `flow:${task.work.flow.id}:${task.surface}`,
           flowId: task.work.flow.id,
@@ -3179,16 +3418,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           milestoneCount: new Set(task.plan.steps.map((s) => s.milestone)).size,
           ...(taint ? { taint: { title: taint.title, mismatch: taint.mismatch } } : {}),
           ...(editMode ? { prior: { scenarios: priorScenarios } } : {}),
-          ...(task.surface === 'web' ? { catalog: authorCatalog } : {}),
+          ...(reads
+            ? {
+                catalog: reads.catalog,
+                catalogReads: () => reads.ids(),
+                replayCatalogReads: (ids: readonly string[]) => reads.adopt(ids),
+              }
+            : {}),
           cacheMaterial: {
             flowFingerprint: task.work.flow.fingerprint,
             sectionKeys: task.work.sectionKeys,
-            interfaceFingerprints: [
-              flowPrerequisiteStateMaterial(task.work.flow, prerequisiteResolution.targets, recipe),
-              realizationAssignmentFingerprint(task.plan),
-              ...task.plan.interfaces.map((j) => j.fingerprint),
-              ...(task.surface === 'web' ? [authorCatalog.fingerprint] : []),
-            ],
+            interfaceFingerprints: keyFingerprints.fingerprints,
+            legacyInterfaceFingerprints: keyFingerprints.legacyFingerprints,
+            recipeSlice: recipeSliceOf(task.surface),
+            roster: seedRoster,
+            preparations: preparationsOffer,
             recipeFingerprint,
             mode: editMode ? 'edit' : 'scratch',
             priorShas: priorScenarios.map((p) => sha256Hex(p.yaml)),
@@ -3985,6 +4229,40 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return { ...entry, generationInputsHash: null }
   }
 
+  /**
+   * The flow's settle record. A flow that re-authored re-folds the components
+   * the compare could only read off its PRIOR scenarios — the roster entries
+   * and the preparation its scenarios name — over the scenarios it holds NOW,
+   * which is what the next compare reads; and on web, the catalog entries its
+   * session actually READ rather than the prior read-set. Every other flow
+   * keeps the components the compare computed. A flow whose web session
+   * produced nothing (it failed, or the browser was missing) carries its prior
+   * read-set rather than losing it.
+   */
+  const settleRecord = (work: FlowWork, written?: readonly GuardScenario[]): FlowSettleRecord => {
+    const parts: FlowGenerationInputParts = {
+      ...work.inputParts,
+      ...(written
+        ? {
+            roster: flowRosterFingerprint(recipe, written),
+            preparation: flowPreparationFingerprint(repoRoot, recipe, written),
+          }
+        : {}),
+    }
+    if (!work.plans.has('web')) {
+      if (!written) return { hash: work.inputsHash, components: work.inputComponents }
+      const components = flowGenerationInputComponents(parts)
+      return { hash: flowSettleDigest(components), components }
+    }
+    const served = work.changed ? catalogReadsByTask.get(`${work.flow.id}\0web`)?.ids() ?? [] : []
+    const catalogReads = served.length > 0 ? served : work.prior?.catalogReads ?? []
+    const components = flowGenerationInputComponents({
+      ...parts,
+      webCatalogReads: catalogReadMaterial(authorCatalog, catalogReads),
+    })
+    return { hash: flowSettleDigest(components), components, catalogReads }
+  }
+
   for (const work of works) {
     if (!work.changed) {
       // Unchanged: its committed scenarios stand, its MATCH-stage gaps are re-derived
@@ -3992,7 +4270,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // run), and its hash carries so the next generate is a no-op again.
       workingManifest.set(
         work.flow.id,
-        enforceSettleInvariant(manifestEntry(work, work.prior?.scenarios ?? [], work.inputsHash)),
+        enforceSettleInvariant(manifestEntry(work, work.prior?.scenarios ?? [], settleRecord(work))),
       )
       const carried = work.prior?.scenarios.length ?? 0
       fact(
@@ -4012,6 +4290,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // the flow with less than it had.
     const slug = areaOrDocSlug(work.primary)
     const scenarios: GuardManifestScenario[] = []
+    // The documents behind those rows — what the settle record folds.
+    const writtenScenarios: GuardScenario[] = []
     const retired: GuardManifestRetiredScenario[] = []
     const priorIds = new Set(work.prior?.scenarios.map((s) => s.id) ?? [])
     // Where each prior file lives NOW — captured before any write, so an edited
@@ -4026,6 +4306,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const { milestoneCoverage, caseEvidence, reviewedScenarioFingerprint, reviewPolicyVersion, ...rest } = scenario
       const current = priorProofCurrent(work, scenario)
       scenarios.push(current ? scenario : rest)
+      const doc = committedScenariosById.get(scenario.id)
+      if (doc) writtenScenarios.push(doc)
       keptIds.add(scenario.id)
     }
     let unsettledFlow = false
@@ -4066,6 +4348,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
         })
         keptIds.add(c.scenario.id)
+        writtenScenarios.push(c.scenario)
         committedHere.push(c.scenario.id)
         writtenFiles.set(c.scenario.id, path.resolve(repoRoot, file))
         return file
@@ -4165,7 +4448,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // tests are real coverage) but records NO inputs hash, so the next generate
     // re-runs it. A committed failing test is NOT such a surface — it settled.
     for (const r of retired) retiredReport.push({ flowId: work.flow.id, ...r })
-    const entry = enforceSettleInvariant(manifestEntry(work, scenarios, unsettledFlow ? null : work.inputsHash, retired))
+    const entry = enforceSettleInvariant(manifestEntry(work, scenarios, unsettledFlow ? null : settleRecord(work, writtenScenarios), retired))
     workingManifest.set(work.flow.id, entry)
     const wroteHere = written.length - writtenBefore
     if (entry.generationInputsHash === null) {
@@ -4327,6 +4610,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     noChanges: changedWorks.length === 0 && removedFlows === 0 && prunedFlows === 0,
     cosmeticSections: claimDiff.cosmetic.size,
     claimDiffCalls: claimDiff.calls,
+    matchContextMoved,
     retiredScenarios: retiredReport,
     written,
     coverageGaps,
@@ -4375,8 +4659,41 @@ interface FlowWork {
   /** Why the other surfaces have no scenario. */
   gaps: GuardManifestGap[]
   inputsHash: string
+  /** The settle inputs behind `inputsHash`, by name. */
+  inputComponents: Record<string, string>
+  /** The parts those components were built from — re-folded when the flow
+   *  settles with a web read-set its compare could not know. */
+  inputParts: FlowGenerationInputParts
   prior?: GuardManifestFlow
   changed: boolean
+  /**
+   * Set when the flow's stored hash no longer matches: the named inputs that
+   * moved, or `null` when the stored entry recorded none.
+   */
+  movedInputs?: string[] | null
+}
+
+/** Roll the re-opened flows' moved inputs up into the report's counts. */
+function reopenedFlowsReport(changedWorks: readonly FlowWork[]): NonNullable<GuardFlowsReport['reopened']> {
+  const report: NonNullable<GuardFlowsReport['reopened']> = { flows: 0, byInput: {}, unrecorded: 0 }
+  for (const w of changedWorks) {
+    if (w.movedInputs === undefined) continue
+    report.flows++
+    if (w.movedInputs === null) report.unrecorded++
+    else for (const name of w.movedInputs) report.byInput[name] = (report.byInput[name] ?? 0) + 1
+  }
+  return report
+}
+
+/** "45 flows re-opened: 45 recipe.manifests, 0 sections, 0 interfaces". The
+ *  spec and code inputs are always named, so a zero there reads as a finding. */
+function reopenedFlowsLine(reopened: NonNullable<GuardFlowsReport['reopened']>): string {
+  const counts = { sections: 0, interfaces: 0, ...reopened.byInput }
+  const parts = Object.entries(counts)
+    .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
+    .map(([name, n]) => `${n} ${name}`)
+  if (reopened.unrecorded > 0) parts.push(`${reopened.unrecorded} with no recorded inputs`)
+  return `${reopened.flows} flow${reopened.flows === 1 ? '' : 's'} re-opened: ${parts.join(', ')}`
 }
 
 /** A committed scenario's yaml + parsed form, indexed by id for edit mode. */
@@ -4444,10 +4761,19 @@ interface AuthorTask {
 
 const taskKey = (task: { work: FlowWork; surface: GuardDriverId }): string => `${task.work.flow.id}\0${task.surface}`
 
+/** A flow's settle record: the named inputs it leaves behind, their digest, and
+ *  the catalog entries its web session read. Null for a flow that did not settle. */
+interface FlowSettleRecord {
+  hash: string
+  components: Record<string, string>
+  /** Absent for a non-web flow. */
+  catalogReads?: readonly string[]
+}
+
 function manifestEntry(
   work: FlowWork,
   scenarios: GuardManifestScenario[],
-  generationInputsHash: string | null,
+  settled: FlowSettleRecord | null,
   retiredScenarios: GuardManifestRetiredScenario[] = [],
 ): GuardManifestFlow {
   return {
@@ -4465,7 +4791,9 @@ function manifestEntry(
       .map(([surface, plan]) => ({ surface, interfaceIds: plan.interfaces.map((j) => j.id) }))
       .filter((j) => j.interfaceIds.length > 0)
       .sort((a, b) => a.surface.localeCompare(b.surface)),
-    generationInputsHash,
+    generationInputsHash: settled?.hash ?? null,
+    ...(settled ? { generationInputs: settled.components } : {}),
+    ...(settled?.catalogReads ? { catalogReads: [...settled.catalogReads] } : {}),
     gaps: work.gaps.slice().sort((a, b) => a.surface.localeCompare(b.surface) || a.kind.localeCompare(b.kind)),
   }
 }
@@ -4884,7 +5212,7 @@ function assembleAuthorCtx(opts: {
       resources: task.surface === 'web' ? scopedAuthorResources(task.plan.interfaces, opts.resources) : buildResourceHints(task.plan.interfaces, opts.resources),
     },
   )
-  return { ...ctx, ...(task.surface === 'web' ? { webSetupCandidates: opts.authorCatalog.candidates(task.plan.interfaces, JSON.stringify(task.work.flow)) } : {}) }
+  return { ...ctx, ...(task.surface === 'web' ? { webSetupCandidates: webSetupCandidates(opts.authorCatalog, task.plan.interfaces, task.work.flow) } : {}) }
 }
 
 // --- Flow-worker helpers ------------------------------------------------------
@@ -5249,6 +5577,25 @@ function recipeCredentialCapabilities(
     out.push({ name, header: cred.header, ...(cred.description ? { description: cred.description } : {}) })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * THE RUN'S ONE WEB AUTHORING CATALOG: every web interface the recipe's own app
+ * serves, with the resources those interfaces reach. Exported because the
+ * pre-flight estimate has to build it the same way — the web arm of a worker's
+ * cache key is drawn from it, and an estimate that built a different catalog
+ * would price a session the run serves from cache.
+ */
+export function buildWebAuthorCatalog(
+  webInterfaces: readonly Interface[],
+  serverIndex: ServerRouteIndex,
+  webApp: string | undefined,
+  resources?: Record<string, InterfaceResource[]>,
+): AuthorCatalog {
+  return createAuthorCatalog(
+    webInterfaces.filter((i) => !servedByOtherApp(serverIndex, webApp, interfaceEntryPath(i))),
+    resources,
+  )
 }
 
 /** One interface's entry path (`''` when it has none) — the route-manifest lookup key. */

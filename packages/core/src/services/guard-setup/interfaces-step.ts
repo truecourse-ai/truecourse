@@ -21,11 +21,15 @@
  *    `guard interfaces author` engine, injected as a thunk so this module
  *    never imports the command layer. The engine already decided the step
  *    should RUN (fingerprint moved, authored file absent, or `--replace`);
- *    what remains here is the cheap zero-work check: when every screen
- *    has authored tasks and established readable facts (and no replace was asked), no authoring
- *    run is started at all — a run record with zero sessions would be noise.
+ *    what remains here is the cheap zero-work check: when the authoring ledger
+ *    has settled every screen (and no replace or refresh was asked), no
+ *    authoring run is started at all — a run record with zero sessions would be
+ *    noise. A screen the ledger holds as unsettled is NOT work by itself, so
+ *    the row names it and a person can ask for the refresh that retries it.
  *
- * An authoring failure fails the STEP, never setup (the engine's contract);
+ * An authoring failure fails the STEP only when EVERY session failed; one dead
+ * session leaves a ledger row and the step settles around it (the engine's
+ * contract stands: neither ever fails setup);
  * everything this step noticed — the cli disputes, the session's verdicts,
  * the catalog edits, and the authoring run's stale-place diagnostics — is
  * returned for the step ROW in `guard/setup.json`, which is where run
@@ -40,11 +44,13 @@ import type {
 } from '@truecourse/guard-generator';
 import {
   computeRecipeFingerprint,
+  recipeContractFingerprint,
   guardInterfacesPath,
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
   resolveEntry,
   staleAuthoredPlaceDiagnostics,
+  unsettledAuthoring,
 } from '@truecourse/guard-runner';
 import { isCreditsExhausted, type InterfacesFile, type MapperDiagnostic } from '@truecourse/shared';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
@@ -66,8 +72,10 @@ import { describeSessionFailure, type GuardSetupSessionContext } from './session
 export interface InterfacesAuthorRun {
   runId: string;
   authored: number;
+  /** Re-authored tasks whose key moved through a reworded label alone. */
+  labelRekeys?: number;
   skipped: string[];
-  places: { status: string; placeId?: string; problems?: string[] }[];
+  places: { status: string; placeId?: string; problems?: string[]; fromCache?: boolean }[];
   diagnostics: MapperDiagnostic[];
   spent: { turns: number; tokens: number; costUsd: number };
   /** The state reconciliation that closed the run, when anything was authored. */
@@ -77,6 +85,8 @@ export interface InterfacesAuthorRun {
 export type InterfacesAuthorFn = (opts: {
   repoRoot: string;
   replace: boolean;
+  /** Re-open the screens whose ledger row says they never settled. */
+  refresh: boolean;
 }) => Promise<InterfacesAuthorRun>;
 
 export interface BuildInterfacesStepOptions {
@@ -130,16 +140,29 @@ export function buildInterfacesStep(
     const derived = readInterfaceCatalog(input.repoRoot);
     const authored = readAuthoredInterfaceCatalog(input.repoRoot);
     const stale = new Set(staleAuthoredPlaceDiagnostics(derived, authored).map((d) => d.subject));
-    const workable = planWorkItems(derived, authored).filter(
-      (item) => !stale.has(item.place.id) && (input.replace || item.needsAuthoring),
+    const planned = planWorkItems(derived, authored, recipeContractFingerprint(input.repoRoot, 'seed'));
+    const workable = planned.filter(
+      (item) =>
+        !stale.has(item.place.id) &&
+        (input.replace ||
+          item.needsAuthoring ||
+          (input.refresh && item.record !== undefined && unsettledAuthoring(item.record))),
     );
+    // Screens the ledger holds as never settled: they are not work (their inputs
+    // have not moved), so the row has to say they are there to be refreshed.
+    const unsettledScreens = planned
+      .filter((item) => item.record !== undefined && unsettledAuthoring(item.record))
+      .map((item) => ({ place: item.place.id, reason: `authoring ${item.record!.status}` }));
     if (workable.length === 0) {
       return {
         status: 'ok',
         reason: joinNotes(
-          'every derived screen already has authored tasks and established readable facts — zero sessions',
+          unsettledScreens.length > 0
+            ? `every derived screen has settled — ${unsettledScreens.length} of them unauthored, awaiting a refresh — zero sessions`
+            : 'every derived screen already has authored tasks and established readable facts — zero sessions',
           notes,
         ),
+        ...(unsettledScreens.length > 0 ? { failedScreens: unsettledScreens } : {}),
         // The reconcile session (when one ran) lives under the SETUP run.
         ...(context.runId() ? { sessionRunId: context.runId() } : {}),
         ...recorded,
@@ -147,9 +170,16 @@ export function buildInterfacesStep(
     }
 
     try {
-      const run = await opts.author({ repoRoot: input.repoRoot, replace: input.replace });
-      context.addSpend(run.places.length, run.spent);
-      for (const place of run.places) {
+      const run = await opts.author({
+        repoRoot: input.repoRoot,
+        replace: input.replace,
+        refresh: input.refresh,
+      });
+      // A screen served from its cached fragment ran no session, so it is
+      // neither counted nor noted: the run record would show work nobody did.
+      const ran = run.places.filter((place) => !place.fromCache);
+      context.addSpend(ran.length, run.spent);
+      for (const place of ran) {
         context.note(place.status === 'failed' || place.status === 'rejected' ? 'failed' : 'completed');
       }
       // The stale-place reports ride the SAME step row as the cli disputes —
@@ -162,20 +192,42 @@ export function buildInterfacesStep(
       for (const place of failed) {
         notes.push(`${place.placeId ?? 'authoring session'}: ${place.problems?.join('; ') || place.status}`);
       }
+      // A screen that failed carries a ledger row now, so the step has settled
+      // its whole work list whatever each session made of it: one dead session
+      // no longer holds the step open for every later run. A run where EVERY
+      // session died is the exception — nothing was settled but the failure
+      // itself — and it stays loud. A screen the ledger held as unsettled that
+      // this run retried (a refresh, or its inputs moved) has this run's
+      // outcome now, whichever way it went, so only the ones the run did not
+      // touch are still awaiting a refresh.
+      const failedScreens = [
+        ...failed.map((place) => ({
+          place: place.placeId ?? 'authoring session',
+          ...(place.problems && place.problems.length > 0
+            ? { reason: place.problems.join('; ') }
+            : {}),
+        })),
+        ...unsettledScreens.filter(
+          (screen) => !run.places.some((place) => place.placeId === screen.place),
+        ),
+      ];
       // The closing state reconciliation never fails the run (the tasks are
       // written), so what it could not do is said on the step row, not lost.
       for (const problem of run.reconcile?.problems ?? []) {
         notes.push(`state registry not reconciled: ${problem}`);
       }
       return {
-        status: failed.length > 0 ? 'failed' : 'ok',
+        status: allFailed ? 'failed' : 'ok',
         reason: joinNotes(
           allFailed
             ? `every authoring session failed (${run.places.length} place(s))`
-            : `authored ${run.authored} task(s) across ${run.places.length - failed.length} place(s)`,
+            : `authored ${run.authored} task(s) across ${run.places.length - failed.length} place(s)` +
+              (run.places.length > ran.length ? `, ${run.places.length - ran.length} from cache` : ''),
           notes,
         ),
         sessionRunId: run.runId,
+        ...(input.replace && run.labelRekeys !== undefined ? { labelRekeys: run.labelRekeys } : {}),
+        ...(failedScreens.length > 0 ? { failedScreens } : {}),
         ...recorded,
       };
     } catch (error) {
@@ -225,7 +277,8 @@ async function runReconcile(
     repoRoot: input.repoRoot,
     diagnostics: disputes,
     entry: resolveEntry(input.repoRoot, [...input.recipe.entry!]),
-    recipeFingerprint: computeRecipeFingerprint(input.repoRoot),
+    recipeContract: recipeContractFingerprint(input.repoRoot, 'seed'),
+    legacyRecipeFingerprint: computeRecipeFingerprint(input.repoRoot),
     driver: async () => {
       acquired = await context.acquire();
       return acquired.driver;

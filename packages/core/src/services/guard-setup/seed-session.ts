@@ -41,6 +41,7 @@
  */
 
 import fs from 'node:fs';
+import { LEGACY_SEED_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -215,11 +216,27 @@ export const SeedSessionOutcomeSchema = z
   .strict();
 export type SeedSessionOutcome = z.infer<typeof SeedSessionOutcomeSchema>;
 
-/** `sha256(prompt fp :: the seed step's input fingerprint)` — the step
- *  fingerprint already folds the recipe and the stored catalog. */
+/**
+ * THE SEED STAGE'S VERSION, bumped by hand. A drafted seed that was proved by
+ * execution is not made wrong by a reworded prompt; a prompt change that fixes
+ * WRONG output bumps this in the same commit.
+ */
+export const SEED_STAGE_VERSION = 1;
+
+/** `sha256(stage version :: the seed step's input fingerprint)` — the step
+ *  fingerprint already folds the recipe contract and the catalog's identity. */
 export function seedSessionCacheKey(stepFingerprint: string): string {
   return createHash('sha256')
-    .update(`${promptFingerprint(SYSTEM_PROMPT)}::${stepFingerprint}`)
+    .update(`seed-v${SEED_STAGE_VERSION}::${stepFingerprint}`)
+    .digest('hex');
+}
+
+/** {@link seedSessionCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to, over the step's OLD fingerprint. Delete with
+ *  the legacy hash. */
+export function seedSessionLegacyCacheKey(legacyStepFingerprint: string): string {
+  return createHash('sha256')
+    .update(`${LEGACY_SEED_SESSION_PROMPT_FINGERPRINT}::${legacyStepFingerprint}`)
     .digest('hex');
 }
 
@@ -1440,6 +1457,7 @@ export function buildSeedSession(
         repoRoot: input.repoRoot,
         cacheName: SEED_CACHE_NAME,
         key: seedSessionCacheKey(input.fingerprint),
+        legacyKeys: [seedSessionLegacyCacheKey(input.legacyFingerprint)],
         schema: SeedSessionOutcomeSchema,
         run: async () => {
           const { driver, persistence } = await context.acquire();

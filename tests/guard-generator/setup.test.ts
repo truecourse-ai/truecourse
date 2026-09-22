@@ -33,11 +33,15 @@ import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
   dependenciesPath,
+  recipeContractFingerprint,
+  screenAuthoringFingerprint,
 } from '@truecourse/guard-runner'
 import {
   runGuardSetup,
   detectRoleColumns,
-  ecosystemFingerprint,
+  needsFingerprint,
+  recipeNeeds,
+  recipeStepFingerprint,
   type GuardSetupAuthStep,
   type GuardSetupCatalogSession,
   type GuardSetupInterfacesStep,
@@ -46,11 +50,14 @@ import {
   type GuardSetupSeedSessionInput,
   type InterfaceProvider,
   type SeedDraftDatabase,
+  type RecipeProposal,
+  type RecipeRepairContext,
   type RecipeRunner,
 } from '@truecourse/guard-generator'
 import {
   GuardSetupReportSchema,
   GuardSetupTaxonomyStepSchema,
+  type DatastoreUrlRef,
   type DetectedExternalService,
   type GuardSetupServerProbe,
   type InterfacesFile,
@@ -119,14 +126,42 @@ function interfaces(
   over: {
     externalServices?: DetectedExternalService[]
     database?: SeedDraftDatabase | null
+    datastoreUrls?: DatastoreUrlRef[]
   } = {},
 ): InterfaceProvider {
   return async () => ({
     interfaces: [apiInterface('GET', '/orgs')],
     externalServices: over.externalServices ?? [],
     database: over.database === undefined ? DATABASE : over.database,
-    datastoreUrls: [],
+    datastoreUrls: over.datastoreUrls ?? [],
   })
+}
+
+/** One datastore connection URL the app's own source declares. */
+function datastoreUrl(scheme: string, envVar: string): DatastoreUrlRef {
+  return {
+    url: `${scheme}://localhost/app`,
+    scheme,
+    envVar,
+    location: { filePath: 'src/db.mjs', startLine: 1, startColumn: 0, endLine: 1, endColumn: 10 },
+  }
+}
+
+/** The recipe step's settled value for a run whose detection saw `world`. */
+function recipeFingerprintFor(world: {
+  externalServices?: DetectedExternalService[]
+  database?: SeedDraftDatabase | null
+  datastoreUrls?: DatastoreUrlRef[]
+}): string {
+  return recipeStepFingerprint(
+    needsFingerprint(
+      recipeNeeds({
+        externalServices: world.externalServices ?? [],
+        database: world.database === undefined ? DATABASE : world.database,
+        datastoreUrls: world.datastoreUrls ?? [],
+      }),
+    ),
+  )
 }
 
 const neverCalled = (label: string): RecipeRunner =>
@@ -239,7 +274,7 @@ describe('runGuardSetup — the gates', () => {
     expect(report.recipe.status).toBe('failed')
     expect(report.reason).toMatch(/not reachable/)
     expect(report.steps.map((s) => [s.key, s.status])).toEqual([['recipe', 'failed']])
-    expect(report.steps[0].inputFingerprint).toBe(ecosystemFingerprint(r))
+    expect(report.steps[0].inputFingerprint).toBe(recipeFingerprintFor({}))
     expect(report.seed).toBeUndefined()
     expect(report.externals).toBeUndefined()
   })
@@ -448,6 +483,37 @@ describe('runGuardSetup — skip when settled', () => {
     expect(probe.calls).toBe(1)
   })
 
+  it('a step that re-opens names the input that moved', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } })
+    const probe = probeStub()
+    const seed = seedSeam()
+    const first = await runAndPersist(r, { probe: probe.probe, seedSession: seed.seam })
+    // The recipe step keys on what the repository NEEDS of the world it boots;
+    // the seed step on the recipe's CONTRACT and the catalog's identity. Neither
+    // reads a dependency version.
+    expect(Object.keys(first.steps.find((s) => s.key === 'recipe')?.inputComponents ?? {})).toEqual([
+      'needs',
+    ])
+    expect(Object.keys(first.steps.find((s) => s.key === 'seed')?.inputComponents ?? {})).toEqual([
+      'recipe.contract',
+      'catalog',
+    ])
+
+    // The app starts talking to a datastore nothing stood up before: the recipe
+    // step re-opens on it and says so.
+    const facts: string[] = []
+    const second = await runAndPersist(r, {
+      probe: probe.probe,
+      seedSession: seed.seam,
+      interfaces: interfaces({ datastoreUrls: [datastoreUrl('redis', 'REDIS_URL')] }),
+      onStepFact: (step, line) => facts.push(`${step} | ${line}`),
+    })
+    expect(facts).toContain('recipe | re-opened: needs moved')
+    expect(facts.filter((line) => line.startsWith('seed | re-opened'))).toEqual([])
+    expect(statuses(second)).toMatchObject({ seed: 'skipped:unchanged' })
+  })
+
   // The seed's cold-clone proof is where the recipe's `install`/`build` first
   // run in a tree that did not grow across the session's attempts. A failure
   // there is the RECIPE gate giving way, found late: the run fails on it and
@@ -628,9 +694,10 @@ describe('runGuardSetup — skip when settled', () => {
     expect(written.ownHosts).toEqual(['localhost'])
   }, 120_000)
 
-  // The recipe step's subject is the ECOSYSTEM, never its own output: an edited
-  // recipe.json re-runs nothing there, a moved package.json re-runs everything.
-  it('a moved package.json re-runs the recipe step; a moved recipe.json does not', async () => {
+  // The recipe step's subject is what the repository NEEDS, never a file's
+  // bytes: a dependency bump and an edited recipe.json both re-derive nothing,
+  // and a datastore the app started talking to re-opens the step.
+  it('a dependency bump re-derives nothing; a new need re-opens the recipe step', async () => {
     const r = fixtureRepo()
     writeRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } })
     const probe = probeStub()
@@ -651,12 +718,30 @@ describe('runGuardSetup — skip when settled', () => {
     expect(statuses(afterRecipeEdit).catalog).toBe('ok')
     expect(statuses(afterRecipeEdit).seed).not.toBe('skipped:unchanged')
 
-    // The subject moved: the recipe step re-runs (and re-probes).
+    // A dependency bump. Nothing about what the app needs of its world moved,
+    // so the recipe is neither re-derived, re-probed, nor handed to a session —
+    // and the file it was verified as is byte-identical afterwards.
+    const before = fs.readFileSync(recipePath(r), 'utf-8')
     const manifest = JSON.parse(fs.readFileSync(pkg, 'utf-8')) as Record<string, unknown>
     manifest.version = '9.9.9'
     fs.writeFileSync(pkg, JSON.stringify(manifest, null, 2))
-    const afterPkgEdit = await runAndPersist(r, { probe: probe.probe })
-    expect(statuses(afterPkgEdit).recipe).toBe('ok')
+    const afterPkgEdit = await runAndPersist(r, {
+      probe: probe.probe,
+      repair: async () => {
+        throw new Error('a dependency bump must not open a repair session')
+      },
+    })
+    expect(statuses(afterPkgEdit).recipe).toBe('skipped:unchanged')
+    expect(probe.calls).toBe(1)
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(before)
+
+    // The app starts reading a datastore url: the needs moved, so the recipe is
+    // re-verified against the live server.
+    const afterNewNeed = await runAndPersist(r, {
+      probe: probe.probe,
+      interfaces: interfaces({ datastoreUrls: [datastoreUrl('redis', 'REDIS_URL')] }),
+    })
+    expect(statuses(afterNewNeed).recipe).toBe('ok')
     expect(probe.calls).toBe(2)
   })
 
@@ -676,6 +761,166 @@ describe('runGuardSetup — skip when settled', () => {
       },
     })
     expect(statuses(second).seed).toBe('skipped:unchanged')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The needs comparison and the scoped repair it opens
+// ---------------------------------------------------------------------------
+
+describe('runGuardSetup — scoped repair', () => {
+  async function runAndPersist(
+    r: string,
+    over: Partial<GuardSetupOptions> = {},
+  ): Promise<Awaited<ReturnType<typeof runGuardSetup>>['report']> {
+    const result = await runGuardSetup(baseOpts(r, over))
+    writeGuardSetup(r, result.report)
+    return result.report
+  }
+
+  const statuses = (
+    report: Awaited<ReturnType<typeof runGuardSetup>>['report'],
+  ): Record<string, string> =>
+    Object.fromEntries(report.steps.map((s) => [s.key, `${s.status}${s.reason ? `:${s.reason}` : ''}`]))
+
+  /** The detection of a repo whose app has started reading a redis url. */
+  const withRedis = (): InterfaceProvider =>
+    interfaces({ datastoreUrls: [datastoreUrl('redis', 'REDIS_URL')] })
+
+  /** A recipe the fixture server really boots under, plus whatever a case adds. */
+  const proposalFor = (r: string, over: Record<string, unknown> = {}): RecipeProposal => ({
+    build: 'true',
+    api: {
+      serve: ['node', path.join(r, 'server.mjs')],
+      healthPath: '/health',
+      env: { SEED_STORE: path.join(r, 'store.json') },
+    },
+    ...over,
+  })
+
+  it('briefs one repair session with the standing recipe and the need it must answer', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const standing = JSON.parse(fs.readFileSync(recipePath(r), 'utf-8'))
+    const scopes: RecipeRepairContext[] = []
+
+    const report = await runAndPersist(r, {
+      interfaces: withRedis(),
+      repair: async (ctx) => {
+        scopes.push(ctx)
+        return { proposal: proposalFor(r, { env: { REDIS_URL: 'redis://127.0.0.1:6379' } }) }
+      },
+    })
+
+    expect(scopes).toHaveLength(1)
+    const existing = scopes[0]!.existing
+    expect(existing?.recipe).toEqual(standing)
+    expect(existing?.scope.kind).toBe('needs')
+    expect(existing?.scope.kind === 'needs' ? existing.scope.unprovided.map((u) => u.need.id) : []).toEqual([
+      'datastore:redis:REDIS_URL',
+    ])
+
+    expect(statuses(report).recipe).toBe('ok')
+    expect(report.recipe.movedFlowSlices).toBeUndefined()
+    const written = JSON.parse(fs.readFileSync(recipePath(r), 'utf-8'))
+    expect(written.env).toEqual({ REDIS_URL: 'redis://127.0.0.1:6379' })
+    expect(written.api.healthPath).toBe('/health')
+  }, 120_000)
+
+  it('refuses a needs-driven outcome that reaches outside the world, leaving recipe.json alone', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const before = fs.readFileSync(recipePath(r), 'utf-8')
+
+    const report = await runAndPersist(r, {
+      interfaces: withRedis(),
+      // The session answers with a rewritten health path — a field a real boot
+      // proved and every api scenario is written against.
+      repair: async () => ({
+        proposal: {
+          build: 'true',
+          env: { REDIS_URL: 'redis://127.0.0.1:6379' },
+          api: {
+            serve: ['node', path.join(r, 'server.mjs')],
+            healthPath: '/ready',
+            env: { SEED_STORE: path.join(r, 'store.json') },
+          },
+        },
+      }),
+    })
+
+    expect(report.status).toBe('failed')
+    expect(report.reason).toContain('api.healthPath')
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(before)
+  }, 120_000)
+
+  // A standing recipe that no longer starts is exactly what a repair is for.
+  // Failing the run instead leaves the row failed, which is what makes the NEXT
+  // run throw the whole recipe away and derive a new one.
+  it('hands a dead server to a boot repair, and reports the slice it moved', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const scopes: RecipeRepairContext[] = []
+    let booted = 0
+
+    const report = await runAndPersist(r, {
+      // Dead until the repair lands, alive afterwards.
+      probe: async () => {
+        booted++
+        return booted === 1
+          ? [{ server: 'default', path: '/health', ok: false, error: 'connection refused' }]
+          : [{ server: 'default', path: '/health', status: 200, ok: true }]
+      },
+      repair: async (ctx) => {
+        scopes.push(ctx)
+        return {
+          proposal: {
+            build: 'true',
+            api: {
+              serve: ['node', path.join(r, 'server.mjs')],
+              healthPath: '/orgs',
+              env: { SEED_STORE: path.join(r, 'store.json') },
+            },
+          },
+        }
+      },
+    })
+
+    expect(scopes).toHaveLength(1)
+    expect(scopes[0]!.existing?.scope.kind).toBe('boot')
+    expect(booted).toBe(2)
+    expect(statuses(report).recipe).toBe('ok')
+    // The health path is a field every api flow's key folds.
+    expect(report.recipe.movedFlowSlices).toEqual(['api'])
+    expect(JSON.parse(fs.readFileSync(recipePath(r), 'utf-8')).api.healthPath).toBe('/orgs')
+  }, 120_000)
+
+  it('reports the needs nobody but a person can answer, and opens no session for them', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const facts: string[] = []
+
+    const report = await runAndPersist(r, {
+      interfaces: interfaces({
+        externalServices: [
+          { service: 'stripe', source: 'sdk', evidence: [{ filePath: 'src/pay.mjs', importSource: 'stripe' }] },
+        ],
+      }),
+      repair: async () => {
+        throw new Error('a third party nobody has classified is a registration, not a repair')
+      },
+      onStepFact: (step, line) => facts.push(`${step} | ${line}`),
+    })
+
+    expect(statuses(report).recipe).toBe('ok')
+    expect(report.recipe.unprovidedNeeds).toEqual([
+      {
+        need: 'third-party:stripe',
+        provides: expect.stringContaining('registered'),
+        answer: 'registration',
+      },
+    ])
+    expect(facts.some((line) => line.startsWith('recipe | third-party:stripe is not provided'))).toBe(true)
   })
 })
 
@@ -1002,6 +1247,49 @@ describe('runGuardSetup — the interfaces step', () => {
     }
   }
 
+  it('the seed a run drafts after them does not re-open the catalog or the interfaces rows', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    writeCatalogs(r, { authored: true })
+    let catalogCalls = 0
+    const catalogSession: GuardSetupCatalogSession = async () => {
+      catalogCalls++
+      return { status: 'ok', added: [], findings: [] }
+    }
+    const one = await runGuardSetup(
+      baseOpts(r, { authorInterfaces: step().seam, catalogSession, seedSession: writingSeedSeam() }),
+    )
+    writeGuardSetup(r, one.report)
+    expect(catalogCalls).toBe(1)
+    expect(one.report.steps.find((s) => s.key === 'seed')).toMatchObject({ status: 'ok' })
+    // The seed step wrote `api.seed` into the recipe AFTER the catalog and
+    // interfaces rows were stamped: neither reads it, so neither moves.
+    expect(JSON.parse(fs.readFileSync(recipePath(r), 'utf-8')).api.seed).toBeDefined()
+
+    const facts: string[] = []
+    const never = (what: string) => async (): Promise<never> => {
+      throw new Error(`${what} must not re-run over a seed the run itself drafted`)
+    }
+    const two = await runGuardSetup(
+      baseOpts(r, {
+        authorInterfaces: never('the interfaces step'),
+        catalogSession: never('the catalog session'),
+        seedSession: never('the seed session'),
+        onStepFact: (key, line) => facts.push(`${key} | ${line}`),
+      }),
+    )
+    expect(
+      two.report.steps
+        .filter((s) => s.key === 'catalog' || s.key === 'interfaces' || s.key === 'seed')
+        .map((s) => [s.key, s.status, s.reason]),
+    ).toEqual([
+      ['catalog', 'skipped', 'unchanged'],
+      ['interfaces', 'skipped', 'unchanged'],
+      ['seed', 'skipped', 'unchanged'],
+    ])
+    expect(facts.filter((line) => line.includes('re-opened'))).toEqual([])
+  })
+
   it('skips only when the places are unchanged AND an authored file exists', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
@@ -1056,6 +1344,38 @@ describe('runGuardSetup — the interfaces step', () => {
     const complete = step()
     await runGuardSetup(baseOpts(r, { authorInterfaces: complete.seam }))
     expect(complete.inputs).toHaveLength(0)
+  })
+
+  // A screen whose session died leaves a ledger row instead of nothing, so the
+  // step has settled its whole work list and the next setup spends no session
+  // on it. Retrying it is a refresh, which the report asks for by name.
+  it('settles around a screen the ledger holds as unsettled', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    writeCatalogs(r, { authored: true })
+    const first = await runGuardSetup(baseOpts(r, { authorInterfaces: step().seam }))
+    writeGuardSetup(r, first.report)
+
+    const file = JSON.parse(fs.readFileSync(guardAuthoredInterfacesPath(r), 'utf-8'))
+    file.authoring = {
+      root: {
+        status: 'failed',
+        inputFingerprint: screenAuthoringFingerprint({
+          derived: DERIVED,
+          place: DERIVED.resources!.web[0],
+          recipeContract: recipeContractFingerprint(r),
+        }),
+      },
+    }
+    fs.writeFileSync(guardAuthoredInterfacesPath(r), JSON.stringify(file))
+
+    const second = step()
+    const two = await runGuardSetup(baseOpts(r, { authorInterfaces: second.seam }))
+    expect(second.inputs).toHaveLength(0)
+    expect(two.report.steps.find((s) => s.key === 'interfaces')).toMatchObject({
+      status: 'skipped',
+      reason: 'unchanged',
+    })
   })
 
   it('--replace never skips, and the seam is told', async () => {

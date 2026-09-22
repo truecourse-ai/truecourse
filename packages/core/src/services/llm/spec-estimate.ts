@@ -30,7 +30,7 @@ import {
   type DocAreaTags,
   type DocCandidate,
 } from '@truecourse/spec-consolidator';
-import { getCacheEntry } from '@truecourse/llm';
+import { getCacheEntryOrLegacy } from '@truecourse/llm';
 import type { z } from 'zod';
 import { WRAP_UP_TURNS, type SessionBudget } from '@truecourse/agent-loop';
 import {
@@ -41,6 +41,7 @@ import {
   DocVerdictSchema,
   curateDocBriefing,
   curateDocCacheKey,
+  curateDocLegacyCacheKeys,
   type DocVerdict,
 } from '../spec-scan/curate-doc.js';
 import {
@@ -54,6 +55,7 @@ import {
   collectAreaVocab,
   settleAreasBriefing,
   settleAreasCacheKey,
+  settleAreasLegacyCacheKey,
   settleAreasGate,
   type AreaSettlement,
 } from '../spec-scan/settle-areas.js';
@@ -66,6 +68,7 @@ import {
   deriveOverlapWorkItems,
   overlapBriefing,
   overlapSessionCacheKey,
+  overlapSessionLegacyCacheKey,
   type OverlapWorkItem,
 } from '../spec-scan/overlap.js';
 import {
@@ -88,29 +91,41 @@ import {
   buildServerRouteIndex,
   bindRealizationServer,
   flowPrerequisiteStateMaterial,
+  flowPrerequisiteShapeFingerprint,
+  flowWorkerKeyFingerprints,
   proposeRecipe,
   recipeCacheKey,
+  recipeLegacyCacheKey,
   RECIPE_CACHE_NAME,
   RecipeProposalSchema,
   SEED_CACHE_NAME,
-  settledFingerprints,
+  settledSteps,
+  stepSettled,
   interfacesFingerprint,
+  legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  legacySeedStepFingerprint,
   authFingerprint,
   collectWorkDocs,
   snapExtraction,
   readCorpusAreaTags,
   buildFlowAreas,
   buildSurfaceCatalogs,
+  buildWebAuthorCatalog,
+  catalogReadMaterial,
   readCachedMatch,
   matchProviderControls,
   realizationAssignmentFingerprint,
   partitionPlanPreparations,
   readFlowsFile,
   sectionInputsKey,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
+  flowGenerationInputComponents,
+  flowSettleVerdict,
   flowAreaIdForDoc,
+  webAuthorKeyMaterial,
   workerCacheKey,
+  workerRecipeMaterial,
   FlowSetSchema,
   RECIPE_SYSTEM_PROMPT,
   MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
@@ -129,17 +144,20 @@ import {
   extractSessionBriefing,
   extractContextSchema,
   extractSessionCacheKey,
+  extractSessionLegacyCacheKey,
   FLOWS_SESSION_BUDGET,
   FLOWS_SESSION_CACHE_NAME,
   FLOWS_SESSION_KIND,
   FLOWS_SESSION_SYSTEM_PROMPT,
   flowsSessionCacheKey,
+  flowsSessionLegacyCacheKey,
   FLOW_WORKER_BUDGET,
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
   FLOW_WORKER_SESSION_KIND,
   flowWorkerSystemPrompt,
   flowWorkerPromptFingerprint,
+  FLOW_WORKER_STAGE_VERSION,
   CachedWorkerEntrySchema,
   FIDELITY_SESSION_BUDGET,
   FIDELITY_SESSION_KIND,
@@ -152,6 +170,7 @@ import {
   GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect,
   runnableDriverIds,
   violatesSettleInvariant,
+  type GuardSetupTaxonomyKey,
   dismissedClaimKey,
   ExtractOutcomeSchema,
   type GuardDriverId,
@@ -159,7 +178,12 @@ import {
 } from '@truecourse/shared';
 import {
   computeRecipeFingerprint,
-  computePreparationFingerprint,
+  legacyPreparationFingerprint,
+  flowRecipeSliceFingerprint,
+  flowRosterFingerprint,
+  flowPreparationFingerprint,
+  seedRosterFingerprint,
+  preparationsFingerprint,
   resolvePrerequisites,
   buildRouteManifest,
   loadDependencyCatalog,
@@ -168,7 +192,8 @@ import {
   preparationCatalog,
   readGuardDecisions,
   readAuthoredInterfaceCatalog,
-  webScreensNeedingReadables,
+  recipeContractFingerprint,
+  webScreensNeedingAuthoring,
   readInterfaceCatalog,
   readMergedInterfaceCatalog,
   readManifest as readGuardManifest,
@@ -190,13 +215,16 @@ import {
   SEED_SESSION_KIND,
   SeedSessionOutcomeSchema,
   seedSessionCacheKey,
+  seedSessionLegacyCacheKey,
 } from '../guard-setup/index.js';
 import {
   RECONCILE_INTERFACES_BUDGET,
   RECONCILE_INTERFACES_SESSION_KIND,
 } from '../guard-setup/reconcile-interfaces.js';
 import {
+  AuthoredFragmentSchema,
   INTERFACE_AUTHOR_BUDGET,
+  INTERFACE_AUTHOR_CACHE_NAME,
   INTERFACE_AUTHOR_SESSION_KIND,
   planWorkItems,
 } from '../interface-author/index.js';
@@ -333,8 +361,11 @@ async function probeSessionCache<T>(
   cacheName: string,
   key: string,
   schema: z.ZodType<T>,
+  /** The keys this kind computed before its formula changed — probed the same
+   *  way the run reads them, so an estimate never quotes work a hit will skip. */
+  ...legacyKeys: readonly string[]
 ): Promise<T | null> {
-  const raw = await getCacheEntry(repoRoot, cacheName, key).catch(() => null);
+  const raw = await getCacheEntryOrLegacy(repoRoot, cacheName, key, ...legacyKeys).catch(() => null);
   if (raw === null) return null;
   const parsed = schema.safeParse(raw);
   return parsed.success ? parsed.data : null;
@@ -412,6 +443,7 @@ export async function estimateScanTokens(
       CURATE_DOC_CACHE_NAME,
       curateDocCacheKey({ identity, doc }, instructionParts),
       DocVerdictSchema,
+      ...curateDocLegacyCacheKeys({ identity, doc }, instructionParts),
     );
     if (cached) cachedVerdicts.set(doc.path, cached);
     else curateMissDocs.push(doc);
@@ -451,6 +483,7 @@ export async function estimateScanTokens(
         SETTLE_AREAS_CACHE_NAME,
         settleAreasCacheKey(vocab, instructionParts),
         AreaSettlementSchema,
+        settleAreasLegacyCacheKey(vocab, instructionParts),
       );
       settleItems = settlement ? 0 : 1;
       settleMin = settleItems;
@@ -495,6 +528,7 @@ export async function estimateScanTokens(
       OVERLAP_SESSION_CACHE_NAME,
       overlapSessionCacheKey(item, instructionParts),
       OverlapOutcomeSchema,
+      overlapSessionLegacyCacheKey(item, instructionParts),
     );
     if (!cached) overlapMissItems.push(item);
   }
@@ -675,6 +709,7 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
       EXTRACT_SESSION_CACHE_NAME,
       extractSessionCacheKey(doc, prerequisites.targets),
       extractContextSchema(prerequisites.targets),
+      extractSessionLegacyCacheKey(doc, prerequisites.targets),
     );
     if (!cached) {
       extractItems++;
@@ -714,7 +749,13 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
     const areas = buildFlowAreas(inputs);
     let areaCalls = 0;
     for (const area of areas) {
-      const cached = await probeSessionCache(repoRoot, FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey(area), FlowSetSchema);
+      const cached = await probeSessionCache(
+        repoRoot,
+        FLOWS_SESSION_CACHE_NAME,
+        flowsSessionCacheKey(area),
+        FlowSetSchema,
+        flowsSessionLegacyCacheKey(area),
+      );
       if (!cached) areaCalls++;
     }
     const areasWithClaims = areas.filter((a) => a.claims.length > 0).length;
@@ -778,12 +819,12 @@ interface GuardRealizationPlan {
  * IS what the run will use) AND the interface snapshot exists: matching then
  * probes the SAME `.cache/guard/match` entries the run reads, and the worker
  * count probes the SAME `guard/generate` worker-cache keys (the kept
- * `workerCacheKey` recipe under the session prompt fingerprints) for the flows
+ * `workerCacheKey` recipe under the worker stage version) for the flows
  * whose composition moved since the manifest. Otherwise both fall back to the
  * honest ceiling — flow count estimated from source obligations, one worker per (flow, surface).
  *
- * The ceiling is what the COST is priced at either way (`maxCalls`), so a prompt
- * change (which re-works every flow) can never exceed the quoted bill. A
+ * The ceiling is what the COST is priced at either way (`maxCalls`), so a stage
+ * version bump (which re-works every flow) can never exceed the quoted bill. A
  * TAINTED flow skips its cache read at run time — the estimate cannot read the
  * taint ledger's future, so a tainted hit is a small under-count, bounded by
  * the ceiling.
@@ -802,6 +843,15 @@ async function planGuardRealizationStages(
   } catch { /* Invalid recipes are repaired before runtime matching. */ }
 
   const prerequisites = resolvePrerequisites(repoRoot, recipe?.api?.externals);
+  // The recipe material every flow's key folds, computed once for the run.
+  const slices = new Map<GuardDriverId, string>();
+  const recipeSliceOf = (surface: GuardDriverId): string => {
+    let slice = slices.get(surface);
+    if (slice === undefined) slices.set(surface, (slice = flowRecipeSliceFingerprint(recipe ?? null, surface)));
+    return slice;
+  };
+  const seedRoster = seedRosterFingerprint(recipe ?? null);
+  const preparationsOffer = preparationsFingerprint(repoRoot, recipe ?? null);
 
   // The MERGED catalog — the matcher runs against both halves, so an estimate that
   // read the derived one alone would price no work at all for the hand-authored
@@ -830,6 +880,13 @@ async function planGuardRealizationStages(
     );
     const priorByFlow = new Map((readGuardManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]));
     const committedScenarios = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]));
+    // The run's own web authoring catalog, built the same way, so this prices
+    // the web keys the run computes rather than ones only it can reach.
+    const catalogResources = catalog?.resources;
+    const authorCatalog =
+      recipe && serverIndex
+        ? buildWebAuthorCatalog(catalogs.get('web')?.interfaces ?? [], serverIndex, recipe.web?.app, catalogResources)
+        : null;
     let matchCalls = 0;
     let workerItems = 0;
     for (const flow of flows) {
@@ -838,7 +895,20 @@ async function planGuardRealizationStages(
       // pair is the only unknown — and it is counted as both a match call and a
       // worker session.
       const interfaceFingerprints: string[] = [];
-      const plannedPairs: { surface: GuardDriverId; fingerprints: string[] }[] = [];
+      // The two prerequisite materials the run folds: the shape every current
+      // key carries, and the resolved state the retired ones did.
+      const prerequisiteShape = flowPrerequisiteShapeFingerprint(flow, prerequisites.targets, recipe);
+      const prerequisiteMaterial = flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe);
+      const plannedPairs: {
+        surface: GuardDriverId;
+        assignment: string;
+        interfaces: string[];
+        webCatalog?: string;
+        /** The bag the worker key folds now, and the one it folded before —
+         *  both built by the engine, so this probes the run's own keys. */
+        fingerprints: string[];
+        legacyFingerprints: string[];
+      }[] = [];
       let unknown = false;
       for (const catalog of matchable) {
         if (!flowDriversToMatch(flow).includes(catalog.surface)) continue;
@@ -858,32 +928,70 @@ async function planGuardRealizationStages(
         }
         const preparedPlan = partitionPlanPreparations(flow, cached.plan, availablePreparations).plan;
         if (!preparedPlan || !completeRealization(flow, preparedPlan)) continue;
-        const fingerprints = [
-          realizationAssignmentFingerprint(preparedPlan),
-          ...preparedPlan.interfaces.map((j) => j.fingerprint),
-          ...(catalog.surface === 'web' ? [catalog.fingerprint] : []),
-        ];
-        plannedPairs.push({ surface: catalog.surface, fingerprints });
+        const assignment = realizationAssignmentFingerprint(preparedPlan);
+        const interfaces = preparedPlan.interfaces.map((j) => j.fingerprint);
+        const webCatalog = catalog.surface === 'web' ? catalog.fingerprint : undefined;
+        const webAuthor = catalog.surface === 'web' && authorCatalog
+          ? webAuthorKeyMaterial(authorCatalog, preparedPlan.interfaces, flow, catalogResources)
+          : undefined;
+        plannedPairs.push({
+          surface: catalog.surface,
+          assignment,
+          interfaces,
+          webCatalog,
+          ...flowWorkerKeyFingerprints({
+            prerequisiteShape,
+            legacyPrerequisiteMaterial: prerequisiteMaterial,
+            assignment,
+            interfaces,
+            ...(webAuthor && webCatalog ? { web: { handed: webAuthor, catalog: webCatalog } } : {}),
+          }),
+        });
 
       }
       const previousDrivers = priorByFlow.get(flow.id)?.scenarios.flatMap(s => s.drivers ?? []) ?? [];
       plannedPairs.sort((a, b) => Number(previousDrivers.includes(b.surface)) - Number(previousDrivers.includes(a.surface)) || a.surface.localeCompare(b.surface));
       plannedPairs.splice(1);
-      interfaceFingerprints.push(...plannedPairs.flatMap(p => p.fingerprints));
-      interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe));
+      // The LEGACY SETTLE bag, which is its own formula: the whole catalog on
+      // web, and the resolved state exactly once.
+      interfaceFingerprints.push(...plannedPairs.flatMap(p => [p.assignment, ...p.interfaces, ...(p.webCatalog ? [p.webCatalog] : [])]));
+      interfaceFingerprints.push(prerequisiteMaterial);
       const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
-      const inputsHash = flowGenerationInputsHash({
-        flowFingerprint: flow.fingerprint,
-        sectionKeys,
-        interfaceFingerprints,
-        recipeFingerprint: plan.recipeFingerprint,
-      });
       const prior = priorByFlow.get(flow.id);
+      const priorScenarios = (prior?.scenarios ?? []).flatMap((s) => committedScenarios.get(s.id) ?? []);
+      const chosenSurface = plannedPairs[0]?.surface ?? 'cli';
+      // The run's own settle compare, over the same components it computes.
+      const settle = flowSettleVerdict({
+        prior,
+        components: flowGenerationInputComponents({
+          flowFingerprint: flow.fingerprint,
+          sectionKeys,
+          assignmentFingerprints: plannedPairs.map((p) => p.assignment),
+          interfaceFingerprints: plannedPairs.flatMap((p) => p.interfaces),
+          ...(plannedPairs[0]?.webCatalog
+            ? {
+                webCatalogFingerprint: plannedPairs[0].webCatalog,
+                webCatalogReads: authorCatalog ? catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []) : [],
+              }
+            : {}),
+          prerequisiteMaterial,
+          prerequisiteShape,
+          recipeSlice: recipeSliceOf(chosenSurface),
+          roster: flowRosterFingerprint(recipe ?? null, priorScenarios),
+          preparation: flowPreparationFingerprint(repoRoot, recipe ?? null, priorScenarios),
+        }),
+        legacyHash: legacyFlowGenerationInputsHash({
+          flowFingerprint: flow.fingerprint,
+          sectionKeys,
+          interfaceFingerprints,
+          recipeFingerprint: plan.recipeFingerprint,
+        }),
+      });
       // Same work selection the run makes: a settled entry that leaves a planned
-      // surface unaccounted for is WORK, whatever its hash says.
+      // surface unaccounted for is WORK, whatever its components say.
       const changed =
-        unknown || !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior) ||
-        prior.scenarios.length > 1 || prior.scenarios.some(s => {
+        unknown || !settle.settled || (prior !== undefined && violatesSettleInvariant(prior)) ||
+        (prior?.scenarios.length ?? 0) > 1 || (prior?.scenarios ?? []).some(s => {
           const scenario = committedScenarios.get(s.id);
           return s.reviewed === false || !scenario || s.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
             !!scenarioFullFlowDefect(flow.milestones, scenario.steps, s.caseEvidence ?? []);
@@ -897,15 +1005,35 @@ async function planGuardRealizationStages(
       // hit (a settled one still pays a deterministic confirmation run — free in
       // token terms); a miss is one session.
       for (const pair of plannedPairs) {
+        // The run's own key, over the run's own material — and the old key
+        // beside it, so an entry the run will serve is never priced as work.
         const key = workerCacheKey(
-          flowWorkerPromptFingerprint(pair.surface),
+          `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
           flow,
           pair.surface,
           sectionKeys,
           pair.fingerprints,
-          plan.recipeFingerprint,
+          workerRecipeMaterial({
+            recipeSlice: recipeSliceOf(pair.surface),
+            roster: seedRoster,
+            preparations: preparationsOffer,
+          }),
         );
-        const hit = await probeSessionCache(repoRoot, FLOW_WORKER_CACHE_NAME, key, CachedWorkerEntrySchema);
+        const hit = await probeSessionCache(
+          repoRoot,
+          FLOW_WORKER_CACHE_NAME,
+          key,
+          CachedWorkerEntrySchema,
+          // The key every surface wore while the prompt was in it.
+          workerCacheKey(
+            flowWorkerPromptFingerprint(pair.surface),
+            flow,
+            pair.surface,
+            sectionKeys,
+            pair.legacyFingerprints,
+            plan.recipeFingerprint,
+          ),
+        );
         if (!hit) workerItems++;
       }
     }
@@ -1041,7 +1169,10 @@ export async function estimateGuardSetup(
   } catch {
     recipe = undefined; // a broken recipe is re-derived, so it costs the session
   }
-  const settled = settledFingerprints(repoRoot, refresh);
+  const settled = settledSteps(repoRoot, refresh);
+  /** The run's own gate, step by step: named inputs when the row has them. */
+  const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
+    stepSettled(repoRoot, key, settled(key), legacyFingerprint);
 
   // ---- recipe repair: loop only on the failure path -------------------------
   // Zero whenever a recipe exists (discovery reuses it) or the settled proposal
@@ -1056,6 +1187,7 @@ export async function estimateGuardSetup(
       RECIPE_CACHE_NAME,
       recipeCacheKey(computeRecipeFingerprint(repoRoot)),
       RecipeProposalSchema,
+      recipeLegacyCacheKey(computeRecipeFingerprint(repoRoot)),
     );
     repairMax = cached ? 0 : 1;
     repairItems = cached ? 0 : proposeRecipe(repoRoot).ok ? 0 : 1;
@@ -1071,22 +1203,36 @@ export async function estimateGuardSetup(
   // ---- interfaces: reconcile + authoring, both off the on-disk halves -------
   const derivedCatalog = readInterfaceCatalog(repoRoot);
   const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
+  const interfaceRecipeContract = recipeContractFingerprint(repoRoot, 'seed');
   const interfacesSettled =
-    !replace && authoredCatalog !== null && settled('interfaces') === interfacesFingerprint(repoRoot) &&
-    webScreensNeedingReadables(derivedCatalog, authoredCatalog).size === 0;
+    !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
+    webScreensNeedingAuthoring({
+      derived: derivedCatalog,
+      authored: authoredCatalog,
+      recipeContract: interfaceRecipeContract,
+    }).size === 0;
   const staleAuthoredIds = new Set(
     staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
   );
-  const authorable = planWorkItems(derivedCatalog, authoredCatalog).filter(
+  const authorable = planWorkItems(derivedCatalog, authoredCatalog, interfaceRecipeContract).filter(
     (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.needsAuthoring),
   );
-  const authorItems = interfacesSettled ? 0 : authorable.length;
+  // A screen whose fragment is cached costs nothing, exactly as the run reads
+  // it — an explicit re-author reads no cache, so every screen is priced.
+  const authorCached = await Promise.all(
+    authorable.map((item) =>
+      interfacesSettled || replace || refresh
+        ? null
+        : probeSessionCache(repoRoot, INTERFACE_AUTHOR_CACHE_NAME, item.inputFingerprint, AuthoredFragmentSchema),
+    ),
+  );
+  const authorItems = interfacesSettled ? 0 : authorCached.filter((hit) => hit === null).length;
   const reconcileMax = interfacesSettled ? 0 : 1;
 
   // ---- seed: real cache key when the step will run --------------------------
   const seedGateOpen =
     !recipe || (recipe.api !== undefined && (recipe.api.seed === undefined || refresh));
-  const seedSettled = recipe !== undefined && settled('seed') === computeSeedStepFingerprint(repoRoot);
+  const seedSettled = recipe !== undefined && holds('seed', legacySeedStepFingerprint(repoRoot));
   let seedItems = 0;
   let seedMax = 0;
   if (seedGateOpen && !seedSettled) {
@@ -1097,6 +1243,7 @@ export async function estimateGuardSetup(
             SEED_CACHE_NAME,
             seedSessionCacheKey(computeSeedStepFingerprint(repoRoot)),
             SeedSessionOutcomeSchema,
+            seedSessionLegacyCacheKey(legacySeedStepFingerprint(repoRoot)),
           )
         : null;
     seedMax = cached ? 0 : 1;
@@ -1106,7 +1253,7 @@ export async function estimateGuardSetup(
   // ---- private preparations: one authoring session per changed recipe --------
   // A profile is not evidence that this setup step already settled. The runtime
   // skips only its current recorded fingerprint; old setups must run this step.
-  const preparationSettled = recipe !== undefined && settled('preparations') === computePreparationFingerprint(repoRoot) &&
+  const preparationSettled = recipe !== undefined && holds('preparations', legacyPreparationFingerprint(repoRoot)) &&
     preparationCatalog(recipe, repoRoot).length === Object.keys(recipe.preparations ?? {}).length;
   const preparationItems = preparationSettled ? 0 : 1;
   // Upstream recipe/seed work can move the fingerprint before this step starts.
@@ -1119,7 +1266,7 @@ export async function estimateGuardSetup(
   const authRuns =
     suppliedEntries > 0 &&
     recipe?.entry !== undefined &&
-    settled('auth') !== authFingerprint(repoRoot);
+    !holds('auth', authFingerprint(repoRoot));
   const authItems = authRuns ? suppliedEntries : 0;
 
   const setupStage = (input: {

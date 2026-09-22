@@ -4,7 +4,7 @@
  *
  *  - the four session seams are REQUIRED options — a caller that forgets one
  *    must not compile, because there is no production fallback any more;
- *  - `flowGenerationInputsHash` FROZE the retired prompts' fingerprints as
+ *  - `legacyFlowGenerationInputsHash` FROZE the retired prompts' fingerprints as
  *    literal salt, so every user's committed flow hashes survived the cut-over.
  *    That value must never move again;
  *  - an abort still reports EVERY stage's losses: the transport tally of the
@@ -18,9 +18,14 @@ import path from 'node:path'
 import { readManifest, loadScenarios } from '@truecourse/guard-runner'
 import {
   generateGuards,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
+  flowGenerationInputComponents,
+  flowInterfaceFingerprintBag,
+  flowSettleVerdict,
+  type FlowGenerationInputParts,
   type GenerateGuardsOptions,
 } from '@truecourse/guard-generator'
+import { movedNamedInputs } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -71,7 +76,7 @@ function seed(): string {
 // The frozen hash.
 // ---------------------------------------------------------------------------
 
-describe('flowGenerationInputsHash — the frozen retirement salt', () => {
+describe('legacyFlowGenerationInputsHash — the frozen retirement salt', () => {
   /**
    * The value the PRE-retirement code produced for these inputs, recomputed off
    * git HEAD before the cut-over. `section-plan.ts` keeps the retired
@@ -97,7 +102,7 @@ describe('flowGenerationInputsHash — the frozen retirement salt', () => {
 
   it('retains the retirement salt with the current matching doctrine', () => {
     expect(
-      flowGenerationInputsHash({
+      legacyFlowGenerationInputsHash({
         flowFingerprint: 'f',
         sectionKeys: ['s'],
         interfaceFingerprints: ['i'],
@@ -114,12 +119,99 @@ describe('flowGenerationInputsHash — the frozen retirement salt', () => {
       { ...base, interfaceFingerprints: ['i2'] },
       { ...base, recipeFingerprint: 'r2' },
     ]) {
-      expect(flowGenerationInputsHash(moved)).not.toBe(flowGenerationInputsHash(base))
+      expect(legacyFlowGenerationInputsHash(moved)).not.toBe(legacyFlowGenerationInputsHash(base))
     }
     // Order-insensitive on both sorted lists.
     expect(
-      flowGenerationInputsHash({ ...base, sectionKeys: ['b', 'a'], interfaceFingerprints: ['y', 'x'] }),
-    ).toBe(flowGenerationInputsHash({ ...base, sectionKeys: ['a', 'b'], interfaceFingerprints: ['x', 'y'] }))
+      legacyFlowGenerationInputsHash({ ...base, sectionKeys: ['b', 'a'], interfaceFingerprints: ['y', 'x'] }),
+    ).toBe(legacyFlowGenerationInputsHash({ ...base, sectionKeys: ['a', 'b'], interfaceFingerprints: ['x', 'y'] }))
+  })
+})
+
+describe('flowGenerationInputComponents — the hash, by name', () => {
+  const parts: FlowGenerationInputParts = {
+    flowFingerprint: 'f',
+    sectionKeys: ['s1', 's2'],
+    assignmentFingerprints: ['a'],
+    interfaceFingerprints: ['i1', 'i2'],
+    webCatalogFingerprint: 'w',
+    webCatalogReads: ['web/home:abc'],
+    prerequisiteMaterial: 'p',
+    prerequisiteShape: 'ps',
+    recipeSlice: 'rs',
+    roster: 'ro',
+    preparation: 'pr',
+  }
+
+  it('moves exactly the named component when one input moves', () => {
+    const base = flowGenerationInputComponents(parts)
+    const moved = (over: Partial<FlowGenerationInputParts>): string[] =>
+      movedNamedInputs(base, flowGenerationInputComponents({ ...parts, ...over }))!
+    expect(moved({})).toEqual([])
+    expect(moved({ flowFingerprint: 'f2' })).toEqual(['flow'])
+    expect(moved({ sectionKeys: ['s1', 's3'] })).toEqual(['sections'])
+    expect(moved({ sectionKeys: ['s2', 's1'] })).toEqual([])
+    expect(moved({ assignmentFingerprints: ['a2'] })).toEqual(['assignment'])
+    expect(moved({ interfaceFingerprints: ['i1'] })).toEqual(['interfaces'])
+    // The whole catalog rides the LEGACY bag alone; what the flow's session
+    // read is the component.
+    expect(moved({ webCatalogFingerprint: 'w2' })).toEqual([])
+    expect(moved({ webCatalogReads: ['web/home:moved'] })).toEqual(['webCatalog.reads'])
+    // The resolved STATE rides the legacy bag alone; the shape is the component.
+    expect(moved({ prerequisiteMaterial: 'p2' })).toEqual([])
+    expect(moved({ prerequisiteShape: 'ps2' })).toEqual(['prerequisites.shape'])
+    expect(moved({ recipeSlice: 'rs2' })).toEqual(['recipe.slice'])
+    expect(moved({ roster: 'ro2' })).toEqual(['roster'])
+    expect(moved({ preparation: 'pr2' })).toEqual(['preparation'])
+  })
+
+  it('folds into the hash every member the bag always carried', () => {
+    expect([...flowInterfaceFingerprintBag(parts)].sort()).toEqual(['a', 'i1', 'i2', 'p', 'w'])
+    const { webCatalogFingerprint: _none, ...noWeb } = parts
+    expect([...flowInterfaceFingerprintBag(noWeb)].sort()).toEqual(['a', 'i1', 'i2', 'p'])
+  })
+})
+
+describe('flowSettleVerdict — the three compare rules and the one legacy check', () => {
+  const components = flowGenerationInputComponents({
+    flowFingerprint: 'f',
+    sectionKeys: ['s1'],
+    assignmentFingerprints: ['a'],
+    interfaceFingerprints: ['i'],
+    prerequisiteMaterial: 'p',
+    prerequisiteShape: 'ps',
+    recipeSlice: 'rs',
+    roster: 'ro',
+    preparation: 'pr',
+  })
+  const legacyHash = 'sha256:' + 'a'.repeat(64)
+
+  it('settles a row whose stored names all still match, ignoring the ones it retired', () => {
+    // A row from the old scheme: it carries `prompts`, `recipe.*` and the
+    // state-folding `prerequisites`, none of which exist any more, and lacks
+    // the ones the scheme gained.
+    const stored = { flow: components.flow, sections: components.sections, prompts: 'deadbeefdeadbeef', 'recipe.manifests': 'cafecafecafecafe', prerequisites: 'f00df00df00df00d' }
+    expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash, generationInputs: stored }, components, legacyHash: 'sha256:other' }))
+      .toEqual({ settled: true, moved: [] })
+  })
+
+  it('re-opens on a name both records carry that differs, and names it', () => {
+    const stored = { ...components, sections: 'ffffffffffffffff' }
+    expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash, generationInputs: stored }, components, legacyHash }))
+      .toEqual({ settled: false, moved: ['sections'] })
+  })
+
+  it('checks a row with no names against the legacy hash, once, and names nothing', () => {
+    expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash }, components, legacyHash }))
+      .toEqual({ settled: true, moved: null })
+    expect(flowSettleVerdict({ prior: { generationInputsHash: 'sha256:moved' }, components, legacyHash }))
+      .toEqual({ settled: false, moved: null })
+  })
+
+  it('never settles a flow nothing has authored', () => {
+    expect(flowSettleVerdict({ prior: undefined, components, legacyHash })).toEqual({ settled: false, moved: null })
+    expect(flowSettleVerdict({ prior: { generationInputsHash: null }, components, legacyHash }))
+      .toEqual({ settled: false, moved: null })
   })
 })
 

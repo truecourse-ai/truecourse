@@ -320,6 +320,7 @@ export async function guardSetupInProcess(
             const run = await runGuardInterfaceAuthoring({
               repoRoot: authorOpts.repoRoot,
               replace: authorOpts.replace,
+              refresh: authorOpts.refresh,
               sessionRun: {
                 runId: acquired.runId,
                 dir: options.sessionRun?.dir ?? sessionRunDir(options.sessionsKey ?? repoRoot, 'guard-setup', acquired.runId),
@@ -338,6 +339,7 @@ export async function guardSetupInProcess(
               places: run.places,
               diagnostics: run.diagnostics,
               spent: run.spent,
+              labelRekeys: run.labelRekeys,
               ...(run.reconcile ? { reconcile: run.reconcile } : {}),
             };
           },

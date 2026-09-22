@@ -18,7 +18,7 @@ import {
   suppressedQuotesIn,
   suppressionKey,
   sectionInputsKey,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
 
@@ -99,7 +99,7 @@ describe('suppression helpers', () => {
     const clean = sectionInputsKey({ fingerprint: 'sha256:fp' })
     const suppressed = sectionInputsKey({ fingerprint: 'sha256:fp', suppressionFingerprint: suppressionKey([QUOTE]) })
     const hash = (sectionKey: string) =>
-      flowGenerationInputsHash({
+      legacyFlowGenerationInputsHash({
         flowFingerprint: 'sha256:flow',
         sectionKeys: [sectionKey],
         interfaceFingerprints: ['sha256:interface'],
@@ -159,7 +159,7 @@ describe('a side verdict re-keys the losing section', () => {
     // generated, so a later plan skips every unchanged section.
     const plan0 = planGuardWork(repo)
     const flowHashOf = (s: (typeof plan0.sections)[number], recipeFingerprint: string) =>
-      flowGenerationInputsHash({
+      legacyFlowGenerationInputsHash({
         flowFingerprint: s.fingerprint,
         sectionKeys: [sectionInputsKey(s)],
         interfaceFingerprints: [],

@@ -29,13 +29,17 @@ import {
   describeInterfaceTarget,
   interfaceEntryLabel,
   interfaceFingerprint,
+  resolvedInterfaceFingerprint,
   guardDriverIds,
   type Interface,
   type InterfaceCommandContract,
+  type InterfaceControlReadable,
+  type InterfaceResource,
   type InterfaceOperationContract,
   type InterfaceContract,
   type InterfaceSequenceNode,
   type InterfaceStep,
+  isLabelOnlyRekey,
 } from '@truecourse/shared'
 
 function iface(steps: InterfaceStep[], over: Partial<Interface> = {}): Interface {
@@ -311,6 +315,27 @@ describe('interface schemas', () => {
     })
     expect(InterfacesFileSchema.parse(base).source).toBeUndefined()
     expect(() => InterfacesFileSchema.parse({ ...base, source: { cli: 'guessed' } })).toThrow()
+  })
+})
+
+describe('isLabelOnlyRekey', () => {
+  const screen = (steps: InterfaceStep[]): Pick<Interface, 'type' | 'entry' | 'steps'> => ({
+    type: 'web',
+    entry: { command: ['web', 'board'] },
+    steps,
+  })
+  const save: InterfaceStep = { kind: 'click', target: { role: 'button', name: 'Save' } }
+
+  it('is true when only a step label reads differently', () => {
+    const reworded: InterfaceStep = { kind: 'click', target: { role: 'button', name: 'Save changes' } }
+    expect(isLabelOnlyRekey(screen([INPUT, save]), screen([INPUT, reworded]))).toBe(true)
+  })
+
+  it('is false when nothing moved, and when the task itself changed', () => {
+    expect(isLabelOnlyRekey(screen([INPUT, save]), screen([INPUT, save]))).toBe(false)
+    expect(isLabelOnlyRekey(screen([INPUT, save]), screen([save]))).toBe(false)
+    const link: InterfaceStep = { kind: 'click', target: { role: 'link', name: 'Save' } }
+    expect(isLabelOnlyRekey(screen([save]), screen([link]))).toBe(false)
   })
 })
 
@@ -2908,5 +2933,80 @@ describe('a step target', () => {
     expect(
       interfaceFingerprint({ type: 'web', entry, steps: [{ ...structured, target: { ...structured.target, exact: true } }] }),
     ).not.toBe(plain)
+  })
+})
+
+/**
+ * A WEB STEP'S IDENTITY, where its place declares what it shows. The label a
+ * session wrote for a control is prose: re-word it and every scenario grounded
+ * on the task re-authors for nothing. Where the locator resolves to a readable
+ * the place DECLARES, the pair (place, readable) is the identity instead — and
+ * where nothing resolves, the label stands exactly as it always has.
+ */
+describe('resolvedInterfaceFingerprint', () => {
+  const entry = { method: 'GET' as const, path: '/expenses' }
+  const save = { kind: 'activate' as const, target: { role: 'button' as const, name: 'Save' } }
+  const task = (steps: (typeof save)[]) => ({ type: 'web' as const, entry, steps })
+  const place = (controls: InterfaceControlReadable[]): Pick<InterfaceResource, 'id' | 'readables'> =>
+    ({ id: 'expenses', readables: { controls } })
+  const saveControl = {
+    id: 'save-button',
+    control: { role: 'button' as const, name: 'Save' },
+    states: ['disabled' as const],
+  }
+
+  it('keeps the fingerprint when a resolved control is reworded', () => {
+    const before = resolvedInterfaceFingerprint(task([save]), place([saveControl]))
+    const after = resolvedInterfaceFingerprint(
+      task([{ kind: 'activate', target: { role: 'button', name: 'Save changes' } }]),
+      place([{ ...saveControl, control: { role: 'button', name: 'Save changes' } }]),
+    )
+    expect(after).toBe(before)
+  })
+
+  it('never merges two controls of one place', () => {
+    const controls = [
+      saveControl,
+      { id: 'delete-button', control: { role: 'button' as const, name: 'Delete' }, states: ['disabled' as const] },
+    ]
+    expect(resolvedInterfaceFingerprint(task([save]), place(controls))).not.toBe(
+      resolvedInterfaceFingerprint(
+        task([{ kind: 'activate', target: { role: 'button', name: 'Delete' } }]),
+        place(controls),
+      ),
+    )
+  })
+
+  it('keeps the label where nothing resolves, byte for byte', () => {
+    const plain = interfaceFingerprint(task([save]))
+    // No place at all, a place that declares nothing, an id-less readable, an
+    // ambiguous pair, and a scoped step: every one of them is unresolved.
+    expect(resolvedInterfaceFingerprint(task([save]), undefined)).toBe(plain)
+    expect(resolvedInterfaceFingerprint(task([save]), place([]))).toBe(plain)
+    expect(
+      resolvedInterfaceFingerprint(task([save]), place([{ control: { role: 'button', name: 'Save' }, states: ['disabled'] }])),
+    ).toBe(plain)
+    expect(
+      resolvedInterfaceFingerprint(task([save]), place([saveControl, { ...saveControl, id: 'save-again' }])),
+    ).toBe(plain)
+    const scoped = { ...save, within: { role: 'dialog' as const, name: 'Expense' } }
+    expect(resolvedInterfaceFingerprint(task([scoped]), place([saveControl]))).toBe(
+      interfaceFingerprint(task([scoped])),
+    )
+  })
+
+  it('moves when an unresolved target is reworded, exactly as it always did', () => {
+    expect(resolvedInterfaceFingerprint(task([save]), place([]))).not.toBe(
+      resolvedInterfaceFingerprint(
+        task([{ kind: 'activate', target: { role: 'button', name: 'Save changes' } }]),
+        place([]),
+      ),
+    )
+  })
+
+  it.skipIf(!referenceCatalog)('leaves every stored reference fingerprint where it was', () => {
+    for (const iface of (referenceCatalog ?? EMPTY_CATALOG).interfaces) {
+      expect(resolvedInterfaceFingerprint(iface, undefined), iface.id).toBe(iface.fingerprint)
+    }
   })
 })

@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import {
   recipePath,
   computeRecipeFingerprint,
-  computePreparationFingerprint,
+  legacyPreparationFingerprint,
   readGuardSetup,
   writeGuardSetup,
   dependenciesPath,
@@ -35,10 +35,10 @@ import {
   proposeRecipe,
   recipeCacheKey,
   RECIPE_CACHE_NAME,
-  interfacesFingerprint,
-  computeSeedStepFingerprint,
+  legacyInterfacesFingerprint,
+  legacySeedStepFingerprint,
   authFingerprint,
-  ecosystemFingerprint,
+  legacyRecipeStepFingerprint,
   type GuardSetupSeedSession,
 } from '@truecourse/guard-generator';
 import type { GuardSetupReport, InterfacesFile } from '@truecourse/shared';
@@ -415,14 +415,16 @@ function settledRepo(): string {
     status: 'ok',
     recipe: { status: 'ok', outcome: 'exists' },
     steps: [
-      { key: 'recipe', status: 'ok', inputFingerprint: ecosystemFingerprint(r) },
+      { key: 'recipe', status: 'ok', inputFingerprint: legacyRecipeStepFingerprint(r) },
       { key: 'detect', status: 'ok', inputFingerprint: '' },
       // The catalog fingerprint folds the detection snapshot, which only an
       // analysis pass can produce — the estimate only asks whether a row settled.
       { key: 'catalog', status: 'ok', inputFingerprint: 'settled-catalog' },
-      { key: 'interfaces', status: 'ok', inputFingerprint: interfacesFingerprint(r) },
-      { key: 'seed', status: 'ok', inputFingerprint: computeSeedStepFingerprint(r) },
-      { key: 'preparations', status: 'ok', inputFingerprint: computePreparationFingerprint(r) },
+      // A spine an older build wrote: no named inputs, so each row is checked
+      // against the step's OLD fingerprint once and settles.
+      { key: 'interfaces', status: 'ok', inputFingerprint: legacyInterfacesFingerprint(r) },
+      { key: 'seed', status: 'ok', inputFingerprint: legacySeedStepFingerprint(r) },
+      { key: 'preparations', status: 'ok', inputFingerprint: legacyPreparationFingerprint(r) },
       { key: 'auth', status: 'ok', inputFingerprint: authFingerprint(r) },
     ],
   };
@@ -524,11 +526,13 @@ describe('guardSetupInProcess', () => {
     await guardSetupInProcess(r, { tracker, interfaces: interfaces(), ...inertSeams });
 
     // Step 1 reuses the existing recipe, so what it spends its time on is the
-    // live probe: booting the server and calling a real route on it.
-    expect(details.get('recipe')?.[0]).toBe('probing a live route');
-    // The analysis pass is reported against whichever step first needs it — here
-    // step 2, because step 1 never had to derive a route surface.
-    expect(details.get('detect')?.[0]).toBe('analyzing the repository');
+    // analysis pass its needs comparison reads, then the live probe: booting
+    // the server and calling a real route on it.
+    expect(details.get('recipe')?.[0]).toBe('analyzing the repository');
+    expect(details.get('recipe')?.some((line) => line.endsWith('probing a live route'))).toBe(true);
+    // The pass is reported against whichever step first needs it, and step 2
+    // reads the same memoized one back — so it announces nothing of its own.
+    expect(details.get('detect') ?? []).not.toContain('analyzing the repository');
     // The catalog session is the one long thing inside step 3.
     expect(details.get('catalog')?.[0]).toBe('classifying the dependency catalog');
   }, 120_000);
@@ -707,7 +711,9 @@ describe('guardSetupInProcess — hosted injection', () => {
   }, 120_000);
 
   // An eager run is VISIBLE from the moment it starts — including one that dies
-  // before any session exists, which a lazy, driver-first run leaves unrecorded.
+  // at the recipe gate, which a lazy, driver-first run leaves unrecorded. The
+  // dead server reaches a boot repair first, and the session it could not run
+  // is part of the record.
   it('opens the run eagerly with the step checklist, and closes it failed with the reason', async () => {
     const r = fixtureRepo();
     writeRecipe(r, { serve: ['node', path.join(r, 'missing.mjs')], readyTimeoutMs: 4000 });
@@ -727,7 +733,9 @@ describe('guardSetupInProcess — hosted injection', () => {
 
     expect(report.status).toBe('failed');
     const [run] = await listStoredSessionRuns(key, 'guard-setup');
-    expect(run.sessions).toEqual([]);
+    expect(run.sessions.map((s) => [s.kind, s.status])).toEqual([
+      ['guard-setup.recipe-repair', 'failed'],
+    ]);
     expect(run.status).toBe('failed');
     expect(run.error).toEqual({ message: report.reason, kind: 'setup' });
     expect(run.llm).toEqual({ mode: 'claude-code', provider: 'test', model: 'scripted' });

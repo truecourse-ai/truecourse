@@ -10,7 +10,10 @@
 export {
   generateGuards,
   looksWorldMutating,
+  buildWebAuthorCatalog,
   workerCacheKey,
+  workerRecipeMaterial,
+  flowWorkerKeyFingerprints,
   // Single-step mode (`only`): the pipeline's session
   // steps in order. `@truecourse/core` enforces the cache-only replay of the
   // prior ones against these.
@@ -46,7 +49,13 @@ export {
   hasGuardUniverse,
   readCorpusAreaTags,
   sectionInputsKey,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
+  flowGenerationInputComponents,
+  flowInterfaceFingerprintBag,
+  flowSettleDigest,
+  flowSettleVerdict,
+  type FlowGenerationInputParts,
+  type FlowSettleCheck,
   type GuardWorkPlan,
   type GuardDoc,
   type SectionInput,
@@ -63,6 +72,9 @@ export {
   realizationAssignmentFingerprint,
   partitionPlanPreparations,
   matchCacheKey,
+  matchLegacyCacheKeys,
+  surfaceIdentityFingerprint,
+  MATCH_STAGE_VERSION,
   MATCH_CACHE_NAME,
   type MatchOutcome,
   type MatchPlan,
@@ -156,6 +168,7 @@ export {
   discoverRecipe,
   verifyProposal,
   recipeCacheKey,
+  recipeLegacyCacheKey,
   staticProposalComplaints,
   failureReport,
   RECIPE_CACHE_NAME,
@@ -168,10 +181,38 @@ export {
   type VerifiableProposal,
   type VerifyContext,
   type ProposalVerdict,
+  repairExistingRecipe,
+  recipeRepairCacheKey,
   type RecipeRepairContext,
   type RecipeRepairResult,
   type RecipeRepairFn,
+  type RecipeRepairScope,
+  type RepairExistingRecipeOptions,
+  type RepairExistingRecipeResult,
 } from './recipe-discovery.js'
+
+// Needs vs provides — the deterministic detector behind the recipe gate, and
+// the scope a repair of a standing recipe is held to.
+export {
+  recipeNeeds,
+  recipeNeedsDiff,
+  recipeNeedsOf,
+  needsFingerprint,
+  parseDetectionSnapshot,
+  type DetectedWorld,
+  type RecipeNeed,
+  type RecipeNeedsDiff,
+  type UnprovidedNeed,
+  type NeedAnswer,
+} from './recipe-needs.js'
+export {
+  NEEDS_REPAIR_FIELDS,
+  foldRepairedRecipe,
+  changedRecipeFields,
+  outOfScopeChanges,
+  needsScopeRefusal,
+  movedFlowSlices,
+} from './recipe-scope.js'
 
 export {
   proposeRecipe,
@@ -214,6 +255,7 @@ export {
   deriveExpansionProbes,
   captureProbes,
   groundProbes,
+  groundInputsFingerprint,
   defaultProbeExecutor,
   GROUND_CACHE_NAME,
   MAX_PROBES_PER_BATCH,
@@ -248,11 +290,16 @@ export {
   runGuardSetup,
   readSpecExcerpts,
   collectSecuritySchemes,
-  ecosystemFingerprint,
+  recipeStepFingerprint,
+  legacyRecipeStepFingerprint,
   interfacesFingerprint,
+  legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  legacySeedStepFingerprint,
   authFingerprint,
-  settledFingerprints,
+  settledSteps,
+  stepSettled,
+  type SettledStepRow,
   GUARD_SETUP_STEPS,
   GUARD_SETUP_ONLY_STEPS,
   SetupStepNotReadyError,
@@ -371,6 +418,7 @@ export {
   reuseCosmeticExtractions,
   rememberDocTexts,
   claimDiffCacheKey,
+  claimDiffLegacyCacheKey,
   docContentHash,
   CLAIM_DIFF_CACHE_NAME,
   DOC_TEXT_CACHE_NAME,
@@ -460,8 +508,8 @@ export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
 
 export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'
 
-export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowInvocationGaps } from './prerequisites.js'
+export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 
 export { completeRealization } from './match.js'
 
-export { createAuthorCatalog, scopedAuthorResources, AUTHOR_CATALOG_VERSION, AUTHOR_TOOL_RESULT_CHARS, AUTHOR_INITIAL_BYTES, type AuthorCatalog, type CatalogSearch, type CatalogGet } from './author-catalog.js'
+export { createAuthorCatalog, scopedAuthorResources, catalogReadMaterial, recordCatalogReads, webAuthorKeyMaterial, webSetupCandidates, AUTHOR_CATALOG_VERSION, AUTHOR_TOOL_RESULT_CHARS, AUTHOR_INITIAL_BYTES, type AuthorCatalog, type CatalogReadLog, type CatalogSearch, type CatalogGet } from './author-catalog.js'

@@ -39,6 +39,7 @@ import {
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_WEB_SYSTEM_PROMPT,
   workerCacheKey,
+  workerRecipeMaterial,
   AUTHOR_CATALOG_VERSION,
   type FlowWorkerTask,
   type WorkerFidelityJudge,
@@ -188,6 +189,14 @@ const PROMPT_FINGERPRINT_BY_SURFACE: Partial<Record<GuardDriverId, string>> = {
   web: FLOW_WORKER_WEB_PROMPT_FINGERPRINT,
 }
 
+/**
+ * THE FLOW-WORKER STAGE'S VERSION, bumped by hand. A cached scenario was
+ * authored, run and proven; rewording the prompt that wrote it does not make it
+ * wrong. A prompt change that fixes WRONG output bumps this in the same commit
+ * and every flow re-authors.
+ */
+export const FLOW_WORKER_STAGE_VERSION = 1
+
 /** The system prompt one surface's workers author under. */
 export function flowWorkerSystemPrompt(surface: GuardDriverId): string {
   return SYSTEM_PROMPT_BY_SURFACE[surface] ?? FLOW_WORKER_CLI_SYSTEM_PROMPT
@@ -207,17 +216,32 @@ export function flowWorkerPromptFingerprint(surface: GuardDriverId): string {
 export function flowWorkerCacheKey(task: FlowWorkerTask): string {
   const m = task.cacheMaterial
   return workerCacheKey(
-    flowWorkerPromptFingerprint(task.surface),
+    `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
     { fingerprint: m.flowFingerprint },
     task.surface,
     m.sectionKeys,
     m.interfaceFingerprints,
-    m.recipeFingerprint,
+    workerRecipeMaterial(m),
     // Edit mode folds the briefed priors in: a from-scratch task keys exactly
     // as before, so every committed entry survives; an edit never serves a
     // scratch hit and vice versa.
     m.mode === 'edit' ? { priorShas: m.priorShas } : undefined,
   )
+}
+
+/**
+ * {@link flowWorkerCacheKey} under the one formula that shipped before it: the
+ * surface's prompt fingerprint over the interface bag as it was then and the
+ * whole recipe fingerprint. A miss reads it. Delete with the legacy hash.
+ */
+export function flowWorkerLegacyCacheKeys(task: FlowWorkerTask): string[] {
+  const m = task.cacheMaterial
+  const legacyBag = m.legacyInterfaceFingerprints ?? m.interfaceFingerprints
+  const edit = m.mode === 'edit' ? { priorShas: m.priorShas } : undefined
+  return [
+    workerCacheKey(flowWorkerPromptFingerprint(task.surface), { fingerprint: m.flowFingerprint }, task.surface,
+      m.sectionKeys, legacyBag, m.recipeFingerprint, edit),
+  ]
 }
 
 /**
@@ -241,6 +265,10 @@ export const CachedWorkerEntrySchema = z
     /** Every accepted yaml, index-aligned with `settledScenariosOf(outcome)` —
      *  written by edit-mode settles; a legacy entry reads as a one-element list. */
     scenarioYamls: z.array(z.string().min(1)).optional(),
+    /** The browser-catalog entries the session that wrote this entry was
+     *  served, so a HIT records on the flow what the live session would have.
+     *  Absent on a cli/api entry and on one written before the record. */
+    catalogReads: z.array(z.string().min(1)).optional(),
   })
   .strict()
 export type CachedWorkerEntry = z.infer<typeof CachedWorkerEntrySchema>

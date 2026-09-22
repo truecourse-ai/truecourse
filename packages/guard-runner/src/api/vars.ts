@@ -331,6 +331,24 @@ export function containsFixtureReference(text: string): boolean {
 }
 
 /**
+ * Every `{{fixture:…}}` and `{{cred:…}}` IDENTIFIER the text carries, in first-use
+ * order and deduplicated. A question about WHICH seeded rows a scenario depends
+ * on, asked of a committed scenario to key it on those rows alone. It lives
+ * beside {@link substitutePlaceholders} for the same reason
+ * {@link containsFixtureReference} does: one grammar, one place.
+ */
+export function placeholderNames(text: string): { fixtures: string[]; credentials: string[] } {
+  const fixtures = new Set<string>()
+  const credentials = new Set<string>()
+  const pattern = /\{\{(fixture|cred):([^{}]+)\}\}/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text)) !== null) {
+    ;(match[1] === 'fixture' ? fixtures : credentials).add(match[2])
+  }
+  return { fixtures: [...fixtures], credentials: [...credentials] }
+}
+
+/**
  * Resolve one `<name>.<field>` fixture reference to its STRING form (the manifest's
  * native value stringified — numbers become their decimal string). This is the mixed-
  * string path: a fixture spliced into a longer template is always text. The whole-value

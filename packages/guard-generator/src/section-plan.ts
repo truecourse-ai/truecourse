@@ -25,7 +25,12 @@ import {
   recipePath,
   readManifest,
 } from '@truecourse/guard-runner'
-import { GUARD_REVIEW_POLICY_VERSION, guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
+import {
+  GUARD_REVIEW_POLICY_VERSION,
+  guardManifestSections,
+  movedSchemeInputs,
+  type GuardManifestSectionView,
+} from '@truecourse/shared'
 import {
   parseOpenApiSpec,
   isOpenApiDoc,
@@ -34,31 +39,19 @@ import {
   type OpenApiDoc,
 } from '@truecourse/shared/openapi'
 import {
-  MATCH_PROMPT_FINGERPRINT,
-  GENERATE_PROMPT_FINGERPRINT,
-  GENERATE_API_PROMPT_FINGERPRINT,
-  GENERATE_WEB_PROMPT_FINGERPRINT,
-  FIDELITY_PROMPT_FINGERPRINT,
-} from './prompts.js'
+  LEGACY_MATCH_PROMPT_FINGERPRINT,
+  LEGACY_GENERATE_PROMPT_FINGERPRINT,
+  LEGACY_GENERATE_API_PROMPT_FINGERPRINT,
+  LEGACY_GENERATE_WEB_PROMPT_FINGERPRINT,
+  LEGACY_FIDELITY_PROMPT_FINGERPRINT,
+  LEGACY_RETIRED_EXTRACT_PROMPT_FINGERPRINT,
+  LEGACY_RETIRED_FLOWS_PROMPT_FINGERPRINT,
+  LEGACY_RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT,
+} from './legacy-prompt-fingerprints.js'
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 import { buildOperationIndex, matchedSchemaFingerprint } from './openapi-enrich.js'
 import { securityFingerprintForSection } from './openapi-security.js'
 import { corpusFilePath } from '@truecourse/shared/work-tree'
-
-/**
- * The RETIRED one-shot extract / flows / epic prompts' fingerprints, FROZEN as
- * literals. They stay in {@link flowGenerationInputsHash} as
- * constant salt on purpose: swapping in the session prompts' fingerprints (or
- * dropping these) would move EVERY committed flow's hash and mass-re-author
- * every user's corpus for no behavioral reason. The trade: an edit to the
- * session extract/flows prompts no longer re-authors committed flows through
- * this hash — it re-runs those STAGES via their own caches, and only a flow
- * whose claims/flows actually changed re-authors (fingerprint-driven, which is
- * the accurate signal anyway).
- */
-const RETIRED_EXTRACT_PROMPT_FINGERPRINT = '87fe2fdd9881b428'
-const RETIRED_FLOWS_PROMPT_FINGERPRINT = '654d47c7386fcd58'
-const RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT = 'fa167e39be3b4a5b'
 
 /** One section fed to the LLM stages — its identity, its text, and area context. */
 export interface SectionInput {
@@ -201,19 +194,20 @@ export function sectionInputsKey(section: {
 }
 
 /**
- * The generation-inputs hash stamped per FLOW — the incremental gate. It moves
- * when the flow's milestone composition changes, when any BOUND SECTION's content
- * key moves (its text, a suppressed quote, a referenced OpenAPI schema, its
- * security context), when a INTERFACE the flow's plans ground on moves (the code
- * surface changed under it — and only those interfaces, never the whole catalog, so
- * unrelated route churn re-authors nothing), when the recipe inputs change, when
- * the scenario format version bumps, or when ANY LLM stage's prompt in the flow
- * pipeline changes (extraction, synthesis, matching, authoring, fidelity review).
- * A flow is WORK exactly when this differs from (or is absent in) the committed
- * manifest — so an unchanged flow is a deterministic no-op, and a prompt edit
- * re-runs the flows it affects.
+ * THE LEGACY FLOW SETTLE HASH — what every manifest row written before named
+ * components was stamped with: the flow fingerprint, its bound sections, the
+ * interfaces it grounds on, the whole recipe fingerprint and the five live
+ * prompt fingerprints, which are frozen as literals here so a prompt edited
+ * since cannot make an old row miss.
+ *
+ * It has exactly one job left. A stored row with a hash and NO components is
+ * checked against it ONCE: a match settles the flow and writes its components,
+ * a miss re-authors, which is what the same run would have done without any of
+ * this. Nothing new is ever stamped with it.
+ *
+ * Delete it, and the frozen literals, once no stored manifest lacks components.
  */
-export function flowGenerationInputsHash(input: {
+export function legacyFlowGenerationInputsHash(input: {
   flowFingerprint: string
   /** Every bound section's {@link sectionInputsKey}, in any order (sorted here). */
   sectionKeys: readonly string[]
@@ -226,19 +220,139 @@ export function flowGenerationInputsHash(input: {
     [...input.sectionKeys].sort().join(''),
     [...input.interfaceFingerprints].sort().join(''),
     input.recipeFingerprint,
-    // Frozen salt for the retired one-shot stages (see the constants above) —
-    // kept so committed flow hashes did not move on the session cut-over.
-    RETIRED_EXTRACT_PROMPT_FINGERPRINT,
-    RETIRED_FLOWS_PROMPT_FINGERPRINT,
-    RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT,
-    MATCH_PROMPT_FINGERPRINT,
-    GENERATE_PROMPT_FINGERPRINT,
-    GENERATE_API_PROMPT_FINGERPRINT,
-    GENERATE_WEB_PROMPT_FINGERPRINT,
-    FIDELITY_PROMPT_FINGERPRINT,
+    LEGACY_RETIRED_EXTRACT_PROMPT_FINGERPRINT,
+    LEGACY_RETIRED_FLOWS_PROMPT_FINGERPRINT,
+    LEGACY_RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT,
+    LEGACY_MATCH_PROMPT_FINGERPRINT,
+    LEGACY_GENERATE_PROMPT_FINGERPRINT,
+    LEGACY_GENERATE_API_PROMPT_FINGERPRINT,
+    LEGACY_GENERATE_WEB_PROMPT_FINGERPRINT,
+    LEGACY_FIDELITY_PROMPT_FINGERPRINT,
     String(GUARD_REVIEW_POLICY_VERSION),
   ]
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
+}
+
+/**
+ * A flow's settle inputs, before they are named. Every field becomes one
+ * component of {@link flowGenerationInputComponents}; the legacy hash folds
+ * several of them as one bag, which is why the bag and the record are built
+ * from the same parts.
+ */
+export interface FlowGenerationInputParts {
+  flowFingerprint: string
+  sectionKeys: readonly string[]
+  /** Each plan's realization-assignment fingerprint. */
+  assignmentFingerprints: readonly string[]
+  /** The planned interfaces' fingerprints. */
+  interfaceFingerprints: readonly string[]
+  /** The whole web catalog's fingerprint, when the flow has a web plan — for
+   *  {@link legacyFlowGenerationInputsHash}'s bag alone. */
+  webCatalogFingerprint?: string
+  /** Each catalog entry the flow's web session was served, with its CURRENT
+   *  fingerprint. Present (possibly empty) for a flow with a web plan. */
+  webCatalogReads?: readonly string[]
+  /** The resolved dependency STATE — for {@link legacyFlowGenerationInputsHash}'s
+   *  bag alone. */
+  prerequisiteMaterial: string
+  /** What the flow's prerequisites ARE, as a scenario depends on them. */
+  prerequisiteShape: string
+  /** The recipe slice of the surface this flow is realized on. */
+  recipeSlice: string
+  /** The seed roster entries the flow's committed scenarios name. */
+  roster: string
+  /** The preparation profiles those scenarios name, with their script bytes. */
+  preparation: string
+}
+
+/** The `interfaceFingerprints` bag {@link legacyFlowGenerationInputsHash} folds. */
+export function flowInterfaceFingerprintBag(parts: FlowGenerationInputParts): string[] {
+  return [
+    ...parts.assignmentFingerprints,
+    ...parts.interfaceFingerprints,
+    ...(parts.webCatalogFingerprint ? [parts.webCatalogFingerprint] : []),
+    parts.prerequisiteMaterial,
+  ]
+}
+
+/**
+ * A flow's settle inputs BY NAME — the record the compare reads and the flow
+ * carries in the manifest. Every value is a short digest: the record compares a
+ * name against itself across two runs, never recomputes a hash, and a name that
+ * is not on both sides is not a comparison at all (see `movedSchemeInputs`).
+ *
+ * Prompt fingerprints are deliberately absent. A committed flow has been run
+ * and proven, and rewording the prompt that wrote it does not make it wrong.
+ */
+export function flowGenerationInputComponents(parts: FlowGenerationInputParts): Record<string, string> {
+  const digest = (values: readonly string[]): string =>
+    createHash('sha256').update([...values].sort().join('\0')).digest('hex').slice(0, 16)
+  const components: Record<string, string> = {
+    flow: digest([parts.flowFingerprint]),
+    sections: digest(parts.sectionKeys),
+    assignment: digest(parts.assignmentFingerprints),
+    interfaces: digest(parts.interfaceFingerprints),
+    // A NEW name, because the retired `prerequisites` folded resolved state: a
+    // stored value under that name would compare unequal for every flow that
+    // has one, and re-open all of them at once. Under its own name the stored
+    // one is simply ignored and this one is filled in with no session.
+    'prerequisites.shape': digest([parts.prerequisiteShape]),
+    policy: String(GUARD_REVIEW_POLICY_VERSION),
+    'recipe.slice': digest([parts.recipeSlice]),
+    roster: digest([parts.roster]),
+    preparation: digest([parts.preparation]),
+  }
+  // The web catalog enters by what the flow's session READ, never whole: an
+  // unrelated screen's re-authored readables used to re-open every web flow.
+  // A row that carries no read-set (it predates the record, or its session
+  // never ran) has this name filled in with no session, which is also why such
+  // a row cannot be re-opened through this path until it next authors.
+  if (parts.webCatalogReads) components['webCatalog.reads'] = digest(parts.webCatalogReads)
+  return components
+}
+
+/**
+ * The SETTLED marker a flow leaves behind: one digest over its whole component
+ * record. Many readers treat a non-null `generationInputsHash` as "this flow is
+ * settled", so the marker stays a `sha256:` string — but nothing recomputes it
+ * to decide whether the flow holds any more. That is the components' job.
+ */
+export function flowSettleDigest(components: Readonly<Record<string, string>>): string {
+  const canonical = Object.keys(components)
+    .sort()
+    .map((name) => `${name}=${components[name]}`)
+    .join('|')
+  return 'sha256:' + createHash('sha256').update(canonical).digest('hex')
+}
+
+/** What a stored flow entry has to say about whether it still holds. */
+export interface FlowSettleCheck {
+  /** The manifest row, or `undefined` for a flow nothing has authored. */
+  prior:
+    | { generationInputsHash: string | null; generationInputs?: Readonly<Record<string, string>> }
+    | undefined
+  /** The components the CURRENT scheme computes for this flow. */
+  components: Readonly<Record<string, string>>
+  /** {@link legacyFlowGenerationInputsHash} over the current inputs — the one
+   *  check a row that predates components gets. */
+  legacyHash: string
+}
+
+/**
+ * Does this flow still hold? A row WITH components is compared name by name:
+ * `moved` names the ones that differ, and an empty list settles the flow. A row
+ * with a hash and no components is compared against the legacy hash once — it
+ * names no input, so `moved` is `null` and the report counts it unrecorded. A
+ * flow with no stored hash was never settled and is work whatever else is true.
+ */
+export function flowSettleVerdict(check: FlowSettleCheck): { settled: boolean; moved: string[] | null } {
+  const prior = check.prior
+  if (!prior || prior.generationInputsHash === null) return { settled: false, moved: null }
+  if (prior.generationInputs) {
+    const moved = movedSchemeInputs(prior.generationInputs, check.components)
+    return { settled: moved.length === 0, moved }
+  }
+  return { settled: prior.generationInputsHash === check.legacyHash, moved: null }
 }
 
 /** Whether a corpus exists — the corpus is generation's only doc authority. */

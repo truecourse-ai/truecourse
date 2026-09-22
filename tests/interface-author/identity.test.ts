@@ -3,6 +3,9 @@ import type { InterfacesFile } from '../../packages/shared/src/index.js'
 import { AuthoredFragmentSchema, stampFragment, validateFragment, type AuthoredFragment } from '../../packages/core/src/services/interface-author/draft.js'
 import { scopeFragmentIds, screenIdentityGuidance, type ScopeFragmentIdsInput } from '../../packages/core/src/services/interface-author/identity.js'
 
+/** Every place a fragment declares answers for all four readable kinds. */
+const NO_READABLES = { markers: [], elements: [], controls: [], rows: [] } as const
+
 const derived: InterfacesFile = {
   version: 2, generatedAt: '2026-09-14T00:00:00.000Z', recipeFingerprint: 'sha256:recipe', interfaces: [],
   resources: { web: [
@@ -24,9 +27,9 @@ function fragment(screenId = 'documents'): AuthoredFragment {
       steps: [{ kind: 'activate', target: { role: 'button', name: 'Save' } }], apiEffects: [],
     }],
     resources: [
-      { id: screenId, kind: 'screen', title: screenId, address: `/${screenId}` },
-      { id: 'editor-panel', kind: 'panel', title: 'Editor', of: screenId },
-      { id: 'confirmation', kind: 'dialog', title: 'Confirmation', of: 'editor-panel' },
+      { id: screenId, kind: 'screen', title: screenId, address: `/${screenId}`, readables: NO_READABLES },
+      { id: 'editor-panel', kind: 'panel', title: 'Editor', of: screenId, readables: NO_READABLES },
+      { id: 'confirmation', kind: 'dialog', title: 'Confirmation', of: 'editor-panel', readables: NO_READABLES },
     ],
     states: [{ id: 'saved', description: 'The changes are saved' }],
     unresolved: ['A conditional preview could not be established'],
@@ -91,7 +94,7 @@ describe('screen-owned authoring identities', () => {
       }],
       resources: [
         { id: 'editor-panel', kind: 'panel', title: 'Editor', readables: { markers: [{ marker: 'Editing' }] } },
-        { id: 'note', kind: 'panel', title: 'Note', of: 'editor-panel' },
+        { id: 'note', kind: 'panel', title: 'Note', of: 'editor-panel', readables: NO_READABLES },
       ],
     }
     const scoped = scopeFragmentIds(draft, input)

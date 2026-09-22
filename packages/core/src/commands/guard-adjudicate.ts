@@ -15,7 +15,7 @@
 
 import yaml from 'js-yaml';
 import { WRAP_UP_TURNS, type SessionEvent } from '@truecourse/agent-loop';
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
+import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import {
   evidenceRelPath,
@@ -57,6 +57,7 @@ import {
   ADJUDICATE_CACHE_NAME,
   adjudicationBriefing,
   adjudicationCacheKey,
+  adjudicationLegacyCacheKey,
   adjudicationSessionDef,
   adjudicationWorkItem,
   sectionTextsForItem,
@@ -289,7 +290,12 @@ async function prepareAdjudication(
       continue;
     }
     if (!scoped) {
-      const entry = await getCacheEntry(repoRoot, ADJUDICATE_CACHE_NAME, adjudicationCacheKey(item)).catch(
+      const entry = await getCacheEntryOrLegacy(
+        repoRoot,
+        ADJUDICATE_CACHE_NAME,
+        adjudicationCacheKey(item),
+        adjudicationLegacyCacheKey(item),
+      ).catch(
         () => null,
       );
       if (entry !== null) {

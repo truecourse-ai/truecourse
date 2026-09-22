@@ -25,11 +25,13 @@ import {
   docBody,
   identityBlock,
   identityFingerprint,
+  legacyIdentityFingerprint,
   type DocCandidate,
   type RepoIdentity,
 } from '@truecourse/spec-consolidator'
 import { planDocChunks } from '@truecourse/shared'
 import { promptFingerprint } from '../agent/session-cache.js'
+import { LEGACY_CURATE_DOC_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
   DOC_CHUNK_CHARS,
   corpusVocabTool,
@@ -163,6 +165,14 @@ One object: { "keep": true|false, "reason": "short explanation", "subject": "thi
 export const CURATE_DOC_PROMPT_FINGERPRINT = promptFingerprint(CURATE_DOC_SYSTEM_PROMPT)
 
 /**
+ * THE CURATE-DOC STAGE'S VERSION, bumped by hand. A reworded prompt does not
+ * make a keep/skip judgment wrong, and this cache IS the scan's skip: a moved
+ * key re-curates every document a workspace has. A prompt change that fixes
+ * WRONG output bumps this in the same commit, deliberately.
+ */
+export const CURATE_DOC_STAGE_VERSION = 1
+
+/**
  * The cache key: prompt fingerprint :: identity fingerprint :: path :: content
  * hash. Tool results are deliberately OUTSIDE the key — they are how the
  * session reads inputs the key already names. `extraParts` is the appendable
@@ -189,13 +199,40 @@ export function curateDocCacheKey(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
 ): string {
-  return scanCacheKey([
-    CURATE_DOC_PROMPT_FINGERPRINT,
+  return curateDocKeyOver(
+    `curate-doc-v${CURATE_DOC_STAGE_VERSION}`,
     identityFingerprint(input.identity),
-    input.doc.path,
-    input.doc.contentHash,
-    ...extraParts,
-  ])
+    input.doc,
+    extraParts,
+  )
+}
+
+/**
+ * {@link curateDocCacheKey} under the formulas that came before it, newest
+ * first: the workspace identity while it still named the connected
+ * repositories, and that same identity while the prompt was in the key. A miss
+ * reads them in turn. Curate-doc's cache IS the scan's skip, so without this a
+ * changed key re-curates every document in every workspace once.
+ * Delete with the legacy hash.
+ */
+export function curateDocLegacyCacheKeys(
+  input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
+  extraParts: readonly string[] = [],
+): string[] {
+  const listed = legacyIdentityFingerprint(input.identity)
+  return [
+    curateDocKeyOver(`curate-doc-v${CURATE_DOC_STAGE_VERSION}`, listed, input.doc, extraParts),
+    curateDocKeyOver(LEGACY_CURATE_DOC_PROMPT_FINGERPRINT, listed, input.doc, extraParts),
+  ]
+}
+
+function curateDocKeyOver(
+  stage: string,
+  identity: string,
+  doc: Pick<DocCandidate, 'path' | 'contentHash'>,
+  extraParts: readonly string[],
+): string {
+  return scanCacheKey([stage, identity, doc.path, doc.contentHash, ...extraParts])
 }
 
 export interface CurateDocSessionInput {

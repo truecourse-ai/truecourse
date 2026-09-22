@@ -23,7 +23,12 @@ import type {
   SessionRunInput,
   TurnUsage,
 } from '../../packages/agent-loop/src/index'
-import { authorWebInterfaces, planWorkItems } from '../../packages/core/src/services/interface-author/author'
+import {
+  INTERFACE_AUTHOR_CACHE_NAME,
+  authorWebInterfaces,
+  planWorkItems,
+} from '../../packages/core/src/services/interface-author/author'
+import { installMemoryKvCache, resetKvCacheStore, type MemoryKvCacheStore } from '../helpers/memory-kv-cache'
 import { readGuardInterfaces } from '../../packages/core/src/commands/guard-read'
 import { collectGuardSetupBundle, materializeGuardSetupBundle } from '../../packages/core/src/services/guard-setup/bundle'
 import { setGuardStore, type GuardStore } from '../../packages/core/src/lib/guard-store'
@@ -69,6 +74,9 @@ const DERIVED: InterfacesFile = {
   source: { api: 'tree', web: 'tree' },
 }
 
+/** The four empty kinds — what a place that shows nothing of them claims. */
+const NO_READABLES = { markers: [], elements: [], controls: [], rows: [] } as const
+
 const HOME_TASK = {
   id: 'web/add-repository-by-path',
   type: 'web' as const,
@@ -105,7 +113,7 @@ const REPORT_FRAGMENT: AuthoredFragment = {
       to: 'rules-dialog',
     },
   ],
-  resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid' }],
+  resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid', readables: NO_READABLES }],
 }
 
 beforeEach(() => {
@@ -290,7 +298,7 @@ describe('the work list', () => {
       source: undefined,
       states: { web: [{ id: 'repository-registered', description: 'registered' }] },
     }
-    expect(planWorkItems(DERIVED, authored).map((item) => [item.place.id, item.existing])).toEqual([
+    expect(planWorkItems(DERIVED, authored, '').map((item) => [item.place.id, item.existing])).toEqual([
       ['root', ['web/add-repository-by-path']],
       ['repos-repoid', []],
     ])
@@ -304,7 +312,7 @@ describe('a session that authors', () => {
       const address = DERIVED.resources!.web.find(r => r.id === place)!.address!
       const draft: AuthoredFragment = {
         interfaces: [{ ...HOME_TASK, id: 'web/save', at: 'editor-dialog', entry: { method: 'GET', path: address } }],
-        resources: [{ id: 'editor-dialog', kind: 'dialog', title: 'Editor', of: place }],
+        resources: [{ id: 'editor-dialog', kind: 'dialog', title: 'Editor', of: place, readables: NO_READABLES }],
         states: HOME_FRAGMENT.states,
       }
       const checked = await callTool(input, 'check_draft', draft)
@@ -521,7 +529,7 @@ describe('concurrent state definitions', () => {
     const saved = new Promise<void>(resolve => { rootSaved = resolve })
     const home: AuthoredFragment = {
       ...HOME_FRAGMENT,
-      resources: [{ id: 'root', kind: 'screen', title: '/', address: '/' }],
+      resources: [{ id: 'root', kind: 'screen', title: '/', address: '/', readables: NO_READABLES }],
     }
     const detail: AuthoredFragment = {
       ...REPORT_FRAGMENT,
@@ -529,7 +537,7 @@ describe('concurrent state definitions', () => {
       states: [{ id: 'repository-registered', description: 'The requested repository is registered.' }],
       resources: [
         ...REPORT_FRAGMENT.resources!,
-        { id: 'repos-repoid', kind: 'screen', title: '/repos/{repoId}', address: '/repos/{repoId}' },
+        { id: 'repos-repoid', kind: 'screen', title: '/repos/{repoId}', address: '/repos/{repoId}', readables: NO_READABLES },
       ],
     }
     const repaired: AuthoredFragment = {
@@ -615,7 +623,50 @@ describe('an outcome that breaks a rule', () => {
     expect(result.places[0].status).toBe('failed')
     expect(result.places[0].problems.join('\n')).toContain('is not a task of `root`')
     expect(result.authored).toBe(0)
-    expect(fs.existsSync(guardAuthoredInterfacesPath(repo))).toBe(false)
+    // Nothing of the fragment lands; the ledger keeps the verdict, which is the
+    // whole of what the file gains.
+    expect(readAuthoredFile().interfaces).toEqual([])
+    expect(readAuthoredFile().authoring).toEqual({ root: { status: 'failed', inputFingerprint: expect.any(String) } })
+  })
+
+  /**
+   * A place with an unstated readable kind is refused rather than completed
+   * here: the empty array is a CLAIM about what the session read, and nothing
+   * comes back to the screen once its ledger row settles.
+   */
+  it('turns back a place that leaves a readable kind unstated, and fills none in', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async () => ({
+      kind: 'outcome',
+      value: {
+        interfaces: [],
+        resources: [{ ...DERIVED.resources!.web[0], readables: { markers: [], elements: [], controls: [] } }],
+      } satisfies AuthoredFragment,
+    }))
+
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+
+    expect(result.places[0].status).toBe('failed')
+    expect(result.places[0].problems.join('\n')).toContain(
+      '`root` leaves `rows` unstated — state each of `markers`, `elements`, `controls` and `rows` explicitly, `[]` when this place has none of that kind',
+    )
+    expect(readAuthoredFile().resources).toBeUndefined()
+  })
+
+  it('accepts the same place once every kind is stated', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async () => ({
+      kind: 'outcome',
+      value: {
+        interfaces: [],
+        resources: [{ ...DERIVED.resources!.web[0], readables: NO_READABLES }],
+      } satisfies AuthoredFragment,
+    }))
+
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+
+    expect(result.places[0].status).toBe('authored')
+    expect(readAuthoredFile().resources!.web[0].readables).toEqual(NO_READABLES)
   })
 
   it('records an empty fragment as an honest result, not a failure', async () => {
@@ -739,13 +790,14 @@ describe('re-running', () => {
 
     await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence })
 
+    // Both screens settled: one with tasks, one with the honest empty outcome.
     const second = await authorWebInterfaces({
       repoRoot: repo,
       driver: scriptedDriver(script).driver,
       persistence,
     })
-    expect(second.skipped).toEqual(['root'])
-    expect(second.places.map((p) => p.placeId)).toEqual(['repos-repoid'])
+    expect(second.skipped).toEqual(['root', 'repos-repoid'])
+    expect(second.places).toEqual([])
 
     // `--replace` re-authors it: the same id may land again, in place.
     const third = await authorWebInterfaces({
@@ -765,6 +817,302 @@ describe('re-running', () => {
     const file = readAuthoredFile()
     expect(file.interfaces).toHaveLength(1)
     expect(file.interfaces[0].title).toBe('Add a repository by path')
+  })
+
+  /**
+   * THE LEDGER. A screen's row says what its last session settled and over which
+   * inputs, which is what turns "did this screen ever get a session" from an
+   * inference off the file's own contents into something the file states.
+   */
+  describe('the authoring ledger', () => {
+    const fails: Script = async (place) =>
+      place === 'root'
+        ? { kind: 'failure', failure: { kind: 'transport', detail: 'connection reset', class: 'provider', retryability: 'none' } }
+        : { kind: 'outcome', value: REPORT_FRAGMENT }
+    /** A driver that must never be asked for a session. */
+    const refuses = scriptedDriver(async (place) => {
+      throw new Error(`no session should have opened for ${place}`)
+    }).driver
+
+    async function firstRun(): Promise<void> {
+      const { persistence } = memoryPersistence()
+      const result = await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(fails).driver, persistence })
+      expect(result.places.map((p) => [p.placeId, p.status])).toEqual([
+        ['root', 'failed'],
+        ['repos-repoid', 'authored'],
+      ])
+      const ledger = readAuthoredFile().authoring ?? {}
+      expect(Object.fromEntries(Object.entries(ledger).map(([id, row]) => [id, row.status]))).toEqual({
+        root: 'failed',
+        'repos-repoid': 'authored',
+      })
+    }
+
+    it('records every screen a run reached, whatever its session made of it', async () => {
+      await firstRun()
+    })
+
+    it('does not re-open a failed screen on the next run', async () => {
+      await firstRun()
+      const { persistence } = memoryPersistence()
+      const second = await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence })
+      expect(second.places).toEqual([])
+      expect(second.skipped).toEqual(['root', 'repos-repoid'])
+    })
+
+    it('re-opens exactly the failed screen whose derived place moved', async () => {
+      await firstRun()
+      fs.writeFileSync(
+        guardInterfacesPath(repo),
+        JSON.stringify({
+          ...DERIVED,
+          resources: { web: [{ ...DERIVED.resources!.web[0], address: '/home' }, DERIVED.resources!.web[1]] },
+        }),
+      )
+      const { persistence } = memoryPersistence()
+      const started: string[] = []
+      const result = await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          started.push(place)
+          return { kind: 'outcome', value: { interfaces: [] } }
+        }).driver,
+        persistence,
+      })
+      expect(started).toEqual(['root'])
+      expect(result.places.map((p) => [p.placeId, p.status])).toEqual([['root', 'empty']])
+    })
+
+    it('re-opens a failed screen on a refresh, and nothing else', async () => {
+      await firstRun()
+      const { persistence } = memoryPersistence()
+      const started: string[] = []
+      await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          started.push(place)
+          return { kind: 'outcome', value: HOME_FRAGMENT }
+        }).driver,
+        persistence,
+        refresh: true,
+      })
+      expect(started).toEqual(['root'])
+      expect(readAuthoredFile().authoring!['root'].status).toBe('authored')
+    })
+
+    // The upgrade: an authored half written before the ledger. What the old
+    // inference calls done is recorded as done, for free, and never re-bought.
+    it('writes a row for a screen the old inference calls done, with no session', async () => {
+      fs.writeFileSync(
+        guardAuthoredInterfacesPath(repo),
+        JSON.stringify({
+          version: 2,
+          generatedAt: '2026-08-17T00:00:00.000Z',
+          recipeFingerprint: 'sha256:recipe',
+          interfaces: [{ ...HOME_TASK, fingerprint: 'sha256:home' }],
+          states: { web: [{ id: 'repository-registered', description: 'registered' }] },
+          resources: {
+            web: [{ ...DERIVED.resources!.web[0], readables: { markers: [], elements: [], controls: [], rows: [] } }],
+          },
+        }),
+      )
+      const { persistence } = memoryPersistence()
+      const started: string[] = []
+      const result = await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          started.push(place)
+          return { kind: 'outcome', value: { interfaces: [] } }
+        }).driver,
+        persistence,
+      })
+      expect(started).toEqual(['repos-repoid'])
+      expect(result.skipped).toEqual(['root'])
+      const ledger = readAuthoredFile().authoring!
+      expect(ledger['root'].status).toBe('authored')
+      expect(ledger['repos-repoid'].status).toBe('empty')
+      // Both rows stand on the same inputs the next run computes, so it spends
+      // nothing at all.
+      const second = await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence })
+      expect(second.places).toEqual([])
+    })
+  })
+
+  /**
+   * THE CACHE. A screen whose inputs have not moved is served the fragment its
+   * last session handed back: the same catalog, the same ledger row, no spend.
+   * The entries live in the workspace's KV store, so a fresh clone with a warm
+   * cache authors nothing at all.
+   */
+  describe('the authoring cache', () => {
+    const script: Script = async (place) =>
+      place === 'root'
+        ? { kind: 'outcome', value: { ...HOME_FRAGMENT, findings: ['README.md says "Add repo"; Home.tsx renders "Add Repository"'] } }
+        : { kind: 'outcome', value: REPORT_FRAGMENT }
+
+    /** Author both screens once, into the in-memory cache. */
+    async function warm(): Promise<MemoryKvCacheStore> {
+      const store = installMemoryKvCache()
+      const { persistence } = memoryPersistence()
+      await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence })
+      expect(store.list().filter((entry) => entry.cacheName === INTERFACE_AUTHOR_CACHE_NAME)).toHaveLength(2)
+      return store
+    }
+
+    /** What a fresh clone hands the run: the derived half, and nothing authored. */
+    function asFreshClone(): void {
+      fs.rmSync(guardAuthoredInterfacesPath(repo))
+    }
+
+    afterEach(() => resetKvCacheStore())
+
+    it('writes the same catalog from the cache as the sessions wrote, and spends nothing', async () => {
+      await warm()
+      const authoredBySessions = readAuthoredFile()
+      asFreshClone()
+
+      const { persistence } = memoryPersistence()
+      const result = await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          throw new Error(`no session should have opened for ${place}`)
+        }).driver,
+        persistence,
+      })
+
+      expect(result.places.map((p) => [p.placeId, p.status, p.fromCache])).toEqual([
+        ['root', 'authored', true],
+        ['repos-repoid', 'authored', true],
+      ])
+      expect(result.spent).toEqual({ turns: 0, tokens: 0, costUsd: 0 })
+      const fromCache = readAuthoredFile()
+      expect(fromCache.interfaces).toEqual(authoredBySessions.interfaces)
+      expect(fromCache.resources).toEqual(authoredBySessions.resources)
+      expect(fromCache.states).toEqual(authoredBySessions.states)
+      expect(fromCache.authoring).toEqual(authoredBySessions.authoring)
+      // And the finding the session reported is reported again, so the findings
+      // ledger of a cached run says what a live one would.
+      expect(result.findings).toEqual([
+        { placeId: 'root', note: 'README.md says "Add repo"; Home.tsx renders "Add Repository"' },
+      ])
+    })
+
+    it("misses when a screen's inputs moved", async () => {
+      await warm()
+      asFreshClone()
+      fs.writeFileSync(
+        guardInterfacesPath(repo),
+        JSON.stringify({
+          ...DERIVED,
+          resources: { web: [{ ...DERIVED.resources!.web[0], address: '/home' }, DERIVED.resources!.web[1]] },
+        }),
+      )
+
+      const started: string[] = []
+      const { persistence } = memoryPersistence()
+      await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          started.push(place)
+          return { kind: 'outcome', value: { interfaces: [] } }
+        }).driver,
+        persistence,
+      })
+
+      expect(started).toEqual(['root'])
+    })
+
+    it('reads no cached fragment on an explicit re-author', async () => {
+      await warm()
+      const started: string[] = []
+      const { persistence } = memoryPersistence()
+      await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          started.push(place)
+          return { kind: 'outcome', value: place === 'root' ? HOME_FRAGMENT : REPORT_FRAGMENT }
+        }).driver,
+        persistence,
+        replace: true,
+      })
+      expect(started.sort()).toEqual(['repos-repoid', 'root'])
+    })
+  })
+
+  /**
+   * A TASK'S IDENTITY, where the screen declares what it shows. A step whose
+   * locator resolves to a declared readable is that readable, so re-wording the
+   * control leaves every scenario grounded on the task exactly where it was.
+   */
+  describe('the re-authored task identity', () => {
+    const control = (id: string, role: 'textbox' | 'button', name: string) =>
+      ({ id, control: { role, name }, states: ['disabled' as const] })
+    const rootWith = (path: string, add: string): AuthoredFragment['resources'] => [
+      {
+        ...DERIVED.resources!.web[0],
+        readables: {
+          markers: [],
+          elements: [],
+          controls: [control('path-field', 'textbox', path), control('add-button', 'button', add)],
+          rows: [],
+        },
+      },
+    ]
+    const withSteps = (path: string, add: string): AuthoredFragment => ({
+      ...HOME_FRAGMENT,
+      interfaces: [
+        {
+          ...HOME_TASK,
+          steps: [
+            { kind: 'input', target: { role: 'textbox', name: path } },
+            { kind: 'activate', target: { role: 'button', name: add } },
+          ],
+        },
+      ],
+      resources: rootWith(path, add),
+    })
+
+    const reauthor = (fragment: AuthoredFragment) =>
+      authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async () => ({ kind: 'outcome', value: fragment })).driver,
+        persistence: memoryPersistence().persistence,
+        places: ['root'],
+        replace: true,
+      })
+
+    it('holds through a reworded control, and counts no re-key', async () => {
+      await reauthor(withSteps('Repository path', 'Add Repository'))
+      const before = readAuthoredFile().interfaces[0].fingerprint
+
+      const result = await reauthor(withSteps('Path to the repository', 'Add repository'))
+
+      expect(readAuthoredFile().interfaces[0].steps).toEqual([
+        { kind: 'input', target: { role: 'textbox', name: 'Path to the repository' } },
+        { kind: 'activate', target: { role: 'button', name: 'Add repository' } },
+      ])
+      expect(readAuthoredFile().interfaces[0].fingerprint).toBe(before)
+      expect(result.labelRekeys).toBe(0)
+    })
+
+    it('moves when the reworded target resolves to nothing, and says so', async () => {
+      await reauthor(withSteps('Repository path', 'Add Repository'))
+      const before = readAuthoredFile().interfaces[0].fingerprint
+
+      // The readables no longer name the button, so its label is its identity.
+      const result = await reauthor({
+        ...withSteps('Repository path', 'Add repository'),
+        resources: [
+          {
+            ...DERIVED.resources!.web[0],
+            readables: { markers: [], elements: [], controls: [control('path-field', 'textbox', 'Repository path')], rows: [] },
+          },
+        ],
+      })
+
+      expect(readAuthoredFile().interfaces[0].fingerprint).not.toBe(before)
+      expect(result.labelRekeys).toBe(1)
+    })
   })
 
   it('refuses a place the catalog does not have', async () => {
@@ -1334,7 +1682,8 @@ describe('sessions run in a pool, the fold does not', () => {
     )
     await authorWebInterfaces({ repoRoot: repo, driver: first.driver, persistence, concurrency: 1 })
 
-    // A second run: `settings` is briefed with the catalog that already has it.
+    // A second run over `settings` alone: it is briefed with the catalog that
+    // already has the id.
     const second = scriptedDriver(async (place) =>
       place === 'settings'
         ? { kind: 'outcome', value: { interfaces: [taskAt('settings', '/settings', 'web/create-webhook')] } }
@@ -1344,6 +1693,7 @@ describe('sessions run in a pool, the fold does not', () => {
       repoRoot: repo,
       driver: second.driver,
       persistence,
+      places: ['settings'],
       concurrency: 1,
     })
     const settings = result.places.find((p) => p.placeId === 'settings')!
@@ -1611,29 +1961,42 @@ describe('readable authoring through storage and the screen read view', () => {
     expect(screenShowRows(buildScreens('web', hosted.resources!.web, hosted.interfaces)[0])).toEqual(rows)
     resetGuardStore()
 
-    const before = fs.readFileSync(guardAuthoredInterfacesPath(repo), 'utf-8')
+    const before = readAuthoredFile()
     const rerun = await authorWebInterfaces({ repoRoot: repo, persistence,
       driver: scriptedDriver(async (place) => {
         expect(place).toBe('repos-repoid')
         return { kind: 'outcome', value: { interfaces: [] } }
       }).driver })
     expect(rerun.skipped).toEqual(['root'])
-    expect(fs.readFileSync(guardAuthoredInterfacesPath(repo), 'utf-8')).toBe(before)
+    // The authored half itself is untouched; only the ledger learns something.
+    const after = readAuthoredFile()
+    expect(after.interfaces).toEqual(before.interfaces)
+    expect(after.resources).toEqual(before.resources)
   })
 
-  it('keeps incomplete readable kinds eligible, and persists a read-only screen', async () => {
-    const { persistence } = memoryPersistence()
-    const run = (resources: AuthoredFragment['resources']) => authorWebInterfaces({ repoRoot: repo, persistence,
-      driver: scriptedDriver(async (place) => ({ kind: 'outcome', value: place === 'root'
-        ? { interfaces: [], resources } : { interfaces: [] } })).driver })
-    await run([{ ...DERIVED.resources!.web[0], readables: { markers: [] } }])
-    expect(planWorkItems(DERIVED, readAuthoredFile())[0].needsAuthoring).toBe(true)
-    const result = await run([{ ...DERIVED.resources!.web[0], readables: { elements: [], controls: [], rows: [] } }])
-    expect(result.places[0].status).toBe('authored')
-    expect(readAuthoredFile().resources!.web[0].readables).toEqual({ markers: [], elements: [], controls: [], rows: [] })
-    expect(planWorkItems(DERIVED, readAuthoredFile())[0].needsAuthoring).toBe(false)
-    const withNested = readAuthoredFile()
+  // The old inference is what judges a screen the ledger does not name — an
+  // authored half written before the ledger existed, or one a person hand-wrote.
+  it('judges a screen with no ledger row by its tasks and its readable kinds', () => {
+    const authoredWith = (readables: Record<string, unknown>): InterfacesFile => ({
+      version: 2, generatedAt: '', recipeFingerprint: '', interfaces: [{ ...HOME_TASK, fingerprint: 'sha256:home' }],
+      resources: { web: [{ ...DERIVED.resources!.web[0], readables }] },
+    })
+    const needs = (file: InterfacesFile): boolean => planWorkItems(DERIVED, file, '')[0].needsAuthoring
+    expect(needs(authoredWith({ markers: [] }))).toBe(true)
+    expect(needs(authoredWith({ markers: [], elements: [], controls: [], rows: [] }))).toBe(false)
+    const withNested = authoredWith({ markers: [], elements: [], controls: [], rows: [] })
     withNested.resources!.web.push({ id: 'nested', kind: 'dialog', of: 'root', title: 'Nested' })
-    expect(planWorkItems(DERIVED, withNested)[0].needsAuthoring).toBe(true)
+    expect(needs(withNested)).toBe(true)
+  })
+
+  it('persists a read-only screen', async () => {
+    const { persistence } = memoryPersistence()
+    const readables = { markers: [], elements: [], controls: [], rows: [] }
+    const result = await authorWebInterfaces({ repoRoot: repo, persistence,
+      driver: scriptedDriver(async (place) => ({ kind: 'outcome', value: place === 'root'
+        ? { interfaces: [], resources: [{ ...DERIVED.resources!.web[0], readables }] } : { interfaces: [] } })).driver })
+    expect(result.places[0].status).toBe('authored')
+    expect(readAuthoredFile().resources!.web[0].readables).toEqual(readables)
+    expect(planWorkItems(DERIVED, readAuthoredFile(), '')[0].needsAuthoring).toBe(false)
   })
 })

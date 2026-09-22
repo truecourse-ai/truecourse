@@ -10,7 +10,7 @@ import type { FlowWorkerSessionSeam } from '@truecourse/guard-generator'
 import {
   workerCacheKey,
   sectionInputsKey,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
   planGuardWork,
   GENERATE_API_PROMPT_FINGERPRINT,
   type SectionInput,
@@ -89,7 +89,7 @@ describe('workerCacheKey — endpoint-schema fold', () => {
   })
 })
 
-describe('sectionInputsKey / flowGenerationInputsHash — endpoint-schema fold', () => {
+describe('sectionInputsKey / legacyFlowGenerationInputsHash — endpoint-schema fold', () => {
   it('is byte-identical when empty, and moves when non-empty', () => {
     const base = sectionInputsKey({ fingerprint: 'sha256:fp' })
     expect(sectionInputsKey({ fingerprint: 'sha256:fp', endpointSchemaFingerprint: '' })).toBe(base)
@@ -97,7 +97,7 @@ describe('sectionInputsKey / flowGenerationInputsHash — endpoint-schema fold',
 
     // The flow hash folds that key, so a flow binding the section re-authors.
     const hash = (sectionKey: string) =>
-      flowGenerationInputsHash({
+      legacyFlowGenerationInputsHash({
         flowFingerprint: FLOW.fingerprint,
         sectionKeys: [sectionKey],
         interfaceFingerprints: INTERFACES,
@@ -171,7 +171,7 @@ describe('planGuardWork — markdown → OpenAPI write-op enrichment', () => {
         flowFingerprint: s.fingerprint,
         bindings: [{ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }],
         scenarios: [],
-        generationInputsHash: flowGenerationInputsHash({
+        generationInputsHash: legacyFlowGenerationInputsHash({
           flowFingerprint: s.fingerprint,
           sectionKeys: [sectionInputsKey(s)],
           interfaceFingerprints: INTERFACES,
