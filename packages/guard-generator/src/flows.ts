@@ -428,26 +428,36 @@ interface AreaValidation {
  * deterministic remap — what a cached outcome produced before ids existed
  * looks like). An id naming no existing flow, one continued twice, or one
  * both continued and retired is an unknown reference; a flow left silently
- * behind is unaccounted. The checker refuses both, so a LIVE session never
- * settles with either (`check_flows` in-session, the seam's `rejectOutput`
- * before the cache). The fold refuses only the first: an unaccounted flow in
- * a value that was never checked against this corpus — a cache entry from
- * before ids existed, replayed after the corpus moved under it — is retired
- * with the engine's reason, because refusing would replay the same entry into
- * the same refusal on every generate until the key happened to move.
+ * behind is unaccounted. The checker (`strict`) refuses all of it, so a LIVE
+ * session never settles with any (`check_flows` in-session, the seam's
+ * `rejectOutput` before the cache).
+ *
+ * The fold is lenient about what a REPLAY produces: the existing flows are
+ * outside the cache key, so a cached value is replayed against a corpus that
+ * may have moved under it, and refusing would replay the same entry into the
+ * same refusal on every generate until the key happened to move. An
+ * unaccounted flow is retired with the engine's reason; a retirement naming a
+ * flow that has since left the corpus is already done; a draft continuing one
+ * is a new flow. What the fold still refuses is a value inconsistent with
+ * ITSELF — an id continued twice, or both continued and retired.
  */
 function reconcileAgainstPrior(
   drafts: readonly DraftFlow[],
   retired: readonly { id: string; reason: string }[],
   prior: readonly GuardFlow[],
   unknownReferences: string[],
+  strict: boolean,
 ): { retiredFlows: RetiredFlow[]; unaccountedFlows: string[] } {
   const priorById = new Map(prior.map((f) => [f.id, f]))
   const continued = new Set<string>()
   for (const draft of drafts) {
     if (!draft.continues) continue
-    if (!priorById.has(draft.continues)) unknownReferences.push(`id "${draft.continues}" names no existing flow of this area`)
-    else if (continued.has(draft.continues)) unknownReferences.push(`id "${draft.continues}" is continued by more than one flow`)
+    if (!priorById.has(draft.continues)) {
+      if (strict) unknownReferences.push(`id "${draft.continues}" names no existing flow of this area`)
+      else delete draft.continues
+      continue
+    }
+    if (continued.has(draft.continues)) unknownReferences.push(`id "${draft.continues}" is continued by more than one flow`)
     continued.add(draft.continues)
   }
   const contracts = new Set(drafts.filter((d) => !d.continues).map((d) => flowContractKey(d)))
@@ -455,7 +465,10 @@ function reconcileAgainstPrior(
   const retiredIds = new Set<string>()
   for (const r of retired) {
     const flow = priorById.get(r.id)
-    if (!flow) { unknownReferences.push(`retired "${r.id}" names no existing flow of this area`); continue }
+    if (!flow) {
+      if (strict) unknownReferences.push(`retired "${r.id}" names no existing flow of this area`)
+      continue
+    }
     if (continued.has(r.id)) { unknownReferences.push(`"${r.id}" is both continued and retired`); continue }
     if (contracts.has(flowContractKey(flow))) {
       unknownReferences.push(`retired "${r.id}" but a flow with the same milestones is in the draft — continue it by id instead`)
@@ -472,13 +485,15 @@ function reconcileAgainstPrior(
 }
 
 /** Snap one area's synthesis output and check the coverage honesty rule and
- *  the reconciliation rule against the area's existing flows. */
+ *  the reconciliation rule against the area's existing flows — strictly for
+ *  the checker, leniently about replay artifacts for the fold. */
 function validateAreaSynthesis(
   area: FlowSynthesisArea,
   data: FlowSet,
   index: ClaimIndex,
   synthesisInputsHash: string,
   prior: readonly GuardFlow[] = [],
+  strict = true,
 ): AreaValidation {
   const unknownReferences: string[] = []
   const covered = new Set<string>()
@@ -541,7 +556,7 @@ function validateAreaSynthesis(
     if (groups.size > 1) unknownReferences.push(`"${flow.title}": split independent verification scopes, methods or failure conditions into separate flows`)
     for (const m of flow.milestones) unknownReferences.push(...verificationBoundaryProblems(m.verification, false, m.proofDrivers).map(p => `"${flow.title}" milestone ${m.order}: ${p}`))
   }
-  const { retiredFlows, unaccountedFlows } = reconcileAgainstPrior(flows, data.retiredFlows ?? [], prior, unknownReferences)
+  const { retiredFlows, unaccountedFlows } = reconcileAgainstPrior(flows, data.retiredFlows ?? [], prior, unknownReferences, strict)
   return { flows, noFlowClaims, retiredFlows, unknownReferences, uncoveredClaims, unaccountedFlows }
 }
 
@@ -685,7 +700,7 @@ export function checkEpicSet(
   }
   // The reconciliation rule, epic form: every existing epic is continued by id,
   // retired with a reason, or re-emitted unchanged. Refusals, like the fold's.
-  const { unaccountedFlows } = reconcileAgainstPrior(drafts, data.retiredEpics ?? [], prior, unknownReferences)
+  const { unaccountedFlows } = reconcileAgainstPrior(drafts, data.retiredEpics ?? [], prior, unknownReferences, true)
   unknownReferences.push(...unaccountedFlows)
   return { unknownReferences, notes }
 }
@@ -740,6 +755,8 @@ function buildEpicDrafts(
   inputsKey: string,
   /** The EXISTING epics; the ids the drafts may continue or retire. */
   prior: readonly GuardFlow[] = [],
+  /** The checker's reading of the reconciliation rule, or the fold's (see `reconcileAgainstPrior`). */
+  strict = true,
 ): { epics: DraftFlow[]; retiredEpics: RetiredFlow[]; unknownReferences: string[] } {
   const digests = digestsOf(flows)
   const byRef = new Map(digests.map((d, i) => [d.ref, i]))
@@ -797,7 +814,7 @@ function buildEpicDrafts(
   }
   // Unaccounted existing epics are the checker's refusal, not the fold's — see
   // `reconcileAgainstPrior`; the fold retires them with the engine's reason.
-  const { retiredFlows: retiredEpics } = reconcileAgainstPrior(epics, data.retiredEpics ?? [], prior, unknownReferences)
+  const { retiredFlows: retiredEpics } = reconcileAgainstPrior(epics, data.retiredEpics ?? [], prior, unknownReferences, strict)
   return { epics, retiredEpics, unknownReferences }
 }
 
@@ -809,18 +826,30 @@ function buildEpicDrafts(
 export interface SubsumedFlow {
   title: string
   supersededBy: string
+  /** The committed flow the dropped draft continued, when it continued one. */
+  continues?: string
 }
 
-/** Remove exact duplicates only. A contained path may be an independent behavior. */
+/**
+ * Remove exact duplicates only. A contained path may be an independent
+ * behavior. Of two identical drafts the one that CONTINUES a committed flow
+ * survives, whichever came first: dropping it would orphan the flow the
+ * session said it kept, and retire it with a reason the session never gave.
+ */
 function applySubsumption(flows: readonly DraftFlow[]): { kept: DraftFlow[]; dropped: SubsumedFlow[] } {
-  const seen = new Map<string, DraftFlow>()
+  const seen = new Map<string, number>()
   const kept: DraftFlow[] = []
   const dropped: SubsumedFlow[] = []
+  const drop = (flow: DraftFlow, by: DraftFlow): void => {
+    dropped.push({ title: flow.title, supersededBy: by.title, ...(flow.continues ? { continues: flow.continues } : {}) })
+  }
   for (const flow of flows) {
     const key = JSON.stringify({ proof: flowFingerprint(flow.milestones), startingState: flow.startingState ?? null })
-    const prior = seen.get(key)
-    if (prior) dropped.push({ title: flow.title, supersededBy: prior.title })
-    else { seen.set(key, flow); kept.push(flow) }
+    const at = seen.get(key)
+    if (at === undefined) { seen.set(key, kept.length); kept.push(flow); continue }
+    const prior = kept[at]
+    if (flow.continues && !prior.continues) { kept[at] = flow; drop(prior, flow) }
+    else drop(flow, prior)
   }
   return { kept, dropped }
 }
@@ -1130,7 +1159,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
       opts.onFact?.(`${key}: no flows, ${r.reason}`)
       return { ok: false, reason: r.reason }
     }
-    const v = validateAreaSynthesis(area, r.value, buildClaimIndex(area.claims), r.inputsKey, prior.byUnit.get(key) ?? [])
+    const v = validateAreaSynthesis(area, r.value, buildClaimIndex(area.claims), r.inputsKey, prior.byUnit.get(key) ?? [], false)
     if (v.unknownReferences.length > 0 || v.uncoveredClaims.length > 0) {
       const reason = flowSetRefusal(v)
       opts.onFact?.(`${key}: refused, ${reason}`)
@@ -1170,6 +1199,11 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
   const areaPass = applySubsumption(drafts)
   drafts = areaPass.kept
   subsumed.push(...areaPass.dropped)
+  // Two continued flows with identical milestones: one draft survives, and the
+  // flow the other continued is retired for exactly that, not as unclaimed.
+  for (const d of areaPass.dropped) {
+    if (d.continues) retiredByModel.set(d.continues, `its milestones are identical to "${d.supersededBy}", which continues another flow`)
+  }
 
   // Epic pass — only worth a call when more than one area contributed flows. The
   // digest refs are taken BEFORE the epics are appended, so `F<n>` keeps pointing
@@ -1199,7 +1233,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
       unsettled.push({ areaId: '(epic)', reason: epicResult.reason })
       opts.onFact?.(`(epic): no epics, ${epicResult.reason}`)
     } else {
-      const built = buildEpicDrafts(epicResult.value, drafts, buildClaimIndex(claims), epicResult.inputsKey, prior.epics)
+      const built = buildEpicDrafts(epicResult.value, drafts, buildClaimIndex(claims), epicResult.inputsKey, prior.epics, false)
       if (built.unknownReferences.length > 0) {
         unsettled.push({ areaId: '(epic)', reason: `epic pass refused: ${built.unknownReferences[0]}` })
         opts.onFact?.(`(epic): refused, ${built.unknownReferences[0]}`)
