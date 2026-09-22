@@ -175,6 +175,12 @@ export interface CurateInProcessOptions {
    */
   decisions?: DecisionsFile;
   /**
+   * The corpus the last scan wrote, for the areas to reconcile against. The
+   * workspace scan passes the stored version (its scratch tree holds none);
+   * omit and the run reads `corpus.json` from the tree.
+   */
+  previousCorpus?: CuratedCorpus | null;
+  /**
    * Inject the doc set instead of walking the working tree — the workspace scan
    * sources its documents through the repo-doc seam (`readRepoDoc`).
    */
@@ -409,6 +415,7 @@ export async function curateInProcess(
         driver,
         persistence: run.persistence,
         decisions: options.decisions,
+        ...(options.previousCorpus !== undefined ? { previousCorpus: options.previousCorpus } : {}),
         docSource: options.docSource,
         repoIdentity: options.repoIdentity,
         skipGit: options.skipGit,
