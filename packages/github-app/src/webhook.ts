@@ -25,15 +25,15 @@ export interface BaselineTrigger {
 /**
  * A push to the default branch of a repository this installation reaches but
  * Code has NOT connected. Nothing is baselined for it, since there is no link
- * and no repository page, but the workspace may still read its documentation
- * as a context source, so the source's owner is told to re-read it.
+ * and no repository page, but ONE workspace may still read its documentation
+ * as a context source, so that source's owner is told to re-read it.
  */
 export interface SourcePushTrigger {
   repoFullName: string;
   installationId: number;
   defaultBranch: string;
   commitSha: string;
-  /** The workspace the installation belongs to. */
+  /** The workspace whose source reads the repository. */
   workspaceOrgId: string;
 }
 
@@ -45,9 +45,14 @@ export interface WebhookDeps {
   /** Kick a baseline run for a connected repo (fire-and-forget). */
   onBaseline: (trigger: BaselineTrigger) => void;
   /**
-   * A push to the default branch of an UNCONNECTED repository the installation
-   * reaches. Fire-and-forget, and only ever called when the installation
-   * belongs to a workspace.
+   * The workspace whose context source reads a repository, or null when none
+   * does. A repository is one workspace's source, so this is one lookup by
+   * name.
+   */
+  sourceWorkspaceOf: (repoFullName: string) => Promise<string | null>;
+  /**
+   * A push to the default branch of an UNCONNECTED repository that a
+   * workspace reads as a context source. Fire-and-forget.
    */
   onSourcePush?: (trigger: SourcePushTrigger) => void;
   /**
@@ -219,20 +224,24 @@ async function handlePush(
   // Only act for repositories Code has connected.
   const link = await deps.repos.getRepo(payload.repository.full_name);
   if (!link || !link.enabled) {
-    // Not connected in Code, so nothing is baselined. Every workspace this
-    // installation is attached to may still read the repository as a context
-    // source, and that source's documents just moved.
+    // Not connected in Code, so nothing is baselined. The one workspace that
+    // reads the repository as a context source, if any, is told its
+    // documents just moved — provided it holds the installation that pushed:
+    // a source keeps naming the installation it was made through, and one
+    // its workspace no longer holds cannot sync, so telling it would only
+    // queue a sync that fails.
     if (link || !deps.onSourcePush) return;
+    const workspaceOrgId = await deps.sourceWorkspaceOf(payload.repository.full_name);
+    if (workspaceOrgId === null) return;
     const installation = await deps.store.getInstallation(payload.installation.id);
-    for (const workspaceOrgId of installation?.workspaceOrgIds ?? []) {
-      deps.onSourcePush({
-        repoFullName: payload.repository.full_name,
-        installationId: payload.installation.id,
-        defaultBranch: payload.repository.default_branch,
-        commitSha: payload.after,
-        workspaceOrgId,
-      });
-    }
+    if (!installation?.workspaceOrgIds.includes(workspaceOrgId)) return;
+    deps.onSourcePush({
+      repoFullName: payload.repository.full_name,
+      installationId: payload.installation.id,
+      defaultBranch: payload.repository.default_branch,
+      commitSha: payload.after,
+      workspaceOrgId,
+    });
     return;
   }
 

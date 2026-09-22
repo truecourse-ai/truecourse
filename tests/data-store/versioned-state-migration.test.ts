@@ -8,33 +8,10 @@
  * carried no flag of their own, and every report names the set at its commit.
  */
 import { describe, it, expect } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
-import { MIGRATIONS_DIR } from '@truecourse/db';
+import { applyMigration, applyMigrationsBefore } from '../helpers/migrations';
 
 const VERSIONED_STATE = '0030_versioned_state';
-
-interface Journal {
-  entries: Array<{ tag: string }>;
-}
-
-/** Apply every migration up to (not including) `stopAt`, in journal order. */
-async function applyMigrationsBefore(client: PGlite, stopAt: string): Promise<void> {
-  const journal = JSON.parse(fs.readFileSync(path.join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8')) as Journal;
-  for (const entry of journal.entries) {
-    if (entry.tag === stopAt) return;
-    await applyMigration(client, entry.tag);
-  }
-  throw new Error(`migration ${stopAt} is not in the journal`);
-}
-
-async function applyMigration(client: PGlite, tag: string): Promise<void> {
-  const sqlText = fs.readFileSync(path.join(MIGRATIONS_DIR, `${tag}.sql`), 'utf-8');
-  for (const statement of sqlText.split('--> statement-breakpoint')) {
-    if (statement.trim()) await client.exec(statement);
-  }
-}
 
 describe('the versioned-state migration', () => {
   it('backfills ids, scopes and provenance on the rows already stored', async () => {

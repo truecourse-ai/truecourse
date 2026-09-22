@@ -49,11 +49,12 @@ import {
   type ContextSourceStatus,
   type ContextSyncRecord,
 } from '@truecourse/shared';
-import type {
-  ContextLedgerWrite,
-  ContextSourceInput,
-  ContextSourcePatch,
-  ContextStore,
+import {
+  RepositorySourceTakenError,
+  type ContextLedgerWrite,
+  type ContextSourceInput,
+  type ContextSourcePatch,
+  type ContextStore,
 } from '@truecourse/core/lib/context-store';
 import { ContentStore, contentScope } from './content-store.js';
 import { iso } from './iso.js';
@@ -133,6 +134,16 @@ export async function listDueContextSources(db: Db, before: string): Promise<Due
 type SourceRow = typeof contextSources.$inferSelect;
 type DocumentRow = typeof contextDocuments.$inferSelect;
 
+/** The constraint that keeps a repository one workspace's source (see the schema). */
+const REPOSITORY_UNIQUE_CONSTRAINT = 'context_sources_repo_full_name_unique';
+
+/** The repository a source reads, for the column that keeps it one workspace's. */
+function repositoryOf(input: ContextSourceInput): string | null {
+  if (input.kind !== 'repository') return null;
+  const name = (input.config as { repoFullName?: unknown }).repoFullName;
+  return typeof name === 'string' && name !== '' ? name : null;
+}
+
 function toSource(row: SourceRow): ContextSource {
   return {
     id: row.id,
@@ -189,24 +200,49 @@ export class PgContextStore implements ContextStore {
 
   async createSource(org: string, input: ContextSourceInput): Promise<ContextSource> {
     const now = new Date().toISOString();
-    const rows = await this.db
-      .insert(contextSources)
-      .values({
-        workspaceOrgId: org,
-        id: input.id,
-        kind: input.kind,
-        title: input.title,
-        config: input.config,
-        status: input.status ?? 'never',
-        statusNote: input.statusNote ?? null,
-        lastSyncAt: null,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
+    const repoFullName = repositoryOf(input);
+    let rows: SourceRow[];
+    try {
+      rows = await this.db
+        .insert(contextSources)
+        .values({
+          workspaceOrgId: org,
+          id: input.id,
+          kind: input.kind,
+          title: input.title,
+          config: input.config,
+          repoFullName,
+          status: input.status ?? 'never',
+          statusNote: input.statusNote ?? null,
+          lastSyncAt: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+    } catch (err) {
+      // The repository's unique constraint, by NAME: the primary key is unique
+      // too, and two repositories can slug to one source id. drizzle may wrap
+      // the driver error, so check `.cause` too.
+      const violated =
+        (err as { constraint?: string }).constraint ??
+        (err as { cause?: { constraint?: string } }).cause?.constraint;
+      if (violated === REPOSITORY_UNIQUE_CONSTRAINT && repoFullName) {
+        throw new RepositorySourceTakenError(repoFullName);
+      }
+      throw err;
+    }
     const row = rows[0];
     if (!row) throw new Error(`A context source "${input.id}" already exists in this workspace.`);
     return toSource(row);
+  }
+
+  async repositorySourceWorkspace(repoFullName: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ workspaceOrgId: contextSources.workspaceOrgId })
+      .from(contextSources)
+      .where(eq(contextSources.repoFullName, repoFullName))
+      .limit(1);
+    return rows[0]?.workspaceOrgId ?? null;
   }
 
   async updateSource(

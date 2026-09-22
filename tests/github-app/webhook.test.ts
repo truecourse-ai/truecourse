@@ -17,6 +17,8 @@ function sign(body: string, secret = SECRET): string {
 }
 
 let store: MemoryInstallationStore;
+/** Which workspace reads a repository as a context source, by name. */
+let sourceWorkspaces: Map<string, string>;
 let baselineCalls: BaselineTrigger[];
 let sourcePushCalls: SourcePushTrigger[];
 let removedCalls: RepositoryRecord[];
@@ -24,6 +26,7 @@ let app: Express;
 
 beforeEach(() => {
   store = new MemoryInstallationStore();
+  sourceWorkspaces = new Map();
   baselineCalls = [];
   sourcePushCalls = [];
   removedCalls = [];
@@ -42,6 +45,7 @@ beforeEach(() => {
       store,
       repos: store,
       onBaseline: (t) => baselineCalls.push(t),
+      sourceWorkspaceOf: async (repoFullName) => sourceWorkspaces.get(repoFullName) ?? null,
       onSourcePush: (t) => sourcePushCalls.push(t),
       onRepoRemoved: async (link) => {
         removedCalls.push(link);
@@ -192,7 +196,7 @@ describe('webhook router', () => {
     }).expect(202);
 
     expect(baselineCalls).toHaveLength(0);
-    // The installation belongs to no workspace, so nobody could be reading it.
+    // No workspace reads it as a source, so nobody is told.
     expect(sourcePushCalls).toHaveLength(0);
   });
 
@@ -214,8 +218,10 @@ describe('webhook router', () => {
     expect(await store.listInstallationsForWorkspace('org_B')).toEqual([]);
   });
 
-  it('reports a push to an unconnected repo to every workspace the installation is attached to', async () => {
+  it('reports a push to an unconnected repo ONCE, to the workspace whose source reads it', async () => {
+    // Two workspaces hold the installation; one of them made the source.
     await seedInstallation(store, 9, ['org_A', 'org_B']);
+    sourceWorkspaces.set('acme/handbook', 'org_B');
 
     await post('push', {
       ref: 'refs/heads/main',
@@ -224,13 +230,28 @@ describe('webhook router', () => {
       installation: { id: 9 },
     }).expect(202);
 
-    expect(sourcePushCalls.map((t) => t.workspaceOrgId)).toEqual(['org_A', 'org_B']);
+    expect(sourcePushCalls.map((t) => t.workspaceOrgId)).toEqual(['org_B']);
+  });
+
+  it('tells nobody when the workspace whose source reads the repo does not hold the pushing installation', async () => {
+    await seedInstallation(store, 9, ['org_A']);
+    sourceWorkspaces.set('acme/handbook', 'org_B');
+
+    await post('push', {
+      ref: 'refs/heads/main',
+      after: 'sha-after',
+      repository: { full_name: 'acme/handbook', default_branch: 'main' },
+      installation: { id: 9 },
+    }).expect(202);
+
+    expect(sourcePushCalls).toEqual([]);
   });
 
   // Nothing is baselined for a repository Code has not connected, but the
   // workspace that installed the App may read it as a context source.
   it('reports a push to an unconnected repo of a workspace’s installation', async () => {
     await seedInstallation(store, 9, ['org_A']);
+    sourceWorkspaces.set('acme/handbook', 'org_A');
 
     await post('push', {
       ref: 'refs/heads/main',

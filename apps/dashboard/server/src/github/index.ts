@@ -22,6 +22,7 @@
 import type { Router } from 'express';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { log } from '@truecourse/core/lib/logger';
+import { contextStoreInstalled, repositorySourceWorkspace } from '@truecourse/core/lib/context-store';
 import {
   createConnectRouter,
   createGithubAuth,
@@ -216,8 +217,10 @@ export function createGithubConnection(
       syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
     },
     // A push to a repository this installation reaches that Code has NOT
-    // connected. It has no baseline and no repository page, but the workspace
+    // connected. It has no baseline and no repository page, but one workspace
     // may read it as a context source, and that source just moved.
+    sourceWorkspaceOf: async (repoFullName) =>
+      contextStoreInstalled() ? repositorySourceWorkspace(repoFullName) : null,
     onSourcePush: (trigger) => {
       syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
     },
