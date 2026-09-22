@@ -25,7 +25,7 @@ import {
   type RepoIdentity,
 } from '@truecourse/spec-consolidator';
 import type { LlmTransportMode } from '../services/llm/provider-config.js';
-import { openConflicts } from '@truecourse/shared';
+import { openConflicts, resolutionDisputeKey } from '@truecourse/shared';
 
 export type {
   DecisionsFile,
@@ -175,9 +175,11 @@ export interface CurateInProcessOptions {
    */
   decisions?: DecisionsFile;
   /**
-   * The corpus the last scan wrote, for the areas to reconcile against. The
-   * workspace scan passes the stored version (its scratch tree holds none);
-   * omit and the run reads `corpus.json` from the tree.
+   * The corpus the last scan wrote, for the areas and the overlaps to reconcile
+   * against: its flagged overlaps are briefed to the overlap sessions so a
+   * dispute keeps its identity across scans. The workspace scan passes the
+   * stored version (its scratch tree holds none); omit and the run reads
+   * `corpus.json` from the tree for the areas, and briefs no prior overlaps.
    */
   previousCorpus?: CuratedCorpus | null;
   /**
@@ -422,6 +424,9 @@ export async function curateInProcess(
         skipCorpusWrite: options.skipCorpusWrite,
         disableOverlapDetection: options.disableOverlapDetection,
         disableScopeOrchestration: options.disableScopeOrchestration,
+        ...(options.previousCorpus
+          ? { priorOverlaps: options.previousCorpus.areas.flatMap((area) => area.overlaps) }
+          : {}),
         ...(options.scopeSources ? { scopeSources: options.scopeSources } : {}),
         ...(options.docOrigins ? { docOrigins: options.docOrigins } : {}),
         ...(options.only !== undefined ? { only: options.only } : {}),
@@ -666,9 +671,9 @@ export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): Dec
 
   // Conflict verdicts: the overlay wins per dispute identity (same unordered pair
   // + same section anchors), other base verdicts survive.
-  const overlayResKeys = new Set((overlay.conflictResolutions ?? []).map(conflictResolutionKey));
+  const overlayResKeys = new Set((overlay.conflictResolutions ?? []).map(resolutionDisputeKey));
   const conflictResolutions = [
-    ...(base.conflictResolutions ?? []).filter((r) => !overlayResKeys.has(conflictResolutionKey(r))),
+    ...(base.conflictResolutions ?? []).filter((r) => !overlayResKeys.has(resolutionDisputeKey(r))),
     ...(overlay.conflictResolutions ?? []),
   ];
 
@@ -708,19 +713,6 @@ function uniqueStrings(items: string[]): string[] {
 // `apply*` that makes no change returns the SAME object reference, letting
 // callers skip a redundant store.
 
-/**
- * Dispute-identity key for a section-scoped conflict verdict: the
- * unordered doc pair plus each side's section anchor, oriented by doc so the same
- * dispute keys identically regardless of which doc was recorded as A. One verdict
- * per dispute — re-recording replaces it.
- */
-const conflictResolutionKey = (r: ConflictResolution): string => {
-  const sides = [
-    `${r.docA}#${r.anchorA ?? ''}`,
-    `${r.docB}#${r.anchorB ?? ''}`,
-  ].sort();
-  return sides.join(' \x00 ');
-};
 
 // Include and exclude are mutually exclusive per doc: adding one clears the
 // other for that path, so decisions.json can never hold a contradictory pair.
@@ -795,8 +787,8 @@ function applyAddConflictResolution(existing: DecisionsFile, input: ConflictReso
   if (input.docA === input.docB) {
     throw new Error('addConflictResolution: docA and docB must be different docs');
   }
-  const key = conflictResolutionKey(input);
-  const dedup = (existing.conflictResolutions ?? []).filter((r) => conflictResolutionKey(r) !== key);
+  const key = resolutionDisputeKey(input);
+  const dedup = (existing.conflictResolutions ?? []).filter((r) => resolutionDisputeKey(r) !== key);
   return {
     version: 2,
     manualIncludes: existing.manualIncludes ?? [],
@@ -811,13 +803,13 @@ function applyRemoveConflictResolution(
   existing: DecisionsFile,
   input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
 ): DecisionsFile {
-  const key = conflictResolutionKey({ ...input, verdict: 'dismissed', resolvedAt: '' });
+  const key = resolutionDisputeKey(input);
   return {
     version: 2,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: existing.manualExcludes ?? [],
     manualAreas: existing.manualAreas ?? [],
-    conflictResolutions: (existing.conflictResolutions ?? []).filter((r) => conflictResolutionKey(r) !== key),
+    conflictResolutions: (existing.conflictResolutions ?? []).filter((r) => resolutionDisputeKey(r) !== key),
     ...carriedV2Fields(existing),
   };
 }

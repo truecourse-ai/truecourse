@@ -21,8 +21,9 @@
  * only — no tokenizing/stemming/stopword removal — so a quote copied verbatim still
  * matches a line-wrapped or backtick-styled source sentence while staying an
  * essentially exact match. The single copy: the consolidator's overlap
- * pointer-verifier imports THIS one (never a second implementation), and the
- * conflict-resolution dispute identity below matches quotes through it.
+ * pointer-verifier imports THIS one (never a second implementation). A
+ * dispute's identity is its doc pair and section anchors ({@link disputeKey}),
+ * not its quotes, so nothing here matches a resolution by quote.
  */
 export function normalizeQuote(text: string): string {
   return text
@@ -345,33 +346,49 @@ const anchorKey = (h: string | null | undefined): string | null =>
   h === null || h === undefined ? null : h.replace(/[`*_~]/g, '').trim().toLowerCase();
 
 /**
- * Does a stored resolution identify THIS conflict? Dispute identity = the same
- * unordered doc pair AND, per doc, either matching normalized quotes (used when
- * BOTH the resolution and the conflict carry a quote on each side — the precise,
- * rescan-surviving key) or matching section anchors (the fallback when a quote is
- * missing; a doc the conflict flags no section for is treated as a `null`/preamble
- * anchor, so a sectionless dispute is matched by a `null`-anchor resolution).
+ * A dispute's IDENTITY: the unordered doc pair and, per doc, the section
+ * anchor the conflict points at (`null` = the doc's lead). The quotes are
+ * evidence, never identity — the overlap session re-excerpts the same
+ * disagreement differently on every scan, and a verdict recorded against one
+ * excerpt must still match the dispute when the next scan quotes it anew. A
+ * doc the conflict flags no section for is its lead, so a sectionless dispute
+ * is matched by a `null`-anchor resolution.
+ *
+ * Stable across scans, so two corpora's conflicts compare by it. The one key
+ * every consumer compares by: the read side matches a resolution to a conflict
+ * through it, and the write side ({@link resolutionDisputeKey}) replaces a
+ * verdict on the same dispute through it.
  */
+export function disputeKey(
+  a: string,
+  b: string,
+  sections: readonly OverlapSectionLike[] | undefined,
+): string {
+  const anchorOf = (doc: string): string | null =>
+    anchorKey((sections ?? []).find((s) => s.doc === doc)?.heading);
+  return disputeKeyOf(a, anchorOf(a), b, anchorOf(b));
+}
+
+/** {@link disputeKey} for the dispute a stored resolution records. */
+export function resolutionDisputeKey(r: Pick<ConflictResolutionLike, 'docA' | 'anchorA' | 'docB' | 'anchorB'>): string {
+  return disputeKeyOf(r.docA, anchorKey(r.anchorA), r.docB, anchorKey(r.anchorB));
+}
+
+function disputeKeyOf(docA: string, anchorA: string | null, docB: string, anchorB: string | null): string {
+  // Encoded, not concatenated: a heading may carry any delimiter, and the
+  // lead (`null`) is not the same section as an empty heading.
+  const sides: [string, string | null][] = [[docA, anchorA], [docB, anchorB]];
+  return JSON.stringify(docA <= docB ? sides : sides.reverse());
+}
+
+/** Does a stored resolution identify THIS conflict? See {@link disputeKey}. */
 function resolutionMatchesConflict(
   r: ConflictResolutionLike,
   a: string,
   b: string,
   sections: readonly OverlapSectionLike[] | undefined,
 ): boolean {
-  if (!samePair(r.docA, r.docB, a, b)) return false;
-  const rSide = (doc: string): { anchor: string | null; quote?: string } =>
-    doc === r.docA ? { anchor: r.anchorA, quote: r.quoteA } : { anchor: r.anchorB, quote: r.quoteB };
-  const cSide = (doc: string): OverlapSectionLike | undefined => (sections ?? []).find((s) => s.doc === doc);
-
-  const bothHaveQuotes =
-    !!r.quoteA && !!r.quoteB && !!cSide(a)?.quote && !!cSide(b)?.quote;
-  if (bothHaveQuotes) {
-    const quoteMatch = (doc: string): boolean =>
-      normalizeQuote(rSide(doc).quote ?? '') === normalizeQuote(cSide(doc)?.quote ?? '');
-    return quoteMatch(a) && quoteMatch(b);
-  }
-  const anchorMatch = (doc: string): boolean => anchorKey(rSide(doc).anchor) === anchorKey(cSide(doc)?.heading);
-  return anchorMatch(a) && anchorMatch(b);
+  return resolutionDisputeKey(r) === disputeKey(a, b, sections);
 }
 
 /**
@@ -392,9 +409,9 @@ export function resolutionForConflict(
 
 /**
  * A stored resolution for THIS doc pair that does NOT match the conflict's
- * precise dispute identity — the pair was re-flagged with drifted quotes (the
- * overlap session excerpts the same disagreement differently on every scan),
- * or an earlier dispute between these docs was resolved and a new one flagged.
+ * dispute identity — the pair was re-flagged under other section anchors (a
+ * heading renamed, or the disagreement found in another section), or an
+ * earlier dispute between these docs was resolved and a new one flagged.
  * Surfaces show it as a reapply HINT on the open conflict; it never resolves
  * anything by itself (a genuinely new dispute must not be swallowed by an old
  * verdict).
@@ -524,7 +541,12 @@ export function suppressedClaims(corpus: CorpusLike, decisions: DecisionsLike): 
       r.verdict === 'a'
         ? { doc: r.docB, anchor: r.anchorB, quote: r.quoteB }
         : { doc: r.docA, anchor: r.anchorA, quote: r.quoteA };
-    if (loser.quote && loser.quote.trim()) out.push({ doc: loser.doc, anchor: loser.anchor, quote: loser.quote });
+    // The sentence to drop is the one the CURRENT scan quoted: the verdict
+    // matched by section, and the section's text may have moved on since the
+    // verdict was recorded. The stored quote stands in only for a conflict
+    // flagged without one.
+    const quote = (c.sections ?? []).find((s) => s.doc === loser.doc)?.quote?.trim() || loser.quote?.trim();
+    if (quote) out.push({ doc: loser.doc, anchor: loser.anchor, quote });
   }
   return out;
 }

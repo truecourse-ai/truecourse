@@ -239,6 +239,28 @@ describe('an inclusion decision says a scan is needed', () => {
     });
   });
 
+  it('replaces a verdict re-recorded on the same dispute, whatever markers or case its anchors wear', async () => {
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
+    const dispute = { docA: ref(SRC_A, 'one.md'), docB: ref(SRC_B, 'site.md') };
+    await request(app)
+      .post('/api/context/conflict-resolution')
+      .send({ ...dispute, anchorA: '`Cancellation`', anchorB: 'Cancellation', verdict: 'a' })
+      .expect(200);
+    // The same dispute, the anchors as a later scan lists them: one row, the new verdict.
+    const again = await request(app)
+      .post('/api/context/conflict-resolution')
+      .send({ ...dispute, anchorA: 'cancellation', anchorB: 'Cancellation', verdict: 'b' })
+      .expect(200);
+    expect(again.body.conflictResolutions).toHaveLength(1);
+    expect(again.body.conflictResolutions[0]).toMatchObject({ verdict: 'b', anchorA: 'cancellation' });
+    // And the same key removes it, however the anchors are spelled.
+    const removed = await request(app)
+      .delete('/api/context/conflict-resolution')
+      .send({ ...dispute, anchorA: '`Cancellation`', anchorB: 'cancellation' })
+      .expect(200);
+    expect(removed.body.conflictResolutions).toEqual([]);
+  });
+
   it('reports nothing for a verdict the route refuses', async () => {
     await request(app)
       .post('/api/context/conflict-resolution')

@@ -100,7 +100,7 @@ import {
   type VocabMap,
 } from '@truecourse/spec-consolidator'
 import { LlmStageFailureError, type StageTransportTally } from '@truecourse/shared/llm'
-import { dedupeCrossAreaOverlaps } from '@truecourse/shared'
+import { dedupeCrossAreaOverlaps, type OverlapLike } from '@truecourse/shared'
 import { cachedSessionOutcome } from '../agent/session-cache.js'
 import { runSessionPool } from '../agent/session-pool.js'
 import {
@@ -244,6 +244,12 @@ export interface SpecScanSessionsOptions {
    * `null` means there is no prior.
    */
   previousCorpus?: CuratedCorpus | null
+  /**
+   * The overlaps the corpus this scan replaces had flagged. Each overlap
+   * session is briefed with the ones between its docs, so a dispute keeps its
+   * identity across scans (see `priorDisputesFor`). Never part of a cache key.
+   */
+  priorOverlaps?: readonly OverlapLike[]
   /**
    * Skip the scope-orchestrator session (stored scope verdicts still apply).
    * The workspace corpus sync passes this: its doc tree is a transient scratch
@@ -1149,7 +1155,7 @@ export async function runSpecScanSessions(
     legacyCacheKeys: (item) => [overlapSessionLegacyCacheKey(item, instructionParts)],
     schema: OverlapOutcomeSchema,
     session: (item) => overlapSessionDef({ item, universe }),
-    briefing: (item) => overlapBriefing(item, instructions),
+    briefing: (item) => overlapBriefing(item, instructions, opts.priorOverlaps ?? []),
     driver: opts.driver,
     persistence: opts.persistence,
     ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
