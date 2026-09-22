@@ -15,6 +15,11 @@
  * screens with their addresses (what `to` names), and the dialogs and panels on
  * its own place (what `of` names).
  *
+ * `observe_screen` is the one tool that is not about the source: it opens an
+ * address of the RUNNING app in a signed-in browser and returns its
+ * accessibility tree (see `live-screen.ts`). It exists only when the run
+ * booted the app; a session without it authors from source alone.
+ *
  * `check_draft` is the one that makes the LOOP earn its keep rather than a
  * single prompt: the rules of {@link validateFragment} are dozens of small
  * structural facts (an id that resolves, a role that exists, an entry that
@@ -45,6 +50,7 @@ import {
 } from './draft.js'
 import { checkedDraftEvidence } from './checked-draft.js'
 import { scopeFragmentIds } from './identity.js'
+import { observeScreenTool, type LiveScreens } from './live-screen.js'
 
 /** How many catalog entries one `list_interfaces` call hands back — a tool
  *  result is context, and context is the budget. */
@@ -60,10 +66,20 @@ export interface AuthorToolsInput {
   replaceable: ReadonlySet<string>
   /** The place this session authors — `check_draft` holds the draft to it. */
   scope?: { screenId: string; address?: string }
+  /** The running app, when the run booted one — adds `observe_screen`. */
+  live?: LiveScreens
 }
 
 export function buildAuthorTools(input: AuthorToolsInput): SessionTool[] {
-  return [readFileTool(input.repoRoot), readFilesTool(input.repoRoot), searchTool(input.repoRoot), interfacesTool(input), ...catalogTools(input), checkDraftTool(input)]
+  return [
+    readFileTool(input.repoRoot),
+    readFilesTool(input.repoRoot),
+    searchTool(input.repoRoot),
+    ...(input.live ? [observeScreenTool(input.live)] : []),
+    interfacesTool(input),
+    ...catalogTools(input),
+    checkDraftTool(input),
+  ]
 }
 
 function catalogTools(input: AuthorToolsInput): SessionTool[] {

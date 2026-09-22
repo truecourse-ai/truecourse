@@ -42,6 +42,17 @@ export {
 export { MAX_PACK_BYTES, clusterPack, type ClusterPack } from './pack.js'
 export { buildAuthorTools, type AuthorToolsInput } from './tools.js'
 export {
+  liveScreenLines,
+  observeScreenTool,
+  publicFixtureFields,
+  renderObservation,
+  type LiveScreenObserver,
+  type LiveScreens,
+  type ObserveScreenResult,
+  type ScreenObservation,
+  type ScreenObservationRequest,
+} from './live-screen.js'
+export {
   INTERFACE_AUTHOR_BUDGET,
   INTERFACE_AUTHOR_SESSION_KIND,
   interfaceAuthorSessionDef,

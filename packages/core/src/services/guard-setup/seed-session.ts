@@ -92,6 +92,7 @@ import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { proveSeedFromColdClone } from './seed-cold-proof.js';
+import { servicesController } from './services-lifecycle.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
 import { isCreditsExhausted } from '@truecourse/shared';
@@ -1316,47 +1317,6 @@ export interface BuildSeedSessionOptions {
    * later.
    */
   coldProof?: boolean;
-}
-
-/** One `api.services` lifecycle handle — up/down/reset through `runBuild`,
- *  exactly as `verifyProposal` runs them, teardown always safe to call twice.
- *
- *  The FIRST bring-up wipes when the tree carries the world-dirty marker: the
- *  compose project is named after the repository, so one shared world outlives
- *  every job of it, and a run that was cancelled or crashed mid-scenario left
- *  its rows behind for this setup's baseline assertions to inherit. */
-function servicesController(repoRoot: string, recipe: Recipe, signal?: AbortSignal) {
-  const services = recipe.api?.services;
-  let up = false;
-  return {
-    async up(): Promise<void> {
-      if (!services) return;
-      const marker = guardWorldDirtyMarkerPath(repoRoot);
-      if (services.reset && fs.existsSync(marker)) {
-        await runBuild(repoRoot, services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
-        fs.rmSync(marker, { force: true });
-      }
-      const result = await runBuild(repoRoot, services.up, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
-      if (!result.ok) {
-        throw new Error(
-          `\`${services.up}\` failed${result.timedOut ? ' (timed out)' : ''}: ${tail(result.output)}`,
-        );
-      }
-      up = true;
-    },
-    async down(): Promise<void> {
-      if (!services?.down || !up) return;
-      up = false;
-      await runBuild(repoRoot, services.down, recipe.env, DEFAULT_BUILD_TIMEOUT_MS);
-    },
-    /** The wipe (`down -v`), when the recipe declares one; a no-op otherwise.
-     *  Best-effort: a reset that fails is not a verdict, the `up` after it is. */
-    async reset(): Promise<void> {
-      if (!services?.reset) return;
-      up = false;
-      await runBuild(repoRoot, services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
-    },
-  };
 }
 
 /**

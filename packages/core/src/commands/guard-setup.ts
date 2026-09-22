@@ -54,6 +54,7 @@ import {
   buildPreparationSession,
   createGuardSetupSessionContext,
   DEPENDENCY_CATALOG_SESSION_KIND,
+  openSetupLiveScreens,
   RECIPE_REPAIR_SESSION_KIND,
   RECONCILE_INTERFACES_SESSION_KIND,
   SEED_SESSION_KIND,
@@ -283,6 +284,7 @@ export async function guardSetupInProcess(
               },
               driver: acquired.driver,
               transportMode: mode,
+              ...(authorOpts.live ? { live: authorOpts.live } : {}),
               ...(options.signal ? { signal: options.signal } : {}),
               onStatus: (message) => tracker?.detail('interfaces', message),
             });
@@ -297,6 +299,15 @@ export async function guardSetupInProcess(
               ...(run.reconcile ? { reconcile: run.reconcile } : {}),
             };
           },
+          // The app the sessions observe: stood up from the recipe the seed
+          // step just wrote, signed in as the principal it minted.
+          liveScreens: (input) =>
+            openSetupLiveScreens({
+              repoRoot: input.repoRoot,
+              recipe: input.recipe,
+              ...(options.signal ? { signal: options.signal } : {}),
+              onPhase: (running) => tracker?.detail('interfaces', running),
+            }),
           ...(options.signal ? { signal: options.signal } : {}),
         })
       : undefined);

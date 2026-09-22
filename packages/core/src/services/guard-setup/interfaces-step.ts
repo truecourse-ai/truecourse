@@ -19,7 +19,12 @@
  *
  * 2. AUTHOR. The web-task authoring run — the existing
  *    `guard interfaces author` engine, injected as a thunk so this module
- *    never imports the command layer. The engine already decided the step
+ *    never imports the command layer. The run is handed the LIVE SCREENS when
+ *    the step can stand the app up (`liveScreens`, the seam that installs,
+ *    builds, seeds and serves it, then signs a browser in): opened right
+ *    before the run and closed right after it, whatever the run made of
+ *    itself. A world that could not be stood up is a note on the step row —
+ *    the sessions author from source alone — never the step's verdict. The engine already decided the step
  *    should RUN (fingerprint moved, authored file absent, or `--replace`);
  *    what remains here is the cheap zero-work check: when the authoring ledger
  *    has settled every screen (and no replace or refresh was asked), no
@@ -55,6 +60,7 @@ import {
 import { isCreditsExhausted, type InterfacesFile, type MapperDiagnostic } from '@truecourse/shared';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
 import { planWorkItems } from '../interface-author/author.js';
+import type { LiveScreens } from '../interface-author/live-screen.js';
 import {
   applyReconcileResolutions,
   runReconcileInterfacesSession,
@@ -87,11 +93,24 @@ export type InterfacesAuthorFn = (opts: {
   replace: boolean;
   /** Re-open the screens whose ledger row says they never settled. */
   refresh: boolean;
+  /** The running app the sessions may observe, when the step stood one up. */
+  live?: LiveScreens;
 }) => Promise<InterfacesAuthorRun>;
+
+/** What the live-screens seam hands back: the observer and its teardown, or why there is none. */
+export type LiveScreensOpen =
+  | { ok: true; live: LiveScreens; close(): Promise<void> }
+  | { ok: false; reason: string };
 
 export interface BuildInterfacesStepOptions {
   /** Runs the web-task authoring (production: `runGuardInterfaceAuthoring`). */
   author: InterfacesAuthorFn;
+  /**
+   * Stands the app up for the sessions to observe (production:
+   * `openSetupLiveScreens`). Called once, right before the authoring run, only
+   * when there is work; absent ⇒ the sessions author from source alone.
+   */
+  liveScreens?: (input: GuardSetupInterfacesStepInput) => Promise<LiveScreensOpen>;
   signal?: AbortSignal;
   onSessionEvent?: (workItem: string, event: SessionEvent) => void;
 }
@@ -169,11 +188,17 @@ export function buildInterfacesStep(
       };
     }
 
+    // The live screens, stood up for exactly the run that has work and torn
+    // down with it. A world that will not come up is a note, and the run
+    // goes ahead on source alone.
+    const opened = opts.liveScreens ? await opts.liveScreens(input) : null;
+    if (opened && !opened.ok) notes.push(`screens not observed live: ${opened.reason}`);
     try {
       const run = await opts.author({
         repoRoot: input.repoRoot,
         replace: input.replace,
         refresh: input.refresh,
+        ...(opened?.ok ? { live: opened.live } : {}),
       });
       // A screen served from its cached fragment ran no session, so it is
       // neither counted nor noted: the run record would show work nobody did.
@@ -239,6 +264,8 @@ export function buildInterfacesStep(
         reason: joinNotes(`authoring failed: ${message(error)}`, notes),
         ...recorded,
       };
+    } finally {
+      if (opened?.ok) await opened.close();
     }
   };
 }

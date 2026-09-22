@@ -86,6 +86,7 @@ import type { AuthorFinding } from './findings.js'
 import { clusterPack, type ClusterPack } from './pack.js'
 import { placeSourcePack } from './place-pack.js'
 import { ownTaskContext } from './catalog-context.js'
+import type { LiveScreens, ObserveScreenResult } from './live-screen.js'
 import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem } from './session.js'
 import { recordAuthoringLedger, writeAuthoredCatalog } from './write.js'
 
@@ -133,6 +134,13 @@ export interface AuthorRunOptions {
    * A place with no entry is briefed exactly as it was before the pack existed.
    */
   context?: ReadonlyMap<string, WebPlaceContext>
+  /**
+   * The running app, when the caller booted one: every session gets
+   * `observe_screen`, and a screen whose address has no slot is observed once
+   * before its session starts so the tree rides the briefing. Absent ⇒ the
+   * sessions author from source alone, exactly as before.
+   */
+  live?: LiveScreens
   signal?: AbortSignal
   onProgress?: (event: AuthorProgress) => void
   /** Every transcript event, as it is persisted — the caller's live view. */
@@ -410,6 +418,12 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     opts.onProgress?.({ kind: 'place-done', place })
   }
 
+  // THE FIRST LOOK, before any session starts: every pending screen whose
+  // address has no slot is opened once in the signed-in browser, so its tree
+  // is in the briefing (the cached prefix) rather than bought with a turn. A
+  // slotted address needs a value the session reads, so it observes itself.
+  const observations = await observeLiteralAddresses(pending, opts.live, opts.signal)
+
   // THE CLUSTERS: the places that read the same modules, grouped. They
   // become the pool's serial groups — one worker per cluster, members in order.
   const clusters = clusterPlaces({
@@ -469,6 +483,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
           get authored() { return authored },
           replaceable,
           scope: scopeOf(item),
+          ...(opts.live ? { live: opts.live } : {}),
         }),
         validateOutcome(fragment) {
           // Validate and write synchronously before the loop marks the session
@@ -498,6 +513,14 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
           nested: placesOn(item.place.id, places),
           ...(opts.context?.get(item.place.id)
             ? { context: opts.context.get(item.place.id)! }
+            : {}),
+          ...(opts.live
+            ? {
+                live: {
+                  screens: opts.live,
+                  ...(observations.has(item.place.id) ? { observation: observations.get(item.place.id)! } : {}),
+                },
+              }
             : {}),
         }),
       ]
@@ -571,6 +594,33 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     diagnostics,
     spent,
   }
+}
+
+/** How many screens the first look opens at once. */
+const OBSERVE_CONCURRENCY = 4
+
+/**
+ * Open every pending screen whose address carries no slot, a few at a time,
+ * and keep what the browser saw. A refusal is kept too: the briefing says why
+ * the screen could not be observed instead of silently saying nothing.
+ */
+async function observeLiteralAddresses(
+  items: readonly AuthorWorkItem[],
+  live: LiveScreens | undefined,
+  signal?: AbortSignal,
+): Promise<Map<string, ObserveScreenResult>> {
+  const observations = new Map<string, ObserveScreenResult>()
+  if (!live) return observations
+  const queue = items.filter((item) => item.place.address && !/\{[^}]*\}/.test(item.place.address))
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < queue.length && !signal?.aborted) {
+      const item = queue[next++]!
+      observations.set(item.place.id, await live.observer.observe({ path: item.place.address! }))
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(OBSERVE_CONCURRENCY, queue.length) }, worker))
+  return observations
 }
 
 /**

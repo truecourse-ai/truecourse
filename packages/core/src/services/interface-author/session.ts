@@ -26,6 +26,7 @@ import { CheckedDraftReferenceSchema, resolveCheckedDraft } from './checked-draf
 import { screenIdentityGuidance } from './identity.js'
 import type { InterfaceResource, InterfaceState, InterfacesFile } from '@truecourse/shared'
 import { AuthoredFragmentSchema, type AuthoredFragment } from './draft.js'
+import { liveScreenLines, type LiveScreens, type ObserveScreenResult } from './live-screen.js'
 import { buildAuthorTools } from './tools.js'
 
 export const INTERFACE_AUTHOR_SESSION_KIND = 'guard-interfaces.web-tasks'
@@ -53,6 +54,8 @@ export interface AuthorSessionInput {
   replaceable: ReadonlySet<string>
   /** The place this session authors — every task it hands back is located there. */
   scope?: { screenId: string; address?: string }
+  /** The running app, when the run booted one — the session may observe screens. */
+  live?: LiveScreens
 }
 
 export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef<AuthoredFragment> {
@@ -103,6 +106,12 @@ export interface PlaceBriefingInput {
   screens: readonly { id: string; address?: string }[]
   /** The dialogs and panels that sit on THIS place — what `of` already names. */
   nested: readonly InterfaceResource[]
+  /**
+   * The running app, when the run booted one: the observer's principal and
+   * fixtures, and what it saw at this place's address before the session
+   * started (taken only for an address with no slot).
+   */
+  live?: { screens: LiveScreens; observation?: ObserveScreenResult }
 }
 
 /**
@@ -142,6 +151,7 @@ export function placeBriefing({
   states,
   screens,
   nested,
+  live,
 }: PlaceBriefingInput): string {
   const lines = [
     `Author the web tasks and readable facts of ONE place.`,
@@ -178,6 +188,15 @@ export function placeBriefing({
   )
   if (ownTaskContext) lines.push('', ownTaskContext)
   if (sourcePack) lines.push('', sourcePack)
+  if (live) {
+    lines.push(
+      ...liveScreenLines({
+        live: live.screens,
+        ...(place.address ? { address: place.address } : {}),
+        ...(live.observation ? { observation: live.observation } : {}),
+      }),
+    )
+  }
   lines.push(...nestedLines(place.id, nested))
   lines.push(...screenLines(screens))
   lines.push(...registryLines(states))
@@ -189,6 +208,12 @@ export function placeBriefing({
       ? `Start from the module above and the modules it renders. Then account for their`
       : `Start by finding the module that renders this place. Then account for its`,
     `controls and rendered content, including conditional content and repeated rows.`,
+    ...(live
+      ? [
+          `Read the live tree against the source: every control the tree lists is a control to account for,`,
+          `and every handler the source attaches is a task to author, with the tree's names as its targets.`,
+        ]
+      : []),
   )
   return lines.join('\n')
 }
@@ -385,7 +410,7 @@ Each task carries:
 
 # The rules that are checked
 
-1. **Locators are roles and accessible names, never selectors.** Every \`target\` is an object with two fields — \`{"role": "button", "name": "Add Repository"}\`, \`{"role": "textbox", "name": "Repository path"}\`, \`{"role": "switch", "name": "Enable rule"}\`. \`role\` is one of the ARIA roles the target schema enumerates; \`name\` is the element's accessible name, written plainly, with no quoting of any kind. Add \`"exact": true\` only when one name is a prefix of another. If an element has no role and no accessible name, it is NOT authorable: say so in \`unresolved\` rather than inventing a locator.
+1. **Locators are roles and accessible names, never selectors.** Every \`target\` is an object with two fields — \`{"role": "button", "name": "Add Repository"}\`, \`{"role": "textbox", "name": "Repository path"}\`, \`{"role": "switch", "name": "Enable rule"}\`. \`role\` is one of the ARIA roles the target schema enumerates; \`name\` is the element's accessible name, written plainly, with no quoting of any kind. Add \`"exact": true\` only when one name is a prefix of another. If an element has no role and no accessible name, it is NOT authorable: say so in \`unresolved\` rather than inventing a locator. **When the briefing carries THE LIVE SCREEN, its accessibility tree is the authority on names**: a control the tree lists as \`button "Save"\` is authorable as exactly that pair whatever the source spells (an \`aria-label\`, a value-built name, a translated string all resolve there), and a control the source renders that the tree does not list is conditional — observe the state that shows it, or say in \`unresolved\` which state you could not reach.
 2. **A task is reachable.** Either it says where it happens (\`at\`), or its first step navigates to its entry address.
 3. **The entry is the address the task starts at.** When the first step navigates, \`entry.path\` equals that route; when the task is \`at\` a place, \`entry.path\` is the address of the screen that place sits on.
 4. **One task, one entry.** Two tasks with the same entry and the same steps are one task. Never author a task the existing catalog already defines; compare exact steps with \`get_interfaces\`.
@@ -406,7 +431,11 @@ Readable locators use the existing user-visible vocabulary: role/name, label, pl
 
 Every place you declare states ALL FOUR kinds: \`markers\`, \`elements\`, \`controls\`, \`rows\`. An explicit [] means you established that it has none of that kind, and the write path REFUSES a place that leaves a kind unstated — nothing returns to this screen once your outcome is accepted, so an omitted kind stays unknown forever. Read the place well enough to answer for each kind; where you truly cannot, say what you could not inspect in \`unresolved\` and still state the kind. Never fill arrays just to populate a table, and never mark uninspected content empty. Existing kinds established by an earlier session of this screen are preserved when you omit them; a supplied kind replaces that kind, so include its surviving established facts. Readables alone are a valid outcome with \`interfaces: []\`. They do not require a new task or changed task steps.
 
-Every fact must come from source you READ (or source already provided in the briefing pack). Use the session's read_file/search_repo tools for evidence, and run check_draft on the resource facts as well as the tasks. These tools provide source evidence, not live browser observation; do not claim to have inspected runtime state.
+Every fact must come from source you READ (or source already provided in the briefing pack), or from a screen you OBSERVED with \`observe_screen\` when the run offers it. Use the session's read_file/search_repo tools for evidence, and run check_draft on the resource facts as well as the tasks. Without \`observe_screen\` these tools provide source evidence only; do not claim to have inspected runtime state you did not observe.
+
+# The live screen
+
+When the briefing carries THE LIVE SCREEN, the app is running and a browser is signed in as a seeded principal. The briefing already holds the accessibility tree of this place's address (for an address with no slot); \`observe_screen\` opens any address again, with the slots filled from the seeded fixtures the briefing lists, and may \`activate\` up to five targets first — the way to read a dialog, a menu or a tab panel that only exists once opened. Read the tree and the source TOGETHER: the tree gives every control its real role and name and shows which of them are rendered in this state; the source gives what each control does (its handler, the request it makes, the state it leaves), which no tree can say. A control in the tree with no handler you could read goes in \`unresolved\` with its name; a handler in the source whose control is in no tree you observed goes there too, naming the state you could not reach. Never activate a control that submits a form, deletes, cancels or signs out: the world is the seed's and the tests will need it intact.
 
 # Findings — what the repository says that the source does not do
 
@@ -438,6 +467,7 @@ The catalog follows the CODE regardless: author the task as the source has it, a
 - The PLACES are in the briefing — every screen with its address, and the dialogs and panels on this one. There is no tool for them: what the briefing states is what the catalog has.
 - \`search_interfaces\` and \`get_interfaces\` — paged web catalog metadata and compact exact action definitions. Request includeResources only when you need their readable details. Follow nextCursor until required fields are complete; restart if those results changed. Use get_resources and get_states for exact registry definitions. Do not use source search to find hidden catalog files.
 - \`list_interfaces\` — API/CLI summaries, including confirming a known API id. Web duplicate checks use the paged catalog tools.
+- \`observe_screen\` — the RUNNING app's accessibility tree at an address, signed in. Offered only when the run booted the app; the briefing says so. Fill every slot; \`activate\` opens what the tree does not show closed.
 - \`search_repo\` uses real glob paths such as **/*.tsx; pathContains is a literal path filter. Distinguish no matching files from no matching content. \`read_file\` reads one source span; use \`read_files\` for independent known paths or continuations in one bounded request. Complete source units include their branches; inspect explicitly omitted units when needed. The accessible names are in JSX (\`aria-label\`, button text, label elements); when a name is an i18n key, the locale file holds the rendered string.
 - \`check_draft\` — the exact rules the write path enforces, run against a draft. **Run it EARLY and run it SMALL**: as soon as you have read the briefing's module, draft the first task or two and check just those, before you read anything further. A misreading — the wrong address, a target the schema refuses, a task located at another screen — comes back in one turn instead of at the outcome, where a fragment that breaks a rule is dropped whole and the place is left with nothing.
 - **What check_draft accepts, it KEEPS.** The draft is built up across calls: each call carries only the interfaces, states, places, unresolved lines and findings it is about, and the tool checks them against the catalog AND against everything already accepted in this session. **Never resend an interface that was accepted** — send its id again only to CORRECT that entry, in which case the new version replaces it. Every tool result names the ids the draft holds. A state stays in the draft only while one of its tasks references it, so renaming a world is a matter of re-sending the task and the new state together. A single whole-draft call still works; it is simply the largest, most fragile way to send one, and a reply that grows past the model's output limit is lost entirely.

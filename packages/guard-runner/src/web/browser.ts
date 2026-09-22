@@ -77,9 +77,11 @@ export interface LaunchWebBrowserOptions {
   /**
    * Where the session video is recorded. The scenario's evidence directory: a
    * browser run's evidence is visual, and a video is the only artifact that shows
-   * what happened BETWEEN two steps' screenshots.
+   * what happened BETWEEN two steps' screenshots. Absent ⇒ nothing is recorded,
+   * which is what a browser opened to OBSERVE a screen (never to prove one)
+   * asks for.
    */
-  videoDir: string
+  videoDir?: string
 }
 
 /**
@@ -175,7 +177,7 @@ export async function launchWebBrowser(
   if (!loaded.ok) return { ok: false, reason: loaded.reason }
   const chromium = loaded.chromium
   if (!isBinaryPresent(chromium)) return { ok: false, reason: BROWSER_MISSING_MESSAGE }
-  fs.mkdirSync(opts.videoDir, { recursive: true })
+  if (opts.videoDir) fs.mkdirSync(opts.videoDir, { recursive: true })
 
   let browser: Browser
   try {
@@ -195,7 +197,7 @@ export async function launchWebBrowser(
       // UTC/C-locale world the CLI driver's child env pins (child-env.ts).
       timezoneId: 'UTC',
       locale: 'en-US',
-      recordVideo: { dir: opts.videoDir, size: { ...WEB_VIEWPORT } },
+      ...(opts.videoDir ? { recordVideo: { dir: opts.videoDir, size: { ...WEB_VIEWPORT } } } : {}),
     })
     page = await context.newPage()
   } catch (e) {
@@ -266,7 +268,7 @@ export async function launchWebBrowser(
     // The context must go down before the video file is complete — that is the
     // recorder's contract, not a race we are choosing to run.
     await context.close().catch(() => undefined)
-    if (video) {
+    if (video && opts.videoDir) {
       const target = path.join(opts.videoDir, WEB_VIDEO_FILE)
       try {
         await video.saveAs(target)

@@ -28,6 +28,7 @@ import {
   StateReconcileResponseSchema,
   type AuthorProgress,
   type AuthorRunResult,
+  type LiveScreens,
   type PlaceResult,
   type ReconcileComplete,
   type StateReconciliation,
@@ -126,6 +127,8 @@ export interface RunGuardInterfaceAuthorOptions {
   sessionsKey?: string;
   /** Reuse the caller's run and persistence; the caller owns its lifecycle. */
   sessionRun?: Pick<SessionRunStore, 'runId' | 'dir' | 'persistence'>;
+  /** The running app the sessions may observe; the caller stood it up and tears it down. */
+  live?: LiveScreens;
   signal?: AbortSignal;
   onProgress?: (event: AuthorProgress) => void;
   onSessionEvent?: (placeId: string, event: SessionEvent) => void;
@@ -218,6 +221,7 @@ export async function runGuardInterfaceAuthoring(
       driver,
       persistence: run.persistence,
       context: context.contexts,
+      ...(opts.live ? { live: opts.live } : {}),
       ...(opts.places ? { places: opts.places } : {}),
       ...(opts.replace !== undefined ? { replace: opts.replace } : {}),
       ...(opts.refresh !== undefined ? { refresh: opts.refresh } : {}),

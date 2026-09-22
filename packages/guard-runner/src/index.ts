@@ -338,6 +338,20 @@ export { openWebSession } from './web/session.js'
 export type { WebSession, OpenWebSessionOptions, OpenWebSessionResult } from './web/session.js'
 export { startWebSurface } from './web/surface.js'
 export type { StartWebSurfaceOptions, WebSurfaceHandle } from './web/surface.js'
+// The screen observer: what interface authoring reads a live screen with.
+export {
+  createWebObserver,
+  observeScreen,
+  boundTree,
+  MAX_OBSERVATION_BYTES,
+} from './web/observe.js'
+export type {
+  CreateWebObserverOptions,
+  ObserveScreenResult,
+  ScreenObservation,
+  ScreenObservationRequest,
+  WebScreenObserver,
+} from './web/observe.js'
 export {
   launchWebBrowser,
   isBrowserInstalled,
