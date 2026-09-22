@@ -1009,6 +1009,54 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
     expect(both.unknownReferences).toEqual([`"${EDGE_ID}" is both continued and retired`])
   })
 
+  it('the fold takes a replayed value in stride: retiring a flow already gone is done, continuing one is a new flow', async () => {
+    const previous = await baseline()
+    // The corpus moved under a cached value: the lifecycle has since left it.
+    const prior = [previous[1]]
+    const retiresGone: FlowSet = {
+      flows: [{ ...TASK_LIFECYCLE.flows[1], id: EDGE_ID }],
+      noFlowClaims: [{ doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD, reason: 'gone' }, { doc: TASKS_DOC, anchor: TASKS.anchors['Listing tasks'], claimTitle: LIST, reason: 'gone' }, { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'gone' }, { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'gone' }],
+      retiredFlows: [{ id: LIFECYCLE_ID, reason: 'the docs dropped it' }],
+    }
+    // A live session is told; the fold is not stopped by it.
+    expect(checkFlowSet(retiresGone, { area: tasksArea, prior }).unknownReferences).toEqual([
+      `retired "${LIFECYCLE_ID}" names no existing flow of this area`,
+    ])
+    const done = await synth(repo(), [tasksArea], areaSessions({ tasks: retiresGone }), { previous: prior })
+    expect(done.unsettled).toEqual([])
+    expect(done.retired).toEqual([])
+    expect(done.reconciliation).toEqual({ kept: [EDGE_ID], amended: [], added: [], carried: [] })
+
+    const continuesGone: FlowSet = {
+      flows: [{ ...TASK_LIFECYCLE.flows[0], id: LIFECYCLE_ID }, { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID }],
+      noFlowClaims: [],
+    }
+    expect(checkFlowSet(continuesGone, { area: tasksArea, prior }).unknownReferences).toEqual([
+      `id "${LIFECYCLE_ID}" names no existing flow of this area`,
+    ])
+    const added = await synth(repo(), [tasksArea], areaSessions({ tasks: continuesGone }), { previous: prior })
+    expect(added.unsettled).toEqual([])
+    expect(added.reconciliation).toEqual({ kept: [EDGE_ID], amended: [], added: [LIFECYCLE_ID], carried: [] })
+  })
+
+  it('of two identical drafts, the one continuing a committed flow survives subsumption whichever came first', async () => {
+    const previous = await baseline()
+    const value: FlowSet = {
+      flows: [
+        { title: 'Reject an empty title', goal: 'The same path, worded anew.', milestones: [ms(TASKS, 'Creating tasks', ADD_EMPTY, 1)] },
+        { ...TASK_LIFECYCLE.flows[0], id: LIFECYCLE_ID },
+        { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID },
+      ],
+      noFlowClaims: [],
+    }
+    const res = await synth(repo(), [tasksArea], areaSessions({ tasks: value }), { previous })
+    expect(res.subsumed).toEqual([{ title: 'Reject an empty title', supersededBy: 'Adding a task without a title is rejected' }])
+    expect(res.retired).toEqual([])
+    // The survivor takes the dropped duplicate's place in the order.
+    expect(res.reconciliation).toEqual({ kept: [EDGE_ID, LIFECYCLE_ID], amended: [], added: [], carried: [] })
+    expect(res.flows).toEqual([previous[1], previous[0]])
+  })
+
   it('retires a prior flow whose claims left the inventory before any session, and never briefs it', async () => {
     const previous = await baseline()
     const r = repo()
