@@ -11,6 +11,7 @@ import {
   type GuardExpectedRed,
   type DetectedExternalService,
   type OutboundRequest,
+  type GuardFlow,
   type GuardScenario,
   type Interface,
 } from '@truecourse/shared'
@@ -20,6 +21,7 @@ import {
   type ExtractSessionSeam,
   type ExtractedClaimWithNeeds,
   type FlowSet,
+  flowAreaKey,
   type FlowSynthesisArea,
   type FlowsAreaSessionResult,
   type FlowsAreaSessionSeam,
@@ -380,13 +382,13 @@ export function extractSessionOf(
  * flows carry a `synthesisInputsHash` a test can assert on.
  */
 export function flowsAreaSessionOf(
-  answer: (area: FlowSynthesisArea) => FlowSet | FlowsAreaSessionResult,
+  answer: (area: FlowSynthesisArea, prior: readonly GuardFlow[]) => FlowSet | FlowsAreaSessionResult,
   over: { summary?: Partial<GuardSessionSummary>; inputsKey?: (area: FlowSynthesisArea) => string } = {},
 ): FlowsAreaSessionSeam {
-  return async ({ areas, onArea }) => {
+  return async ({ areas, prior, onArea }) => {
     const byArea = new Map<string, FlowsAreaSessionResult>()
     for (const area of areas) {
-      const given = answer(area)
+      const given = answer(area, prior?.get(flowAreaKey(area)) ?? [])
       const result: FlowsAreaSessionResult =
         'flows' in given
           ? { ok: true, value: given, inputsKey: over.inputsKey?.(area) ?? `key:${area.areaId}` }
@@ -398,16 +400,24 @@ export function flowsAreaSessionOf(
   }
 }
 
+/** What a reconciling session does with a deterministic title: continue the
+ *  existing flow of that title by id, so a re-synthesis keeps (or amends) it. */
+function continuing(prior: readonly GuardFlow[], title: string): { id: string } | Record<never, never> {
+  const existing = prior.find((f) => f.title === title)
+  return existing ? { id: existing.id } : {}
+}
+
 /**
  * Flow synthesis fake: ONE atomic flow per claim, titled from the claim's anchor —
  * so a flow's id IS the anchor slug and its scenarios read `<anchor>.<surface>.<n>`.
  * The default for tests that care about a claim, not a composition.
  */
 export function flowPerClaimSession(onArea?: (areaId: string) => void): FlowsAreaSessionSeam {
-  return flowsAreaSessionOf((area) => {
+  return flowsAreaSessionOf((area, prior) => {
     onArea?.(area.areaId)
     return {
       flows: area.claims.map((c) => ({
+        ...continuing(prior, c.anchor),
         title: c.anchor,
         goal: `verify ${c.title}`,
         milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) }],
@@ -420,12 +430,13 @@ export function flowPerClaimSession(onArea?: (areaId: string) => void): FlowsAre
 /** Flow synthesis fake: ONE composite flow chaining every claim of the area, in
  *  the order the claims were given — the multi-milestone path. */
 export function flowOfAllSession(title: string, onArea?: (areaId: string) => void): FlowsAreaSessionSeam {
-  return flowsAreaSessionOf((area) => {
+  return flowsAreaSessionOf((area, prior) => {
     onArea?.(area.areaId)
     if (area.claims.length === 0) return { flows: [], noFlowClaims: [] }
     return {
       flows: [
         {
+          ...continuing(prior, title),
           title,
           goal: `walk ${area.claims.length} milestone(s)`,
           milestones: area.claims.map((c, i) => ({ order: i + 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) })),

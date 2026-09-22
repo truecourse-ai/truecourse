@@ -525,8 +525,8 @@ export function createGuardGenerateSessionSeams(
       cacheKey: (area) => flowsSessionCacheKey(area),
       legacyCacheKeys: (area) => [flowsSessionLegacyCacheKey(area)],
       schema: FlowSetSchema,
-      session: (area) => flowsSessionDef({ area, universe, checker }),
-      briefing: (area) => flowsSessionBriefing(area, input.grounding),
+      session: (area) => flowsSessionDef({ area, universe, checker, prior: input.prior?.get(flowAreaKey(area)) ?? [] }),
+      briefing: (area) => flowsSessionBriefing(area, input.grounding, input.prior?.get(flowAreaKey(area)) ?? []),
       driver: acquire,
       ...(replayOnly('flows') ? { cacheOnly: 'flows' as const } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -534,7 +534,7 @@ export function createGuardGenerateSessionSeams(
       // The fold-side refusal (never trust the transcript): the SAME checker
       // `check_flows` ran in-session, so a draft that checked clean lands clean.
       rejectOutput: (area, output) =>
-        flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, catalogNames: checker.catalogNames })),
+        flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, catalogNames: checker.catalogNames, prior: input.prior?.get(flowAreaKey(area)) ?? [] })),
       fold: (area, result) => {
         if (result.outcome.status === 'completed') {
           byArea.set(flowAreaKey(area), {
@@ -570,14 +570,14 @@ export function createGuardGenerateSessionSeams(
       cacheKey: () => flowsEpicSessionCacheKey(input.digests),
       legacyCacheKeys: () => [flowsEpicSessionLegacyCacheKey(input.digests)],
       schema: EpicSynthesisSchema,
-      session: () => flowsEpicSessionDef({ digests: input.digests, claims: input.claims }),
-      briefing: () => flowsEpicSessionBriefing(input.digests),
+      session: () => flowsEpicSessionDef({ digests: input.digests, claims: input.claims, prior: input.prior ?? [] }),
+      briefing: () => flowsEpicSessionBriefing(input.digests, input.prior ?? []),
       driver: acquire,
       concurrency: 1,
       ...(replayOnly('flows') ? { cacheOnly: 'flows' as const } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       rejectOutput: (_item, output) => {
-        const { unknownReferences } = checkEpicSet(output, input.digests, input.claims)
+        const { unknownReferences } = checkEpicSet(output, input.digests, input.claims, input.prior ?? [])
         return unknownReferences.length > 0 ? `epic pass refused: ${unknownReferences[0]}` : null
       },
       fold: (_item, poolResult) => {

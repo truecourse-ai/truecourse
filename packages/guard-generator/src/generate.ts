@@ -1701,10 +1701,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     unsettled: 0,
     skipped: 0,
     dismissed: dismissedFlowCount,
-    orphaned: synthesis.orphaned.length,
+    orphaned: synthesis.retired.length,
     subsumed: synthesis.subsumed.length,
     noFlowClaims: synthesis.noFlowClaims.length,
     unsettledAreas: synthesis.unsettled.map((u) => ({ areaId: u.areaId, reason: u.reason })),
+    reconciled: {
+      kept: synthesis.reconciliation.kept.length,
+      amended: synthesis.reconciliation.amended.length,
+      added: synthesis.reconciliation.added.length,
+      retired: synthesis.retired.length,
+      carried: synthesis.reconciliation.carried.length,
+    },
   }
 
   const committedScenariosById = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]))
@@ -4450,8 +4457,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   //    explain a missing test for a flow that no longer exists) die with it. The
   //    rule reads the entry, not this run's synthesis, so ghosts carried forward by
   //    EARLIER generates are pruned on the next one too.
+  const retiredFlows = synthesis.retired.map((r) => r.flow)
   const dismissedAway = new Set(
-    synthesis.orphaned
+    retiredFlows
       .filter((f) =>
         f.milestones.length > 0 &&
         f.milestones.every((m) => dismissalByKey.has(dismissedClaimKey(m.doc, m.anchor, m.claimTitle))),
@@ -4462,7 +4470,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // it just did not settle this run (its sections vanished mid-run and it was
   // skipped with an error), so it is carried untouched and never marked or pruned.
   const synthesizedIds = new Set(synthesis.flows.map((f) => f.id))
-  const orphanedThisRun = new Set(synthesis.orphaned.map((f) => f.id))
+  const orphanedThisRun = new Set(retiredFlows.map((f) => f.id))
+  const retiredReason = new Map(synthesis.retired.map((r) => [r.flow.id, r.reason]))
   let removedFlows = 0
   let prunedFlows = 0
   for (const [flowId, prior] of priorFlows) {
@@ -4486,7 +4495,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       fact('validate', `${flowId}: pruned, no flow derives it and it holds no test`)
       continue
     }
-    const oldFlow = synthesis.orphaned.find(f => f.id === flowId) ?? (prior.milestones?.length ? { milestones: prior.milestones } : undefined)
+    const oldFlow = retiredFlows.find(f => f.id === flowId) ?? (prior.milestones?.length ? { milestones: prior.milestones } : undefined)
     const sourceKey = (m: GuardFlow['milestones'][number], caseId?: string) => `${m.doc}\0${m.anchor}\0${m.claimTitle}\0${caseId ?? ''}`
     const obligations = (f: { milestones?: GuardFlow['milestones'] }) => (f.milestones ?? []).flatMap(m =>
       m.verification?.cases?.length ? m.verification.cases.map(c => sourceKey(m, c.id)) : [sourceKey(m)])
@@ -4503,8 +4512,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       if (orphanedThisRun.has(flowId)) flowsReport.orphaned--
       continue
     }
-    workingManifest.set(flowId, { ...prior, orphaned: true })
-    fact('validate', `${flowId}: orphaned, its ${prior.scenarios.length} scenario(s) kept and marked stale`)
+    // The reason travels with the mark, so every reader can say WHY the flow
+    // left the corpus; an entry orphaned by an earlier run keeps the reason it has.
+    const reason = retiredReason.get(flowId) ?? prior.orphanedReason
+    workingManifest.set(flowId, { ...prior, orphaned: true, ...(reason ? { orphanedReason: reason } : {}) })
+    fact('validate', `${flowId}: orphaned, its ${prior.scenarios.length} scenario(s) kept and marked stale${reason ? ` (${asLine(reason)})` : ''}`)
   }
   writeWorkingManifest()
 

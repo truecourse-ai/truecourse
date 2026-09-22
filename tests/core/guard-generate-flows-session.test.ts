@@ -40,7 +40,7 @@ import {
   type FlowsSessionGrounding,
   type GuardDoc,
 } from '@truecourse/guard-generator'
-import { interfaceFingerprint, type Interface } from '@truecourse/shared'
+import { interfaceFingerprint, type GuardFlow, type Interface } from '@truecourse/shared'
 import { runAgentLoop, type SessionRunInput } from '../../packages/agent-loop/src/index'
 import {
   FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT,
@@ -223,6 +223,55 @@ describe('guard-generate.flows — the area session through the loop', () => {
     expect(second!.isError).toBeUndefined()
     expect(second!.content).toContain('produce it as the outcome')
     expect(settled.status).toBe('completed')
+  })
+
+  it('`check_flows` refuses a draft that reinvents an existing flow, and passes one that continues it by id', async () => {
+    const r = docRepo()
+    const { universe } = universeOf(r)
+    const existing: GuardFlow = {
+      id: 'create-list-and-complete-a-task',
+      title: 'Create, list and complete a task',
+      goal: 'A user adds a task, sees it, and completes it.',
+      fingerprint: 'sha256:f',
+      milestones: [
+        { order: 1, doc: DOC, anchor: CREATE, claimTitle: ADD },
+        { order: 2, doc: DOC, anchor: LIST, claimTitle: LS },
+        { order: 3, doc: DOC, anchor: DONE, claimTitle: FIN },
+      ],
+      bindings: [{ doc: DOC, anchor: CREATE, fingerprint: 'sha256:s' }],
+      composedOf: [],
+      synthesisInputsHash: 'sha256:i',
+    }
+    // The same journey, shortened, re-emitted with no id and no retirement.
+    const reinvented: FlowSet = {
+      flows: [{ title: 'Add and list', goal: 'Reinvented.', milestones: [ms(CREATE, ADD, 1), ms(LIST, LS, 2)] }],
+      noFlowClaims: [{ doc: DOC, anchor: DONE, claimTitle: FIN, reason: 'not a user path' }],
+    }
+    const continued: FlowSet = { flows: [{ ...reinvented.flows[0], id: existing.id }], noFlowClaims: reinvented.noFlowClaims }
+    let refused: { content: string; isError?: boolean } | undefined
+    let ok: { content: string; isError?: boolean } | undefined
+    const { driver } = stubDriver(async (call) => {
+      refused = await callTool(call.input, 'check_flows', reinvented)
+      ok = await callTool(call.input, 'check_flows', continued)
+      return outcome(continued)
+    })
+    const { persistence } = memoryPersistence()
+    const settled = await runAgentLoop<FlowSet>({
+      def: flowsSessionDef({ area: AREA, universe, checker: CHECKER, prior: [existing] }),
+      workItem: flowsSessionWorkItem(AREA.areaId),
+      initialMessages: [flowsSessionBriefing(AREA, undefined, [existing])],
+      driver,
+      persistence,
+      sessionId: 'flows-reconcile',
+    }).outcome
+    expect(settled.status).toBe('completed')
+    expect(refused!.isError).toBe(true)
+    expect(refused!.content).toContain('existing flow "create-list-and-complete-a-task" is neither continued')
+    expect(refused!.content).toContain('continue it by id (kept or amended) or list it in retiredFlows with a reason')
+    expect(ok!.isError).toBeUndefined()
+    // The seam's fold-side refusal reads the same report.
+    expect(flowSetRefusalReason(checkFlowSet(reinvented, { area: AREA, prior: [existing] }))).toContain('1 existing flow(s) left unaccounted')
+    expect(flowSetRefusalReason(checkFlowSet(continued, { area: AREA, prior: [existing] }))).toBeNull()
   })
 
   it('refuses an outcome produced without `check_flows`, exactly once', async () => {
@@ -554,6 +603,30 @@ describe('flowsSessionBriefing', () => {
     expect(flowsSessionBriefing(AREA, { interfaces: [{ surface: 'cli', digests: [] }], dependencies: [] })).not.toContain('GROUNDING')
   })
 
+  it('renders the existing flows to reconcile against, and nothing of them when there are none', () => {
+    const existing: GuardFlow = {
+      id: 'create-list-and-complete-a-task',
+      title: 'Create, list and complete a task',
+      goal: 'A user adds a task, sees it, and completes it.',
+      startingState: { stepCreatable: ['a task'], seedable: [], supplied: [] },
+      fingerprint: 'sha256:f',
+      milestones: [
+        { order: 2, doc: DOC, anchor: LIST, claimTitle: LS },
+        { order: 1, doc: DOC, anchor: CREATE, claimTitle: ADD, caseIds: ['c1'] },
+      ],
+      bindings: [{ doc: DOC, anchor: CREATE, fingerprint: 'sha256:s' }],
+      composedOf: [],
+      synthesisInputsHash: 'sha256:i',
+    }
+    const briefing = flowsSessionBriefing(AREA, undefined, [existing])
+    expect(briefing).toContain('EXISTING FLOWS OF THIS AREA — 1 flow(s)')
+    expect(briefing).toContain('id: create-list-and-complete-a-task')
+    expect(briefing).toContain('startingState: {"stepCreatable":["a task"],"seedable":[],"supplied":[]}')
+    // Milestones in path order, with the case selection.
+    expect(briefing.indexOf(`1. ${DOC}#${CREATE} — ${ADD} [caseIds: c1]`)).toBeLessThan(briefing.indexOf(`2. ${DOC}#${LIST} — ${LS}`))
+    expect(flowsSessionBriefing(AREA, undefined)).not.toContain('EXISTING FLOWS')
+  })
+
   it('the epic briefing is digests only', () => {
     const briefing = flowsEpicSessionBriefing(DIGESTS)
     expect(briefing).toContain('--- F1  (area: tasks)')
@@ -577,6 +650,14 @@ describe('the session cache keys', () => {
     // The old key stays computable, so a synthesized area is not re-synthesized
     // on the way over.
     expect(flowsSessionLegacyCacheKey(AREA)).not.toBe(expected)
+  })
+
+  it('is the same key whatever the existing flows are — they supply identity, not an answer', () => {
+    // The seam computes the key from the area alone; the prior flows ride the
+    // briefing and the checker. This pins that no prior-dependent input exists
+    // on the key's signature at all.
+    expect(flowsSessionCacheKey(AREA)).toBe(flowsSessionCacheKey({ ...AREA }))
+    expect(flowsSessionCacheKey.length).toBe(1)
   })
 
   it('moves with the area id, the claims and the outlines', () => {

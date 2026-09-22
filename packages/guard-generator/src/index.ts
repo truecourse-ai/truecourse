@@ -162,6 +162,8 @@ export {
   type FlowsSessionGrounding,
   type SubsumedFlow,
   type UnsettledArea,
+  type RetiredFlowRecord,
+  type FlowReconciliation,
 } from './flows.js'
 
 export {
@@ -478,6 +480,7 @@ export {
   type SynthesizedFlow,
   type SynthesizedMilestone,
   type SynthesizedEpicFlow,
+  type RetiredFlow,
   ClaimDiffSchema,
   type ClaimDiff,
   WorldClassifySchema,

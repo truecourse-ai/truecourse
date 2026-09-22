@@ -81,9 +81,13 @@ describe('flow driver selection', () => {
     fs.writeFileSync(file, scenario)
     fs.writeFileSync(path.join(r, '.truecourse/scenarios/manifest.json'), JSON.stringify(before.manifest))
     const after = await generate(r, 'web')
-    expect(after.manifest.flows.find(f => !f.orphaned)!.gaps.some((g) => g.surface === 'api')).toBe(false)
-    expect(after.manifest.flows.find(f => f.orphaned)!.scenarios).toMatchObject([{ id: 'expenses.api', drivers: ['api'], status: 'failing' }])
+    // The re-synthesized flow is the SAME flow, amended: it keeps its id and the
+    // failing API test it already has, and only the obsolete API gap goes.
+    expect(after.manifest.flows.map((f) => [f.flowId, f.orphaned])).toEqual([[entry.flowId, undefined]])
+    expect(after.manifest.flows[0].gaps.some((g) => g.surface === 'api')).toBe(false)
+    expect(after.manifest.flows[0].scenarios).toMatchObject([{ id: 'expenses.api', drivers: ['api'], status: 'failing' }])
     expect(fs.readFileSync(file, 'utf8')).toBe(scenario)
+    expect(after.flows.flows[0].id).toBe(entry.flowId)
     expect(after.flows.flows[0].fingerprint).not.toBe(before.flows.flows[0].fingerprint)
   })
 

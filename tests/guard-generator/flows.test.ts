@@ -7,6 +7,7 @@ import {
   buildFlowAreas,
   FLOW_AREA_CLAIM_CEILING,
   flowAreaKey,
+  checkEpicSet,
   checkFlowSet,
   flowSectionKey,
   isFlowSetClean,
@@ -770,7 +771,7 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
     return res.flows
   }
 
-  it('REMAPS an identical milestone set: the id survives a retitled flow', async () => {
+  it('KEEPS an identical milestone set byte-identical: the id survives, the retitle is discarded', async () => {
     const previous = await baseline()
     const r = repo()
     const retitled = {
@@ -783,11 +784,14 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
     const res = await synth(r, [tasksArea], areaSessions({ tasks: retitled }), { previous })
 
     expect(res.flows[0].id).toBe('create-list-and-complete-a-task')
-    expect(res.flows[0].title).toBe('Task lifecycle, end to end')
-    expect(res.orphaned).toEqual([])
+    // An unchanged path is the committed flow, whatever the session called it:
+    // a reworded title of the same journey is the reinvention the rule forbids.
+    expect(res.flows[0]).toEqual(previous[0])
+    expect(res.retired).toEqual([])
+    expect(res.reconciliation).toEqual({ kept: ['create-list-and-complete-a-task', 'adding-a-task-without-a-title-is-rejected'], amended: [], added: [], carried: [] })
   })
 
-  it('goes STALE in place on majority overlap (keeps the id, new fingerprint)', async () => {
+  it('a shortened path with no stated continuation is a NEW flow, and the prior is retired', async () => {
     const previous = await baseline()
     const r = repo()
     const shortened = {
@@ -806,16 +810,17 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
       noFlowClaims: [
         { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' },
       ],
+      retiredFlows: [{ id: previous[0].id, reason: 'the completed filter is no longer part of the lifecycle' }],
     }
     const res = await synth(r, [tasksArea], areaSessions({ tasks: shortened }), { previous })
 
     expect(res.flows[0].id).not.toBe(previous[0].id)
     expect(res.flows[0].fingerprint).not.toBe(previous[0].fingerprint)
-    expect(res.orphaned).toEqual([previous[0]])
+    expect(res.retired).toEqual([{ flow: previous[0], reason: 'the completed filter is no longer part of the lifecycle' }])
     expect(res.noFlowClaims.map((c) => c.claimTitle)).toEqual([LIST_DONE])
   })
 
-  it('ORPHANS a prior flow nothing claims, and gives the newcomer a fresh id', async () => {
+  it('RETIRES a prior flow nothing claims, and gives the newcomer a fresh id', async () => {
     const previous = await baseline()
     const r = repo()
     const rebuilt = {
@@ -836,11 +841,13 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
         { doc: TASKS_DOC, anchor: TASKS.anchors['Listing tasks'], claimTitle: LIST, reason: 'covered as a precondition elsewhere' },
         { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'covered as a precondition elsewhere' },
       ],
+      retiredFlows: [{ id: 'create-list-and-complete-a-task', reason: 'the lifecycle is no longer one path' }],
     }
     const res = await synth(r, [tasksArea], areaSessions({ tasks: rebuilt }), { previous })
 
-    expect(res.orphaned.map((f) => f.id)).toEqual(['create-list-and-complete-a-task'])
+    expect(res.retired.map((r) => [r.flow.id, r.reason])).toEqual([['create-list-and-complete-a-task', 'the lifecycle is no longer one path']])
     expect(res.flows.map((f) => f.id)).toEqual(['adding-a-task-without-a-title-is-rejected', 'browse-the-completed-tasks'])
+    expect(res.reconciliation).toEqual({ kept: ['adding-a-task-without-a-title-is-rejected'], amended: [], added: ['browse-the-completed-tasks'], carried: [] })
   })
 
   it('disambiguates two same-titled flows with -N', async () => {
@@ -860,6 +867,286 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
       }),
     )
     expect(res.flows.map((f) => f.id)).toEqual(['work-with-tasks', 'work-with-tasks-2', 'work-with-tasks-3'])
+  })
+})
+
+describe('synthesizeFlows — reconciliation against the committed corpus', () => {
+  async function baseline(): Promise<GuardFlow[]> {
+    const r = repo()
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: TASK_LIFECYCLE }))
+    return res.flows
+  }
+  const LIFECYCLE_ID = 'create-list-and-complete-a-task'
+  const EDGE_ID = 'adding-a-task-without-a-title-is-rejected'
+
+  /** A seam that records the existing flows each unit was briefed with. */
+  function recordingSessions(answer: FlowSet): FlowsAreaSessionSeam & { prior: Map<string, readonly GuardFlow[]> } {
+    const prior = new Map<string, readonly GuardFlow[]>()
+    const seam = (async ({ areas, prior: given, onArea }: Parameters<FlowsAreaSessionSeam>[0]) => {
+      const byArea = new Map<string, FlowsAreaSessionResult>()
+      for (const area of areas) {
+        prior.set(flowAreaKey(area), given?.get(flowAreaKey(area)) ?? [])
+        byArea.set(flowAreaKey(area), { ok: true, value: answer, inputsKey: 'key:recorded' })
+        onArea?.(area.areaId)
+      }
+      return { byArea, summary: sessionSummary(FLOWS_KIND, { ran: areas.length }) }
+    }) as FlowsAreaSessionSeam & { prior: Map<string, readonly GuardFlow[]> }
+    seam.prior = prior
+    return seam
+  }
+
+  it('briefs each unit with its existing flows, and a second synthesis returns them byte-identical', async () => {
+    const previous = await baseline()
+    const r = repo()
+    // The session's answer: every existing flow continued by id, unchanged.
+    const reconciled: FlowSet = {
+      flows: TASK_LIFECYCLE.flows.map((f, i) => ({ ...f, id: previous[i].id })),
+      noFlowClaims: [],
+    }
+    const seam = recordingSessions(reconciled)
+    const res = await synth(r, [tasksArea], seam, { previous })
+
+    expect(seam.prior.get('tasks')).toEqual(previous)
+    expect(res.flows).toEqual(previous)
+    expect(res.retired).toEqual([])
+    expect(res.reconciliation).toEqual({ kept: [LIFECYCLE_ID, EDGE_ID], amended: [], added: [], carried: [] })
+  })
+
+  it('AMENDS a flow continued by id with new milestones: same id, new fingerprint', async () => {
+    const previous = await baseline()
+    const r = repo()
+    const amended: FlowSet = {
+      flows: [
+        {
+          id: LIFECYCLE_ID,
+          title: 'Create, list and complete a task',
+          goal: 'The lifecycle without the completed filter.',
+          milestones: [ms(TASKS, 'Creating tasks', ADD, 1), ms(TASKS, 'Listing tasks', LIST, 2), ms(TASKS, 'Completing tasks', DONE, 3)],
+        },
+        { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID },
+      ],
+      noFlowClaims: [{ doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' }],
+    }
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: amended }), { previous })
+
+    expect(res.flows[0].id).toBe(LIFECYCLE_ID)
+    expect(res.flows[0].fingerprint).not.toBe(previous[0].fingerprint)
+    expect(res.flows[0].milestones).toHaveLength(3)
+    expect(res.flows[0].synthesisInputsHash).toBe('key:tasks')
+    expect(res.retired).toEqual([])
+    expect(res.reconciliation).toEqual({ kept: [EDGE_ID], amended: [LIFECYCLE_ID], added: [], carried: [] })
+  })
+
+  it('a cached outcome produced before ids existed keeps every unchanged flow by its contract', async () => {
+    const previous = await baseline()
+    const r = repo()
+    // No ids, no retiredFlows — exactly the shape a pre-reconciliation cache entry has.
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: TASK_LIFECYCLE }), { previous })
+    expect(res.flows).toEqual(previous)
+    expect(res.retired).toEqual([])
+    expect(res.reconciliation.kept).toEqual([LIFECYCLE_ID, EDGE_ID])
+  })
+
+  it('the checker REFUSES a draft that leaves an existing flow unaccounted; the fold retires it (a cached value was never checked)', async () => {
+    const previous = await baseline()
+    // The lifecycle re-emitted as a NEW flow with one milestone dropped and no id, no retirement.
+    const reinvented: FlowSet = {
+      flows: [
+        {
+          title: 'Manage tasks end to end',
+          goal: 'Reinvented.',
+          milestones: [ms(TASKS, 'Creating tasks', ADD, 1), ms(TASKS, 'Listing tasks', LIST, 2), ms(TASKS, 'Completing tasks', DONE, 3)],
+        },
+        TASK_LIFECYCLE.flows[1],
+      ],
+      noFlowClaims: [{ doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter' }],
+    }
+    const report = checkFlowSet(reinvented, { area: tasksArea, prior: previous })
+    expect(isFlowSetClean(report)).toBe(false)
+    expect(report.unaccountedFlows).toEqual([
+      `existing flow "${LIFECYCLE_ID}" is neither continued (by id), retired (with a reason) nor re-emitted unchanged`,
+    ])
+
+    // The fold sees the same value as a cache entry from before ids existed
+    // would arrive: it is not refused (that would replay into the same refusal
+    // every generate), the unaccounted flow is retired with the engine's reason.
+    const r = repo()
+    const facts: string[] = []
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: reinvented }), { previous, onFact: (l) => facts.push(l) })
+    expect(res.unsettled).toEqual([])
+    expect(res.retired).toEqual([{ flow: previous[0], reason: 'no flow of the re-synthesized area continues it' }])
+    expect(res.flows.map((f) => f.id)).toEqual(['manage-tasks-end-to-end', EDGE_ID])
+    expect(facts).toContain('tasks: 1 existing flow(s) unaccounted by a value never checked against them, retired')
+    expect(facts).toContain(`${LIFECYCLE_ID}: retired, no flow of the re-synthesized area continues it`)
+  })
+
+  it('REFUSES an id naming no existing flow, one continued twice, and one both continued and retired', async () => {
+    const previous = await baseline()
+    const unknown = checkFlowSet(
+      { flows: [{ ...TASK_LIFECYCLE.flows[0], id: 'no-such-flow' }, { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID }], noFlowClaims: [], retiredFlows: [{ id: LIFECYCLE_ID, reason: 'gone' }] },
+      { area: tasksArea, prior: previous },
+    )
+    expect(unknown.unknownReferences).toContain('id "no-such-flow" names no existing flow of this area')
+
+    // A retirement contradicted by a draft flow with the same milestones and no id.
+    const contradicted = checkFlowSet(
+      { flows: [TASK_LIFECYCLE.flows[0], { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID }], noFlowClaims: [], retiredFlows: [{ id: LIFECYCLE_ID, reason: 'gone' }] },
+      { area: tasksArea, prior: previous },
+    )
+    expect(contradicted.unknownReferences).toEqual([`retired "${LIFECYCLE_ID}" but a flow with the same milestones is in the draft — continue it by id instead`])
+
+    const twice = checkFlowSet(
+      { flows: [{ ...TASK_LIFECYCLE.flows[0], id: EDGE_ID }, { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID }], noFlowClaims: [] },
+      { area: tasksArea, prior: previous },
+    )
+    expect(twice.unknownReferences).toContain(`id "${EDGE_ID}" is continued by more than one flow`)
+    expect(twice.unaccountedFlows).toEqual([expect.stringContaining(LIFECYCLE_ID)])
+
+    const both = checkFlowSet(
+      { flows: TASK_LIFECYCLE.flows.map((f, i) => ({ ...f, id: previous[i].id })), noFlowClaims: [], retiredFlows: [{ id: EDGE_ID, reason: 'gone' }] },
+      { area: tasksArea, prior: previous },
+    )
+    expect(both.unknownReferences).toEqual([`"${EDGE_ID}" is both continued and retired`])
+  })
+
+  it('retires a prior flow whose claims left the inventory before any session, and never briefs it', async () => {
+    const previous = await baseline()
+    const r = repo()
+    // The empty-title claim is gone from the inventory (dismissed, or the doc changed).
+    const withoutEdge: FlowSynthesisArea = { ...tasksArea, claims: TASK_CLAIMS.filter((c) => c.title !== ADD_EMPTY) }
+    const seam = recordingSessions({ flows: [{ ...TASK_LIFECYCLE.flows[0], id: LIFECYCLE_ID }], noFlowClaims: [] })
+    const res = await synth(r, [withoutEdge], seam, { previous })
+
+    expect(seam.prior.get('tasks')!.map((f) => f.id)).toEqual([LIFECYCLE_ID])
+    expect(res.retired).toEqual([{ flow: previous[1], reason: 'none of its claims is in the live claim inventory' }])
+    expect(res.flows.map((f) => f.id)).toEqual([LIFECYCLE_ID])
+  })
+
+  it('retires a prior flow whose documents left every area', async () => {
+    const previous = await baseline()
+    const r = repo()
+    const seam = recordingSessions(AUTH_SESSION)
+    const res = await synth(r, [authArea], seam, { previous })
+
+    expect(seam.prior.get('accounts')).toEqual([])
+    expect(res.retired.map((x) => [x.flow.id, x.reason])).toEqual([
+      [LIFECYCLE_ID, 'its documents are no longer in the corpus'],
+      [EDGE_ID, 'its documents are no longer in the corpus'],
+    ])
+    expect(res.flows.map((f) => f.id)).toEqual(['sign-in-and-sign-out'])
+  })
+
+  it('a new flow never takes a retired flow’s id — its scenario files still carry it', async () => {
+    const previous = await baseline()
+    const r = repo()
+    const answer: FlowSet = {
+      flows: [
+        // Same title as the retired lifecycle, a different path, no continuation.
+        { title: 'Create, list and complete a task', goal: 'A shorter path.', milestones: [ms(TASKS, 'Creating tasks', ADD, 1), ms(TASKS, 'Completing tasks', DONE, 2)] },
+        { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID },
+      ],
+      noFlowClaims: [
+        { doc: TASKS_DOC, anchor: TASKS.anchors['Listing tasks'], claimTitle: LIST, reason: 'listing is a precondition elsewhere' },
+        { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter' },
+      ],
+      retiredFlows: [{ id: LIFECYCLE_ID, reason: 'listing left the lifecycle' }],
+    }
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: answer }), { previous })
+    expect(res.flows.map((f) => f.id)).toEqual([`${LIFECYCLE_ID}-2`, EDGE_ID])
+    expect(res.reconciliation.added).toEqual([`${LIFECYCLE_ID}-2`])
+  })
+
+  it('an unsettled area CARRIES its committed flows and no-flow claims while the other area reconciles', async () => {
+    const r = repo()
+    const first = await synth(r, [tasksArea, authArea], areaSessions({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }))
+    const previous = first.flows
+    const second = await synth(
+      r,
+      [tasksArea, authArea],
+      areaSessions({ tasks: { ok: false, reason: 'the flows session died' }, accounts: { ...AUTH_SESSION, flows: [{ ...AUTH_SESSION.flows[0], id: 'sign-in-and-sign-out' }] } }),
+      { previous },
+    )
+    expect(second.unsettled).toEqual([{ areaId: 'tasks', reason: 'the flows session died' }])
+    expect(second.flows.map((f) => f.id)).toEqual(['sign-in-and-sign-out', LIFECYCLE_ID, EDGE_ID])
+    expect(second.flows.slice(1)).toEqual(previous.filter((f) => f.id !== 'sign-in-and-sign-out'))
+    expect(second.reconciliation).toEqual({ kept: ['sign-in-and-sign-out'], amended: [], added: [], carried: [LIFECYCLE_ID, EDGE_ID] })
+    expect(second.retired).toEqual([])
+    // Not a wipeout: one area synthesized, so the corpus is written with the carried flows.
+    expect(isFlowSynthesisWipeout(second)).toBe(false)
+    expect(readFlowsFile(r)!.flows.map((f) => f.id)).toEqual(['sign-in-and-sign-out', LIFECYCLE_ID, EDGE_ID])
+  })
+
+  it('a run where every area failed is still a wipeout — carried flows are not an answer', async () => {
+    const previous = await baseline()
+    const r = repo()
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: { ok: false, reason: 'died' } }), { previous })
+    expect(res.reconciliation.carried).toEqual([LIFECYCLE_ID, EDGE_ID])
+    expect(isFlowSynthesisWipeout(res)).toBe(true)
+    expect(res.path).toBeUndefined()
+  })
+
+  describe('epics', () => {
+    const EPIC: EpicSynthesis = {
+      epics: [
+        {
+          title: 'Sign in, then manage tasks',
+          goal: 'A signed-in user creates and completes a task.',
+          composedOf: ['F1', 'F2'],
+          milestones: [ms(AUTH, 'Signing in', SIGN_IN, 1), ms(TASKS, 'Creating tasks', ADD, 2), ms(TASKS, 'Completing tasks', DONE, 3)],
+        },
+      ],
+    }
+    async function withEpic(): Promise<{ r: string; previous: GuardFlow[] }> {
+      const r = repo()
+      const res = await synth(r, [authArea, tasksArea], areaSessions({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), { epicSession: epicSession(EPIC) })
+      return { r, previous: res.flows }
+    }
+    const keepAll = (previous: readonly GuardFlow[]) =>
+      areaSessions({
+        tasks: { ...TASK_LIFECYCLE, flows: TASK_LIFECYCLE.flows.map((f) => ({ ...f, id: previous.find((p) => p.title === f.title)!.id })) },
+        accounts: { ...AUTH_SESSION, flows: [{ ...AUTH_SESSION.flows[0], id: 'sign-in-and-sign-out' }] },
+      })
+
+    it('briefs the existing epics and keeps one continued by id byte-identical', async () => {
+      const { r, previous } = await withEpic()
+      const epic = previous.find((f) => f.composedOf.length > 0)!
+      const seam = epicSession({ epics: [{ ...EPIC.epics[0], id: epic.id, title: 'Reworded' }] })
+      const res = await synth(r, [authArea, tasksArea], keepAll(previous), { previous, epicSession: seam })
+      expect(seam.seen[0].prior).toEqual([epic])
+      expect(res.flows).toEqual(previous)
+      expect(res.reconciliation.kept).toContain(epic.id)
+    })
+
+    it('retires an existing epic with the session’s reason', async () => {
+      const { r, previous } = await withEpic()
+      const epic = previous.find((f) => f.composedOf.length > 0)!
+      const res = await synth(r, [authArea, tasksArea], keepAll(previous), {
+        previous,
+        epicSession: epicSession({ epics: [], retiredEpics: [{ id: epic.id, reason: 'signing in is no longer a prerequisite of task work' }] }),
+      })
+      expect(res.retired).toEqual([{ flow: epic, reason: 'signing in is no longer a prerequisite of task work' }])
+      expect(res.flows.map((f) => f.id)).not.toContain(epic.id)
+    })
+
+    it('the epic checker refuses an existing epic left unaccounted', async () => {
+      const { previous } = await withEpic()
+      const epic = previous.find((f) => f.composedOf.length > 0)!
+      const digests = previous.filter((f) => f.composedOf.length === 0).map((f, i) => ({ ref: `F${i + 1}`, areaId: 'x', title: f.title, goal: f.goal, milestones: f.milestones.map((m) => ({ doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle })) }))
+      const { unknownReferences } = checkEpicSet({ epics: [] }, digests, [...AUTH_CLAIMS, ...TASK_CLAIMS], [epic])
+      expect(unknownReferences).toEqual([expect.stringContaining(`existing flow "${epic.id}" is neither continued`)])
+    })
+
+    it('carries the existing epics when the epic session fails, and retires them when the pass cannot run', async () => {
+      const { r, previous } = await withEpic()
+      const epic = previous.find((f) => f.composedOf.length > 0)!
+      const failed = await synth(r, [authArea, tasksArea], keepAll(previous), { previous, epicSession: epicSession({ ok: false, reason: 'died' }) })
+      expect(failed.flows).toContainEqual(epic)
+      expect(failed.reconciliation.carried).toEqual([epic.id])
+
+      // Only one area left: nothing chains, so the epic cannot stand.
+      const oneArea = await synth(r, [tasksArea], areaSessions({ tasks: { ...TASK_LIFECYCLE, flows: TASK_LIFECYCLE.flows.map((f) => ({ ...f, id: previous.find((p) => p.title === f.title)!.id })) } }), { previous })
+      expect(oneArea.retired.map((x) => [x.flow.id, x.reason])).toContainEqual([epic.id, 'fewer than two areas produced flows, so no epic chains them'])
+    })
   })
 })
 
@@ -925,7 +1212,9 @@ describe('synthesizeFlows — the inputs stamp and the write gate', () => {
 
     const wiped = await synth(r, [tasksArea], areaSessions({ tasks: { ok: false, reason: 'flows session failed: gone' } }))
     expect(isFlowSynthesisWipeout(wiped)).toBe(true)
-    expect(wiped.flows).toEqual([])
+    // The committed flows are CARRIED, not synthesized — a stand-in, never an answer.
+    expect(wiped.flows).toEqual(first.flows)
+    expect(wiped.reconciliation.carried).toEqual(first.flows.map((f) => f.id))
     expect(wiped.unsettled).toHaveLength(1)
     expect(wiped.calls).toBe(1)
     expect(wiped.path).toBeUndefined()
