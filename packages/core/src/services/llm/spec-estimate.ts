@@ -191,7 +191,7 @@ import {
   preparationCatalog,
   readGuardDecisions,
   readAuthoredInterfaceCatalog,
-  recipeContractFingerprint,
+  authoringRecipeContract,
   webScreensNeedingAuthoring,
   readInterfaceCatalog,
   readMergedInterfaceCatalog,
@@ -1202,7 +1202,7 @@ export async function estimateGuardSetup(
   // ---- interfaces: reconcile + authoring, both off the on-disk halves -------
   const derivedCatalog = readInterfaceCatalog(repoRoot);
   const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
-  const interfaceRecipeContract = recipeContractFingerprint(repoRoot, 'seed');
+  const interfaceRecipeContract = authoringRecipeContract(repoRoot);
   const interfacesSettled =
     !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
     webScreensNeedingAuthoring({

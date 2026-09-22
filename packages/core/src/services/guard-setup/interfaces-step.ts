@@ -44,7 +44,7 @@ import type {
 } from '@truecourse/guard-generator';
 import {
   computeRecipeFingerprint,
-  recipeContractFingerprint,
+  authoringRecipeContract,
   guardInterfacesPath,
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
@@ -140,7 +140,7 @@ export function buildInterfacesStep(
     const derived = readInterfaceCatalog(input.repoRoot);
     const authored = readAuthoredInterfaceCatalog(input.repoRoot);
     const stale = new Set(staleAuthoredPlaceDiagnostics(derived, authored).map((d) => d.subject));
-    const planned = planWorkItems(derived, authored, recipeContractFingerprint(input.repoRoot, 'seed'));
+    const planned = planWorkItems(derived, authored, authoringRecipeContract(input.repoRoot));
     const workable = planned.filter(
       (item) =>
         !stale.has(item.place.id) &&
@@ -277,7 +277,7 @@ async function runReconcile(
     repoRoot: input.repoRoot,
     diagnostics: disputes,
     entry: resolveEntry(input.repoRoot, [...input.recipe.entry!]),
-    recipeContract: recipeContractFingerprint(input.repoRoot, 'seed'),
+    recipeContract: authoringRecipeContract(input.repoRoot),
     legacyRecipeFingerprint: computeRecipeFingerprint(input.repoRoot),
     driver: async () => {
       acquired = await context.acquire();

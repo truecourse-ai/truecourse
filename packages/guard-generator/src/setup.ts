@@ -26,12 +26,15 @@
  *   3    the catalog                               — SOFT. The externals declaration
  *                                                    skeleton (det) + the
  *                                                    dependency-catalog session seam.
- *   4    interfaces                                — SOFT. The cli reconcile session
+ *   4    the one seed (data AND auth)              — SOFT, never blocks. The seed
+ *                                                    authoring session (`seedSession`).
+ *   5    interfaces                                — SOFT. The cli reconcile session
  *                                                    over the union's disputes, then
  *                                                    the web-task authoring run
- *                                                    (both behind `authorInterfaces`).
- *   5    the one seed (data AND auth)              — SOFT, never blocks. The seed
- *                                                    authoring session (`seedSession`).
+ *                                                    (both behind `authorInterfaces`),
+ *                                                    which opens the app's screens
+ *                                                    signed in as a seeded principal
+ *                                                    — hence after the seed.
  *   5.5  private preparations                      — HARD on execution failure;
  *                                                    unsupported profiles may skip.
  *   6    auth                                      — SOFT; the one step that may end
@@ -74,6 +77,7 @@ import {
   legacyPreparationFingerprint,
   preparationFingerprintComponents,
   recipeContractFingerprint,
+  authoringRecipeContract,
   dependencyCatalogIdentity,
   preparationCatalog,
   dependenciesPath,
@@ -171,7 +175,7 @@ const SPEC_EXCERPT_CHARS = 1500
  * deterministic `mapInterfaces` pass whose in-memory output every later step
  * reads, so it always runs and the detection snapshot is always this run's.
  */
-export const GUARD_SETUP_ONLY_STEPS = ['recipe', 'catalog', 'interfaces', 'seed', 'preparations', 'auth'] as const
+export const GUARD_SETUP_ONLY_STEPS = ['recipe', 'catalog', 'seed', 'interfaces', 'preparations', 'auth'] as const
 export type GuardSetupOnlyStep = (typeof GUARD_SETUP_ONLY_STEPS)[number]
 
 /**
@@ -275,7 +279,8 @@ export interface GuardSetupOptions {
   catalogSession?: GuardSetupCatalogSession
   /**
    * The interfaces step body: the cli reconcile session over the mapping's
-   * diagnostics, then the web-task authoring run.
+   * diagnostics, then the web-task authoring run. Runs after the seed step, so
+   * `recipe` carries the seed the authoring signs its browser in with.
    * Absent ⇒ the step reports a `skipped` placeholder row.
    */
   authorInterfaces?: GuardSetupInterfacesStep
@@ -298,14 +303,14 @@ export interface GuardSetupOptions {
 }
 
 /** Stable step taxonomy for the progress tracker —
- *  recipe → detect → catalog → interfaces → seed → auth
+ *  recipe → detect → catalog → seed → interfaces → preparations → auth
  *  (the old externals step folded INTO catalog). */
 export const GUARD_SETUP_STEPS = [
   { key: 'recipe', label: 'Deriving the recipe' },
   { key: 'detect', label: 'Detecting dependencies' },
   { key: 'catalog', label: 'Cataloguing dependencies' },
-  { key: 'interfaces', label: 'Authoring the interface catalog' },
   { key: 'seed', label: 'Preparing data + principals' },
+  { key: 'interfaces', label: 'Authoring the interface catalog' },
   { key: 'preparations', label: 'Verifying private starting states' },
   { key: 'auth', label: 'Verifying supplied auth' },
 ] as const
@@ -362,7 +367,7 @@ export interface GuardSetupInterfacesStepInput {
   refresh: boolean
   /** Re-author places that already carry authored tasks (the `replace` option). */
   replace: boolean
-  /** The recipe as it stands on disk when the step runs. */
+  /** The recipe as it stands on disk when the step runs — the seed step's write included. */
   recipe: Recipe
   /** The memoized mapping's in-memory catalog — what resolutions edit BEFORE
    *  the corrected snapshot is written back. */
@@ -1206,106 +1211,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   if (externalsStep) soFar.externals = externalsStep
   settleSpine()
 
-  // ---- Step 4: interfaces — reconcile the cli disputes, author the web tasks.
-  // SOFT: an authoring failure fails the STEP, never setup — the derived half of
-  // the catalog is already on disk, and generate runs on whatever authored half
-  // exists. Skip-when-settled needs BOTH halves settled: an unchanged place set
-  // with the authored file missing (deleted, or a clone that never authored) is
-  // work, not a skip; `replace` is an explicit re-author and never skips
-  // either.
-  if (enter('interfaces')) {
-    const interfacesFp = interfacesFingerprint(repoRoot)
-    const authoredExists = fs.existsSync(guardAuthoredInterfacesPath(repoRoot))
-    // The derived catalog is what this step reconciles and authors over, so it
-    // names what the derivation produced whichever branch below runs.
-    for (const line of derivedInterfaceFacts(repoRoot, mapped.interfaces)) fact('interfaces', line)
-    if (replayed('interfaces')) {
-      // Prior step: the merged catalog on disk — the derived half detect just
-      // re-wrote, plus whatever authored half the bundle carried in — is what
-      // the later steps read. No reconcile session, no authoring run.
-      if (!ranBefore('interfaces')) {
-        throw new SetupStepNotReadyError('interfaces', 'no interfaces row in guard/setup.json')
-      }
-      fact('interfaces', 'replayed: the authored catalog stands as it is')
-      opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
-    } else if (holds('interfaces', legacyInterfacesFingerprint(repoRoot)) && authoredExists && opts.replace !== true &&
-      webScreensNeedingAuthoring({
-        derived: readInterfaceCatalog(repoRoot),
-        authored: readAuthoredInterfaceCatalog(repoRoot),
-        recipeContract: recipeContractFingerprint(repoRoot, 'seed'),
-      }).size === 0) {
-      pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
-      fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')
-      opts.onStepDone?.('interfaces', 'unchanged')
-    } else if (opts.authorInterfaces) {
-      const result = await opts.authorInterfaces({
-        repoRoot,
-        fingerprint: interfacesFp,
-        refresh: opts.refresh === true,
-        replace: opts.replace === true,
-        recipe: reloadRecipe(repoRoot) ?? recipe,
-        interfaces: mapped.interfaces,
-        diagnostics: mapped.diagnostics,
-      })
-      pushStep({
-        key: 'interfaces',
-        status: result.status,
-        ...(result.reason ? { reason: result.reason } : {}),
-        // The fingerprint this step PLANNED over: the step writes only the
-        // authored half, which no input of its key reads, so the row records
-        // the same value before and after the run rather than re-reading a tree
-        // the authoring may have moved underneath it.
-        inputFingerprint: interfacesFp,
-        ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
-        // The step row is where run reporting lands (diagnostics are NEVER
-        // stored in the catalog, and 01-D left the dashboard silent on them).
-        ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
-        ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
-        ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
-        ...(result.labelRekeys !== undefined ? { labelRekeys: result.labelRekeys } : {}),
-        ...(result.failedScreens && result.failedScreens.length > 0
-          ? { failedScreens: result.failedScreens }
-          : {}),
-      })
-      for (const screen of result.failedScreens ?? []) {
-        fact('interfaces', `${screen.place}: not authored (${screen.reason ?? 'the session did not settle'}) — refresh to retry`)
-      }
-      if (result.labelRekeys) {
-        fact('interfaces', `${result.labelRekeys} re-authored task${result.labelRekeys === 1 ? '' : 's'} moved a key through a reworded label alone`)
-      }
-      if (result.resolutions && result.resolutions.length > 0) {
-        fact(
-          'interfaces',
-          result.reconcileFromCache
-            ? `${result.resolutions.length} tree-vs-probe dispute${result.resolutions.length === 1 ? '' : 's'} settled from cache`
-            : `the reconcile session settled ${result.resolutions.length} tree-vs-probe dispute${result.resolutions.length === 1 ? '' : 's'}`,
-        )
-        for (const resolution of result.resolutions) {
-          fact('interfaces', `${resolution.subject}: ${resolution.resolution}, ${firstReasonLine(resolution.evidence)}`)
-        }
-      }
-      for (const change of result.changes ?? []) fact('interfaces', `catalog edit: ${change}`)
-      opts.onStepDone?.('interfaces', result.reason ?? result.status)
-    } else {
-      pushStep({
-        key: 'interfaces',
-        status: 'skipped',
-        reason:
-          'interface authoring is not wired into this run — inject the `authorInterfaces` seam (production does)',
-        inputFingerprint: interfacesFp,
-      })
-      fact('interfaces', 'interface authoring is not wired into this run; the derived catalog stands alone')
-      opts.onStepDone?.('interfaces', 'not wired into this run')
-    }
-  }
-  settleSpine()
-
   // The recipe on disk may have changed under the catalog step (the skeleton is a
   // real write), so the seed drafts against the RELOADED one — its fingerprint has
   // already moved.
   const current = reloadRecipe(repoRoot) ?? recipe
 
-  // ---- Step 5: the one seed — data AND auth. SOFT. -------------------------
+  // ---- Step 4: the one seed — data AND auth. SOFT. -------------------------
   const seedFpOf = (): string => computeSeedStepFingerprint(repoRoot)
   let seedStep: GuardSetupSeedStep | undefined
   /** A recipe defect the seed's cold-clone proof surfaced: the run fails on it. */
@@ -1406,6 +1317,103 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // The recipe row too: the seed's cold-clone proof may have unsettled it.
   soFar.recipe = recipeStep
   if (seedStep) soFar.seed = seedStep
+  settleSpine()
+
+  // ---- Step 5: interfaces — reconcile the cli disputes, author the web tasks.
+  // SOFT: an authoring failure fails the STEP, never setup — the derived half of
+  // the catalog is already on disk, and generate runs on whatever authored half
+  // exists. Skip-when-settled needs BOTH halves settled: an unchanged place set
+  // with the authored file missing (deleted, or a clone that never authored) is
+  // work, not a skip; `replace` is an explicit re-author and never skips
+  // either. It runs AFTER the seed on purpose: the authoring sessions open the
+  // app's screens in a browser signed in as a seeded principal, so the seed's
+  // principals are an input of theirs, and the recipe they read is the one the
+  // seed step just wrote.
+  if (enter('interfaces')) {
+    const interfacesFp = interfacesFingerprint(repoRoot)
+    const authoredExists = fs.existsSync(guardAuthoredInterfacesPath(repoRoot))
+    // The derived catalog is what this step reconciles and authors over, so it
+    // names what the derivation produced whichever branch below runs.
+    for (const line of derivedInterfaceFacts(repoRoot, mapped.interfaces)) fact('interfaces', line)
+    if (replayed('interfaces')) {
+      // Prior step: the merged catalog on disk — the derived half detect just
+      // re-wrote, plus whatever authored half the bundle carried in — is what
+      // the later steps read. No reconcile session, no authoring run.
+      if (!ranBefore('interfaces')) {
+        throw new SetupStepNotReadyError('interfaces', 'no interfaces row in guard/setup.json')
+      }
+      fact('interfaces', 'replayed: the authored catalog stands as it is')
+      opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
+    } else if (holds('interfaces', legacyInterfacesFingerprint(repoRoot)) && authoredExists && opts.replace !== true &&
+      webScreensNeedingAuthoring({
+        derived: readInterfaceCatalog(repoRoot),
+        authored: readAuthoredInterfaceCatalog(repoRoot),
+        recipeContract: authoringRecipeContract(repoRoot),
+      }).size === 0) {
+      pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
+      fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')
+      opts.onStepDone?.('interfaces', 'unchanged')
+    } else if (opts.authorInterfaces) {
+      const result = await opts.authorInterfaces({
+        repoRoot,
+        fingerprint: interfacesFp,
+        refresh: opts.refresh === true,
+        replace: opts.replace === true,
+        recipe: reloadRecipe(repoRoot) ?? recipe,
+        interfaces: mapped.interfaces,
+        diagnostics: mapped.diagnostics,
+      })
+      pushStep({
+        key: 'interfaces',
+        status: result.status,
+        ...(result.reason ? { reason: result.reason } : {}),
+        // The fingerprint this step PLANNED over: the step writes only the
+        // authored half, which no input of its key reads, so the row records
+        // the same value before and after the run rather than re-reading a tree
+        // the authoring may have moved underneath it.
+        inputFingerprint: interfacesFp,
+        ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
+        // The step row is where run reporting lands (diagnostics are NEVER
+        // stored in the catalog, and 01-D left the dashboard silent on them).
+        ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
+        ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
+        ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
+        ...(result.labelRekeys !== undefined ? { labelRekeys: result.labelRekeys } : {}),
+        ...(result.failedScreens && result.failedScreens.length > 0
+          ? { failedScreens: result.failedScreens }
+          : {}),
+      })
+      for (const screen of result.failedScreens ?? []) {
+        fact('interfaces', `${screen.place}: not authored (${screen.reason ?? 'the session did not settle'}) — refresh to retry`)
+      }
+      if (result.labelRekeys) {
+        fact('interfaces', `${result.labelRekeys} re-authored task${result.labelRekeys === 1 ? '' : 's'} moved a key through a reworded label alone`)
+      }
+      if (result.resolutions && result.resolutions.length > 0) {
+        fact(
+          'interfaces',
+          result.reconcileFromCache
+            ? `${result.resolutions.length} tree-vs-probe dispute${result.resolutions.length === 1 ? '' : 's'} settled from cache`
+            : `the reconcile session settled ${result.resolutions.length} tree-vs-probe dispute${result.resolutions.length === 1 ? '' : 's'}`,
+        )
+        for (const resolution of result.resolutions) {
+          fact('interfaces', `${resolution.subject}: ${resolution.resolution}, ${firstReasonLine(resolution.evidence)}`)
+        }
+      }
+      for (const change of result.changes ?? []) fact('interfaces', `catalog edit: ${change}`)
+      opts.onStepDone?.('interfaces', result.reason ?? result.status)
+    } else {
+      pushStep({
+        key: 'interfaces',
+        status: 'skipped',
+        reason:
+          'interface authoring is not wired into this run — inject the `authorInterfaces` seam (production does)',
+        inputFingerprint: interfacesFp,
+      })
+      fact('interfaces', 'interface authoring is not wired into this run; the derived catalog stands alone')
+      opts.onStepDone?.('interfaces', 'not wired into this run')
+    }
+  }
   settleSpine()
 
   // Private state is its own targeted setup step; it never replaces the main seed.
@@ -1659,14 +1667,15 @@ function writeCatalogSettle(repoRoot: string, fingerprint: string): void {
 }
 
 /** Sorted derived web place `(id, address)` pairs :: the recipe CONTRACT as it
- *  stands before the seed step — the interfaces step re-runs when a screen
- *  appeared, moved or vanished, or when the promise it derives against changed.
- *  A dependency bump, a catalog edit, and the seed and preparations the later
- *  steps of the same run write reach none of it.
+ *  stands before the preparations step, the seed included — the interfaces
+ *  step re-runs when a screen appeared, moved or vanished, or when the promise
+ *  it derives against changed, the principals it signs in with among it. A
+ *  dependency bump, a catalog edit, and the preparations a later step of the
+ *  same run writes reach none of it.
  *  Exported for the pre-flight estimate's settled check. */
 export function interfacesFingerprint(repoRoot: string): string {
   return createHash('sha256')
-    .update(`${derivedWebPlacePairs(repoRoot)}::${recipeContractFingerprint(repoRoot, 'seed')}`)
+    .update(`${derivedWebPlacePairs(repoRoot)}::${authoringRecipeContract(repoRoot)}`)
     .digest('hex')
 }
 
@@ -1753,7 +1762,7 @@ function stepInputComponents(
     case 'interfaces':
       return {
         places: digest(derivedWebPlacePairs(repoRoot)),
-        'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'seed')),
+        'recipe.contract': digest(authoringRecipeContract(repoRoot)),
       }
     case 'seed':
       return {

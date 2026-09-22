@@ -489,6 +489,7 @@ export { RecipePreparationBaselineCheckSchema } from './recipe.js';
 
 export {
   recipeContractFingerprint,
+  authoringRecipeContract,
   computePreparationFingerprint,
   legacyPreparationFingerprint,
   preparationFingerprintComponents,

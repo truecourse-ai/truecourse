@@ -297,8 +297,8 @@ describe('runGuardSetup — the step spine', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ])
@@ -321,8 +321,8 @@ describe('runGuardSetup — the step spine', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ])
@@ -1247,7 +1247,7 @@ describe('runGuardSetup — the interfaces step', () => {
     }
   }
 
-  it('the seed a run drafts after them does not re-open the catalog or the interfaces rows', async () => {
+  it('the seed a run drafts does not re-open the catalog or the interfaces rows', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
     writeCatalogs(r, { authored: true })
@@ -1262,8 +1262,9 @@ describe('runGuardSetup — the interfaces step', () => {
     writeGuardSetup(r, one.report)
     expect(catalogCalls).toBe(1)
     expect(one.report.steps.find((s) => s.key === 'seed')).toMatchObject({ status: 'ok' })
-    // The seed step wrote `api.seed` into the recipe AFTER the catalog and
-    // interfaces rows were stamped: neither reads it, so neither moves.
+    // The seed step wrote `api.seed` into the recipe AFTER the catalog row was
+    // stamped (which does not read it) and BEFORE the interfaces row (which was
+    // stamped over the recipe the seed left behind): neither moves.
     expect(JSON.parse(fs.readFileSync(recipePath(r), 'utf-8')).api.seed).toBeDefined()
 
     const facts: string[] = []
@@ -1284,8 +1285,8 @@ describe('runGuardSetup — the interfaces step', () => {
         .map((s) => [s.key, s.status, s.reason]),
     ).toEqual([
       ['catalog', 'skipped', 'unchanged'],
-      ['interfaces', 'skipped', 'unchanged'],
       ['seed', 'skipped', 'unchanged'],
+      ['interfaces', 'skipped', 'unchanged'],
     ])
     expect(facts.filter((line) => line.includes('re-opened'))).toEqual([])
   })

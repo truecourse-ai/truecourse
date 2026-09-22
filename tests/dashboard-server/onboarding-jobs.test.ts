@@ -423,8 +423,8 @@ describe('the guard setup job', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ]);
@@ -515,7 +515,7 @@ describe('the guard setup job', () => {
       steps: { key: string; status: string }[];
     };
     // Everything up to the step the balance stopped, and nothing past it.
-    expect(report.steps.map((s) => s.key)).toEqual(['recipe', 'detect', 'catalog', 'interfaces']);
+    expect(report.steps.map((s) => s.key)).toEqual(['recipe', 'detect', 'catalog']);
     expect(report.steps.every((s) => s.status !== 'failed')).toBe(true);
     // And the recipe it derived travels too — the expensive half of the step.
     expect(Object.keys(bundle)).toContain('.truecourse/scenarios/recipe.json');

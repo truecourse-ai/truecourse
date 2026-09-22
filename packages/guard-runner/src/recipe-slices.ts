@@ -86,6 +86,16 @@ export function recipeContractFingerprint(repoRoot: string, before?: RecipeWriti
   return digest({ recipe: hashableRecipeText(text), scripts })
 }
 
+/**
+ * The recipe contract the web tasks are AUTHORED against: everything before the
+ * preparations step, the seed included. Authoring runs after the seed step and
+ * opens the app's screens signed in as a seeded principal, so the seed is one of
+ * its inputs; the preparations a later step writes are not.
+ */
+export function authoringRecipeContract(repoRoot: string): string {
+  return recipeContractFingerprint(repoRoot, 'preparations')
+}
+
 /** The recipe text with every block written by `step` and the steps after it removed. */
 function recipeTextBefore(raw: string, step: RecipeWritingStep): string {
   let parsed: unknown

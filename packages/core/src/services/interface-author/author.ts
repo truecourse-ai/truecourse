@@ -57,7 +57,7 @@ import type {
 import {
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
-  recipeContractFingerprint,
+  authoringRecipeContract,
   staleAuthoredPlaceDiagnostics,
   unsettledAuthoring,
   webScreenAuthoringStates,
@@ -262,7 +262,7 @@ function placeIndex(
 export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<AuthorRunResult> {
   const derived = readInterfaceCatalog(opts.repoRoot)
   let authored = readAuthoredInterfaceCatalog(opts.repoRoot)
-  const recipeContract = recipeContractFingerprint(opts.repoRoot, 'seed')
+  const recipeContract = authoringRecipeContract(opts.repoRoot)
 
   const all = planWorkItems(derived, authored, recipeContract)
 

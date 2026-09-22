@@ -35,7 +35,7 @@ import {
 import {
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
-  recipeContractFingerprint,
+  authoringRecipeContract,
 } from '@truecourse/guard-runner';
 import { CreditsExhaustedError, isCreditsPauseFailure } from '@truecourse/shared';
 import type { SessionDriver, SessionEvent, SessionPersistence } from '@truecourse/agent-loop';
@@ -79,7 +79,7 @@ export function readGuardInterfacesAuthorView(repoRoot: string): GuardInterfaces
   const derived = readInterfaceCatalog(repoRoot);
   const authored = readAuthoredInterfaceCatalog(repoRoot);
   return {
-    places: planWorkItems(derived, authored, recipeContractFingerprint(repoRoot, 'seed')).map((item) => ({
+    places: planWorkItems(derived, authored, authoringRecipeContract(repoRoot)).map((item) => ({
       id: item.place.id,
       kind: item.place.kind,
       title: item.place.title,

@@ -31,15 +31,17 @@ export type GuardSetupStepStatus = z.infer<typeof GuardSetupStepStatusSchema>
 /**
  * The setup taxonomy, in run order. `externals` folded INTO `catalog` (the
  * skeleton write runs inside that step); `interfaces` and `auth` are new steps of
- * the rebuilt setup. The legacy top-level `recipe`/`externals`/`seed` report fields stay
- * populated for back-compat — the `steps` array is the new spine.
+ * the rebuilt setup, and `interfaces` runs after `seed` because its sessions open
+ * the app signed in as a seeded principal. The legacy top-level
+ * `recipe`/`externals`/`seed` report fields stay populated for back-compat — the
+ * `steps` array is the new spine.
  */
 export const GuardSetupTaxonomyKeySchema = z.enum([
   'recipe',
   'detect',
   'catalog',
-  'interfaces',
   'seed',
+  'interfaces',
   'preparations',
   'auth',
 ])

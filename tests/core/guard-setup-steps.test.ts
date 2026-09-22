@@ -287,12 +287,12 @@ describe('the persisted report', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ]);
-    expect(whole.reached).toEqual(['catalog', 'interfaces', 'seed', 'preparations', 'auth']);
+    expect(whole.reached).toEqual(['catalog', 'seed', 'interfaces', 'preparations', 'auth']);
 
     // One step, forced: --refresh with --only-<step> re-runs that step alone.
     const single = seams();
@@ -311,8 +311,8 @@ describe('the persisted report', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ]);
