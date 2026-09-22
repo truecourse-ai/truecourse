@@ -17,6 +17,7 @@ import {
   getModelPrices,
   heldModelPrices,
   priceForModel,
+  type CallCost,
   type CallTokens,
   type ModelPrice,
 } from './model-prices.js';
@@ -81,7 +82,7 @@ export function buildProviderConfig(api: LlmApiConfig | undefined): ProviderConf
  * with the table already held and never waits for one; a null records the turn
  * unpriced. Cost is observational: it never delays or fails a call.
  */
-export function priceCall(modelId: string, usage: CallTokens): number | null {
+export function priceCall(modelId: string, usage: CallTokens): CallCost | null {
   const table = heldModelPrices();
   if (!table) return null;
   const price = priceForModel(modelId, table);
@@ -97,7 +98,7 @@ export function priceCall(modelId: string, usage: CallTokens): number | null {
  */
 export function pricingFor(
   cfg: Pick<ProviderConfig, 'model' | 'priceModel'>,
-): (modelId: string, usage: CallTokens) => number | null {
+): (modelId: string, usage: CallTokens) => CallCost | null {
   return (modelId, usage) =>
     priceCall(cfg.priceModel && modelId === cfg.model ? cfg.priceModel : modelId, usage);
 }

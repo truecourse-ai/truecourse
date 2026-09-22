@@ -1088,11 +1088,11 @@ describe('api session driver pricing', () => {
     return (turn as { usage: Record<string, unknown> }).usage;
   }
 
-  it('records what the hook priced the turn at', async () => {
-    expect(await firstTurnUsage(() => 0.42)).toMatchObject({
-      costUsd: 0.42,
-      costSource: 'model-priced',
-    });
+  it('records what the hook priced the turn at, whole and by kind', async () => {
+    const cost = { input: 0.1, output: 0.3, cached: 0.02 };
+    const usage = await firstTurnUsage(() => cost);
+    expect(usage).toMatchObject({ cost, costSource: 'model-priced' });
+    expect(usage.costUsd as number).toBeCloseTo(0.42, 12);
   });
 
   it('records a turn the hook could not price as unpriced, never as free', async () => {

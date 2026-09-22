@@ -14,7 +14,7 @@ import {
 } from '../../packages/core/src/services/llm/token-estimator.js';
 import { estimateScanTokens } from '../../packages/core/src/services/llm/spec-estimate.js';
 import { curateInProcess } from '../../packages/core/src/commands/spec-in-process.js';
-import { costOfCall, priceForModel, type PriceTable } from '../../packages/core/src/services/llm/model-prices.js';
+import { costOfCall, priceForModel, totalCost, type PriceTable } from '../../packages/core/src/services/llm/model-prices.js';
 import { discoverDocs, writeDecisions } from '../../packages/spec-consolidator/src/index.js';
 import type { DecisionsFile, RepoIdentity, ScopeVerdict } from '../../packages/spec-consolidator/src/index.js';
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
@@ -185,12 +185,14 @@ describe('estimateStageTokens', () => {
       [0, 0, inputTokens],
       [200, 3000, 800],
     ]) {
-      const ran = costOfCall(opus, {
-        inputTokens: fresh!,
-        outputTokens,
-        cacheReadTokens: read!,
-        cacheCreateTokens: written!,
-      })!;
+      const ran = totalCost(
+        costOfCall(opus, {
+          inputTokens: fresh!,
+          outputTokens,
+          cacheReadTokens: read!,
+          cacheCreateTokens: written!,
+        })!,
+      );
       expect(ran).toBeLessThanOrEqual(est.estimatedCostUsd! + 1e-15);
     }
   });

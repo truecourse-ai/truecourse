@@ -55,6 +55,10 @@ function delta(over: Partial<UsageDelta> = {}): UsageDelta {
     costUsd: 1,
     startedAt: '2026-06-14T10:00:00.000Z',
     finishedAt: '2026-06-14T10:10:00.000Z',
+    // A test that names only the total spent it all on input.
+    inputCostUsd: over.costUsd ?? 1,
+    outputCostUsd: 0,
+    cachedCostUsd: 0,
     ...over,
   };
 }
@@ -277,6 +281,9 @@ describe('the usage reads', () => {
         repoFullName: null,
         startedAt: '2026-06-14T11:00:00.000Z',
         costUsd: 3,
+        inputCostUsd: 1,
+        outputCostUsd: 1.5,
+        cachedCostUsd: 0.5,
         inputTokens: 20,
         outputTokens: 700,
         cacheReadTokens: 9000,
@@ -295,18 +302,40 @@ describe('the usage reads', () => {
       '2026-06-14',
       '2026-06-15',
     ]);
-    expect(series[0]).toEqual({ at: '2026-06-09', costUsd: 0, input: 0, output: 0, cached: 0, byJobType: {} });
+    expect(series[0]).toEqual({
+      at: '2026-06-09',
+      costUsd: 0,
+      costByKind: { input: 0, output: 0, cached: 0 },
+      input: 0,
+      output: 0,
+      cached: 0,
+      byJobType: {},
+    });
     // Every measure the chart can plot, per job type: a cache write is input,
-    // a cache read is cached — the split the totals and the runs use.
+    // a cache read is cached — the split the totals and the runs use — and the
+    // cost split the same three ways.
     expect(series[5]).toEqual({
       at: '2026-06-14',
       costUsd: 5,
+      costByKind: { input: 3, output: 1.5, cached: 0.5 },
       input: 1420,
       output: 800,
       cached: 9000,
       byJobType: {
-        'repo.guard-generate': { costUsd: 2, input: 1000, output: 100, cached: 0 },
-        'context.scan': { costUsd: 3, input: 420, output: 700, cached: 9000 },
+        'repo.guard-generate': {
+          costUsd: 2,
+          costByKind: { input: 2, output: 0, cached: 0 },
+          input: 1000,
+          output: 100,
+          cached: 0,
+        },
+        'context.scan': {
+          costUsd: 3,
+          costByKind: { input: 1, output: 1.5, cached: 0.5 },
+          input: 420,
+          output: 700,
+          cached: 9000,
+        },
       },
     });
   });

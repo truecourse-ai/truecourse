@@ -158,6 +158,9 @@ describe('GET /api/credits', () => {
       cacheCreateTokens: 0,
       calls: 1,
       costUsd: 1.2,
+      inputCostUsd: 0.2,
+      outputCostUsd: 1,
+      cachedCostUsd: 0,
       startedAt: '2026-03-01T10:00:00.000Z',
       finishedAt: '2026-03-01T10:00:00.000Z',
     });

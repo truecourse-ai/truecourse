@@ -47,6 +47,10 @@ function usageRow(over: Partial<UsageDelta> = {}): Promise<string> {
     costUsd: 0.25,
     startedAt: at,
     finishedAt: at,
+    // A test that names only the total spent it all on input.
+    inputCostUsd: over.costUsd ?? 0.25,
+    outputCostUsd: 0,
+    cachedCostUsd: 0,
     ...over,
   });
 }

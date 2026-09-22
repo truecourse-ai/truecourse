@@ -335,13 +335,24 @@ export async function usageTotals(query: UsageQuery): Promise<UsageTotals> {
 function addAmount(a: UsageAmount, b: UsageAmount): UsageAmount {
   return {
     costUsd: exact(a.costUsd + b.costUsd),
+    costByKind: {
+      input: exact(a.costByKind.input + b.costByKind.input),
+      output: exact(a.costByKind.output + b.costByKind.output),
+      cached: exact(a.costByKind.cached + b.costByKind.cached),
+    },
     input: a.input + b.input,
     output: a.output + b.output,
     cached: a.cached + b.cached,
   };
 }
 
-const NO_AMOUNT: UsageAmount = { costUsd: 0, input: 0, output: 0, cached: 0 };
+const NO_AMOUNT: UsageAmount = {
+  costUsd: 0,
+  costByKind: { input: 0, output: 0, cached: 0 },
+  input: 0,
+  output: 0,
+  cached: 0,
+};
 
 /**
  * The trend: one point per bucket of the period, each split by job type, and
@@ -367,6 +378,7 @@ export async function usageSeries(
     const split = usageTokenSplit(row);
     const amount: UsageAmount = {
       costUsd: row.costUsd,
+      costByKind: { input: row.inputCostUsd, output: row.outputCostUsd, cached: row.cachedCostUsd },
       input: split.input,
       output: split.output,
       cached: split.cached,

@@ -18,6 +18,7 @@ import {
   heldModelPrices,
   priceForModel,
   resetModelPriceSource,
+  totalCost,
   type PriceTable,
 } from '../../packages/core/src/services/llm/model-prices.js';
 import { priceCall, pricingFor, priceOfConfig } from '../../packages/core/src/services/llm/provider.js';
@@ -213,17 +214,24 @@ describe('costOfCall — a call that ran', () => {
   const USAGE = { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 50_000, cacheCreateTokens: 4000 };
 
   it('prices every bucket at its own published rate', () => {
-    expect(costOfCall(OPUS, USAGE)).toBeCloseTo(
+    expect(totalCost(costOfCall(OPUS, USAGE)!)).toBeCloseTo(
       1000 * 0.000005 + 200 * 0.000025 + 50_000 * 0.0000005 + 4000 * 0.00000625,
       12,
     );
   });
 
+  it('splits the cost the way the tokens are split: a cache write is input', () => {
+    const cost = costOfCall(OPUS, USAGE)!;
+    expect(cost.input).toBeCloseTo(1000 * 0.000005 + 4000 * 0.00000625, 12);
+    expect(cost.output).toBeCloseTo(200 * 0.000025, 12);
+    expect(cost.cached).toBeCloseTo(50_000 * 0.0000005, 12);
+  });
+
   it('charges a cache read less than the same tokens fresh, and a cache write more', () => {
     const tokens = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0 };
-    const fresh = costOfCall(OPUS, { ...tokens, inputTokens: 10_000 })!;
-    const read = costOfCall(OPUS, { ...tokens, cacheReadTokens: 10_000 })!;
-    const written = costOfCall(OPUS, { ...tokens, cacheCreateTokens: 10_000 })!;
+    const fresh = totalCost(costOfCall(OPUS, { ...tokens, inputTokens: 10_000 })!);
+    const read = totalCost(costOfCall(OPUS, { ...tokens, cacheReadTokens: 10_000 })!);
+    const written = totalCost(costOfCall(OPUS, { ...tokens, cacheCreateTokens: 10_000 })!);
     expect(read).toBeCloseTo(fresh / 10, 12);
     expect(written).toBeCloseTo(fresh * 1.25, 12);
   });
@@ -233,7 +241,7 @@ describe('costOfCall — a call that ran', () => {
     expect(costOfCall(noCache, { ...USAGE, cacheCreateTokens: 0 })).toBeNull();
     expect(costOfCall(noCache, { ...USAGE, cacheReadTokens: 0 })).toBeNull();
     // A bucket with no tokens needs no rate.
-    expect(costOfCall(noCache, { ...USAGE, cacheReadTokens: 0, cacheCreateTokens: 0 })).toBeCloseTo(
+    expect(totalCost(costOfCall(noCache, { ...USAGE, cacheReadTokens: 0, cacheCreateTokens: 0 })!)).toBeCloseTo(
       1000 * 0.000003 + 200 * 0.000015,
       12,
     );
@@ -260,7 +268,7 @@ describe('pricingFor', () => {
 
   it('prices the deployment as the model it serves, cache reads at the cache rate', async () => {
     const priced = await hookFor({ model: 'gpt-5.6-sol-2', priceModel: 'gpt-5.6-sol' });
-    expect(priced('gpt-5.6-sol-2', USAGE)).toBeCloseTo(cost({ ...SOL, cacheRead: SOL.cacheRead! }), 12);
+    expect(totalCost(priced('gpt-5.6-sol-2', USAGE)!)).toBeCloseTo(cost({ ...SOL, cacheRead: SOL.cacheRead! }), 12);
   });
 
   it('cannot price a deployment name on its own', async () => {
@@ -270,7 +278,7 @@ describe('pricingFor', () => {
 
   it('prices any other model the call really ran on under its own id', async () => {
     const priced = await hookFor({ model: 'gpt-5.6-sol-2', priceModel: 'gpt-5.6-sol' });
-    expect(priced('gpt-5.6-luna', USAGE)).toBeCloseTo(cost(LUNA), 12);
+    expect(totalCost(priced('gpt-5.6-luna', USAGE)!)).toBeCloseTo(cost(LUNA), 12);
   });
 
   it('records a turn unpriced while no table has been fetched', () => {

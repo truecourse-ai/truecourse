@@ -23,6 +23,18 @@ export const CostSourceSchema = z.enum(['provider-reported', 'model-priced', 'un
 export type CostSource = z.infer<typeof CostSourceSchema>;
 
 /**
+ * What a priced turn cost, split the way the Usage page splits its tokens: a
+ * cache WRITE is input (fresh input read at full price on its way into the
+ * cache), `cached` is the cheap cache reads. The three add up to `costUsd`.
+ */
+export const TurnCostSchema = z.object({
+  input: z.number(),
+  output: z.number(),
+  cached: z.number(),
+});
+export type TurnCost = z.infer<typeof TurnCostSchema>;
+
+/**
  * One turn's token usage, in the four disjoint buckets `StageUsage` already
  * tracks (input here = fresh, non-cached input). `reasoningTokens` is a
  * SUBSET of `outputTokens` — informational, never an addend.
@@ -34,6 +46,8 @@ export const TurnUsageSchema = z.object({
   cacheCreateTokens: z.number(),
   reasoningTokens: z.number().optional(),
   costUsd: z.number(),
+  /** `costUsd` split by kind; present only on a priced turn. */
+  cost: TurnCostSchema.optional(),
   costSource: CostSourceSchema,
 });
 export type TurnUsage = z.infer<typeof TurnUsageSchema>;

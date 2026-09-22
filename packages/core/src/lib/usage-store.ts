@@ -36,6 +36,10 @@ export interface UsageDelta {
   cacheCreateTokens: number;
   calls: number;
   costUsd: number;
+  /** `costUsd` by kind: fresh input and cache writes, output, cache reads. */
+  inputCostUsd: number;
+  outputCostUsd: number;
+  cachedCostUsd: number;
   /** The first call in this flush. */
   startedAt: string;
   /** The last one. */
@@ -84,6 +88,9 @@ export interface UsageSeriesRecord {
   at: string;
   jobType: string;
   costUsd: number;
+  inputCostUsd: number;
+  outputCostUsd: number;
+  cachedCostUsd: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;

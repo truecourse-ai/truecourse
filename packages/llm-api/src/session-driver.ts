@@ -44,6 +44,7 @@ import type {
   SessionRunInput,
   SessionStatus,
   ToolContext,
+  TurnCost,
   TurnUsage,
   RawPayload,
 } from '@truecourse/agent-loop';
@@ -187,9 +188,9 @@ export function retryDelayMs(
 }
 
 export interface ApiSessionDriverOptions {
-  /** Cost for one turn's usage, in USD, or null when the turn cannot be priced.
-   *  A number ⇒ the turn records `costSource: 'model-priced'`; null, or no hook ⇒ `unpriced`. */
-  pricing?: (modelId: string, usage: CallUsage) => number | null;
+  /** Cost for one turn's usage, in USD split by kind, or null when the turn cannot be priced.
+   *  A split ⇒ the turn records `costSource: 'model-priced'`; null, or no hook ⇒ `unpriced`. */
+  pricing?: (modelId: string, usage: CallUsage) => TurnCost | null;
   /** Overrides on `DEFAULT_API_RETRY`, field by field. */
   retry?: Partial<ApiRetryPolicy>;
   /**
@@ -1093,12 +1094,15 @@ function turnUsageOf(
 ): TurnUsage {
   const callUsage: CallUsage = callUsageOf(usage);
   let costUsd = 0;
+  let cost: TurnCost | undefined;
   let costSource: TurnUsage['costSource'] = 'unpriced';
   if (pricing) {
     try {
       const priced = pricing(modelId, callUsage);
-      if (priced !== null && Number.isFinite(priced)) {
-        costUsd = priced;
+      const total = priced ? priced.input + priced.output + priced.cached : NaN;
+      if (priced && Number.isFinite(total)) {
+        costUsd = total;
+        cost = priced;
         costSource = 'model-priced';
       }
     } catch {
@@ -1110,6 +1114,7 @@ function turnUsageOf(
     ...callUsage,
     ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     costUsd,
+    ...(cost ? { cost } : {}),
     costSource,
   };
 }

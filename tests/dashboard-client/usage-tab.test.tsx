@@ -40,6 +40,8 @@ if (!Element.prototype.scrollTo) {
 
 const realFetch = window.fetch;
 
+const NO_COST = { input: 0, output: 0, cached: 0 };
+
 const USAGE: UsageResponse = {
   period: {
     key: '30d',
@@ -60,16 +62,29 @@ const USAGE: UsageResponse = {
     runs: 2,
   },
   series: [
-    { at: '2026-09-14', costUsd: 0, input: 0, output: 0, cached: 0, byJobType: {} },
+    { at: '2026-09-14', costUsd: 0, costByKind: NO_COST, input: 0, output: 0, cached: 0, byJobType: {} },
     {
       at: '2026-09-15',
       costUsd: 12.5,
+      costByKind: { input: 5.9, output: 5.6, cached: 1 },
       input: 980_000,
       output: 220_000,
       cached: 800_000,
       byJobType: {
-        'repo.guard-generate': { costUsd: 10, input: 600_000, output: 200_000, cached: 800_000 },
-        'context.scan': { costUsd: 2.5, input: 380_000, output: 20_000, cached: 0 },
+        'repo.guard-generate': {
+          costUsd: 10,
+          costByKind: { input: 4, output: 5, cached: 1 },
+          input: 600_000,
+          output: 200_000,
+          cached: 800_000,
+        },
+        'context.scan': {
+          costUsd: 2.5,
+          costByKind: { input: 1.9, output: 0.6, cached: 0 },
+          input: 380_000,
+          output: 20_000,
+          cached: 0,
+        },
       },
     },
   ],
@@ -137,7 +152,7 @@ const EMPTY: UsageResponse = {
     calls: 0,
     runs: 0,
   },
-  series: [{ at: '2026-09-15', costUsd: 0, input: 0, output: 0, cached: 0, byJobType: {} }],
+  series: [{ at: '2026-09-15', costUsd: 0, costByKind: NO_COST, input: 0, output: 0, cached: 0, byJobType: {} }],
   runs: [],
   repositories: [],
   jobTypes: [],
@@ -214,7 +229,7 @@ describe('Settings › Usage', () => {
     serve();
     renderUsage();
 
-    const chart = await screen.findByRole('region', { name: 'Spend over time' });
+    const chart = await screen.findByRole('region', { name: 'Usage over time' });
     // One band per job type that spent, named in the product's words.
     expect(within(chart).getByText('Flow generation')).toBeInTheDocument();
     expect(within(chart).getByText('Document scan')).toBeInTheDocument();
@@ -263,54 +278,58 @@ describe('Settings › Usage', () => {
     expect(address()).toBe('/agent/run_gen');
   });
 
-  it('plots cost per job type, or the sum of the toggled token kinds, without asking the server again', async () => {
+  it('plots the toggled kinds per job type, in cost or in tokens, without asking the server again', async () => {
     const state = serve();
     renderUsage();
 
-    const chart = await screen.findByRole('region', { name: 'Spend over time' });
-    const measures = within(chart).getByRole('group', { name: 'Measure' });
-    // Two measures; the kinds are toggles of the Tokens measure, not measures.
-    expect(within(measures).getAllByRole('button').map((b) => b.textContent)).toEqual(['Cost', 'Tokens']);
-    expect(within(chart).queryByRole('group', { name: 'Token kinds' })).toBeNull();
+    const chart = await screen.findByRole('region', { name: 'Usage over time' });
+    const measures = within(chart).getByRole('radiogroup', { name: 'Measure' });
+    // Two measures, one of them chosen; the kinds are checkboxes beside them,
+    // and they narrow either measure.
+    expect(within(measures).getAllByRole('radio').map((b) => b.textContent)).toEqual(['Cost', 'Tokens']);
+    expect(within(measures).getByRole('radio', { name: 'Cost' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(measures).getByRole('radio', { name: 'Tokens' })).toHaveAttribute('aria-checked', 'false');
+    const kinds = within(chart).getByRole('group', { name: 'Kinds' });
+    const kind = (name: string) => within(kinds).getByRole('checkbox', { name });
+    expect(within(kinds).getAllByRole('checkbox').map((b) => b.textContent)).toEqual(['Input', 'Output', 'Cached']);
+    for (const name of ['Input', 'Output', 'Cached']) expect(kind(name)).toHaveAttribute('aria-checked', 'true');
     const plotted = () => within(chart).getByRole('img').querySelector('desc')!.textContent;
-    // Cost: one band per job type.
+    // Cost, every kind on: each job type's whole cost.
+    expect(plotted()).toContain('cost (input + output + cached)');
     expect(plotted()).toContain('Sep 15: $2.50 document scan, $10.00 flow generation');
 
     const before = state.calls.length;
-    await userEvent.click(within(measures).getByRole('button', { name: 'Tokens' }));
-    const kinds = within(chart).getByRole('group', { name: 'Token kinds' });
-    const kind = (name: string) => within(kinds).getByRole('button', { name });
-    expect(within(kinds).getAllByRole('button').map((b) => b.textContent)).toEqual(['Input', 'Output', 'Cached']);
-    // Every kind on by default: each job type's input + output + cached.
-    for (const name of ['Input', 'Output', 'Cached']) expect(kind(name)).toHaveAttribute('aria-pressed', 'true');
-    expect(plotted()).toContain('tokens (input + output + cached)');
-    expect(plotted()).toContain('Sep 15: 400.0K document scan, 1.6M flow generation');
-
-    // Turning a kind off takes it out of every band's sum.
+    // Turning a kind off takes its cost out of every band.
     await userEvent.click(kind('Output'));
-    expect(kind('Output')).toHaveAttribute('aria-pressed', 'false');
+    expect(kind('Output')).toHaveAttribute('aria-checked', 'false');
+    expect(plotted()).toContain('cost (input + cached)');
+    expect(plotted()).toContain('Sep 15: $1.90 document scan, $5.00 flow generation');
+
+    // Tokens keeps the kinds that were picked.
+    await userEvent.click(within(measures).getByRole('radio', { name: 'Tokens' }));
+    expect(within(measures).getByRole('radio', { name: 'Tokens' })).toHaveAttribute('aria-checked', 'true');
     expect(plotted()).toContain('tokens (input + cached)');
     expect(plotted()).toContain('Sep 15: 380.0K document scan, 1.4M flow generation');
 
     await userEvent.click(kind('Input'));
     expect(plotted()).toContain('Sep 15: 0 document scan, 800.0K flow generation');
 
-    // The last kind on stays on.
+    // The last kind on stays on, and says why.
     expect(kind('Cached')).toHaveAttribute('aria-disabled', 'true');
+    expect(kind('Cached')).toHaveAccessibleDescription('At least one kind stays on.');
+    expect(kind('Output')).not.toHaveAttribute('aria-disabled');
     await userEvent.click(kind('Cached'));
-    expect(kind('Cached')).toHaveAttribute('aria-pressed', 'true');
+    expect(kind('Cached')).toHaveAttribute('aria-checked', 'true');
     expect(plotted()).toContain('Sep 15: 0 document scan, 800.0K flow generation');
 
-    // Output alone fills the chart with output.
+    // Output alone fills the chart with output, in tokens and in cost.
     await userEvent.click(kind('Output'));
     await userEvent.click(kind('Cached'));
     expect(plotted()).toContain('tokens (output). ');
     expect(plotted()).toContain('Sep 15: 20.0K document scan, 200.0K flow generation');
-
-    // Cost reads as it always has.
-    await userEvent.click(within(measures).getByRole('button', { name: 'Cost' }));
-    expect(within(chart).queryByRole('group', { name: 'Token kinds' })).toBeNull();
-    expect(plotted()).toContain('Sep 15: $2.50 document scan, $10.00 flow generation');
+    await userEvent.click(within(measures).getByRole('radio', { name: 'Cost' }));
+    expect(plotted()).toContain('cost (output). ');
+    expect(plotted()).toContain('Sep 15: $0.60 document scan, $5.00 flow generation');
 
     // The period's total beneath stays what it is, each number said once.
     expect(screen.getByText('$12.50')).toBeInTheDocument();
@@ -337,11 +356,12 @@ describe('Settings › Usage', () => {
     const line = await screen.findByText('1.0M input · 200.0K output');
     expect(line).toHaveTextContent(/^1\.0M input · 200\.0K output$/);
     // Nor does the chart offer to plot a cache that held nothing.
-    const measures = screen.getByRole('group', { name: 'Measure' });
-    await userEvent.click(within(measures).getByRole('button', { name: 'Tokens' }));
-    const kinds = screen.getByRole('group', { name: 'Token kinds' });
-    expect(within(kinds).getAllByRole('button').map((b) => b.textContent)).toEqual(['Input', 'Output']);
-    expect(screen.getByRole('img', { name: 'Spend over time' }).querySelector('desc')!.textContent).toContain(
+    const measures = screen.getByRole('radiogroup', { name: 'Measure' });
+    await userEvent.click(within(measures).getByRole('radio', { name: 'Tokens' }));
+    const kinds = screen.getByRole('group', { name: 'Kinds' });
+    expect(within(kinds).getAllByRole('checkbox').map((b) => b.textContent)).toEqual(['Input', 'Output']);
+    for (const box of within(kinds).getAllByRole('checkbox')) expect(box).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('img', { name: 'Usage over time' }).querySelector('desc')!.textContent).toContain(
       'tokens (input + output)',
     );
   });
@@ -350,25 +370,77 @@ describe('Settings › Usage', () => {
     const state = serve();
     renderUsage();
 
-    await screen.findByRole('region', { name: 'Spend over time' });
+    await screen.findByRole('region', { name: 'Usage over time' });
     expect(asked(state).get('period')).toBeNull();
+    // The period is one choice: a radio group with exactly one option checked.
+    const periods = screen.getByRole('radiogroup', { name: 'Period' });
+    const checked = () =>
+      within(periods)
+        .getAllByRole('radio')
+        .filter((r) => r.getAttribute('aria-checked') === 'true')
+        .map((r) => r.textContent);
+    expect(within(periods).getAllByRole('radio').map((r) => r.textContent)).toEqual([
+      '7 days',
+      '30 days',
+      '90 days',
+      'Custom',
+    ]);
+    expect(checked()).toEqual(['30 days']);
 
-    await userEvent.click(screen.getByRole('button', { name: '7 days' }));
+    await userEvent.click(within(periods).getByRole('radio', { name: '7 days' }));
     await waitFor(() => expect(asked(state).get('period')).toBe('7d'));
     expect(address()).toBe('/settings/usage?period=7d');
+    expect(checked()).toEqual(['7 days']);
+
+    // The arrow keys move the choice, and the address follows.
+    await userEvent.keyboard('{ArrowRight}');
+    await waitFor(() => expect(address()).toBe('/settings/usage?period=30d'));
+    expect(checked()).toEqual(['30 days']);
+  });
+
+  it('keeps the chart header the same shape whether or not a point is hovered', async () => {
+    serve();
+    renderUsage();
+
+    const chart = await screen.findByRole('region', { name: 'Usage over time' });
+    const header = chart.querySelector('[data-slot="chart-header"]')!;
+    const readout = () => header.querySelector('[data-slot="chart-readout"]');
+    // The readout's slot is there at rest, empty, since the numbers come with the pointer.
+    expect(readout()).not.toBeNull();
+    expect(readout()!.textContent).toBe('');
+    // Its line cannot wrap: a value appearing never adds a line.
+    expect(readout()!.parentElement!.className).toContain('whitespace-nowrap');
+    expect(readout()!.parentElement!.className).toContain('h-5');
+    const atRest = header.children.length;
+
+    const plot = within(chart).getByRole('img');
+    // Hover (or keyboard focus) fills the same slot rather than adding one.
+    plot.focus();
+    await waitFor(() => expect(readout()!.textContent).toContain('Sep 15'));
+    expect(header.children.length).toBe(atRest);
+    expect(readout()!.parentElement!.className).toContain('whitespace-nowrap');
+  });
+
+  it('names the chart without a native tooltip', async () => {
+    serve();
+    renderUsage();
+
+    const chart = await screen.findByRole('region', { name: 'Usage over time' });
+    const svg = within(chart).getByRole('img', { name: 'Usage over time' });
+    expect(svg.querySelector('title')).toBeNull();
   });
 
   it('sends the reader’s own zone, and keeps it off the address', async () => {
     const state = serve();
     renderUsage();
 
-    await screen.findByRole('region', { name: 'Spend over time' });
+    await screen.findByRole('region', { name: 'Usage over time' });
     // The chart's days are cut in the zone the reader is in, the way the runs
     // beneath it are already written in it.
     expect(asked(state).get('tz')).toBe(ZONE);
     expect(address()).toBe('/settings/usage');
 
-    await userEvent.click(screen.getByRole('button', { name: '7 days' }));
+    await userEvent.click(screen.getByRole('radio', { name: '7 days' }));
     await waitFor(() => expect(asked(state).get('period')).toBe('7d'));
     expect(asked(state).get('tz')).toBe(ZONE);
     expect(address()).toBe('/settings/usage?period=7d');
@@ -378,7 +450,7 @@ describe('Settings › Usage', () => {
     const state = serve();
     renderUsage('/settings/usage?period=90d&repo=web&jobType=repo.guard-generate');
 
-    await screen.findByRole('region', { name: 'Spend over time' });
+    await screen.findByRole('region', { name: 'Usage over time' });
     const sent = asked(state);
     expect(sent.get('period')).toBe('90d');
     expect(sent.get('repo')).toBe('web');
@@ -393,7 +465,7 @@ describe('Settings › Usage', () => {
     const state = serve();
     renderUsage();
 
-    await screen.findByRole('region', { name: 'Spend over time' });
+    await screen.findByRole('region', { name: 'Usage over time' });
     await userEvent.click(screen.getByRole('button', { name: 'Add filter' }));
     await userEvent.click(screen.getByRole('option', { name: /Repository/ }));
     await userEvent.click(screen.getByRole('option', { name: /acme\/web/ }));
@@ -406,8 +478,8 @@ describe('Settings › Usage', () => {
     const state = serve();
     renderUsage();
 
-    await screen.findByRole('region', { name: 'Spend over time' });
-    await userEvent.click(screen.getByRole('button', { name: 'Custom' }));
+    await screen.findByRole('region', { name: 'Usage over time' });
+    await userEvent.click(screen.getByRole('radio', { name: 'Custom' }));
 
     expect(screen.getByLabelText('From')).toBeInTheDocument();
     expect(screen.getByLabelText('To')).toBeInTheDocument();
@@ -424,9 +496,9 @@ describe('Settings › Usage', () => {
 
     expect(await screen.findByText('No usage in this period')).toBeInTheDocument();
     expect(screen.getByText(/Usage is on record from/)).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Spend over time' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Usage over time' })).toBeNull();
     // The control row stays: the period that shows nothing is the one to change.
-    expect(screen.getByRole('group', { name: 'Period' })).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: 'Period' })).toBeInTheDocument();
   });
 
   it('says so when nothing has ever spent', async () => {

@@ -9,19 +9,19 @@
  *
  * Under it the trend: one quiet band per job type over the period's days (its
  * weeks, once a day per point stops being readable), plotting its cost or its
- * tokens, picked beside it. Tokens plot the sum of the kinds toggled on
+ * tokens, picked beside it. Either plots the sum of the kinds toggled on
  * (input, output, cached), per job type, at least one always on. The
  * period's total sits once beneath it with its tokens split into input, output
  * and cached. Then the runs that spent it, four corners each, carrying the same
  * split and opening the conversation they belong to.
  *
  * The server folded every number, named every value and faceted every filter;
- * the one sum made here is the toggled token kinds, which is presentation.
+ * the one sum made here is the toggled kinds, which is presentation.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Coins } from 'lucide-react';
+import { Check, Coins } from 'lucide-react';
 import {
   USAGE_PERIODS,
   usageJobTypeWord,
@@ -42,6 +42,7 @@ import {
 import { fetchUsage } from '@/lib/api';
 import { EntityList } from '@/dashboard/ui/entity-list';
 import { FilterBuilder, filterKey, selectedValues } from '@/dashboard/ui/filter-builder';
+import { SegmentedControl } from '@/dashboard/ui/segmented-control';
 import { StackedArea, type StackedSeries } from '@/dashboard/ui/stacked-area';
 import {
   RUN_STATUS_TONE,
@@ -73,9 +74,7 @@ const PERIOD_LABEL: Record<UsagePeriod, string> = {
   custom: 'Custom',
 };
 
-const CHIP = 'rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors';
-const CHIP_ON = 'bg-primary text-primary-foreground ring-1 ring-inset ring-current';
-const CHIP_OFF = 'bg-muted text-foreground';
+const PERIOD_OPTIONS = USAGE_PERIODS.map((key) => ({ key, label: PERIOD_LABEL[key] }));
 const DATE_FIELD =
   'rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary';
 
@@ -122,17 +121,68 @@ const OUTCOME_ORDER: JobStatus[] = [
 const MEASURES = ['cost', 'tokens'] as const;
 type Measure = (typeof MEASURES)[number];
 
-const MEASURE_LABEL: Record<Measure, string> = { cost: 'Cost', tokens: 'Tokens' };
+const MEASURE_OPTIONS = [
+  { key: 'cost', label: 'Cost' },
+  { key: 'tokens', label: 'Tokens' },
+] as const satisfies readonly { key: Measure; label: string }[];
 
-/** The token kinds the Tokens measure sums, in the order the toggles offer them. */
-const TOKEN_KINDS = ['input', 'output', 'cached'] as const;
-type TokenKind = (typeof TOKEN_KINDS)[number];
+/** The kinds either measure sums, in the order the toggles offer them. */
+const KINDS = ['input', 'output', 'cached'] as const;
+type Kind = (typeof KINDS)[number];
 
-const TOKEN_KIND_LABEL: Record<TokenKind, string> = {
+const KIND_LABEL: Record<Kind, string> = {
   input: 'Input',
   output: 'Output',
   cached: 'Cached',
 };
+
+/**
+ * One token kind as a checkbox chip: outlined, a ticked box when on, an empty
+ * box when off. The last kind on is locked, and says why.
+ */
+function KindChip({
+  label,
+  on,
+  locked,
+  onToggle,
+}: {
+  label: string;
+  on: boolean;
+  locked: boolean;
+  onToggle: () => void;
+}) {
+  const why = useId();
+  return (
+    <>
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={on}
+        aria-disabled={locked || undefined}
+        aria-describedby={locked ? why : undefined}
+        onClick={onToggle}
+        className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          on ? 'border-foreground/30 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'
+        } ${locked ? 'cursor-default' : ''}`}
+      >
+        <span
+          aria-hidden
+          className={`inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-[3px] border ${
+            on ? 'border-foreground bg-foreground text-background' : 'border-muted-foreground/60'
+          }`}
+        >
+          {on && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+        </span>
+        {label}
+      </button>
+      {locked && (
+        <span id={why} className="sr-only">
+          At least one kind stays on.
+        </span>
+      )}
+    </>
+  );
+}
 
 /** A share as a whole percent; a share too small to round to one still reads as some. */
 function formatShare(share: number): string {
@@ -202,7 +252,7 @@ export function UsageTab() {
   const [measure, setMeasure] = useState<Measure>('cost');
   // The kinds the reader toggled; null until they touch one, so the default is
   // whatever kinds the period has.
-  const [toggled, setToggled] = useState<TokenKind[] | null>(null);
+  const [toggled, setToggled] = useState<Kind[] | null>(null);
 
   const period: UsagePeriod = (USAGE_PERIODS as readonly string[]).includes(params.get('period') ?? '')
     ? (params.get('period') as UsagePeriod)
@@ -294,7 +344,7 @@ export function UsageTab() {
     const present = new Set<string>();
     for (const point of usage?.series ?? []) {
       for (const [jobType, amount] of Object.entries(point.byJobType)) {
-        if (amount.costUsd > 0 || TOKEN_KINDS.some((kind) => amount[kind] > 0)) present.add(jobType);
+        if (amount.costUsd > 0 || KINDS.some((kind) => amount[kind] > 0)) present.add(jobType);
       }
     }
     return [...present]
@@ -309,7 +359,7 @@ export function UsageTab() {
   // A period nothing was cached in offers no Cached toggle, the way its split
   // shows no cached figure: a flat zero would read as a cache that missed.
   const kinds = useMemo(
-    () => TOKEN_KINDS.filter((kind) => kind !== 'cached' || usage?.totals.split.cacheHitRate !== null),
+    () => KINDS.filter((kind) => kind !== 'cached' || usage?.totals.split.cacheHitRate !== null),
     [usage],
   );
   const selectedKinds = useMemo(() => {
@@ -319,7 +369,7 @@ export function UsageTab() {
 
   // The last kind on stays on: a chart of no tokens is not a reading.
   const toggleKind = useCallback(
-    (kind: TokenKind) => {
+    (kind: Kind) => {
       if (selectedKinds.includes(kind)) {
         if (selectedKinds.length > 1) setToggled(selectedKinds.filter((k) => k !== kind));
       } else {
@@ -329,7 +379,7 @@ export function UsageTab() {
     [kinds, selectedKinds],
   );
 
-  // Each job type's band is its cost, or the sum of its toggled token kinds.
+  // Each job type's band is the sum of its toggled kinds, in cost or in tokens.
   const points = useMemo(
     () =>
       (usage?.series ?? []).map((point) => ({
@@ -338,10 +388,8 @@ export function UsageTab() {
           series.map((s) => {
             const amount = point.byJobType[s.key];
             if (!amount) return [s.key, 0];
-            const value =
-              measure === 'cost'
-                ? amount.costUsd
-                : selectedKinds.reduce((sum, kind) => sum + amount[kind], 0);
+            const byKind = measure === 'cost' ? amount.costByKind : amount;
+            const value = selectedKinds.reduce((sum, kind) => sum + byKind[kind], 0);
             return [s.key, value];
           }),
         ) as Record<string, number>,
@@ -360,26 +408,11 @@ export function UsageTab() {
   );
 
   const format = measure === 'cost' ? formatUsd : formatTokens;
-  const valueNote =
-    measure === 'tokens'
-      ? `tokens (${selectedKinds.map((kind) => TOKEN_KIND_LABEL[kind].toLowerCase()).join(' + ')})`
-      : undefined;
+  const valueNote = `${measure} (${selectedKinds.map((kind) => KIND_LABEL[kind].toLowerCase()).join(' + ')})`;
 
   const control = (
     <span className="mr-2 flex flex-wrap items-center gap-1">
-      <span role="group" aria-label="Period" className="flex items-center gap-1">
-        {USAGE_PERIODS.map((key) => (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={period === key}
-            onClick={() => pickPeriod(key)}
-            className={`${CHIP} ${period === key ? CHIP_ON : CHIP_OFF}`}
-          >
-            {PERIOD_LABEL[key]}
-          </button>
-        ))}
-      </span>
+      <SegmentedControl label="Period" options={PERIOD_OPTIONS} value={period} onChange={pickPeriod} />
       {period === 'custom' && (
         <span className="flex items-center gap-1">
           <input
@@ -439,7 +472,7 @@ export function UsageTab() {
           <>
             <div className="border-b border-border px-6 py-5">
               <StackedArea<string>
-                label="Spend over time"
+                label="Usage over time"
                 series={series}
                 points={points}
                 numbersAtRest={false}
@@ -447,39 +480,22 @@ export function UsageTab() {
                 valueNote={valueNote}
                 controls={
                   <span className="flex flex-wrap items-center gap-3">
-                    <span role="group" aria-label="Measure" className="flex items-center gap-1">
-                      {MEASURES.map((key) => (
-                        <button
-                          key={key}
-                          type="button"
-                          aria-pressed={measure === key}
-                          onClick={() => setMeasure(key)}
-                          className={`${CHIP} ${measure === key ? CHIP_ON : CHIP_OFF}`}
-                        >
-                          {MEASURE_LABEL[key]}
-                        </button>
-                      ))}
+                    <SegmentedControl label="Measure" options={MEASURE_OPTIONS} value={measure} onChange={setMeasure} />
+                    <span role="group" aria-label="Kinds" className="flex items-center gap-1.5">
+                      {kinds.map((kind) => {
+                        const on = selectedKinds.includes(kind);
+                        const last = on && selectedKinds.length === 1;
+                        return (
+                          <KindChip
+                            key={kind}
+                            label={KIND_LABEL[kind]}
+                            on={on}
+                            locked={last}
+                            onToggle={() => toggleKind(kind)}
+                          />
+                        );
+                      })}
                     </span>
-                    {measure === 'tokens' && (
-                      <span role="group" aria-label="Token kinds" className="flex items-center gap-1">
-                        {kinds.map((kind) => {
-                          const on = selectedKinds.includes(kind);
-                          const last = on && selectedKinds.length === 1;
-                          return (
-                            <button
-                              key={kind}
-                              type="button"
-                              aria-pressed={on}
-                              aria-disabled={last || undefined}
-                              onClick={() => toggleKind(kind)}
-                              className={`${CHIP} ${on ? CHIP_ON : CHIP_OFF} ${last ? 'cursor-default' : ''}`}
-                            >
-                              {TOKEN_KIND_LABEL[kind]}
-                            </button>
-                          );
-                        })}
-                      </span>
-                    )}
                   </span>
                 }
               />

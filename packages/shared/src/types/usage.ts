@@ -92,12 +92,22 @@ export interface UsageTotals {
   runs: number;
 }
 
+/** A cost split by the same three kinds the tokens are: input, output, cached. */
+export interface UsageCostByKind {
+  /** Uncached input plus cache writes. */
+  input: number;
+  output: number;
+  /** Input served from the prompt cache. */
+  cached: number;
+}
+
 /**
- * A bucket's spend, one number per thing the trend can plot: its cost, and its
- * tokens split the way {@link UsageTokenSplit} splits them.
+ * A bucket's spend, one number per thing the trend can plot: its cost, whole
+ * and by kind, and its tokens split the way {@link UsageTokenSplit} splits them.
  */
 export interface UsageAmount {
   costUsd: number;
+  costByKind: UsageCostByKind;
   /** Uncached input plus cache writes. */
   input: number;
   output: number;

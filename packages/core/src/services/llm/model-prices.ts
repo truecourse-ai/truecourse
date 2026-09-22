@@ -253,6 +253,17 @@ export interface CallTokens {
 }
 
 /**
+ * A call's cost by kind, the way the Usage page splits tokens: a cache write
+ * is input (fresh input read at full price on its way into the cache), and
+ * `cached` is the cache reads.
+ */
+export interface CallCost {
+  input: number;
+  output: number;
+  cached: number;
+}
+
+/**
  * What one call that RAN cost: every bucket at its own published rate.
  *
  * A call that reported tokens in a cache bucket the model publishes no rate for
@@ -262,13 +273,17 @@ export interface CallTokens {
  * free. An unpriced turn is recorded as unpriced, which is the truth; a
  * bucket with no tokens needs no rate.
  */
-export function costOfCall(price: ModelPrice, usage: CallTokens): number | null {
+export function costOfCall(price: ModelPrice, usage: CallTokens): CallCost | null {
   if (usage.cacheReadTokens > 0 && price.cacheRead === undefined) return null;
   if (usage.cacheCreateTokens > 0 && price.cacheWrite === undefined) return null;
-  return (
-    usage.inputTokens * price.input +
-    usage.outputTokens * price.output +
-    usage.cacheReadTokens * (price.cacheRead ?? 0) +
-    usage.cacheCreateTokens * (price.cacheWrite ?? 0)
-  );
+  return {
+    input: usage.inputTokens * price.input + usage.cacheCreateTokens * (price.cacheWrite ?? 0),
+    output: usage.outputTokens * price.output,
+    cached: usage.cacheReadTokens * (price.cacheRead ?? 0),
+  };
+}
+
+/** A call's cost as one number. */
+export function totalCost(cost: CallCost): number {
+  return cost.input + cost.output + cost.cached;
 }
