@@ -185,7 +185,7 @@ export async function startServer(): Promise<void> {
   //    link hook enqueues the connected repository's Flow setup, and started
   //    after — the task bodies read seams (the work-tree provider) the
   //    connection installs.
-  const jobs = createServerJobs({ db: getDb(), connectionString: databaseUrl });
+  const jobs = createServerJobs({ db: getDb(), connectionString: databaseUrl, repos: repoLinks });
   // Disconnecting a repository stops whatever it has in flight.
   setRepoJobsCanceller(jobs.cancelRepoJobs);
   // A Context mutation is workspace-wide, so it rides the SSE stream the
@@ -229,6 +229,17 @@ export async function startServer(): Promise<void> {
         repoFullName: link.repoFullName,
         workspaceOrgId: link.workspaceOrgId,
         source: 'chain',
+      });
+      return outcome.status;
+    },
+    // A push to the default branch runs the main chain at the pushed commit.
+    startMainChain: async (trigger) => {
+      const link = await repoLinks.getRepo(trigger.repoFullName);
+      if (!link) return 'failed';
+      const outcome = await jobs.startMainChain({
+        repoId: link.slug,
+        repoFullName: link.repoFullName,
+        workspaceOrgId: link.workspaceOrgId,
       });
       return outcome.status;
     },

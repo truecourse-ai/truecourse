@@ -36,6 +36,7 @@ import {
   reachableInstallations,
   splitRepo,
   uninstallApp,
+  type BaselineTrigger,
   type InstallationStore,
   type GithubAuth,
   type OctokitClient,
@@ -101,7 +102,16 @@ export interface GithubConnectionOverrides {
    * without one the repository is linked and left for a Set up.
    */
   startSetup?: SetupStart;
+  /**
+   * A push to a connected repository's default branch runs the main chain at
+   * the pushed commit. Boot passes the mount's `startMainChain`; without one a
+   * push only re-reads the repository's documentation.
+   */
+  startMainChain?: MainChainStart;
 }
+
+/** How a push starts the main chain: the queue's answer, as a word. */
+export type MainChainStart = (trigger: BaselineTrigger) => Promise<'queued' | 'busy' | 'failed'>;
 
 /** How connect starts a repository's setup: the queue's answer, as a word. */
 export type SetupStart = (link: RepositoryRecord) => Promise<'queued' | 'busy' | 'failed'>;
@@ -156,6 +166,7 @@ export function createGithubConnection(
         return createRunClone(repoKey, await tokenFor(via.installationId), {
           workspaceOrgId: via.workspaceOrgId,
           defaultBranch: via.defaultBranch ?? null,
+          commitSha: via.commitSha ?? null,
         });
       }
       const link = await repos.getRepo(repoKey);
@@ -166,6 +177,7 @@ export function createGithubConnection(
       return createRunClone(repoKey, await tokenFor(installationId), {
         workspaceOrgId: link.workspaceOrgId,
         defaultBranch: link.defaultBranch,
+        commitSha: via?.commitSha ?? null,
       });
     });
   setWorkTreeProvider('github', workTree);
@@ -212,9 +224,17 @@ export function createGithubConnection(
     secret: cfg.webhookSecret,
     store,
     repos,
-    // A connected repository's push.
+    // A connected repository's push: its documentation is re-read, and the
+    // main chain runs at the pushed commit.
     onBaseline: (trigger) => {
       syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
+      void overrides.startMainChain?.(trigger)
+        .then((outcome) => {
+          if (outcome !== 'queued') log.info(`[github] ${trigger.repoFullName} pushed — main chain ${outcome}`);
+        })
+        .catch((err: unknown) => {
+          log.error(`[github] could not start ${trigger.repoFullName}'s main chain: ${(err as Error).message}`);
+        });
     },
     // A push to a repository this installation reaches that Code has NOT
     // connected. It has no baseline and no repository page, but one workspace

@@ -187,6 +187,38 @@ describe('webhook router', () => {
     expect(baselineCalls).toHaveLength(0);
   });
 
+  it('remembers the pushed commit on the repository before the push is reported', async () => {
+    await store.linkRepo(repoLink('acme/api', 5));
+    let shaWhenReported: string | null | undefined;
+    baselineCalls.length = 0;
+    app = express();
+    app.use(express.json({ verify: (req, _res, buf) => { (req as express.Request & { rawBody?: Buffer }).rawBody = buf; } }));
+    app.use(
+      '/api/ee/github',
+      createWebhookRouter({
+        secret: SECRET,
+        store,
+        repos: store,
+        sourceWorkspaceOf: async () => null,
+        onBaseline: (t) => {
+          baselineCalls.push(t);
+          void store.getRepo('acme/api').then((r) => { shaWhenReported = r?.defaultBranchSha; });
+        },
+      }),
+    );
+
+    await post('push', {
+      ref: 'refs/heads/main',
+      after: 'sha-after',
+      repository: { full_name: 'acme/api', default_branch: 'main' },
+      installation: { id: 5 },
+    }).expect(202);
+
+    expect(baselineCalls).toHaveLength(1);
+    expect(shaWhenReported).toBe('sha-after');
+    expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBe('sha-after');
+  });
+
   it('ignores a push to an unconnected repo', async () => {
     await post('push', {
       ref: 'refs/heads/main',

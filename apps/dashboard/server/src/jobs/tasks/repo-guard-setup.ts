@@ -39,7 +39,7 @@ import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.se
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { markWorldStateUnknown } from '../materialize-guard.js';
 import { materializeStoredSpec, storedSliceSize } from '../materialize-spec.js';
-import { firstLine, type OnboardingJobRequest } from './onboarding.js';
+import { chainEnded, firstLine, workTreeVia, type ChainEnd, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_SETUP_TASK = 'repo.guard-setup';
 
@@ -57,6 +57,8 @@ export type GuardSetupJobPayload = GuardSetupJobRequest & JobPayload;
 export interface RepoGuardSetupTaskDeps {
   /** Enqueue the scenario generation a successful setup chains into. */
   chainGuardGenerate(request: OnboardingJobRequest): Promise<void>;
+  /** A setup that chained nothing ended its chain: see {@link ChainEnd}. */
+  onChainEnd?: ChainEnd;
   startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runSetup?: typeof guardSetupInProcess;
   /** How many documents the repository reads right now (the store, not the clone). */
@@ -73,6 +75,8 @@ export function createRepoGuardSetupTask(
   // address too: `onError` is handed the payload alone. Keyed by job id, and
   // cleared however the job settles.
   const runIds = new Map<string, string>();
+  /** The commit each job cloned, for the settle hook. Same lifetime as `runIds`. */
+  const commits = new Map<string, string>();
 
   return {
     type: REPO_GUARD_SETUP_TASK,
@@ -106,9 +110,10 @@ export function createRepoGuardSetupTask(
           const llm = await startLlm(ctx.payload.workspaceOrgId, meter);
 
           await ctx.phase('clone');
-          const tree = await acquireWorkTree(repoFullName);
+          const tree = await acquireWorkTree(repoFullName, workTreeVia(ctx.payload));
           try {
             const commitSha = await resolveCommitSha(tree.dir);
+            commits.set(ctx.jobId, commitSha);
             activityRun.setGitRef?.(commitSha);
             activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
             const ref = { repoKey: repoFullName, commitSha };
@@ -243,45 +248,74 @@ export function createRepoGuardSetupTask(
 
     async onSettled(ctx, outcome, result) {
       runIds.delete(ctx.jobId);
+      const commitSha = commits.get(ctx.jobId) ?? null;
+      commits.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however setup ended.
       await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-setup');
-      // Only a setup whose recipe gate held has anything to generate against: a
-      // refused setup ends the chain here, and its notification already says why.
-      if (outcome !== 'succeeded') return;
-      const settled = result as { status?: string; documents?: number } | undefined;
-      if (settled?.status !== 'ok') return;
-      // And only a repository that actually READS something has anything to
-      // generate FROM. A repository linked to no source with documents is set
-      // up and stops here — a generate would fail for want of a spec it was
-      // never given. The Document scan's ripple starts it when documents arrive.
-      //
-      // Asked ONE more time, here, because this is the latest moment there is:
-      // the scan this job was started beside may have stored its corpus while
-      // the body was still running, and by now the job's row is settled, so a
-      // ripple that meant to skip this repository no longer will.
-      const documents =
-        (settled.documents ?? 0) > 0
-          ? (settled.documents ?? 0)
-          : await sliceDocuments(ctx.payload.repoFullName, ctx.payload.workspaceOrgId).catch(() => 0);
-      if (documents === 0) {
-        log.info(
-          `[jobs] ${ctx.payload.repoFullName} is set up but reads no documents — scenario generation not chained`,
-        );
-        return;
-      }
-      try {
-        // A fresh request, not this job's payload: the chained job gets its own
-        // row id from the enqueue, never setup's.
-        const { repoId, repoFullName, workspaceOrgId } = ctx.payload;
-        await deps.chainGuardGenerate({ repoId, repoFullName, workspaceOrgId, source: 'chain' });
-      } catch (err) {
-        // A chain that cannot be enqueued is not this setup's failure: setup
-        // already succeeded, and generate can be started by hand.
-        log.warn(
-          `[jobs] could not chain scenario generation for ${ctx.payload.repoFullName}: ${(err as Error).message}`,
-        );
+      // The chain's commit: the one this job was pinned to, else the one it
+      // cloned. Carried into the next link, and reported when the chain ends.
+      const target = ctx.payload.commitSha ?? commitSha;
+      if (!(await chainGenerate(ctx.payload, outcome, result, target)) && chainEnded(outcome)) {
+        await deps.onChainEnd?.(ctx.payload, target);
       }
     },
   };
+
+  /**
+   * Chain the generate a finished setup owes, and say whether one was asked
+   * for. Only a setup whose recipe gate held has anything to generate
+   * against: a refused setup ends the chain here, and its notification
+   * already says why.
+   */
+  async function chainGenerate(
+    payload: GuardSetupJobPayload,
+    outcome: string,
+    result: unknown,
+    commitSha: string | null,
+  ): Promise<boolean> {
+    if (outcome !== 'succeeded') return false;
+    const settled = result as { status?: string; documents?: number } | undefined;
+    if (settled?.status !== 'ok') return false;
+    // And only a repository that actually READS something has anything to
+    // generate FROM. A repository linked to no source with documents is set
+    // up and stops here — a generate would fail for want of a spec it was
+    // never given. The Document scan's ripple starts it when documents arrive.
+    //
+    // Asked ONE more time, here, because this is the latest moment there is:
+    // the scan this job was started beside may have stored its corpus while
+    // the body was still running, and by now the job's row is settled, so a
+    // ripple that meant to skip this repository no longer will.
+    const documents =
+      (settled.documents ?? 0) > 0
+        ? (settled.documents ?? 0)
+        : await sliceDocuments(payload.repoFullName, payload.workspaceOrgId).catch(() => 0);
+    if (documents === 0) {
+      log.info(
+        `[jobs] ${payload.repoFullName} is set up but reads no documents — scenario generation not chained`,
+      );
+      return false;
+    }
+    try {
+      // A fresh request, not this job's payload: the chained job gets its own
+      // row id from the enqueue, never setup's. It is pinned to the chain's
+      // commit, so the chain works one tree from end to end.
+      const { repoId, repoFullName, workspaceOrgId } = payload;
+      await deps.chainGuardGenerate({
+        repoId,
+        repoFullName,
+        workspaceOrgId,
+        source: 'chain',
+        ...(commitSha ? { commitSha } : {}),
+      });
+      return true;
+    } catch (err) {
+      // A chain that cannot be enqueued is not this setup's failure: setup
+      // already succeeded, and generate can be started by hand.
+      log.warn(
+        `[jobs] could not chain scenario generation for ${payload.repoFullName}: ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
 }

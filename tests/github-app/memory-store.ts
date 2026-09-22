@@ -87,13 +87,23 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
     const taken = [...this.repos.values()]
       .filter((r) => r.workspaceOrgId === rec.workspaceOrgId)
       .map((r) => r.slug);
-    const stored: RepositoryRecord = { ...rec, slug: existing?.slug ?? slugify(rec.repoFullName, taken) };
+    const stored: RepositoryRecord = {
+      ...rec,
+      slug: existing?.slug ?? slugify(rec.repoFullName, taken),
+      // As the Postgres store does: a re-link forgets the last push it saw.
+      defaultBranchSha: null,
+    };
     this.repos.set(rec.repoFullName, stored);
     return stored;
   }
 
   async unlinkRepo(repoFullName: string): Promise<void> {
     this.repos.delete(repoFullName);
+  }
+
+  async recordDefaultBranchSha(repoFullName: string, commitSha: string): Promise<void> {
+    const repo = this.repos.get(repoFullName);
+    if (repo) this.repos.set(repoFullName, { ...repo, defaultBranchSha: commitSha });
   }
 
   async getRepo(repoFullName: string): Promise<RepositoryRecord | null> {

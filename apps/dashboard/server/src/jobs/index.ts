@@ -23,6 +23,17 @@
  * in enqueue order. Nothing waits in this process, so the gate survives a
  * restart and holds across replicas; `context.sync` and `context.scan` name no
  * queue and keep running beside a heavy job.
+ *
+ * AND A PUSH TO THE DEFAULT BRANCH RUNS THE MAIN CHAIN, COALESCED. The chain
+ * is setup → generate → run, pinned to ONE commit: the pushed one, which the
+ * repository row remembers (`defaultBranchSha`, written by the webhook before
+ * the chain starts). At most one chain runs and one waits per repository: a
+ * push that lands while any heavy job of the repository is active starts
+ * nothing; when a chain ends — the run settles, or an earlier link stops
+ * short — the mount compares the row's commit with the one the chain was
+ * pinned to and starts one more chain if they differ. Three pushes during a
+ * chain cost one follow-up, and a chain that fails at its own commit is not
+ * started again: only a newer push starts one.
  */
 
 import {
@@ -36,6 +47,7 @@ import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
 import type { Db } from '@truecourse/db';
 import type { PausedJob } from '@truecourse/data-store';
+import type { RepositoryStore } from '@truecourse/shared';
 import {
   createRepoGuardSetupTask,
   REPO_GUARD_SETUP_TASK,
@@ -91,6 +103,12 @@ export interface JobsMount extends Jobs {
   enqueueGuardGenerate(request: GuardGenerateJobRequest): Promise<EnqueueResult>;
   enqueueGuardRun(request: GuardRunJobRequest): Promise<EnqueueResult>;
   /**
+   * A push to the default branch: run the main chain at its tip, unless a
+   * heavy job of the repository is already active — then `busy`, and the
+   * chain that is running follows up on its own when it ends.
+   */
+  startMainChain(request: MainChainRequest): Promise<EnqueueResult>;
+  /**
    * Refresh ONE workspace context source. Keyed by the source, not the repo:
    * a source belongs to the workspace and several repositories may read it.
    */
@@ -124,6 +142,9 @@ export interface JobsMount extends Jobs {
   resumePaused(job: PausedJob): Promise<string | null>;
 }
 
+/** The repository a push moved, as the webhook names it. */
+export type MainChainRequest = Pick<OnboardingJobRequest, 'repoId' | 'repoFullName' | 'workspaceOrgId'>;
+
 export interface LinksChangedRequest {
   workspaceOrgId: string;
   repoId: string;
@@ -135,6 +156,12 @@ export interface LinksChangedRequest {
 export interface CreateServerJobsOptions {
   db: Db;
   connectionString: string;
+  /**
+   * The connected repositories: where the newest pushed commit is read from
+   * when a chain ends. Without it (a test that pushes nothing) no chain ever
+   * follows up.
+   */
+  repos?: RepositoryStore;
   /** Task-body seams (tests substitute the engines each job drives). */
   guardSetup?: Omit<RepoGuardSetupTaskDeps, 'chainGuardGenerate'>;
   guardGenerate?: Omit<RepoGuardGenerateTaskDeps, 'chainGuardRun'>;
@@ -180,6 +207,56 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
 
   const enqueueGuardRun = (request: GuardRunJobRequest): Promise<EnqueueResult> =>
     enqueue(REPO_GUARD_RUN_TASK, 'guard-run', request, { ...request });
+
+  /** Is any of the three heavy jobs of this repository queued or running? */
+  const repoHasHeavyJob = async (request: MainChainRequest): Promise<boolean> => {
+    for (const task of HEAVY_TASKS) {
+      if (await jobs.jobStore.getActiveByKey(request.workspaceOrgId, jobKey(task, request.repoFullName))) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const startMainChain = async (request: MainChainRequest): Promise<EnqueueResult> => {
+    if (await repoHasHeavyJob(request)) return { status: 'busy' };
+    // Pinned to the pushed commit the row remembers, so what the chain works
+    // on and what it is compared against when it ends are the same commit by
+    // construction. A fresh request from the three facts alone: never a
+    // chain's own payload, whose row id must not carry into the new chain.
+    const { repoId, repoFullName, workspaceOrgId } = request;
+    const pushed = (await opts.repos?.getRepo(repoFullName))?.defaultBranchSha ?? null;
+    return enqueueGuardSetup({
+      repoId,
+      repoFullName,
+      workspaceOrgId,
+      source: 'push',
+      ...(pushed ? { commitSha: pushed } : {}),
+    });
+  };
+
+  /**
+   * A chain ended at `commitSha`, its commit (null when it never got to
+   * clone). If the default branch has moved past it since — the webhook
+   * recorded a newer push — and nothing of the repository is active, run the
+   * chain once more, at the newer commit. A chain that failed at its own
+   * commit starts nothing, and one with no commit to compare starts nothing
+   * either.
+   */
+  const onChainEnd = async (request: OnboardingJobRequest, commitSha: string | null): Promise<void> => {
+    const target = commitSha;
+    if (!opts.repos || !target) return;
+    try {
+      const link = await opts.repos.getRepo(request.repoFullName);
+      if (!link?.enabled || !link.defaultBranchSha || link.defaultBranchSha === target) return;
+      const outcome = await startMainChain(request);
+      log.info(
+        `[jobs] ${request.repoFullName} moved to ${link.defaultBranchSha.slice(0, 8)} while its chain ran at ${target.slice(0, 8)} — follow-up chain ${outcome.status}`,
+      );
+    } catch (err) {
+      log.warn(`[jobs] could not follow up on ${request.repoFullName}'s chain: ${(err as Error).message}`);
+    }
+  };
 
   // A context source is not a repository: nothing about it is visible in the
   // session-run store, so the queue's single-flight key is the whole guard.
@@ -258,6 +335,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   const tasks: readonly JobTask[] = [
     createRepoGuardSetupTask({
       ...opts.guardSetup,
+      onChainEnd,
       chainGuardGenerate: async (request) => {
         const outcome = await enqueueGuardGenerate(request);
         if (outcome.status === 'busy') {
@@ -267,6 +345,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     }),
     createRepoGuardGenerateTask({
       ...opts.guardGenerate,
+      onChainEnd,
       chainGuardRun: async (request) => {
         const outcome = await enqueueGuardRun(request);
         if (outcome.status === 'busy') {
@@ -274,7 +353,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
         }
       },
     }),
-    createRepoGuardRunTask(opts.guardRun),
+    createRepoGuardRunTask({ ...opts.guardRun, onChainEnd }),
     createContextSyncTask({
       ...opts.contextSync,
       // A repository's FIRST sync is the rest of its onboarding: Flow setup
@@ -396,6 +475,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     enqueueGuardSetup,
     enqueueGuardGenerate,
     enqueueGuardRun,
+    startMainChain,
     enqueueContextSync,
     enqueueContextScan,
     startForLinks,

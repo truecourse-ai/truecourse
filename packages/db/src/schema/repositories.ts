@@ -79,6 +79,8 @@ export const repositories = pgTable(
     slug: text('slug').notNull(),
     /** The branch the provider tracks; null for a local folder, which has whatever is checked out. */
     defaultBranch: text('default_branch'),
+    /** The newest commit the provider reported pushed to that branch; null until one was. */
+    defaultBranchSha: text('default_branch_sha'),
     /** Where the provider finds it, when the name is not enough: a local folder's absolute path. */
     location: text('location'),
     /**

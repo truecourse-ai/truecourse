@@ -1018,6 +1018,44 @@ describe('createRunClone', () => {
     expect(fs.existsSync(clone.dir)).toBe(false);
   });
 
+  it('fetches ONE commit into an empty repository when pinned to it, with the token only on the fetch', async () => {
+    const { calls, run } = recordingGit();
+
+    const clone = await createRunClone(REPO, 'ghs_secret_token', {
+      workspaceOrgId: ORG,
+      defaultBranch: 'main',
+      commitSha: 'abc123',
+      run,
+    });
+
+    const basic = Buffer.from('x-access-token:ghs_secret_token').toString('base64');
+    const header = `http.https://github.com/.extraheader=Authorization: Basic ${basic}`;
+    expect(calls.map((c) => c.args[0] === 'init' ? 'init' : c.args.includes('fetch') ? 'fetch' : c.args[0])).toEqual([
+      'init',
+      'remote',
+      'fetch',
+      'checkout',
+    ]);
+    expect(calls[0]!.args).toEqual(['init', '--quiet', clone.dir]);
+    expect(calls[1]!.args).toEqual(['remote', 'add', 'origin', `https://github.com/${REPO}.git`]);
+    expect(calls[2]!.args).toEqual(['-c', header, 'fetch', '--depth', '1', 'origin', 'abc123']);
+    // Checked out as the branch the commit belongs to, so the tree's branch
+    // reads as `main`, not `HEAD`.
+    expect(calls[3]!.args).toEqual(['checkout', '--quiet', '-B', 'main', 'FETCH_HEAD']);
+    for (const call of calls.slice(1)) expect(call.cwd).toBe(clone.dir);
+    // No `--branch` on the fetch, and a per-command header leaves nothing to unset.
+    expect(calls.flatMap((c) => c.args)).not.toContain('--branch');
+    expect(calls.flatMap((c) => c.args)).not.toContain('config');
+    clone.dispose();
+  });
+
+  it('checks a pinned commit out detached when no branch name is known', async () => {
+    const { calls, run } = recordingGit();
+    const clone = await createRunClone(REPO, 't', { workspaceOrgId: ORG, commitSha: 'abc123', run });
+    expect(calls[3]!.args).toEqual(['checkout', '--quiet', '--detach', 'FETCH_HEAD']);
+    clone.dispose();
+  });
+
   it('unsets the persisted auth header, tolerating an already-absent key', async () => {
     const calls: Array<{ args: string[]; cwd?: string }> = [];
     const run: GitRunner = async (args, cwd) => {

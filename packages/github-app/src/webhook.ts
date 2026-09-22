@@ -42,7 +42,10 @@ export interface WebhookDeps {
   store: InstallationStore;
   /** The connected repositories, whichever provider brought them. */
   repos: RepositoryStore;
-  /** Kick a baseline run for a connected repo (fire-and-forget). */
+  /**
+   * A push to the default branch of a connected repository (fire-and-forget).
+   * The pushed commit is already on the repository's row when this fires.
+   */
   onBaseline: (trigger: BaselineTrigger) => void;
   /**
    * The workspace whose context source reads a repository, or null when none
@@ -245,6 +248,9 @@ async function handlePush(
     return;
   }
 
+  // The row remembers the newest push BEFORE anything is started for it, so a
+  // chain already running finds this commit when it ends and follows up.
+  await deps.repos.recordDefaultBranchSha(link.repoFullName, payload.after);
   deps.onBaseline({
     repoFullName: payload.repository.full_name,
     installationId: payload.installation.id,

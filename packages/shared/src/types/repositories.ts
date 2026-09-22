@@ -37,6 +37,13 @@ export interface RepositoryRecord {
   slug: string
   /** The branch the provider tracks. Null for a local folder: it has whatever is checked out. */
   defaultBranch: string | null
+  /**
+   * The newest commit the provider reported pushed to that branch. What the
+   * main chain compares its own commit against when it settles, to run once
+   * more for pushes that landed while it worked. Null until the first push
+   * the server saw; a local folder has none.
+   */
+  defaultBranchSha?: string | null
   /** Where the provider finds it when the name is not enough: a local folder's absolute path. */
   location?: string | null
   /**
@@ -66,6 +73,8 @@ export interface RepositoryStore {
   linkRepo(rec: RepositoryLink): Promise<RepositoryRecord>
   /** Disconnect it. */
   unlinkRepo(repoFullName: string): Promise<void>
+  /** The provider reported a push to the default branch: remember its commit. */
+  recordDefaultBranchSha(repoFullName: string, commitSha: string): Promise<void>
   getRepo(repoFullName: string): Promise<RepositoryRecord | null>
   listReposForWorkspace(workspaceOrgId: string): Promise<RepositoryRecord[]>
   /** Every repository connected through one provider account (uninstall cleanup). */

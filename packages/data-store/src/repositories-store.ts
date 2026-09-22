@@ -27,6 +27,7 @@ function toRecord(r: Row): RepositoryRecord {
     workspaceOrgId: r.workspaceOrgId,
     slug: r.slug,
     defaultBranch: r.defaultBranch,
+    defaultBranchSha: r.defaultBranchSha,
     location: r.location,
     blocking: r.blocking,
     enabled: r.enabled,
@@ -76,6 +77,9 @@ export class PgRepositoryStore implements RepositoryStore {
           accountId: rec.accountId,
           workspaceOrgId: rec.workspaceOrgId,
           defaultBranch: rec.defaultBranch,
+          // A reconnect starts afresh: the last push the old connection saw
+          // says nothing about the branch now.
+          defaultBranchSha: null,
           location: rec.location ?? null,
           blocking: rec.blocking,
           enabled: rec.enabled,
@@ -91,6 +95,13 @@ export class PgRepositoryStore implements RepositoryStore {
 
   async unlinkRepo(repoFullName: string): Promise<void> {
     await this.db.delete(repositories).where(eq(repositories.repoFullName, repoFullName));
+  }
+
+  async recordDefaultBranchSha(repoFullName: string, commitSha: string): Promise<void> {
+    await this.db
+      .update(repositories)
+      .set({ defaultBranchSha: commitSha })
+      .where(eq(repositories.repoFullName, repoFullName));
   }
 
   async getRepo(repoFullName: string): Promise<RepositoryRecord | null> {
