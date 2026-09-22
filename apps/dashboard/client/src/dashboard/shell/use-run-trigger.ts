@@ -61,6 +61,9 @@ export function useRunTrigger(repoId: string): RunStarter {
             case 'probe-failed':
               toast.error(`Provider check failed: ${outcome.message}`);
               return;
+            case 'prices-unavailable':
+              toast.error('Prices are not available yet', { description: outcome.message });
+              return;
             case 'busy':
               toast.error('A run is already in progress');
               return;

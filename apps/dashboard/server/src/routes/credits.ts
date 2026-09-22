@@ -21,6 +21,8 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
+  CREDITS_PRICES_UNAVAILABLE,
+  CREDITS_PRICES_UNAVAILABLE_MESSAGE,
   usageJobTypeWord,
   type CreditEntryView,
   type CreditsResponse,
@@ -28,6 +30,7 @@ import {
 } from '@truecourse/shared';
 import type { CreditStatementRecord } from '@truecourse/core/lib/credits-store';
 import { readCreditBalance } from '@truecourse/core/lib/credits-store';
+import { priceOfConfig } from '@truecourse/core/services/llm/provider';
 import {
   adjustWorkspaceCredits,
   creditStatement,
@@ -37,7 +40,11 @@ import {
   pausedRuns,
   resumePausedJob,
 } from '../services/credits.service.js';
-import { orgOf, workspaceOnCredits } from '../services/workspace-llm.service.js';
+import {
+  creditsPriceModel,
+  orgOf,
+  workspaceOnCredits,
+} from '../services/workspace-llm.service.js';
 import { operatorOnly } from '../middleware/operator.js';
 import {
   resolveWorkspaceName,
@@ -71,15 +78,18 @@ function toEntry(row: CreditStatementRecord): CreditEntryView {
  * spending TrueCourse's credits. `true` means the route has answered and must
  * stop.
  *
- * At ZERO there is nothing to spend and the start is refused outright. BELOW
+ * At ZERO there is nothing to spend and the start is refused outright; with
+ * no price for the model the run would be charged as, it could not be debited
+ * and is refused too (503 `credits-prices-unavailable`). BELOW
  * WHAT THE RUN WOULD COST the answer asks instead of deciding: the run may
  * still be worth starting, it will simply pause part-way, and only the person
  * paying can say. A second request carrying `confirmCredits` is that answer.
  *
  * `estimateUsd` is the run's ceiling cost when the caller could work one out.
  * No hosted start route can today: every estimator reads a repository's working
- * tree, and a route has not cloned one — so the gate that fires is the empty
- * one, and a start with money in the balance goes straight through.
+ * tree, and a route has not cloned one — so the gates that fire are the empty
+ * one and the price, and a priced start with money in the balance goes
+ * straight through.
  */
 export async function refusedWithoutCredits(
   req: Request,
@@ -88,9 +98,20 @@ export async function refusedWithoutCredits(
 ): Promise<boolean> {
   const orgId = orgOf(req);
   if (!(await workspaceOnCredits(orgId))) return false;
-  const check = await creditsStartCheck(orgId, opts.estimateUsd);
+  const check = await creditsStartCheck(orgId, {
+    priceModel: creditsPriceModel(),
+    ...(opts.estimateUsd === undefined ? {} : { estimateUsd: opts.estimateUsd }),
+  });
   if (check.verdict === 'ok') return false;
   if (check.verdict === 'refused') {
+    // No price is the server's state, not the workspace's: it clears once the
+    // price list has been fetched, so it is answered as unavailable.
+    if (check.reason === 'prices-unavailable') {
+      res
+        .status(503)
+        .json({ error: CREDITS_PRICES_UNAVAILABLE, message: check.message, credits: check });
+      return true;
+    }
     res.status(409).json({ error: 'credits-exhausted', message: check.message, credits: check });
     return true;
   }
@@ -136,6 +157,16 @@ export function createCreditsRouter(): Router {
         if (balance <= 0) {
           res.status(409).json({
             error: 'This workspace is out of credits. The run stays paused until it has some.',
+          });
+          return;
+        }
+        // Carried on with no price, the run would refuse at its start and end
+        // failed; left paused, it can be carried on once the price is there.
+        const priceModel = creditsPriceModel();
+        if (priceModel !== null && !(await priceOfConfig({ model: priceModel }))) {
+          res.status(503).json({
+            error: CREDITS_PRICES_UNAVAILABLE,
+            message: CREDITS_PRICES_UNAVAILABLE_MESSAGE,
           });
           return;
         }

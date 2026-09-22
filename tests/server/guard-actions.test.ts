@@ -9,7 +9,7 @@ import { type Express } from 'express';
  * `guard run` from the dashboard. Temp-repo fixture + supertest over the real app.
  *
  * The estimate route runs the REAL estimateGuard (deterministic, offline —
- * TRUECOURSE_NO_PRICE_FETCH is set by tests/setup.ts), so its shape is asserted
+ * tests/setup.ts installs no model prices), so its shape is asserted
  * against a direct call: proof the route answers exactly what `estimateGuard`
  * returns. The two engine drivers are mocked (never a real LLM call, no sandbox build), so the
  * trigger tests assert only the route contract: generate ENQUEUES (202, 409 while

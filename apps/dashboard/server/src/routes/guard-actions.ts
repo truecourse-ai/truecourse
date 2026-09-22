@@ -74,6 +74,7 @@ import { requireJobs } from '../jobs/current.js';
 import { refusedWithoutCredits } from './credits.js';
 import {
   CreditsProviderUnavailableError,
+  CreditsPricesUnavailableError,
   LlmNotConfiguredError,
   LlmProbeFailedError,
   orgOf,
@@ -174,6 +175,10 @@ async function refusedWithoutLlm(req: Request, res: Response): Promise<boolean> 
     }
     if (e instanceof LlmNotConfiguredError) {
       res.status(409).json({ error: e.code, message: e.message });
+      return true;
+    }
+    if (e instanceof CreditsPricesUnavailableError) {
+      res.status(503).json({ error: e.code, message: e.message });
       return true;
     }
     if (e instanceof LlmProbeFailedError) {

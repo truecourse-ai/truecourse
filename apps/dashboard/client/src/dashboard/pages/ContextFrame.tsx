@@ -63,6 +63,9 @@ function ScanButton({ stale, scanning }: { stale: boolean; scanning: boolean }) 
           case 'probe-failed':
             toast.error(`Provider check failed: ${outcome.message}`);
             return;
+          case 'prices-unavailable':
+            toast.error('Prices are not available yet', { description: outcome.message });
+            return;
           case 'busy':
             toast.error('A document scan is already running');
             return;

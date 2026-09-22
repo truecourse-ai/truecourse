@@ -9,6 +9,7 @@
 
 import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
+import { CREDITS_PRICES_UNAVAILABLE, CREDITS_PRICES_UNAVAILABLE_MESSAGE } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
 export interface GuardGenerateState {
@@ -38,6 +39,8 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
             ? 'No LLM provider configured — add one under Settings › Models.'
             : 'A guard job is already running for this repo.',
         );
+      } else if (e instanceof api.ApiError && e.message === CREDITS_PRICES_UNAVAILABLE) {
+        toast.error('Prices are not available yet', { description: CREDITS_PRICES_UNAVAILABLE_MESSAGE });
       } else if (e instanceof api.ApiError && e.status === 502) {
         toast.error('Provider check failed', { description: 'The workspace provider did not answer its pre-flight probe.' });
       } else if (e instanceof api.ApiError && e.status === 422) {

@@ -40,6 +40,9 @@ import {
   runAgentLoop,
   SessionToolArgsError,
 } from '../../packages/agent-loop/src/index';
+import { pricingFor } from '../../packages/core/src/services/llm/provider';
+import { getModelPrices } from '../../packages/core/src/services/llm/model-prices';
+import { installModelPrices, TEST_PRICES, uninstallModelPrices } from '../helpers/model-prices';
 
 const cfg = {
   provider: 'anthropic' as const,
@@ -1064,6 +1067,58 @@ describe('api session driver attribution', () => {
     expect((turns[0] as { raw?: { payload?: { modelId?: string } } }).raw?.payload?.modelId).toBe(
       'mock-model',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pricing: what a turn cost, or that it could not be priced
+// ---------------------------------------------------------------------------
+
+describe('api session driver pricing', () => {
+  /** The first turn's usage, with `pricing` as the driver's hook. */
+  async function firstTurnUsage(pricing: ApiSessionDriverOptions['pricing']) {
+    buildModelMock.mockReturnValue(
+      scriptedModel([{ content: [outcomeCall({ verdict: 'keep' })] }]).model,
+    );
+    const { handle, events } = runSession(
+      createApiSessionDriver(cfgNoFallback, pricing ? { pricing } : {}),
+    );
+    await handle.done;
+    const turn = events.find((e) => e.type === 'assistant-turn');
+    return (turn as { usage: Record<string, unknown> }).usage;
+  }
+
+  it('records what the hook priced the turn at', async () => {
+    expect(await firstTurnUsage(() => 0.42)).toMatchObject({
+      costUsd: 0.42,
+      costSource: 'model-priced',
+    });
+  });
+
+  it('records a turn the hook could not price as unpriced, never as free', async () => {
+    expect(await firstTurnUsage(() => null)).toMatchObject({ costUsd: 0, costSource: 'unpriced' });
+    expect(await firstTurnUsage(undefined)).toMatchObject({ costSource: 'unpriced' });
+  });
+
+  // The hook a workspace on its own key runs with: until a price table has
+  // been fetched its turns are recorded unpriced; with one, every bucket the
+  // turn reported is priced at its own rate.
+  it('prices an own-key turn bucket by bucket once there is a table, and not before', async () => {
+    const hook = pricingFor({ model: cfgNoFallback.model, priceModel: 'claude-opus-5' });
+    uninstallModelPrices();
+    expect(await firstTurnUsage(hook)).toMatchObject({ costUsd: 0, costSource: 'unpriced' });
+
+    installModelPrices();
+    await getModelPrices();
+    const opus = TEST_PRICES['anthropic/claude-opus-5']!;
+    // The stub reports 40 fresh, 50 cache-read and 10 cache-written input tokens and 20 out.
+    const usage = await firstTurnUsage(hook);
+    expect(usage.costSource).toBe('model-priced');
+    expect(usage.costUsd as number).toBeCloseTo(
+      40 * opus.input + 50 * opus.cacheRead! + 10 * opus.cacheWrite! + 20 * opus.output,
+      12,
+    );
+    uninstallModelPrices();
   });
 });
 

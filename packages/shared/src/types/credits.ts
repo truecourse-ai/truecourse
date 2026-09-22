@@ -207,16 +207,34 @@ export interface CreditMovementResponse {
   resumed: number;
 }
 
+/**
+ * The refusal code a start answers with when the workspace spends credits and
+ * its model has no price: no price table has been fetched yet, or the table
+ * holds none for the model the credits provider is charged as. A run that
+ * cannot be priced cannot be charged, so it does not start.
+ */
+export const CREDITS_PRICES_UNAVAILABLE = 'credits-prices-unavailable';
+
+/** What a person is told when {@link CREDITS_PRICES_UNAVAILABLE} refuses a start. */
+export const CREDITS_PRICES_UNAVAILABLE_MESSAGE =
+  'Model prices are not available yet, so a run on TrueCourse credits cannot be charged. Try again in a few minutes.';
+
 /** How a start was answered when the workspace spends credits. */
 export type CreditsStartVerdict = 'ok' | 'confirm' | 'refused';
 
 /**
  * What a start route says about the balance before it queues anything.
  * `confirm` means the run may not finish on what is left, so the client asks
- * before spending it; `refused` means there is nothing to spend at all.
+ * before spending it; `refused` means there is nothing to spend at all, or the
+ * run could not be charged for.
  */
 export interface CreditsStartCheck {
   verdict: CreditsStartVerdict;
+  /**
+   * Why a `refused` start was refused: nothing left to spend, or no price to
+   * charge the run's model at.
+   */
+  reason?: 'exhausted' | 'prices-unavailable';
   balance: number;
   /** The run's ceiling cost in credits, when an estimate could be made. */
   estimate?: number;

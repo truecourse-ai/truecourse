@@ -14,7 +14,7 @@ import {
 } from '../../packages/core/src/services/llm/token-estimator.js';
 import { estimateScanTokens } from '../../packages/core/src/services/llm/spec-estimate.js';
 import { curateInProcess } from '../../packages/core/src/commands/spec-in-process.js';
-import { priceForModel, type PriceTable } from '../../packages/core/src/services/llm/model-prices.js';
+import { costOfCall, priceForModel, type PriceTable } from '../../packages/core/src/services/llm/model-prices.js';
 import { discoverDocs, writeDecisions } from '../../packages/spec-consolidator/src/index.js';
 import type { DecisionsFile, RepoIdentity, ScopeVerdict } from '../../packages/spec-consolidator/src/index.js';
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
@@ -148,6 +148,51 @@ describe('estimateStageTokens', () => {
     ]);
     expect(est.estimatedCostUsd).toBeUndefined();
     expect(est.stages![0].estimatedCostUsd).toBeUndefined();
+  });
+
+  // No table fetched yet: the estimate quotes its tokens and no cost, never a made-up one.
+  it('quotes tokens and no cost when there are no prices at all', () => {
+    const est = estimateStageTokens(
+      [{ stage: 'extract', model: 'opus', calls: 3, avgInputTokens: 100, avgOutputTokens: 20 }],
+      '3 docs',
+      null,
+    );
+    expect(est.totalEstimatedTokens).toBe(3 * (100 + 500 + 20));
+    expect(est.estimatedCostUsd).toBeUndefined();
+    expect(est.expectedCostUsd).toBeUndefined();
+    expect(est.costSource).toBeUndefined();
+    expect(est.stages![0].estimatedCostUsd).toBeUndefined();
+  });
+
+  // The forecast cannot know how a run's input will split between fresh,
+  // cache-read and cache-written tokens, so it charges every input token at the
+  // dearest of them — and whatever the split turns out to be, what the run is
+  // really charged lands at or below it.
+  it('stays a ceiling over the exact per-bucket price of any cache split', () => {
+    const opus = { input: 5 / 1e6, output: 25 / 1e6, cacheRead: 0.5 / 1e6, cacheWrite: 6.25 / 1e6 };
+    const table: PriceTable = { tiers: { opus }, byId: {}, fetchedAt: 1, source: 'live' };
+    const est = estimateStageTokens(
+      [{ stage: 'extract', model: 'opus', calls: 2, avgInputTokens: 1500, avgOutputTokens: 100 }],
+      undefined,
+      table,
+    );
+    const inputTokens = 2 * (1500 + 500);
+    const outputTokens = 2 * 100;
+    expect(est.estimatedCostUsd).toBeCloseTo(inputTokens * opus.cacheWrite + outputTokens * opus.output, 12);
+    for (const [fresh, read, written] of [
+      [inputTokens, 0, 0],
+      [0, inputTokens, 0],
+      [0, 0, inputTokens],
+      [200, 3000, 800],
+    ]) {
+      const ran = costOfCall(opus, {
+        inputTokens: fresh!,
+        outputTokens,
+        cacheReadTokens: read!,
+        cacheCreateTokens: written!,
+      })!;
+      expect(ran).toBeLessThanOrEqual(est.estimatedCostUsd! + 1e-15);
+    }
   });
 
   it('flags costPartial when a stage model cannot be priced', () => {

@@ -2,11 +2,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { initParsers } from '../packages/source-facts/src/parser'
+import { uninstallModelPrices } from './helpers/model-prices'
 
-// Never fetch live model prices from OpenRouter in tests — the pre-flight cost
-// estimate falls back to bundled list prices. (`model-prices.test.ts` deletes
-// this to exercise the real fetch/cache path against a stubbed `fetch`.)
-process.env.TRUECOURSE_NO_PRICE_FETCH = '1'
+// No test fetches model prices from OpenRouter: the price source is a seam, and
+// every file starts with one that answers nothing, so the code under test holds
+// no price table. A test that needs prices installs a known table
+// (`installModelPrices`); `model-prices.test.ts` drives the real fetch against
+// a stubbed `fetch`.
+uninstallModelPrices()
 
 // No test may ever spawn the developer's real `claude` binary: production LLM
 // runners spawn it by default, so an unstubbed runner in a test must fail fast

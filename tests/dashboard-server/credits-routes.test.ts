@@ -29,6 +29,7 @@ import type { PausedJob } from '@truecourse/data-store';
 import { createTestApp, resetTestWorkspaceLlm, stubJobs, TEST_ORG } from '../helpers/test-app';
 import { clearTestRegistry } from '../helpers/test-fixture';
 import { installCreditsStore, type InstalledCreditsStore } from '../helpers/credits-store';
+import { installModelPrices, TEST_PRICES, uninstallModelPrices } from '../helpers/model-prices';
 import {
   platformCreditsConfig,
   resetWorkspaceLlmConfigStore,
@@ -379,9 +380,11 @@ describe('the start gate', () => {
     process.env.TRUECOURSE_CREDITS_MODEL = 'gpt-5.6';
     delete process.env.TRUECOURSE_CREDITS_OPENAI_BASE_URL;
     delete process.env.TRUECOURSE_CREDITS_PRICE_MODEL;
+    installModelPrices({ 'openai/gpt-5.6': TEST_PRICES['openai/gpt-5.6-sol']! });
   });
 
   afterEach(() => {
+    uninstallModelPrices();
     for (const name of CREDITS_ENV) {
       if (saved[name] === undefined) delete process.env[name];
       else process.env[name] = saved[name];
@@ -406,14 +409,58 @@ describe('the start gate', () => {
     await installed.store.grant({ workspaceOrgId: TEST_ORG, credits: 100, actorUserId: OPERATOR });
     // 300 credits' worth against a balance of 100: worth starting or not, but
     // only the person paying can say.
-    expect(await creditsStartCheck(TEST_ORG, 3)).toMatchObject({
+    const priceModel = 'gpt-5.6';
+    expect(await creditsStartCheck(TEST_ORG, { priceModel, estimateUsd: 3 })).toMatchObject({
       verdict: 'confirm',
       balance: 100,
       estimate: 300,
     });
-    expect(await creditsStartCheck(TEST_ORG, 0.5)).toMatchObject({ verdict: 'ok', estimate: 50 });
+    expect(await creditsStartCheck(TEST_ORG, { priceModel, estimateUsd: 0.5 })).toMatchObject({
+      verdict: 'ok',
+      estimate: 50,
+    });
     // With no estimate to compare, a balance above zero is a start.
-    expect(await creditsStartCheck(TEST_ORG)).toMatchObject({ verdict: 'ok' });
+    expect(await creditsStartCheck(TEST_ORG, { priceModel })).toMatchObject({ verdict: 'ok' });
+  });
+
+  it('refuses a credits run whose model cannot be priced, and says prices are not there yet', async () => {
+    await installed.store.grant({ workspaceOrgId: TEST_ORG, credits: 100, actorUserId: OPERATOR });
+    uninstallModelPrices();
+    const refused = await request(appWith()).post('/api/context/scan').expect(503);
+    expect(refused.body).toMatchObject({
+      error: 'credits-prices-unavailable',
+      message: expect.stringMatching(/prices are not available yet/i),
+    });
+    expect(refused.body.credits).toMatchObject({
+      verdict: 'refused',
+      reason: 'prices-unavailable',
+      balance: 100,
+    });
+    // The same for a start that goes through the repository routes' gate.
+    expect(await creditsStartCheck(TEST_ORG, { priceModel: 'gpt-5.6' })).toMatchObject({
+      verdict: 'refused',
+      reason: 'prices-unavailable',
+    });
+    // A table that holds no price for the model is no table for this run.
+    installModelPrices({ 'openai/gpt-5.6-luna': TEST_PRICES['openai/gpt-5.6-sol']! });
+    await request(appWith()).post('/api/context/scan').expect(503);
+    installModelPrices({ 'openai/gpt-5.6': TEST_PRICES['openai/gpt-5.6-sol']! });
+    await request(appWith()).post('/api/context/scan').expect(202);
+  });
+
+  it('leaves a paused run paused while its model cannot be priced', async () => {
+    await installed.store.grant({ workspaceOrgId: TEST_ORG, credits: 100, actorUserId: OPERATOR });
+    uninstallModelPrices();
+    paused = [pausedJob()];
+    const res = await request(appWith()).post('/api/credits/resume/job_paused').expect(503);
+    expect(res.body).toMatchObject({ error: 'credits-prices-unavailable' });
+    expect(resumed).toEqual([]);
+  });
+
+  it('starts a workspace on its own key with no prices at all', async () => {
+    credits = false;
+    uninstallModelPrices();
+    await request(appWith()).post('/api/context/scan').expect(202);
   });
 
   it('runs the platform key against its own endpoint, priced as the model the deployment serves', () => {

@@ -96,6 +96,7 @@ import {
 } from '@truecourse/core/lib/workspace-profile-store';
 import {
   CreditsProviderUnavailableError,
+  CreditsPricesUnavailableError,
   LlmNotConfiguredError,
   LlmProbeFailedError,
   startWorkspaceLlm,
@@ -663,6 +664,10 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         // to change, like an unconfigured provider, not a job that dies later.
         if (e instanceof CreditsProviderUnavailableError || e instanceof LlmNotConfiguredError) {
           res.status(409).json({ error: e.code, message: e.message });
+          return;
+        }
+        if (e instanceof CreditsPricesUnavailableError) {
+          res.status(503).json({ error: e.code, message: e.message });
           return;
         }
         if (e instanceof LlmProbeFailedError) {

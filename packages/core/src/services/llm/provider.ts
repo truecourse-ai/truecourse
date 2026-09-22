@@ -12,7 +12,14 @@
 import type { ProviderConfig } from '@truecourse/llm-api';
 import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type { LlmApiConfig } from './provider-config.js';
-import { getModelPrices, priceForModel, type PriceTable } from './model-prices.js';
+import {
+  costOfCall,
+  getModelPrices,
+  heldModelPrices,
+  priceForModel,
+  type CallTokens,
+  type ModelPrice,
+} from './model-prices.js';
 
 const SETUP_HINT = 'Set a provider in Settings → Models.';
 
@@ -65,52 +72,20 @@ export function buildProviderConfig(api: LlmApiConfig | undefined): ProviderConf
 // Cost accounting
 // ---------------------------------------------------------------------------
 
-// The price table is fetched once, off the hot path: the pricing hook is
-// synchronous (it runs inside the transport's per-call accounting), so it prices
-// with whatever table has resolved and charges 0 until then. Cost is
-// observational — it must never delay or fail a call.
-let priceTable: PriceTable | null = null;
-let priceTablePending = false;
-
-function primePriceTable(): void {
-  if (priceTable || priceTablePending) return;
-  priceTablePending = true;
-  void getModelPrices()
-    .then((t) => {
-      priceTable = t;
-    })
-    .catch(() => {
-      /* unpriceable run — tokens are still recorded */
-    })
-    .finally(() => {
-      priceTablePending = false;
-    });
-}
-
-/** One call's tokens, in the buckets both backends report. */
-interface CallTokens {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreateTokens: number;
-}
-
 /**
- * Ceiling cost for one call: every input-side token (fresh, cache-read,
- * cache-written) is charged at the list input rate — providers only ever
- * discount those, so the real bill lands at or below this.
+ * What one call that ran cost, each token bucket at its model's own published
+ * rate, or NULL when it cannot be priced: no price table has been fetched yet,
+ * the table holds no price for the model, or the call reported cache tokens the
+ * model publishes no cache rate for ({@link costOfCall}). The hook is
+ * synchronous — it runs inside the driver's per-turn accounting — so it prices
+ * with the table already held and never waits for one; a null records the turn
+ * unpriced. Cost is observational: it never delays or fails a call.
  */
-export function priceCall(modelId: string, usage: CallTokens): number {
-  try {
-    primePriceTable();
-    if (!priceTable) return 0;
-    const price = priceForModel(modelId, priceTable);
-    if (!price) return 0;
-    const input = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens;
-    return input * price.input + usage.outputTokens * price.output;
-  } catch {
-    return 0;
-  }
+export function priceCall(modelId: string, usage: CallTokens): number | null {
+  const table = heldModelPrices();
+  if (!table) return null;
+  const price = priceForModel(modelId, table);
+  return price ? costOfCall(price, usage) : null;
 }
 
 /**
@@ -122,7 +97,19 @@ export function priceCall(modelId: string, usage: CallTokens): number {
  */
 export function pricingFor(
   cfg: Pick<ProviderConfig, 'model' | 'priceModel'>,
-): (modelId: string, usage: CallTokens) => number {
+): (modelId: string, usage: CallTokens) => number | null {
   return (modelId, usage) =>
     priceCall(cfg.priceModel && modelId === cfg.model ? cfg.priceModel : modelId, usage);
+}
+
+/**
+ * The price a config's own calls are charged at — its `priceModel` when it
+ * names one, else its model — fetching the table when none is held. Null when
+ * there is no table or the table holds no price for that model.
+ */
+export async function priceOfConfig(
+  cfg: Pick<ProviderConfig, 'model' | 'priceModel'>,
+): Promise<ModelPrice | null> {
+  const table = await getModelPrices();
+  return table ? priceForModel(cfg.priceModel || cfg.model, table) : null;
 }

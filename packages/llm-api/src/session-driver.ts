@@ -187,9 +187,9 @@ export function retryDelayMs(
 }
 
 export interface ApiSessionDriverOptions {
-  /** Cost for one turn's usage, in USD.
-   *  Present ⇒ turns record `costSource: 'model-priced'`; absent ⇒ `unpriced`. */
-  pricing?: (modelId: string, usage: CallUsage) => number;
+  /** Cost for one turn's usage, in USD, or null when the turn cannot be priced.
+   *  A number ⇒ the turn records `costSource: 'model-priced'`; null, or no hook ⇒ `unpriced`. */
+  pricing?: (modelId: string, usage: CallUsage) => number | null;
   /** Overrides on `DEFAULT_API_RETRY`, field by field. */
   retry?: Partial<ApiRetryPolicy>;
   /**
@@ -1097,7 +1097,7 @@ function turnUsageOf(
   if (pricing) {
     try {
       const priced = pricing(modelId, callUsage);
-      if (Number.isFinite(priced)) {
+      if (priced !== null && Number.isFinite(priced)) {
         costUsd = priced;
         costSource = 'model-priced';
       }
