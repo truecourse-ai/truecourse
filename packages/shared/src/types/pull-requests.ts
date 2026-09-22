@@ -180,6 +180,45 @@ export interface PullRequestCheckRecord {
   settledAt: string | null
 }
 
+/** A check in one line, as a list reads it. */
+export interface PullRequestCheckSummary {
+  id: string
+  attempt: number
+  status: PullRequestCheckStatus
+  conclusion: PullRequestCheckConclusion | null
+  reason: PullRequestCheckReason | null
+  createdAt: string
+  settledAt: string | null
+  /** The report's counts; null before the check settled with one. */
+  counts: {
+    conflictsCreated: number
+    sectionsMoved: number
+    newFailures: number
+    preExisting: number
+    fixed: number
+  } | null
+}
+
+/** One pull request with its latest check — a repository's list. */
+export interface PullRequestListItem extends PullRequestRecord {
+  check: PullRequestCheckSummary | null
+}
+
+/**
+ * One open pull request whose latest check settled with a report, with the
+ * two parts Context draws: the conflicts it created and the sections it moved.
+ */
+export interface WorkspacePullRequestRow extends PullRequestRecord {
+  check: {
+    id: string
+    conclusion: PullRequestCheckConclusion
+    reason: PullRequestCheckReason
+    settledAt: string
+    conflictsCreated: PullRequestCheckReport['conflictsCreated']
+    sectionsMoved: PullRequestCheckReport['sectionsMoved']
+  }
+}
+
 /** What a settle or a progress update may change on a check. */
 export type PullRequestCheckPatch = Partial<
   Pick<

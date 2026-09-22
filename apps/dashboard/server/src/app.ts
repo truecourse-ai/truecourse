@@ -8,6 +8,9 @@ import { createProjectResolver } from './middleware/project.js';
 import { createReposRouter } from './routes/repos.js';
 import specRouter from './routes/spec.js';
 import { createContextRouter, createContextBindingsRouter } from './routes/context.js';
+import { createPullsRouter, createWorkspacePullsRouter } from './routes/pulls.js';
+import type { PullRequestStore } from '@truecourse/shared';
+import type { PullRequestChecks } from './services/pull-request-checks.service.js';
 import { createHomeRouter } from './routes/home.js';
 import guardRouter from './routes/guard.js';
 import guardActionsRouter from './routes/guard-actions.js';
@@ -84,6 +87,12 @@ export interface CreateAppOptions {
    * pass it) makes the three job routes answer 503.
    */
   jobs: JobsMount | null;
+  /**
+   * The pull requests and their checks, and what starts one. Absent in a test
+   * that is not about them; the pull request routes then answer 404 like any
+   * route that is not mounted. `checks` is null when GitHub is not configured.
+   */
+  pulls?: { store: PullRequestStore; checks: PullRequestChecks | null };
   /**
    * Routers this edition adds, already built (see `features.ts`). The open
    * edition has none; boot builds the enterprise bundle's when the loader
@@ -251,7 +260,8 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // The workspace's CONTEXT: its documentation sources and what they yielded.
   // A source belongs to the workspace, not to a repository, so this mounts
   // above the repository routers and behind the gate alone — no slug to resolve.
-  app.use('/api/context', createContextRouter({ repoLinks, github: opts.github?.access ?? null }));
+  app.use('/api/context', createContextRouter({ repoLinks, github: opts.github?.access ?? null, checks: opts.pulls?.checks ?? null }));
+  if (opts.pulls) app.use('/api/context', createWorkspacePullsRouter({ pulls: opts.pulls.store }));
 
   // Home: the workspace's sections today and over time, what waits on a person
   // and what changed. Workspace-scoped like Context, and read-only.
@@ -272,6 +282,7 @@ export function createApp(opts: CreateAppOptions): express.Express {
   app.use('/api/repos', projectResolver, guardRouter);
   app.use('/api/repos', projectResolver, guardActionsRouter);
   app.use('/api/repos', projectResolver, sessionsRouter);
+  if (opts.pulls) app.use('/api/repos', projectResolver, createPullsRouter({ pulls: opts.pulls.store, checks: opts.pulls.checks }));
 
   // Nothing under /api answered: say so as JSON. Without this a GET here falls
   // through to the SPA's index.html with a 200 and a POST to Express's HTML

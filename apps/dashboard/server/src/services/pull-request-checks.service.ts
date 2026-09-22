@@ -40,10 +40,20 @@ export interface PullRequestChecksDeps {
   pulls: PullRequestStore;
   repos: RepositoryStore;
   octokitFor: (installationId: number) => OctokitClient;
+  /**
+   * The installation a workspace's context SOURCE reads a repository through,
+   * for a repository Code has not connected: its checks have no link to read
+   * the installation off. Null when the workspace has no such source.
+   */
+  sourceInstallationOf?: (workspaceOrgId: string, repoFullName: string) => Promise<number | null>;
 }
 
-/** What starting a check answered: the attempt's row, and the queue's word. */
-export type CheckStart = { status: 'queued'; checkId: string; jobId: string } | { status: 'busy' | 'failed' };
+/**
+ * What starting a check answered: the attempt's row, and the queue's word.
+ * `stale` is a head the pull request no longer has, or a pull request no
+ * longer open: nothing was superseded and nothing started.
+ */
+export type CheckStart = { status: 'queued'; checkId: string; jobId: string } | { status: 'busy' | 'failed' | 'stale' };
 
 export interface PullRequestChecks {
   onPullRequest(trigger: PullRequestTrigger): Promise<void>;
@@ -56,6 +66,13 @@ export interface PullRequestChecks {
    * disconnect, `error` when the process running it died.
    */
   supersede(repoFullName: string, number: number, reason: 'superseded' | 'cancelled' | 'error'): Promise<void>;
+  /**
+   * A conflict was resolved in the workspace: every open pull request whose
+   * latest check settled on a conflict is checked again, whichever conflict it
+   * was — a check records no conflict identity, and one going may free any of
+   * them. Best-effort.
+   */
+  rerunBlockedByConflict(workspaceOrgId: string): Promise<void>;
 }
 
 export function createPullRequestChecks(deps: PullRequestChecksDeps): PullRequestChecks {
@@ -109,11 +126,15 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     }
   }
 
-  /** The installation a pull request's checks read GitHub through. */
+  /**
+   * The installation a pull request's checks read GitHub through: the one the
+   * event named, else the repository's link, else the workspace's source.
+   */
   async function installationFor(pr: PullRequestRecord, given?: number): Promise<number | null> {
     if (given !== undefined) return given;
     const link = await deps.repos.getRepo(pr.repoFullName);
-    return link ? installationOf(link) : null;
+    if (link) return installationOf(link);
+    return (await deps.sourceInstallationOf?.(pr.workspaceOrgId, pr.repoFullName)) ?? null;
   }
 
   const supersede: PullRequestChecks['supersede'] = async (repoFullName, number, reason) => {
@@ -133,6 +154,14 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     if (installationId === null) {
       log.warn(`[checks] ${pr.repoFullName}#${pr.number} has no installation to check through`);
       return { status: 'failed' };
+    }
+    // The head as stored NOW: a re-run carries a row read a moment ago, and a
+    // push landing in between must not have its fresh check superseded by a
+    // check of the head it just replaced.
+    const stored = await deps.pulls.getPullRequest(pr.repoFullName, pr.number);
+    if (!stored || stored.state !== 'open' || stored.headSha !== pr.headSha) {
+      log.info(`[checks] ${pr.repoFullName}#${pr.number} at ${pr.headSha.slice(0, 8)} not started: the pull request moved on`);
+      return { status: 'stale' };
     }
     await supersede(pr.repoFullName, pr.number, 'superseded');
     const octokit = deps.octokitFor(installationId);
@@ -175,6 +204,17 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
   return {
     start,
     supersede,
+    async rerunBlockedByConflict(workspaceOrgId) {
+      for (const pr of await deps.pulls.listWorkspacePullRequests(workspaceOrgId, { state: 'open' })) {
+        if (pr.draft) continue;
+        try {
+          const latest = await deps.pulls.latestCheck(pr.repoFullName, pr.number);
+          if (latest?.status === 'settled' && latest.reason === 'conflict') await start(pr);
+        } catch (err) {
+          log.warn(`[checks] could not re-check ${pr.repoFullName}#${pr.number}: ${(err as Error).message}`);
+        }
+      }
+    },
     async onPullRequest(trigger) {
       const { pr, installationId, effect } = trigger;
       try {

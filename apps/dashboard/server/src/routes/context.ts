@@ -121,6 +121,7 @@ import {
   type SiteSourceConfig,
 } from '@truecourse/shared';
 import { requireJobs } from '../jobs/current.js';
+import type { PullRequestChecks } from '../services/pull-request-checks.service.js';
 import { refusedWithoutCredits } from './credits.js';
 import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
 import {
@@ -156,6 +157,11 @@ export interface ContextRouterDeps {
   repoLinks?: RepoOwnershipLookup | null;
   /** The same connection's installation access. Absent when GitHub is unconfigured. */
   github?: ContextGithubAccess | null;
+  /**
+   * What re-checks the pull requests a conflict blocked once it is resolved.
+   * Absent when GitHub is unconfigured: nothing to re-check.
+   */
+  checks?: Pick<PullRequestChecks, 'rerunBlockedByConflict'> | null;
 }
 
 /** The workspace the caller is acting in, or a refusal. */
@@ -799,6 +805,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
       );
       const who = actorOf(req);
       if (who) captureAction(EVENTS.conflictResolved, { ...who, properties: { verdict } });
+      // A conflict resolved is what a check stopped on: the pull requests it
+      // blocked are checked again, the way clearing the last block on a
+      // generate starts it. Fire-and-forget; the resolution is saved either way.
+      deps.checks?.rerunBlockedByConflict(org).catch((err: unknown) => {
+        log.warn(`[context] could not re-check the pull requests a conflict blocked: ${(err as Error).message}`);
+      });
       res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
     } catch (e) {
       respond(res, next, e);

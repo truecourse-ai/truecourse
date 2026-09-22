@@ -122,6 +122,8 @@ describe('a head to check', () => {
   it('supersedes the attempt in flight: its row settles, its job stops, GitHub is told', async () => {
     const service = checks();
     await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
+    // The webhook saved the new head before it said so.
+    await pulls.savePullRequest(pr({ headSha: 'head-2' }));
     await service.onPullRequest({ pr: pr({ headSha: 'head-2' }), installationId: 5, effect: 'check' });
 
     const [first, second] = pulls.checks;
@@ -138,11 +140,22 @@ describe('a head to check', () => {
     refuseCreate = true;
     const service = checks();
     await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
+    await pulls.savePullRequest(pr({ headSha: 'head-2' }));
     await service.onPullRequest({ pr: pr({ headSha: 'head-2' }), installationId: 5, effect: 'check' });
     expect(pulls.checks.map((c) => c.githubCheckRunId)).toEqual([null, null]);
     expect(enqueued).toHaveLength(2);
     // Nothing was ever posted, so nothing is updated either.
     expect(github.filter((c) => c.method === 'update')).toEqual([]);
+  });
+
+  it('starts nothing, and supersedes nothing, for a head the pull request no longer has', async () => {
+    const service = checks();
+    await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
+    // A push landed between a re-run's read and its start.
+    await pulls.savePullRequest(pr({ headSha: 'head-2' }));
+    expect(await service.start(pr({ headSha: 'head-1' }))).toEqual({ status: 'stale' });
+    expect(pulls.checks.map((c) => [c.headSha, c.status])).toEqual([['head-1', 'queued']]);
+    expect(cancelled).toEqual([]);
   });
 });
 
@@ -183,6 +196,46 @@ describe('a close', () => {
   it('a title edit starts nothing', async () => {
     await checks().onPullRequest({ pr: pr(), installationId: 5, effect: 'none' });
     expect(pulls.checks).toEqual([]);
+  });
+});
+
+describe('a conflict resolved', () => {
+  it('re-checks every open pull request whose latest check stopped on a conflict', async () => {
+    const service = checks();
+    await pulls.savePullRequest(pr({ number: 8, headSha: 'head-8' }));
+    await pulls.savePullRequest(pr({ number: 9, headSha: 'head-9', draft: true }));
+    for (const [number, reason] of [
+      [7, 'conflict'],
+      [8, 'clean'],
+      [9, 'conflict'],
+    ] as const) {
+      const row = await pulls.createCheck({ repoFullName: 'acme/api', number, headSha: `head-${number === 7 ? 1 : number}` });
+      await pulls.updateCheck(row.id, { status: 'settled', conclusion: reason === 'conflict' ? 'failure' : 'success', reason });
+    }
+    await service.rerunBlockedByConflict('org_A');
+    // #7 stopped on a conflict: checked again. #8 was clean, #9 is a draft.
+    expect(enqueued.map((r) => r.number)).toEqual([7]);
+  });
+
+  it('re-checks a repository only a context source reads, through the source’s installation', async () => {
+    const service = createPullRequestChecks({
+      pulls,
+      repos,
+      octokitFor: () => octokit,
+      sourceInstallationOf: async (org, repoFullName) => (org === 'org_A' && repoFullName === 'acme/docs' ? 9 : null),
+      jobs: {
+        enqueuePullRequestCheck: async (request) => {
+          enqueued.push(request);
+          return { status: 'queued', jobId: 'job_docs' };
+        },
+        cancel: async () => 'cancelled',
+      },
+    });
+    await pulls.savePullRequest(pr({ repoFullName: 'acme/docs', headRepoFullName: 'acme/docs', number: 3, headSha: 'head-3' }));
+    const row = await pulls.createCheck({ repoFullName: 'acme/docs', number: 3, headSha: 'head-3' });
+    await pulls.updateCheck(row.id, { status: 'settled', conclusion: 'failure', reason: 'conflict' });
+    await service.rerunBlockedByConflict('org_A');
+    expect(enqueued).toEqual([expect.objectContaining({ repoFullName: 'acme/docs', repoId: 'acme/docs', number: 3, installationId: 9 })]);
   });
 });
 

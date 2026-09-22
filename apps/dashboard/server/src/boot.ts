@@ -32,6 +32,8 @@ import {
 import { PgInviteLinkStore, PgPullRequestStore, PgRepositoryStore, sweepStoredVersions } from '@truecourse/data-store';
 import { installationOctokit, loadGithubAppConfig } from '@truecourse/github-app';
 import { createPullRequestChecks } from './services/pull-request-checks.service.js';
+import { listContextSources } from '@truecourse/core/lib/context-store';
+import { repositoryConfig } from '@truecourse/core/services/context';
 import { setRepoProviderLookup } from './services/work-tree.service.js';
 import { startRunChangeRelay } from './services/run-events.service.js';
 import {
@@ -208,6 +210,11 @@ export async function startServer(): Promise<void> {
         pulls,
         repos: repoLinks,
         octokitFor,
+        sourceInstallationOf: async (workspaceOrgId, repoFullName) => {
+          const sources = await listContextSources(workspaceOrgId);
+          const source = sources.find((s) => s.kind === 'repository' && repositoryConfig(s.config).repoFullName === repoFullName);
+          return source ? (repositoryConfig(source.config).installationId ?? null) : null;
+        },
       })
     : null;
   const jobs = createServerJobs({
@@ -366,6 +373,7 @@ export async function startServer(): Promise<void> {
     github,
     localRouter: local?.router ?? null,
     jobs,
+    pulls: { store: pulls, checks: pullRequestChecks },
     featureRouters,
     // Who a workspace IS, for the operator's Credits page. Local mode has no
     // identity provider to ask, and no operator routes to ask for.
