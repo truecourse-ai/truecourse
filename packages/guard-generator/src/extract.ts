@@ -336,14 +336,16 @@ export function mergeSettledSections<C extends { sectionAnchor: string }>(
 
 /**
  * Identity below the claim: a KEPT claim (its sentence verbatim) takes its
- * prior cases and needs byte for byte — the sentence is the claim, and a
- * re-spelled case id on an unchanged claim would orphan every flow milestone
- * that selects it; a REPLACED claim keeps the id of every prior case whose
- * own sentence it re-states, and the prior need names for the same kinds.
- * Applied to the draft's extracted sections only; settled sections are prior
- * already. Deterministic, so a session cannot re-mint what did not change.
+ * prior driver, proof alternatives, cases and needs byte for byte — the
+ * sentence is the claim, a re-chosen driver on an unchanged claim unbinds
+ * every flow milestone proved on the old one, and a re-spelled case id
+ * orphans every milestone that selects it; a REPLACED claim keeps the id of
+ * every prior case whose own sentence it re-states, and the prior need names
+ * for the same kinds. Applied to the draft's extracted sections only; settled
+ * sections are prior already. Deterministic, so a session cannot re-mint what
+ * did not change.
  */
-export function carryPriorCaseIdentity<C extends { claim: string; sectionAnchor: string; replaces?: string; verification?: ExtractedClaim['verification']; needs?: ClaimNeed[] }>(
+export function carryPriorCaseIdentity<C extends { claim: string; sectionAnchor: string; replaces?: string; driver?: ExtractedClaim['driver']; alternativeDrivers?: ExtractedClaim['alternativeDrivers']; verification?: ExtractedClaim['verification']; needs?: ClaimNeed[] }>(
   draft: { claims: readonly C[] },
   prior: ExtractPrior,
 ): C[] {
@@ -354,11 +356,13 @@ export function carryPriorCaseIdentity<C extends { claim: string; sectionAnchor:
     if (settled.has(c.sectionAnchor)) return c
     const kept = c.replaces === undefined ? byText.get(normalizeSentence(c.claim)) : undefined
     if (kept && kept.sectionAnchor === c.sectionAnchor) {
+      const { alternativeDrivers: _alt, ...rest } = c
       return {
-        ...c,
+        ...(kept.driver ? rest : c),
+        ...(kept.driver ? { driver: kept.driver, ...(kept.alternativeDrivers ? { alternativeDrivers: kept.alternativeDrivers } : {}) } : {}),
         ...(kept.verification ? { verification: kept.verification } : {}),
         ...(kept.needs !== undefined ? { needs: kept.needs } : {}),
-      }
+      } as C
     }
     const replaced = c.replaces === undefined ? undefined : byText.get(normalizeSentence(c.replaces))
     if (!replaced) return c

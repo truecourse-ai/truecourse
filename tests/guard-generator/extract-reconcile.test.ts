@@ -143,9 +143,14 @@ describe('carryPriorCaseIdentity', () => {
   const priorList = withCases(LIST, [['newest-first', 'Newest task first'], ['one-per-line', 'One line per task']], [{ kind: 'fixture', name: 'sample-tasks' }])
   const prior: ExtractPrior = { claims: [addClaim, priorList], untestable: [], settledAnchors: [CREATING] }
 
-  it('a kept claim takes its prior cases and needs verbatim, whatever the session re-minted', () => {
-    const draft = { claims: [withCases(LIST, [['first', 'Newest task first']], [{ kind: 'fixture' as const, name: 'tasks' }])] }
+  it('a kept claim takes its prior driver, alternatives, cases and needs verbatim, whatever the session re-minted', () => {
+    const draft = { claims: [{ ...withCases(LIST, [['first', 'Newest task first']], [{ kind: 'fixture' as const, name: 'tasks' }]), driver: 'web' as const, alternativeDrivers: ['api' as const] }] }
     expect(carryPriorCaseIdentity(draft, prior)).toEqual([priorList])
+    // A prior without a driver (a store row from before drivers were recorded) leaves the session's choice.
+    const { driver: _d, ...driverless } = priorList
+    const out = carryPriorCaseIdentity(draft, { ...prior, claims: [addClaim, driverless] })
+    expect(out[0]!.driver).toBe('web')
+    expect(out[0]!.verification).toEqual(priorList.verification)
   })
 
   it('a replaced claim keeps the id of every prior case it re-states, and the prior need name for the same need', () => {
