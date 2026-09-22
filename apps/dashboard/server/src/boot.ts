@@ -29,7 +29,9 @@ import {
   subscribeSessionRunWrites,
   workspaceOfRepo,
 } from './stores.js';
-import { PgInviteLinkStore, PgRepositoryStore, sweepStoredVersions } from '@truecourse/data-store';
+import { PgInviteLinkStore, PgPullRequestStore, PgRepositoryStore, sweepStoredVersions } from '@truecourse/data-store';
+import { installationOctokit, loadGithubAppConfig } from '@truecourse/github-app';
+import { createPullRequestChecks } from './services/pull-request-checks.service.js';
 import { setRepoProviderLookup } from './services/work-tree.service.js';
 import { startRunChangeRelay } from './services/run-events.service.js';
 import {
@@ -185,7 +187,45 @@ export async function startServer(): Promise<void> {
   //    link hook enqueues the connected repository's Flow setup, and started
   //    after — the task bodies read seams (the work-tree provider) the
   //    connection installs.
-  const jobs = createServerJobs({ db: getDb(), connectionString: databaseUrl, repos: repoLinks });
+  // The pull requests, and GitHub as the checks read it: through the App's
+  // installations, built here rather than by the connection below because
+  // the check job is a task of the queue, which comes first.
+  const pulls = new PgPullRequestStore(getDb());
+  const githubConfig = loadGithubAppConfig();
+  const octokitFor = githubConfig
+    ? (installationId: number) => installationOctokit(githubConfig, installationId)
+    : null;
+  const appUrl = process.env.WORKOS_APP_URL || 'http://localhost:3000';
+  // The checks service and the queue need each other: the service enqueues
+  // and cancels through the queue, and a disconnect settles checks through
+  // the service. The service takes the queue lazily, so both can be built.
+  const pullRequestChecks = octokitFor
+    ? createPullRequestChecks({
+        jobs: {
+          enqueuePullRequestCheck: (request) => jobs.enqueuePullRequestCheck(request),
+          cancel: (jobId) => jobs.cancel(jobId),
+        },
+        pulls,
+        repos: repoLinks,
+        octokitFor,
+      })
+    : null;
+  const jobs = createServerJobs({
+    db: getDb(),
+    connectionString: databaseUrl,
+    repos: repoLinks,
+    ...(octokitFor && pullRequestChecks
+      ? {
+          pullRequestCheck: {
+            pulls,
+            repos: repoLinks,
+            octokitFor,
+            appUrl,
+            onStopped: (repoFullName, number, reason) => pullRequestChecks.supersede(repoFullName, number, reason),
+          },
+        }
+      : {}),
+  });
   // Disconnecting a repository stops whatever it has in flight.
   setRepoJobsCanceller(jobs.cancelRepoJobs);
   // A Context mutation is workspace-wide, so it rides the SSE stream the
@@ -232,6 +272,8 @@ export async function startServer(): Promise<void> {
       });
       return outcome.status;
     },
+    pulls,
+    ...(pullRequestChecks ? { checks: pullRequestChecks } : {}),
     // A push to the default branch runs the main chain at the pushed commit.
     startMainChain: async (trigger) => {
       const link = await repoLinks.getRepo(trigger.repoFullName);

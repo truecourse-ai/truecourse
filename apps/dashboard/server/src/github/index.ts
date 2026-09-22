@@ -42,7 +42,8 @@ import {
   type OctokitClient,
   type UserInstallation,
 } from '@truecourse/github-app';
-import type { RepositoryRecord, RepositoryStore } from '@truecourse/shared';
+import type { PullRequestStore, RepositoryRecord, RepositoryStore } from '@truecourse/shared';
+import type { PullRequestChecks } from '../services/pull-request-checks.service.js';
 import { getDb } from '../db.js';
 import { createRunClone } from '../services/run-clone.service.js';
 import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tree.service.js';
@@ -108,6 +109,9 @@ export interface GithubConnectionOverrides {
    * push only re-reads the repository's documentation.
    */
   startMainChain?: MainChainStart;
+  /** The pull requests, and what their events start. Without them pull request events are ignored. */
+  pulls?: PullRequestStore;
+  checks?: PullRequestChecks;
 }
 
 /** How a push starts the main chain: the queue's answer, as a word. */
@@ -244,6 +248,14 @@ export function createGithubConnection(
     onSourcePush: (trigger) => {
       syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
     },
+    // A pull request's events: its check starts, is held, or is cancelled.
+    ...(overrides.pulls ? { pulls: overrides.pulls } : {}),
+    ...(overrides.checks
+      ? {
+          onPullRequest: (trigger) => void overrides.checks!.onPullRequest(trigger),
+          onCheckRerun: (trigger) => void overrides.checks!.onCheckRerun(trigger),
+        }
+      : {}),
     // GitHub taking a repo away (app uninstall, repo removed from the
     // installation) disconnects it exactly like an explicit unlink does.
     onRepoRemoved: async (link: RepositoryRecord) => {

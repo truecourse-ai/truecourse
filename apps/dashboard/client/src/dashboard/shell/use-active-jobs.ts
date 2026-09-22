@@ -34,23 +34,26 @@ const JOB_COMMAND: Record<string, string> = {
   'repo.guard-setup': 'guard-setup',
   'repo.guard-generate': 'guard-generate',
   'repo.guard-run': 'guard-run',
+  'repo.pr-check': 'pr-check',
   'context.scan': 'spec-scan',
 };
 
 /** The jobs that share the workspace's one heavy queue, one at a time. */
-const HEAVY_TYPES = ['repo.guard-setup', 'repo.guard-generate', 'repo.guard-run'];
+const HEAVY_TYPES = ['repo.guard-setup', 'repo.guard-generate', 'repo.guard-run', 'repo.pr-check'];
 
 /** The command a job runs, or null for work that becomes no conversation. */
 export const jobCommand = (job: JobView): string | null => JOB_COMMAND[job.type] ?? null;
 
 /**
  * The repository a job runs for, read off its single-flight key
- * (`<type>:<owner/repo>`, the server's `jobKey`). The workspace's own document
- * scan names no repository, and its key is the type alone.
+ * (`<type>:<owner/repo>`, the server's `jobKey`; a pull request check's key
+ * carries `#<number>` after it). The workspace's own document scan names no
+ * repository, and its key is the type alone.
  */
 export function jobRepoFullName(job: JobView): string | null {
   const prefix = `${job.type}:`;
-  return job.key?.startsWith(prefix) === true ? job.key.slice(prefix.length) : null;
+  if (job.key?.startsWith(prefix) !== true) return null;
+  return job.key.slice(prefix.length).replace(/#\d+$/, '');
 }
 
 /**

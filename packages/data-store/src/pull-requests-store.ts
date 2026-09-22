@@ -180,6 +180,18 @@ export class PgPullRequestStore implements PullRequestStore {
     return rows[0] ? toCheck(rows[0]) : null;
   }
 
+  async settleCheck(
+    id: string,
+    patch: Omit<PullRequestCheckPatch, 'status'>,
+  ): Promise<PullRequestCheckRecord | null> {
+    const rows = await this.db
+      .update(pullRequestChecks)
+      .set({ ...patch, status: 'settled', settledAt: patch.settledAt ?? new Date().toISOString() })
+      .where(and(eq(pullRequestChecks.id, id), ne(pullRequestChecks.status, 'settled')))
+      .returning();
+    return rows[0] ? toCheck(rows[0]) : null;
+  }
+
   async getCheck(id: string): Promise<PullRequestCheckRecord | null> {
     const rows = await this.db.select().from(pullRequestChecks).where(eq(pullRequestChecks.id, id)).limit(1);
     return rows[0] ? toCheck(rows[0]) : null;

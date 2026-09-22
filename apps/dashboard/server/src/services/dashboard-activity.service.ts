@@ -3,6 +3,7 @@ import {
   createStoredSessionRun,
   resumeStoredSessionRun,
   SessionRunNotFoundError,
+  type CreateSessionRunOptions,
   type SessionRunStore,
 } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
@@ -38,8 +39,9 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
   steps: readonly { key: string; label: string }[],
   execute: (run: SessionRunStore, tracker: StepTracker) => Promise<T>,
   credits?: CreditsGate,
+  opts: { pullRequest?: CreateSessionRunOptions['pullRequest'] } = {},
 ): Promise<T> {
-  const run = await carryOn(ctx, command);
+  const run = await carryOn(ctx, command, opts.pullRequest);
   const tracker = mirrorTracker(ctx, [{ key: 'clone', label: 'Preparing repository' }, ...steps]);
   const untap = tracker.tap(progress => {
     if (progress.steps) run.setChecklist(progress.steps);
@@ -67,6 +69,7 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
 async function carryOn<P extends OnboardingJobPayload>(
   ctx: JobContext<P>,
   command: SessionCommand,
+  pullRequest?: CreateSessionRunOptions['pullRequest'],
 ): Promise<SessionRunStore> {
   const repoKey = ctx.payload.repoFullName;
   const carryOnRunId = ctx.payload.carryOnRunId;
@@ -78,7 +81,11 @@ async function carryOn<P extends OnboardingJobPayload>(
       log.warn(`[jobs] ${repoKey} has no ${command} run ${carryOnRunId} to carry on — opening a new one`);
     }
   }
-  return createStoredSessionRun(repoKey, { command, gitRef: 'unknown' });
+  return createStoredSessionRun(repoKey, {
+    command,
+    gitRef: 'unknown',
+    ...(pullRequest ? { pullRequest } : {}),
+  });
 }
 
 /** An empty balance is what stopped the run, whatever the engine called it. */

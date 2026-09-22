@@ -101,6 +101,12 @@ export interface EnqueueOptions {
    * worker's own concurrency still runs them beside a queued one.
    */
   queue?: string;
+  /**
+   * graphile's priority: within a queue, a LOWER number is claimed first, and
+   * equal numbers keep enqueue order. How the main chain of a repository's
+   * push goes before a pull request's check waiting in the same lane.
+   */
+  priority?: number;
 }
 
 export interface Jobs {
@@ -174,6 +180,7 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
       jobKey,
       maxAttempts: 1,
       ...(opts?.queue ? { queueName: opts.queue } : {}),
+      ...(opts?.priority !== undefined ? { priority: opts.priority } : {}),
     });
   };
 

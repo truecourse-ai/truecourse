@@ -27,6 +27,9 @@ export const SessionCommandSchema = z.enum([
   // A scenario run. Deterministic apart from ONE opt-in annotation: the visual
   // verdict on a failing web step. A run that asks for none creates no record.
   'guard-run',
+  // A pull request's check: setup, generation and the run at the head, in one
+  // conversation, judged against what is stored for the base.
+  'pr-check',
 ]);
 export type SessionCommand = z.infer<typeof SessionCommandSchema>;
 

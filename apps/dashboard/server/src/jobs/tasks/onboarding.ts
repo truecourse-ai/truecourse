@@ -13,8 +13,8 @@ import { stepBridge, type JobContext, type JobOutcomeStatus, type JobPayload } f
 import { emitSpecProgress } from '../../socket/handlers.js';
 import type { WorkTreeVia } from '../../services/work-tree.service.js';
 
-/** What asked for this run: a connect, a user pressing the button, the chain, or a push to the default branch. */
-export type OnboardingJobSource = 'connect' | 'manual' | 'chain' | 'push';
+/** What asked for this run: a connect, a user pressing the button, the chain, a push to the default branch, or a pull request. */
+export type OnboardingJobSource = 'connect' | 'manual' | 'chain' | 'push' | 'pull-request';
 
 /** What an enqueue is asked for — the payload minus the row the queue creates. */
 export interface OnboardingJobRequest {

@@ -92,6 +92,12 @@ export function memoryPullRequestStore(clock: () => string = () => new Date().to
       checks[index] = { ...checks[index]!, ...patch };
       return { ...checks[index]! };
     },
+    async settleCheck(id, patch) {
+      const index = checks.findIndex((c) => c.id === id && c.status !== 'settled');
+      if (index < 0) return null;
+      checks[index] = { ...checks[index]!, ...patch, status: 'settled', settledAt: patch.settledAt ?? clock() };
+      return { ...checks[index]! };
+    },
     async getCheck(id) {
       const check = checks.find((c) => c.id === id);
       return check ? { ...check } : null;

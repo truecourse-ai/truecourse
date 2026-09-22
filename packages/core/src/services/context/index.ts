@@ -42,6 +42,7 @@ export { createSiteDriver, type SiteDriverDeps } from './site-driver.js';
 export {
   createRepositoryDriver,
   documentTitle,
+  repositoryDocumentsIn,
   scopeFilter,
   type RepositoryDriverDeps,
 } from './repository-driver.js';

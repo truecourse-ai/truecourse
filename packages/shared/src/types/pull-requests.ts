@@ -111,6 +111,7 @@ export const PullRequestCheckReportSchema = z.object({
   /** Conflicts the head creates against the rest of the workspace. */
   conflictsCreated: z.array(
     z.object({
+      /** The two documents, this repository's own first when one side is one. */
       docs: z.tuple([z.string(), z.string()]),
       sections: z.tuple([z.array(z.string()), z.array(z.string())]),
       note: z.string(),
@@ -221,6 +222,16 @@ export interface PullRequestStore {
   }): Promise<PullRequestCheckRecord>
   /** Returns the patched row, or null when the id names none. */
   updateCheck(id: string, patch: PullRequestCheckPatch): Promise<PullRequestCheckRecord | null>
+  /**
+   * Settle a check that is still queued or running: the one transition to
+   * `settled`, taken by whoever gets there first — the job's own exit, or a
+   * webhook superseding it. Null when the row is already settled (or absent),
+   * and the caller then posts nothing: the first word stands.
+   */
+  settleCheck(
+    id: string,
+    patch: Omit<PullRequestCheckPatch, 'status'>,
+  ): Promise<PullRequestCheckRecord | null>
   getCheck(id: string): Promise<PullRequestCheckRecord | null>
   /** The newest check of a pull request, whatever its status. */
   latestCheck(repoFullName: string, number: number): Promise<PullRequestCheckRecord | null>
