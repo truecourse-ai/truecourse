@@ -7,10 +7,12 @@
  * it before running, and lift what the generator wrote out again before the
  * clone goes:
  *
- *   IN  — the user's guard decisions (dismissed claims and flows), the baseline
- *         scenario set (the manifest is what makes an unchanged section a skip
- *         and keeps scenario ids stable across runs) and the baseline report
- *         (the birth findings a no-op generate carries forward).
+ *   IN  — the user's guard decisions (dismissed claims and flows), the current
+ *         scenario set — every file of it: the manifest is what makes an
+ *         unchanged section a skip and keeps scenario ids stable across runs,
+ *         and the flows and claims beside it are what synthesis reconciles
+ *         against — and the current report (the birth findings a no-op
+ *         generate carries forward).
  *   OUT — the scenario tree, the report (flagged as the repo's guard BASELINE:
  *         the job only ever runs on the default branch), and every birth-finding
  *         transcript, which lives in a gitignored evidence dir the clone takes
@@ -44,7 +46,6 @@ import {
   type GuardLatest,
 } from '@truecourse/shared';
 import {
-  listScenarioFiles,
   readGuardBaselineCommit,
   readGuardDecisions,
   readGuardResult,
@@ -63,6 +64,7 @@ import {
   readGuardRunFlowSummary,
   readGuardRunSectionSummary,
 } from '@truecourse/core/commands/guard-read';
+import { storedScenarioSetFiles } from '@truecourse/core/lib/guard-read-tree';
 import { log } from '@truecourse/core/lib/logger';
 import { assertSafeRel, safeJoin } from '@truecourse/core/lib/safe-path';
 
@@ -98,7 +100,10 @@ export async function materializeStoredGuardState(
   // the blocked report of a generate that stored no set, carried forward.
   const manifest = await readManifest(repoKey);
   if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
-  for (const rel of await listScenarioFiles(repoKey)) {
+  // Every file of the set, not only the scenario yaml: the committed flows and
+  // claims beside the manifest are what synthesis reconciles against, and a
+  // clone without them makes every flow look new.
+  for (const rel of await storedScenarioSetFiles(repoKey, treeDir)) {
     const body = await readScenarioFile(repoKey, rel);
     if (body == null) continue;
     assertSafeRel(rel);
