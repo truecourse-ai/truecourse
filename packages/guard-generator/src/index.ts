@@ -116,14 +116,22 @@ export {
 export {
   snapExtraction,
   isSystemicSessionLoss,
+  reconciliationProblems,
+  mergeSettledSections,
+  priorClaimsToAccount,
   type DocClaims,
   type ExtractResult,
   type ExtractedClaimWithNeeds,
+  type ExtractPrior,
+  type PriorClaim,
+  type ReconcilableDraft,
   type ExtractSessionSeam,
   type PriorExtraction,
   type ReuseExtractionSeam,
   type GuardSessionSummary,
 } from './extract.js'
+
+export { priorExtractions, type PriorExtractionsInput } from './extract-prior.js'
 
 export {
   mergeExtractedClaims,

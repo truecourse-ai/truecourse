@@ -92,6 +92,12 @@ export interface FlowClaimInput {
    * Advisory — they steer composition, never gate it.
    */
   needs?: ClaimNeed[]
+  /**
+   * The prior claim's sentence this one supersedes, when a re-extraction
+   * reworded it. A committed flow's milestone still names the prior sentence
+   * and resolves to this claim through it, so the flow is amended, not retired.
+   */
+  replaces?: string
 }
 
 /** One document's synthesis context: its outline and its untestable sections. */
@@ -302,6 +308,10 @@ function buildClaimIndex(claims: readonly FlowClaimInput[]): ClaimIndex {
   const index: ClaimIndex = { byKey: new Map(), byDocAnchor: new Map(), byDocLoose: new Map(), all: [...claims] }
   for (const c of claims) {
     index.byKey.set(claimKey(c.doc, c.anchor, c.title), c)
+    // The superseded sentence resolves here too, unless a live claim states it.
+    if (c.replaces !== undefined && !index.byKey.has(claimKey(c.doc, c.anchor, c.replaces))) {
+      index.byKey.set(claimKey(c.doc, c.anchor, c.replaces), c)
+    }
     const da = flowSectionKey(c.doc, c.anchor)
     const list = index.byDocAnchor.get(da)
     if (list) list.push(c)

@@ -26,6 +26,7 @@ import { GuardVerificationSchema } from './verification.js'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { ClaimNeedSchema } from './extract-outcome.js'
+import { guardDriverIds } from './drivers.js'
 
 /**
  * One extracted claim. Identity = `doc` + `anchor` + `title`.
@@ -59,6 +60,16 @@ export const GuardClaimSchema = z
      */
     needs: z.array(ClaimNeedSchema).optional(),
     verification: GuardVerificationSchema.optional(),
+    /**
+     * The surface extraction judged could assert the claim, and the drivers
+     * that each prove the whole claim on their own. Stored so a later
+     * extraction can take an unchanged section's claims from here verbatim
+     * without a session, cache or no cache. Absent on rows written before the
+     * store carried them; such a section is re-extracted with its claims
+     * briefed instead.
+     */
+    driver: z.enum(guardDriverIds).optional(),
+    alternativeDrivers: z.array(z.enum(guardDriverIds)).optional(),
   })
   .strict()
 export type GuardClaim = z.infer<typeof GuardClaimSchema>
