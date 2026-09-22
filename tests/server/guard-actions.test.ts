@@ -398,15 +398,13 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
       await client.close();
     });
 
-    it("a newer non-baseline report never masks the repo's findings — the last dismissal still regenerates", async () => {
-      // The baseline-flagged generate is the repo's anchor.
-      await writeGuardResult({ repoKey: root, commitSha: 'basesha1111' }, report([findingA]), {
-        baseline: true,
-      });
-      // A findings-free report stored at another commit — strictly newer createdAt,
-      // so a commit-less "newest" read would see zero findings and skip.
+    it("a newer report in a pull request's scope never masks the repo's findings — the last dismissal still regenerates", async () => {
+      // The default branch's generate is the repo's anchor.
+      await writeGuardResult({ repoKey: root, commitSha: 'basesha1111' }, report([findingA]));
+      // A findings-free report stored under a pull request's scope — strictly
+      // newer createdAt, so a scope-blind "newest" read would see zero findings and skip.
       await new Promise((r) => setTimeout(r, 5));
-      await writeGuardResult({ repoKey: root, commitSha: 'othersha9999' }, report([]));
+      await writeGuardResult({ repoKey: root, commitSha: 'othersha9999', scope: 'pr/9' }, report([]));
 
       await dismiss(findingA).expect(200);
       expect(enqueue).toHaveBeenCalledTimes(1);

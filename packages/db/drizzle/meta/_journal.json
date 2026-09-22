@@ -211,6 +211,13 @@
       "when": 1790026458283,
       "tag": "0029_workspace_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1790126458283,
+      "tag": "0030_versioned_state",
+      "breakpoints": true
     }
   ]
 }

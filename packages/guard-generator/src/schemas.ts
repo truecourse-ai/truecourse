@@ -547,8 +547,11 @@ export const SynthesizedMilestoneSchema = z.object({
 })
 export type SynthesizedMilestone = z.infer<typeof SynthesizedMilestoneSchema>
 
-/** One synthesized flow: a user-goal path over the area's claims. */
+/** One synthesized flow: a user-goal path over the area's claims. `id` names
+ *  the EXISTING flow this one continues (kept when the milestones are the
+ *  same, amended when they moved); absent for a flow that is new. */
 export const SynthesizedFlowSchema = z.object({
+  id: z.string().min(1).optional(),
   title: z.string().min(1),
   goal: z.string().min(1),
   notes: z.string().min(1).optional(),
@@ -568,6 +571,14 @@ export const SynthesizedNoFlowClaimSchema = z.object({
 })
 export type SynthesizedNoFlowClaim = z.infer<typeof SynthesizedNoFlowClaimSchema>
 
+/** An existing flow the reconciliation RETIRES, with why the claims no longer
+ *  support it. */
+export const RetiredFlowSchema = z.object({
+  id: z.string().min(1),
+  reason: z.string().min(1),
+})
+export type RetiredFlow = z.infer<typeof RetiredFlowSchema>
+
 /**
  * One area's synthesis output. Either array may be omitted (an area that composes
  * everything, or one that flows nothing), but at least one MUST be a real array —
@@ -578,11 +589,12 @@ export const FlowSynthesisSchema = z
   .object({
     flows: z.array(SynthesizedFlowSchema).optional(),
     noFlowClaims: z.array(SynthesizedNoFlowClaimSchema).optional(),
+    retiredFlows: z.array(RetiredFlowSchema).optional(),
   })
   .refine((d) => d.flows !== undefined || d.noFlowClaims !== undefined, {
     message: 'expected a "flows" and/or "noFlowClaims" array',
   })
-  .transform((d) => ({ flows: d.flows ?? [], noFlowClaims: d.noFlowClaims ?? [] }))
+  .transform((d) => ({ flows: d.flows ?? [], noFlowClaims: d.noFlowClaims ?? [], retiredFlows: d.retiredFlows ?? [] }))
 export type FlowSynthesis = z.infer<typeof FlowSynthesisSchema>
 
 /**
@@ -598,6 +610,9 @@ export const FlowSetSchema = z
   .object({
     flows: z.array(SynthesizedFlowSchema),
     noFlowClaims: z.array(SynthesizedNoFlowClaimSchema),
+    /** Existing flows retired with a reason. Optional so a cached outcome
+     *  produced before reconciliation still parses as a hit. */
+    retiredFlows: z.array(RetiredFlowSchema).optional(),
   })
   .strict()
 export type FlowSet = z.infer<typeof FlowSetSchema>
@@ -609,6 +624,8 @@ export type FlowSet = z.infer<typeof FlowSetSchema>
  * milestones, so an epic can never smuggle in a claim no flow covers.
  */
 export const SynthesizedEpicFlowSchema = z.object({
+  /** The existing epic this one continues; absent for a new epic. */
+  id: z.string().min(1).optional(),
   title: z.string().min(1),
   goal: z.string().min(1),
   notes: z.string().min(1).optional(),
@@ -623,6 +640,8 @@ export type SynthesizedEpicFlow = z.infer<typeof SynthesizedEpicFlowSchema>
  *  answer rather than an unparsed one. */
 export const EpicSynthesisSchema = z.object({
   epics: z.array(SynthesizedEpicFlowSchema),
+  /** Existing epics retired with a reason (optional: see {@link FlowSetSchema}). */
+  retiredEpics: z.array(RetiredFlowSchema).optional(),
 })
 export type EpicSynthesis = z.infer<typeof EpicSynthesisSchema>
 

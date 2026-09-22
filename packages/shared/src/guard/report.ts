@@ -753,8 +753,26 @@ export const GuardFlowsReportSchema = z
     skipped: z.number().int().nonnegative(),
     /** Flows dropped by a `dismissedFlows` entry. */
     dismissed: z.number().int().nonnegative(),
-    /** Committed flows no re-synthesized flow claimed — their scenarios were dropped. */
+    /** Committed flows the reconciliation RETIRED whose scenarios were kept and
+     *  marked orphaned (a retired flow without a test is pruned, not counted). */
     orphaned: z.number().int().nonnegative(),
+    /**
+     * What the reconciliation against the committed corpus did to each flow:
+     * `kept` came back byte-identical under its id, `amended` kept its id under
+     * a new milestone set, `added` is new, `retired` left the corpus with a
+     * reason, `carried` is a prior flow of an area that failed to settle, kept
+     * as it was. Absent on a report written before flows were reconciled.
+     */
+    reconciled: z
+      .object({
+        kept: z.number().int().nonnegative(),
+        amended: z.number().int().nonnegative(),
+        added: z.number().int().nonnegative(),
+        retired: z.number().int().nonnegative(),
+        carried: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
     /** Near-duplicates the deterministic subsumption pass dropped. */
     subsumed: z.number().int().nonnegative(),
     /** Runnable claims synthesis deliberately placed in no flow, with a reason. */

@@ -116,14 +116,23 @@ export {
 export {
   snapExtraction,
   isSystemicSessionLoss,
+  reconciliationProblems,
+  mergeSettledSections,
+  carryPriorCaseIdentity,
+  priorClaimsToAccount,
   type DocClaims,
   type ExtractResult,
   type ExtractedClaimWithNeeds,
+  type ExtractPrior,
+  type PriorClaim,
+  type ReconcilableDraft,
   type ExtractSessionSeam,
   type PriorExtraction,
   type ReuseExtractionSeam,
   type GuardSessionSummary,
 } from './extract.js'
+
+export { priorExtractions, type PriorExtractionsInput } from './extract-prior.js'
 
 export {
   mergeExtractedClaims,
@@ -162,6 +171,8 @@ export {
   type FlowsSessionGrounding,
   type SubsumedFlow,
   type UnsettledArea,
+  type RetiredFlowRecord,
+  type FlowReconciliation,
 } from './flows.js'
 
 export {
@@ -478,6 +489,7 @@ export {
   type SynthesizedFlow,
   type SynthesizedMilestone,
   type SynthesizedEpicFlow,
+  type RetiredFlow,
   ClaimDiffSchema,
   type ClaimDiff,
   WorldClassifySchema,

@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto'
 import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import { guardManifestSections, isCreditsExhausted, type GuardManifest } from '@truecourse/shared'
 import { extractSectionTexts, nodeRefContext, normalizeSectionText } from '@truecourse/guard-runner'
-import { snapExtraction, type ReuseExtractionSeam } from './extract.js'
+import { snapExtraction, type PriorExtraction, type ReuseExtractionSeam } from './extract.js'
 import { flowSectionKey } from './flows.js'
 import { type ClaimDiffSectionInput } from './prompts.js'
 import { LEGACY_CLAIM_DIFF_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
@@ -40,6 +40,9 @@ export interface ClaimDiffGateResult {
   cosmetic: Map<string, string>
   /** Documents whose prior extraction was reused this run. */
   reusedDocs: string[]
+  /** The prior extraction the gate found for each edited document it judged,
+   *  reused or not — handed on so the next reader does not fetch it again. */
+  priors: Map<string, PriorExtraction>
   /** Live gate calls made (cache hits excluded). */
   calls: number
   /** One message per document the gate could not judge (runner failure) and
@@ -47,7 +50,7 @@ export interface ClaimDiffGateResult {
   errors: string[]
 }
 
-export const EMPTY_CLAIM_DIFF_GATE: ClaimDiffGateResult = { cosmetic: new Map(), reusedDocs: [], calls: 0, errors: [] }
+export const EMPTY_CLAIM_DIFF_GATE: ClaimDiffGateResult = { cosmetic: new Map(), reusedDocs: [], priors: new Map(), calls: 0, errors: [] }
 
 export interface ReuseCosmeticExtractionsInput {
   repoRoot: string
@@ -106,7 +109,7 @@ function claimDiffKeyOver(stage: string, section: ClaimDiffSectionInput): string
 }
 
 export async function reuseCosmeticExtractions(input: ReuseCosmeticExtractionsInput): Promise<ClaimDiffGateResult> {
-  const result: ClaimDiffGateResult = { cosmetic: new Map(), reusedDocs: [], calls: 0, errors: [] }
+  const result: ClaimDiffGateResult = { cosmetic: new Map(), reusedDocs: [], priors: new Map(), calls: 0, errors: [] }
   const priorDocs = new Map((input.priorManifest?.docs ?? []).map((d) => [d.doc, d.contentHash]))
   if (priorDocs.size === 0) return result
 
@@ -137,6 +140,7 @@ export async function reuseCosmeticExtractions(input: ReuseCosmeticExtractionsIn
     const changed = doc.sections.filter((s) => priorFingerprints.get(flowSectionKey(s.doc, s.anchor)) !== s.fingerprint)
     const prior = await input.seam.lookup(doc, priorHash, input.prerequisiteTargets)
     if (!prior) continue
+    result.priors.set(doc.doc, prior)
     const snapped = snapExtraction(prior, doc.sections)
 
     // Deepest first, so an ancestor whose own text did not move inherits its

@@ -11,7 +11,7 @@
  * dedup.
  */
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { content, type Db } from '@truecourse/db';
 import { sha256 } from './pack.js';
 
@@ -42,16 +42,24 @@ export class ContentStore {
    * constraint; returns true iff a NEW row was written (for counts). Deliberately
    * keeps NO in-memory "already written" memo: such a memo desyncs when content is
    * deleted out-of-band and makes `put` skip a write whose row is gone, leaving a
-   * manifest pointing at a missing object. The on-conflict insert is a no-op for
-   * existing rows, so always issuing it is the right trade.
+   * manifest pointing at a missing object, so the insert is always issued.
+   *
+   * A body already in the pool gets its `created_at` moved to now: the sweep's
+   * grace period (`gc`'s `before`) protects a body by that stamp, and a save
+   * that re-references a body nothing referenced any more would otherwise put
+   * it, then lose it to a concurrent sweep before its manifest row landed.
    */
   async put(scope: string, sha: string, body: string): Promise<boolean> {
-    const inserted = await this.db
+    const rows = await this.db
       .insert(content)
       .values({ scope, sha, body, createdAt: new Date().toISOString() })
-      .onConflictDoNothing({ target: [content.scope, content.sha] })
-      .returning({ sha: content.sha });
-    return inserted.length > 0;
+      .onConflictDoUpdate({
+        target: [content.scope, content.sha],
+        set: { createdAt: sql`excluded.created_at` },
+      })
+      // A row an INSERT created has no updating transaction id; an updated one does.
+      .returning({ inserted: sql<boolean>`(xmax = 0)` });
+    return rows[0]?.inserted === true;
   }
 
   /**
@@ -85,12 +93,22 @@ export class ContentStore {
     return body == null ? null : (JSON.parse(body) as T);
   }
 
-  /** Sweep: delete `scope` bodies whose sha is not in `liveShas`. Returns count. */
-  async gc(scope: string, liveShas: Set<string>): Promise<number> {
+  /**
+   * Sweep: delete `scope` bodies whose sha is not in `liveShas`. With `before`,
+   * only bodies stored (or last re-put, see `put`) before that moment are
+   * candidates — a save puts its bodies before the row that references them,
+   * and a sweep must not take a body whose row is still on its way. Returns
+   * the count deleted.
+   */
+  async gc(scope: string, liveShas: Set<string>, before?: string): Promise<number> {
     const rows = await this.db
       .select({ sha: content.sha })
       .from(content)
-      .where(eq(content.scope, scope));
+      .where(
+        before
+          ? and(eq(content.scope, scope), lt(content.createdAt, before))
+          : eq(content.scope, scope),
+      );
     const dead = rows.map((r) => r.sha).filter((s) => !liveShas.has(s));
     if (dead.length === 0) return 0;
     await this.db

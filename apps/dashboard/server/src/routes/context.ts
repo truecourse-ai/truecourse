@@ -69,7 +69,12 @@ import {
   type CuratedCorpus,
   type DecisionsFile,
 } from '@truecourse/spec-consolidator';
-import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import {
+  listWorkspaceSpecVersions,
+  loadWorkspaceSpec,
+  readWorkspaceSpecVersion,
+} from '@truecourse/core/lib/spec-store';
+import { diffCorpora } from '@truecourse/spec-consolidator';
 import {
   addWorkspaceConflictResolution,
   addWorkspaceManualExclude,
@@ -422,6 +427,48 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         manualExcludes: decisions.manualExcludes ?? [],
         conflictResolutions: decisions.conflictResolutions ?? [],
       });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // GET — the workspace's corpus versions, newest first, each with its
+  // provenance: the scan that wrote it and the model it ran on.
+  router.get('/versions', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      res.json({ versions: await listWorkspaceSpecVersions({ workspaceOrgId: org }, 'corpus') });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // GET — what changed between two corpus versions: the documents added,
+  // removed and re-tagged, the areas that appeared or emptied, the overlap
+  // flags that opened or closed. `?from=` and `?to=` are version ids.
+  router.get('/versions/diff', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const fromId = String(req.query.from ?? '');
+      const toId = String(req.query.to ?? '');
+      if (!fromId || !toId) {
+        res.status(400).json({ error: 'Missing ?from=<version id>&to=<version id>.' });
+        return;
+      }
+      const [from, to] = await Promise.all([
+        readWorkspaceSpecVersion(org, 'corpus', fromId),
+        readWorkspaceSpecVersion(org, 'corpus', toId),
+      ]);
+      if (!from || !to) {
+        res.status(404).json({ error: `No corpus version ${!from ? fromId : toId}.` });
+        return;
+      }
+      const ref = { workspaceOrgId: org };
+      const [prior, current] = await Promise.all([
+        loadWorkspaceSpec<CuratedCorpus>(ref, 'corpus', { id: from.id }),
+        loadWorkspaceSpec<CuratedCorpus>(ref, 'corpus', { id: to.id }),
+      ]);
+      res.json({ from, to, diff: diffCorpora(prior, current) });
     } catch (e) {
       respond(res, next, e);
     }

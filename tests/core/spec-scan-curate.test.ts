@@ -225,6 +225,14 @@ describe('the curate-doc prompt and briefing', () => {
     expect(curateDocBriefing(doc, null)).not.toMatch(/IDENTITY/)
   })
 
+  it('the briefing carries the areas the last scan tagged the document with, and nothing when it has none', () => {
+    const doc = docCandidate('docs/auth.md', '# Auth\nSessions use bearer tokens.\n')
+    expect(curateDocBriefing(doc, IDENTITY)).not.toContain('PREVIOUS AREAS')
+    const briefing = curateDocBriefing(doc, IDENTITY, [], undefined, ['core/sessions', 'core/auth'])
+    expect(briefing).toContain('PREVIOUS AREAS (the last scan tagged this document): core/auth, core/sessions')
+    expect(CURATE_DOC_SYSTEM_PROMPT).toContain('PREVIOUS AREAS')
+  })
+
   // The verdict cache must not survive a change of who we think we are.
   it('the cache key folds the identity, the path and the content hash', () => {
     const doc = { path: 'docs/api.md', contentHash: 'h1' }

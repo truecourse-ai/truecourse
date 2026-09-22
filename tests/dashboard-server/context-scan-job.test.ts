@@ -58,7 +58,7 @@ let context: ReturnType<typeof memoryContextStore>;
 
 const testLlm: WorkspaceLlm = {
   mode: 'api',
-  driver: () => ({}) as never,
+  driver: () => ({ attribution: { provider: 'test', model: 'test-model' } }) as never,
 } as unknown as WorkspaceLlm;
 
 beforeEach(async () => {

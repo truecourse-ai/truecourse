@@ -1,21 +1,15 @@
 /**
- * Postgres implementation of core's `GuardStore`. Four homes:
+ * Postgres implementation of core's `GuardStore`. Four homes, every one of
+ * them a SERIES rather than a row that is overwritten:
  *
- *   - RUN STATE (`guard_runs`, one row per repo+commit):
- *     `writeGuardLatest` marks the default-branch baseline, `writeGuardRun` writes
- *     a snapshot without marking it baseline (the adjudication fold re-writes a
- *     run this way), `readGuardLatest` is the newest
- *     baseline row, and the run history is every baseline row. `readGuardRun(runId)`
- *     stays LIVE (the `(repo, run_id)` index). The commit key comes from the payload
- *     (`latest.run.commit`), falling
- *     back to the always-present `runId` so distinct runs never collide on the PK.
- *     Re-running guard on the SAME commit upserts that row — latest wins: the
- *     previous run's history point is replaced, its runId stops resolving via
- *     `readGuardRun` (the row's `run_id` is overwritten), and its evidence
- *     manifest resets to `{}` so the old transcripts are never served under the
- *     new runId (the blobs remain in `content`, unreferenced). Deliberate: one row
- *     per commit, and the trend is derived from the baseline rows rather than
- *     appended to.
+ *   - RUN STATE (`guard_runs`, one row per run id): `writeGuardLatest` and
+ *     `writeGuardRun` insert a run under its scope (the default branch's unless
+ *     the caller names another), and a run id already stored is updated in
+ *     place — the adjudication fold re-writes a run with its verdicts, and its
+ *     evidence manifest is kept. `readGuardLatest` is the scope's newest run
+ *     by `ran_at`, the history is the scope's runs, and `readGuardRun(runId)`
+ *     resolves any run ever stored: a rerun at a commit is a new row beside the
+ *     old one, never over it.
  *
  *   - EVIDENCE — per-run transcripts, content-addressed in `content` (scope
  *     `guard-evidence:<repo>`); the run row's `evidence` jsonb is the
@@ -24,27 +18,36 @@
  *     report (`guard_results.evidence`, same shape) instead — `readGuardEvidenceAt`
  *     falls back to it when the evidence path's runId matches no run row.
  *
- *   - SCENARIO CORPUS (`guard_scenario_sets`) — content-addressed and keyed
- *     per (repo, commit): the `scenarios/` tree (yaml +
- *     recipe.json + manifest.json) is deduped into `content` (scope `guard:<repo>`)
- *     with a per-(repo, commit) `{ relPath: sha }` manifest row. `saveScenarios`
- *     takes a `RepoRef` and rejects an empty commit; `loadScenarios(ref)` is that
- *     commit's set (exact — no latest fallback), materialized into
- *     a temp dir the unchanged guard-runner loader reads; the browse reads take an
- *     optional commit and fall back to the newest stored set. The generate report
- *     (`guard_results`) is keyed the same way.
+ *   - SCENARIO SETS (`guard_scenario_sets`) — one VERSION per save: the
+ *     `scenarios/` tree (yaml + recipe.json + manifest.json) is deduped into
+ *     `content` (scope `guard:<repo>`) with a `{ relPath: sha }` manifest row
+ *     carrying its scope, commit and provenance. A read names a version by id,
+ *     or takes the newest of a scope at a commit, or the newest of the scope
+ *     outright — which is the CURRENT set. The generate reports
+ *     (`guard_results`) are a series of the same shape, and a report names the
+ *     set it was written beside (`scenario_set_id`: the scope's newest set at
+ *     its commit when it was stored, none for a blocked generate).
+ *     `restoreGuardScenarioSet` makes an older set current again by inserting
+ *     a copy of it AND of the report paired with it, each naming what it copied
+ *     (`restored_from`), so the current set and the current report stay the
+ *     pair a generate produced.
  *
- *   - SETUP BUNDLE (`guard_setup_sets`) — the same shape and the same content
+ *   - SETUP BUNDLES (`guard_setup_sets`) — the same shape and the same content
  *     scope for what `guard setup` leaves behind (`guard/setup.json`, the findings
  *     ledger, the recipe, the dependency catalog + settle record, the seed script,
  *     the generated compose file). A hosted setup runs in an ephemeral clone, so
  *     this is what carries its per-step settle spine from commit to commit: the
  *     job materializes the newest bundle before running and saves the clone's
- *     result under its commit after.
+ *     result as a new version after.
  *
  *   - DECISIONS — the mutable `dismissedClaims` ledger reuses the generic
  *     `decisions` table under a `guard:<repo>` scope, one row per repository. An
  *     absent row reads as `EMPTY_GUARD_DECISIONS`, never null.
+ *
+ * "Newest" is by `created_at` (then id, which is time-sortable): a series is
+ * ordered by when its versions were written. Every save applies retention to
+ * the series it extended (`version-sweep.ts`), and sweeps the repository's
+ * two pools when that took a version.
  *
  * The `repoPath` argument is the stable repo key, never an on-disk path.
  */
@@ -52,7 +55,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
-import { and, asc, desc, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, sql, type SQL } from 'drizzle-orm';
 import {
   guardRuns,
   guardResults,
@@ -61,13 +64,22 @@ import {
   decisions,
   type Db,
 } from '@truecourse/db';
-import { guardEvidenceVisual } from '@truecourse/shared';
+import {
+  DEFAULT_VERSION_SCOPE,
+  guardEvidenceVisual,
+  type GuardVersion,
+  type GuardVersionArtifact,
+} from '@truecourse/shared';
 import type {
   GuardHistoryReadOptions,
   GuardRunCoverage,
+  GuardRunWriteOptions,
   GuardStore,
+  GuardVersionListOptions,
   RepoRef,
   SaveScenariosResult,
+  VersionAt,
+  VersionProvenance,
   WrittenGuardRun,
 } from '@truecourse/core/lib/guard-store';
 import {
@@ -91,7 +103,9 @@ import {
   type LoadedScenarios,
 } from '@truecourse/guard-runner';
 import { ContentStore, contentScope } from './content-store.js';
+import { iso } from './iso.js';
 import { assertSafeRel, mapLimit, safeJoin, sha256, sortKeys } from './pack.js';
+import { newVersionId, sweepGuardSeries } from './version-sweep.js';
 import { WORK_TREE_DIR, scenariosDir } from '@truecourse/shared/work-tree';
 
 const OBJECT_CONCURRENCY = 16;
@@ -104,7 +118,9 @@ function requireCommit(ref: RepoRef, what: string): string {
   return ref.commitSha;
 }
 
-/** Run ids / evidence filenames — plain segments, no separators, no `..`. */
+const scopeOf = (ref: { scope?: string } | undefined): string => ref?.scope ?? DEFAULT_VERSION_SCOPE;
+
+/** Run ids / evidence filenames / version ids — plain segments, no separators, no `..`. */
 const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 
 /** The repo-relative prefix guard scenario paths are listed / read under. */
@@ -113,6 +129,33 @@ const SCENARIOS_PREFIX = '.truecourse/scenarios/';
 interface Manifest {
   v: number;
   files: Record<string, string>;
+}
+
+/** The two manifest series share one row shape. */
+type ManifestTable = typeof guardScenarioSets | typeof guardSetupSets;
+
+/** The three series a `GuardVersion` can describe. */
+type VersionTable = typeof guardResults | ManifestTable;
+
+const versionTable = (artifact: GuardVersionArtifact): VersionTable =>
+  artifact === 'report' ? guardResults : artifact === 'scenarios' ? guardScenarioSets : guardSetupSets;
+
+/**
+ * The columns every version record is read from: the row's series and
+ * provenance, its file count where the series has one, and what it restored
+ * where the series can be rolled back.
+ */
+function versionColumns(table: VersionTable) {
+  return {
+    id: table.id,
+    scope: table.scope,
+    commitSha: table.commitSha,
+    producedByRun: table.producedByRun,
+    model: table.model,
+    createdAt: table.createdAt,
+    fileCount: 'fileCount' in table ? table.fileCount : sql<number | null>`null`,
+    restoredFrom: 'restoredFrom' in table ? table.restoredFrom : sql<string | null>`null`,
+  };
 }
 
 /** Evidence pointer prefix (`evidenceRelPath` shape): `.truecourse/guard/evidence/`. */
@@ -137,6 +180,31 @@ function parseEvidenceDir(evidenceDir: string): { runId: string; scenarioSeg: st
 /** The repository's row in the generic `decisions` table. */
 const decisionsScope = (repoKey: string): string => `guard:${repoKey}`;
 
+/** A content manifest over `files` (rel → body), with its bodies deduped into the pool. */
+async function packFiles(
+  content: ContentStore,
+  scope: string,
+  files: Record<string, Buffer>,
+): Promise<{ manifest: Manifest; manifestHash: string; fileCount: number }> {
+  const manifest: Record<string, string> = {};
+  const uniqueBytes = new Map<string, Buffer>();
+  for (const [rel, bytes] of Object.entries(files)) {
+    assertSafeRel(rel);
+    const sha = sha256(bytes);
+    manifest[rel] = sha;
+    if (!uniqueBytes.has(sha)) uniqueBytes.set(sha, bytes);
+  }
+  await mapLimit([...uniqueBytes.keys()], OBJECT_CONCURRENCY, async (sha) => {
+    await content.put(scope, sha, uniqueBytes.get(sha)!.toString('utf-8'));
+  });
+  const sortedFiles = sortKeys(manifest);
+  return {
+    manifest: { v: 1, files: sortedFiles },
+    manifestHash: sha256(Buffer.from(JSON.stringify(sortedFiles))),
+    fileCount: Object.keys(sortedFiles).length,
+  };
+}
+
 export class PgGuardStore implements GuardStore {
   private readonly content: ContentStore;
 
@@ -146,22 +214,26 @@ export class PgGuardStore implements GuardStore {
 
   // --- Run state ------------------------------------------------------------
 
-  async readGuardLatest(repoKey: string): Promise<GuardLatest | null> {
+  async readGuardLatest(repoKey: string, scope: string = DEFAULT_VERSION_SCOPE): Promise<GuardLatest | null> {
     const rows = await this.db
       .select({ snapshot: guardRuns.snapshot })
       .from(guardRuns)
-      .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.isBaseline, true)))
-      .orderBy(desc(guardRuns.ranAt))
+      .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.scope, scope)))
+      .orderBy(desc(guardRuns.ranAt), desc(guardRuns.runId))
       .limit(1);
     return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
   }
 
-  async writeGuardLatest(repoKey: string, latest: GuardLatest): Promise<void> {
-    await this.upsertRun(repoKey, latest, true);
+  async writeGuardLatest(repoKey: string, latest: GuardLatest, opts: GuardRunWriteOptions = {}): Promise<void> {
+    await this.upsertRun(repoKey, latest, opts);
   }
 
-  async writeGuardRun(repoKey: string, latest: GuardLatest): Promise<WrittenGuardRun> {
-    await this.upsertRun(repoKey, latest, false);
+  async writeGuardRun(
+    repoKey: string,
+    latest: GuardLatest,
+    opts: GuardRunWriteOptions = {},
+  ): Promise<WrittenGuardRun> {
+    await this.upsertRun(repoKey, latest, opts);
     return { runId: latest.run.runId, latest };
   }
 
@@ -171,25 +243,35 @@ export class PgGuardStore implements GuardStore {
       .select({ snapshot: guardRuns.snapshot })
       .from(guardRuns)
       .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, runId)))
-      .orderBy(desc(guardRuns.ranAt))
       .limit(1);
     return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
   }
 
-  /** The `(repoKey, commitSha)` row's snapshot (PK lookup) — baseline or not. */
-  async readGuardRunForCommit(repoKey: string, commitSha: string): Promise<GuardLatest | null> {
+  /** The newest run at an exact commit in a scope. */
+  async readGuardRunForCommit(
+    repoKey: string,
+    commitSha: string,
+    scope: string = DEFAULT_VERSION_SCOPE,
+  ): Promise<GuardLatest | null> {
     const rows = await this.db
       .select({ snapshot: guardRuns.snapshot })
       .from(guardRuns)
-      .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.commitSha, commitSha)))
+      .where(
+        and(
+          eq(guardRuns.repoKey, repoKey),
+          eq(guardRuns.scope, scope),
+          eq(guardRuns.commitSha, commitSha),
+        ),
+      )
+      .orderBy(desc(guardRuns.ranAt), desc(guardRuns.runId))
       .limit(1);
     return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
   }
 
   /**
-   * The run trend: every baseline run for the repo, oldest-first. With `all`,
-   * every stored run, not just the baselines — each entry carrying the
-   * envelope's provenance (`origin`, `pullRequest`).
+   * The run trend: one scope's runs, oldest-first. With `all`, every stored
+   * run of every scope — each entry carrying the envelope's provenance
+   * (`origin`, `pullRequest`).
    */
   async readGuardHistory(repoKey: string, opts: GuardHistoryReadOptions = {}): Promise<GuardHistory> {
     const rows = await this.db
@@ -198,14 +280,14 @@ export class PgGuardStore implements GuardStore {
       .where(
         opts.all
           ? eq(guardRuns.repoKey, repoKey)
-          : and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.isBaseline, true)),
+          : and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.scope, scopeOf(opts))),
       )
-      .orderBy(asc(guardRuns.ranAt));
+      .orderBy(asc(guardRuns.ranAt), asc(guardRuns.runId));
     const runs: GuardHistoryEntry[] = rows.map((r) => guardHistoryEntryOf(r.snapshot as GuardLatest));
     return { runs };
   }
 
-  // History is derived from the baseline rows — nothing to append.
+  // History is derived from the run rows — nothing to append.
   async appendGuardHistory(): Promise<void> {}
 
   /** Record a run's section and flow summaries on its own row, by run id. */
@@ -219,8 +301,11 @@ export class PgGuardStore implements GuardStore {
       .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, run.runId)));
   }
 
-  /** Every baseline run carrying a section summary, oldest first. */
-  async readGuardRunCoverage(repoKey: string): Promise<GuardRunCoverage[]> {
+  /** Every run of the scope carrying a section summary, oldest first. */
+  async readGuardRunCoverage(
+    repoKey: string,
+    scope: string = DEFAULT_VERSION_SCOPE,
+  ): Promise<GuardRunCoverage[]> {
     const rows = await this.db
       .select({
         runId: guardRuns.runId,
@@ -233,11 +318,11 @@ export class PgGuardStore implements GuardStore {
       .where(
         and(
           eq(guardRuns.repoKey, repoKey),
-          eq(guardRuns.isBaseline, true),
+          eq(guardRuns.scope, scope),
           isNotNull(guardRuns.sections),
         ),
       )
-      .orderBy(asc(guardRuns.ranAt));
+      .orderBy(asc(guardRuns.ranAt), asc(guardRuns.runId));
     return rows.map((r) => ({
       runId: r.runId,
       ranAt: r.ranAt,
@@ -247,16 +332,13 @@ export class PgGuardStore implements GuardStore {
     }));
   }
 
-  /** A specific commit's generate report, or the newest stored one when omitted. */
-  async readGuardResult(repoKey: string, commitSha?: string): Promise<GuardGenerateReport | null> {
-    const where = commitSha
-      ? and(eq(guardResults.repoKey, repoKey), eq(guardResults.commitSha, commitSha))
-      : eq(guardResults.repoKey, repoKey);
+  /** The report `at` names: one by id, the newest at a commit, or the scope's newest. */
+  async readGuardResult(repoKey: string, at: VersionAt = {}): Promise<GuardGenerateReport | null> {
     const rows = await this.db
       .select({ report: guardResults.report })
       .from(guardResults)
-      .where(where)
-      .orderBy(desc(guardResults.createdAt))
+      .where(this.versionWhere(guardResults, repoKey, at))
+      .orderBy(desc(guardResults.createdAt), desc(guardResults.id))
       .limit(1);
     return rows[0] ? (rows[0].report as GuardGenerateReport) : null;
   }
@@ -264,64 +346,69 @@ export class PgGuardStore implements GuardStore {
   async writeGuardResult(
     ref: RepoRef,
     report: GuardGenerateReport,
-    opts: { baseline?: boolean } = {},
+    provenance: VersionProvenance = {},
   ): Promise<void> {
     const commitSha = requireCommit(ref, 'writeGuardResult');
-    const now = new Date().toISOString();
-    const isBaseline = opts.baseline === true;
-    await this.db
-      .insert(guardResults)
-      .values({
-        repoKey: ref.repoKey,
-        commitSha,
-        report,
-        isBaseline,
-        generatedAt: report.generatedAt,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [guardResults.repoKey, guardResults.commitSha],
-        set: { report, isBaseline, generatedAt: report.generatedAt, updatedAt: now },
-      });
-  }
-
-  /** The newest baseline-flagged generate's commit — by when it was generated,
-   *  so a re-run over an older commit never outranks a later default-branch one. */
-  async readGuardBaselineCommit(repoKey: string): Promise<string | null> {
-    const rows = await this.db
-      .select({ commitSha: guardResults.commitSha })
-      .from(guardResults)
-      .where(and(eq(guardResults.repoKey, repoKey), eq(guardResults.isBaseline, true)))
-      .orderBy(desc(guardResults.generatedAt), desc(guardResults.createdAt))
+    const scope = scopeOf(ref);
+    // The set this report was written beside: a generate saves its set, then
+    // its report, so the scope's newest set at the commit is the pair. A
+    // blocked generate stored no set, and its report pairs with none.
+    const [set] = await this.db
+      .select({ id: guardScenarioSets.id })
+      .from(guardScenarioSets)
+      .where(this.versionWhere(guardScenarioSets, ref.repoKey, { scope, commitSha }))
+      .orderBy(desc(guardScenarioSets.createdAt), desc(guardScenarioSets.id))
       .limit(1);
-    return rows[0]?.commitSha ?? null;
+    const now = new Date();
+    await this.db.insert(guardResults).values({
+      id: newVersionId(now),
+      repoKey: ref.repoKey,
+      commitSha,
+      report,
+      scope,
+      producedByRun: provenance.producedByRun ?? null,
+      model: provenance.model ?? null,
+      scenarioSetId: set?.id ?? null,
+      generatedAt: report.generatedAt,
+      createdAt: now.toISOString(),
+    });
+    await sweepGuardSeries(this.db, guardResults, ref.repoKey, scope);
   }
 
   /**
-   * Upsert a run snapshot keyed by repo+commit; a baseline write marks the row.
-   * A same-commit rerun REPLACES the row's snapshot/summary/run_id (latest wins —
-   * see the file header): the old runId no longer resolves, its history data
-   * point is gone, and the evidence manifest resets. One-row-per-commit semantics.
+   * The commit the scope's CURRENT state was produced at: the newest of its
+   * scenario sets and its reports, whichever was stored last. A generate
+   * stores its set and then its report at one commit; a blocked generate
+   * stores a report alone at the commit it was blocked at, and that report IS
+   * the current state — the views read its status, and resolving the last
+   * conflict re-enqueues on it. Null when the scope holds neither.
    */
-  private async upsertRun(repoKey: string, latest: GuardLatest, markBaseline: boolean): Promise<void> {
+  async readGuardBaselineCommit(
+    repoKey: string,
+    scope: string = DEFAULT_VERSION_SCOPE,
+  ): Promise<string | null> {
+    let newest: { commitSha: string; createdAt: string; id: string } | null = null;
+    for (const table of [guardScenarioSets, guardResults] as const) {
+      const [row] = await this.db
+        .select({ commitSha: table.commitSha, createdAt: table.createdAt, id: table.id })
+        .from(table)
+        .where(and(eq(table.repoKey, repoKey), eq(table.scope, scope)))
+        .orderBy(desc(table.createdAt), desc(table.id))
+        .limit(1);
+      if (!row) continue;
+      const [t, prev] = [new Date(row.createdAt).getTime(), newest ? new Date(newest.createdAt).getTime() : -1];
+      if (!newest || t > prev || (t === prev && row.id > newest.id)) newest = row;
+    }
+    return newest?.commitSha ?? null;
+  }
+
+  /**
+   * Insert a run under its scope, or update the row its run id already has
+   * (the adjudication fold re-writing a run keeps the row's scope, provenance
+   * and evidence manifest — `writeGuardEvidence` owns that one).
+   */
+  private async upsertRun(repoKey: string, latest: GuardLatest, opts: GuardRunWriteOptions): Promise<void> {
     const commitSha = latest.run.commit ?? latest.run.runId;
-    const now = new Date().toISOString();
-    // `evidence` resets to `{}` ONLY when the incoming runId differs (a same-commit
-    // RERUN) — the previous run's transcripts must never be served under the new
-    // runId; the blobs stay in `content` (content-addressed), just unreferenced.
-    // A same-runId re-upsert (`writeGuardLatest` marking baseline after
-    // `writeGuardRun` already wrote the row, or an idempotent re-write) keeps the
-    // manifest: `writeGuardEvidence` owns it and must not be clobbered.
-    const set: Record<string, unknown> = {
-      branch: latest.run.branch,
-      runId: latest.run.runId,
-      snapshot: latest,
-      summary: latest.summary,
-      ranAt: latest.run.ranAt,
-      evidence: sql`CASE WHEN ${guardRuns.runId} <> excluded.run_id THEN '{}'::jsonb ELSE ${guardRuns.evidence} END`,
-    };
-    if (markBaseline) set.isBaseline = true;
     await this.db
       .insert(guardRuns)
       .values({
@@ -332,11 +419,22 @@ export class PgGuardStore implements GuardStore {
         snapshot: latest,
         summary: latest.summary,
         evidence: {},
-        isBaseline: markBaseline,
+        scope: scopeOf(opts),
+        producedByRun: opts.provenance?.producedByRun ?? null,
+        model: opts.provenance?.model ?? null,
         ranAt: latest.run.ranAt,
-        createdAt: now,
+        createdAt: new Date().toISOString(),
       })
-      .onConflictDoUpdate({ target: [guardRuns.repoKey, guardRuns.commitSha], set });
+      .onConflictDoUpdate({
+        target: [guardRuns.repoKey, guardRuns.runId],
+        set: {
+          commitSha,
+          branch: latest.run.branch,
+          snapshot: latest,
+          summary: latest.summary,
+          ranAt: latest.run.ranAt,
+        },
+      });
   }
 
   // --- Evidence -------------------------------------------------------------
@@ -403,15 +501,23 @@ export class PgGuardStore implements GuardStore {
     const commitSha = requireCommit(ref, 'writeGuardResultEvidence');
     const entries = await this.putEvidenceFiles(ref.repoKey, sanitizeSegment(scenarioSeg), files);
 
-    // Merge onto the generate report's evidence manifest atomically (jsonb `||`),
-    // mirroring `writeGuardEvidence` for runs — concurrent birth-finding writes for
-    // the same report can never drop each other's entries. The report row is written
-    // first (`writeGuardResult`); the RETURNING row doubles as the "report exists" check.
-    const updated = await this.db
-      .update(guardResults)
-      .set({ evidence: sql`${guardResults.evidence} || ${JSON.stringify(entries)}::jsonb` })
-      .where(and(eq(guardResults.repoKey, ref.repoKey), eq(guardResults.commitSha, commitSha)))
-      .returning({ repoKey: guardResults.repoKey });
+    // Merge onto the NEWEST report at that commit — the one `writeGuardResult`
+    // just wrote — atomically (jsonb `||`), mirroring `writeGuardEvidence` for
+    // runs: concurrent birth-finding writes for the same report can never drop
+    // each other's entries. The RETURNING row doubles as the "report exists" check.
+    const [target] = await this.db
+      .select({ id: guardResults.id })
+      .from(guardResults)
+      .where(this.versionWhere(guardResults, ref.repoKey, { scope: ref.scope, commitSha }))
+      .orderBy(desc(guardResults.createdAt), desc(guardResults.id))
+      .limit(1);
+    const updated = target
+      ? await this.db
+          .update(guardResults)
+          .set({ evidence: sql`${guardResults.evidence} || ${JSON.stringify(entries)}::jsonb` })
+          .where(eq(guardResults.id, target.id))
+          .returning({ id: guardResults.id })
+      : [];
     if (updated.length === 0) {
       throw new Error(
         `[data-store] no guard result for ${ref.repoKey}@${commitSha} to attach evidence to`,
@@ -537,7 +643,7 @@ export class PgGuardStore implements GuardStore {
       .select({ evidence: guardResults.evidence })
       .from(guardResults)
       .where(eq(guardResults.repoKey, repoKey))
-      .orderBy(desc(guardResults.createdAt));
+      .orderBy(desc(guardResults.createdAt), desc(guardResults.id));
     for (const row of rows) {
       const manifest = (row.evidence as Record<string, string> | null) ?? {};
       if (Object.keys(manifest).some((key) => key.startsWith(prefix))) return manifest;
@@ -545,52 +651,85 @@ export class PgGuardStore implements GuardStore {
     return null;
   }
 
-  // --- Scenario corpus ------------------------------------------------------
+  // --- Versions: the shared row logic --------------------------------------
 
-  async saveScenarios(ref: RepoRef, sourceDir: string): Promise<SaveScenariosResult> {
-    const commitSha = requireCommit(ref, 'saveScenarios');
-    const files = walkScenarioRelFiles(sourceDir);
-    const manifest: Record<string, string> = {};
-    const uniqueBytes = new Map<string, Buffer>();
-    await mapLimit(files, OBJECT_CONCURRENCY, async (rel) => {
-      assertSafeRel(rel);
-      const bytes = await fsp.readFile(path.join(sourceDir, rel));
-      const sha = sha256(bytes);
-      manifest[rel] = sha;
-      if (!uniqueBytes.has(sha)) uniqueBytes.set(sha, bytes);
-    });
-
-    const scope = contentScope.guard(ref.repoKey);
-    await mapLimit([...uniqueBytes.keys()], OBJECT_CONCURRENCY, async (sha) => {
-      await this.content.put(scope, sha, uniqueBytes.get(sha)!.toString('utf-8'));
-    });
-
-    const sortedFiles = sortKeys(manifest);
-    const manifestHash = sha256(Buffer.from(JSON.stringify(sortedFiles)));
-    const payload: Manifest = { v: 1, files: sortedFiles };
-    const now = new Date().toISOString();
-    await this.db
-      .insert(guardScenarioSets)
-      .values({
-        repoKey: ref.repoKey,
-        commitSha,
-        manifest: payload,
-        manifestHash,
-        fileCount: files.length,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [guardScenarioSets.repoKey, guardScenarioSets.commitSha],
-        set: { manifest: payload, manifestHash, fileCount: files.length, updatedAt: now },
-      });
-
-    return { fileCount: files.length };
+  /**
+   * The rows of a series `at` names: one version by id (any scope, any
+   * commit), else the scope's rows, at a commit when one is named. Ordered by
+   * the caller, newest first, so `limit(1)` is the current one.
+   */
+  private versionWhere(
+    table: typeof guardResults | ManifestTable,
+    repoKey: string,
+    at: VersionAt,
+  ): SQL {
+    if (at.id) return and(eq(table.repoKey, repoKey), eq(table.id, at.id))!;
+    const inScope = and(eq(table.repoKey, repoKey), eq(table.scope, scopeOf(at)))!;
+    return at.commitSha ? and(inScope, eq(table.commitSha, at.commitSha))! : inScope;
   }
 
-  /** Exactly that commit's set (no latest fallback). */
+  /** The manifest of the version `at` names in a manifest series, or null. */
+  private async manifestFor(table: ManifestTable, repoKey: string, at: VersionAt): Promise<Manifest | null> {
+    const rows = await this.db
+      .select({ manifest: table.manifest })
+      .from(table)
+      .where(this.versionWhere(table, repoKey, at))
+      .orderBy(desc(table.createdAt), desc(table.id))
+      .limit(1);
+    return rows[0] ? (rows[0].manifest as Manifest) : null;
+  }
+
+  /** Insert a new version of a manifest series and apply retention to that series. */
+  private async insertManifestVersion(
+    table: ManifestTable,
+    ref: RepoRef,
+    commitSha: string,
+    packed: { manifest: Manifest; manifestHash: string; fileCount: number },
+    provenance: VersionProvenance,
+  ): Promise<string> {
+    const now = new Date();
+    const id = newVersionId(now);
+    const scope = scopeOf(ref);
+    await this.db.insert(table).values({
+      id,
+      repoKey: ref.repoKey,
+      commitSha,
+      manifest: packed.manifest,
+      manifestHash: packed.manifestHash,
+      fileCount: packed.fileCount,
+      scope,
+      producedByRun: provenance.producedByRun ?? null,
+      model: provenance.model ?? null,
+      createdAt: now.toISOString(),
+    });
+    await sweepGuardSeries(this.db, table, ref.repoKey, scope);
+    return id;
+  }
+
+  // --- Scenario sets --------------------------------------------------------
+
+  async saveScenarios(
+    ref: RepoRef,
+    sourceDir: string,
+    provenance: VersionProvenance = {},
+  ): Promise<SaveScenariosResult> {
+    const commitSha = requireCommit(ref, 'saveScenarios');
+    const files: Record<string, Buffer> = {};
+    await mapLimit(walkScenarioRelFiles(sourceDir), OBJECT_CONCURRENCY, async (rel) => {
+      assertSafeRel(rel);
+      files[rel] = await fsp.readFile(path.join(sourceDir, rel));
+    });
+    const packed = await packFiles(this.content, contentScope.guard(ref.repoKey), files);
+    const versionId = await this.insertManifestVersion(guardScenarioSets, ref, commitSha, packed, provenance);
+    return { fileCount: packed.fileCount, versionId };
+  }
+
+  /** The newest set at `ref`'s commit in its scope; an empty commit names the scope's newest set. */
   async loadScenarios(ref: RepoRef): Promise<LoadedScenarios> {
-    const manifest = await this.commitManifest(ref);
+    const manifest = await this.manifestFor(guardScenarioSets, ref.repoKey, {
+      scope: ref.scope,
+      ...(ref.commitSha ? { commitSha: ref.commitSha } : {}),
+    });
     if (!manifest) return { scenarios: [], errors: [] };
 
     const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'tc-guard-scenarios-'));
@@ -602,7 +741,7 @@ export class PgGuardStore implements GuardStore {
         const body = await this.content.get(scope, sha);
         if (body == null) {
           throw new Error(
-            `[data-store] missing guard object ${sha} for ${rel} (${ref.repoKey}@${ref.commitSha})`,
+            `[data-store] missing guard object ${sha} for ${rel} (${ref.repoKey}@${ref.commitSha || 'current'})`,
           );
         }
         await fsp.mkdir(path.dirname(dest), { recursive: true });
@@ -614,8 +753,8 @@ export class PgGuardStore implements GuardStore {
     }
   }
 
-  async readManifest(repoKey: string, commitSha?: string): Promise<GuardManifest | null> {
-    const body = await this.scenarioFileBody(repoKey, 'manifest.json', commitSha);
+  async readManifest(repoKey: string, at: VersionAt = {}): Promise<GuardManifest | null> {
+    const body = await this.scenarioFileBody(repoKey, 'manifest.json', at);
     if (body == null) return null;
     try {
       const parsed = GuardManifestSchema.safeParse(JSON.parse(body));
@@ -625,12 +764,12 @@ export class PgGuardStore implements GuardStore {
     }
   }
 
-  async readRecipeRaw(repoKey: string, commitSha?: string): Promise<string | null> {
-    return this.scenarioFileBody(repoKey, 'recipe.json', commitSha);
+  async readRecipeRaw(repoKey: string, at: VersionAt = {}): Promise<string | null> {
+    return this.scenarioFileBody(repoKey, 'recipe.json', at);
   }
 
-  async listScenarioFiles(repoKey: string, commitSha?: string): Promise<string[]> {
-    const manifest = await this.manifestFor(repoKey, commitSha);
+  async listScenarioFiles(repoKey: string, at: VersionAt = {}): Promise<string[]> {
+    const manifest = await this.manifestFor(guardScenarioSets, repoKey, at);
     if (!manifest) return [];
     return Object.keys(manifest.files ?? {})
       .filter((rel) => /\.ya?ml$/i.test(rel))
@@ -638,99 +777,35 @@ export class PgGuardStore implements GuardStore {
       .sort();
   }
 
-  async readScenarioFile(repoKey: string, relPath: string, commitSha?: string): Promise<string | null> {
+  async readScenarioFile(repoKey: string, relPath: string, at: VersionAt = {}): Promise<string | null> {
     if (!relPath.startsWith(SCENARIOS_PREFIX)) return null;
-    return this.scenarioFileBody(repoKey, relPath.slice(SCENARIOS_PREFIX.length), commitSha);
+    return this.scenarioFileBody(repoKey, relPath.slice(SCENARIOS_PREFIX.length), at);
   }
 
   /** Body of one scenario-set file by its scenarios-dir-relative path, or null. */
-  private async scenarioFileBody(
-    repoKey: string,
-    rel: string,
-    commitSha?: string,
-  ): Promise<string | null> {
-    const manifest = await this.manifestFor(repoKey, commitSha);
+  private async scenarioFileBody(repoKey: string, rel: string, at: VersionAt): Promise<string | null> {
+    const manifest = await this.manifestFor(guardScenarioSets, repoKey, at);
     const sha = manifest?.files?.[rel];
     if (!sha) return null;
     return this.content.get(contentScope.guard(repoKey), sha);
   }
 
-  /** Manifest of a specific commit's set, or the latest (mirrors `manifestFor`). */
-  private async manifestFor(repoKey: string, commitSha?: string): Promise<Manifest | null> {
-    if (!commitSha) return this.latestManifest(repoKey);
-    return this.commitManifest({ repoKey, commitSha });
-  }
-
-  /** Manifest of the most-recently-stored set — the "current" set to browse. */
-  private async latestManifest(repoKey: string): Promise<Manifest | null> {
-    const rows = await this.db
-      .select({ manifest: guardScenarioSets.manifest })
-      .from(guardScenarioSets)
-      .where(eq(guardScenarioSets.repoKey, repoKey))
-      .orderBy(desc(guardScenarioSets.createdAt))
-      .limit(1);
-    return rows[0] ? (rows[0].manifest as Manifest) : null;
-  }
-
-  private async commitManifest(ref: RepoRef): Promise<Manifest | null> {
-    const rows = await this.db
-      .select({ manifest: guardScenarioSets.manifest })
-      .from(guardScenarioSets)
-      .where(
-        and(eq(guardScenarioSets.repoKey, ref.repoKey), eq(guardScenarioSets.commitSha, ref.commitSha)),
-      )
-      .limit(1);
-    return rows[0] ? (rows[0].manifest as Manifest) : null;
-  }
-
   // --- Setup bundle ---------------------------------------------------------
 
-  async saveGuardSetupBundle(ref: RepoRef, files: Record<string, string>): Promise<void> {
+  async saveGuardSetupBundle(
+    ref: RepoRef,
+    files: Record<string, string>,
+    provenance: VersionProvenance = {},
+  ): Promise<void> {
     const commitSha = requireCommit(ref, 'saveGuardSetupBundle');
-    const manifest: Record<string, string> = {};
-    const uniqueBytes = new Map<string, Buffer>();
-    for (const [rel, body] of Object.entries(files)) {
-      assertSafeRel(rel);
-      const bytes = Buffer.from(body, 'utf-8');
-      const sha = sha256(bytes);
-      manifest[rel] = sha;
-      if (!uniqueBytes.has(sha)) uniqueBytes.set(sha, bytes);
-    }
-
-    const scope = contentScope.guard(ref.repoKey);
-    await mapLimit([...uniqueBytes.keys()], OBJECT_CONCURRENCY, async (sha) => {
-      await this.content.put(scope, sha, uniqueBytes.get(sha)!.toString('utf-8'));
-    });
-
-    const sortedFiles = sortKeys(manifest);
-    const manifestHash = sha256(Buffer.from(JSON.stringify(sortedFiles)));
-    const payload: Manifest = { v: 1, files: sortedFiles };
-    const fileCount = Object.keys(sortedFiles).length;
-    const now = new Date().toISOString();
-    await this.db
-      .insert(guardSetupSets)
-      .values({
-        repoKey: ref.repoKey,
-        commitSha,
-        manifest: payload,
-        manifestHash,
-        fileCount,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [guardSetupSets.repoKey, guardSetupSets.commitSha],
-        set: { manifest: payload, manifestHash, fileCount, updatedAt: now },
-      });
+    const bytes: Record<string, Buffer> = {};
+    for (const [rel, body] of Object.entries(files)) bytes[rel] = Buffer.from(body, 'utf-8');
+    const packed = await packFiles(this.content, contentScope.guard(ref.repoKey), bytes);
+    await this.insertManifestVersion(guardSetupSets, ref, commitSha, packed, provenance);
   }
 
-  async loadGuardSetupBundle(
-    repoKey: string,
-    commitSha?: string,
-  ): Promise<Record<string, string> | null> {
-    const manifest = commitSha
-      ? await this.setupManifest({ repoKey, commitSha })
-      : await this.latestSetupManifest(repoKey);
+  async loadGuardSetupBundle(repoKey: string, at: VersionAt = {}): Promise<Record<string, string> | null> {
+    const manifest = await this.manifestFor(guardSetupSets, repoKey, at);
     if (!manifest) return null;
 
     const scope = contentScope.guard(repoKey);
@@ -742,7 +817,7 @@ export class PgGuardStore implements GuardStore {
       const body = await this.content.get(scope, sha);
       if (body == null) {
         throw new Error(
-          `[data-store] missing guard setup object ${sha} for ${rel} (${repoKey}@${commitSha ?? 'latest'})`,
+          `[data-store] missing guard setup object ${sha} for ${rel} (${repoKey}@${at.commitSha ?? at.id ?? 'current'})`,
         );
       }
       files[rel] = body;
@@ -750,24 +825,117 @@ export class PgGuardStore implements GuardStore {
     return files;
   }
 
-  /** Manifest of the most-recently-stored bundle (the one a new clone inherits). */
-  private async latestSetupManifest(repoKey: string): Promise<Manifest | null> {
+  // --- Versions -------------------------------------------------------------
+
+  /** One series' rows as `GuardVersion`s, newest first, under `where`. */
+  private async selectVersions(
+    artifact: GuardVersionArtifact,
+    where: (table: VersionTable) => SQL,
+    limit: number,
+  ): Promise<GuardVersion[]> {
+    const table = versionTable(artifact);
     const rows = await this.db
-      .select({ manifest: guardSetupSets.manifest })
-      .from(guardSetupSets)
-      .where(eq(guardSetupSets.repoKey, repoKey))
-      .orderBy(desc(guardSetupSets.createdAt))
-      .limit(1);
-    return rows[0] ? (rows[0].manifest as Manifest) : null;
+      .select(versionColumns(table))
+      .from(table)
+      .where(where(table))
+      .orderBy(desc(table.createdAt), desc(table.id))
+      .limit(limit);
+    return rows.map((row) => ({ ...row, artifact, createdAt: iso(row.createdAt) }));
   }
 
-  private async setupManifest(ref: RepoRef): Promise<Manifest | null> {
-    const rows = await this.db
-      .select({ manifest: guardSetupSets.manifest })
-      .from(guardSetupSets)
-      .where(and(eq(guardSetupSets.repoKey, ref.repoKey), eq(guardSetupSets.commitSha, ref.commitSha)))
+  async listGuardVersions(
+    repoKey: string,
+    artifact: GuardVersionArtifact,
+    opts: GuardVersionListOptions = {},
+  ): Promise<GuardVersion[]> {
+    return this.selectVersions(
+      artifact,
+      (t) => and(eq(t.repoKey, repoKey), eq(t.scope, scopeOf(opts)))!,
+      opts.limit ?? 50,
+    );
+  }
+
+  async readGuardVersion(
+    repoKey: string,
+    artifact: GuardVersionArtifact,
+    versionId: string,
+  ): Promise<GuardVersion | null> {
+    if (!SAFE_SEGMENT.test(versionId)) return null;
+    const [row] = await this.selectVersions(
+      artifact,
+      (t) => and(eq(t.repoKey, repoKey), eq(t.id, versionId))!,
+      1,
+    );
+    return row ?? null;
+  }
+
+  async restoreGuardScenarioSet(
+    repoKey: string,
+    versionId: string,
+    provenance: VersionProvenance = {},
+  ): Promise<GuardVersion | null> {
+    if (!SAFE_SEGMENT.test(versionId)) return null;
+    const [source] = await this.db
+      .select()
+      .from(guardScenarioSets)
+      .where(and(eq(guardScenarioSets.repoKey, repoKey), eq(guardScenarioSets.id, versionId)))
       .limit(1);
-    return rows[0] ? (rows[0].manifest as Manifest) : null;
+    if (!source) return null;
+    const now = new Date();
+    const id = newVersionId(now);
+    await this.db.insert(guardScenarioSets).values({
+      id,
+      repoKey,
+      commitSha: source.commitSha,
+      manifest: source.manifest,
+      manifestHash: source.manifestHash,
+      fileCount: source.fileCount,
+      scope: source.scope,
+      producedByRun: provenance.producedByRun ?? null,
+      model: provenance.model ?? null,
+      restoredFrom: source.id,
+      createdAt: now.toISOString(),
+    });
+    await sweepGuardSeries(this.db, guardScenarioSets, repoKey, source.scope);
+
+    // The report the set was born with comes back as current beside it — the
+    // newest report paired with the source set, copied with its evidence
+    // manifest so its birth-finding transcripts stay reachable and referenced.
+    const [report] = await this.db
+      .select()
+      .from(guardResults)
+      .where(and(eq(guardResults.repoKey, repoKey), eq(guardResults.scenarioSetId, source.id)))
+      .orderBy(desc(guardResults.createdAt), desc(guardResults.id))
+      .limit(1);
+    if (report) {
+      const reportNow = new Date();
+      await this.db.insert(guardResults).values({
+        id: newVersionId(reportNow),
+        repoKey,
+        commitSha: report.commitSha,
+        report: report.report,
+        evidence: report.evidence,
+        scope: report.scope,
+        producedByRun: provenance.producedByRun ?? null,
+        model: provenance.model ?? null,
+        scenarioSetId: id,
+        restoredFrom: report.id,
+        generatedAt: report.generatedAt,
+        createdAt: reportNow.toISOString(),
+      });
+      await sweepGuardSeries(this.db, guardResults, repoKey, report.scope);
+    }
+    return {
+      id,
+      artifact: 'scenarios',
+      scope: source.scope,
+      commitSha: source.commitSha,
+      producedByRun: provenance.producedByRun ?? null,
+      model: provenance.model ?? null,
+      fileCount: source.fileCount,
+      restoredFrom: source.id,
+      createdAt: now.toISOString(),
+    };
   }
 
   // --- Decisions ------------------------------------------------------------

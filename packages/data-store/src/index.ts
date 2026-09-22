@@ -24,6 +24,14 @@ export { PgKvCacheStore } from './cache-store.js';
 export { PgLlmConfigStore, type StoredProviderSelection } from './llm-config-store.js';
 export { encryptSecret, decryptSecret, maskKey } from './crypto.js';
 export { purgeRepoData } from './repo-purge.js';
+export { VERSION_RETENTION, CONTENT_SWEEP_GRACE_MS } from './retention.js';
+export {
+  newVersionId,
+  sweepRepoVersions,
+  sweepStoredVersions,
+  sweepWorkspaceVersions,
+  type SweepCounts,
+} from './version-sweep.js';
 export {
   JobStore,
   NotificationStore,

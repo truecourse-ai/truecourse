@@ -55,6 +55,7 @@ import {
   flowSectionKey,
   EpicSynthesisSchema,
   FlowSetSchema,
+  type ExtractPrior,
   type ExtractResult,
   type ExtractSessionSeam,
   type ReuseExtractionSeam,
@@ -464,6 +465,11 @@ export function createGuardGenerateSessionSeams(
 
   const extractSession: ExtractSessionSeam = async (input) => {
     const universe = buildGuardDocUniverse(input.docs)
+    // The document's last extraction rides the session, never its cache key.
+    const priorOf = (doc: GuardDoc): { prior?: ExtractPrior } => {
+      const prior = input.priors?.get(doc.doc)
+      return prior ? { prior } : {}
+    }
     const byDoc = new Map<string, ExtractResult>()
     let done = 0
     const total = input.docs.length
@@ -477,8 +483,8 @@ export function createGuardGenerateSessionSeams(
       cacheKey: (doc) => extractSessionCacheKey(doc, input.prerequisiteTargets),
       legacyCacheKeys: (doc) => [extractSessionLegacyCacheKey(doc, input.prerequisiteTargets)],
       schema: extractContextSchema(input.prerequisiteTargets),
-      session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets }),
-      briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets),
+      session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets, ...priorOf(doc) }),
+      briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets, input.priors?.get(doc.doc)),
       driver: acquire,
       ...(replayOnly('extract') ? { cacheOnly: 'extract' as const } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -525,8 +531,8 @@ export function createGuardGenerateSessionSeams(
       cacheKey: (area) => flowsSessionCacheKey(area),
       legacyCacheKeys: (area) => [flowsSessionLegacyCacheKey(area)],
       schema: FlowSetSchema,
-      session: (area) => flowsSessionDef({ area, universe, checker }),
-      briefing: (area) => flowsSessionBriefing(area, input.grounding),
+      session: (area) => flowsSessionDef({ area, universe, checker, prior: input.prior?.get(flowAreaKey(area)) ?? [] }),
+      briefing: (area) => flowsSessionBriefing(area, input.grounding, input.prior?.get(flowAreaKey(area)) ?? []),
       driver: acquire,
       ...(replayOnly('flows') ? { cacheOnly: 'flows' as const } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -534,7 +540,7 @@ export function createGuardGenerateSessionSeams(
       // The fold-side refusal (never trust the transcript): the SAME checker
       // `check_flows` ran in-session, so a draft that checked clean lands clean.
       rejectOutput: (area, output) =>
-        flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, catalogNames: checker.catalogNames })),
+        flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, catalogNames: checker.catalogNames, prior: input.prior?.get(flowAreaKey(area)) ?? [] })),
       fold: (area, result) => {
         if (result.outcome.status === 'completed') {
           byArea.set(flowAreaKey(area), {
@@ -570,14 +576,14 @@ export function createGuardGenerateSessionSeams(
       cacheKey: () => flowsEpicSessionCacheKey(input.digests),
       legacyCacheKeys: () => [flowsEpicSessionLegacyCacheKey(input.digests)],
       schema: EpicSynthesisSchema,
-      session: () => flowsEpicSessionDef({ digests: input.digests, claims: input.claims }),
-      briefing: () => flowsEpicSessionBriefing(input.digests),
+      session: () => flowsEpicSessionDef({ digests: input.digests, claims: input.claims, prior: input.prior ?? [] }),
+      briefing: () => flowsEpicSessionBriefing(input.digests, input.prior ?? []),
       driver: acquire,
       concurrency: 1,
       ...(replayOnly('flows') ? { cacheOnly: 'flows' as const } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       rejectOutput: (_item, output) => {
-        const { unknownReferences } = checkEpicSet(output, input.digests, input.claims)
+        const { unknownReferences } = checkEpicSet(output, input.digests, input.claims, input.prior ?? [])
         return unknownReferences.length > 0 ? `epic pass refused: ${unknownReferences[0]}` : null
       },
       fold: (_item, poolResult) => {

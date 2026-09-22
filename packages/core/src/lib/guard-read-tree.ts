@@ -35,6 +35,8 @@ import {
   readGuardResult,
   readManifest,
   readScenarioFile,
+  versionAt,
+  type VersionAt,
 } from './guard-store.js';
 import { materializeGuardOverlays } from './guard-overlays.js';
 
@@ -45,6 +47,25 @@ function relOf(root: string, abs: string): string {
 
 /** The corpus files the scenario-file listing does not enumerate but the readers join. */
 const CORPUS_FILES = ['flows.json', 'claims.json'];
+
+/**
+ * Every file of the stored scenario set, as tree-relative paths: the scenario
+ * yaml the listing enumerates plus the corpus files beside the manifest — the
+ * committed flows and claims a generate reconciles against. Anyone putting a
+ * stored set into a tree walks this list, so the corpus is never left behind.
+ */
+export async function storedScenarioSetFiles(
+  repoKey: string,
+  treeDir: string,
+  at?: VersionAt,
+): Promise<string[]> {
+  const scenariosRel = relOf(treeDir, path.dirname(manifestPath(treeDir)));
+  const files = [
+    ...(await listScenarioFiles(repoKey, at)),
+    ...CORPUS_FILES.map((name) => `${scenariosRel}/${name}`),
+  ];
+  return [...new Set(files)];
+}
 
 function writeFile(file: string, body: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -60,23 +81,19 @@ export async function materializeGuardReadTree(
   treeDir: string,
   ref?: string,
 ): Promise<void> {
-  const bundle = await loadGuardSetupBundle(repoKey, ref);
+  const at = versionAt(ref);
+  const bundle = await loadGuardSetupBundle(repoKey, at);
   if (bundle) materializeGuardSetupBundle(treeDir, bundle);
 
-  const manifest = await readManifest(repoKey, ref);
+  const manifest = await readManifest(repoKey, at);
   if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
-  const scenariosRel = relOf(treeDir, path.dirname(manifestPath(treeDir)));
-  const files = [
-    ...(await listScenarioFiles(repoKey, ref)),
-    ...CORPUS_FILES.map((name) => `${scenariosRel}/${name}`),
-  ];
-  for (const rel of new Set(files)) {
+  for (const rel of await storedScenarioSetFiles(repoKey, treeDir, at)) {
     assertSafeRel(rel);
-    const body = await readScenarioFile(repoKey, rel, ref);
+    const body = await readScenarioFile(repoKey, rel, at);
     if (body != null) writeFile(safeJoin(treeDir, rel), body);
   }
 
-  const report = await readGuardResult(repoKey, ref);
+  const report = await readGuardResult(repoKey, at);
   if (report) writeTreeGuardResult(treeDir, report);
 
   const decisions = await readGuardDecisions(repoKey);

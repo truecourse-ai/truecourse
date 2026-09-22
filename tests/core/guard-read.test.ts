@@ -78,6 +78,7 @@ async function saveSetFor(
   repoKey: string,
   commit: string,
   ids: Array<[string, string] | [string, string, 'passing' | 'failing']>,
+  scope?: string,
 ): Promise<void> {
   const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
   try {
@@ -96,7 +97,7 @@ async function saveSetFor(
       });
     }
     fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ flows }));
-    await guardStore.saveScenarios({ repoKey, commitSha: commit } satisfies RepoRef, src);
+    await guardStore.saveScenarios({ repoKey, commitSha: commit, ...(scope ? { scope } : {}) } satisfies RepoRef, src);
   } finally {
     fs.rmSync(src, { recursive: true, force: true });
   }
@@ -105,18 +106,20 @@ async function saveSetFor(
 const saveSet = (
   commit: string,
   ids: Array<[string, string] | [string, string, 'passing' | 'failing']>,
-): Promise<void> => saveSetFor(REPO, commit, ids);
+  scope?: string,
+): Promise<void> => saveSetFor(REPO, commit, ids, scope);
+
+/** A pull request's own line of versions: what a PR-head regenerate writes under. */
+const PR_SCOPE = 'pr/7';
 
 /**
- * A temp repo whose baseline-flagged generate anchors the guard baseline at
+ * A temp repo whose default-branch generate anchors the guard baseline at
  * `commit` — the shape a hosted repo has after its default-branch generate.
  * Caller removes it.
  */
 async function makeBaselineRepo(commit: string): Promise<string> {
   const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-baseline-'));
-  await guardStore.writeGuardResult({ repoKey: tmpRepo, commitSha: commit }, REPORT(), {
-    baseline: true,
-  });
+  await guardStore.writeGuardResult({ repoKey: tmpRepo, commitSha: commit }, REPORT());
   return tmpRepo;
 }
 
@@ -187,16 +190,16 @@ describe('listGuardScenarios — commit-scoped (hosted)', () => {
     const tmpRepo = await makeBaselineRepo('baseline9999');
     try {
       // A newest set at a PR head, and the real baseline set — no ref must pick baseline.
-      const srcSave = async (commit: string, ids: Array<[string, string]>) => {
+      const srcSave = async (commit: string, ids: Array<[string, string]>, scope?: string) => {
         const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
         fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify(RECIPE));
         fs.mkdirSync(path.join(src, 'core'), { recursive: true });
         for (const [id, section] of ids) fs.writeFileSync(path.join(src, 'core', `${id}.yaml`), yaml(id, section));
-        await guardStore.saveScenarios({ repoKey: tmpRepo, commitSha: commit }, src);
+        await guardStore.saveScenarios({ repoKey: tmpRepo, commitSha: commit, ...(scope ? { scope } : {}) }, src);
         fs.rmSync(src, { recursive: true, force: true });
       };
       await srcSave('baseline9999', [['base1', 'alpha']]);
-      await srcSave('prhead0000', [['pr1', 'beta']]);
+      await srcSave('prhead0000', [['pr1', 'beta']], PR_SCOPE);
 
       const inv = await listGuardScenarios(tmpRepo);
       expect(inv.scenarios.map((s) => s.id)).toEqual(['base1']);
@@ -239,9 +242,9 @@ describe('listGuardScenarios — PR-head baseline fallback (hosted)', () => {
   });
 
   it('a head miss with NO baseline stays empty (no newest-set leak)', async () => {
-    // REPO has no baseline-flagged generate → no baseline anchor; another
-    // commit's set must not leak into an unknown ref's view.
-    await saveSet('shaA1234567', [['a1', 'alpha']]);
+    // REPO has no default-branch generate → no baseline anchor; a pull
+    // request's set must not leak into an unknown ref's view.
+    await saveSet('shaA1234567', [['a1', 'alpha']], PR_SCOPE);
     const inv = await listGuardScenarios(REPO, 'unknownsha12');
     expect(inv.scenarios).toEqual([]);
     expect(inv.recipe).toBeNull();
@@ -345,24 +348,24 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
 
 describe('hosted repo-level view with NO baseline — empty, never the newest set', () => {
   it('listGuardScenarios with no ref and no baseline returns empty (a PR set must not leak)', async () => {
-    // Only a PR head's set is stored; the repo has no baseline-flagged generate yet.
-    await saveSet('prheadonly12', [['pr1', 'alpha']]);
+    // Only a PR head's set is stored, under its scope; the default branch has nothing yet.
+    await saveSet('prheadonly12', [['pr1', 'alpha']], PR_SCOPE);
     const inv = await listGuardScenarios(REPO);
     expect(inv).toEqual({ recipe: null, scenarios: [] });
   });
 
   it('readGuardReport with no ref and no baseline returns null (a PR report must not leak)', async () => {
-    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'prheadonly12' }, REPORT());
+    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'prheadonly12', scope: PR_SCOPE }, REPORT());
     expect(await readGuardReport(REPO)).toBeNull();
   });
 
   it('readGuardScenarioSource with no ref and no baseline returns null', async () => {
-    await saveSet('prheadonly12', [['pr1', 'alpha']]);
+    await saveSet('prheadonly12', [['pr1', 'alpha']], PR_SCOPE);
     expect(await readGuardScenarioSource(REPO, 'pr1')).toBeNull();
   });
 
   it('computeGuardStaleness with no ref and no baseline is all-false (no newest-set probe)', async () => {
-    await saveSet('prheadonly12', [['pr1', 'alpha']]);
+    await saveSet('prheadonly12', [['pr1', 'alpha']], PR_SCOPE);
     expect(await computeGuardStaleness(REPO)).toEqual({
       runStale: false,
       hasScenarios: false,
@@ -387,9 +390,7 @@ describe('coverage/status view reads — PR-head baseline fallback (hosted)', ()
   it('readGuardReport at an unreported head falls back to the baseline report', async () => {
     const repo = await makeBaselineRepo('baseline9999');
     try {
-      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT(), {
-        baseline: true,
-      });
+      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT());
       const report = await readGuardReport(repo, 'prhead0000');
       expect(report).not.toBeNull();
       expect(report?.generatedAt).toBe('2026-07-06T00:00:00.000Z');
@@ -417,9 +418,7 @@ describe('coverage/status view reads — PR-head baseline fallback (hosted)', ()
   it('readGuardResultForView falls back to the baseline result', async () => {
     const repo = await makeBaselineRepo('baseline9999');
     try {
-      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT(), {
-        baseline: true,
-      });
+      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT());
       const result = await readGuardResultForView(repo, 'prhead0000');
       expect(result?.generatedAt).toBe('2026-07-06T00:00:00.000Z');
     } finally {
@@ -428,8 +427,8 @@ describe('coverage/status view reads — PR-head baseline fallback (hosted)', ()
   });
 
   it('none of the view reads leak across commits when no baseline exists', async () => {
-    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT());
-    await saveSet('shaA1234567', [['a1', 'alpha']]);
+    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567', scope: PR_SCOPE }, REPORT());
+    await saveSet('shaA1234567', [['a1', 'alpha']], PR_SCOPE);
     expect(await readGuardReport(REPO, 'unknownsha12')).toBeNull();
     expect(await readManifestForView(REPO, 'unknownsha12')).toBeNull();
     expect(await readGuardResultForView(REPO, 'unknownsha12')).toBeNull();
@@ -447,8 +446,8 @@ describe('repo-level view reads (no ref) — baseline-anchored, never newest (ho
     try {
       await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
       await tick();
-      // A PR regen persisted a NEWER set at its head — it must not shadow the repo view.
-      await saveSetFor(repo, 'prhead0000', [['pr1', 'beta']]);
+      // A PR regen persisted a NEWER set at its head, under its scope — it must not shadow the repo view.
+      await saveSetFor(repo, 'prhead0000', [['pr1', 'beta']], PR_SCOPE);
 
       const manifest = await readManifestForView(repo);
       expect(guardManifestSections(manifest).map((s) => s.anchor)).toEqual(['alpha']);
@@ -460,12 +459,10 @@ describe('repo-level view reads (no ref) — baseline-anchored, never newest (ho
   it('readGuardResultForView with no ref reads the baseline report, not a newer PR report', async () => {
     const repo = await makeBaselineRepo('baseline9999');
     try {
-      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT(), {
-        baseline: true,
-      });
+      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT());
       await tick();
       await guardStore.writeGuardResult(
-        { repoKey: repo, commitSha: 'prhead0000' },
+        { repoKey: repo, commitSha: 'prhead0000', scope: PR_SCOPE },
         REPORT({ generatedAt: '2026-07-10T00:00:00.000Z' }),
       );
 
@@ -477,9 +474,9 @@ describe('repo-level view reads (no ref) — baseline-anchored, never newest (ho
   });
 
   it('with no ref and NO baseline, both view reads are absent (a PR row must not leak)', async () => {
-    // Only PR-head rows are stored; REPO has no baseline-flagged generate.
-    await saveSet('prheadonly12', [['pr1', 'alpha']]);
-    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'prheadonly12' }, REPORT());
+    // Only PR-head rows are stored, under their scope; the default branch has nothing.
+    await saveSet('prheadonly12', [['pr1', 'alpha']], PR_SCOPE);
+    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'prheadonly12', scope: PR_SCOPE }, REPORT());
 
     expect(await readManifestForView(REPO)).toBeNull();
     expect(await readGuardResultForView(REPO)).toBeNull();
@@ -493,8 +490,8 @@ describe('readGuardReport — commit-scoped (hosted)', () => {
     }));
     const report = await readGuardReport(REPO, 'shaA1234567');
     expect(report?.birthFindings[0]).toMatchObject({ anchor: 'alpha', headingText: 'Alpha' });
-    // A different ref has no report.
-    expect(await readGuardReport(REPO, 'othersha1234')).toBeNull();
+    // A different ref has no report of its own: it falls back to the current one.
+    expect((await readGuardReport(REPO, 'othersha1234'))?.birthFindings).toHaveLength(1);
   });
 });
 
@@ -547,9 +544,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     const repo = await makeBaselineRepo('baseline9999');
     try {
       await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
-      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT(), {
-        baseline: true,
-      });
+      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT());
       await guardStore.writeGuardRun(repo, RUN('run-pr', 'prhead0000'));
 
       expect(await computeGuardStaleness(repo, 'prhead0000')).toEqual({
@@ -595,13 +590,13 @@ describe('hosted repo-level view anchored on the store baseline', () => {
   // The hosted generate job only ever runs on the default branch, so the report
   // it writes is flagged as the repo's guard baseline; every repo anchors its
   // guard views on it.
-  it('reads the flagged generate’s set and report, never a newer PR-head row', async () => {
+  it('reads the default branch’s set and report, never a newer PR-head row', async () => {
     await saveSet('gen1111111', [['a1', 'alpha']]);
-    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'gen1111111' }, REPORT(), { baseline: true });
-    // A PR head's regenerate lands later and unflagged.
-    await saveSet('prhead0000', [['pr1', 'beta']]);
+    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'gen1111111' }, REPORT());
+    // A PR head's regenerate lands later, under the pull request's scope.
+    await saveSet('prhead0000', [['pr1', 'beta']], PR_SCOPE);
     await guardStore.writeGuardResult(
-      { repoKey: REPO, commitSha: 'prhead0000' },
+      { repoKey: REPO, commitSha: 'prhead0000', scope: PR_SCOPE },
       REPORT({ generatedAt: '2026-07-07T00:00:00.000Z' }),
     );
 

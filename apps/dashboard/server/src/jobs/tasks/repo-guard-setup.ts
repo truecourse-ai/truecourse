@@ -156,10 +156,13 @@ export function createRepoGuardSetupTask(
             // bought a second time. Best-effort: a bundle that could not be
             // saved is logged, never allowed to replace the reason the run
             // stopped.
+            const driver = llm.driver();
+            // The bundle version says which run wrote it and on which model.
+            const provenance = { producedByRun: activityRun.runId, model: driver.attribution.model };
             const preserveBundle = async (): Promise<void> => {
               try {
                 const files = collectGuardSetupBundle(tree.dir);
-                if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files);
+                if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files, provenance);
               } catch (err) {
                 log.warn(
                   `[jobs] could not save the setup bundle for ${repoFullName}: ${(err as Error).message}`,
@@ -170,7 +173,7 @@ export function createRepoGuardSetupTask(
             let report: Awaited<ReturnType<typeof runSetup>>['report'];
             try {
               ({ report } = await runSetup(tree.dir, {
-                driver: llm.driver(),
+                driver,
                 transportMode: llm.mode,
                 sessionsKey: repoFullName,
                 // The docker world the recipe's compose project names. Two

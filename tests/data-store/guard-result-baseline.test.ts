@@ -1,10 +1,15 @@
 /**
- * The guard BASELINE flag on a stored generate report: what the hosted
- * repo-level views anchor on when the repo has no analyze baseline. Only a
- * flagged row counts, the newest by generation time wins, a re-write can drop
- * the flag, and the purge takes it with everything else.
+ * The commit a repository's guard views anchor on: what the default branch's
+ * CURRENT state was produced at — the newest of its scenario sets and its
+ * reports, whichever was stored last. A generate stores both at one commit; a
+ * blocked generate stores a report alone, and that report is the state. A
+ * version under another scope never anchors, and the purge takes the anchor
+ * with everything else.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
@@ -44,46 +49,70 @@ const report = (generatedAt: string): GuardGenerateReport => ({
   orphaned: [],
 });
 
+/** A one-file scenario set saved at `commit`. */
+async function saveSet(commit: string, scope?: string): Promise<void> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-set-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'recipe.json'), '{}');
+    await store.saveScenarios({ repoKey: REPO, commitSha: commit, ...(scope ? { scope } : {}) }, dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+
 describe('PgGuardStore guard baseline', () => {
-  it('answers null until a report is written as a baseline', async () => {
+  it('answers null until something is stored in the scope', async () => {
     expect(await store.readGuardBaselineCommit(REPO)).toBeNull();
-    await store.writeGuardResult({ repoKey: REPO, commitSha: 'prhead1' }, report('2026-01-02T00:00:00Z'));
-    // An unflagged row (a PR head's regenerate) is never the anchor.
+    // A pull request's own line of versions never anchors the default branch.
+    await store.writeGuardResult({ repoKey: REPO, commitSha: 'prhead1', scope: 'pr/1' }, report('2026-01-02T00:00:00Z'));
+    await saveSet('prhead1', 'pr/1');
     expect(await store.readGuardBaselineCommit(REPO)).toBeNull();
+    expect(await store.readGuardBaselineCommit(REPO, 'pr/1')).toBe('prhead1');
   });
 
-  it('anchors on the newest flagged row by generation time, whatever else was written', async () => {
-    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main1' }, report('2026-01-01T00:00:00Z'), {
-      baseline: true,
-    });
-    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main2' }, report('2026-01-03T00:00:00Z'), {
-      baseline: true,
-    });
-    // A later-written but earlier-generated baseline (a re-run over an old
-    // commit) does not outrank the newer default-branch one.
-    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main0' }, report('2025-12-31T00:00:00Z'), {
-      baseline: true,
-    });
-    // Nor does a newer PR-head row.
-    await store.writeGuardResult({ repoKey: REPO, commitSha: 'prhead9' }, report('2026-01-09T00:00:00Z'));
-
+  it('anchors on whichever of the newest set and the newest report was stored last', async () => {
+    await saveSet('main1');
+    await tick();
+    await saveSet('main2');
     expect(await store.readGuardBaselineCommit(REPO)).toBe('main2');
+    await tick();
+    // A blocked generate at a later commit stores its report and no set: that
+    // report is the current state, and the views must find it at the anchor.
+    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main3' }, { ...report('2026-01-09T00:00:00Z'), status: 'open-conflicts' });
+    expect(await store.readGuardBaselineCommit(REPO)).toBe('main3');
+    expect((await store.readGuardResult(REPO, { commitSha: 'main3' }))?.status).toBe('open-conflicts');
+    await tick();
+    await saveSet('main4');
+    expect(await store.readGuardBaselineCommit(REPO)).toBe('main4');
     expect(await store.readGuardBaselineCommit('other/repo')).toBeNull();
   });
 
-  it('a re-write of the same commit carries the flag it was given', async () => {
-    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main1' }, report('2026-01-01T00:00:00Z'), {
-      baseline: true,
-    });
-    expect(await store.readGuardBaselineCommit(REPO)).toBe('main1');
+  it('a rollback moves the anchor to the restored version’s commit, and the report there is its pair', async () => {
+    await saveSet('main1');
     await store.writeGuardResult({ repoKey: REPO, commitSha: 'main1' }, report('2026-01-01T00:00:00Z'));
-    expect(await store.readGuardBaselineCommit(REPO)).toBeNull();
+    await tick();
+    await saveSet('main2');
+    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main2' }, report('2026-01-02T00:00:00Z'));
+    const [, older] = await store.listGuardVersions(REPO, 'scenarios');
+    await tick();
+    await store.restoreGuardScenarioSet(REPO, older!.id);
+    expect(await store.readGuardBaselineCommit(REPO)).toBe('main1');
+    expect((await store.readGuardResult(REPO, { commitSha: 'main1' }))?.generatedAt).toBe('2026-01-01T00:00:00Z');
+    expect((await store.readGuardResult(REPO))?.generatedAt).toBe('2026-01-01T00:00:00Z');
+  });
+
+  it('falls back to the newest report when no set was ever stored', async () => {
+    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main1' }, report('2026-01-01T00:00:00Z'));
+    await tick();
+    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main2' }, report('2026-01-03T00:00:00Z'));
+    expect(await store.readGuardBaselineCommit(REPO)).toBe('main2');
   });
 
   it('is purged with the repo', async () => {
-    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main1' }, report('2026-01-01T00:00:00Z'), {
-      baseline: true,
-    });
+    await saveSet('main1');
+    await store.writeGuardResult({ repoKey: REPO, commitSha: 'main1' }, report('2026-01-01T00:00:00Z'));
     await purgeRepoData(db, REPO);
     expect(await store.readGuardBaselineCommit(REPO)).toBeNull();
   });

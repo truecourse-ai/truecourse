@@ -26,6 +26,7 @@ import {
   settleAreasGate,
   settleAreasSessionDef,
   validateSettlement,
+  reconcileDocTagsWithPrior,
   type AreaSettlement,
 } from '../../packages/core/src/services/spec-scan/settle-areas'
 import { buildScanUniverse } from '../../packages/core/src/services/spec-scan/tools'
@@ -483,6 +484,80 @@ describe('check_settlement — one pushback on a no-op draft over a fragmented v
 })
 
 // ---------------------------------------------------------------------------
+// the prior areas: what the last scan settled is kept, never re-invented
+// ---------------------------------------------------------------------------
+
+describe('prior areas — identity across scans', () => {
+  const vocab = collectAreaVocab(
+    tagMap({
+      'a.md': [['core', 'login']],
+      'b.md': [['core', 'billing']],
+    }),
+  )
+  const base: AreaSettlement = { concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] }
+
+  it('the gate opens when a prior label no doc carries any more, and stays closed for a settled corpus', () => {
+    const one = collectAreaVocab(tagMap({ 'a.md': [['core', 'login']] }))
+    expect(settleAreasGate(one)).toBe(false)
+    expect(settleAreasGate(one, ['core/login'])).toBe(false)
+    expect(settleAreasGate(one, ['core/sessions'])).toBe(true)
+    expect(settleAreasGate(collectAreaVocab(tagMap({})), ['core/sessions'])).toBe(false)
+  })
+
+  it('the validator lets a merge target be a prior label no doc carries, and refuses a merge away from one', () => {
+    expect(validateSettlement({ ...base, concernMerges: { login: 'sessions' } }, vocab, ['core/sessions'])).toEqual([])
+    expect(validateSettlement({ ...base, concernMerges: { login: 'sessions' } }, vocab)).toEqual([
+      expect.stringContaining('target `sessions`'),
+    ])
+    expect(validateSettlement({ ...base, concernMerges: { billing: 'login' } }, vocab, ['core/billing'])).toEqual([
+      expect.stringContaining('`billing` is an existing area\'s label — merge `login` into it, not away from it'),
+    ])
+    // Two prior areas may still be consolidated.
+    expect(validateSettlement({ ...base, concernMerges: { billing: 'login' } }, vocab, ['core/billing', 'core/login'])).toEqual([])
+  })
+
+  it('the fold inverts a merge away from a prior label instead of dropping it, and takes a prior label as target', () => {
+    const inverted = applySettlement({ ...base, concernMerges: { billing: 'login' } }, vocab, ['core/billing'])
+    expect(inverted.vocab.concerns).toEqual({ login: 'billing' })
+    const onto = applySettlement({ ...base, concernMerges: { login: 'sessions' } }, vocab, ['core/sessions'])
+    expect(onto.vocab.concerns).toEqual({ login: 'sessions' })
+    // Without the prior, the old rules hold: an unknown target is dropped.
+    expect(applySettlement({ ...base, concernMerges: { login: 'sessions' } }, vocab).vocab.concerns).toEqual({})
+  })
+
+  it('a re-spelled concern of a document keeps the id the last scan gave it; a new label rides through', () => {
+    const tags = reconcileDocTagsWithPrior(
+      [
+        { product: 'core', concern: 'booking' },
+        { product: 'core', concern: 'bookings-attendees' },
+        { product: 'core', concern: 'billing' },
+      ],
+      ['core/bookings', 'core/booking-attendees'],
+    )
+    expect(tags).toEqual([
+      { product: 'core', concern: 'bookings' },
+      { product: 'core', concern: 'booking-attendees' },
+      { product: 'core', concern: 'billing' },
+    ])
+    // Another product's label is not this document's prior.
+    expect(reconcileDocTagsWithPrior([{ product: 'booking', concern: 'booking' }], ['core/bookings'])).toEqual([
+      { product: 'booking', concern: 'booking' },
+    ])
+  })
+
+  it('the briefing lists the prior areas and marks the one no doc carries now', () => {
+    const universe = universeOf({ 'a.md': 'Login', 'b.md': 'Billing' })
+    expect(settleAreasBriefing(vocab, universe)).not.toContain('PRIOR AREAS')
+    const briefing = settleAreasBriefing(vocab, universe, [], ['core/sessions', 'core/billing'])
+    expect(briefing).toContain('PRIOR AREAS — the 2 area(s) the last scan settled')
+    expect(briefing).toContain('  core/sessions  (no doc carries this label now — merge the label that replaced it INTO it)')
+    expect(briefing).toMatch(/\n  core\/billing\n/)
+    // The prior is not in the key.
+    expect(settleAreasCacheKey(vocab)).toBe(settleAreasCacheKey(vocab))
+  })
+})
+
+// ---------------------------------------------------------------------------
 // end to end through the scan run
 // ---------------------------------------------------------------------------
 
@@ -681,5 +756,97 @@ describe('spec-scan.settle-areas — through the run', () => {
       ran: 1,
       fromCache: 0,
     })
+  })
+})
+
+describe('spec-scan.settle-areas — the prior corpus through the run', () => {
+  const priorCorpus = (ids: string[], docs: Record<string, string[]>) => ({
+    version: 3 as const,
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    docs: Object.entries(docs).map(([ref, areaTags]) => ({ ref, kind: 'spec', lastTouched: '', areaTags })),
+    areas: ids.map((id) => ({ id, product: id.split('/')[0]!, concern: id.split('/')[1]!, docRefs: [], overlaps: [] })),
+    skippedDocs: [],
+  })
+
+  it('a re-labelled corpus merges back INTO the prior area: the id survives the re-curation', async () => {
+    writeDoc('docs/login.md', '# Login\nSessions authenticate users with a bearer token.\n')
+    writeDoc('docs/logout.md', '# Logout\nA session ends on logout.\n')
+    const facts: string[] = []
+    const briefings: string[] = []
+    // Curation re-spells the concern; the settle session, briefed with the
+    // prior, merges the new label into the prior one.
+    const stub = stubDriver(async (call) => {
+      if (call.kind === SETTLE_AREAS_SESSION_KIND) {
+        briefings.push(...call.input.initialMessages)
+        await call.emit(toolResult('check_settlement', 'valid'))
+        return outcome({ concernMerges: { login: 'sessions' }, productMerges: {}, productVerdicts: [], subdivisions: [] })
+      }
+      return outcome(keep('core', 'login'))
+    })
+    const result = await runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => stub.driver,
+      persistence: memoryPersistence().persistence,
+      decisions: COVERING,
+      repoIdentity: IDENTITY,
+      skipGit: true,
+      disableOverlapDetection: true,
+      previousCorpus: priorCorpus(['core/sessions'], { 'docs/login.md': ['core/sessions'], 'docs/logout.md': ['core/sessions'] }),
+      onFact: (_step, line) => facts.push(line),
+    })
+
+    expect(settleCalls(stub.calls)).toHaveLength(1)
+    expect(briefings.join('\n')).toContain('PRIOR AREAS')
+    expect(result.corpus.areas.map((a) => a.id)).toEqual(['core/sessions'])
+    expect(result.corpus.docs.map((d) => d.areaTags)).toEqual([['core/sessions'], ['core/sessions']])
+    expect(facts).toContain('areas reconciled against the last scan: 1 kept, 0 added, 0 retired')
+  })
+
+  it('a morphological re-spelling is kept in the fold with no settle session at all', async () => {
+    writeDoc('docs/booking.md', '# Booking\nA booking holds a slot.\n')
+    const facts: string[] = []
+    const stub = stubDriver(() => outcome(keep('core', 'booking')))
+    const result = await runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => stub.driver,
+      persistence: memoryPersistence().persistence,
+      decisions: COVERING,
+      repoIdentity: IDENTITY,
+      skipGit: true,
+      disableOverlapDetection: true,
+      previousCorpus: priorCorpus(['core/bookings'], { 'docs/booking.md': ['core/bookings'] }),
+      onFact: (_step, line) => facts.push(line),
+    })
+
+    expect(settleCalls(stub.calls)).toHaveLength(0)
+    expect(result.corpus.areas.map((a) => a.id)).toEqual(['core/bookings'])
+    expect(facts).toContain('docs/booking.md: area "core/booking" kept as "core/bookings" from the last scan')
+  })
+
+  it('a prior area whose documents all left is retired, on the record', async () => {
+    writeDoc('docs/billing.md', '# Billing\nInvoices are issued monthly.\n')
+    const facts: string[] = []
+    const stub = stubDriver(async (call) => {
+      if (call.kind === SETTLE_AREAS_SESSION_KIND) {
+        await call.emit(toolResult('check_settlement', 'valid'))
+        return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] })
+      }
+      return outcome(keep('core', 'billing'))
+    })
+    const result = await runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => stub.driver,
+      persistence: memoryPersistence().persistence,
+      decisions: COVERING,
+      repoIdentity: IDENTITY,
+      skipGit: true,
+      disableOverlapDetection: true,
+      previousCorpus: priorCorpus(['core/sessions', 'core/billing'], { 'docs/billing.md': ['core/billing'] }),
+      onFact: (_step, line) => facts.push(line),
+    })
+
+    expect(result.corpus.areas.map((a) => a.id)).toEqual(['core/billing'])
+    expect(facts).toContain('areas reconciled against the last scan: 1 kept, 0 added, 1 retired')
+    expect(facts).toContain('area "core/sessions" retired: no document carries it now')
   })
 })

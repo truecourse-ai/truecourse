@@ -144,6 +144,8 @@ MULTI-AREA: a doc often covers several areas. List EVERY area it materially spec
 
 PROCESS BUCKET: sections that are pure overview / goals / non-goals / open-questions and spec no behavior map to product "process" with one of these concerns: overview, goals, non-goals, open-questions. A doc that is ONLY process gets only process areas; a substantive doc that merely has a Goals section does NOT need a process area.
 
+PREVIOUS AREAS: when the briefing lists the areas the last scan tagged this document with, reuse those exact labels unless what the document says has actually moved — and when it has, say in \`reason\` what moved. A re-spelled label for the same topic is a defect: everything downstream is keyed on the area's id.
+
 STATUS: if the doc header states a lifecycle (Status: shipped / planned / deferred / deprecated / out-of-scope, or equivalents like "done"/"draft"), report it verbatim in \`status\`; otherwise null.
 
 # Tools — when to use them
@@ -164,7 +166,10 @@ One object: { "keep": true|false, "reason": "short explanation", "subject": "thi
 export const CURATE_DOC_PROMPT_FINGERPRINT = promptFingerprint(CURATE_DOC_SYSTEM_PROMPT)
 
 /**
- * THE CURATE-DOC STAGE'S VERSION, bumped by hand. A reworded prompt does not
+ * THE CURATE-DOC STAGE'S VERSION, bumped by hand. The previous-areas block did
+ * not bump it: a cached verdict is never re-briefed, and the fold keeps a
+ * re-spelled prior label deterministically, so a stored verdict is corrected
+ * on the way through rather than re-bought. A reworded prompt does not
  * make a keep/skip judgment wrong, and this cache IS the scan's skip: a moved
  * key re-curates every document a workspace has. A prompt change that fixes
  * WRONG output bumps this in the same commit, deliberately.
@@ -296,6 +301,9 @@ export function curateDocBriefing(
   identity: RepoIdentity | null,
   instructions: readonly string[] = [],
   origin?: DocOrigin,
+  /** The area ids the last scan tagged this document with — briefed for
+   *  identity, never part of the cache key (a cached verdict is never re-briefed). */
+  priorAreas: readonly string[] = [],
 ): string {
   const chunks = planDocChunks(doc.path, docBody(doc), DOC_CHUNK_CHARS)
   const first = chunks[0]
@@ -306,6 +314,9 @@ export function curateDocBriefing(
     ...(origin ? [`SOURCE: ${origin.sourceTitle} (${origin.sourceKind})`] : []),
     `Detected kind: ${doc.kind}`,
     `Size: ${doc.size} bytes`,
+    ...(priorAreas.length > 0
+      ? [`PREVIOUS AREAS (the last scan tagged this document): ${[...priorAreas].sort().join(', ')} — reuse these labels unless what the document says has moved.`]
+      : []),
     '',
     chunks.length > 1 ? `--- doc (chunk 1/${chunks.length}) ---` : '--- doc ---',
     first?.text ?? '',

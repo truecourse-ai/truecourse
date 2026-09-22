@@ -67,7 +67,7 @@ let app: Express;
 let fixture: TestFixture;
 let repoKey: string;
 
-async function saveSet(commit: string, ids: Array<[string, string]>): Promise<void> {
+async function saveSet(commit: string, ids: Array<[string, string]>, scope?: string): Promise<void> {
   const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-hosted-'));
   try {
     fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify({ build: 'pnpm build', entry: ['node', 'dist/index.js'] }));
@@ -85,7 +85,7 @@ async function saveSet(commit: string, ids: Array<[string, string]>): Promise<vo
       });
     }
     fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ flows }));
-    await guardStore.saveScenarios({ repoKey, commitSha: commit }, src);
+    await guardStore.saveScenarios({ repoKey, commitSha: commit, ...(scope ? { scope } : {}) }, src);
   } finally {
     fs.rmSync(src, { recursive: true, force: true });
   }
@@ -150,9 +150,9 @@ describe('Guard routes — hosted, commit-scoped', () => {
     expect(res.body).toMatchObject({ hasScenarios: true, hasRun: false, runStale: true });
   });
 
-  it('status without ref reads the baseline set — a newer PR regen never shadows the repo view', async () => {
-    // Anchor the repo baseline at `baselinesha` — the baseline-flagged generate
-    // the hosted job writes on the default branch.
+  it("status without ref reads the default branch's set — a newer regen in a pull request's scope never shadows the repo view", async () => {
+    // Anchor the repo view at `baselinesha` — the generate the hosted job
+    // writes on the default branch.
     await guardStore.writeGuardResult(
       { repoKey, commitSha: 'baselinesha' },
       {
@@ -169,14 +169,13 @@ describe('Guard routes — hosted, commit-scoped', () => {
         extractionFailures: [],
         orphaned: [],
       },
-      { baseline: true },
     );
     await saveSet('baselinesha', [['a1', 'alpha']]);
     await new Promise((r) => setTimeout(r, 5)); // strictly newer createdAt for the PR row
-    // A PR regen persisted a NEWER, larger set + a report at its head.
-    await saveSet(HEAD, [['z1', 'alpha'], ['z2', 'beta']]);
+    // A PR regen persisted a NEWER, larger set + a report at its head, under its own scope.
+    await saveSet(HEAD, [['z1', 'alpha'], ['z2', 'beta']], 'pr/7');
     await guardStore.writeGuardResult(
-      { repoKey, commitSha: HEAD },
+      { repoKey, commitSha: HEAD, scope: 'pr/7' },
       {
         generatedAt: '2026-07-09T00:00:00.000Z',
         status: 'ok',
@@ -218,7 +217,6 @@ describe('Guard routes — hosted, commit-scoped', () => {
         extractionFailures: [],
         orphaned: [],
       },
-      { baseline: true },
     );
     await saveSet('baselinesha', [['a1', 'alpha']]);
     setRepoDocReader(async (_repoKey, docPath) => (docPath === DOC ? DOC_CONTENT : null));
@@ -235,5 +233,50 @@ describe('Guard routes — hosted, commit-scoped', () => {
     const alpha = res.body.sections.find((s: { anchor: string }) => s.anchor === 'alpha');
     expect(alpha.status).toBe('fail');
     expect(res.body.runId).toBe(`run-${HEAD}`);
+  });
+});
+
+describe('Guard routes — versions of the scenario set', () => {
+  it('lists the default branch’s versions newest first with their provenance, and diffs two of them', async () => {
+    await saveSet('gen1', [['a1', 'alpha']]);
+    await new Promise((r) => setTimeout(r, 5));
+    await saveSet('gen2', [['a1', 'alpha'], ['b1', 'beta']]);
+    await new Promise((r) => setTimeout(r, 5));
+    // A pull request's regenerate under its own scope is not in the default list.
+    await saveSet('prhead', [['z1', 'zeta']], 'pr/7');
+
+    const list = await request(app).get(url('versions')).expect(200);
+    expect(list.body.versions.map((v: { commitSha: string }) => v.commitSha)).toEqual(['gen2', 'gen1']);
+    expect(list.body.versions[0]).toMatchObject({ artifact: 'scenarios', scope: 'default', fileCount: 4 });
+    const scoped = await request(app).get(url('versions?scope=pr%2F7')).expect(200);
+    expect(scoped.body.versions.map((v: { commitSha: string }) => v.commitSha)).toEqual(['prhead']);
+    await request(app).get(url('versions?artifact=nope')).expect(400);
+
+    const [to, from] = list.body.versions as Array<{ id: string }>;
+    const diff = await request(app).get(url(`versions/diff?from=${from!.id}&to=${to!.id}`)).expect(200);
+    expect(diff.body.from.id).toBe(from!.id);
+    expect(diff.body.diff.flows.added).toEqual([`${DOC}#beta`]);
+    expect(diff.body.diff.sections.gained).toEqual([{ doc: DOC, anchor: 'beta' }]);
+    await request(app).get(url('versions/diff?from=nope&to=' + to!.id)).expect(404);
+    await request(app).get(url('versions/diff')).expect(400);
+  });
+
+  it('restores an older version as a new one, and the repo view reads it', async () => {
+    await saveSet('gen1', [['a1', 'alpha']]);
+    await new Promise((r) => setTimeout(r, 5));
+    await saveSet('gen2', [['a1', 'alpha'], ['b1', 'beta']]);
+    const list = await request(app).get(url('versions')).expect(200);
+    const older = list.body.versions[1] as { id: string };
+
+    await new Promise((r) => setTimeout(r, 5));
+    const restored = await request(app).post(url(`versions/${older.id}/restore`)).expect(200);
+    expect(restored.body.version).toMatchObject({ commitSha: 'gen1', fileCount: 3 });
+    expect(restored.body.version.id).not.toBe(older.id);
+
+    const after = await request(app).get(url('versions')).expect(200);
+    expect(after.body.versions).toHaveLength(3);
+    const scenarios = await request(app).get(url('scenarios')).expect(200);
+    expect(scenarios.body.scenarios.map((s: { id: string }) => s.id)).toEqual(['a1']);
+    await request(app).post(url('versions/nope/restore')).expect(404);
   });
 });

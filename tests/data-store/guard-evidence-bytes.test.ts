@@ -93,7 +93,7 @@ describe('PgGuardStore evidence bytes', () => {
 
   it('serves a birth finding’s bundle off the generate report when no run row matches', async () => {
     const ref = { repoKey: REPO, commitSha: 'main1' };
-    await store.writeGuardResult(ref, report, { baseline: true });
+    await store.writeGuardResult(ref, report);
     await store.writeGuardResultEvidence(ref, 'a.web.1', { 'transcript.txt': 'born red', 'session.webm': PNG });
 
     const dir = '.truecourse/guard/evidence/birth1/a.web.1';

@@ -5,6 +5,7 @@ import yaml from 'js-yaml'
 import {
   generateGuards,
   birthValidate,
+  readFlowsFile,
   type BirthCandidate,
   type FlowWorkerTask,
   type MatchRunner,
@@ -47,6 +48,7 @@ import {
   flowPerClaimSession,
   flowWorkerSessionOf,
   submitWorkerSessions,
+  flowsAreaSessionOf,
   matchAll,
   matchBy,
   cliInterface,
@@ -549,6 +551,54 @@ describe('generateGuards — change detection', () => {
     // The flow is skipped, not re-settled: its stored scenario stands.
     expect(res2.flows).toMatchObject({ total: 1, skipped: 1, settled: 1, unsettled: 0 })
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
+  }, 60_000)
+
+  it('a second generate over unchanged inputs with the session cache CLEARED returns the same ids and fingerprints, and writes nothing', async () => {
+    const r = seed()
+    const briefed: GuardFlow[][] = []
+    // A reconciling session: what a live model does when briefed with the
+    // existing flows — continue each one by id, unchanged. No cache is
+    // consulted anywhere: every run below is a session that ran.
+    const reconciling = flowsAreaSessionOf((area, prior) => {
+      briefed.push([...prior])
+      return {
+        flows: area.claims.map((c) => {
+          const existing = prior.find((f) => f.milestones.some((m) => m.claimTitle === c.title))
+          return {
+            ...(existing ? { id: existing.id } : {}),
+            title: existing ? `re-worded ${c.anchor}` : c.anchor,
+            goal: `verify ${c.title}`,
+            milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title }],
+          }
+        }),
+        noFlowClaims: [],
+      }
+    })
+
+    const first = await runGenerate({ repoRoot: r, extractSession: versionCliBgUntestable, flowsAreaSession: reconciling, flowWorkerSession: authorsEvery() })
+    expect(first.written).toHaveLength(1)
+    expect(briefed[0]).toEqual([])
+    const flowsBefore = readFlowsFile(r)!.flows
+    const manifestBefore = readManifest(r)!
+
+    let workerTasks = 0
+    const second = await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowsAreaSession: reconciling,
+      flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS), { onBriefing: () => workerTasks++ }),
+    })
+
+    // The session was briefed with the committed flow and continued it.
+    expect(briefed[1].map((f) => f.id)).toEqual(flowsBefore.map((f) => f.id))
+    // Same ids, same fingerprints, the re-worded title discarded: byte-identical.
+    expect(readFlowsFile(r)!.flows).toEqual(flowsBefore)
+    expect(second.flows.reconciled).toEqual({ kept: flowsBefore.length, amended: 0, added: 0, retired: 0, carried: 0 })
+    // And nothing to author: the manifest stands, no worker ran, no file was written.
+    expect(second.noChanges).toBe(true)
+    expect(second.written).toEqual([])
+    expect(workerTasks).toBe(0)
+    expect(readManifest(r)).toEqual(manifestBefore)
   }, 60_000)
 
   it('a MOVED interface re-authors only the flow that grounds on it', async () => {

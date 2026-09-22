@@ -22,6 +22,7 @@ export {
   extractContextSchema,
   extractSessionBriefing,
   validateExtractDraft,
+  priorExtractionLines,
   type ExtractSessionInput,
 } from './extract.js'
 
