@@ -22,7 +22,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
-import { createSandbox, executeStep, flowRecipeSliceFingerprint, type Recipe, type StepCapture } from '@truecourse/guard-runner'
+import { createSandbox, executeStep, flowRecipeSliceFingerprint, recipeFingerprintComponents, type Recipe, type StepCapture } from '@truecourse/guard-runner'
 
 export const GROUND_CACHE_NAME = 'guard/ground'
 /** Hard per-probe wall-clock; a probe that hangs is killed and recorded timed-out. */
@@ -537,18 +537,21 @@ function repoPackageProgramNames(repoRoot: string): string[] {
 }
 
 /**
- * What a probe's transcript can depend on, and nothing else: the entry argv it
- * invokes (the cli slice) and the env the sandbox hands that process. A probe
- * runs the BUILT program, and no key here has ever folded the source that built
- * it, so folding the whole recipe fingerprint only re-ran probes for edits —
- * a dependency bump, a seed rewrite, a catalog entry — that cannot change a
- * `--help` transcript.
+ * What a probe's transcript can depend on: the entry argv it invokes (the cli
+ * slice), the env the sandbox hands that process, and the root manifests — the
+ * program's own version and name live there, and `--version` prints them. A
+ * probe runs the BUILT program and no key has ever folded the source that
+ * built it; the manifests are the one cheap signal that the build moved, and a
+ * probe re-run costs a subprocess, never a model call. A seed rewrite or a
+ * catalog entry cannot change a `--help` transcript, so neither is here.
  */
-export function groundInputsFingerprint(recipe: Recipe): string {
+export function groundInputsFingerprint(repoRoot: string, recipe: Recipe): string {
   return createHash('sha256')
     .update(flowRecipeSliceFingerprint(recipe, 'cli'))
     .update('::')
     .update(JSON.stringify(Object.entries(recipe.env ?? {}).sort()))
+    .update('::')
+    .update(recipeFingerprintComponents(repoRoot).manifests)
     .digest('hex')
 }
 

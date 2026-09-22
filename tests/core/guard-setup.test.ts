@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import {
   recipePath,
   computeRecipeFingerprint,
-  computePreparationFingerprint,
+  legacyPreparationFingerprint,
   readGuardSetup,
   writeGuardSetup,
   dependenciesPath,
@@ -424,7 +424,7 @@ function settledRepo(): string {
       // against the step's OLD fingerprint once and settles.
       { key: 'interfaces', status: 'ok', inputFingerprint: legacyInterfacesFingerprint(r) },
       { key: 'seed', status: 'ok', inputFingerprint: legacySeedStepFingerprint(r) },
-      { key: 'preparations', status: 'ok', inputFingerprint: computePreparationFingerprint(r) },
+      { key: 'preparations', status: 'ok', inputFingerprint: legacyPreparationFingerprint(r) },
       { key: 'auth', status: 'ok', inputFingerprint: authFingerprint(r) },
     ],
   };

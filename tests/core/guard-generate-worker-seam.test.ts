@@ -300,12 +300,15 @@ describe('flowWorkerCacheKey', () => {
     // The old key — the surface's prompt over the whole recipe fingerprint —
     // stays computable, so a committed entry is served once on the way over.
     expect(flowWorkerLegacyCacheKeys(base)).toEqual([expect.not.stringMatching(flowWorkerCacheKey(base))])
-    // A web task has TWO old keys: the whole author catalog sat in the bag
-    // under this stage version before the key folded what the session is handed.
+    // The ONE old key folds the bag as it was then, never a formula nothing
+    // shipped: a web task whose bag moved still has exactly one.
     const web = { ...base, surface: 'web' as const,
       cacheMaterial: { ...base.cacheMaterial, interfaceFingerprints: ['iface-1', 'handed'], legacyInterfaceFingerprints: ['iface-1', 'whole-catalog'] } }
-    const webKeys = flowWorkerLegacyCacheKeys(web)
-    expect(new Set([...webKeys, flowWorkerCacheKey(web)]).size).toBe(3)
+    const [webLegacy, ...rest] = flowWorkerLegacyCacheKeys(web)
+    expect(rest).toEqual([])
+    expect(webLegacy).toBe(workerCacheKey(flowWorkerPromptFingerprint('web'), { fingerprint: base.cacheMaterial.flowFingerprint }, 'web',
+      base.cacheMaterial.sectionKeys, ['iface-1', 'whole-catalog'], base.cacheMaterial.recipeFingerprint))
+    expect(webLegacy).not.toBe(flowWorkerCacheKey(web))
     expect(flowWorkerPromptFingerprint('cli')).toBe(FLOW_WORKER_CLI_PROMPT_FINGERPRINT)
     expect(flowWorkerPromptFingerprint('api')).toBe(FLOW_WORKER_API_PROMPT_FINGERPRINT)
     expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).not.toBe(FLOW_WORKER_API_PROMPT_FINGERPRINT)

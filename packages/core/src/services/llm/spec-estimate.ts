@@ -178,7 +178,7 @@ import {
 } from '@truecourse/shared';
 import {
   computeRecipeFingerprint,
-  computePreparationFingerprint,
+  legacyPreparationFingerprint,
   flowRecipeSliceFingerprint,
   flowRosterFingerprint,
   flowPreparationFingerprint,
@@ -843,6 +843,15 @@ async function planGuardRealizationStages(
   } catch { /* Invalid recipes are repaired before runtime matching. */ }
 
   const prerequisites = resolvePrerequisites(repoRoot, recipe?.api?.externals);
+  // The recipe material every flow's key folds, computed once for the run.
+  const slices = new Map<GuardDriverId, string>();
+  const recipeSliceOf = (surface: GuardDriverId): string => {
+    let slice = slices.get(surface);
+    if (slice === undefined) slices.set(surface, (slice = flowRecipeSliceFingerprint(recipe ?? null, surface)));
+    return slice;
+  };
+  const seedRoster = seedRosterFingerprint(recipe ?? null);
+  const preparationsOffer = preparationsFingerprint(repoRoot, recipe ?? null);
 
   // The MERGED catalog — the matcher runs against both halves, so an estimate that
   // read the derived one alone would price no work at all for the hand-authored
@@ -967,7 +976,7 @@ async function planGuardRealizationStages(
             : {}),
           prerequisiteMaterial,
           prerequisiteShape,
-          recipeSlice: flowRecipeSliceFingerprint(recipe ?? null, chosenSurface),
+          recipeSlice: recipeSliceOf(chosenSurface),
           roster: flowRosterFingerprint(recipe ?? null, priorScenarios),
           preparation: flowPreparationFingerprint(repoRoot, recipe ?? null, priorScenarios),
         }),
@@ -1005,9 +1014,9 @@ async function planGuardRealizationStages(
           sectionKeys,
           pair.fingerprints,
           workerRecipeMaterial({
-            recipeSlice: flowRecipeSliceFingerprint(recipe ?? null, pair.surface),
-            roster: seedRosterFingerprint(recipe ?? null),
-            preparations: preparationsFingerprint(repoRoot, recipe ?? null),
+            recipeSlice: recipeSliceOf(pair.surface),
+            roster: seedRoster,
+            preparations: preparationsOffer,
           }),
         );
         const hit = await probeSessionCache(
@@ -1015,20 +1024,7 @@ async function planGuardRealizationStages(
           FLOW_WORKER_CACHE_NAME,
           key,
           CachedWorkerEntrySchema,
-          // The web arm's retired formula under this stage version, then the
-          // key every surface wore while the prompt was in it.
-          workerCacheKey(
-            `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
-            flow,
-            pair.surface,
-            sectionKeys,
-            pair.legacyFingerprints,
-            workerRecipeMaterial({
-              recipeSlice: flowRecipeSliceFingerprint(recipe ?? null, pair.surface),
-              roster: seedRosterFingerprint(recipe ?? null),
-              preparations: preparationsFingerprint(repoRoot, recipe ?? null),
-            }),
-          ),
+          // The key every surface wore while the prompt was in it.
           workerCacheKey(
             flowWorkerPromptFingerprint(pair.surface),
             flow,
@@ -1207,7 +1203,7 @@ export async function estimateGuardSetup(
   // ---- interfaces: reconcile + authoring, both off the on-disk halves -------
   const derivedCatalog = readInterfaceCatalog(repoRoot);
   const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
-  const interfaceRecipeContract = recipeContractFingerprint(repoRoot);
+  const interfaceRecipeContract = recipeContractFingerprint(repoRoot, 'seed');
   const interfacesSettled =
     !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
     webScreensNeedingAuthoring({
@@ -1257,7 +1253,7 @@ export async function estimateGuardSetup(
   // ---- private preparations: one authoring session per changed recipe --------
   // A profile is not evidence that this setup step already settled. The runtime
   // skips only its current recorded fingerprint; old setups must run this step.
-  const preparationSettled = recipe !== undefined && holds('preparations', computePreparationFingerprint(repoRoot)) &&
+  const preparationSettled = recipe !== undefined && holds('preparations', legacyPreparationFingerprint(repoRoot)) &&
     preparationCatalog(recipe, repoRoot).length === Object.keys(recipe.preparations ?? {}).length;
   const preparationItems = preparationSettled ? 0 : 1;
   // Upstream recipe/seed work can move the fingerprint before this step starts.

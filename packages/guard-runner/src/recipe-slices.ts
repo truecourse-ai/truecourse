@@ -29,11 +29,14 @@ import { z } from 'zod'
 import type { GuardDriverId, GuardScenario } from '@truecourse/shared'
 import { placeholderNames } from './api/vars.js'
 import {
+  computeRecipeFingerprint,
   hashableRecipeText,
   resolveApiServers,
   resolvePreparationScripts,
+  RecipeSchema,
   type Recipe,
 } from './recipe.js'
+import { observationSource } from './preparation-observation.js'
 import { dependenciesPath, recipePath } from './store.js'
 
 /** One slice's digest: a labelled, canonically-ordered material, hashed. */
@@ -52,21 +55,50 @@ function readRecipeText(repoRoot: string): string | null {
 }
 
 /**
+ * The setup steps that WRITE the recipe, in run order: the seed step writes
+ * `api.seed`, the preparations step writes `preparations` and the scripts it
+ * names. A step keyed on the contract folds it as it stood BEFORE the first of
+ * these that runs after it — otherwise its row, stamped mid-run, is stale by
+ * the time the run ends, and the next setup re-opens it over nothing.
+ */
+export type RecipeWritingStep = 'seed' | 'preparations'
+
+/**
  * THE RECIPE CONTRACT — the canonical, secret-stripped `recipe.json` plus the
  * bytes of every preparation script it names. It is the recipe as a PROMISE
  * about the repository: what boots, how it is prepared, which capabilities
  * exist. The steps that read the whole promise key on this — interface
  * derivation, the reconcile session, the seed step — so that a dependency bump
  * or a catalog edit, neither of which changes the promise, re-runs none of them.
+ *
+ * `before` names the first recipe-writing step that runs AFTER the consumer:
+ * the blocks that step and its successors write are left out, because the
+ * consumer ran without them and would only be re-opened by its own run.
  */
-export function recipeContractFingerprint(repoRoot: string): string {
+export function recipeContractFingerprint(repoRoot: string, before?: RecipeWritingStep): string {
   const raw = readRecipeText(repoRoot)
   if (raw === null) return digest({ recipe: null })
-  const scripts = resolvePreparationScripts(repoRoot, raw).map((abs) => [
+  const text = before ? recipeTextBefore(raw, before) : raw
+  const scripts = resolvePreparationScripts(repoRoot, text).map((abs) => [
     path.relative(repoRoot, abs),
     crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex'),
   ])
-  return digest({ recipe: hashableRecipeText(raw), scripts })
+  return digest({ recipe: hashableRecipeText(text), scripts })
+}
+
+/** The recipe text with every block written by `step` and the steps after it removed. */
+function recipeTextBefore(raw: string, step: RecipeWritingStep): string {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return raw
+  }
+  if (!parsed || typeof parsed !== 'object') return raw
+  const recipe = parsed as { api?: { seed?: unknown }; preparations?: unknown }
+  if (step === 'seed' && recipe.api && typeof recipe.api === 'object') delete recipe.api.seed
+  delete recipe.preparations
+  return JSON.stringify(recipe)
 }
 
 /**
@@ -267,6 +299,60 @@ export function flowPreparationFingerprint(
 export function preparationsFingerprint(repoRoot: string, recipe: Recipe | null): string {
   const names = Object.keys(recipe?.preparations ?? {}).sort()
   return digest(names.map((name) => [name, preparationView(repoRoot, recipe, name)]))
+}
+
+const PREPARATION_SEMANTICS_VERSION = 'guard-preparations:5-qualified-observations-runtime-diagnostics'
+
+/**
+ * The preparations step's fingerprint: the semantics version (bumped on its
+ * own, so a cached unsupported outcome can be retried once), the qualified
+ * observation sources, and the recipe CONTRACT. The step is the last one that
+ * writes the recipe and its row is stamped after it wrote, so the whole
+ * contract is its to fold; a dependency bump reaches none of it.
+ */
+export function computePreparationFingerprint(repoRoot: string): string {
+  const hash = crypto.createHash('sha256').update(`${PREPARATION_SEMANTICS_VERSION}\n`)
+    .update(recipeContractFingerprint(repoRoot))
+  for (const chunk of preparationSourceMaterial(repoRoot)) hash.update(chunk)
+  return hash.digest('hex')
+}
+
+/**
+ * {@link computePreparationFingerprint} as it was computed before the slices,
+ * over the whole recipe fingerprint — the one check a settled row with no
+ * components gets. Delete with the legacy hash.
+ */
+export function legacyPreparationFingerprint(repoRoot: string): string {
+  const hash = crypto.createHash('sha256').update(`${PREPARATION_SEMANTICS_VERSION}\n`)
+    .update(computeRecipeFingerprint(repoRoot))
+  for (const chunk of preparationSourceMaterial(repoRoot)) hash.update(chunk)
+  return hash.digest('hex')
+}
+
+/**
+ * {@link computePreparationFingerprint} by named input: the semantics version,
+ * the qualified observation sources, and the recipe contract.
+ */
+export function preparationFingerprintComponents(repoRoot: string): Record<string, string> {
+  const sources = crypto.createHash('sha256')
+  for (const chunk of preparationSourceMaterial(repoRoot)) sources.update(chunk)
+  return {
+    version: PREPARATION_SEMANTICS_VERSION,
+    sources: sources.digest('hex').slice(0, 16),
+    'recipe.contract': crypto.createHash('sha256').update(recipeContractFingerprint(repoRoot)).digest('hex').slice(0, 16),
+  }
+}
+
+/** The qualified observation sources the preparation fingerprint folds: path, then content hash. */
+function preparationSourceMaterial(repoRoot: string): string[] {
+  try {
+    const recipe = RecipeSchema.parse(JSON.parse(fs.readFileSync(recipePath(repoRoot), 'utf8')))
+    const paths = new Set(Object.values(recipe.preparations ?? {}).flatMap(p =>
+      (p.baselineChecks ?? []).flatMap(c => (c.qualification?.sources ?? []).map(s => s.path))))
+    return [...paths].sort().flatMap((relative) => {
+      try { return [relative, observationSource(repoRoot, relative).sha256] } catch { return [relative, 'missing'] }
+    })
+  } catch { return ['no-qualified-recipe'] }
 }
 
 /**

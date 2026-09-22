@@ -71,8 +71,8 @@ import {
   loadResolvedExternals,
   computeRecipeFingerprint,
   computePreparationFingerprint,
+  legacyPreparationFingerprint,
   preparationFingerprintComponents,
-  recipeFingerprintComponents,
   recipeContractFingerprint,
   dependencyCatalogIdentity,
   preparationCatalog,
@@ -330,6 +330,9 @@ export interface GuardSetupCatalogSessionInput {
   skeleton: { declared: string[]; alreadyDeclared: string[]; undeclarable: string[] }
   /** The catalog step's PRE-RUN input fingerprint — the session's cache key. */
   fingerprint: string
+  /** The same fingerprint under the formula the key used to fold, for the OLD
+   *  key a miss falls back to. Delete with the legacy hash. */
+  legacyFingerprint: string
 }
 
 export type GuardSetupCatalogSessionResult =
@@ -1031,15 +1034,25 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // ---- Step 3: the catalog — the externals skeleton (det) + the session. ---
   // SOFT throughout: the hard gate already held, and a catalog that could not be
   // classified is a reported step, never a failed setup.
+  // The recipe as the catalog step reads it: the contract before the seed
+  // step, which (with the preparations step) writes the recipe later in this
+  // same run. A dependency version reaches neither the classification nor
+  // the skeleton, so the manifests are not here either.
   const catalogFpOf = (): string =>
+    catalogFingerprint(detectionSnapshotJson, recipeContractFingerprint(repoRoot, 'seed'), dependenciesFileContent(repoRoot))
+  /** {@link catalogFpOf} as it was computed before the slices — the one check a
+   *  settled row with no components gets, and the session's old cache key.
+   *  Delete with the legacy hash. */
+  const legacyCatalogFpOf = (): string =>
     catalogFingerprint(detectionSnapshotJson, computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
   // The session's own settle gate. Its additions are LLM-nondeterministic, so
   // a re-run can grow the catalog, which moves the recipe fingerprint, which
   // re-authors every flow. This fingerprint deliberately excludes the catalog
   // it produces (feeding the session's OUTPUT back into its gate is what made
   // the churn self-sustaining) and the full recipe fingerprint (which folds the
-  // catalog too): it hashes only what the session derives FROM — detection, the
-  // recipe's own text, and the seed script. While it holds, the stored catalog
+  // catalog too): it hashes only what the session derives FROM — detection and
+  // the recipe contract as it stands before the seed step, which writes the
+  // recipe after this step in the same run. While it holds, the stored catalog
   // stands byte-for-byte; the add-only fold already protects curated entries
   // whenever the session does run.
   // Detection IDENTITY without evidence: the evidence entries carry absolute
@@ -1062,7 +1075,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       .sort((a, b) => a.service.localeCompare(b.service)),
     database: database ? { type: database.type, driver: database.driver } : null,
   })
-  const catalogSessionFpOf = (): string => {
+  const catalogSessionFpOf = (): string =>
+    `sha256:${createHash('sha256').update(`${stableDetectionJson}::${recipeContractFingerprint(repoRoot, 'seed')}`).digest('hex')}`
+  /** {@link catalogSessionFpOf} as the settle record was written before the
+   *  slices: the recipe's whole text and the seed script. A record under it
+   *  holds once, then re-settles under the new value. Delete with the legacy hash. */
+  const legacyCatalogSessionFpOf = (): string => {
     let recipeRaw = ''
     try {
       recipeRaw = fs.readFileSync(recipePath(repoRoot), 'utf-8')
@@ -1085,7 +1103,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     // rather than re-classifying — it is a curated artifact of the stored
     // bundle, and `refresh` remains the explicit way to re-derive it.
     const settleSkip =
-      catalogOnDisk && (settledSession === catalogSessionFp || (settledSession === null && opts.refresh !== true))
+      catalogOnDisk &&
+      (settledSession === catalogSessionFp ||
+        settledSession === legacyCatalogSessionFpOf() ||
+        (settledSession === null && opts.refresh !== true))
     if (replayed('catalog')) {
       // Prior step: the catalog on disk stands as it is. Not even the
       // deterministic skeleton runs — it WRITES `api.externals` into the recipe,
@@ -1096,7 +1117,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       fact('catalog', 'replayed: scenarios/dependencies.json stands as it is')
       for (const line of catalogEntryFacts(repoRoot)) fact('catalog', line)
       opts.onStepDone?.('catalog', 'replayed — scenarios/dependencies.json stands as it is')
-    } else if (holds('catalog', catalogFpPre) || settleSkip) {
+    } else if (holds('catalog', legacyCatalogFpOf()) || settleSkip) {
       // The skeleton is still run for the legacy report field — with unchanged
       // detection and an unchanged recipe it derives nothing and writes nothing —
       // but no session is spent.
@@ -1130,6 +1151,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             undeclarable: externalsStep.undeclarable,
           },
           fingerprint: catalogFpPre,
+          legacyFingerprint: legacyCatalogFpOf(),
         })
         if (result.status === 'ok') writeCatalogSettle(repoRoot, catalogSessionFpOf())
         pushStep(
@@ -1210,7 +1232,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       webScreensNeedingAuthoring({
         derived: readInterfaceCatalog(repoRoot),
         authored: readAuthoredInterfaceCatalog(repoRoot),
-        recipeContract: recipeContractFingerprint(repoRoot),
+        recipeContract: recipeContractFingerprint(repoRoot, 'seed'),
       }).size === 0) {
       pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
       fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')
@@ -1395,7 +1417,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       fact('preparations', 'replayed: the existing private preparation profiles stand as they are')
       for (const line of preparationFacts(preparationRecipe, repoRoot)) fact('preparations', line)
       opts.onStepDone?.('preparations', 'existing private preparation profiles preserved')
-    } else if (holds('preparations', preparationFp) &&
+    } else if (holds('preparations', legacyPreparationFingerprint(repoRoot)) &&
       preparationCatalog(preparationRecipe, repoRoot).length === Object.keys(preparationRecipe.preparations ?? {}).length) {
       pushStep({ key: 'preparations', status: 'skipped', reason: 'unchanged', inputFingerprint: preparationFp })
       fact('preparations', 'every private preparation profile is unchanged since the last setup, from cache')
@@ -1601,8 +1623,8 @@ function dependenciesFileContent(repoRoot: string): string {
   }
 }
 
-function catalogFingerprint(detectionJson: string, recipeFingerprint: string, depsContent: string): string {
-  return createHash('sha256').update(`${detectionJson}::${recipeFingerprint}::${depsContent}`).digest('hex')
+function catalogFingerprint(detectionJson: string, recipeContract: string, depsContent: string): string {
+  return createHash('sha256').update(`${detectionJson}::${recipeContract}::${depsContent}`).digest('hex')
 }
 
 /**
@@ -1636,14 +1658,15 @@ function writeCatalogSettle(repoRoot: string, fingerprint: string): void {
   )
 }
 
-/** Sorted derived web place `(id, address)` pairs :: the recipe CONTRACT — the
- *  interfaces step re-runs when a screen appeared, moved or vanished, or when
- *  the promise it derives against changed. A dependency bump, a catalog edit
- *  and a seed rewrite reach none of it.
+/** Sorted derived web place `(id, address)` pairs :: the recipe CONTRACT as it
+ *  stands before the seed step — the interfaces step re-runs when a screen
+ *  appeared, moved or vanished, or when the promise it derives against changed.
+ *  A dependency bump, a catalog edit, and the seed and preparations the later
+ *  steps of the same run write reach none of it.
  *  Exported for the pre-flight estimate's settled check. */
 export function interfacesFingerprint(repoRoot: string): string {
   return createHash('sha256')
-    .update(`${derivedWebPlacePairs(repoRoot)}::${recipeContractFingerprint(repoRoot)}`)
+    .update(`${derivedWebPlacePairs(repoRoot)}::${recipeContractFingerprint(repoRoot, 'seed')}`)
     .digest('hex')
 }
 
@@ -1666,13 +1689,15 @@ function derivedWebPlacePairs(repoRoot: string): string {
 /**
  * The seed step's fingerprint off the tree as it stands — the estimate's
  * settled check, the exact value the running step computes, and the seed
- * session's cache key. The recipe CONTRACT plus the catalog's IDENTITY: which
+ * session's cache key. The recipe CONTRACT before the preparations step (the
+ * seed's own block is in it: the row is stamped after the seed wrote, and a
+ * seed deleted by hand re-opens the step) plus the catalog's IDENTITY: which
  * classes of starting state exist, never how the catalog session worded them,
  * and never a dependency version the seed does not read.
  */
 export function computeSeedStepFingerprint(repoRoot: string): string {
   return createHash('sha256')
-    .update(`${recipeContractFingerprint(repoRoot)}::${dependencyCatalogIdentity(repoRoot)}`)
+    .update(`${recipeContractFingerprint(repoRoot, 'preparations')}::${dependencyCatalogIdentity(repoRoot)}`)
     .digest('hex')
 }
 
@@ -1712,8 +1737,6 @@ function stepInputComponents(
   detectionJson: string,
 ): Record<string, string> {
   const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex').slice(0, 16)
-  const recipeParts = (): Record<string, string> =>
-    Object.fromEntries(Object.entries(recipeFingerprintComponents(repoRoot)).map(([part, value]) => [`recipe.${part}`, value]))
   switch (key) {
     case 'recipe':
       // Off the detection snapshot the row was recorded with, so the needs the
@@ -1722,15 +1745,19 @@ function stepInputComponents(
     case 'detect':
       return {}
     case 'catalog':
-      return { detection: digest(detectionJson), ...recipeParts() }
+      return {
+        detection: digest(detectionJson),
+        'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'seed')),
+        catalog: digest(dependenciesFileContent(repoRoot)),
+      }
     case 'interfaces':
       return {
         places: digest(derivedWebPlacePairs(repoRoot)),
-        'recipe.contract': digest(recipeContractFingerprint(repoRoot)),
+        'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'seed')),
       }
     case 'seed':
       return {
-        'recipe.contract': digest(recipeContractFingerprint(repoRoot)),
+        'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'preparations')),
         catalog: digest(dependencyCatalogIdentity(repoRoot)),
       }
     case 'preparations':

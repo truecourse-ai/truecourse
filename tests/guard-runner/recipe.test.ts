@@ -164,14 +164,19 @@ describe('recipeFingerprintComponents', () => {
     expect(computeRecipeFingerprint(r)).toBe(`sha256:${expected}`)
   })
 
-  it('the preparation fingerprint names the recipe parts it folds', () => {
+  it('the preparation fingerprint folds the recipe contract, never a dependency version', () => {
     const r = repo()
     const before = preparationFingerprintComponents(r)
     const fingerprint = computePreparationFingerprint(r)
     fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }))
+    expect(computePreparationFingerprint(r)).toBe(fingerprint)
+    expect(preparationFingerprintComponents(r)).toEqual(before)
+    // A recipe edit is the contract moving, and the component says so.
+    fs.mkdirSync(path.dirname(recipePath(r)), { recursive: true })
+    fs.writeFileSync(recipePath(r), JSON.stringify({ entry: ['node', 'cli.js'], env: { MODE: 'test' } }))
     const after = preparationFingerprintComponents(r)
     expect(computePreparationFingerprint(r)).not.toBe(fingerprint)
-    expect(Object.keys(after).filter((name) => after[name] !== before[name])).toEqual(['recipe.manifests'])
+    expect(Object.keys(after).filter((name) => after[name] !== before[name])).toEqual(['recipe.contract'])
   })
 })
 

@@ -309,15 +309,17 @@ describe('buildInterfacesStep — the authoring half', () => {
     expect(result.failedScreens).toEqual([{ place: 'root', reason: 'authoring failed' }]);
   });
 
-  it('re-opens an unsettled screen on a refresh', async () => {
+  it('re-opens an unsettled screen on a refresh, and a retry that authored is no longer awaiting one', async () => {
     const r = repo();
     writeHalves(r, { authoredPlaces: ['root', 'repos-repoid'] });
     withLedger(r, { root: 'failed' });
-    const { author, calls } = authoring();
+    const { author, calls } = authoring({ places: [{ status: 'authored', placeId: 'root' }], authored: 1 });
 
-    await buildInterfacesStep(stubContext().context, { author })(stepInput(r, { refresh: true }));
+    const result = await buildInterfacesStep(stubContext().context, { author })(stepInput(r, { refresh: true }));
 
     expect(calls).toEqual([{ repoRoot: r, replace: false, refresh: true }]);
+    expect(result.status).toBe('ok');
+    expect(result.failedScreens).toBeUndefined();
   });
 
   // Run reporting lands on the step ROW — never in the catalog.

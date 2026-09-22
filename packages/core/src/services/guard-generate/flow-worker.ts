@@ -230,20 +230,15 @@ export function flowWorkerCacheKey(task: FlowWorkerTask): string {
 }
 
 /**
- * {@link flowWorkerCacheKey} under the formulas that came before it, newest
- * first: the web arm's whole-author-catalog fingerprint under this stage
- * version (web only), and the surface's prompt over the whole recipe
- * fingerprint. A miss reads them in turn. Delete with the legacy hash.
+ * {@link flowWorkerCacheKey} under the one formula that shipped before it: the
+ * surface's prompt fingerprint over the interface bag as it was then and the
+ * whole recipe fingerprint. A miss reads it. Delete with the legacy hash.
  */
 export function flowWorkerLegacyCacheKeys(task: FlowWorkerTask): string[] {
   const m = task.cacheMaterial
   const legacyBag = m.legacyInterfaceFingerprints ?? m.interfaceFingerprints
   const edit = m.mode === 'edit' ? { priorShas: m.priorShas } : undefined
   return [
-    ...(m.legacyInterfaceFingerprints
-      ? [workerCacheKey(`flow-worker-v${FLOW_WORKER_STAGE_VERSION}`, { fingerprint: m.flowFingerprint }, task.surface,
-          m.sectionKeys, legacyBag, workerRecipeMaterial(m), edit)]
-      : []),
     workerCacheKey(flowWorkerPromptFingerprint(task.surface), { fingerprint: m.flowFingerprint }, task.surface,
       m.sectionKeys, legacyBag, m.recipeFingerprint, edit),
   ]

@@ -2012,6 +2012,23 @@ describe('generateGuards — the per-flow pipeline', () => {
     expect(new Set(loadScenarios(r).scenarios.map((s) => s.id)).size).toBe(2)
   }, 90_000)
 
+  it('a flow authored from scratch is stamped over the roster its NEW scenario names, so the next run is a no-op', async () => {
+    const r = seed()
+    const opts = {
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      // The scenario names a fixture no prior scenario named: the roster the
+      // compare read BEFORE the session ran is not the roster the flow holds now.
+      flowWorkerSession: submitWorkerSessions((task) => raw(`${task.flowId} for {{fixture:org.id}}`, PASSING_STEPS)),
+    }
+    const first = await runGenerate(opts)
+    expect(first.written).toHaveLength(1)
+
+    const second = await runGenerate(opts)
+    expect(second.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
+    expect(second.written).toEqual([])
+  }, 90_000)
+
   it('names the settle input that re-opened a flow, and a dependency bump names none', async () => {
     const r = seed()
     const opts = {

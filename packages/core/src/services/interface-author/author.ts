@@ -262,7 +262,7 @@ function placeIndex(
 export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<AuthorRunResult> {
   const derived = readInterfaceCatalog(opts.repoRoot)
   let authored = readAuthoredInterfaceCatalog(opts.repoRoot)
-  const recipeContract = recipeContractFingerprint(opts.repoRoot)
+  const recipeContract = recipeContractFingerprint(opts.repoRoot, 'seed')
 
   const all = planWorkItems(derived, authored, recipeContract)
 

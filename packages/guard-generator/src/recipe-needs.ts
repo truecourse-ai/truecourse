@@ -248,10 +248,12 @@ function unprovidedNeed(need: RecipeNeed, provides: RecipeProvides): UnprovidedN
       if (need.envVars.some((name) => provides.envVars.has(name))) return undefined
       const filed = provides.catalogued.get(need.service)
       // The catalog's CLASS is what says whether a third party can be stood up
-      // locally: `supplied` is a real-world account nobody may fabricate, so it
-      // waits on a registration; the other two classes are state the engine
-      // itself creates or seeds, which a compose service can stand in for — and
-      // standing one up is a recipe edit.
+      // locally. `supplied` is a real-world account nobody may fabricate: it is
+      // answered by a registration the catalog step tracks and reports as
+      // "awaiting an account" (this detector never reads the registrations),
+      // so as far as the RECIPE is concerned it is provided. The other two
+      // classes are state the engine itself creates or seeds, which a compose
+      // service can stand in for — and standing one up is a recipe edit.
       if (filed === 'supplied') return undefined
       if (filed === undefined) {
         return {

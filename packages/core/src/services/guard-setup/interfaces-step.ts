@@ -140,7 +140,7 @@ export function buildInterfacesStep(
     const derived = readInterfaceCatalog(input.repoRoot);
     const authored = readAuthoredInterfaceCatalog(input.repoRoot);
     const stale = new Set(staleAuthoredPlaceDiagnostics(derived, authored).map((d) => d.subject));
-    const planned = planWorkItems(derived, authored, recipeContractFingerprint(input.repoRoot));
+    const planned = planWorkItems(derived, authored, recipeContractFingerprint(input.repoRoot, 'seed'));
     const workable = planned.filter(
       (item) =>
         !stale.has(item.place.id) &&
@@ -196,7 +196,10 @@ export function buildInterfacesStep(
       // its whole work list whatever each session made of it: one dead session
       // no longer holds the step open for every later run. A run where EVERY
       // session died is the exception — nothing was settled but the failure
-      // itself — and it stays loud.
+      // itself — and it stays loud. A screen the ledger held as unsettled that
+      // this run retried (a refresh, or its inputs moved) has this run's
+      // outcome now, whichever way it went, so only the ones the run did not
+      // touch are still awaiting a refresh.
       const failedScreens = [
         ...failed.map((place) => ({
           place: place.placeId ?? 'authoring session',
@@ -205,7 +208,7 @@ export function buildInterfacesStep(
             : {}),
         })),
         ...unsettledScreens.filter(
-          (screen) => !failed.some((place) => place.placeId === screen.place),
+          (screen) => !run.places.some((place) => place.placeId === screen.place),
         ),
       ];
       // The closing state reconciliation never fails the run (the tasks are
@@ -274,7 +277,7 @@ async function runReconcile(
     repoRoot: input.repoRoot,
     diagnostics: disputes,
     entry: resolveEntry(input.repoRoot, [...input.recipe.entry!]),
-    recipeContract: recipeContractFingerprint(input.repoRoot),
+    recipeContract: recipeContractFingerprint(input.repoRoot, 'seed'),
     legacyRecipeFingerprint: computeRecipeFingerprint(input.repoRoot),
     driver: async () => {
       acquired = await context.acquire();

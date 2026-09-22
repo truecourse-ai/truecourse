@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { GuardSessionSummary } from '@truecourse/guard-generator'
 import { looksWorldMutating } from '@truecourse/guard-generator'
+import { LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT } from '../../packages/guard-generator/src/legacy-prompt-fingerprints.js'
 import {
   FIXTURE_BIN,
   PASSING_STEPS,
@@ -313,10 +314,10 @@ describe('generateGuards — classifier loss fails closed', () => {
     })
     expect(batch).toHaveLength(2)
 
-    // The entry a run before per-flow verdicts left behind: one key over the
-    // whole positional slice.
+    // The entry a run before per-flow verdicts left behind: the prompt
+    // fingerprint over the whole positional slice.
     await setCacheEntry(r, 'guard/world-classify',
-      createHash('sha256').update(`world-classify-v1\0${JSON.stringify(batch)}`).digest('hex'),
+      createHash('sha256').update(`${LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT}\0${JSON.stringify(batch)}`).digest('hex'),
       { mutators: [batch[1].id] })
 
     const mutators: string[] = []

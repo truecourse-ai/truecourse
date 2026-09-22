@@ -1,5 +1,5 @@
 import { forEachInlineSecret } from './recipe-secrets.js';
-import { PreparationQualificationSchema, observationSource } from './preparation-observation.js';
+import { PreparationQualificationSchema } from './preparation-observation.js';
 /**
  * The preparation recipe (`.truecourse/scenarios/recipe.json`) — how to turn the
  * working tree into something scenarios can drive. `build` runs once per run in
@@ -1063,40 +1063,6 @@ export function loadRecipe(repoRoot: string, recipeFile: string): LoadedRecipe |
     throw new RecipeError(`recipe.json is invalid: ${result.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join('; ')}`)
   }
   return { recipe: result.data, fingerprint: computeRecipeFingerprint(repoRoot) }
-}
-
-const PREPARATION_SEMANTICS_VERSION = 'guard-preparations:5-qualified-observations-runtime-diagnostics'
-
-/** Version preparation semantics independently so cached unsupported outcomes can be retried once. */
-export function computePreparationFingerprint(repoRoot: string): string {
-  const hash = crypto.createHash('sha256').update(`${PREPARATION_SEMANTICS_VERSION}\n`)
-    .update(computeRecipeFingerprint(repoRoot));
-  for (const chunk of preparationSourceMaterial(repoRoot)) hash.update(chunk);
-  return hash.digest('hex');
-}
-
-/**
- * {@link computePreparationFingerprint} by named input: the semantics version,
- * the qualified observation sources, and the recipe fingerprint's own parts.
- */
-export function preparationFingerprintComponents(repoRoot: string): Record<string, string> {
-  const sources = crypto.createHash('sha256')
-  for (const chunk of preparationSourceMaterial(repoRoot)) sources.update(chunk)
-  const components: Record<string, string> = { version: PREPARATION_SEMANTICS_VERSION, sources: sources.digest('hex').slice(0, 16) }
-  for (const [part, value] of Object.entries(recipeFingerprintComponents(repoRoot))) components[`recipe.${part}`] = value
-  return components
-}
-
-/** The qualified observation sources the preparation fingerprint folds: path, then content hash. */
-function preparationSourceMaterial(repoRoot: string): string[] {
-  try {
-    const recipe = RecipeSchema.parse(JSON.parse(fs.readFileSync(recipePath(repoRoot), 'utf8')));
-    const paths = new Set(Object.values(recipe.preparations ?? {}).flatMap(p =>
-      (p.baselineChecks ?? []).flatMap(c => (c.qualification?.sources ?? []).map(s => s.path))));
-    return [...paths].sort().flatMap((relative) => {
-      try { return [relative, observationSource(repoRoot, relative).sha256]; } catch { return [relative, 'missing']; }
-    });
-  } catch { return ['no-qualified-recipe']; }
 }
 
 /** The named parts of the recipe fingerprint, in the order the digest folds them. */

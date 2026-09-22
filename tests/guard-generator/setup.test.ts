@@ -1247,6 +1247,49 @@ describe('runGuardSetup — the interfaces step', () => {
     }
   }
 
+  it('the seed a run drafts after them does not re-open the catalog or the interfaces rows', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    writeCatalogs(r, { authored: true })
+    let catalogCalls = 0
+    const catalogSession: GuardSetupCatalogSession = async () => {
+      catalogCalls++
+      return { status: 'ok', added: [], findings: [] }
+    }
+    const one = await runGuardSetup(
+      baseOpts(r, { authorInterfaces: step().seam, catalogSession, seedSession: writingSeedSeam() }),
+    )
+    writeGuardSetup(r, one.report)
+    expect(catalogCalls).toBe(1)
+    expect(one.report.steps.find((s) => s.key === 'seed')).toMatchObject({ status: 'ok' })
+    // The seed step wrote `api.seed` into the recipe AFTER the catalog and
+    // interfaces rows were stamped: neither reads it, so neither moves.
+    expect(JSON.parse(fs.readFileSync(recipePath(r), 'utf-8')).api.seed).toBeDefined()
+
+    const facts: string[] = []
+    const never = (what: string) => async (): Promise<never> => {
+      throw new Error(`${what} must not re-run over a seed the run itself drafted`)
+    }
+    const two = await runGuardSetup(
+      baseOpts(r, {
+        authorInterfaces: never('the interfaces step'),
+        catalogSession: never('the catalog session'),
+        seedSession: never('the seed session'),
+        onStepFact: (key, line) => facts.push(`${key} | ${line}`),
+      }),
+    )
+    expect(
+      two.report.steps
+        .filter((s) => s.key === 'catalog' || s.key === 'interfaces' || s.key === 'seed')
+        .map((s) => [s.key, s.status, s.reason]),
+    ).toEqual([
+      ['catalog', 'skipped', 'unchanged'],
+      ['interfaces', 'skipped', 'unchanged'],
+      ['seed', 'skipped', 'unchanged'],
+    ])
+    expect(facts.filter((line) => line.includes('re-opened'))).toEqual([])
+  })
+
   it('skips only when the places are unchanged AND an authored file exists', async () => {
     const r = fixtureRepo()
     writeRecipe(r)

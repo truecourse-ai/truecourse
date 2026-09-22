@@ -106,6 +106,49 @@ describe('recipe contract fingerprint', () => {
     expect(recipeContractFingerprint(r)).not.toBe(before)
   })
 
+  it('read before a recipe-writing step, leaves out what that step and its successors write', () => {
+    const { r } = seeded()
+    const whole = recipeContractFingerprint(r)
+    const beforeSeed = recipeContractFingerprint(r, 'seed')
+    const beforePreparations = recipeContractFingerprint(r, 'preparations')
+    // The base recipe declares a seed and no preparations: the contract read
+    // before the seed step leaves the seed out, the one read before the
+    // preparations step has nothing to leave out yet.
+    expect(beforeSeed).not.toBe(whole)
+    expect(beforePreparations).toBe(whole)
+
+    // The seed step writes `api.seed`: only the whole contract and the one read
+    // before the preparations step (which still holds the seed) follow it.
+    const { api, ...rest } = structuredClone(BASE)
+    putRecipe(r, { ...rest, api: { ...api, seed: { ...api.seed, command: 'node scripts/seed.mjs --fast' } } })
+    expect(recipeContractFingerprint(r)).not.toBe(whole)
+    expect(recipeContractFingerprint(r, 'preparations')).not.toBe(beforePreparations)
+    expect(recipeContractFingerprint(r, 'seed')).toBe(beforeSeed)
+
+    // The preparations step writes `preparations` and its scripts: neither
+    // contract read before it follows.
+    write(r, 'scripts/prep-seed.mjs', 'one')
+    write(r, 'scripts/prep-verify.mjs', 'one')
+    putRecipe(r, {
+      ...structuredClone(BASE),
+      preparations: {
+        pg: {
+          baseline: 'empty',
+          scope: 'instance',
+          env: { DB_NS: '${namespace}' },
+          seed: { script: 'scripts/prep-seed.mjs', provides: {} },
+          verify: { script: 'scripts/prep-verify.mjs' },
+        },
+      },
+    })
+    expect(recipeContractFingerprint(r)).not.toBe(whole)
+    expect(recipeContractFingerprint(r, 'preparations')).toBe(beforePreparations)
+    expect(recipeContractFingerprint(r, 'seed')).toBe(beforeSeed)
+    write(r, 'scripts/prep-seed.mjs', 'two')
+    expect(recipeContractFingerprint(r, 'preparations')).toBe(beforePreparations)
+    expect(recipeContractFingerprint(r, 'seed')).toBe(beforeSeed)
+  })
+
   it('ignores a rotated inline secret and follows a preparation script edit', () => {
     const r = repo()
     write(r, 'scripts/prep-seed.mjs', 'one')

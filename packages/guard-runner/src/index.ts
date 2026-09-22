@@ -71,7 +71,6 @@ export {
   resolveEntry,
   computeRecipeFingerprint,
   recipeFingerprintComponents,
-  preparationFingerprintComponents,
   RECIPE_FINGERPRINT_PARTS,
   FINGERPRINT_INPUTS,
   resolveApiCredentials,
@@ -477,7 +476,6 @@ export * from './prerequisites.js'
 
 export { preparationOwnedEnvKeys, bindPreparationPostgres } from './preparation-postgres.js'
 
-export { computePreparationFingerprint } from './recipe.js'
 
 export { preparationDependencyBriefing, resolvePreparationDependencies } from './preparation-dependencies.js'
 
@@ -491,6 +489,9 @@ export { RecipePreparationBaselineCheckSchema } from './recipe.js';
 
 export {
   recipeContractFingerprint,
+  computePreparationFingerprint,
+  legacyPreparationFingerprint,
+  preparationFingerprintComponents,
   flowRecipeSliceFingerprint,
   seedRosterFingerprint,
   flowRosterFingerprint,
@@ -498,4 +499,5 @@ export {
   preparationsFingerprint,
   dependencyCatalogIdentity,
 } from './recipe-slices.js'
+export type { RecipeWritingStep } from './recipe-slices.js'
 export { type ResolvedProviderControl, resolveProviderControl, providerControlStateMaterial, scenarioProviderControlProblems, PROVIDER_CONTROL_VERSION } from './provider-control.js'

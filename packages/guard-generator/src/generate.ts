@@ -1170,6 +1170,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   const recipe: Recipe = recipeResult.recipe
   const recipeFingerprint = recipeResult.fingerprint
+  // The recipe material a flow's key folds, constant for the run: computed
+  // once here, not once per flow and again per authoring task.
+  const recipeSlices = new Map<GuardDriverId, string>()
+  const recipeSliceOf = (surface: GuardDriverId): string => {
+    let slice = recipeSlices.get(surface)
+    if (slice === undefined) recipeSlices.set(surface, (slice = flowRecipeSliceFingerprint(recipe, surface)))
+    return slice
+  }
+  const seedRoster = seedRosterFingerprint(recipe)
+  const preparationsOffer = preparationsFingerprint(repoRoot, recipe)
   fact(
     'index',
     recipeResult.status === 'exists'
@@ -2055,7 +2065,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // A flow with no plan is realized on no surface, so it folds the cli
       // slice as a stable stand-in: the estimate makes the same choice, and a
       // flow that later gains a plan re-opens on the surface it gained.
-      recipeSlice: flowRecipeSliceFingerprint(recipe, chosen ?? 'cli'),
+      recipeSlice: recipeSliceOf(chosen ?? 'cli'),
       roster: flowRosterFingerprint(recipe, priorScenarios),
       preparation: flowPreparationFingerprint(repoRoot, recipe, priorScenarios),
     }
@@ -2264,9 +2274,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         .digest('hex')
     const record = async (flow: ClassifyInput, mutates: boolean): Promise<void> => {
       if (mutates) destructiveFlowIds.add(flow.id)
+      // The verdict stands whether or not the store took it: a lost write
+      // costs the next run one call, never this run its answer.
       await setCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, flowKey(flow), {
         mutators: mutates ? [flow.id] : [],
-      })
+      }).catch(() => undefined)
     }
     const chunksOf = (flows: readonly ClassifyInput[]): ClassifyInput[][] => {
       const out: ClassifyInput[][] = []
@@ -2288,20 +2300,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       unresolved.set(flow.id, flow)
     }
 
-    // THE RETIRED POSITIONAL CHUNKS, read once per forty flows: the old key is
-    // exactly this run's slicing of this run's changed set, so an unchanged set
+    // THE RETIRED POSITIONAL CHUNKS, read once per forty flows: the old key —
+    // the prompt fingerprint over this run's slicing of this run's changed set
+    // — is exactly what shipped before per-flow verdicts, so an unchanged set
     // finds its whole stored answer and every flow in it is written out
     // individually. A set that moved simply misses, as it did before.
     if (unresolved.size > 0) {
-      const chunkKeyOver = (stage: string, chunk: readonly ClassifyInput[]): string =>
-        createHash('sha256').update(`${stage}\0${JSON.stringify(chunk)}`).digest('hex')
       for (const chunk of chunksOf(classifyInputs)) {
         if (!chunk.some((flow) => unresolved.has(flow.id))) continue
-        const stored =
-          (await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME,
-            chunkKeyOver(`world-classify-v${WORLD_CLASSIFY_STAGE_VERSION}`, chunk))) ??
-          (await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME,
-            chunkKeyOver(LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT, chunk)))
+        const stored = await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME,
+          createHash('sha256').update(`${LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT}\0${JSON.stringify(chunk)}`).digest('hex'))
         const cached = WorldClassifySchema.safeParse(stored)
         if (!cached.success) continue
         const mutators = new Set(cached.data.mutators)
@@ -2446,7 +2454,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       claimTexts,
       resolvedEntry: resolvedEntryMemo,
       displayEntry: recipe.entry,
-      inputsFingerprint: groundInputsFingerprint(recipe),
+      inputsFingerprint: groundInputsFingerprint(repoRoot, recipe),
       legacyRecipeFingerprint: recipeFingerprint,
       recipeEnv: recipe.env,
       onProbesPlanned: (n) => {
@@ -3422,9 +3430,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             sectionKeys: task.work.sectionKeys,
             interfaceFingerprints: keyFingerprints.fingerprints,
             legacyInterfaceFingerprints: keyFingerprints.legacyFingerprints,
-            recipeSlice: flowRecipeSliceFingerprint(recipe, task.surface),
-            roster: seedRosterFingerprint(recipe),
-            preparations: preparationsFingerprint(repoRoot, recipe),
+            recipeSlice: recipeSliceOf(task.surface),
+            roster: seedRoster,
+            preparations: preparationsOffer,
             recipeFingerprint,
             mode: editMode ? 'edit' : 'scratch',
             priorShas: priorScenarios.map((p) => sha256Hex(p.yaml)),
@@ -4222,19 +4230,34 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
 
   /**
-   * The flow's settle record. A flow that re-authored on web re-folds its
-   * components over what its session actually READ — the compare that re-opened
-   * it could only know the PRIOR read-set — while every other flow keeps the
-   * components the compare computed. A flow whose web session produced nothing
-   * (it failed, or the browser was missing) carries its prior read-set rather
-   * than losing it.
+   * The flow's settle record. A flow that re-authored re-folds the components
+   * the compare could only read off its PRIOR scenarios — the roster entries
+   * and the preparation its scenarios name — over the scenarios it holds NOW,
+   * which is what the next compare reads; and on web, the catalog entries its
+   * session actually READ rather than the prior read-set. Every other flow
+   * keeps the components the compare computed. A flow whose web session
+   * produced nothing (it failed, or the browser was missing) carries its prior
+   * read-set rather than losing it.
    */
-  const settleRecord = (work: FlowWork): FlowSettleRecord => {
-    if (!work.plans.has('web')) return { hash: work.inputsHash, components: work.inputComponents }
+  const settleRecord = (work: FlowWork, written?: readonly GuardScenario[]): FlowSettleRecord => {
+    const parts: FlowGenerationInputParts = {
+      ...work.inputParts,
+      ...(written
+        ? {
+            roster: flowRosterFingerprint(recipe, written),
+            preparation: flowPreparationFingerprint(repoRoot, recipe, written),
+          }
+        : {}),
+    }
+    if (!work.plans.has('web')) {
+      if (!written) return { hash: work.inputsHash, components: work.inputComponents }
+      const components = flowGenerationInputComponents(parts)
+      return { hash: flowSettleDigest(components), components }
+    }
     const served = work.changed ? catalogReadsByTask.get(`${work.flow.id}\0web`)?.ids() ?? [] : []
     const catalogReads = served.length > 0 ? served : work.prior?.catalogReads ?? []
     const components = flowGenerationInputComponents({
-      ...work.inputParts,
+      ...parts,
       webCatalogReads: catalogReadMaterial(authorCatalog, catalogReads),
     })
     return { hash: flowSettleDigest(components), components, catalogReads }
@@ -4267,6 +4290,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // the flow with less than it had.
     const slug = areaOrDocSlug(work.primary)
     const scenarios: GuardManifestScenario[] = []
+    // The documents behind those rows — what the settle record folds.
+    const writtenScenarios: GuardScenario[] = []
     const retired: GuardManifestRetiredScenario[] = []
     const priorIds = new Set(work.prior?.scenarios.map((s) => s.id) ?? [])
     // Where each prior file lives NOW — captured before any write, so an edited
@@ -4281,6 +4306,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const { milestoneCoverage, caseEvidence, reviewedScenarioFingerprint, reviewPolicyVersion, ...rest } = scenario
       const current = priorProofCurrent(work, scenario)
       scenarios.push(current ? scenario : rest)
+      const doc = committedScenariosById.get(scenario.id)
+      if (doc) writtenScenarios.push(doc)
       keptIds.add(scenario.id)
     }
     let unsettledFlow = false
@@ -4321,6 +4348,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
         })
         keptIds.add(c.scenario.id)
+        writtenScenarios.push(c.scenario)
         committedHere.push(c.scenario.id)
         writtenFiles.set(c.scenario.id, path.resolve(repoRoot, file))
         return file
@@ -4420,7 +4448,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // tests are real coverage) but records NO inputs hash, so the next generate
     // re-runs it. A committed failing test is NOT such a surface — it settled.
     for (const r of retired) retiredReport.push({ flowId: work.flow.id, ...r })
-    const entry = enforceSettleInvariant(manifestEntry(work, scenarios, unsettledFlow ? null : settleRecord(work), retired))
+    const entry = enforceSettleInvariant(manifestEntry(work, scenarios, unsettledFlow ? null : settleRecord(work, writtenScenarios), retired))
     workingManifest.set(work.flow.id, entry)
     const wroteHere = written.length - writtenBefore
     if (entry.generationInputsHash === null) {
