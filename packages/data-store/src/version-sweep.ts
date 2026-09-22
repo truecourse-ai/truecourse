@@ -8,8 +8,11 @@
  * every surviving manifest, every corpus body, every document a snapshot
  * names, and every run's and report's evidence. Runs are never trimmed.
  *
- * The stores call the per-owner sweeps after each save; boot calls
- * {@link sweepStoredVersions} once over everything.
+ * A save trims the ONE series it just extended and sweeps the owner's pools
+ * only when that trim took a version — nothing else can have orphaned a body
+ * (runs are never trimmed, and a purge sweeps for itself), so the full pass
+ * over every series and every manifest is boot's ({@link sweepStoredVersions})
+ * and not the price of every save.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -157,6 +160,28 @@ export async function sweepWorkspaceContent(
     for (const sha of Object.values(manifest?.files ?? {})) live.add(sha);
   }
   return { spec: await content.gc(scope, live, sweepCutoff()) };
+}
+
+/** What a save does after its row lands: trim its series, sweep the pools if that took anything. */
+export async function sweepGuardSeries(
+  db: Db,
+  table: GuardSeriesTable,
+  repoKey: string,
+  scope: string,
+): Promise<SweepCounts> {
+  const versions = await trimGuardSeries(db, table, repoKey, scope);
+  return { versions, bodies: versions > 0 ? await sweepRepoContent(db, repoKey) : {} };
+}
+
+/** The workspace form of {@link sweepGuardSeries}. */
+export async function sweepWorkspaceSeries(
+  db: Db,
+  workspaceOrgId: string,
+  scope: string,
+  artifact: string,
+): Promise<SweepCounts> {
+  const versions = await trimWorkspaceSeries(db, workspaceOrgId, scope, artifact);
+  return { versions, bodies: versions > 0 ? await sweepWorkspaceContent(db, workspaceOrgId) : {} };
 }
 
 /** Trim every series of one repository, then sweep its pools. */

@@ -105,6 +105,15 @@ export const guardResults = pgTable(
      */
     evidence: jsonb('evidence').$type<unknown>().notNull().default({}),
     ...versioned,
+    /**
+     * The scenario set this report was written beside: the newest set of the
+     * same scope at the same commit when the report was stored. Null for a
+     * report a blocked generate stored with no set. A rollback of a set copies
+     * the report paired with it, so the two series stay in step.
+     */
+    scenarioSetId: text('scenario_set_id'),
+    /** The report this one is a rollback's copy of, when it is one. */
+    restoredFrom: text('restored_from'),
     generatedAt: ts('generated_at').notNull(),
     createdAt: ts('created_at').notNull(),
   },
@@ -147,6 +156,8 @@ export const guardScenarioSets = pgTable(
     manifestHash: text('manifest_hash').notNull(),
     fileCount: integer('file_count').notNull(),
     ...versioned,
+    /** The version this one is a rollback's copy of, when it is one. */
+    restoredFrom: text('restored_from'),
     createdAt: ts('created_at').notNull(),
   },
   (t) => [index('guard_scenario_sets_scope_idx').on(t.repoKey, t.scope, t.commitSha, t.createdAt)],

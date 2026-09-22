@@ -1102,6 +1102,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "scenario_set_id": {
+          "name": "scenario_set_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "restored_from": {
+          "name": "restored_from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "generated_at": {
           "name": "generated_at",
           "type": "timestamp with time zone",
@@ -1374,6 +1386,12 @@
         },
         "model": {
           "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "restored_from": {
+          "name": "restored_from",
           "type": "text",
           "primaryKey": false,
           "notNull": false

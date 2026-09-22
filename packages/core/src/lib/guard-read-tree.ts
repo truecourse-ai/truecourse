@@ -35,7 +35,7 @@ import {
   readGuardResult,
   readManifest,
   readScenarioFile,
-  type VersionAt,
+  versionAt,
 } from './guard-store.js';
 import { materializeGuardOverlays } from './guard-overlays.js';
 
@@ -61,7 +61,7 @@ export async function materializeGuardReadTree(
   treeDir: string,
   ref?: string,
 ): Promise<void> {
-  const at: VersionAt = ref ? { commitSha: ref } : {};
+  const at = versionAt(ref);
   const bundle = await loadGuardSetupBundle(repoKey, at);
   if (bundle) materializeGuardSetupBundle(treeDir, bundle);
 

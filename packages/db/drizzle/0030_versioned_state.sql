@@ -22,6 +22,8 @@ ALTER TABLE "guard_results" ADD PRIMARY KEY ("id");--> statement-breakpoint
 ALTER TABLE "guard_results" ADD COLUMN "scope" text DEFAULT 'default' NOT NULL;--> statement-breakpoint
 ALTER TABLE "guard_results" ADD COLUMN "produced_by_run" text;--> statement-breakpoint
 ALTER TABLE "guard_results" ADD COLUMN "model" text;--> statement-breakpoint
+ALTER TABLE "guard_results" ADD COLUMN "scenario_set_id" text;--> statement-breakpoint
+ALTER TABLE "guard_results" ADD COLUMN "restored_from" text;--> statement-breakpoint
 UPDATE "guard_results" SET "scope" = 'unflagged' WHERE NOT "is_baseline";--> statement-breakpoint
 ALTER TABLE "guard_results" DROP COLUMN "is_baseline";--> statement-breakpoint
 ALTER TABLE "guard_results" DROP COLUMN "updated_at";--> statement-breakpoint
@@ -37,6 +39,9 @@ ALTER TABLE "guard_scenario_sets" ADD PRIMARY KEY ("id");--> statement-breakpoin
 ALTER TABLE "guard_scenario_sets" ADD COLUMN "scope" text DEFAULT 'default' NOT NULL;--> statement-breakpoint
 ALTER TABLE "guard_scenario_sets" ADD COLUMN "produced_by_run" text;--> statement-breakpoint
 ALTER TABLE "guard_scenario_sets" ADD COLUMN "model" text;--> statement-breakpoint
+ALTER TABLE "guard_scenario_sets" ADD COLUMN "restored_from" text;--> statement-breakpoint
+UPDATE "guard_scenario_sets" s SET "scope" = 'unflagged' WHERE EXISTS (SELECT 1 FROM "guard_results" r WHERE r."repo_key" = s."repo_key" AND r."commit_sha" = s."commit_sha") AND NOT EXISTS (SELECT 1 FROM "guard_results" r WHERE r."repo_key" = s."repo_key" AND r."commit_sha" = s."commit_sha" AND r."scope" = 'default');--> statement-breakpoint
+UPDATE "guard_results" r SET "scenario_set_id" = (SELECT s."id" FROM "guard_scenario_sets" s WHERE s."repo_key" = r."repo_key" AND s."commit_sha" = r."commit_sha" AND s."scope" = r."scope" LIMIT 1);--> statement-breakpoint
 ALTER TABLE "guard_scenario_sets" DROP COLUMN "updated_at";--> statement-breakpoint
 ALTER TABLE "guard_setup_sets" ADD COLUMN "id" text;--> statement-breakpoint
 UPDATE "guard_setup_sets" SET "id" = gen_random_uuid()::text;--> statement-breakpoint
@@ -45,6 +50,7 @@ ALTER TABLE "guard_setup_sets" ADD PRIMARY KEY ("id");--> statement-breakpoint
 ALTER TABLE "guard_setup_sets" ADD COLUMN "scope" text DEFAULT 'default' NOT NULL;--> statement-breakpoint
 ALTER TABLE "guard_setup_sets" ADD COLUMN "produced_by_run" text;--> statement-breakpoint
 ALTER TABLE "guard_setup_sets" ADD COLUMN "model" text;--> statement-breakpoint
+UPDATE "guard_setup_sets" s SET "scope" = 'unflagged' WHERE EXISTS (SELECT 1 FROM "guard_results" r WHERE r."repo_key" = s."repo_key" AND r."commit_sha" = s."commit_sha") AND NOT EXISTS (SELECT 1 FROM "guard_results" r WHERE r."repo_key" = s."repo_key" AND r."commit_sha" = s."commit_sha" AND r."scope" = 'default');--> statement-breakpoint
 ALTER TABLE "guard_setup_sets" DROP COLUMN "updated_at";--> statement-breakpoint
 CREATE INDEX "workspace_spec_sets_scope_idx" ON "workspace_spec_sets" USING btree ("workspace_org_id","scope","artifact","created_at");--> statement-breakpoint
 CREATE INDEX "guard_results_scope_idx" ON "guard_results" USING btree ("repo_key","scope","commit_sha","created_at");--> statement-breakpoint

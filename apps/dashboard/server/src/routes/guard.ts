@@ -81,6 +81,7 @@ import {
   readGuardVersion,
   readManifest,
   restoreGuardScenarioSet,
+  versionAt,
 } from '@truecourse/core/lib/guard-store';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { diffScenarioSets, type GuardVersionArtifact } from '@truecourse/shared';
@@ -619,7 +620,7 @@ router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFun
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const commit = req.query.commit ? String(req.query.commit) : undefined;
-    const bundle = await loadGuardSetupBundle(repo.path, commit ? { commitSha: commit } : {});
+    const bundle = await loadGuardSetupBundle(repo.path, versionAt(commit));
     const report = bundle ? readBundleGuardSetup(bundle) : null;
     if (!report) {
       res.status(404).json({ error: 'Guard setup has not run for this repository yet.' });

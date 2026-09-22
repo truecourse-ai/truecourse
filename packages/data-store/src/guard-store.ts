@@ -23,9 +23,14 @@
  *     `content` (scope `guard:<repo>`) with a `{ relPath: sha }` manifest row
  *     carrying its scope, commit and provenance. A read names a version by id,
  *     or takes the newest of a scope at a commit, or the newest of the scope
- *     outright — which is the CURRENT set. `restoreGuardScenarioSet` makes an
- *     older version current again by inserting a copy of it. The generate
- *     reports (`guard_results`) are a series of the same shape.
+ *     outright — which is the CURRENT set. The generate reports
+ *     (`guard_results`) are a series of the same shape, and a report names the
+ *     set it was written beside (`scenario_set_id`: the scope's newest set at
+ *     its commit when it was stored, none for a blocked generate).
+ *     `restoreGuardScenarioSet` makes an older set current again by inserting
+ *     a copy of it AND of the report paired with it, each naming what it copied
+ *     (`restored_from`), so the current set and the current report stay the
+ *     pair a generate produced.
  *
  *   - SETUP BUNDLES (`guard_setup_sets`) — the same shape and the same content
  *     scope for what `guard setup` leaves behind (`guard/setup.json`, the findings
@@ -40,9 +45,9 @@
  *     absent row reads as `EMPTY_GUARD_DECISIONS`, never null.
  *
  * "Newest" is by `created_at` (then id, which is time-sortable): a series is
- * ordered by when its versions were written. Every save of a series applies
- * retention to the repository (`version-sweep.ts`) and sweeps its two pools of
- * what no surviving version and no run references.
+ * ordered by when its versions were written. Every save applies retention to
+ * the series it extended (`version-sweep.ts`), and sweeps the repository's
+ * two pools when that took a version.
  *
  * The `repoPath` argument is the stable repo key, never an on-disk path.
  */
@@ -100,7 +105,7 @@ import {
 import { ContentStore, contentScope } from './content-store.js';
 import { iso } from './iso.js';
 import { assertSafeRel, mapLimit, safeJoin, sha256, sortKeys } from './pack.js';
-import { newVersionId, sweepRepoVersions } from './version-sweep.js';
+import { newVersionId, sweepGuardSeries } from './version-sweep.js';
 import { WORK_TREE_DIR, scenariosDir } from '@truecourse/shared/work-tree';
 
 const OBJECT_CONCURRENCY = 16;
@@ -128,6 +133,30 @@ interface Manifest {
 
 /** The two manifest series share one row shape. */
 type ManifestTable = typeof guardScenarioSets | typeof guardSetupSets;
+
+/** The three series a `GuardVersion` can describe. */
+type VersionTable = typeof guardResults | ManifestTable;
+
+const versionTable = (artifact: GuardVersionArtifact): VersionTable =>
+  artifact === 'report' ? guardResults : artifact === 'scenarios' ? guardScenarioSets : guardSetupSets;
+
+/**
+ * The columns every version record is read from: the row's series and
+ * provenance, its file count where the series has one, and what it restored
+ * where the series can be rolled back.
+ */
+function versionColumns(table: VersionTable) {
+  return {
+    id: table.id,
+    scope: table.scope,
+    commitSha: table.commitSha,
+    producedByRun: table.producedByRun,
+    model: table.model,
+    createdAt: table.createdAt,
+    fileCount: 'fileCount' in table ? table.fileCount : sql<number | null>`null`,
+    restoredFrom: 'restoredFrom' in table ? table.restoredFrom : sql<string | null>`null`,
+  };
+}
 
 /** Evidence pointer prefix (`evidenceRelPath` shape): `.truecourse/guard/evidence/`. */
 const EVIDENCE_PREFIX_SEGMENTS = [WORK_TREE_DIR, 'guard', 'evidence'];
@@ -320,40 +349,57 @@ export class PgGuardStore implements GuardStore {
     provenance: VersionProvenance = {},
   ): Promise<void> {
     const commitSha = requireCommit(ref, 'writeGuardResult');
+    const scope = scopeOf(ref);
+    // The set this report was written beside: a generate saves its set, then
+    // its report, so the scope's newest set at the commit is the pair. A
+    // blocked generate stored no set, and its report pairs with none.
+    const [set] = await this.db
+      .select({ id: guardScenarioSets.id })
+      .from(guardScenarioSets)
+      .where(this.versionWhere(guardScenarioSets, ref.repoKey, { scope, commitSha }))
+      .orderBy(desc(guardScenarioSets.createdAt), desc(guardScenarioSets.id))
+      .limit(1);
     const now = new Date();
     await this.db.insert(guardResults).values({
       id: newVersionId(now),
       repoKey: ref.repoKey,
       commitSha,
       report,
-      scope: scopeOf(ref),
+      scope,
       producedByRun: provenance.producedByRun ?? null,
       model: provenance.model ?? null,
+      scenarioSetId: set?.id ?? null,
       generatedAt: report.generatedAt,
       createdAt: now.toISOString(),
     });
-    await sweepRepoVersions(this.db, ref.repoKey);
+    await sweepGuardSeries(this.db, guardResults, ref.repoKey, scope);
   }
 
   /**
-   * The commit the scope's CURRENT state was produced at: the newest scenario
-   * set's, or — for a repository whose generate stored a report and no set (a
-   * blocked corpus) — the newest report's. Null when the scope holds neither.
+   * The commit the scope's CURRENT state was produced at: the newest of its
+   * scenario sets and its reports, whichever was stored last. A generate
+   * stores its set and then its report at one commit; a blocked generate
+   * stores a report alone at the commit it was blocked at, and that report IS
+   * the current state — the views read its status, and resolving the last
+   * conflict re-enqueues on it. Null when the scope holds neither.
    */
   async readGuardBaselineCommit(
     repoKey: string,
     scope: string = DEFAULT_VERSION_SCOPE,
   ): Promise<string | null> {
+    let newest: { commitSha: string; createdAt: string; id: string } | null = null;
     for (const table of [guardScenarioSets, guardResults] as const) {
-      const rows = await this.db
-        .select({ commitSha: table.commitSha })
+      const [row] = await this.db
+        .select({ commitSha: table.commitSha, createdAt: table.createdAt, id: table.id })
         .from(table)
         .where(and(eq(table.repoKey, repoKey), eq(table.scope, scope)))
         .orderBy(desc(table.createdAt), desc(table.id))
         .limit(1);
-      if (rows[0]) return rows[0].commitSha;
+      if (!row) continue;
+      const [t, prev] = [new Date(row.createdAt).getTime(), newest ? new Date(newest.createdAt).getTime() : -1];
+      if (!newest || t > prev || (t === prev && row.id > newest.id)) newest = row;
     }
-    return null;
+    return newest?.commitSha ?? null;
   }
 
   /**
@@ -633,7 +679,7 @@ export class PgGuardStore implements GuardStore {
     return rows[0] ? (rows[0].manifest as Manifest) : null;
   }
 
-  /** Insert a new version of a manifest series and apply retention to the repository. */
+  /** Insert a new version of a manifest series and apply retention to that series. */
   private async insertManifestVersion(
     table: ManifestTable,
     ref: RepoRef,
@@ -643,6 +689,7 @@ export class PgGuardStore implements GuardStore {
   ): Promise<string> {
     const now = new Date();
     const id = newVersionId(now);
+    const scope = scopeOf(ref);
     await this.db.insert(table).values({
       id,
       repoKey: ref.repoKey,
@@ -650,12 +697,12 @@ export class PgGuardStore implements GuardStore {
       manifest: packed.manifest,
       manifestHash: packed.manifestHash,
       fileCount: packed.fileCount,
-      scope: scopeOf(ref),
+      scope,
       producedByRun: provenance.producedByRun ?? null,
       model: provenance.model ?? null,
       createdAt: now.toISOString(),
     });
-    await sweepRepoVersions(this.db, ref.repoKey);
+    await sweepGuardSeries(this.db, table, ref.repoKey, scope);
     return id;
   }
 
@@ -780,45 +827,32 @@ export class PgGuardStore implements GuardStore {
 
   // --- Versions -------------------------------------------------------------
 
+  /** One series' rows as `GuardVersion`s, newest first, under `where`. */
+  private async selectVersions(
+    artifact: GuardVersionArtifact,
+    where: (table: VersionTable) => SQL,
+    limit: number,
+  ): Promise<GuardVersion[]> {
+    const table = versionTable(artifact);
+    const rows = await this.db
+      .select(versionColumns(table))
+      .from(table)
+      .where(where(table))
+      .orderBy(desc(table.createdAt), desc(table.id))
+      .limit(limit);
+    return rows.map((row) => ({ ...row, artifact, createdAt: iso(row.createdAt) }));
+  }
+
   async listGuardVersions(
     repoKey: string,
     artifact: GuardVersionArtifact,
     opts: GuardVersionListOptions = {},
   ): Promise<GuardVersion[]> {
-    const scope = scopeOf(opts);
-    const limit = opts.limit ?? 50;
-    if (artifact === 'report') {
-      const rows = await this.db
-        .select({
-          id: guardResults.id,
-          scope: guardResults.scope,
-          commitSha: guardResults.commitSha,
-          producedByRun: guardResults.producedByRun,
-          model: guardResults.model,
-          createdAt: guardResults.createdAt,
-        })
-        .from(guardResults)
-        .where(and(eq(guardResults.repoKey, repoKey), eq(guardResults.scope, scope)))
-        .orderBy(desc(guardResults.createdAt), desc(guardResults.id))
-        .limit(limit);
-      return rows.map((row) => ({ ...row, artifact, fileCount: null, createdAt: iso(row.createdAt) }));
-    }
-    const table = artifact === 'scenarios' ? guardScenarioSets : guardSetupSets;
-    const rows = await this.db
-      .select({
-        id: table.id,
-        scope: table.scope,
-        commitSha: table.commitSha,
-        producedByRun: table.producedByRun,
-        model: table.model,
-        fileCount: table.fileCount,
-        createdAt: table.createdAt,
-      })
-      .from(table)
-      .where(and(eq(table.repoKey, repoKey), eq(table.scope, scope)))
-      .orderBy(desc(table.createdAt), desc(table.id))
-      .limit(limit);
-    return rows.map((row) => ({ ...row, artifact, createdAt: iso(row.createdAt) }));
+    return this.selectVersions(
+      artifact,
+      (t) => and(eq(t.repoKey, repoKey), eq(t.scope, scopeOf(opts)))!,
+      opts.limit ?? 50,
+    );
   }
 
   async readGuardVersion(
@@ -827,36 +861,12 @@ export class PgGuardStore implements GuardStore {
     versionId: string,
   ): Promise<GuardVersion | null> {
     if (!SAFE_SEGMENT.test(versionId)) return null;
-    if (artifact === 'report') {
-      const [row] = await this.db
-        .select({
-          id: guardResults.id,
-          scope: guardResults.scope,
-          commitSha: guardResults.commitSha,
-          producedByRun: guardResults.producedByRun,
-          model: guardResults.model,
-          createdAt: guardResults.createdAt,
-        })
-        .from(guardResults)
-        .where(and(eq(guardResults.repoKey, repoKey), eq(guardResults.id, versionId)))
-        .limit(1);
-      return row ? { ...row, artifact, fileCount: null, createdAt: iso(row.createdAt) } : null;
-    }
-    const table = artifact === 'scenarios' ? guardScenarioSets : guardSetupSets;
-    const [row] = await this.db
-      .select({
-        id: table.id,
-        scope: table.scope,
-        commitSha: table.commitSha,
-        producedByRun: table.producedByRun,
-        model: table.model,
-        fileCount: table.fileCount,
-        createdAt: table.createdAt,
-      })
-      .from(table)
-      .where(and(eq(table.repoKey, repoKey), eq(table.id, versionId)))
-      .limit(1);
-    return row ? { ...row, artifact, createdAt: iso(row.createdAt) } : null;
+    const [row] = await this.selectVersions(
+      artifact,
+      (t) => and(eq(t.repoKey, repoKey), eq(t.id, versionId))!,
+      1,
+    );
+    return row ?? null;
   }
 
   async restoreGuardScenarioSet(
@@ -883,9 +893,38 @@ export class PgGuardStore implements GuardStore {
       scope: source.scope,
       producedByRun: provenance.producedByRun ?? null,
       model: provenance.model ?? null,
+      restoredFrom: source.id,
       createdAt: now.toISOString(),
     });
-    await sweepRepoVersions(this.db, repoKey);
+    await sweepGuardSeries(this.db, guardScenarioSets, repoKey, source.scope);
+
+    // The report the set was born with comes back as current beside it — the
+    // newest report paired with the source set, copied with its evidence
+    // manifest so its birth-finding transcripts stay reachable and referenced.
+    const [report] = await this.db
+      .select()
+      .from(guardResults)
+      .where(and(eq(guardResults.repoKey, repoKey), eq(guardResults.scenarioSetId, source.id)))
+      .orderBy(desc(guardResults.createdAt), desc(guardResults.id))
+      .limit(1);
+    if (report) {
+      const reportNow = new Date();
+      await this.db.insert(guardResults).values({
+        id: newVersionId(reportNow),
+        repoKey,
+        commitSha: report.commitSha,
+        report: report.report,
+        evidence: report.evidence,
+        scope: report.scope,
+        producedByRun: provenance.producedByRun ?? null,
+        model: provenance.model ?? null,
+        scenarioSetId: id,
+        restoredFrom: report.id,
+        generatedAt: report.generatedAt,
+        createdAt: reportNow.toISOString(),
+      });
+      await sweepGuardSeries(this.db, guardResults, repoKey, report.scope);
+    }
     return {
       id,
       artifact: 'scenarios',
@@ -894,6 +933,7 @@ export class PgGuardStore implements GuardStore {
       producedByRun: provenance.producedByRun ?? null,
       model: provenance.model ?? null,
       fileCount: source.fileCount,
+      restoredFrom: source.id,
       createdAt: now.toISOString(),
     };
   }
