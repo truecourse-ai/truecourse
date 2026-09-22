@@ -52,7 +52,7 @@ export function StackedArea<K extends string>({
   points: StackedPoint<K>[];
   /** A legend word is a door when the surface has somewhere to go with it. */
   onPickSeries?: (key: K) => void;
-  /** The chart's own controls (a period picker), on the readout row after the label. */
+  /** The chart's own controls (a period picker), on the label's line after it. */
   controls?: ReactNode;
   /**
    * Whether the readout carries values while nothing is hovered. Off when the
@@ -102,6 +102,7 @@ export function StackedArea<K extends string>({
   if (points.length === 0) return null;
   const shown = active ?? points.length - 1;
   const point = points[shown]!;
+  const showNumbers = active !== null || numbersAtRest;
 
   const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -111,43 +112,56 @@ export function StackedArea<K extends string>({
 
   return (
     <section aria-label={label} className="min-w-0">
-      {/* The readout: the date at the left, every series' value at that date
-          to the right, value before word. At rest it is the latest point, so
-          this line is also the legend and the current tally. */}
-      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
-        {controls}
-        {(active !== null || numbersAtRest) && (
-          <span className="text-[11px] tabular-nums text-muted-foreground" aria-live="polite">
-            {dateWord(point.at)}
-            {valueNote && ` · ${valueNote}`}
-          </span>
-        )}
-        <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
-          {[...series].reverse().map((s) => {
-            const body = (
+      {/* Two lines of fixed shape, so hovering never moves the plot. The
+          first holds the label and the surface's controls. The second is the
+          readout: the date at the left, every series' value at that date to
+          the right, value before word. Its slots are always there and it never
+          wraps, so a value appearing under the pointer changes no height. At
+          rest it is the latest point, so this line is also the legend. */}
+      <div data-slot="chart-header" className="mb-2 flex flex-col gap-1.5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+          {controls}
+        </div>
+        <div className="flex h-5 min-w-0 items-center gap-x-4 overflow-hidden whitespace-nowrap">
+          <span
+            data-slot="chart-readout"
+            className="min-w-0 truncate text-[11px] tabular-nums text-muted-foreground"
+            aria-live="polite"
+          >
+            {showNumbers && (
               <>
-                <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
-                {(active !== null || numbersAtRest) && <span className="tabular-nums font-medium text-foreground">{formatValue(point.values[s.key] ?? 0)}</span>}
-                {s.label}
+                {dateWord(point.at)}
+                {valueNote && ` · ${valueNote}`}
               </>
-            );
-            return onPickSeries ? (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => onPickSeries(s.key)}
-                className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-              >
-                {body}
-              </button>
-            ) : (
-              <span key={s.key} className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                {body}
-              </span>
-            );
-          })}
-        </span>
+            )}
+          </span>
+          <span className="ml-auto flex shrink-0 items-center gap-x-3">
+            {[...series].reverse().map((s) => {
+              const body = (
+                <>
+                  <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
+                  {showNumbers && <span className="tabular-nums font-medium text-foreground">{formatValue(point.values[s.key] ?? 0)}</span>}
+                  {s.label}
+                </>
+              );
+              return onPickSeries ? (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => onPickSeries(s.key)}
+                  className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  {body}
+                </button>
+              ) : (
+                <span key={s.key} className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  {body}
+                </span>
+              );
+            })}
+          </span>
+        </div>
       </div>
       <div
         className="relative h-48 w-full"
@@ -159,7 +173,7 @@ export function StackedArea<K extends string>({
           preserveAspectRatio="none"
           className="h-full w-full"
           role="img"
-          aria-labelledby={`${id}-title`}
+          aria-label={label}
           aria-describedby={`${id}-desc`}
           tabIndex={0}
           onFocus={() => setActive((current) => current ?? points.length - 1)}
@@ -169,7 +183,6 @@ export function StackedArea<K extends string>({
           }}
           onBlur={() => setActive(null)}
         >
-          <title id={`${id}-title`}>{label}</title>
           <desc id={`${id}-desc`}>
             {valueNote && `${valueNote}. `}
             {points.map((p) => `${dateWord(p.at)}: ${series.map((s) => `${formatValue(p.values[s.key] ?? 0)} ${s.label.toLowerCase()}`).join(', ')}`).join('; ')}
