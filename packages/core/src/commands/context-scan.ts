@@ -147,6 +147,7 @@ export async function workspaceContextScanInProcess(
       const { curate, sessionsRunDir, noChanges } = await curateInProcess(tmp, {
         skipGit: true,
         decisions,
+        previousCorpus,
         repoIdentity: identity,
         sessionsKey: workspaceSessionsKey(org),
         scopeSources,

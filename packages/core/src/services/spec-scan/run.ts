@@ -77,6 +77,7 @@ import {
   prefilterCategory,
   prefilterDocs,
   pruneOrphanedConflictResolutions,
+  readCorpus,
   readCorpusDecisions,
   readRepoIdentityInput,
   resolveRepoIdentity,
@@ -94,6 +95,7 @@ import {
   type DocCandidate,
   type Overlap,
   type RepoIdentity,
+  splitArea,
   type Status,
   type VocabMap,
 } from '@truecourse/spec-consolidator'
@@ -130,6 +132,7 @@ import {
   type AreaSettlement,
   type AreaVocabView,
 } from './settle-areas.js'
+import { reconcileDocTagsWithPrior } from './settle-areas.js'
 import {
   OVERLAP_SESSION_CACHE_NAME,
   OVERLAP_SESSION_KIND,
@@ -232,6 +235,15 @@ export interface SpecScanSessionsOptions {
   skipCorpusWrite?: boolean
   /** Skip the overlap sessions entirely (workspace sync passes this). */
   disableOverlapDetection?: boolean
+  /**
+   * The corpus the last scan wrote, for the areas to reconcile against: its
+   * area ids ride the settle session's briefing and are kept by its fold, and
+   * each document's prior tags ride its curation briefing. The workspace scan
+   * injects the stored version (its scratch tree holds none); a repository
+   * scan reads `corpus.json` from the tree when this is absent. Explicit
+   * `null` means there is no prior.
+   */
+  previousCorpus?: CuratedCorpus | null
   /**
    * Skip the scope-orchestrator session (stored scope verdicts still apply).
    * The workspace corpus sync passes this: its doc tree is a transient scratch
@@ -570,6 +582,10 @@ export async function runSpecScanSessions(
   /** One line of what a phase did, for the run record's checklist. */
   const fact = (step: ScanFactStep, line: string): void => opts.onFact?.(step, line)
   let decisions = opts.decisions ?? readCorpusDecisions(repoRoot)
+  // What the last scan settled, for identity: the area ids, and each doc's tags.
+  const previousCorpus = opts.previousCorpus === undefined ? readCorpus(repoRoot) : opts.previousCorpus
+  const priorAreaIds: string[] = previousCorpus?.areas.map((a) => a.id) ?? []
+  const priorTagsByRef = new Map<string, string[]>(previousCorpus?.docs.map((d) => [d.ref, d.areaTags]) ?? [])
 
   // ---- Discover (det) ------------------------------------------------------
   let allDocs: DocCandidate[]
@@ -805,6 +821,14 @@ export async function runSpecScanSessions(
   const liveVocab = (): { products: string[]; concerns: string[] } => {
     const products = new Set<string>()
     const concerns = new Set<string>()
+    // The last scan's labels are in the vocabulary from the first doc on, so
+    // a session never mints a new spelling for an area that already exists.
+    for (const id of priorAreaIds) {
+      const tag = splitArea(id)
+      if (tag.product === 'process') continue
+      if (tag.product !== 'core') products.add(tag.product)
+      concerns.add(tag.concern)
+    }
     for (const tags of liveTags.values()) {
       for (const tag of canonicalDocTags(tags)) {
         if (tag.product !== 'core' && tag.product !== 'process') products.add(tag.product)
@@ -825,7 +849,7 @@ export async function runSpecScanSessions(
     legacyCacheKeys: (doc) => curateDocLegacyCacheKeys({ identity, doc }, [...instructionParts, ...originParts(doc)]),
     schema: DocVerdictSchema,
     session: (doc) => curateDocSessionDef({ doc, universe, liveVocab }),
-    briefing: (doc) => curateDocBriefing(doc, identity, instructions, originOf(doc)),
+    briefing: (doc) => curateDocBriefing(doc, identity, instructions, originOf(doc), priorTagsByRef.get(doc.path) ?? []),
     driver: opts.driver,
     persistence: opts.persistence,
     ...(replayOnly('curate') ? { cacheOnly: 'curate' as const } : {}),
@@ -877,10 +901,18 @@ export async function runSpecScanSessions(
   const reinstatedCount = { value: 0 }
   let thirdPartyDropped = 0
 
-  const keepDoc = (doc: DocCandidate, tags: AreaTag[], statusRaw: string | null | undefined): void => {
+  const keepDoc = (doc: DocCandidate, rawTags: AreaTag[], statusRaw: string | null | undefined): void => {
     keptProse.push(doc)
     const status: Status | undefined =
       (statusRaw ? classifyStatusValue(statusRaw) : undefined) ?? parseDocStatus(docBody(doc))
+    // A label the session only re-spelled keeps the id the last scan gave it.
+    const tags = reconcileDocTagsWithPrior(rawTags, priorTagsByRef.get(doc.path) ?? [])
+    for (const [i, tag] of tags.entries()) {
+      const before = rawTags[i]
+      if (before && (before.product !== tag.product || before.concern !== tag.concern)) {
+        fact('tag', `${doc.path}: area "${before.product}/${before.concern}" kept as "${tag.product}/${tag.concern}" from the last scan`)
+      }
+    }
     tagsByPath.set(doc.path, { tags, ...(status ? { status } : {}) })
   }
 
@@ -955,7 +987,7 @@ export async function runSpecScanSessions(
   const vocabView: AreaVocabView = collectAreaVocab(canonicalByPath)
   let vocabMap: VocabMap = { products: {}, concerns: {} }
   let settleSummary: (ScanSessionKindSummary & { firstError?: string; allTransport: boolean }) | null = null
-  if (keptProse.length > 0 && settleAreasGate(vocabView)) {
+  if (keptProse.length > 0 && settleAreasGate(vocabView, priorAreaIds)) {
     let settlement: AreaSettlement | null = null
     settleSummary = await runCachedSessionPool<typeof SETTLE_AREAS_WORK_ITEM, AreaSettlement>({
       repoRoot,
@@ -966,8 +998,8 @@ export async function runSpecScanSessions(
       cacheKey: () => settleAreasCacheKey(vocabView, instructionParts),
       legacyCacheKeys: () => [settleAreasLegacyCacheKey(vocabView, instructionParts)],
       schema: AreaSettlementSchema,
-      session: () => settleAreasSessionDef({ vocab: vocabView, universe }),
-      briefing: () => settleAreasBriefing(vocabView, universe, instructions),
+      session: () => settleAreasSessionDef({ vocab: vocabView, universe, prior: priorAreaIds }),
+      briefing: () => settleAreasBriefing(vocabView, universe, instructions, priorAreaIds),
       driver: opts.driver,
       persistence: opts.persistence,
       concurrency: 1,
@@ -982,7 +1014,7 @@ export async function runSpecScanSessions(
     })
     assertKindHealthy(settleSummary)
     if (settlement) {
-      const applied = applySettlement(settlement, vocabView)
+      const applied = applySettlement(settlement, vocabView, priorAreaIds)
       vocabMap = applied.vocab
       const settledBy = settleSummary.fromCache > 0 ? 'from cache' : 'by a session'
       fact('tag', `area labels settled ${settledBy}`)
@@ -1022,6 +1054,18 @@ export async function runSpecScanSessions(
     }),
   )
   const grouped = groupByArea(keptProse, groupTags, decisions.manualAreas ?? [], vocabMap)
+  // The areas, reconciled against the last scan's: what this scan kept, added
+  // and retired, on the record — an added area beside a retired one is the
+  // rename the rules above exist to prevent, and the reader should see it.
+  if (priorAreaIds.length > 0) {
+    const live = new Set(grouped.areas.map((a) => a.id))
+    const kept = priorAreaIds.filter((id) => live.has(id))
+    const retired = priorAreaIds.filter((id) => !live.has(id))
+    const added = grouped.areas.map((a) => a.id).filter((id) => !priorAreaIds.includes(id))
+    fact('tag', `areas reconciled against the last scan: ${kept.length} kept, ${added.length} added, ${retired.length} retired`)
+    for (const id of retired) fact('tag', `area "${id}" retired: no document carries it now`)
+    for (const id of added) fact('tag', `area "${id}" added`)
+  }
 
   if (only === 'settle') {
     return stoppedResult(
