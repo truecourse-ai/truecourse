@@ -627,6 +627,19 @@ describe('flowsSessionBriefing', () => {
     expect(flowsSessionBriefing(AREA, undefined)).not.toContain('EXISTING FLOWS')
   })
 
+  it('renders the existing no-flow decisions with their reasons, and the refusal names one dropped in silence', () => {
+    const decision = { doc: DOC, anchor: LIST, claimTitle: LS, reason: 'a static property, not a user path' }
+    expect(flowsSessionBriefing(AREA, undefined)).not.toContain('EXISTING NO-FLOW DECISIONS')
+    const briefing = flowsSessionBriefing(AREA, undefined, [], [decision])
+    expect(briefing).toContain('EXISTING NO-FLOW DECISIONS OF THIS AREA — 1 claim(s) deliberately in no flow.')
+    expect(briefing).toContain(`  ${DOC}#${LIST} — ${LS} — a static property, not a user path`)
+
+    const dropped: FlowSet = { flows: [{ title: 'Create and finish', goal: 'g', milestones: [ms(CREATE, ADD, 1), ms(DONE, FIN, 2)] }], noFlowClaims: [] }
+    const report = checkFlowSet(dropped, { area: AREA, ...CHECKER, priorNoFlow: [decision] })
+    expect(report.unaccountedNoFlow).toHaveLength(1)
+    expect(flowSetRefusalReason(report)).toContain('1 existing no-flow decision(s) left unaccounted')
+  })
+
   it('the epic briefing is digests only', () => {
     const briefing = flowsEpicSessionBriefing(DIGESTS)
     expect(briefing).toContain('--- F1  (area: tasks)')

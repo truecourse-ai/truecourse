@@ -333,3 +333,49 @@ export function mergeSettledSections<C extends { sectionAnchor: string }>(
   ]
   return { claims, untestable }
 }
+
+/**
+ * Identity below the claim: a KEPT claim (its sentence verbatim) takes its
+ * prior cases and needs byte for byte — the sentence is the claim, and a
+ * re-spelled case id on an unchanged claim would orphan every flow milestone
+ * that selects it; a REPLACED claim keeps the id of every prior case whose
+ * own sentence it re-states, and the prior need names for the same kinds.
+ * Applied to the draft's extracted sections only; settled sections are prior
+ * already. Deterministic, so a session cannot re-mint what did not change.
+ */
+export function carryPriorCaseIdentity<C extends { claim: string; sectionAnchor: string; replaces?: string; verification?: ExtractedClaim['verification']; needs?: ClaimNeed[] }>(
+  draft: { claims: readonly C[] },
+  prior: ExtractPrior,
+): C[] {
+  const settled = new Set(prior.settledAnchors)
+  const byText = new Map<string, PriorClaim>()
+  for (const c of prior.claims) if (!settled.has(c.sectionAnchor)) byText.set(normalizeSentence(c.claim), c)
+  return draft.claims.map((c) => {
+    if (settled.has(c.sectionAnchor)) return c
+    const kept = c.replaces === undefined ? byText.get(normalizeSentence(c.claim)) : undefined
+    if (kept && kept.sectionAnchor === c.sectionAnchor) {
+      return {
+        ...c,
+        ...(kept.verification ? { verification: kept.verification } : {}),
+        ...(kept.needs !== undefined ? { needs: kept.needs } : {}),
+      }
+    }
+    const replaced = c.replaces === undefined ? undefined : byText.get(normalizeSentence(c.replaces))
+    if (!replaced) return c
+    const priorCases = replaced.verification?.cases ?? []
+    const cases = c.verification?.cases?.map((k) => {
+      const same = priorCases.find((p) => normalizeSentence(p.claim) === normalizeSentence(k.claim))
+      return same && same.id !== k.id ? { ...k, id: same.id } : k
+    })
+    const priorNeeds = replaced.needs ?? []
+    const needs = c.needs?.map((n) => {
+      const same = priorNeeds.find((p) => p.kind === n.kind && normalizeSentence(p.name) !== normalizeSentence(n.name) && (p.detail ?? '') === (n.detail ?? ''))
+      return same ? { ...n, name: same.name } : n
+    })
+    return {
+      ...c,
+      ...(c.verification && cases ? { verification: { ...c.verification, cases } } : {}),
+      ...(needs ? { needs } : {}),
+    }
+  })
+}

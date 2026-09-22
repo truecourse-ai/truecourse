@@ -423,6 +423,9 @@ function obligationKeys(claim: { doc: string; anchor: string; title: string; ver
 interface AreaValidation {
   flows: DraftFlow[]
   noFlowClaims: GuardNoFlowClaim[]
+  /** Prior no-flow decisions the draft neither re-emitted nor covered with a
+   *  milestone — a refusal for the checker; the fold carries them. */
+  unaccountedNoFlow: string[]
   /** Existing flows the session retired, each with its reason — ids verified. */
   retiredFlows: RetiredFlow[]
   unknownReferences: string[]
@@ -504,6 +507,7 @@ function validateAreaSynthesis(
   synthesisInputsHash: string,
   prior: readonly GuardFlow[] = [],
   strict = true,
+  priorNoFlow: readonly GuardNoFlowClaim[] = [],
 ): AreaValidation {
   const unknownReferences: string[] = []
   const covered = new Set<string>()
@@ -538,6 +542,16 @@ function validateAreaSynthesis(
   }
 
   const assigned = new Set(covered)
+  // The prior no-flow decisions of this unit, by obligation: a re-emitted one
+  // keeps its prior reason verbatim (a re-worded reason for an unchanged
+  // decision is the reinvention the rule forbids), one now placed in a flow is
+  // accounted by the milestone, and one the draft says nothing about is
+  // unaccounted — refused by the checker, carried by the fold.
+  const priorByKey = new Map<string, GuardNoFlowClaim>()
+  for (const p of priorNoFlow) {
+    const claim = snapClaim(p, index)
+    if (claim) priorByKey.set(obligationKeys(claim, p.caseIds).join('\n'), p)
+  }
   const noFlowClaims: GuardNoFlowClaim[] = []
   const seenNoFlow = new Set<string>()
   for (const entry of data.noFlowClaims) {
@@ -554,7 +568,21 @@ function validateAreaSynthesis(
     const key = keys.join("\n")
     if (seenNoFlow.has(key)) continue
     seenNoFlow.add(key)
-    noFlowClaims.push({ doc: claim.doc, anchor: claim.anchor, claimTitle: claim.title, ...(entry.caseIds ? { caseIds: [...entry.caseIds].sort() } : {}), reason: normalizeText(entry.reason) })
+    const kept = priorByKey.get(key)
+    noFlowClaims.push({ doc: claim.doc, anchor: claim.anchor, claimTitle: claim.title, ...(entry.caseIds ? { caseIds: [...entry.caseIds].sort() } : {}), reason: kept ? kept.reason : normalizeText(entry.reason) })
+  }
+  const unaccountedNoFlow: string[] = []
+  for (const [key, p] of priorByKey) {
+    if (seenNoFlow.has(key)) continue
+    if (key.split('\n').every((k) => assigned.has(k))) continue
+    if (strict) {
+      unaccountedNoFlow.push(`existing no-flow decision on ${describeRef(p)} is neither re-emitted in noFlowClaims nor covered by a milestone`)
+    } else {
+      // Lenient on replay: the decision stands as it was, and accounts for its claim.
+      seenNoFlow.add(key)
+      for (const k of key.split('\n')) covered.add(k)
+      noFlowClaims.push(p)
+    }
   }
 
   const uncoveredClaims = index.all
@@ -567,7 +595,7 @@ function validateAreaSynthesis(
     for (const m of flow.milestones) unknownReferences.push(...verificationBoundaryProblems(m.verification, false, m.proofDrivers).map(p => `"${flow.title}" milestone ${m.order}: ${p}`))
   }
   const { retiredFlows, unaccountedFlows } = reconcileAgainstPrior(flows, data.retiredFlows ?? [], prior, unknownReferences, strict)
-  return { flows, noFlowClaims, retiredFlows, unknownReferences, uncoveredClaims, unaccountedFlows }
+  return { flows, noFlowClaims, unaccountedNoFlow, retiredFlows, unknownReferences, uncoveredClaims, unaccountedFlows }
 }
 
 // ---------------------------------------------------------------------------
@@ -587,6 +615,8 @@ export interface FlowSetCheckContext {
   /** The area's EXISTING flows the draft must reconcile against. Omit when
    *  there are none (a first synthesis). */
   prior?: readonly GuardFlow[]
+  /** The area's EXISTING no-flow decisions the draft must account for. */
+  priorNoFlow?: readonly GuardNoFlowClaim[]
 }
 
 /**
@@ -604,6 +634,9 @@ export interface FlowSetCheckReport {
   /** Existing flows neither continued by id, retired with a reason nor
    *  re-emitted unchanged. REFUSAL — a silent replacement is the defect. */
   unaccountedFlows: string[]
+  /** Existing no-flow decisions neither re-emitted nor covered by a milestone.
+   *  REFUSAL — a decision dropped in silence is the same defect. */
+  unaccountedNoFlow: string[]
   /** Exact behavior duplicates the fold will drop (report, don't delete). */
   subsumed: SubsumedFlow[]
   /** Milestones whose section is outside the live index — no flow can bind them. */
@@ -613,14 +646,19 @@ export interface FlowSetCheckReport {
 }
 
 /** True when the report carries no refusal-class defect. */
-export function isFlowSetClean(report: Pick<FlowSetCheckReport, 'unknownReferences' | 'uncoveredClaims' | 'unaccountedFlows'>): boolean {
-  return report.unknownReferences.length === 0 && report.uncoveredClaims.length === 0 && report.unaccountedFlows.length === 0
+export function isFlowSetClean(report: Pick<FlowSetCheckReport, 'unknownReferences' | 'uncoveredClaims' | 'unaccountedFlows' | 'unaccountedNoFlow'>): boolean {
+  return (
+    report.unknownReferences.length === 0 &&
+    report.uncoveredClaims.length === 0 &&
+    report.unaccountedFlows.length === 0 &&
+    report.unaccountedNoFlow.length === 0
+  )
 }
 
 export function checkFlowSet(data: FlowSet, ctx: FlowSetCheckContext): FlowSetCheckReport {
   const index = buildClaimIndex(ctx.area.claims)
   // The inputs hash is irrelevant to a check — the drafts are discarded.
-  const v = validateAreaSynthesis(ctx.area, data, index, '', ctx.prior ?? [])
+  const v = validateAreaSynthesis(ctx.area, data, index, '', ctx.prior ?? [], true, ctx.priorNoFlow ?? [])
   const subsumed = applySubsumption(v.flows).dropped
 
   const unbindable: string[] = []
@@ -645,6 +683,7 @@ export function checkFlowSet(data: FlowSet, ctx: FlowSetCheckContext): FlowSetCh
     unknownReferences: v.unknownReferences,
     uncoveredClaims: v.uncoveredClaims,
     unaccountedFlows: v.unaccountedFlows,
+    unaccountedNoFlow: v.unaccountedNoFlow,
     subsumed,
     unbindable,
     unboundNeeds,
@@ -942,6 +981,9 @@ export type FlowsAreaSessionSeam = (input: {
   /** Each unit's EXISTING flows, keyed by {@link flowAreaKey} — briefed for
    *  reconciliation and checked against by `check_flows`. */
   prior?: ReadonlyMap<string, readonly GuardFlow[]>
+  /** Each unit's EXISTING no-flow decisions, keyed the same way — briefed and
+   *  checked against beside the flows. */
+  priorNoFlow?: ReadonlyMap<string, readonly GuardNoFlowClaim[]>
   grounding?: FlowsSessionGrounding
   /** The work docs (section texts) the sessions' `read_section` reads from. */
   docs?: readonly GuardDoc[]
@@ -985,6 +1027,9 @@ export interface SynthesizeFlowsOptions {
   sectionFingerprints: ReadonlyMap<string, string>
   /** The committed flows the sessions reconcile against; defaults to `flows.json`. */
   previous?: readonly GuardFlow[]
+  /** The committed no-flow decisions the sessions reconcile against; defaults
+   *  to `flows.json`'s, whether or not `previous` was given. */
+  previousNoFlowClaims?: readonly GuardNoFlowClaim[]
   /** False to compute without writing `flows.json` (callers that stage the write). */
   write?: boolean
   /** Progress hook, fired once per area as it settles. */
@@ -1136,10 +1181,30 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
     return { ...area, claims }
   })
 
-  const previousFile = opts.previous ? undefined : readFlowsFile(repoRoot)
+  const previousFile = opts.previous && opts.previousNoFlowClaims ? undefined : readFlowsFile(repoRoot)
   const previous = opts.previous ?? previousFile?.flows ?? []
   const prior = partitionPriorFlows(previous, areas)
   const retired: RetiredFlowRecord[] = [...prior.retired]
+  // The committed no-flow decisions, to the unit whose docs they belong to; one
+  // whose claim no longer snaps onto the unit's inventory is dropped
+  // deterministically, never briefed — the same rule as a retired flow.
+  const priorNoFlowByUnit = new Map<string, GuardNoFlowClaim[]>()
+  {
+    const unitByDoc = new Map<string, string>()
+    const indexByUnit = new Map<string, ClaimIndex>()
+    for (const area of areas) {
+      const key = flowAreaKey(area)
+      for (const d of area.docs) unitByDoc.set(d.doc, key)
+      indexByUnit.set(key, buildClaimIndex(area.claims))
+    }
+    for (const c of opts.previousNoFlowClaims ?? previousFile?.noFlowClaims ?? []) {
+      const unit = unitByDoc.get(c.doc)
+      if (unit === undefined || !snapClaim(c, indexByUnit.get(unit)!)) continue
+      const list = priorNoFlowByUnit.get(unit) ?? []
+      list.push(c)
+      priorNoFlowByUnit.set(unit, list)
+    }
+  }
 
   const sessionSummaries: GuardSessionSummary[] = []
   let calls = 0
@@ -1151,6 +1216,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
   const { byArea, summary } = await opts.areaSession({
     areas,
     prior: prior.byUnit,
+    priorNoFlow: priorNoFlowByUnit,
     ...(opts.sessionGrounding ? { grounding: opts.sessionGrounding } : {}),
     ...(opts.sessionDocs ? { docs: opts.sessionDocs } : {}),
     onArea: (areaId) => opts.onArea?.(areaId),
@@ -1169,7 +1235,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
       opts.onFact?.(`${key}: no flows, ${r.reason}`)
       return { ok: false, reason: r.reason }
     }
-    const v = validateAreaSynthesis(area, r.value, buildClaimIndex(area.claims), r.inputsKey, prior.byUnit.get(key) ?? [], false)
+    const v = validateAreaSynthesis(area, r.value, buildClaimIndex(area.claims), r.inputsKey, prior.byUnit.get(key) ?? [], false, priorNoFlowByUnit.get(key) ?? [])
     if (v.unknownReferences.length > 0 || v.uncoveredClaims.length > 0) {
       const reason = flowSetRefusal(v)
       opts.onFact?.(`${key}: refused, ${reason}`)
@@ -1203,7 +1269,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
     noFlowClaims.push(...outcome.noFlowClaims)
     for (const r of outcome.retiredFlows) retiredByModel.set(r.id, r.reason)
   })
-  noFlowClaims.push(...(previousFile?.noFlowClaims ?? []).filter((c) => carriedDocs.has(c.doc)))
+  noFlowClaims.push(...(opts.previousNoFlowClaims ?? previousFile?.noFlowClaims ?? []).filter((c) => carriedDocs.has(c.doc)))
 
   const subsumed: SubsumedFlow[] = []
   const areaPass = applySubsumption(drafts)

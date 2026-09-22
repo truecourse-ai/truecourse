@@ -23,7 +23,7 @@ import {
   type FlowClaimInput,
   type FlowSynthesisResult,
 } from '@truecourse/guard-generator'
-import { GuardFlowsFileSchema, type GuardFlow } from '@truecourse/shared'
+import { GuardFlowsFileSchema, type GuardFlow, type GuardNoFlowClaim } from '@truecourse/shared'
 import { makeTempRepo, rmrf, sessionSummary, FLOWS_KIND } from './helpers.js'
 
 const repos: string[] = []
@@ -1096,6 +1096,55 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
     const edge = res.flows.find((f) => f.id === EDGE_ID)!
     expect(edge.milestones[0].claimTitle).toBe(REWORDED)
     expect(edge.fingerprint).not.toBe(previous[1].fingerprint)
+  })
+
+  it('a prior no-flow decision keeps its reason verbatim when re-emitted, is accounted by a milestone, and is refused when dropped', async () => {
+    const previous = await baseline()
+    const decision = { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' }
+    // The lifecycle without the filter milestone; the filter re-emitted no-flow with a reworded reason.
+    const reworded: FlowSet = {
+      flows: [
+        { ...TASK_LIFECYCLE.flows[0], id: LIFECYCLE_ID, milestones: TASK_LIFECYCLE.flows[0].milestones.slice(0, 3) },
+        { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID },
+      ],
+      noFlowClaims: [{ ...decision, reason: 'only a listing filter' }],
+    }
+    expect(isFlowSetClean(checkFlowSet(reworded, { area: tasksArea, prior: previous, priorNoFlow: [decision] }))).toBe(true)
+    const r = repo()
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: reworded }), { previous, previousNoFlowClaims: [decision] })
+    expect(res.noFlowClaims).toEqual([decision])
+
+    // Placed in a flow: the milestone is the account.
+    const placed: FlowSet = { flows: TASK_LIFECYCLE.flows.map((f, i) => ({ ...f, id: previous[i].id })), noFlowClaims: [] }
+    expect(isFlowSetClean(checkFlowSet(placed, { area: tasksArea, prior: previous, priorNoFlow: [decision] }))).toBe(true)
+
+    // Dropped in silence: refused by the checker…
+    const dropped: FlowSet = { ...reworded, noFlowClaims: [] }
+    const report = checkFlowSet(dropped, { area: tasksArea, prior: previous, priorNoFlow: [decision] })
+    expect(report.unaccountedNoFlow).toEqual([expect.stringContaining(`existing no-flow decision on ${TASKS_DOC}#${TASKS.anchors['Completing tasks']}`)])
+    expect(isFlowSetClean(report)).toBe(false)
+    // …and carried by the fold, where a replayed value cannot be re-asked.
+    const carried = await synth(repo(), [tasksArea], areaSessions({ tasks: dropped }), { previous, previousNoFlowClaims: [decision] })
+    expect(carried.unsettled).toEqual([])
+    expect(carried.noFlowClaims).toEqual([decision])
+  })
+
+  it('a prior no-flow decision whose claim left the inventory is dropped before any session, never briefed', async () => {
+    const previous = await baseline()
+    const gone = { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: 'a claim the corpus no longer states', reason: 'stale' }
+    const briefed: (readonly GuardNoFlowClaim[])[] = []
+    const seam: FlowsAreaSessionSeam = async ({ areas, priorNoFlow, onArea }) => {
+      const byArea = new Map<string, FlowsAreaSessionResult>()
+      for (const area of areas) {
+        briefed.push(priorNoFlow?.get(flowAreaKey(area)) ?? [])
+        byArea.set(flowAreaKey(area), { ok: true, value: { flows: TASK_LIFECYCLE.flows.map((f, i) => ({ ...f, id: previous[i].id })), noFlowClaims: [] }, inputsKey: 'key:tasks' })
+        onArea?.(area.areaId)
+      }
+      return { byArea, summary: sessionSummary(FLOWS_KIND, { ran: areas.length }) }
+    }
+    const res = await synth(repo(), [tasksArea], seam, { previous, previousNoFlowClaims: [gone] })
+    expect(briefed).toEqual([[]])
+    expect(res.noFlowClaims).toEqual([])
   })
 
   it('retires a prior flow whose documents left every area', async () => {

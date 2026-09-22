@@ -35,7 +35,7 @@
 import { createHash } from 'node:crypto'
 import { LEGACY_FLOWS_SESSION_PROMPT_FINGERPRINT, LEGACY_FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
-import { isRunnableDriver, type GuardFlow } from '@truecourse/shared'
+import { isRunnableDriver, type GuardFlow, type GuardNoFlowClaim } from '@truecourse/shared'
 import {
   FlowSetSchema,
   EpicSynthesisSchema,
@@ -109,6 +109,7 @@ When the briefing lists EXISTING FLOWS, they are the corpus as it stands, with p
 - AMENDED — the claims changed what the path is (a milestone added, removed, re-ordered or re-cased): emit it with its \`id\` and the new milestones. The id is the journey's identity; keep it whenever the journey is the same one a user would recognise.
 - RETIRED — the claims no longer support the journey at all: list it in \`retiredFlows\` with the reason, in the claims' own terms.
 A flow with no \`id\` is NEW. Emit one only for a journey no existing flow is. Never re-emit an existing journey as a new flow, never continue one id with two flows, and never both continue and retire an id. \`check_flows\` refuses a draft that leaves an existing flow unaccounted for.
+The EXISTING NO-FLOW DECISIONS are reconciled the same way: a claim that already carries one comes back in \`noFlowClaims\` with that decision's reason verbatim, unless you now place it in a flow — the milestone is the account. Never drop one in silence; \`check_flows\` refuses that too.
 
 # Coverage honesty — the rule you are graded on
 Every case of a claim marked \`account: required\` MUST appear in a milestone selection or a scoped \`noFlowClaims\` selection. Claims without cases are indivisible. No source obligation may be both assigned and marked no-flow. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both. Claims marked \`account: optional\` sit on surfaces with no test runner today: use one as a milestone when it truly belongs to the path, but you never have to account for it.
@@ -217,6 +218,7 @@ function renderFlowSetReport(report: FlowSetCheckReport): { content: string; isE
     ...report.unknownReferences.map((r) => `matched no claim: ${r}`),
     ...report.uncoveredClaims.map((c) => `required claim unaccounted (put it in a flow, or in noFlowClaims with a reason): ${c}`),
     ...report.unaccountedFlows.map((f) => `${f} — continue it by id (kept or amended) or list it in retiredFlows with a reason`),
+    ...report.unaccountedNoFlow.map((n) => `${n} — re-emit it with its reason, or put the claim in a flow`),
   ]
   const notes = [
     ...report.subsumed.map((s) => `near-duplicate: "${s.title}" is contained in "${s.supersededBy}" — the engine will drop it; emit the longest path once`),
@@ -241,7 +243,12 @@ export interface FlowsCheckerContext {
   catalogNames: ReadonlySet<string>
 }
 
-function checkFlowsTool(area: FlowSynthesisArea, checker: FlowsCheckerContext, prior: readonly GuardFlow[]): SessionTool {
+function checkFlowsTool(
+  area: FlowSynthesisArea,
+  checker: FlowsCheckerContext,
+  prior: readonly GuardFlow[],
+  priorNoFlow: readonly GuardNoFlowClaim[] = [],
+): SessionTool {
   return defineSessionTool({
     name: 'check_flows',
     description:
@@ -256,6 +263,7 @@ function checkFlowsTool(area: FlowSynthesisArea, checker: FlowsCheckerContext, p
         sectionKeys: checker.sectionKeys,
         catalogNames: checker.catalogNames,
         prior,
+        priorNoFlow,
       })
       return renderFlowSetReport(report)
     },
@@ -297,6 +305,8 @@ export interface FlowsSessionInput {
   checker: FlowsCheckerContext
   /** The unit's EXISTING flows the session reconciles against. */
   prior?: readonly GuardFlow[]
+  /** The unit's EXISTING no-flow decisions the session reconciles against. */
+  priorNoFlow?: readonly GuardNoFlowClaim[]
 }
 
 export function flowsSessionDef(input: FlowsSessionInput): SessionDef<FlowSet> {
@@ -304,7 +314,7 @@ export function flowsSessionDef(input: FlowsSessionInput): SessionDef<FlowSet> {
     kind: FLOWS_SESSION_KIND,
     display: { title: 'Flow synthesis' },
     systemPrompt: FLOWS_SESSION_SYSTEM_PROMPT,
-    tools: [readUniverseSectionTool(input.universe), checkFlowsTool(input.area, input.checker, input.prior ?? [])],
+    tools: [readUniverseSectionTool(input.universe), checkFlowsTool(input.area, input.checker, input.prior ?? [], input.priorNoFlow ?? [])],
     outcomeSchema: FlowSetSchema,
     budget: FLOWS_SESSION_BUDGET,
     outcomePrecondition: {
@@ -398,6 +408,7 @@ export function flowsSessionBriefing(
   area: FlowSynthesisArea,
   grounding: FlowsSessionGrounding | undefined,
   prior: readonly GuardFlow[] = [],
+  priorNoFlow: readonly GuardNoFlowClaim[] = [],
 ): string {
   const lines: string[] = [`Compose the flows of ONE specification area.`, ``, `Area: ${area.areaId}`]
   if (area.docs.length > 0) {
@@ -435,6 +446,16 @@ export function flowsSessionBriefing(
       'A flow with no `id` is new; never re-emit one of these as new:',
     )
     for (const flow of prior) lines.push(...existingFlowLines(flow))
+  }
+  if (priorNoFlow.length > 0) {
+    lines.push(
+      '',
+      `EXISTING NO-FLOW DECISIONS OF THIS AREA — ${priorNoFlow.length} claim(s) deliberately in no flow.`,
+      'Each comes back in `noFlowClaims` with its reason verbatim, unless you now place it in a flow:',
+    )
+    for (const c of priorNoFlow) {
+      lines.push(`  ${c.doc}#${c.anchor} — ${c.claimTitle}${c.caseIds ? ` [caseIds: ${c.caseIds.join(', ')}]` : ''} — ${c.reason}`)
+    }
   }
   lines.push('', 'Check the draft with `check_flows`, then produce the outcome.')
   return lines.join('\n')
@@ -474,6 +495,9 @@ export function flowSetRefusalReason(report: FlowSetCheckReport): string | null 
   }
   if (report.unaccountedFlows.length > 0) {
     parts.push(`${report.unaccountedFlows.length} existing flow(s) left unaccounted (${report.unaccountedFlows[0]})`)
+  }
+  if (report.unaccountedNoFlow.length > 0) {
+    parts.push(`${report.unaccountedNoFlow.length} existing no-flow decision(s) left unaccounted (${report.unaccountedNoFlow[0]})`)
   }
   return `flow synthesis refused: ${parts.join('; ')}`
 }

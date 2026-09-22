@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import {
+  carryPriorCaseIdentity,
   collectWorkDocs,
   docContentHash,
   mergeSettledSections,
@@ -127,6 +128,38 @@ describe('reconciliationProblems', () => {
     expect(
       reconciliationProblems({ claims: [listClaim], retiredClaims: [{ claim: LIST, reason: 'gone' }] }, prior),
     ).toEqual([expect.stringContaining('is both continued and retired')])
+  })
+})
+
+describe('carryPriorCaseIdentity', () => {
+  const withCases = (claim: string, ids: [string, string][], needs: { kind: 'fixture'; name: string }[] = []) => ({
+    claim,
+    driver: 'cli' as const,
+    sectionAnchor: LISTING,
+    reason: 'r',
+    verification: { scope: 'configuration' as const, method: 'behavior' as const, observable: 'o', cases: ids.map(([id, text]) => ({ id, claim: text, method: 'behavior' as const, requires: ['process' as const], conditions: [], prerequisites: [] })) },
+    needs,
+  })
+  const priorList = withCases(LIST, [['newest-first', 'Newest task first'], ['one-per-line', 'One line per task']], [{ kind: 'fixture', name: 'sample-tasks' }])
+  const prior: ExtractPrior = { claims: [addClaim, priorList], untestable: [], settledAnchors: [CREATING] }
+
+  it('a kept claim takes its prior cases and needs verbatim, whatever the session re-minted', () => {
+    const draft = { claims: [withCases(LIST, [['first', 'Newest task first']], [{ kind: 'fixture' as const, name: 'tasks' }])] }
+    expect(carryPriorCaseIdentity(draft, prior)).toEqual([priorList])
+  })
+
+  it('a replaced claim keeps the id of every prior case it re-states, and the prior need name for the same need', () => {
+    const draft = {
+      claims: [{ ...withCases('lists open tasks', [['first', 'Newest task first'], ['count', 'Shows the count']], [{ kind: 'fixture' as const, name: 'tasks' }]), replaces: LIST }],
+    }
+    const [out] = carryPriorCaseIdentity(draft, prior)
+    expect(out!.verification?.cases?.map((c) => c.id)).toEqual(['newest-first', 'count'])
+    expect(out!.needs).toEqual([{ kind: 'fixture', name: 'sample-tasks' }])
+  })
+
+  it('leaves a settled section and a genuinely new claim alone', () => {
+    const fresh = withCases('a brand new claim', [['x', 'x']])
+    expect(carryPriorCaseIdentity({ claims: [addClaim, fresh] }, prior)).toEqual([addClaim, fresh])
   })
 })
 
