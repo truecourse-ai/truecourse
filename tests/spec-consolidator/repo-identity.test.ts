@@ -9,11 +9,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveRepoIdentity,
+  resolveWorkspaceIdentity,
   aliasMatcher,
   identityFingerprint,
   identityBlock,
   stripForNames,
   MAX_ALIASES,
+  MAX_DESCRIPTION_CHARS,
 } from '../../packages/spec-consolidator/src/index.js';
 import type { DocCandidate } from '../../packages/spec-consolidator/src/index.js';
 
@@ -169,6 +171,70 @@ describe('identityBlock', () => {
 
   it('is empty when there is no identity, so the prompt is unchanged', () => {
     expect(identityBlock(null)).toBe('');
+  });
+});
+
+/**
+ * THE WORKSPACE SUBJECT. A workspace scan curates documentation that belongs to
+ * the workspace, and what it is attributed against is the ONE SENTENCE the
+ * workspace states about its product — not the names of the repositories it has
+ * connected, which a workspace may have several of, may have none of yet, and
+ * whose names say nothing about what the product is.
+ */
+describe('resolveWorkspaceIdentity', () => {
+  const DESCRIPTION = 'Acme Widgets, a warehouse inventory service with a REST API.';
+
+  it('is built from the description alone', () => {
+    const identity = resolveWorkspaceIdentity(DESCRIPTION);
+    expect(identity).toEqual({
+      scope: 'workspace',
+      name: '',
+      description: DESCRIPTION,
+      aliases: [],
+      sources: ['workspace'],
+    });
+  });
+
+  it('states the product in the block, and never a repository name', () => {
+    const block = identityBlock(resolveWorkspaceIdentity(DESCRIPTION));
+    expect(block).toContain('IDENTITY: the workspace being scanned');
+    expect(block).toContain(`This workspace's product is: ${DESCRIPTION}`);
+    // The old block listed `owner/repo` lines. Nothing can put one there now:
+    // the resolver takes a sentence and nothing else.
+    expect(block).not.toMatch(/Its products are the repositories/);
+    expect(block).not.toMatch(/\n {2}- \S+\/\S+/);
+  });
+
+  it('bounds a description that runs long', () => {
+    const long = 'Billing workflows for finance teams that outgrew spreadsheets. '.repeat(12);
+    const identity = resolveWorkspaceIdentity(long);
+    expect(identity.description!.length).toBeLessThanOrEqual(MAX_DESCRIPTION_CHARS + 1);
+  });
+
+  // The description IS the cache key's subject half, so editing the sentence
+  // re-judges every document in the workspace exactly once. That is the
+  // contract: the curator is being asked a different question.
+  it('moves the curation fingerprint when the sentence changes', () => {
+    const before = identityFingerprint(resolveWorkspaceIdentity(DESCRIPTION));
+    const after = identityFingerprint(
+      resolveWorkspaceIdentity('Acme Widgets, a scheduling service for clinics.'),
+    );
+    expect(after).not.toBe(before);
+    // …and is stable for the same sentence, so an unchanged workspace re-reads
+    // every cached verdict.
+    expect(identityFingerprint(resolveWorkspaceIdentity(DESCRIPTION))).toBe(before);
+  });
+
+  // A repository identity must fingerprint exactly as it always did: the
+  // workspace axis is a different shape and must not re-key per-repo caches.
+  it('is a different subject from a repository of the same words', () => {
+    const repo = identityFingerprint({
+      name: 'widgets',
+      description: DESCRIPTION,
+      aliases: ['widgets'],
+      sources: ['git-remote'],
+    });
+    expect(identityFingerprint(resolveWorkspaceIdentity(DESCRIPTION))).not.toBe(repo);
   });
 });
 

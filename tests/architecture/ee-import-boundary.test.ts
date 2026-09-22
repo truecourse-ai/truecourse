@@ -150,7 +150,8 @@ function reachesEe(specifier: string): boolean {
 //
 // Model and provider APIs belong in `packages/llm-api`. Dashboard activity
 // streaming also uses the SDK's UI transport, with only the named imports
-// below allowed. Model access still goes through `@truecourse/shared/llm`.
+// below allowed. Everything else reaches a model through the `SessionDriver`
+// seam in `@truecourse/agent-loop`.
 const AI_SDK_HOME = 'packages/llm-api';
 
 const ACTIVITY_SDK_IMPORTS: Record<string, { values: string[]; types: string[] }> = {
@@ -211,10 +212,10 @@ const STATIC_CLOUD_SDK_IMPORT =
 
 // The Claude Agent SDK wrapper has exactly ONE sanctioned home in OSS:
 // `packages/llm-claude-agent`, the claude-code session driver. Everything
-// else runs sessions through the
-// `SessionDriver` seam in `@truecourse/shared/llm`. Any mention of the
-// package specifier counts — the sanctioned home itself loads it through a
-// lazy, assembled-specifier import (it is an optional peer).
+// else runs sessions through the `SessionDriver` seam in
+// `@truecourse/agent-loop`. Any mention of the package specifier counts — the
+// sanctioned home itself loads it through a lazy, assembled-specifier import
+// (it is an optional peer).
 const CLAUDE_AGENT_SDK_HOME = 'packages/llm-claude-agent';
 
 const CLAUDE_AGENT_SDK_REFERENCE = /@anthropic-ai\/claude-agent-sdk/;
@@ -314,7 +315,7 @@ describe('vendor SDK homes', () => {
 
     expect(
       offenders,
-      `Disallowed AI SDK imports outside ${AI_SDK_HOME} (only activity UI transport imports are allowed; reach models through @truecourse/shared/llm):\n${offenders.join('\n')}`,
+      `Disallowed AI SDK imports outside ${AI_SDK_HOME} (only activity UI transport imports are allowed; reach models through the SessionDriver seam in @truecourse/agent-loop):\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 

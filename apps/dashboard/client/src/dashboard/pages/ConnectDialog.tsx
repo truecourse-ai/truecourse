@@ -43,6 +43,7 @@ import {
 } from '@/components/ui/dialog';
 import { Capsule, ProviderIcon, providerName } from '@/dashboard/ui/bits';
 import { offeredRepositoryProviders } from '@/dashboard/data/providers';
+import { toldToDescribeWorkspace } from '@/dashboard/data/workspace-profile';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import type { RepositoryProvider } from '@/dashboard/shell/registry';
 import { StatusWord } from '@/dashboard/ui/status-word';
@@ -303,6 +304,13 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     try {
       landed = (await connect.link(asked)).repoFullName;
     } catch (error) {
+      // Nothing connects into a workspace with no description; the remedy is a
+      // page, so the dialog closes and the toast carries the way there.
+      if (toldToDescribeWorkspace(error, navigate)) {
+        setLinking(null);
+        onOpenChange(false);
+        return;
+      }
       setLinkErrors({ [asked]: reasonOf(error) });
     }
     setLinking(null);
@@ -340,6 +348,13 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           defaultBranch: repo.defaultBranch,
         });
       } catch (error) {
+        // The same refusal for every repository in the batch: say it once and
+        // stop, rather than failing each in turn with the same sentence.
+        if (toldToDescribeWorkspace(error, navigate)) {
+          setLinking(null);
+          onOpenChange(false);
+          return;
+        }
         failures[repo.fullName] = reasonOf(error);
       }
     }

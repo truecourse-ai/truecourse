@@ -24,6 +24,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { z } from 'zod';
 import { resolveClaudeBinary } from '@truecourse/shared';
 import {
+  sessionImageRef,
   type DriverResult,
   type SessionDef,
   type SessionDriver,
@@ -104,14 +105,39 @@ export function createClaudeAgentSessionDriver(
       const queue = new AsyncQueue<SdkUserMessage>();
       let liveQuery: SdkQuery | undefined;
 
+      // Images ride the FIRST message this session sends and only that one —
+      // the briefing, the resume nudge, or a corrective re-ask, whichever opens
+      // the conversation this time. Re-showing them on every later steer would
+      // re-send the pixels each turn for nothing.
+      let imagesPending = input.images ?? [];
+
       const sendUser = (content: string): void => {
+        const images = imagesPending;
+        imagesPending = [];
+        // Text FIRST — the instruction has to be in context before the pixels.
+        const message: SdkUserMessage['message'] = images.length
+          ? {
+              role: 'user',
+              content: [
+                { type: 'text', text: content },
+                ...images.map((image) => ({
+                  type: 'image' as const,
+                  source: { type: 'base64' as const, media_type: image.mediaType, data: image.data },
+                })),
+              ],
+            }
+          : { role: 'user', content };
         // Recorded at the moment of INGESTION — when the SDK pulls the
         // message from the streaming input, not when we queue it. A message
         // queued into a dead or ending session is dropped unrecorded, so the
         // transcript never claims the model saw something it did not (and
         // the shell's retry probe can trust `user-message` events).
-        queue.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null }, () =>
-          input.onEvent({ type: 'user-message', content }),
+        queue.push({ type: 'user', message, parent_tool_use_id: null }, () =>
+          input.onEvent({
+            type: 'user-message',
+            content,
+            ...(images.length ? { images: images.map(sessionImageRef) } : {}),
+          }),
         );
       };
 

@@ -193,6 +193,32 @@ export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 // ---------------------------------------------------------------------------
 
 /**
+ * ONE image a user message showed the model, AS THE TRANSCRIPT RECORDS IT:
+ * what it was and how big, never the bytes. A transcript is a text journal —
+ * read by people, streamed to a browser, stored per event — and a megabyte of
+ * base64 has no place in one. The model is shown the real pixels at send time,
+ * out of whatever the caller holds them in; the record says what it saw.
+ */
+export const SessionImageRefSchema = z.object({
+  mediaType: z.string(),
+  /** Decoded size of the image the model was shown. */
+  bytes: z.number().int().nonnegative(),
+});
+export type SessionImageRef = z.infer<typeof SessionImageRefSchema>;
+
+/** Decoded byte length of well-formed base64, without decoding it. */
+function base64Bytes(data: string): number {
+  if (data.length === 0) return 0;
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
+}
+
+/** What the transcript records for one image the model was shown. */
+export function sessionImageRef(image: { mediaType: string; data: string }): SessionImageRef {
+  return { mediaType: image.mediaType, bytes: base64Bytes(image.data) };
+}
+
+/**
  * The raw escape hatch: the driver's native wire payload and its source, so
  * the normalized event never loses the native one and a driver bug is
  * diagnosable from the transcript alone.
@@ -239,6 +265,9 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     type: z.literal('user-message'),
     content: z.string(),
     actor: z.string().optional(),
+    /** The images shown alongside this message, as references. Absent for the
+     *  overwhelmingly common text-only message. */
+    images: z.array(SessionImageRefSchema).optional(),
   }),
   // One assistant turn — tool call or text; both count against the budget.
   z.object({

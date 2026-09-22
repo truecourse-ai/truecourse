@@ -8,7 +8,7 @@ import type { GuardSetupPreparationSession } from '@truecourse/guard-generator';
  * the one seed — the step spine with per-step fingerprints). THIS module is the
  * adapter the dashboard calls: it owns step 0 (is a
  * provider configured — a CONFIG question, which the engine package deliberately
- * has no dependency on), model + transport resolution, the pre-flight cost
+ * has no dependency on), the pre-flight cost
  * estimate, usage accounting, persisting `guard/setup.json`, and the AGENT-SESSION
  * seams: the recipe-repair, dependency-catalog, interfaces (reconcile + web-task
  * authoring), seed and auth-proof sessions are built here (they need the
@@ -17,13 +17,12 @@ import type { GuardSetupPreparationSession } from '@truecourse/guard-generator';
  *
  * Working-tree only, by design: setup writes files inside the repo. A hosted
  * caller runs it against a clone it materialized, and injects what a server owns
- * that a checkout does not — the workspace's transport and session driver, and
+ * that a checkout does not — the workspace's session driver, and
  * the repo identity its run record is keyed by.
  */
 
 import {
   runGuardSetup,
-  spawnRecipeRunner,
   GUARD_SETUP_STEPS,
   type GuardSetupOnlyStep,
   type GuardSetupAuthStep,
@@ -37,19 +36,10 @@ import {
   type RecipeRunner,
 } from '@truecourse/guard-generator';
 import { writeGuardSetup, readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
-import {
-  getStageUsage,
-  resetStageUsage,
-  setLlmCallSink,
-  noProviderTransport,
-  NO_LLM_PROVIDER_MESSAGE,
-  type LlmTransport,
-} from '@truecourse/shared/llm';
 import type { RunError, SessionDriver } from '@truecourse/agent-loop';
 import type { GuardSetupReport } from '@truecourse/shared';
-import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import type { LlmTransportMode } from '../services/llm/provider-config.js';
-import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
+import { createRecipeProposeSession } from '../services/guard-setup/recipe-propose.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
@@ -84,25 +74,10 @@ export {
 export { EstimateDeclined } from './spec-in-process.js';
 export { readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
 
-/** No LLM provider is configured — setup's step 0, thrown before anything else runs. */
-export class NoLlmProviderError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'NoLlmProviderError';
-  }
-}
-
 export interface GuardSetupInProcessOptions {
   tracker?: StepTracker;
   /**
-   * The transport the ONE-SHOT calls run on: the one the dashboard server
-   * built from the asking workspace's stored provider config, or the
-   * operator's Claude Code. Credentials travel with the run, never through a
-   * process-wide default, and the run has no other way to reach a model.
-   */
-  transport: LlmTransport;
-  /**
-   * The mode an explicit `transport`/`driver` runs in, which the run record's
+   * The mode an explicit `driver` runs in, which the run record's
    * attribution states. Unset, the run is on this process's Claude Code.
    */
   transportMode?: LlmTransportMode;
@@ -162,7 +137,7 @@ export interface GuardSetupInProcessOptions {
   /** Asked only when a refresh would REPLACE an existing `api.seed`; see the engine. */
   confirmSeedReplace?: () => Promise<boolean>;
   signal?: AbortSignal;
-  // --- test seams (production spawns the transport / builds the sessions) ---
+  // --- test seams (production builds the sessions) ---
   recipeRunner?: RecipeRunner;
   interfaces?: GuardSetupInterfaceProvider;
   /** Test seam for the recipe-repair session. */
@@ -189,20 +164,6 @@ export interface GuardSetupInProcessResult {
   sessionsRunDirs: string[];
 }
 
-/**
- * STEP 0 — a usable LLM provider must exist. Cheap and call-free: the
- * no-provider sentinel is a hard refusal. A real transport is taken at its
- * word — the dashboard server probed the workspace's provider (or the
- * operator's Claude Code login) before it built the run, so there is nothing
- * left to check here.
- *
- * It runs FIRST because both of setup's LLM stages happen after real work (a build,
- * a boot, an analysis pass), and discovering "no provider" then would waste all of it.
- */
-export function assertLlmProviderConfigured(transport: LlmTransport): void {
-  if (transport === noProviderTransport) throw new NoLlmProviderError(NO_LLM_PROVIDER_MESSAGE);
-}
-
 /** The pre-flight estimate the gate prices the run with. */
 export async function estimateGuardSetupCost(
   repoRoot: string,
@@ -217,15 +178,6 @@ export async function estimateGuardSetupCost(
 ): Promise<LlmEstimate> {
   return estimateGuardSetup(repoRoot, await getModelPrices(), opts);
 }
-
-/**
- * The ONE-SHOT stage setup can still spend on: the legacy recipe fallback,
- * which fires only on runs without a session driver (an injected `recipeRunner`
- * test seam). The sessions' spend is
- * accounted separately — the loop's `BudgetSpent` has no input/output token
- * split, so it rides `usage.sessions` instead of being forced into these fields.
- */
-const SETUP_USAGE_STAGES = ['guard.recipe'] as const;
 
 /**
  * Which session kinds do each setup step's work — stamped onto the run
@@ -247,10 +199,6 @@ export async function guardSetupInProcess(
   options: GuardSetupInProcessOptions,
 ): Promise<GuardSetupInProcessResult> {
   const { tracker } = options;
-  // Step 0, before the estimate: never ask to spend, then fail on a missing
-  // provider.
-  const { transport } = options;
-  assertLlmProviderConfigured(transport);
   const mode: LlmTransportMode = options.transportMode ?? 'claude-code';
 
   if (options.onLlmEstimate) {
@@ -266,14 +214,9 @@ export async function guardSetupInProcess(
     }
   }
 
-  resetStageUsage();
-  const llmLog = createLlmCallLogger(repoRoot, 'guard-setup');
-  if (llmLog) setLlmCallSink(llmLog.sink);
-  const startedAt = Date.now();
-
   // THE SESSION SEAMS. Production wires the real agent sessions; a run with an
-  // injected one-shot recipe runner (the test seam) keeps the legacy path those
-  // tests drive. The context is LAZY by default — a run whose deterministic
+  // injected recipe runner (the test seam) needs no context at all, which is
+  // the only way there is none. The context is LAZY by default — a run whose deterministic
   // paths settle everything never creates a run record and never builds a
   // driver — until a hosted caller asks for an eager one, which has a watcher
   // from the first second and must be visible even when it spends nothing.
@@ -296,6 +239,18 @@ export async function guardSetupInProcess(
           transportMode: mode,
         })
       : createGuardSetupSessionContext(sessionContextOptions);
+  // The recipe proposal — the one LEAF judgement setup makes, a one-turn
+  // session on setup's own run record. A test that injects its own runner
+  // never reaches this, which is also the only way there is no context.
+  const leafRecipe = createRecipeProposeSession({
+    acquire: async () => {
+      if (!sessionContext) throw new Error('guard setup has no session driver to propose a recipe on');
+      const acquired = await sessionContext.acquire();
+      return { driver: acquired.driver, persistence: acquired.persistence };
+    },
+    onSpend: (spent) => sessionContext?.addSpend(1, spent),
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
   const repair =
     options.repair ??
     (sessionContext
@@ -328,7 +283,6 @@ export async function guardSetupInProcess(
               },
               driver: acquired.driver,
               transportMode: mode,
-              transport,
               ...(options.signal ? { signal: options.signal } : {}),
               onStatus: (message) => tracker?.detail('interfaces', message),
             });
@@ -389,13 +343,7 @@ export async function guardSetupInProcess(
     const result: GuardSetupResult = await runGuardSetup({
       repoRoot,
       ...(options.composeKey ? { composeKey: options.composeKey } : {}),
-      recipeRunner:
-        options.recipeRunner ??
-        spawnRecipeRunner({
-          transport,
-          model: resolveModel('guard.recipe'),
-          fallbackModel: resolveFallbackModel() ?? undefined,
-        }),
+      recipeRunner: options.recipeRunner ?? leafRecipe.runner,
       interfaces:
         options.interfaces ??
         (async () => {
@@ -460,46 +408,18 @@ export async function guardSetupInProcess(
   } finally {
     // Close the sessions-store run, when any session actually ran under it.
     await sessionContext?.finish(options.signal?.aborted === true, closingFailure ?? undefined);
-    if (llmLog) {
-      setLlmCallSink(undefined);
-      llmLog.finish(Date.now() - startedAt);
-    }
   }
 }
 
 /**
- * The run's spend: the one-shot stage usage (the legacy recipe fallback) plus
- * the agent-session totals the context accumulated. `costUsd` is the WHOLE
- * run; the sessions' turn/token detail rides its own block because the loop's
- * `BudgetSpent` has no input/output split to fold into the one-shot fields.
- * Omitted entirely when nothing was spent.
+ * The run's spend — every LLM call it made is a turn of one of its sessions,
+ * which is what the context accumulated. Omitted entirely when nothing ran.
  */
 function withUsage(
   sessions: { count: number; turns: number; tokens: number; costUsd: number } | null,
 ): Pick<GuardSetupReport, 'usage'> {
-  const usage = getStageUsage();
-  let calls = 0;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let costUsd = 0;
-  for (const stage of SETUP_USAGE_STAGES) {
-    const u = usage.get(stage);
-    if (!u) continue;
-    calls += u.calls;
-    inputTokens += u.inputTokens;
-    outputTokens += u.outputTokens;
-    costUsd += u.costUsd;
-  }
-  if (calls === 0 && (sessions === null || sessions.count === 0)) return {};
-  return {
-    usage: {
-      calls,
-      inputTokens,
-      outputTokens,
-      costUsd: costUsd + (sessions?.costUsd ?? 0),
-      ...(sessions && sessions.count > 0 ? { sessions } : {}),
-    },
-  };
+  if (sessions === null || sessions.count === 0) return {};
+  return { usage: { costUsd: sessions.costUsd, sessions } };
 }
 
 function firstLine(reason: string | undefined): string | undefined {

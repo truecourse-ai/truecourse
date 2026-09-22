@@ -171,7 +171,6 @@ export function createRepoGuardSetupTask(
             try {
               ({ report } = await runSetup(tree.dir, {
                 driver: llm.driver(),
-                transport: llm.transport(),
                 transportMode: llm.mode,
                 sessionsKey: repoFullName,
                 // The docker world the recipe's compose project names. Two

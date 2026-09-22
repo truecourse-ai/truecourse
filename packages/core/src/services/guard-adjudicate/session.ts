@@ -18,7 +18,6 @@ import { LEGACY_ADJUDICATE_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerpri
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { SessionBudget, SessionDef } from '@truecourse/agent-loop';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import { extractSectionTexts, nodeRefContext } from '@truecourse/guard-runner';
 import { GuardAdjudicationSchema, type GuardAdjudication, type GuardScenario } from '@truecourse/shared';
 import { promptFingerprint } from '../agent/session-cache.js';
@@ -281,8 +280,6 @@ export interface AdjudicationSessionInput {
   item: AdjudicationItem;
   exec: AdjudicationExecution;
   state: AdjudicationSessionState;
-  /** The run's transport, for the tools that make a one-shot call of their own. */
-  transport: LlmTransport;
 }
 
 export function adjudicationSessionDef(input: AdjudicationSessionInput): SessionDef<GuardAdjudication> {

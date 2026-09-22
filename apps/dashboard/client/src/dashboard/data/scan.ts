@@ -6,20 +6,25 @@
  * is done. Progress arrives on the run stream, so this promise is only ever
  * about whether the run started.
  *
- * Three refusals matter and each is its own outcome, because each has its own
- * remedy: the workspace has no provider (fill in Settings), the provider failed
- * its pre-flight probe (the provider's own words, which the user must read),
- * and the repository is already working (wait). The first two are coded in the
- * body's `error` field with the human sentence in `message` — so this reads the
- * body itself rather than going through `fetchApi`, whose one-string `ApiError`
- * would keep the code and drop the sentence.
+ * Four refusals matter and each is its own outcome, because each has its own
+ * remedy: the workspace has not said what its product is (Settings › Workspace,
+ * and the scan has nothing to attribute against without it), it has no provider
+ * (fill in Settings), the provider failed its pre-flight probe (the provider's
+ * own words, which the user must read), and the repository is already working
+ * (wait). The first three are coded in the body's `error` field with the human
+ * sentence in `message` — so this reads the body itself rather than going
+ * through `fetchApi`, whose one-string `ApiError` would keep the code and drop
+ * the sentence.
  */
 
+import { WORKSPACE_DESCRIPTION_REQUIRED } from '@truecourse/shared';
 import { getServerUrl } from '@/lib/server-url';
 
 export type RunStart =
   | { kind: 'started' }
   | { kind: 'not-configured'; message: string }
+  /** The workspace has not said what its product is; the scan has no subject. */
+  | { kind: 'no-description'; message: string }
   | { kind: 'probe-failed'; message: string }
   | { kind: 'busy'; message: string }
   | { kind: 'failed'; message: string };
@@ -48,6 +53,7 @@ export async function startRun(repoId: string, path: string, payload?: unknown):
   const message = detail || `The server answered ${res.status}.`;
   // The code, not the status: an unconfigured workspace and a busy repository
   // both answer 409.
+  if (code === WORKSPACE_DESCRIPTION_REQUIRED) return { kind: 'no-description', message };
   if (code === 'llm-not-configured') return { kind: 'not-configured', message };
   if (code === 'llm-probe-failed') return { kind: 'probe-failed', message };
   if (res.status === 409) return { kind: 'busy', message };
@@ -83,6 +89,7 @@ export async function startContextScan(): Promise<RunStart> {
   const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
   const code = body?.error ?? '';
   const message = body?.message ?? code ?? `The server answered ${res.status}.`;
+  if (code === WORKSPACE_DESCRIPTION_REQUIRED) return { kind: 'no-description', message };
   if (code === 'llm-not-configured') return { kind: 'not-configured', message };
   if (code === 'llm-probe-failed') return { kind: 'probe-failed', message };
   if (res.status === 409) return { kind: 'busy', message };

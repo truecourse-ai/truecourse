@@ -25,7 +25,6 @@ import {
   docBody,
   identityBlock,
   identityFingerprint,
-  legacyIdentityFingerprint,
   type DocCandidate,
   type RepoIdentity,
 } from '@truecourse/spec-consolidator'
@@ -208,21 +207,25 @@ export function curateDocCacheKey(
 }
 
 /**
- * {@link curateDocCacheKey} under the formulas that came before it, newest
- * first: the workspace identity while it still named the connected
- * repositories, and that same identity while the prompt was in the key. A miss
- * reads them in turn. Curate-doc's cache IS the scan's skip, so without this a
- * changed key re-curates every document in every workspace once.
+ * {@link curateDocCacheKey} under the formula that came before it: the same
+ * identity while the prompt's fingerprint, not the stage version, was in the
+ * key. A miss reads it. Curate-doc's cache IS the scan's skip, so without this
+ * a changed key re-curates every document once. A workspace identity has no
+ * older form to fall back to: its subject moved from the connected repositories
+ * to the sentence the workspace states, and its documents re-judge once.
  * Delete with the legacy hash.
  */
 export function curateDocLegacyCacheKeys(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
 ): string[] {
-  const listed = legacyIdentityFingerprint(input.identity)
   return [
-    curateDocKeyOver(`curate-doc-v${CURATE_DOC_STAGE_VERSION}`, listed, input.doc, extraParts),
-    curateDocKeyOver(LEGACY_CURATE_DOC_PROMPT_FINGERPRINT, listed, input.doc, extraParts),
+    curateDocKeyOver(
+      LEGACY_CURATE_DOC_PROMPT_FINGERPRINT,
+      identityFingerprint(input.identity),
+      input.doc,
+      extraParts,
+    ),
   ]
 }
 

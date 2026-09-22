@@ -259,6 +259,46 @@ describe('api session driver', () => {
     expect(JSON.stringify(wire)).not.toContain('verdict');
   });
 
+  it('shows the model an IMAGE the session was given, text first', async () => {
+    const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'seen' })] }]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const pixels = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64');
+    const { handle, events } = runSession(createApiSessionDriver(cfg), {
+      initialMessages: ['look at this'],
+      images: [{ mediaType: 'image/png', data: pixels }],
+    });
+    expect(await handle.done).toMatchObject({ kind: 'outcome' });
+
+    const first = (scripted.calls[0].prompt as Array<{ role: string; content: unknown }>).find(
+      (m) => m.role === 'user',
+    )!;
+    const parts = first.content as Array<Record<string, unknown>>;
+    // Text FIRST — the instruction has to be in context before the pixels.
+    // (The SDK normalizes an image part to a `file` part on the wire.)
+    expect(parts.map((part) => part.type)).toEqual(['text', 'file']);
+    expect(parts[0].text).toBe('look at this');
+    expect(parts[1]).toMatchObject({ mediaType: 'image/png' });
+    // The TRANSCRIPT records what was shown, never the bytes.
+    const said = events.find((e) => e.type === 'user-message')!;
+    expect(said).toMatchObject({
+      content: 'look at this',
+      images: [{ mediaType: 'image/png', bytes: 4 }],
+    });
+    expect(JSON.stringify(events)).not.toContain(pixels);
+  });
+
+  it('leaves a text-only session on the plain string it always sent', async () => {
+    const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'ok' })] }]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle, events } = runSession(createApiSessionDriver(cfg));
+    expect(await handle.done).toMatchObject({ kind: 'outcome' });
+    const first = (scripted.calls[0].prompt as Array<{ role: string; content: unknown }>).find(
+      (m) => m.role === 'user',
+    )!;
+    expect(first.content).toEqual([{ type: 'text', text: 'go' }]);
+    expect(events.find((e) => e.type === 'user-message')).not.toHaveProperty('images');
+  });
+
   it('declares turn-boundary steering and a tool-based outcome', () => {
     buildModelMock.mockReturnValue(scriptedModel([]).model);
     const driver = createApiSessionDriver(cfg);

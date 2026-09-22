@@ -8,6 +8,7 @@
 import type { z } from 'zod';
 import type { BudgetSpent, SessionFailure, UserInputQuestion, SessionEvent } from './session-events.js';
 import type { KnownDisplayBlock, ToolDisplay } from './session-presentation.js';
+import type { SessionImage } from './session-driver.js';
 
 /** What a tool hands back to the model. An error result is an observation
  *  the session ingests and revises on — never a session failure. */
@@ -34,6 +35,8 @@ export interface ToolContext {
   dispatchChild<TOutcome>(
     def: SessionDef<TOutcome>,
     initialMessages: readonly string[],
+    /** Images the child must LOOK at, shown with its first message. */
+    images?: readonly SessionImage[],
   ): Promise<SessionOutcome<TOutcome>>;
 }
 
@@ -95,8 +98,11 @@ export interface SessionDef<TOutcome = unknown> {
   kind: string;
   systemPrompt: string;
   tools: readonly SessionTool[];
-  /** A session cannot end without an outcome this schema accepts. */
-  outcomeSchema: z.ZodType<TOutcome>;
+  /** A session cannot end without an outcome this schema accepts. Typed on
+   *  what it PRODUCES, not on what it takes: a schema that coerces or fills
+   *  defaults reads a shape of its own, and the shell only ever hands it the
+   *  model's raw value. */
+  outcomeSchema: z.ZodType<TOutcome, z.ZodTypeDef, unknown>;
   /** Optional compact wire representation; the shell still validates the resolved outcome. */
   outcomeInputSchema?: z.ZodTypeAny;
   resolveOutcome?(value: unknown, events: readonly SessionEvent[]): unknown;

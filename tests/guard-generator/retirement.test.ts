@@ -23,6 +23,7 @@ import {
   flowInterfaceFingerprintBag,
   flowSettleVerdict,
   type FlowGenerationInputParts,
+  MATCH_SESSION_KIND,
   type GenerateGuardsOptions,
 } from '@truecourse/guard-generator'
 import { movedNamedInputs } from '@truecourse/shared'
@@ -278,16 +279,22 @@ describe('generateGuards — a match wipeout reports the SESSION tallies too', (
     const seams = flowStageSeams(r)
 
     // One of two docs lost (non-systemic, so extraction fails open) and one of
-    // two areas lost the same way; matching then loses every call on the REAL
-    // transport, which is what puts it in the audit's tally.
+    // two areas lost the same way; matching then loses every SESSION, which is
+    // what puts its kind in the run's tallies beside the pooled kinds'.
     const result = await generateGuards({
       repoRoot: r,
       interfaces: seams.interfaces,
       flowsEpicSession: seams.flowsEpicSession,
       flowWorkerSession: seams.flowWorkerSession,
-      transport: async () => {
-        throw new Error('the match transport died')
+      recipeRunner: seams.recipeRunner,
+      claimDiffRunner: seams.claimDiffRunner,
+      worldClassifyRunner: seams.worldClassifyRunner,
+      matchRunner: async () => {
+        throw new Error('the match session died')
       },
+      leafSummaries: () => [
+        sessionSummary(MATCH_SESSION_KIND, { ran: 1, failed: 1, firstError: 'the match session died' }),
+      ],
       extractSession: async (input) => {
         const inner = await extractSessionBy({ background: { untestable: 'design history' } })(input)
         return {
@@ -305,11 +312,11 @@ describe('generateGuards — a match wipeout reports the SESSION tallies too', (
     })
 
     expect(result.status).toBe('llm-failed')
-    expect(result.reason).toMatch(/guard\.match/)
+    expect(result.reason).toContain(MATCH_SESSION_KIND)
     const byStage = new Map((result.llmFailures ?? []).map((f) => [f.stage, f]))
-    // Both halves of the accounting: the transport audit's stage AND the two
-    // session kinds it can never see.
-    expect(byStage.get('guard.match')).toMatchObject({ attempts: 1, failures: 1 })
+    // Every kind's losses ride the abort: the leaf that died and the two
+    // pooled kinds beside it.
+    expect(byStage.get(MATCH_SESSION_KIND)).toMatchObject({ attempts: 1, failures: 1 })
     expect(byStage.get(EXTRACT_KIND)).toMatchObject({ attempts: 2, failures: 1 })
     expect(byStage.get(FLOWS_KIND)).toMatchObject({ attempts: 2, failures: 1 })
     // Nothing was written.

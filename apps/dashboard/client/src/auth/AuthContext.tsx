@@ -21,6 +21,7 @@ import {
 } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@truecourse/shared';
+import { PRODUCT_DESCRIPTION_MAX_CHARS, normalizeWorkspaceDescription } from '@truecourse/shared';
 import { takeRememberedInvite } from '@/auth/invite-resume';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { SESSION_REFUSED_EVENT } from '@/lib/api';
@@ -162,19 +163,26 @@ function FullScreen({ children }: { children: ReactNode }) {
 }
 
 /**
- * Onboarding for a signed-in user with no workspace yet. Names + creates a
- * WorkOS org (server re-mints the session into it), then reloads so the auth
- * gate re-probes `/me` and lets them into the dashboard.
+ * Onboarding for a signed-in user with no workspace yet. Names + DESCRIBES the
+ * workspace and creates a WorkOS org (server re-mints the session into it),
+ * then reloads so the auth gate re-probes `/me` and lets them into the
+ * dashboard.
+ *
+ * The description is asked for here because it is what every document the
+ * workspace ever holds is attributed against, and nothing can be connected
+ * until it is set — a workspace created without one would begin at a refusal.
  */
 function CreateWorkspace() {
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const described = normalizeWorkspaceDescription(description) !== null;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const trimmed = name.trim();
-    if (!trimmed || busy) return;
+    if (!trimmed || !described || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -182,7 +190,7 @@ function CreateWorkspace() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: trimmed }),
+        body: JSON.stringify({ name: trimmed, description }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -203,7 +211,7 @@ function CreateWorkspace() {
         <div className="space-y-1">
           <h1 className="text-lg font-semibold">Create your workspace</h1>
           <p className="text-xs text-muted-foreground">
-            Name your TrueCourse workspace to get started.
+            Name your TrueCourse workspace and say what it builds.
           </p>
         </div>
         <input
@@ -212,12 +220,26 @@ function CreateWorkspace() {
           maxLength={80}
           onChange={(e) => setName(e.target.value)}
           placeholder="Acme Inc."
+          aria-label="Workspace name"
           className="w-full rounded-md bg-background px-3 py-2 text-sm text-foreground ring-1 ring-border focus:outline-none focus:ring-2 focus:ring-primary"
         />
+        <textarea
+          rows={3}
+          value={description}
+          maxLength={PRODUCT_DESCRIPTION_MAX_CHARS}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="What your product is, in one sentence."
+          aria-label="What this workspace's product is"
+          className="w-full rounded-md bg-background px-3 py-2 text-sm text-foreground ring-1 ring-border focus:outline-none focus:ring-2 focus:ring-primary"
+        />
+        <p className="text-left text-[11px] text-muted-foreground">
+          Documentation is kept or dropped by whether it describes this product, so this sentence is
+          what every document is judged against. You can change it later in Settings.
+        </p>
         {error && <p className="text-xs text-red-400">{error}</p>}
         <button
           type="submit"
-          disabled={busy || !name.trim()}
+          disabled={busy || !name.trim() || !described}
           className="inline-flex w-full items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create workspace'}

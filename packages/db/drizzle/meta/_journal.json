@@ -204,6 +204,13 @@
       "when": 1789956896572,
       "tag": "0028_usage_and_credits",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1790026458283,
+      "tag": "0029_workspace_profiles",
+      "breakpoints": true
     }
   ]
 }

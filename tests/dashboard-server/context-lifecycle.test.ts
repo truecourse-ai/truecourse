@@ -31,6 +31,10 @@ import {
 } from '../../apps/dashboard/server/src/services/context-lifecycle.service';
 import { setContextEventPublisher } from '../../apps/dashboard/server/src/services/context.service';
 import { memoryContextStore, type MemoryContextStore } from '../helpers/memory-context-store';
+import {
+  installDescribedWorkspaces,
+  resetWorkspaceProfiles,
+} from '../helpers/workspace-profile';
 import { MemoryInstallationStore, seedInstallation } from '../github-app/memory-store';
 
 const ORG = 'org_A';
@@ -62,6 +66,8 @@ beforeEach(async () => {
   Object.assign(process.env, APP_ENV);
   store = memoryContextStore();
   setContextStore(store);
+  // A repository connects into a workspace that has said what its product is.
+  installDescribedWorkspaces();
   setContextEventPublisher(() => {});
   gate = new MemoryInstallationStore();
   syncs = [];
@@ -69,6 +75,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  resetWorkspaceProfiles();
   resetContextStore();
   setContextEventPublisher(null);
   for (const key of Object.keys(APP_ENV)) delete process.env[key];

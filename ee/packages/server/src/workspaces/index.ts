@@ -16,6 +16,11 @@ import { Router } from 'express';
 import type { ServerFeature, WorkspaceSessionTools } from '@truecourse/dashboard-server';
 import type { WorkspaceSummary, WorkspacesResponse } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
+import { saveWorkspaceProfile } from '@truecourse/core/lib/workspace-profile-store';
+import {
+  BAD_WORKSPACE_DESCRIPTION,
+  normalizeWorkspaceDescription,
+} from '@truecourse/shared';
 
 /** A workspace name as it may be stored, or null when it is not one. */
 function workspaceNameOf(body: unknown): string | null {
@@ -59,10 +64,22 @@ export function createWorkspacesRouter(tools: WorkspaceSessionTools): Router {
   // Create a workspace and go into it. Unlike onboarding's `/api/auth/workspace`,
   // this ALWAYS creates: it is reached from the switcher by someone who already
   // has one and wants another.
+  //
+  // It is named AND DESCRIBED here. The description is what every document the
+  // workspace ever holds is attributed against, and a workspace without one can
+  // connect nothing, so it is collected where the workspace begins rather than
+  // asked for later at the first refusal.
   router.post('/', async (req, res) => {
     const name = workspaceNameOf(req.body);
     if (!name) {
       res.status(400).json({ error: BAD_WORKSPACE_NAME });
+      return;
+    }
+    const description = normalizeWorkspaceDescription(
+      (req.body as { description?: unknown })?.description,
+    );
+    if (!description) {
+      res.status(400).json({ error: BAD_WORKSPACE_DESCRIPTION });
       return;
     }
     try {
@@ -73,6 +90,7 @@ export function createWorkspacesRouter(tools: WorkspaceSessionTools): Router {
         organizationId: org.id,
         userId: session.user.id,
       });
+      await saveWorkspaceProfile(org.id, description);
       const minted = await tools.mintSessionInto(session.sealed, org.id);
       // The name is the one just typed, so nothing looks it up.
       tools.rememberOrganizationName(org.id, org.name);

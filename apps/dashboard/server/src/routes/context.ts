@@ -84,6 +84,10 @@ import {
   readGuardCoverageSources,
 } from '@truecourse/core/commands/guard-read';
 import {
+  requireWorkspaceDescription,
+  WorkspaceDescriptionRequiredError,
+} from '@truecourse/core/lib/workspace-profile-store';
+import {
   CreditsProviderUnavailableError,
   LlmNotConfiguredError,
   LlmProbeFailedError,
@@ -155,6 +159,12 @@ function statusOf(err: unknown): number | null {
 }
 
 function respond(res: Response, next: NextFunction, err: unknown): void {
+  // A workspace that has not said what its product is refuses with a CODE, not
+  // a sentence: the client reads it and offers the page where it is set.
+  if (err instanceof WorkspaceDescriptionRequiredError) {
+    res.status(err.statusCode).json({ error: err.code, message: err.message });
+    return;
+  }
   const status = statusOf(err);
   if (status === null) {
     next(err);
@@ -553,7 +563,11 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/scan', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      // The balance first: proving a provider that cannot be paid for is work
+      // THE SUBJECT FIRST: the scan attributes every document against what the
+      // workspace says its product is, so with no sentence there is nothing to
+      // scan against — and this is the backstop for every other entry point.
+      await requireWorkspaceDescription(org);
+      // Then the balance: proving a provider that cannot be paid for is work
       // nobody asked for, and the refusal is about the money either way.
       if (await refusedWithoutCredits(req, res)) return;
       try {
@@ -827,6 +841,9 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/sources', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
+      // Nothing enters a workspace that has not said what its product is: the
+      // documents this source yields would be attributed against nothing.
+      await requireWorkspaceDescription(org);
       const body = (req.body ?? {}) as {
         kind?: unknown;
         config?: unknown;

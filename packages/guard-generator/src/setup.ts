@@ -153,7 +153,7 @@ import {
   type RequiredResource,
 } from './seed-evidence.js'
 import type { InterfaceProvider } from './generate.js'
-import type { RecipeRunner } from './runners.js'
+import type { RecipeRunner } from './leaf-seams.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -262,7 +262,7 @@ export interface GuardSetupOptions {
    * The recipe-repair session (step 9), in both situations that reach it: the
    * failure path of discovery for a repo with no recipe, and the SCOPED repair
    * of a standing one the needs comparison found wanting. Absent ⇒ discovery
-   * falls back to the one-shot `recipeRunner`, and an unprovided need is
+   * falls back to the one-turn `recipeRunner` proposal, and an unprovided need is
    * reported and left standing rather than repaired.
    */
   repair?: RecipeRepairFn

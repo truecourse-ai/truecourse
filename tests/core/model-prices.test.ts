@@ -161,7 +161,7 @@ describe('priceForModel', () => {
  * model that deployment serves, and only its own model is mapped.
  */
 describe('pricingFor', () => {
-  const TRANSPORT = '../../packages/core/src/services/llm/install-transport.js';
+  const TRANSPORT = '../../packages/core/src/services/llm/provider.js';
   const USAGE = { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheCreateTokens: 0 };
   const DEPLOYMENTS = {
     data: [
@@ -177,7 +177,7 @@ describe('pricingFor', () => {
   async function hookFor(cfg: { model: string; priceModel?: string }) {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(DEPLOYMENTS)));
     vi.resetModules();
-    const { pricingFor }: typeof import('../../packages/core/src/services/llm/install-transport.js') =
+    const { pricingFor }: typeof import('../../packages/core/src/services/llm/provider.js') =
       await import(TRANSPORT);
     const known = pricingFor({ model: 'gpt-5.6-sol' });
     known('gpt-5.6-sol', USAGE);

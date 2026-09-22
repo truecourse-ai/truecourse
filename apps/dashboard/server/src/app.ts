@@ -15,6 +15,7 @@ import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions
 import capabilitiesRouter from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
 import { createUsageRouter } from './routes/usage.js';
+import { createWorkspaceProfileRouter } from './routes/workspace-profile.js';
 import { createCreditsRouter, createOperatorCreditsRouter } from './routes/credits.js';
 import { isLocalMode } from './mode.js';
 import { createAuthGate } from './middleware/auth.js';
@@ -197,6 +198,11 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // invitations standing against it. Scoped to the session's organization, so
   // it needs the gate above it and nothing else.
   if (opts.workspaceRouter) app.use('/api/workspace', opts.workspaceRouter);
+
+  // What the workspace says its product is. Every mode has it: a local server
+  // has no Create workspace dialog to state it at, and nothing connects into a
+  // workspace that has not.
+  app.use('/api/workspace', createWorkspaceProfileRouter());
 
   // Folders on this machine, as repositories (local mode only).
   if (opts.localRouter) app.use('/api/local', opts.localRouter);

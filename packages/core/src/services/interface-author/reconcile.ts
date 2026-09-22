@@ -55,7 +55,7 @@ import {
   type InterfaceState,
   type InterfacesFile,
 } from '@truecourse/shared'
-import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
+import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
   mergeInterfaceCatalogs,
   readAuthoredInterfaceCatalog,
@@ -64,8 +64,8 @@ import {
 import { AUTHORED_SURFACE } from './draft.js'
 import { writeAuthoredCatalog } from './write.js'
 
-/** The pipeline stage this pass bills under — one call, whatever the app size. */
-export const STATE_RECONCILE_STAGE = 'guard.stateReconcile'
+/** The session kind this pass runs as — one session, whatever the app size. */
+export const STATE_RECONCILE_SESSION_KIND = 'guard-setup.state-reconcile'
 
 /**
  * One collapse: the id that survives, the ids that fold into it, and (optionally)
@@ -87,18 +87,12 @@ export const StateReconcileResponseSchema = z
   .object({ groups: z.array(StateMergeSchema) })
   .strict()
 
-/** The response contract, rendered once from the Zod source the reply is parsed with. */
-export const STATE_RECONCILE_RESPONSE_SCHEMA = jsonSchemaHint(StateReconcileResponseSchema)
-
 /**
- * The one-shot model call this pass needs: a prompt and the JSON schema its
- * answer must satisfy in, the PARSED JSON value out. The caller owns the
- * transport, the model and the parse — this package owns the question.
+ * The one ask this pass needs: a prompt in, the model's structured answer out.
+ * The caller owns how it is asked — `@truecourse/core` runs it as a one-turn
+ * session — and this package owns the question and what it will accept.
  */
-export type ReconcileComplete = (
-  prompt: { system: string; user: string },
-  schema: string,
-) => Promise<unknown>
+export type ReconcileComplete = (prompt: { system: string; user: string }) => Promise<unknown>
 
 export interface ReconcileStatesInput {
   /** The derived snapshot — read-only here; the derivation mints no states. */
@@ -159,7 +153,7 @@ export async function reconcileStates(input: ReconcileStatesInput): Promise<Stat
     const gone = absorbed(merges)
     const survivors = registry.filter((state) => !gone.has(state.id))
     try {
-      const raw = await input.complete(reconcilePrompt(survivors), STATE_RECONCILE_RESPONSE_SCHEMA)
+      const raw = await input.complete(reconcilePrompt(survivors))
       const parsed = StateReconcileResponseSchema.safeParse(raw)
       if (!parsed.success) {
         problems.push(`the reconciliation reply did not match its schema: ${describe(parsed.error)}`)
@@ -173,7 +167,7 @@ export async function reconcileStates(input: ReconcileStatesInput): Promise<Stat
       // found: this is a tidying step, and losing it costs a re-run, not a run.
       // An empty balance is not that: it stops the run rather than tidying it.
       if (isCreditsExhausted(error)) throw error
-      problems.push(`the reconciliation call failed: ${error instanceof Error ? error.message : String(error)}`)
+      problems.push(`the reconciliation session failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 

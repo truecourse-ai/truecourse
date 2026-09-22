@@ -10,9 +10,15 @@
 
 import express, { type Express } from 'express';
 import request from 'supertest';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createWorkspaceSessionTools } from '../../apps/dashboard/server/src/auth/workos-auth';
 import { createWorkspacesRouter } from '../../ee/packages/server/src/workspaces/index';
+import {
+  TEST_WORKSPACE_DESCRIPTION,
+  installWorkspaceProfiles,
+  resetWorkspaceProfiles,
+  type MemoryWorkspaceProfiles,
+} from '../helpers/workspace-profile';
 
 const cfg = {
   apiKey: 'sk_test',
@@ -193,15 +199,34 @@ describe('GET /api/auth/workspaces', () => {
 });
 
 describe('POST /api/auth/workspaces', () => {
+  let profiles: MemoryWorkspaceProfiles;
+
+  beforeEach(() => {
+    // A workspace is named AND DESCRIBED here: the description is what every
+    // document it holds is attributed against, and nothing connects without one.
+    profiles = installWorkspaceProfiles([]);
+  });
+
+  afterEach(() => {
+    resetWorkspaceProfiles();
+  });
+
   it('always creates, even for a user already in one, and mints the session into it', async () => {
     const m = makeWorkos({ existingOrg: 'org_ws_a', memberships: [WS_A] });
     const res = await request(makeApp(m.workos))
       .post('/api/auth/workspaces')
       .set('Cookie', 'tc_session=sealed')
-      .send({ name: '  Second  ' })
+      .send({ name: '  Second  ', description: TEST_WORKSPACE_DESCRIPTION })
       .expect(200);
 
     expect(m.calls.createOrg).toEqual([{ name: 'Second' }]); // trimmed
+    // …and what it says it builds is stored with it.
+    expect(profiles.all()).toEqual([
+      expect.objectContaining({
+        workspaceOrgId: 'org_new',
+        description: TEST_WORKSPACE_DESCRIPTION,
+      }),
+    ]);
     expect(m.calls.membership).toEqual([{ organizationId: 'org_new', userId: 'user_1' }]);
     expect(m.calls.refresh).toEqual([{ organizationId: 'org_new' }]);
     expect(res.body.user.organizationId).toBe('org_new');
@@ -216,16 +241,34 @@ describe('POST /api/auth/workspaces', () => {
       const res = await request(app)
         .post('/api/auth/workspaces')
         .set('Cookie', 'tc_session=sealed')
-        .send({ name })
+        .send({ name, description: TEST_WORKSPACE_DESCRIPTION })
         .expect(400);
       expect(res.body.error).toBe('A workspace name of 1 to 80 characters is required.');
     }
     expect(m.calls.createOrg).toEqual([]);
   });
 
+  it('rejects a workspace that says nothing about its product, without asking WorkOS', async () => {
+    const m = makeWorkos({ existingOrg: 'org_ws_a' });
+    const app = makeApp(m.workos);
+    for (const description of [undefined, '', '   ', 'too short', 'x'.repeat(401)]) {
+      const res = await request(app)
+        .post('/api/auth/workspaces')
+        .set('Cookie', 'tc_session=sealed')
+        .send({ name: 'Second', ...(description === undefined ? {} : { description }) })
+        .expect(400);
+      expect(res.body.error).toMatch(/what this workspace's product is/i);
+    }
+    expect(m.calls.createOrg).toEqual([]);
+    expect(profiles.all()).toEqual([]);
+  });
+
   it('returns 401 without a session cookie', async () => {
     const m = makeWorkos();
-    await request(makeApp(m.workos)).post('/api/auth/workspaces').send({ name: 'Acme' }).expect(401);
+    await request(makeApp(m.workos))
+      .post('/api/auth/workspaces')
+      .send({ name: 'Acme', description: TEST_WORKSPACE_DESCRIPTION })
+      .expect(401);
     expect(m.calls.createOrg).toEqual([]);
   });
 });

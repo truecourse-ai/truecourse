@@ -129,6 +129,11 @@
       "types": "./dist/lib/credits-store.d.ts",
       "import": "./dist/lib/credits-store.js"
     },
+    "./lib/workspace-profile-store": {
+      "truecourse-source": "./src/lib/workspace-profile-store.ts",
+      "types": "./dist/lib/workspace-profile-store.d.ts",
+      "import": "./dist/lib/workspace-profile-store.js"
+    },
     "./lib/context-ref": {
       "truecourse-source": "./src/lib/context-ref.ts",
       "types": "./dist/lib/context-ref.d.ts",
@@ -239,10 +244,10 @@
       "types": "./dist/services/llm/session-driver.d.ts",
       "import": "./dist/services/llm/session-driver.js"
     },
-    "./services/llm/install-transport": {
-      "truecourse-source": "./src/services/llm/install-transport.ts",
-      "types": "./dist/services/llm/install-transport.d.ts",
-      "import": "./dist/services/llm/install-transport.js"
+    "./services/llm/provider": {
+      "truecourse-source": "./src/services/llm/provider.ts",
+      "types": "./dist/services/llm/provider.d.ts",
+      "import": "./dist/services/llm/provider.js"
     },
     "./services/llm/provider-config": {
       "truecourse-source": "./src/services/llm/provider-config.ts",

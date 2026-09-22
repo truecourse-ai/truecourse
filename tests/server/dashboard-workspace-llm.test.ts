@@ -1,9 +1,9 @@
 /**
  * Per-workspace LLM credentials, threaded per run.
  *
- * The dashboard server holds no process-wide transport: every step that spends
+ * The dashboard server holds no process-wide provider: every step that spends
  * — the Document scan, guard generate — loads the asking workspace's provider,
- * proves it answers, and hands the resulting driver/transport to the pipeline
+ * proves it answers, and hands the resulting session driver to the pipeline
  * call. What's asserted here is exactly that
  * handoff, plus the two ways a start can refuse: no provider configured (409,
  * machine-readable) and a provider that won't answer (502, with the failure on
@@ -48,7 +48,6 @@ import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
 import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
 import type { SessionDriver } from '@truecourse/agent-loop';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import type { LlmApiConfig } from '@truecourse/core/services/llm/provider-config';
 import { createTestApp, stubJobs, TEST_ORG, TEST_USER, type StubJobs } from '../helpers/test-app';
 import {
@@ -70,9 +69,8 @@ const WORKSPACE_CONFIG: LlmApiConfig = {
   apiKey: 'sk-workspace',
 };
 
-/** The driver/transport a start is expected to hand to the pipeline. */
+/** The driver a start is expected to hand to the pipeline. */
 const driver = { attribution: { provider: 'anthropic', model: 'claude-workspace' } } as unknown as SessionDriver;
-const transport = (async () => '{}') as LlmTransport;
 
 /** An in-memory stand-in for the Postgres config store (that has its own suite). */
 function configStore(configs: Record<string, LlmApiConfig>): WorkspaceLlmConfigStore {
@@ -109,7 +107,6 @@ beforeEach(async () => {
   setWorkspaceLlmBackend({
     probe: probe as never,
     driver: () => driver,
-    transport: () => transport,
   });
 });
 
@@ -220,14 +217,13 @@ describe('a configured, answering provider', () => {
         requestedBy: TEST_USER,
       },
     ]);
-    // The job body, not the route, runs the engine on the workspace transport.
+    // The job body, not the route, runs the engine on the workspace provider.
     expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
   });
 });
 
 describe("operator mode — the server's own Claude Code", () => {
   const claudeDriver = { attribution: { provider: 'claude-code', model: 'opus' } } as unknown as SessionDriver;
-  const claudeTransport = (async () => '{}') as LlmTransport;
   let claudeProbe: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -237,7 +233,7 @@ describe("operator mode — the server's own Claude Code", () => {
     setWorkspaceLlmConfigStore(configStore({}));
     setWorkspaceLlmBackend({
       probe: probe as never,
-      claudeCode: { probe: claudeProbe as never, driver: () => claudeDriver, transport: () => claudeTransport },
+      claudeCode: { probe: claudeProbe as never, driver: () => claudeDriver },
     });
   });
 

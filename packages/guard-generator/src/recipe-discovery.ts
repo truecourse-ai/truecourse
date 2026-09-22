@@ -76,7 +76,7 @@ import {
   movedFlowSlices,
   needsScopeRefusal,
 } from './recipe-scope.js'
-import type { RecipeRunner } from './runners.js'
+import type { RecipeRunner } from './leaf-seams.js'
 
 export const RECIPE_CACHE_NAME = 'guard/recipe'
 

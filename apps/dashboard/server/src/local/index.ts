@@ -22,6 +22,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
+import {
+  requireWorkspaceDescription,
+  WorkspaceDescriptionRequiredError,
+} from '@truecourse/core/lib/workspace-profile-store';
 import type {
   LocalRepositoriesResponse,
   LocalRepositorySummary,
@@ -168,6 +172,16 @@ export function createLocalConnection(deps: LocalConnectionDeps): LocalMount {
     const org = orgIdOf(req);
     if (!org) {
       res.status(401).json({ error: 'unauthenticated' });
+      return;
+    }
+    // Nothing connects into a workspace that has not said what its product is.
+    // Local mode has one workspace and no Create workspace dialog, so the
+    // sentence is set in Settings › Workspace, which is where this points.
+    try {
+      await requireWorkspaceDescription(org);
+    } catch (err) {
+      if (!(err instanceof WorkspaceDescriptionRequiredError)) throw err;
+      res.status(err.statusCode).json({ error: err.code, message: err.message });
       return;
     }
     const raw = (req.body as { path?: unknown })?.path;

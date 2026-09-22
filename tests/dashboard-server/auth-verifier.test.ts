@@ -13,6 +13,10 @@ import request from 'supertest';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { parseCookies } from '../../apps/dashboard/server/src/auth/cookies';
 import {
+  TEST_WORKSPACE_DESCRIPTION,
+  installWorkspaceProfiles,
+} from '../helpers/workspace-profile';
+import {
   clearMembershipCache,
   createAuthRouter,
   createSessionVerifier,
@@ -382,11 +386,13 @@ describe('POST /api/auth/workspace for a member removed from the workspace the t
       },
     };
     const app = appFor(workos, verifierFor(workos));
+    // Creating a workspace stores what it says its product is.
+    installWorkspaceProfiles([]);
 
     const res = await request(app)
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed')
-      .send({ name: 'Fresh start' })
+      .send({ name: 'Fresh start', description: TEST_WORKSPACE_DESCRIPTION })
       .expect(200);
 
     expect(created).toEqual(['Fresh start']);

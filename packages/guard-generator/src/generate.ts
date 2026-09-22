@@ -69,21 +69,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import pLimit from 'p-limit'
 import os from 'node:os'
-import {
-  auditTransport,
-  noProviderTransport,
-  formatStageFailure,
-  type LlmTransport,
-  type StageTransportTally,
-  type TransportAudit,
-} from '@truecourse/shared/llm'
-
-/** The transport a run's one-shot stages call through: the caller's. Without
- *  one, a stage that calls fails with the no-provider message — a run whose
- *  stages are all injected never notices. */
-function requireTransport(options: { transport?: LlmTransport }): LlmTransport {
-  return options.transport ?? noProviderTransport
-}
+import { type StageTransportTally } from '@truecourse/shared/llm'
 import {
   writeManifest,
   readManifest,
@@ -230,15 +216,13 @@ import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { WorldClassifySchema, rawScenarioSchemaFor, type RawGeneratedScenario } from './schemas.js'
 import { EMPTY_CLAIM_DIFF_GATE, docContentHash, rememberDocTexts, reuseCosmeticExtractions } from './claim-diff.js'
 import {
-  spawnRecipeRunner,
-  spawnMatchRunner,
-  spawnWorldClassifyRunner,
-  spawnClaimDiffRunner,
-  type RecipeRunner,
-  type MatchRunner,
-  type WorldClassifyRunner,
+  MATCH_SESSION_KIND,
   type ClaimDiffRunner,
-} from './runners.js'
+  type LeafSummaries,
+  type MatchRunner,
+  type RecipeRunner,
+  type WorldClassifyRunner,
+} from './leaf-seams.js'
 import {
   isSystemicSessionLoss,
   type DocClaims,
@@ -570,18 +554,6 @@ export interface GuardGenerateResult {
 }
 
 /**
- * The models of the two ONE-SHOT stages that remain (recipe discovery and
- * realization matching). Every session stage runs on the ONE configured session
- * model — there is no per-stage tier for them, by decision.
- */
-export interface GuardGenerateModels {
-  /** Realization matching (stage `guard.match`). */
-  match?: string
-  recipe?: string
-  fallback?: string
-}
-
-/**
  * Where the interface catalog comes from. Mapping needs the ANALYZER, which lives
  * above this package, so the caller injects it (core's `mapInterfaces`). Omitted, the
  * generator falls back to the last mapping's snapshot and then to an empty catalog:
@@ -630,8 +602,6 @@ export type InterfaceProvider = () => Promise<{
 
 export interface GenerateGuardsOptions {
   repoRoot: string
-  transport?: LlmTransport
-  models?: GuardGenerateModels
   /**
    * The execution seam birth validation runs through. Core passes
    * `getGuardExecutor()` (the in-process executor unless a host installed
@@ -702,16 +672,18 @@ export interface GenerateGuardsOptions {
    * (inside the tools), persist and the settle invariant are unchanged.
    */
   flowWorkerSession: FlowWorkerSessionSeam
-  // --- test seams for the two remaining one-shot stages (production injects
-  // none; an injected runner bypasses the transport) ---
-  recipeRunner?: RecipeRunner
-  matchRunner?: MatchRunner
-  /** Test seam for the batched world classification; production spawns it on
-   *  the shared transport (see {@link spawnWorldClassifyRunner}). */
-  worldClassifyRunner?: WorldClassifyRunner
-  /** Test seam for the claim-diff gate's verdict call; production spawns it on
-   *  the shared transport (see {@link spawnClaimDiffRunner}). */
-  claimDiffRunner?: ClaimDiffRunner
+  // --- the leaf seams: the one-question judgements, one turn each. Declared in
+  // `leaf-seams.ts`, injected by `@truecourse/core`; tests inject stubs. ---
+  /** Recipe discovery, when this run has to derive a recipe of its own. */
+  recipeRunner: RecipeRunner
+  /** Realization matching, per (flow, surface with interfaces). */
+  matchRunner: MatchRunner
+  /** The batched world classification over the changed flows. */
+  worldClassifyRunner: WorldClassifyRunner
+  /** The claim-diff gate's verdict on one edited section. */
+  claimDiffRunner: ClaimDiffRunner
+  /** What the leaf kinds did, read at every exit — see {@link LeafSummaries}. */
+  leafSummaries?: LeafSummaries
   /**
    * The claim-diff gate's access to the extract cache (prior-outcome lookup +
    * reuse). Absent, the gate is skipped and every edited document re-extracts
@@ -1099,16 +1071,25 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Inert until the first execution needs it; shut down before every exit of
   // the worker phase (the teardown channel backstops crashes).
   const sharedWorld = createGuardSharedWorld()
-  // ONE counting seam for the transport half of the run: the two remaining
-  // one-shot runners (recipe, match) are spawned on the WRAPPED transport, so
-  // attempts and failures are accounted centrally instead of at each fail-soft
-  // site. The session stages never touch the transport — their losses are
-  // tallied from the seam summaries (`sessionTallies` below). A test that
-  // injects a runner bypasses the transport entirely: that stage records no
-  // attempts, which is correct — the tally answers "did this stage reach the
-  // model", nothing else.
-  const audit = auditTransport(requireTransport(options))
-  const transport = audit.transport
+  // The LEAF kinds' losses, read fresh at every exit: one-turn sessions report
+  // the same per-kind summary the pooled kinds do, so every `llmFailures` list
+  // this run reports is the same two things added together — the leaves, and
+  // the pools (`sessionTallies` below).
+  const leafSummaries = (): readonly GuardSessionSummary[] => options.leafSummaries?.() ?? []
+  const leafTallies = (): StageTransportTally[] =>
+    leafSummaries()
+      .filter((s) => s.failed > 0)
+      .map((s) => ({
+        stage: s.kind,
+        attempts: s.ran,
+        failures: s.failed,
+        ...(s.firstError ? { firstError: s.firstError } : {}),
+      }))
+  /** The summary of `kind`, when the provider lost EVERY session of it. */
+  const leafLoss = (kind: string): GuardSessionSummary | null => {
+    const s = leafSummaries().find((x) => x.kind === kind)
+    return s && isSystemicSessionLoss(s) ? s : null
+  }
   /** File one line about a thing this run did, under the phase that did it. */
   const fact = (step: GuardGenerateFactStep, line: string): void => options.onFact?.(step, line)
   /** Say this step finished over items that never settled. */
@@ -1142,9 +1123,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       })
     }
   }
-  const recipeRunner =
-    options.recipeRunner ??
-    spawnRecipeRunner({ transport, model: options.models?.recipe, fallbackModel: options.models?.fallback })
+  const recipeRunner = options.recipeRunner
   // Interface mapping is memoized: the deterministic recipe proposer ranks its health
   // path over the SAME route surface stage 4 walks, so a repo with no recipe maps
   // its interfaces once, earlier — never twice.
@@ -1166,7 +1145,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   if (recipeResult.status === 'verify-failed') {
     // A failed proposal call already aborts the run loudly through this channel, so
     // the recipe stage needs no systemic check of its own; the tally rides along.
-    return emptyResult('recipe-failed', { reason: recipeResult.reason, llmFailures: audit.failures() })
+    return emptyResult('recipe-failed', { reason: recipeResult.reason, llmFailures: leafTallies() })
   }
   const recipe: Recipe = recipeResult.recipe
   const recipeFingerprint = recipeResult.fingerprint
@@ -1229,15 +1208,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
 
   const limit = pLimit(Math.max(1, options.concurrency ?? defaultConcurrency()))
-  const matchRunner =
-    options.matchRunner ??
-    spawnMatchRunner({ transport, model: options.models?.match, fallbackModel: options.models?.fallback })
-  const worldClassifyRunner =
-    options.worldClassifyRunner ??
-    spawnWorldClassifyRunner({ transport, model: options.models?.match, fallbackModel: options.models?.fallback })
-  const claimDiffRunner =
-    options.claimDiffRunner ??
-    spawnClaimDiffRunner({ transport, model: options.models?.match, fallbackModel: options.models?.fallback })
+  const matchRunner = options.matchRunner
+  const worldClassifyRunner = options.worldClassifyRunner
+  const claimDiffRunner = options.claimDiffRunner
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
@@ -1335,13 +1308,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // uses. A key present in SOME doc is fine (schemes resolve per doc).
   const satisfiesCheck = validateCredentialSatisfies(recipeAuthCredentials(recipe), docs)
   if (satisfiesCheck.errors.length > 0) {
-    return emptyResult('recipe-failed', { reason: satisfiesCheck.errors.join(' '), llmFailures: audit.failures() })
+    return emptyResult('recipe-failed', { reason: satisfiesCheck.errors.join(' '), llmFailures: leafTallies() })
   }
   if (satisfiesCheck.warnings.length > 0) recipeMeta.warnings = satisfiesCheck.warnings
 
-  // Session-kind failure tallies: the session seams never pass through
-  // the transport audit, so their per-kind losses are appended to every
-  // `llmFailures` list this run reports (fail-open stays visible either way).
+  // The POOLED kinds' failure tallies, appended to every `llmFailures` list
+  // this run reports beside the leaves' (fail-open stays visible either way).
   const sessionTallies: StageTransportTally[] = []
   const recordSessionSummary = (s: GuardSessionSummary): void => {
     if (s.failed > 0) {
@@ -1501,10 +1473,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // `manifest.json` stay exactly as they were, and the next run re-attempts the
   // failed views (a failed view is never cached). The per-doc reasons ride along so
   // the report names the affected documents.
-  if (audit.isSystemicFailure('guard.extract') || extractSystemicLoss) {
+  if (extractSystemicLoss) {
     return llmFailedResult(
-      audit,
-      'guard.extract',
       {
         recipe: recipeMeta,
         recipeFingerprint,
@@ -1515,11 +1485,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         errors,
         extractionFailures,
         orphaned: orphanedSections,
-        llmFailures: [...audit.failures(), ...sessionTallies],
+        llmFailures: [...leafTallies(), ...sessionTallies],
       },
-      // On the session path the transport tally saw nothing — the session
-      // summary is the loss record, and its head line takes the tally's place.
-      extractSystemicLoss ? sessionLossHead(extractSystemicLoss) : undefined,
+      sessionLossHead(extractSystemicLoss),
     )
   }
 
@@ -1548,7 +1516,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       birthFindings: [],
       errors,
       extractionFailures,
-      llmFailures: [...audit.failures(), ...sessionTallies],
+      llmFailures: [...leafTallies(), ...sessionTallies],
       unadjudicated: [],
       orphaned: orphanedSections,
       birthPassed: 0,
@@ -1674,7 +1642,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // `unsettled` areas with not one flow to show for the spend do).
   // `synthesizeFlows` already refused to rewrite `flows.json` on this same predicate.
   const flowsWipeout = isFlowSynthesisWipeout(synthesis)
-  if (audit.isSystemicFailure('guard.flows') || flowsSessionLoss || flowsWipeout) {
+  if (flowsSessionLoss || flowsWipeout) {
     const known = {
       recipe: recipeMeta,
       recipeFingerprint,
@@ -1686,17 +1654,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       extractionFailures,
       orphaned: orphanedSections,
       orphanedDismissals,
-      llmFailures: [...audit.failures(), ...sessionTallies],
+      llmFailures: [...leafTallies(), ...sessionTallies],
     }
-    // Precedence mirrors the predicates: a transport wipeout's own tally is the
-    // head; a session-kind wipeout states its summary (the transport audit saw
-    // nothing); an answered-but-unusable loss states the unusable-output reason.
-    const head = audit.isSystemicFailure('guard.flows')
-      ? undefined
-      : flowsSessionLoss
-        ? sessionLossHead(flowsSessionLoss)
-        : unusableOutputReason('guard.flows', 'area synthesis', synthesis.calls, synthesis.unsettled[0]?.reason)
-    return llmFailedResult(audit, 'guard.flows', known, head)
+    // Precedence mirrors the predicates: a kind that lost every session states
+    // its summary; an answered-but-unusable loss states the unusable-output
+    // reason, which no summary records.
+    const head = flowsSessionLoss
+      ? sessionLossHead(flowsSessionLoss)
+      : unusableOutputReason(
+          synthesis.sessionSummaries?.[0]?.kind ?? 'flow synthesis',
+          'area synthesis',
+          synthesis.calls,
+          synthesis.unsettled[0]?.reason,
+        )
+    return llmFailedResult(known, head)
   }
 
   // Dismissed flows drop whole (with their scenarios); a dismissal naming a flow
@@ -1799,7 +1770,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       birthFindings: [],
       errors,
       extractionFailures,
-      llmFailures: [...audit.failures(), ...sessionTallies],
+      llmFailures: [...leafTallies(), ...sessionTallies],
       // The run stops before birth, so neither adjudication stage ever ran.
       unadjudicated: [],
       orphaned: orphanedSections,
@@ -2185,7 +2156,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // counts as a loss; only a thrown call (the tally) or a reply that failed
   // validation twice (the error counters) does.
   const matchWipeout = matchCalls > 0 && matchCallErrors === matchCalls
-  if (audit.isSystemicFailure('guard.match') || matchWipeout) {
+  const matchSessionLoss = leafLoss(MATCH_SESSION_KIND)
+  if (matchSessionLoss || matchWipeout) {
     const known = {
       recipe: recipeMeta,
       recipeFingerprint,
@@ -2201,14 +2173,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       flows: flowsReport,
       interfaces: interfacesReport,
       externalServices,
-      // The session kinds' tallies ride every abort — the transport audit never
-      // sees a session, so `audit.failures()` alone under-reports here.
-      llmFailures: [...audit.failures(), ...sessionTallies],
+      // Every kind's tally rides every abort: the leaves and the pools.
+      llmFailures: [...leafTallies(), ...sessionTallies],
     }
-    const head = audit.isSystemicFailure('guard.match')
-      ? undefined
-      : unusableOutputReason('guard.match', 'realization match', matchCalls, firstMatchError)
-    return llmFailedResult(audit, 'guard.match', known, head)
+    const head = matchSessionLoss
+      ? sessionLossHead(matchSessionLoss)
+      : unusableOutputReason(MATCH_SESSION_KIND, 'realization match', matchCalls, firstMatchError)
+    return llmFailedResult(known, head)
   }
 
   // Every flow-level gap is reported alongside the manifest's per-surface record.
@@ -2633,7 +2604,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // dirty marker cleared) after the last execution, before persist.
   let mutatorPhasePlanned = false
   // The worker path's fidelity children lost EVERY dispatch — the carve-out's
-  // loud row, mirrored from the transport-audit predicate the one-shot uses.
+  // loud row, on the same predicate every other kind's wipeout uses.
   let workerFidelityLoss: GuardSessionSummary | null = null
 
   // THE FLOW-WORKER POOL — the ONLY author→adjudicate path (the one-shot
@@ -3824,7 +3795,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       if (anomalyLatch) {
         await sharedWorld.shutdown()
         return emptyResult('recipe-failed', {
-          llmFailures: [...audit.failures(), ...sessionTallies],
+          llmFailures: [...leafTallies(), ...sessionTallies],
           reason: noOpAnomalyReason(anomalyLatch, recipe),
         })
       }
@@ -3837,8 +3808,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       if (!anyCompleted && isSystemicSessionLoss(summary)) {
         await sharedWorld.shutdown()
         return llmFailedResult(
-          audit,
-          'guard.generate',
           {
             recipe: recipeMeta,
             recipeFingerprint,
@@ -3854,7 +3823,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             flows: flowsReport,
             interfaces: interfacesReport,
             externalServices,
-            llmFailures: [...audit.failures(), ...sessionTallies],
+            llmFailures: [...leafTallies(), ...sessionTallies],
           },
           sessionLossHead(summary),
         )
@@ -4617,7 +4586,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthFindings,
     errors,
     extractionFailures,
-    llmFailures: [...audit.failures(), ...sessionTallies],
+    llmFailures: [...leafTallies(), ...sessionTallies],
     unadjudicated,
     orphaned: orphanedSections,
     birthPassed,
@@ -5075,35 +5044,31 @@ function emptyResult(
 }
 
 /**
- * The `llm-failed` abort for a stage that lost EVERY call: the stage's own tally
- * becomes the user-facing reason (`head` overrides it for a stage whose calls
- * ANSWERED and came back unusable, which no tally records), and every stage tally
- * of the run rides along. Nothing this run produced is claimed as output — the
- * caller returns this INSTEAD of writing scenarios or the manifest, so the
- * committed corpus is exactly what it was before the run.
+ * The `llm-failed` abort for a kind that produced NOTHING: `head` states the
+ * loss in that kind's own words, and every tally of the run rides along.
+ * Nothing this run produced is claimed as output — the caller returns this
+ * INSTEAD of writing scenarios or the manifest, so the committed corpus is
+ * exactly what it was before the run.
  */
 function llmFailedResult(
-  audit: TransportAudit,
-  stage: string,
   known: Partial<GuardGenerateResult>,
-  head = formatStageFailure(audit.tally(stage)),
+  head: string,
   tail = 'Nothing was generated; the committed scenarios and manifest are unchanged.',
 ): GuardGenerateResult {
   return emptyResult('llm-failed', {
     reason: `${head.endsWith('.') ? head : `${head}.`} ${tail}`,
-    llmFailures: audit.failures(),
     ...known,
   })
 }
 
 /**
- * The `llm-failed` reason for calls that all ANSWERED and were all unusable —
- * output that failed validation twice, once per corrective re-ask. The transport
- * tally counts those calls as successes, so the reason states the loss in the same
- * words {@link formatStageFailure} uses for a thrown-call wipeout.
+ * The `llm-failed` reason for asks that all ANSWERED and were all unusable —
+ * output that failed validation twice, once per corrective re-ask. A session
+ * that answered is a session that completed, so no summary records this; the
+ * reason states the loss in the same words a lost kind's head line uses.
  */
-function unusableOutputReason(stage: string, unit: string, calls: number, firstError?: string): string {
-  const head = `every ${unit} in the \`${stage}\` stage came back unusable (${calls} of ${calls}) — the stage produced nothing`
+function unusableOutputReason(kind: string, unit: string, calls: number, firstError?: string): string {
+  const head = `every ${unit} in the \`${kind}\` kind came back unusable (${calls} of ${calls}) — it produced nothing`
   return firstError ? `${head}. First failure: ${firstError}.` : `${head}.`
 }
 

@@ -10,7 +10,6 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
-import { noProviderTransport } from '@truecourse/shared/llm'
 import fs from 'node:fs'
 import path from 'node:path'
 import { CAPABILITY_SETUP_EXPECTED, writeGuardLatest, writeManifest } from '@truecourse/guard-runner'
@@ -135,7 +134,7 @@ describe('runGuardAdjudication — a pre-passed board opens no session run', () 
     writeGuardLatest(r, board([failRow('scn.a')]))
     writeManifest(r, manifestWith([{ scenarioId: 'scn.a', flowId: 'flow.a', expectedRed: EXPECTED_RED }]))
 
-    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
+    const run = await runGuardAdjudication({ repoRoot: r })
 
     expect(run.scenarios).toHaveLength(1)
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'pre-pass' })
