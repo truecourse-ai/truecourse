@@ -55,6 +55,7 @@ import {
   flowSectionKey,
   EpicSynthesisSchema,
   FlowSetSchema,
+  type ExtractPrior,
   type ExtractResult,
   type ExtractSessionSeam,
   type ReuseExtractionSeam,
@@ -464,6 +465,11 @@ export function createGuardGenerateSessionSeams(
 
   const extractSession: ExtractSessionSeam = async (input) => {
     const universe = buildGuardDocUniverse(input.docs)
+    // The document's last extraction rides the session, never its cache key.
+    const priorOf = (doc: GuardDoc): { prior?: ExtractPrior } => {
+      const prior = input.priors?.get(doc.doc)
+      return prior ? { prior } : {}
+    }
     const byDoc = new Map<string, ExtractResult>()
     let done = 0
     const total = input.docs.length
@@ -477,8 +483,8 @@ export function createGuardGenerateSessionSeams(
       cacheKey: (doc) => extractSessionCacheKey(doc, input.prerequisiteTargets),
       legacyCacheKeys: (doc) => [extractSessionLegacyCacheKey(doc, input.prerequisiteTargets)],
       schema: extractContextSchema(input.prerequisiteTargets),
-      session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets }),
-      briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets),
+      session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets, ...priorOf(doc) }),
+      briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets, input.priors?.get(doc.doc)),
       driver: acquire,
       ...(replayOnly('extract') ? { cacheOnly: 'extract' as const } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),

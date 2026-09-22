@@ -195,6 +195,7 @@ import {
 import { LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
 import { persistExtractedClaims } from './claims-persist.js'
+import { priorExtractions } from './extract-prior.js'
 import {
   resolveSectionAuth,
   recipeAuthCredentials,
@@ -1285,11 +1286,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // generate's gate reads an edited document's OLD text from here.
   const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe.api?.externals)
   await rememberDocTexts(repoRoot, docs)
+  const priorManifestForExtract = readManifest(repoRoot)
   const claimDiff = options.reuseExtraction
     ? await reuseCosmeticExtractions({
         repoRoot,
         docs,
-        priorManifest: readManifest(repoRoot),
+        priorManifest: priorManifestForExtract,
         seam: options.reuseExtraction,
         prerequisiteTargets: prerequisiteResolution.targets,
         runner: claimDiffRunner,
@@ -1299,6 +1301,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   for (const doc of claimDiff.reusedDocs) {
     fact('extract', `${doc}: the edits are cosmetic, prior claims reused from cache`)
   }
+  // THE PRIOR every document reconciles against when its own cache entry
+  // misses: its last extraction, with the sections whose text did not move
+  // settled — taken verbatim, never re-extracted — and the rest briefed so an
+  // unchanged sentence keeps its claim. Without it a doc edit re-extracts the
+  // whole document from scratch and every claim in it can change identity.
+  const extractPriors = options.reuseExtraction
+    ? await priorExtractions({
+        repoRoot,
+        docs,
+        priorManifest: priorManifestForExtract,
+        seam: options.reuseExtraction,
+        prerequisiteTargets: prerequisiteResolution.targets,
+        cachedPriors: claimDiff.priors,
+      })
+    : new Map<string, never>()
 
   // A credential's `satisfies` naming a scheme NO OpenAPI doc in
   // the corpus declares can never bind — the matcher would silently fall through to
@@ -1341,6 +1358,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const { byDoc: extractByDoc, summary: extractSummary } = await options.extractSession({
     docs,
     prerequisiteTargets: prerequisiteResolution.targets,
+    priors: extractPriors,
     onDoc: (done, total) => options.onExtractProgress?.(done, total),
   })
   recordSessionSummary(extractSummary)
@@ -1361,6 +1379,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
     const claims = result.data.claims.length
     fact('extract', `${doc.doc}: ${claims} claim${claims === 1 ? '' : 's'}${extractSource}`)
+    const prior = extractPriors.get(doc.doc)
+    if (prior && extractSource !== ', from cache') {
+      const settled = prior.settledAnchors.length
+      const reextracted = doc.sections.length - settled
+      fact('extract', `${doc.doc}: ${settled} section${settled === 1 ? '' : 's'} settled from the last extraction, ${reextracted} re-extracted against ${prior.claims.length} prior claim${prior.claims.length === 1 ? '' : 's'}`)
+    }
     if (!result.complete) fact('extract', `${doc.doc}: ${result.failedViews} extraction view(s) failed`)
   }
   if (extractSource === '') {
@@ -1435,6 +1459,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // The extraction session's structured needs ride into flow synthesis;
           // the one-shot path carries none.
           ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
+          // The prior sentence this claim supersedes: a committed flow's
+          // milestone still names it, and resolves to this claim through it.
+          ...(c.replaces ? { replaces: c.replaces } : {}),
         })
       }
       if (claims.length === 0 && kept === 0) {

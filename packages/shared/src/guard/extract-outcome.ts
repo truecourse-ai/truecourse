@@ -65,6 +65,14 @@ export const SessionExtractedClaimSchema = z
      * re-asks a session that omits it rather than silently defaulting.
      */
     needs: z.array(ClaimNeedSchema),
+    /**
+     * The sentence of the PRIOR claim this one supersedes — reworded, split or
+     * narrowed by the edit — copied verbatim from the briefing. The engine
+     * carries the prior claim's id and its flows' bindings onto this claim
+     * instead of retiring them. Absent on a genuinely new claim, and on every
+     * claim of a session briefed with no prior.
+     */
+    replaces: z.string().min(1).optional(),
   })
   .strict()
 export type SessionExtractedClaim = z.infer<typeof SessionExtractedClaimSchema>
@@ -88,6 +96,13 @@ export const ExtractOutcomeSchema = z
   .object({
     claims: z.array(SessionExtractedClaimSchema),
     untestable: z.array(SessionUntestableNoteSchema),
+    /**
+     * Prior claims of a re-extracted section the edited text no longer
+     * supports, each with why, in the briefing's own words. Only the
+     * reconciliation reads it; the fold drops it from the whole-document
+     * outcome it keeps.
+     */
+    retiredClaims: z.array(z.object({ claim: z.string().min(1), reason: z.string().min(1) }).strict()).optional(),
   })
   .strict()
 export type ExtractOutcome = z.infer<typeof ExtractOutcomeSchema>

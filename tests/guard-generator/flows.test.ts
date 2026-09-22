@@ -1070,6 +1070,34 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
     expect(res.flows.map((f) => f.id)).toEqual([LIFECYCLE_ID])
   })
 
+  it('AMENDS, never retires, a prior flow whose claim a re-extraction reworded and said so', async () => {
+    const previous = await baseline()
+    const r = repo()
+    // The empty-title claim came back reworded, naming the sentence it replaces.
+    const REWORDED = '`relkit add` without a title exits 2 and reports `title is required` on stderr'
+    const reworded: FlowSynthesisArea = {
+      ...tasksArea,
+      claims: TASK_CLAIMS.map((c) => (c.title === ADD_EMPTY ? { ...c, title: REWORDED, replaces: ADD_EMPTY } : c)),
+    }
+    // The session continues both flows by id; the edge flow's milestone still
+    // names the prior sentence, as the committed flow it was briefed with does.
+    const seam = recordingSessions({
+      flows: [
+        { ...TASK_LIFECYCLE.flows[0], id: LIFECYCLE_ID },
+        { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID },
+      ],
+      noFlowClaims: [],
+    })
+    const res = await synth(r, [reworded], seam, { previous })
+
+    expect(seam.prior.get('tasks')!.map((f) => f.id)).toEqual([LIFECYCLE_ID, EDGE_ID])
+    expect(res.retired).toEqual([])
+    expect(res.reconciliation).toEqual({ kept: [LIFECYCLE_ID], amended: [EDGE_ID], added: [], carried: [] })
+    const edge = res.flows.find((f) => f.id === EDGE_ID)!
+    expect(edge.milestones[0].claimTitle).toBe(REWORDED)
+    expect(edge.fingerprint).not.toBe(previous[1].fingerprint)
+  })
+
   it('retires a prior flow whose documents left every area', async () => {
     const previous = await baseline()
     const r = repo()

@@ -31,7 +31,16 @@ import {
   type ExtractOutcome,
   type GuardPrerequisiteTarget,
 } from '@truecourse/shared'
-import { snapExtraction, suppressionKey, type GuardDoc } from '@truecourse/guard-generator'
+import {
+  mergeSettledSections,
+  priorClaimsToAccount,
+  reconciliationProblems,
+  snapExtraction,
+  suppressionKey,
+  type ExtractPrior,
+  type GuardDoc,
+  type PriorClaim,
+} from '@truecourse/guard-generator'
 import { promptFingerprint } from '../agent/session-cache.js'
 import {
   docChunkCount,
@@ -181,6 +190,9 @@ For every claim, report its \`needs\`: the prerequisites a test would require BE
   - manual     — a step only a human can perform.
 Give each need a short stable \`name\` (lower-kebab-case, e.g. \`github-token\`, \`sample-repo\`) and reuse the SAME name when two claims need the same thing. Needs describe what the DOC presupposes — never speculate about implementation details.
 
+# Reconciling against the last extraction
+When the briefing carries the LAST EXTRACTION of this document, you are not extracting from scratch. SETTLED sections are unchanged since then: their claims are fixed, listed for context only, and you extract NOTHING for them. Every other section is yours to extract, and its PRIOR claims are listed: return each one KEPT (the same \`claim\` sentence, verbatim, when the text still states it), REPLACED (a new claim whose \`replaces\` is the prior sentence, verbatim, when the edit reworded, split or narrowed what it states) or RETIRED (in \`retiredClaims\`, with the reason, when the text no longer supports it). A claim without \`replaces\` is NEW: emit one only for behavior the text now states that no prior claim did. Never re-emit a prior claim's behavior as a new claim, never replace one prior claim twice, and never both continue and retire one. Reuse the prior claims' case ids for the cases that still hold, and the prior need names for the same needs. \`check_claims\` refuses a draft that leaves a prior claim unaccounted for or touches a settled section.
+
 # Sections and anchors
 The OUTLINE lists every section with its exact ANCHOR. Each claim MUST carry the anchor of the section whose own text states it, copied VERBATIM from the outline — never invent, abbreviate, translate, or reformat an anchor. Bind a claim to the NARROWEST section that states it.
 
@@ -268,6 +280,7 @@ export function validateExtractDraft(
   draft: ExtractOutcome,
   doc: GuardDoc,
   prerequisiteTargets: readonly GuardPrerequisiteTarget[],
+  prior?: ExtractPrior,
 ): string[] {
   const snapped = snapExtraction(draft, doc.sections)
   const normalize = (text: string): string => text.replace(/\s+/g, ' ').trim().toLowerCase()
@@ -299,6 +312,9 @@ export function validateExtractDraft(
     }
     seenNoteAnchor.add(snappedTo.sectionAnchor)
   }
+  // The reconciliation half, over the snapped draft: anchors compare as the
+  // fold will bind them, and `replaces` rides through the snap untouched.
+  if (prior) problems.push(...reconciliationProblems({ claims: snapped.claims, retiredClaims: draft.retiredClaims }, prior))
   return problems
 }
 
@@ -385,26 +401,40 @@ export function extractContextSchema(targets: readonly GuardPrerequisiteTarget[]
   }).transform(draft => canonicalizeExtractPrerequisites(draft, targets))
 }
 
-/** Rechecked on the final outcome, even when the model changes a checked draft. */
-function checkedExtractionSchema(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[]) {
+/**
+ * Rechecked on the final outcome, even when the model changes a checked draft.
+ * The transform is the FOLD: prerequisites canonicalized, and — against a
+ * prior — the settled sections' claims merged in verbatim, so the outcome the
+ * loop returns, the cache keeps and the seam re-snaps is a whole-document
+ * extraction whichever sections the session actually worked on.
+ */
+function checkedExtractionSchema(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[], prior?: ExtractPrior) {
   return ExtractOutcomeSchema.superRefine((draft, ctx) => {
-    const problems = validateExtractDraft(draft, doc, prerequisiteTargets)
+    const problems = validateExtractDraft(draft, doc, prerequisiteTargets, prior)
     for (const c of draft.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
     for (const message of new Set(problems)) ctx.addIssue({ code: 'custom', message })
-  }).transform((draft) => canonicalizeExtractPrerequisites(draft, prerequisiteTargets))
+  }).transform((draft): ExtractOutcome => {
+    const canonical = canonicalizeExtractPrerequisites(draft, prerequisiteTargets)
+    if (!prior) return canonical
+    // The settled sections' prior claims are compared by their snapped anchors,
+    // so the draft is snapped once here for the merge; the seam's fold re-snaps
+    // the whole outcome anyway.
+    const snapped = snapExtraction(canonical, doc.sections)
+    return mergeSettledSections(snapped, prior)
+  })
 }
 
-function checkClaimsTool(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[]): SessionTool {
+function checkClaimsTool(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[], prior?: ExtractPrior): SessionTool {
   return defineSessionTool({
     name: 'check_claims',
     description:
-      'Check a draft extraction against the live section index — every anchor is snapped exactly as the engine will snap it. Call it on your complete draft (claims AND untestable notes) before you produce the outcome.',
+      'Check a draft extraction against the live section index — every anchor is snapped exactly as the engine will snap it — and, when the briefing carried the last extraction, against it: every prior claim of a section you extract must be kept, replaced or retired. Call it on your complete draft (claims AND untestable notes) before you produce the outcome.',
     kind: 'check-extract-claims',
     readOnly: true,
     destructive: false,
     inputSchema: ExtractOutcomeSchema,
     async execute(args) {
-      const problems = validateExtractDraft(args, doc, prerequisiteTargets)
+      const problems = validateExtractDraft(args, doc, prerequisiteTargets, prior)
       for (const c of args.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
       if (problems.length === 0) {
         return {
@@ -422,6 +452,10 @@ export interface ExtractSessionInput {
   /** The declared dependencies a case prerequisite may name (the catalog plus
    *  the recipe's externals), as the generator resolves them. */
   prerequisiteTargets: readonly GuardPrerequisiteTarget[]
+  /** The document's last extraction, when it has one: briefed, checked
+   *  against, and merged into the outcome for the sections it settles. It is
+   *  NOT part of the cache key — it supplies identity, not an answer. */
+  prior?: ExtractPrior
 }
 
 export function extractSessionDef(input: ExtractSessionInput): SessionDef<ExtractOutcome> {
@@ -433,9 +467,9 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
       readOwnChunkTool(input.doc),
       readOwnSectionTool(input.doc),
       readReferencedDocTool(input.universe),
-      checkClaimsTool(input.doc, input.prerequisiteTargets),
+      checkClaimsTool(input.doc, input.prerequisiteTargets, input.prior),
     ],
-    outcomeSchema: checkedExtractionSchema(input.doc, input.prerequisiteTargets),
+    outcomeSchema: checkedExtractionSchema(input.doc, input.prerequisiteTargets, input.prior),
     // A revised draft can still violate a verification boundary. Return the
     // terminal validation errors to the session before losing the whole doc.
     outcomeSchemaRepairs: 2,
@@ -460,6 +494,7 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
 export function extractSessionBriefing(
   doc: GuardDoc,
   prerequisiteTargets: readonly GuardPrerequisiteTarget[],
+  prior?: ExtractPrior,
 ): string {
   const areas = doc.sections[0]?.areaTags ?? []
   const chunks = docChunkCount(doc)
@@ -502,10 +537,62 @@ export function extractSessionBriefing(
           "carry such requirements in the claim's `needs`.",
         ]),
   )
+  if (prior) lines.push('', ...priorExtractionLines(doc, prior))
   lines.push('', renderDocChunk(doc, 1).content)
   if (chunks > 1) {
     lines.push('', `${chunks - 1} more chunk(s) — use \`read_chunk\` to page through the rest before you finish.`)
   }
   lines.push('', 'Read the whole document, check the draft with `check_claims`, then produce the outcome.')
   return lines.join('\n')
+}
+
+/** One prior claim as the briefing lists it: the sentence, its driver, its case ids. */
+function priorClaimLine(c: PriorClaim): string {
+  const cases = c.verification?.cases?.map((k) => k.id) ?? []
+  return `  • "${c.claim}"${c.driver ? ` (${c.driver})` : ''}${cases.length ? ` [cases: ${cases.join(', ')}]` : ''}`
+}
+
+/**
+ * The LAST EXTRACTION block: the settled sections with their fixed claims
+ * (context only), then the sections to extract with the prior claims each one
+ * must account for, then the need names to reuse.
+ */
+export function priorExtractionLines(doc: GuardDoc, prior: ExtractPrior): string[] {
+  const settled = new Set(prior.settledAnchors)
+  const byAnchor = new Map<string, PriorClaim[]>()
+  for (const c of prior.claims) {
+    const list = byAnchor.get(c.sectionAnchor)
+    if (list) list.push(c)
+    else byAnchor.set(c.sectionAnchor, [c])
+  }
+  const toAccount = priorClaimsToAccount(prior)
+  const lines = [
+    `LAST EXTRACTION of this document — reconcile against it (${prior.claims.length} prior claim(s)).`,
+  ]
+  const settledSections = doc.sections.filter((s) => settled.has(s.anchor))
+  if (settledSections.length > 0) {
+    lines.push('', `SETTLED sections — unchanged since then; their claims are fixed. Extract NOTHING for them:`)
+    for (const s of settledSections) {
+      const own = byAnchor.get(s.anchor) ?? []
+      lines.push(`- ${s.anchor}: ${own.length} claim(s)`)
+      for (const c of own) lines.push(priorClaimLine(c))
+    }
+  }
+  const extractSections = doc.sections.filter((s) => !settled.has(s.anchor))
+  lines.push('', `Sections to EXTRACT: ${extractSections.map((s) => s.anchor).join(', ') || '(none)'}.`)
+  if (toAccount.length > 0) {
+    lines.push(
+      'Their PRIOR claims — return every one KEPT (its sentence verbatim), REPLACED (a new claim',
+      'with `replaces` set to the prior sentence, verbatim) or RETIRED (in `retiredClaims`, with a reason):',
+    )
+    for (const s of extractSections) {
+      const own = byAnchor.get(s.anchor) ?? []
+      if (own.length === 0) continue
+      lines.push(`- ${s.anchor}`)
+      for (const c of own) lines.push(priorClaimLine(c))
+    }
+  }
+  const needNames = [...new Set(prior.claims.flatMap((c) => (c.needs ?? []).map((n) => n.name)))].sort()
+  if (needNames.length > 0) lines.push('', `Need names in use — reuse them for the same needs: ${needNames.join(', ')}.`)
+  return lines
 }
