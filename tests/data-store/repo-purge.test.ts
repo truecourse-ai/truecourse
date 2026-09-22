@@ -43,13 +43,13 @@ async function seed(repoKey: string): Promise<void> {
     createdAt: NOW,
   });
   await db.insert(guardSetupSets).values({
+    id: `${repoKey}-setup1`,
     repoKey,
     commitSha: 'c1',
     manifest: { v: 1, files: {} },
     manifestHash: 'sha',
     fileCount: 0,
     createdAt: NOW,
-    updatedAt: NOW,
   });
   await db.insert(decisions).values([
     { scope: `ws:org_${repoKey}`, payload: {}, updatedAt: NOW },

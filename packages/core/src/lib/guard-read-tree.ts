@@ -35,6 +35,7 @@ import {
   readGuardResult,
   readManifest,
   readScenarioFile,
+  type VersionAt,
 } from './guard-store.js';
 import { materializeGuardOverlays } from './guard-overlays.js';
 
@@ -60,23 +61,24 @@ export async function materializeGuardReadTree(
   treeDir: string,
   ref?: string,
 ): Promise<void> {
-  const bundle = await loadGuardSetupBundle(repoKey, ref);
+  const at: VersionAt = ref ? { commitSha: ref } : {};
+  const bundle = await loadGuardSetupBundle(repoKey, at);
   if (bundle) materializeGuardSetupBundle(treeDir, bundle);
 
-  const manifest = await readManifest(repoKey, ref);
+  const manifest = await readManifest(repoKey, at);
   if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
   const scenariosRel = relOf(treeDir, path.dirname(manifestPath(treeDir)));
   const files = [
-    ...(await listScenarioFiles(repoKey, ref)),
+    ...(await listScenarioFiles(repoKey, at)),
     ...CORPUS_FILES.map((name) => `${scenariosRel}/${name}`),
   ];
   for (const rel of new Set(files)) {
     assertSafeRel(rel);
-    const body = await readScenarioFile(repoKey, rel, ref);
+    const body = await readScenarioFile(repoKey, rel, at);
     if (body != null) writeFile(safeJoin(treeDir, rel), body);
   }
 
-  const report = await readGuardResult(repoKey, ref);
+  const report = await readGuardResult(repoKey, at);
   if (report) writeTreeGuardResult(treeDir, report);
 
   const decisions = await readGuardDecisions(repoKey);

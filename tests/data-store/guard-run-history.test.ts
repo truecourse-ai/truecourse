@@ -39,11 +39,12 @@ function run(env: Partial<GuardRunEnvelope> & Pick<GuardRunEnvelope, 'runId' | '
 }
 
 describe('PgGuardStore.readGuardHistory', () => {
-  it('lists the baseline runs by default and every stored run with `all`, oldest first', async () => {
+  it("lists the default branch's runs by default and every stored run with `all`, oldest first", async () => {
     await store.writeGuardLatest(REPO, run({ runId: 'r-main1', ranAt: '2026-01-01T00:00:00Z', commit: 'main1', origin: 'hosted' }));
     await store.writeGuardRun(
       REPO,
       run({ runId: 'r-head7', ranAt: '2026-01-02T00:00:00Z', commit: 'head7', branch: 'feature', pullRequest: 7, origin: 'hosted' }),
+      { scope: 'pr/7' },
     );
     await store.writeGuardLatest(REPO, run({ runId: 'r-main2', ranAt: '2026-01-03T00:00:00Z', commit: 'main2', origin: 'hosted' }));
 

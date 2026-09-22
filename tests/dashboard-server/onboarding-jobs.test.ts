@@ -1054,7 +1054,7 @@ describe('the guard generate job', () => {
     expect(baseline).toMatch(/^[0-9a-f]{40}$/);
     const { scenarios } = await loadScenarios({ repoKey: REPO, commitSha: baseline! });
     expect(scenarios.map((s) => s.id)).toEqual(['a1']);
-    expect(await readGuardResult(REPO, baseline!)).toMatchObject({ status: 'ok', generatedAt: '2026-02-02T00:00:00Z' });
+    expect(await readGuardResult(REPO, { commitSha: baseline! })).toMatchObject({ status: 'ok', generatedAt: '2026-02-02T00:00:00Z' });
     const evidence = await new PgGuardStore(db).readGuardEvidenceAt(
       REPO,
       '.truecourse/guard/evidence/birth1/a1',
@@ -1116,7 +1116,7 @@ describe('the guard generate job', () => {
     expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: run!.runId });
     // The report is still the record of WHY, so the guard surfaces can say it.
     const baseline = await readGuardBaselineCommit(REPO);
-    expect(await readGuardResult(REPO, baseline!)).toMatchObject({ refusal });
+    expect(await readGuardResult(REPO, { commitSha: baseline! })).toMatchObject({ refusal });
   }, 60_000);
 
   // A generate that found nothing CHANGED over an empty set is still an empty
@@ -1130,7 +1130,7 @@ describe('the guard generate job', () => {
     const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
     await saveScenarios(priorRef, scenariosDir(prior));
     const refusal = { status: 'seed-failed', message: 'the seed script exited 1', flowIds: [] };
-    await writeGuardResult(priorRef, { ...okReport([]), generatedAt: '2026-01-01T00:00:00Z', refusal }, { baseline: true });
+    await writeGuardResult(priorRef, { ...okReport([]), generatedAt: '2026-01-01T00:00:00Z', refusal });
 
     generateImpl = async (repoRoot) => {
       writeCloneGuardResult(repoRoot, {
@@ -1198,7 +1198,7 @@ describe('the guard generate job', () => {
     );
     const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
     await saveScenarios(priorRef, scenariosDir(prior));
-    await writeGuardResult(priorRef, { ...okReport(['a1']), generatedAt: '2026-01-01T00:00:00Z' }, { baseline: true });
+    await writeGuardResult(priorRef, { ...okReport(['a1']), generatedAt: '2026-01-01T00:00:00Z' });
 
     generateImpl = async (repoRoot) => {
       writeCloneGuardResult(repoRoot, {
@@ -1229,7 +1229,7 @@ describe('the guard generate job', () => {
     fs.writeFileSync(path.join(orgs, 'a1.yaml'), 'guard: 2\nid: a1\n');
     const priorRef = { repoKey: REPO, commitSha: 'prior-commit' };
     await saveScenarios(priorRef, scenariosDir(prior));
-    await writeGuardResult(priorRef, { ...okReport(['a1']), generatedAt: '2026-01-01T00:00:00Z' }, { baseline: true });
+    await writeGuardResult(priorRef, { ...okReport(['a1']), generatedAt: '2026-01-01T00:00:00Z' });
 
     generateImpl = async (repoRoot) => {
       writeCloneGuardResult(repoRoot, { ...okReport([]), generatedAt: '2026-03-03T00:00:00Z' });
@@ -1264,7 +1264,7 @@ describe('the guard generate job', () => {
     expect(job.error).toContain('Partial results were saved');
     const baseline = await readGuardBaselineCommit(REPO);
     expect(baseline).toMatch(/^[0-9a-f]{40}$/);
-    expect(await readGuardResult(REPO, baseline!)).toMatchObject({ extractionFailures });
+    expect(await readGuardResult(REPO, { commitSha: baseline! })).toMatchObject({ extractionFailures });
     expect((await loadScenarios({ repoKey: REPO, commitSha: baseline! })).scenarios.map(s => s.id)).toEqual(['a1']);
     const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
     expect(run).toMatchObject({
@@ -1327,7 +1327,7 @@ describe('the guard generate job', () => {
     const [job] = await jobsOfType('repo.guard-generate');
     expect(job).toMatchObject({ status: 'succeeded', result: { status: 'open-conflicts', openConflicts: 1 } });
     const baseline = await readGuardBaselineCommit(REPO);
-    expect(await readGuardResult(REPO, baseline!)).toMatchObject({
+    expect(await readGuardResult(REPO, { commitSha: baseline! })).toMatchObject({
       status: 'open-conflicts',
       reason: expect.stringContaining('docs/v1.md'),
     });
@@ -1512,7 +1512,7 @@ describe('the guard run job', () => {
     fs.writeFileSync(manifestPath(dir), JSON.stringify({ version: GUARD_FORMAT_VERSION, flows: [] }, null, 2) + '\n');
     const ref = { repoKey: REPO, commitSha: GEN_COMMIT };
     await saveScenarios(ref, scenariosDir(dir));
-    await writeGuardResult(ref, okReport(), { baseline: true });
+    await writeGuardResult(ref, okReport());
   }
 
   const saveSetupBundle = (): Promise<void> =>

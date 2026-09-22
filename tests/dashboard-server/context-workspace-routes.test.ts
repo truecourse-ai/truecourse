@@ -648,3 +648,26 @@ describe('the repository routes over the workspace corpus', () => {
     expect(stale.body.docsChanged).toBe(true);
   });
 });
+
+describe('the corpus versions', () => {
+  it('lists the versions the scans wrote, newest first, and diffs two of them', async () => {
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus(), { producedByRun: 'scan-1', model: 'm1' });
+    const next = corpus();
+    next.docs.push({ ref: ref(SRC_A, 'two.md'), kind: 'prd', lastTouched: '', areaTags: ['p/d'], sourceId: SRC_A, sourceKind: 'repository' });
+    next.areas.push({ id: 'p/d', product: 'p', concern: 'd', docRefs: [ref(SRC_A, 'two.md')], overlaps: [] });
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', next, { producedByRun: 'scan-2', model: 'm2' });
+
+    const list = await request(app).get('/api/context/versions').expect(200);
+    expect(list.body.versions.map((v: { producedByRun: string }) => v.producedByRun)).toEqual(['scan-2', 'scan-1']);
+    const [to, from] = list.body.versions as Array<{ id: string }>;
+    const diff = await request(app).get(`/api/context/versions/diff?from=${from!.id}&to=${to!.id}`).expect(200);
+    expect(diff.body.to).toMatchObject({ model: 'm2' });
+    expect(diff.body.diff).toEqual({
+      docs: { added: [ref(SRC_A, 'two.md')], removed: [], retagged: [] },
+      areas: { added: ['p/d'], removed: [] },
+      conflicts: { opened: 0, closed: 0 },
+    });
+    await request(app).get(`/api/context/versions/diff?from=nope&to=${to!.id}`).expect(404);
+    await request(app).get('/api/context/versions/diff').expect(400);
+  });
+});

@@ -166,9 +166,11 @@ export async function workspaceContextScanInProcess(
       // The stamp is the artifact's own record of where a document came from,
       // so nothing downstream has to re-derive it from a ref.
       const corpus = stampCorpusSources(curate.corpus, sources);
-      await saveWorkspaceSpec(ref, 'corpus', corpus);
+      // The versions this scan writes say which run wrote them and on which model.
+      const provenance = { producedByRun: runId, model: options.driver?.attribution.model ?? null };
+      await saveWorkspaceSpec(ref, 'corpus', corpus, provenance);
       await saveWorkspaceSpec(ref, 'decisions', curate.decisions);
-      await saveWorkspaceSpecDocs(ref, snapshotBodies(corpus, materialized.bodies));
+      await saveWorkspaceSpecDocs(ref, snapshotBodies(corpus, materialized.bodies), provenance);
       await closeRun(org, runId, options.signal?.aborted ? 'interrupted' : 'completed');
 
       return {

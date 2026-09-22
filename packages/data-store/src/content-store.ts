@@ -11,7 +11,7 @@
  * dedup.
  */
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, lt } from 'drizzle-orm';
 import { content, type Db } from '@truecourse/db';
 import { sha256 } from './pack.js';
 
@@ -85,12 +85,21 @@ export class ContentStore {
     return body == null ? null : (JSON.parse(body) as T);
   }
 
-  /** Sweep: delete `scope` bodies whose sha is not in `liveShas`. Returns count. */
-  async gc(scope: string, liveShas: Set<string>): Promise<number> {
+  /**
+   * Sweep: delete `scope` bodies whose sha is not in `liveShas`. With `before`,
+   * only bodies stored before that moment are candidates — a save puts its
+   * bodies before the row that references them, and a sweep must not take a
+   * body whose row is still on its way. Returns the count deleted.
+   */
+  async gc(scope: string, liveShas: Set<string>, before?: string): Promise<number> {
     const rows = await this.db
       .select({ sha: content.sha })
       .from(content)
-      .where(eq(content.scope, scope));
+      .where(
+        before
+          ? and(eq(content.scope, scope), lt(content.createdAt, before))
+          : eq(content.scope, scope),
+      );
     const dead = rows.map((r) => r.sha).filter((s) => !liveShas.has(s));
     if (dead.length === 0) return 0;
     await this.db

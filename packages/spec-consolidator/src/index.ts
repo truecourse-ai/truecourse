@@ -195,3 +195,4 @@ export type {
   DocSubject,
   RelevanceVerdict,
 } from './relevance-filter.js';
+export { diffCorpora } from './corpus-diff.js';

@@ -153,16 +153,17 @@ describe('PgGuardStore — run state (pglite)', () => {
     expect(await store.readGuardLatest('other/repo')).toBeNull();
   });
 
-  it('readGuardLatest returns the newest baseline; a PR-head run never becomes the baseline', async () => {
+  it("readGuardLatest returns the default branch's newest run; a PR-head run in its own scope never becomes it", async () => {
     const base1 = makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1', branch: 'main' });
     await store.writeGuardLatest(REPO, base1);
-    // A PR-head run for a different commit — writeGuardRun does NOT mark baseline.
+    // A PR-head run for a different commit, written under the pull request's scope.
     const prHead = makeLatest({ runId: 'r2', ranAt: '2026-07-05T00:00:00.000Z', commit: 'pr-head', branch: 'feature' });
-    const written = await store.writeGuardRun(REPO, prHead);
+    const written = await store.writeGuardRun(REPO, prHead, { scope: 'pr/7' });
     expect(written.runId).toBe('r2');
     expect(written.latest).toEqual(prHead);
-    // baseline is still base1 (the PR head, though newer, is not a baseline row)
+    // The default branch's newest is still base1; the PR scope has its own newest.
     expect(await store.readGuardLatest(REPO)).toEqual(base1);
+    expect(await store.readGuardLatest(REPO, 'pr/7')).toEqual(prHead);
     // A newer baseline supersedes.
     const base2 = makeLatest({ runId: 'r3', ranAt: '2026-07-08T00:00:00.000Z', commit: 'c2', branch: 'main' });
     await store.writeGuardLatest(REPO, base2);
@@ -173,7 +174,7 @@ describe('PgGuardStore — run state (pglite)', () => {
     const base = makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1' });
     await store.writeGuardLatest(REPO, base);
     const prHead = makeLatest({ runId: 'r2', ranAt: '2026-07-05T00:00:00.000Z', commit: 'pr-head' });
-    await store.writeGuardRun(REPO, prHead);
+    await store.writeGuardRun(REPO, prHead, { scope: 'pr/7' });
     expect(await store.readGuardRun(REPO, 'r1')).toEqual(base);
     expect(await store.readGuardRun(REPO, 'r2')).toEqual(prHead);
     expect(await store.readGuardRun(REPO, 'nope')).toBeNull();
@@ -184,9 +185,11 @@ describe('PgGuardStore — run state (pglite)', () => {
     const base = makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1', branch: 'main' });
     await store.writeGuardLatest(REPO, base);
     const prHead = makeLatest({ runId: 'r2', ranAt: '2026-07-05T00:00:00.000Z', commit: 'pr-head', branch: 'feature' });
-    await store.writeGuardRun(REPO, prHead);
+    await store.writeGuardRun(REPO, prHead, { scope: 'pr/7' });
     expect(await store.readGuardRunForCommit(REPO, 'c1')).toEqual(base);
-    expect(await store.readGuardRunForCommit(REPO, 'pr-head')).toEqual(prHead);
+    expect(await store.readGuardRunForCommit(REPO, 'pr-head', 'pr/7')).toEqual(prHead);
+    // A commit is read within its scope: the PR head's run is not the default branch's.
+    expect(await store.readGuardRunForCommit(REPO, 'pr-head')).toBeNull();
   });
 
   it('readGuardRunForCommit returns null for an unknown commit or another repo', async () => {
@@ -205,9 +208,9 @@ describe('PgGuardStore — run state (pglite)', () => {
     expect(await store.readGuardRun(REPO, 'r2')).toEqual(b);
   });
 
-  it('history is the baseline runs oldest-first; appendGuardHistory is a derived no-op', async () => {
+  it("history is the default branch's runs oldest-first; appendGuardHistory is a derived no-op", async () => {
     await store.writeGuardLatest(REPO, makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1' }));
-    await store.writeGuardRun(REPO, makeLatest({ runId: 'r2', ranAt: '2026-07-03T00:00:00.000Z', commit: 'pr' })); // excluded
+    await store.writeGuardRun(REPO, makeLatest({ runId: 'r2', ranAt: '2026-07-03T00:00:00.000Z', commit: 'pr' }), { scope: 'pr/7' }); // excluded
     await store.writeGuardLatest(REPO, makeLatest({ runId: 'r3', ranAt: '2026-07-05T00:00:00.000Z', commit: 'c2' }));
     await store.appendGuardHistory(REPO, {
       runId: 'r9',
@@ -221,9 +224,7 @@ describe('PgGuardStore — run state (pglite)', () => {
     expect(history.runs[0]!.summary.total).toBe(1);
   });
 
-  it('a same-commit rerun replaces the row: latest wins in history, old runId stops resolving', async () => {
-    // Latest-wins is deliberate (mirrors PgVerifyStore's one-row-per-commit model,
-    // unlike the OSS append-only history.json) — see the store's doc header.
+  it('a same-commit rerun is a new run beside the old one: both resolve, the newest is current', async () => {
     const r1 = makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1' });
     await store.writeGuardLatest(REPO, r1);
     const r2 = makeLatest({
@@ -234,15 +235,15 @@ describe('PgGuardStore — run state (pglite)', () => {
     });
     await store.writeGuardLatest(REPO, r2);
 
-    // History has exactly ONE entry for the commit, carrying R2's runId + summary.
+    // History has BOTH runs of the commit, oldest first.
     const history = await store.readGuardHistory(REPO);
-    expect(history.runs).toHaveLength(1);
-    expect(history.runs[0]!.runId).toBe('r2');
-    expect(history.runs[0]!.summary).toEqual(r2.summary);
-    // R1's data point is gone: its runId no longer resolves; R2's is the row.
-    expect(await store.readGuardRun(REPO, 'r1')).toBeNull();
+    expect(history.runs.map((r) => r.runId)).toEqual(['r1', 'r2']);
+    expect(history.runs[1]!.summary).toEqual(r2.summary);
+    // R1 stays on record; the commit's current run is the newest.
+    expect(await store.readGuardRun(REPO, 'r1')).toEqual(r1);
     expect(await store.readGuardRun(REPO, 'r2')).toEqual(r2);
     expect(await store.readGuardLatest(REPO)).toEqual(r2);
+    expect(await store.readGuardRunForCommit(REPO, 'c1')).toEqual(r2);
   });
 
   it('keys generate results per commit; commit-less read falls back to the newest', async () => {
@@ -252,18 +253,22 @@ describe('PgGuardStore — run state (pglite)', () => {
     await new Promise((r) => setTimeout(r, 5));
     await store.writeGuardResult(refAt('c2'), makeReport({ sectionsChanged: 4, generatedAt: '2026-07-10T00:00:00.000Z' }));
     // both commits' reports coexist and read back by commit
-    expect((await store.readGuardResult(REPO, 'c1'))!.sectionsChanged).toBe(1);
-    expect((await store.readGuardResult(REPO, 'c2'))!.sectionsChanged).toBe(4);
-    expect(await store.readGuardResult(REPO, 'nope')).toBeNull();
+    expect((await store.readGuardResult(REPO, { commitSha: 'c1' }))!.sectionsChanged).toBe(1);
+    expect((await store.readGuardResult(REPO, { commitSha: 'c2' }))!.sectionsChanged).toBe(4);
+    expect(await store.readGuardResult(REPO, { commitSha: 'nope' })).toBeNull();
     // no commit → the newest stored row
     expect((await store.readGuardResult(REPO))!.sectionsChanged).toBe(4);
     expect(await store.readGuardResult('other/repo')).toBeNull();
   });
 
-  it('re-writing a commit upserts its row in place', async () => {
+  it('a second report at a commit is a new version; the commit reads its newest and the old one stays', async () => {
     await store.writeGuardResult(refAt('c1'), makeReport({ sectionsChanged: 1 }));
+    await new Promise((r) => setTimeout(r, 5));
     await store.writeGuardResult(refAt('c1'), makeReport({ sectionsChanged: 2 }));
-    expect((await store.readGuardResult(REPO, 'c1'))!.sectionsChanged).toBe(2);
+    expect((await store.readGuardResult(REPO, { commitSha: 'c1' }))!.sectionsChanged).toBe(2);
+    const versions = await store.listGuardVersions(REPO, 'report');
+    expect(versions).toHaveLength(2);
+    expect((await store.readGuardResult(REPO, { id: versions[1]!.id }))!.sectionsChanged).toBe(1);
   });
 
   it('rejects an empty commit SHA on writeGuardResult', async () => {
@@ -326,18 +331,16 @@ describe('PgGuardStore — evidence (pglite + Postgres content)', () => {
     );
   });
 
-  it('same-commit rerun under a new runId resets the evidence manifest (no stale serving)', async () => {
+  it('a same-commit rerun under a new runId keeps its own evidence apart from the old run’s', async () => {
     await store.writeGuardRun(REPO, makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1' }));
     await store.writeGuardEvidence(REPO, 'r1', 's1', { 'transcript.txt': 'first run' });
-    // Rerun the SAME commit under a new runId — the row's run_id is overwritten
-    // and its evidence manifest resets to {}.
+    // Rerun the SAME commit under a new runId — a new row beside the old one.
     await store.writeGuardRun(REPO, makeLatest({ runId: 'r2', ranAt: '2026-07-02T00:00:00.000Z', commit: 'c1' }));
 
-    // R1-addressed reads go null (no row carries run_id=r1 anymore)…
-    expect(await store.readGuardEvidence(REPO, 'r1', 's1', 'transcript.txt')).toBeNull();
-    expect(await store.readGuardEvidenceAt(REPO, '.truecourse/guard/evidence/r1/s1', 'transcript.txt')).toBeNull();
-    // …and R2-addressed reads are null too: the previous run's transcript is never
-    // served under the new runId (the blobs stay in `content`, just unreferenced).
+    // R1's transcript stays readable under R1…
+    expect(await store.readGuardEvidence(REPO, 'r1', 's1', 'transcript.txt')).toBe('first run');
+    expect(await store.readGuardEvidenceAt(REPO, '.truecourse/guard/evidence/r1/s1', 'transcript.txt')).toBe('first run');
+    // …and is never served under R2, which starts with nothing.
     expect(await store.readGuardEvidence(REPO, 'r2', 's1', 'transcript.txt')).toBeNull();
     expect(await store.readGuardEvidenceAt(REPO, '.truecourse/guard/evidence/r2/s1', 'transcript.txt')).toBeNull();
     // R2's own evidence write then works normally.
@@ -528,14 +531,16 @@ describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
     await store.saveScenarios(refAt('c2'), dir2);
 
     // by commit
-    expect(await store.listScenarioFiles(REPO, 'c1')).toEqual(['.truecourse/scenarios/core/help.yaml']);
-    expect(await store.listScenarioFiles(REPO, 'c2')).toEqual([]);
-    expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/core/help.yaml', 'c1')).toBe(SCENARIO_YAML);
-    expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/core/help.yaml', 'c2')).toBeNull();
-    expect(await store.readRecipeRaw(REPO, 'c1')).toBe(RECIPE_JSON);
-    expect(await store.readRecipeRaw(REPO, 'c2')).toContain('build:v2');
-    expect((await store.readManifest(REPO, 'c1'))!.flows).toHaveLength(1);
-    expect(await store.readManifest(REPO, 'c2')).toBeNull(); // c2 has no manifest.json
+    const c1 = { commitSha: 'c1' };
+    const c2 = { commitSha: 'c2' };
+    expect(await store.listScenarioFiles(REPO, c1)).toEqual(['.truecourse/scenarios/core/help.yaml']);
+    expect(await store.listScenarioFiles(REPO, c2)).toEqual([]);
+    expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/core/help.yaml', c1)).toBe(SCENARIO_YAML);
+    expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/core/help.yaml', c2)).toBeNull();
+    expect(await store.readRecipeRaw(REPO, c1)).toBe(RECIPE_JSON);
+    expect(await store.readRecipeRaw(REPO, c2)).toContain('build:v2');
+    expect((await store.readManifest(REPO, c1))!.flows).toHaveLength(1);
+    expect(await store.readManifest(REPO, c2)).toBeNull(); // c2 has no manifest.json
     // no commit → the newest stored set (c2)
     expect(await store.listScenarioFiles(REPO)).toEqual([]);
     expect(await store.readRecipeRaw(REPO)).toContain('build:v2');
