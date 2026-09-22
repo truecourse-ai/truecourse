@@ -152,7 +152,10 @@ export class PgUsageStore implements UsageStore {
         at,
         jobType: llmUsage.jobType,
         costUsd: sql<string>`coalesce(sum(${llmUsage.costUsd}), 0)`,
-        tokens: sql<string>`coalesce(sum(${TOKENS}), 0)`,
+        inputTokens: sql<string>`coalesce(sum(${llmUsage.inputTokens}), 0)`,
+        outputTokens: sql<string>`coalesce(sum(${llmUsage.outputTokens}), 0)`,
+        cacheReadTokens: sql<string>`coalesce(sum(${llmUsage.cacheReadTokens}), 0)`,
+        cacheCreateTokens: sql<string>`coalesce(sum(${llmUsage.cacheCreateTokens}), 0)`,
       })
       .from(llmUsage)
       .where(scope(query))
@@ -163,7 +166,10 @@ export class PgUsageStore implements UsageStore {
       at: text(row.at),
       jobType: row.jobType,
       costUsd: num(row.costUsd),
-      tokens: num(row.tokens),
+      inputTokens: num(row.inputTokens),
+      outputTokens: num(row.outputTokens),
+      cacheReadTokens: num(row.cacheReadTokens),
+      cacheCreateTokens: num(row.cacheCreateTokens),
     }));
   }
 

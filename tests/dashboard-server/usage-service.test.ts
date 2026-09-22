@@ -277,6 +277,10 @@ describe('the usage reads', () => {
         repoFullName: null,
         startedAt: '2026-06-14T11:00:00.000Z',
         costUsd: 3,
+        inputTokens: 20,
+        outputTokens: 700,
+        cacheReadTokens: 9000,
+        cacheCreateTokens: 400,
       }),
     );
     const period = resolveUsagePeriod(request({ period: '7d' }), NOW);
@@ -291,14 +295,18 @@ describe('the usage reads', () => {
       '2026-06-14',
       '2026-06-15',
     ]);
-    expect(series[0]).toEqual({ at: '2026-06-09', costUsd: 0, tokens: 0, byJobType: {} });
+    expect(series[0]).toEqual({ at: '2026-06-09', costUsd: 0, input: 0, output: 0, cached: 0, byJobType: {} });
+    // Every measure the chart can plot, per job type: a cache write is input,
+    // a cache read is cached — the split the totals and the runs use.
     expect(series[5]).toEqual({
       at: '2026-06-14',
       costUsd: 5,
-      tokens: 2200,
+      input: 1420,
+      output: 800,
+      cached: 9000,
       byJobType: {
-        'repo.guard-generate': { costUsd: 2, tokens: 1100 },
-        'context.scan': { costUsd: 3, tokens: 1100 },
+        'repo.guard-generate': { costUsd: 2, input: 1000, output: 100, cached: 0 },
+        'context.scan': { costUsd: 3, input: 420, output: 700, cached: 9000 },
       },
     });
   });

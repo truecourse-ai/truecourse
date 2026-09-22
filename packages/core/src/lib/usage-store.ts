@@ -78,13 +78,16 @@ export interface UsageTotalsRecord {
   runs: number;
 }
 
-/** One bucket's spend under one job type. */
+/** One bucket's spend under one job type, in the four stored token buckets. */
 export interface UsageSeriesRecord {
   /** The bucket's first day, `YYYY-MM-DD` in the query's zone. */
   at: string;
   jobType: string;
   costUsd: number;
-  tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
 }
 
 /** One job's spend, with how the job ended. */

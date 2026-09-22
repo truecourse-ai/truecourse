@@ -8,11 +8,11 @@
  * answer does not honour would be a lie.
  *
  * Under it the trend: one quiet band per job type over the period's days (its
- * weeks, once a day per point stops being readable), the period's total once
- * beneath it with its tokens split into input, output and cached, and a toggle
- * that swaps what is measured from money to tokens. Then the runs that spent
- * it, four corners each, carrying the same split and opening the conversation
- * they belong to.
+ * weeks, once a day per point stops being readable), plotting ONE measure at a
+ * time — cost, input, output or cached tokens — picked beside it, and the
+ * period's total once beneath it with its tokens split into input, output and
+ * cached. Then the runs that spent it, four corners each, carrying the same
+ * split and opening the conversation they belong to.
  *
  * Nothing is composed here: the server folded every number, named every value
  * and faceted every filter, so this page draws what it was told.
@@ -26,6 +26,7 @@ import {
   usageJobTypeWord,
   type JobStatus,
   type UsagePeriod,
+  type UsageMeasure,
   type UsageResponse,
   type UsageRunRow,
   type UsageTokenSplit,
@@ -117,8 +118,15 @@ const OUTCOME_ORDER: JobStatus[] = [
   'succeeded',
 ];
 
-/** What the chart measures. */
-type Measure = 'cost' | 'tokens';
+/** What the chart can plot, in the order the picker offers it. */
+const MEASURES: UsageMeasure[] = ['costUsd', 'input', 'output', 'cached'];
+
+const MEASURE_LABEL: Record<UsageMeasure, string> = {
+  costUsd: 'Cost',
+  input: 'Input',
+  output: 'Output',
+  cached: 'Cached',
+};
 
 /** A share as a whole percent; a share too small to round to one still reads as some. */
 function formatShare(share: number): string {
@@ -185,7 +193,7 @@ function defaultRange(): { from: string; to: string } {
 export function UsageTab() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [measure, setMeasure] = useState<Measure>('cost');
+  const [picked, setPicked] = useState<UsageMeasure>('costUsd');
 
   const period: UsagePeriod = (USAGE_PERIODS as readonly string[]).includes(params.get('period') ?? '')
     ? (params.get('period') as UsagePeriod)
@@ -277,7 +285,7 @@ export function UsageTab() {
     const present = new Set<string>();
     for (const point of usage?.series ?? []) {
       for (const [jobType, amount] of Object.entries(point.byJobType)) {
-        if (amount.costUsd > 0 || amount.tokens > 0) present.add(jobType);
+        if (MEASURES.some((key) => amount[key] > 0)) present.add(jobType);
       }
     }
     return [...present]
@@ -289,17 +297,20 @@ export function UsageTab() {
       }));
   }, [usage]);
 
+  // A period nothing was cached in offers no Cached measure, the way its split
+  // shows no cached figure: a flat zero would read as a cache that missed.
+  const measures = useMemo(
+    () => MEASURES.filter((key) => key !== 'cached' || usage?.totals.split.cacheHitRate !== null),
+    [usage],
+  );
+  const measure = measures.includes(picked) ? picked : 'costUsd';
+
   const points = useMemo(
     () =>
       (usage?.series ?? []).map((point) => ({
         at: point.at,
         values: Object.fromEntries(
-          series.map((s) => [
-            s.key,
-            measure === 'cost'
-              ? (point.byJobType[s.key]?.costUsd ?? 0)
-              : (point.byJobType[s.key]?.tokens ?? 0),
-          ]),
+          series.map((s) => [s.key, point.byJobType[s.key]?.[measure] ?? 0]),
         ) as Record<string, number>,
       })),
     [usage, series, measure],
@@ -315,12 +326,7 @@ export function UsageTab() {
     [settled],
   );
 
-  const format = measure === 'cost' ? formatUsd : formatTokens;
-  const spent = usage
-    ? measure === 'cost'
-      ? formatUsd(usage.totals.costUsd)
-      : formatTokens(usage.totals.tokens)
-    : '';
+  const format = measure === 'costUsd' ? formatUsd : formatTokens;
 
   const control = (
     <span className="mr-2 flex flex-wrap items-center gap-1">
@@ -403,24 +409,24 @@ export function UsageTab() {
                 formatValue={format}
                 controls={
                   <span role="group" aria-label="Measure" className="flex items-center gap-1">
-                    {(['cost', 'tokens'] as Measure[]).map((key) => (
+                    {measures.map((key) => (
                       <button
                         key={key}
                         type="button"
                         aria-pressed={measure === key}
-                        onClick={() => setMeasure(key)}
+                        onClick={() => setPicked(key)}
                         className={`${CHIP} ${measure === key ? CHIP_ON : CHIP_OFF}`}
                       >
-                        {key === 'cost' ? 'Cost' : 'Tokens'}
+                        {MEASURE_LABEL[key]}
                       </button>
                     ))}
                   </span>
                 }
               />
               <p className="mt-3 text-[13px] text-foreground">
-                <span className="text-lg font-semibold tabular-nums">{spent}</span>
+                <span className="text-lg font-semibold tabular-nums">{formatUsd(usage.totals.costUsd)}</span>
                 <span className="ml-2 text-[11px] text-muted-foreground">
-                  {measure === 'cost' ? 'spent' : 'tokens'} over{' '}
+                  spent over{' '}
                   {period === 'custom' ? 'the chosen days' : `the last ${PERIOD_LABEL[period]}`}
                 </span>
               </p>

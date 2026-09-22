@@ -5,7 +5,7 @@
  * the server folded, whose filter values the server faceted and whose period
  * the server resolved. What is asserted here is what the page DOES with that
  * answer — the trend it draws and the total beneath it, the runs list and what
- * a row opens, the toggle that swaps money for tokens, and the control row,
+ * a row opens, the measure the chart plots, and the control row,
  * whose every choice lands in the address and is read back from it.
  */
 
@@ -60,14 +60,16 @@ const USAGE: UsageResponse = {
     runs: 2,
   },
   series: [
-    { at: '2026-09-14', costUsd: 0, tokens: 0, byJobType: {} },
+    { at: '2026-09-14', costUsd: 0, input: 0, output: 0, cached: 0, byJobType: {} },
     {
       at: '2026-09-15',
       costUsd: 12.5,
-      tokens: 2_000_000,
+      input: 980_000,
+      output: 220_000,
+      cached: 800_000,
       byJobType: {
-        'repo.guard-generate': { costUsd: 10, tokens: 1_600_000 },
-        'context.scan': { costUsd: 2.5, tokens: 400_000 },
+        'repo.guard-generate': { costUsd: 10, input: 600_000, output: 200_000, cached: 800_000 },
+        'context.scan': { costUsd: 2.5, input: 380_000, output: 20_000, cached: 0 },
       },
     },
   ],
@@ -135,7 +137,7 @@ const EMPTY: UsageResponse = {
     calls: 0,
     runs: 0,
   },
-  series: [{ at: '2026-09-15', costUsd: 0, tokens: 0, byJobType: {} }],
+  series: [{ at: '2026-09-15', costUsd: 0, input: 0, output: 0, cached: 0, byJobType: {} }],
   runs: [],
   repositories: [],
   jobTypes: [],
@@ -261,16 +263,38 @@ describe('Settings › Usage', () => {
     expect(address()).toBe('/agent/run_gen');
   });
 
-  it('swaps money for tokens without asking the server again', async () => {
+  it('plots the one measure picked, per job type, without asking the server again', async () => {
     const state = serve();
     renderUsage();
 
-    await screen.findByText('$12.50');
-    const before = state.calls.length;
-    await userEvent.click(screen.getByRole('button', { name: 'Tokens' }));
+    const chart = await screen.findByRole('region', { name: 'Spend over time' });
+    const measures = within(chart).getByRole('group', { name: 'Measure' });
+    // Four measures, no summed token count among them.
+    expect(within(measures).getAllByRole('button').map((b) => b.textContent)).toEqual([
+      'Cost',
+      'Input',
+      'Output',
+      'Cached',
+    ]);
+    const plotted = () => within(chart).getByRole('img').querySelector('desc')!.textContent;
+    expect(plotted()).toContain('Sep 15: $2.50 document scan, $10.00 flow generation');
 
-    expect(screen.getByText('2.0M')).toBeInTheDocument();
-    expect(screen.queryByText('$12.50')).toBeNull();
+    const before = state.calls.length;
+    await userEvent.click(within(measures).getByRole('button', { name: 'Output' }));
+    expect(within(measures).getByRole('button', { name: 'Output' })).toHaveAttribute('aria-pressed', 'true');
+    expect(plotted()).toContain('Sep 15: 20.0K document scan, 200.0K flow generation');
+
+    await userEvent.click(within(measures).getByRole('button', { name: 'Input' }));
+    expect(plotted()).toContain('Sep 15: 380.0K document scan, 600.0K flow generation');
+
+    await userEvent.click(within(measures).getByRole('button', { name: 'Cached' }));
+    expect(plotted()).toContain('Sep 15: 0 document scan, 800.0K flow generation');
+
+    // The period's total beneath stays what it is, each number said once.
+    expect(screen.getByText('$12.50')).toBeInTheDocument();
+    expect(
+      screen.getByText('1.0M input · 200.0K output · 800.0K cached · 44% cache hits'),
+    ).toBeInTheDocument();
     expect(state.calls).toHaveLength(before);
   });
 
@@ -290,6 +314,9 @@ describe('Settings › Usage', () => {
     // The line says exactly the two figures there are, with nothing cached after them.
     const line = await screen.findByText('1.0M input · 200.0K output');
     expect(line).toHaveTextContent(/^1\.0M input · 200\.0K output$/);
+    // Nor does the chart offer to plot a cache that held nothing.
+    const measures = screen.getByRole('group', { name: 'Measure' });
+    expect(within(measures).queryByRole('button', { name: 'Cached' })).toBeNull();
   });
 
   it('puts the period in the address and reads it back', async () => {

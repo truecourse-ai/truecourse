@@ -152,8 +152,25 @@ describe('PgUsageStore', () => {
 
     const days = await store.series(ALL, 'day');
     expect(days).toEqual([
-      { at: '2026-06-01', jobType: 'repo.guard-generate', costUsd: 3, tokens: 2320 },
-      { at: '2026-06-03', jobType: 'context.scan', costUsd: 4, tokens: 1160 },
+      // The four stored buckets per point, never summed into one.
+      {
+        at: '2026-06-01',
+        jobType: 'repo.guard-generate',
+        costUsd: 3,
+        inputTokens: 200,
+        outputTokens: 20,
+        cacheReadTokens: 2000,
+        cacheCreateTokens: 100,
+      },
+      {
+        at: '2026-06-03',
+        jobType: 'context.scan',
+        costUsd: 4,
+        inputTokens: 100,
+        outputTokens: 10,
+        cacheReadTokens: 1000,
+        cacheCreateTokens: 50,
+      },
     ]);
 
     // June 1 2026 is a Monday, so both days fall in the one week bucket.

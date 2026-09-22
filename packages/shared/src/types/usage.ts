@@ -5,7 +5,7 @@
  * way Home is: the server folds every number and names every value, so the page
  * draws what it was told and computes nothing of its own. Three shapes over the
  * same filtered slice — the period's totals, the trend bucketed by day or by
- * week with one line per job type, and the runs that spent it.
+ * week with one band per job type, and the runs that spent it.
  *
  * Cost is a CEILING in USD: every input-side token is priced at the list input
  * rate and prompt-cache discounts are ignored, the same arithmetic the
@@ -92,19 +92,27 @@ export interface UsageTotals {
   runs: number;
 }
 
-/** One job type's share of a bucket. */
+/**
+ * A bucket's spend, one number per thing the trend can plot: its cost, and its
+ * tokens split the way {@link UsageTokenSplit} splits them.
+ */
 export interface UsageAmount {
   costUsd: number;
-  tokens: number;
+  /** Uncached input plus cache writes. */
+  input: number;
+  output: number;
+  /** Input served from the prompt cache. */
+  cached: number;
 }
 
+/** What the trend can plot, one number per job type per bucket. */
+export type UsageMeasure = keyof UsageAmount;
+
 /** One point of the trend: a day, or the week that starts on it. */
-export interface UsageSeriesPoint {
+export interface UsageSeriesPoint extends UsageAmount {
   /** The bucket's first day, `YYYY-MM-DD` where the reader is. */
   at: string;
-  costUsd: number;
-  tokens: number;
-  /** The same two numbers per job type; a type that spent nothing is absent. */
+  /** The same numbers per job type; a type that spent nothing is absent. */
   byJobType: Record<string, UsageAmount>;
 }
 
