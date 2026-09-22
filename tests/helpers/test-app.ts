@@ -172,7 +172,7 @@ export function installTestWorkspaceLlm(): void {
   });
   setWorkspaceLlmBackend({
     probe: async () => {},
-    driver: () => ({}) as never,
+    driver: () => ({ attribution: { provider: 'test', model: 'test-model' } }) as never,
   });
 }
 

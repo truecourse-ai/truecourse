@@ -42,13 +42,13 @@ describe('PgGuardStore setup bundle', () => {
   it('round-trips a bundle at an exact commit', async () => {
     await store.saveGuardSetupBundle({ repoKey: REPO, commitSha: 'shaA' }, BUNDLE);
 
-    expect(await store.loadGuardSetupBundle(REPO, 'shaA')).toEqual(BUNDLE);
+    expect(await store.loadGuardSetupBundle(REPO, { commitSha: 'shaA' })).toEqual(BUNDLE);
   });
 
   it('returns null when the repo or the commit has no bundle', async () => {
     expect(await store.loadGuardSetupBundle(REPO)).toBeNull();
     await store.saveGuardSetupBundle({ repoKey: REPO, commitSha: 'shaA' }, BUNDLE);
-    expect(await store.loadGuardSetupBundle(REPO, 'shaZ')).toBeNull();
+    expect(await store.loadGuardSetupBundle(REPO, { commitSha: 'shaZ' })).toBeNull();
     expect(await store.loadGuardSetupBundle('other/repo')).toBeNull();
   });
 
@@ -59,15 +59,19 @@ describe('PgGuardStore setup bundle', () => {
 
     expect(await store.loadGuardSetupBundle(REPO)).toEqual(newer);
     // The older commit is still addressable.
-    expect(await store.loadGuardSetupBundle(REPO, 'shaA')).toEqual(BUNDLE);
+    expect(await store.loadGuardSetupBundle(REPO, { commitSha: 'shaA' })).toEqual(BUNDLE);
   });
 
-  it('re-saving the same commit replaces its manifest', async () => {
+  it('re-saving the same commit adds a version; the commit reads its newest', async () => {
     await store.saveGuardSetupBundle({ repoKey: REPO, commitSha: 'shaA' }, BUNDLE);
+    await new Promise((r) => setTimeout(r, 5));
     await store.saveGuardSetupBundle({ repoKey: REPO, commitSha: 'shaA' }, { 'only.txt': 'one' });
 
-    expect(await store.loadGuardSetupBundle(REPO, 'shaA')).toEqual({ 'only.txt': 'one' });
-    expect(await db.select().from(guardSetupSets)).toHaveLength(1);
+    expect(await store.loadGuardSetupBundle(REPO, { commitSha: 'shaA' })).toEqual({ 'only.txt': 'one' });
+    expect(await db.select().from(guardSetupSets)).toHaveLength(2);
+    // The earlier version is still addressable by id.
+    const [, older] = await store.listGuardVersions(REPO, 'setup');
+    expect(await store.loadGuardSetupBundle(REPO, { id: older!.id })).toEqual(BUNDLE);
   });
 
   it('dedups identical bodies across commits into one content row each', async () => {

@@ -57,6 +57,7 @@ import {
   writeGuardResultEvidence,
   writeGuardRunCoverage,
   type RepoRef,
+  type VersionProvenance,
 } from '@truecourse/core/lib/guard-store';
 import {
   readGuardRunFlowSummary,
@@ -71,8 +72,9 @@ function writeFile(file: string, body: string): void {
 }
 
 /**
- * Put the repo's stored guard state into `treeDir`. Returns the baseline
- * commit the scenario set came from, or `null` when the repo has never
+ * Put the repo's stored guard state into `treeDir`: the CURRENT scenario set
+ * and report of the default branch (the newest version of each). Returns the
+ * commit the current set came from, or `null` when the repo has never
  * generated — a first generate starts from nothing, which is fine.
  */
 export async function materializeStoredGuardState(
@@ -90,15 +92,18 @@ export async function materializeStoredGuardState(
   const baseline = await readGuardBaselineCommit(repoKey);
   if (!baseline) return null;
 
-  const manifest = await readManifest(repoKey, baseline);
+  // The newest version of each, whatever commit it was written at: a set
+  // rolled back to an older version is what the next generate reconciles
+  // against, and the report beside it is the one that set was born with.
+  const manifest = await readManifest(repoKey);
   if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
-  for (const rel of await listScenarioFiles(repoKey, baseline)) {
-    const body = await readScenarioFile(repoKey, rel, baseline);
+  for (const rel of await listScenarioFiles(repoKey)) {
+    const body = await readScenarioFile(repoKey, rel);
     if (body == null) continue;
     assertSafeRel(rel);
     writeFile(safeJoin(treeDir, rel), body);
   }
-  const report = await readGuardResult(repoKey, baseline);
+  const report = await readGuardResult(repoKey, { commitSha: baseline });
   if (report) writeCloneGuardResult(treeDir, report);
   return baseline;
 }
@@ -123,18 +128,20 @@ export interface PersistedGuardGenerate {
 }
 
 /**
- * Lift what a completed generate wrote in `treeDir` into the store under
- * `ref`: the scenario tree, the report (baseline), then every birth-finding
- * transcript the report and the manifest point at. The report row is written
- * before the evidence, which attaches to it.
+ * Lift what a completed generate wrote in `treeDir` into the store as new
+ * versions of `ref`'s series: the scenario tree, the report, then every
+ * birth-finding transcript the report and the manifest point at. Both carry
+ * `provenance` — the run that wrote them and its model. The report row is
+ * written before the evidence, which attaches to it.
  */
 export async function persistGeneratedGuard(
   ref: RepoRef,
   treeDir: string,
   report: GuardGenerateReport,
+  provenance?: VersionProvenance,
 ): Promise<PersistedGuardGenerate> {
-  const { fileCount } = await saveScenarios(ref, scenariosDir(treeDir));
-  await writeGuardResult(ref, report, { baseline: true });
+  const { fileCount } = await saveScenarios(ref, scenariosDir(treeDir), provenance);
+  await writeGuardResult(ref, report, provenance);
   await persistBirthEvidence(ref, treeDir, report);
   return { fileCount };
 }
@@ -175,7 +182,7 @@ export async function persistGuardRun(
 ): Promise<void> {
   // The stored record says where it ran: this is the hosted runner's run.
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
-  await writeGuardLatest(ref.repoKey, latest);
+  await writeGuardLatest(ref.repoKey, latest, { scope: ref.scope });
   await recordGuardRunCoverage(ref.repoKey, latest);
   const runId = latest.run.runId;
   for (const scenario of latest.scenarios) {

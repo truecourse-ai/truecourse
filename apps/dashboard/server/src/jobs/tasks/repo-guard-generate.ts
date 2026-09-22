@@ -5,11 +5,12 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  * The third link of onboarding: a successful setup chains into it, and the
  * Generate button enqueues it. The generator reads and writes files, so the
  * job brackets it the way the setup job does: the stored spec, the repo's
- * guard state (decisions, the baseline scenario set and report) and setup's
- * newest bundle are materialized into the clone first, and what the generate
- * wrote — the scenario tree, the report, the birth-finding transcripts — is
- * saved back under the clone's commit after, flagged as the repo's guard
- * baseline: the job only ever runs on the default branch.
+ * guard state (decisions, the default branch's current scenario set and
+ * report) and setup's newest bundle are materialized into the clone first, and
+ * what the generate wrote — the scenario tree, the report, the birth-finding
+ * transcripts — is saved back after as new versions of the default branch's
+ * series under the clone's commit, stamped with this run and its model: the job
+ * only ever runs on the default branch.
  *
  * Nothing is persisted from a generate that authored nothing. A corpus still
  * carrying open conflicts is the one exception: its blocked report is stored so
@@ -192,8 +193,10 @@ export function createRepoGuardGenerateTask(
             activityTracker.done('clone');
 
             let guard;
+            // The versions this generate writes say which run wrote them and on which model.
+            const driver = llm.driver();
+            const provenance = { producedByRun: activityRun.runId, model: driver.attribution.model };
             try {
-              const driver = llm.driver();
               ({ guard } = await runGenerate(tree.dir, {
                 driver,
                 transportMode: llm.mode,
@@ -209,9 +212,7 @@ export function createRepoGuardGenerateTask(
               if (ctx.signal?.aborted) throw err;
               if (err instanceof OpenConflictsError) {
                 // The engine already stopped the run on the gate's reason.
-                await writeGuardResult(ref, buildOpenConflictsReport(err, new Date().toISOString()), {
-                  baseline: true,
-                });
+                await writeGuardResult(ref, buildOpenConflictsReport(err, new Date().toISOString()), provenance);
                 const result: GuardGenerateJobResult = {
                   repoFullName,
                   status: 'open-conflicts',
@@ -250,7 +251,7 @@ export function createRepoGuardGenerateTask(
             // The report the engine left in the tree is what gets stored, so the
             // row's counts come from it too — never from a result it could differ from.
             const report = readGeneratedReport(tree.dir) ?? buildGuardReport(guard, new Date().toISOString());
-            await persistGeneratedGuard(ref, tree.dir, report);
+            await persistGeneratedGuard(ref, tree.dir, report, provenance);
 
             // Keep successful documents and the failure report, but do not present
             // an incomplete extraction as success or chain its baseline run.

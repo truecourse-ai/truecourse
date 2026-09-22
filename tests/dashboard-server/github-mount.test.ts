@@ -266,7 +266,7 @@ beforeEach(async () => {
     getView: async () => null,
     save: async () => {},
   });
-  setWorkspaceLlmBackend({ probe: async () => {}, driver: () => ({}) as never });
+  setWorkspaceLlmBackend({ probe: async () => {}, driver: () => ({ attribution: { provider: 'test', model: 'test-model' } }) as never });
   // Nothing connects into a workspace that has not said what its product is;
   // the refusal itself is pinned in the connect router's own suite.
   installDescribedWorkspaces();

@@ -171,6 +171,7 @@ import {
   readScenarioFile,
   writeGuardDecisions as writeGuardDecisionsStore,
   type GuardRunCoverage,
+  type VersionAt,
 } from '../lib/guard-store.js'
 import { readGuardExternalSetupIndex } from './guard-externals.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
@@ -191,10 +192,13 @@ export {
 // Commit resolution (hosted)
 // ---------------------------------------------------------------------------
 
+/** Where a store read lands: the pinned commit's newest version, else the scope's current one. */
+const at = (commit?: string): VersionAt => (commit ? { commitSha: commit } : {})
+
 /** The baseline commit — the default-branch anchor guard reads fall back to
- *  when no explicit ref is given (hosted): the commit of the newest generate the
- *  store flagged as a baseline, which the hosted generate job writes since it
- *  only ever runs on the default branch. `undefined` when there is none yet. */
+ *  when no explicit ref is given (hosted): the commit the default branch's
+ *  CURRENT scenario set (else its current report) was produced at, which is the
+ *  newest version of its series. `undefined` when there is none yet. */
 async function guardBaselineCommit(repoKey: string): Promise<string | undefined> {
   return (await getGuardStore().readGuardBaselineCommit(repoKey)) ?? undefined
 }
@@ -203,10 +207,9 @@ async function guardBaselineCommit(repoKey: string): Promise<string | undefined>
  * The resolved read scope for a guard view:
  *  - `commit` — the explicit `ref` (a pinned commit) or, absent one, the
  *    default-branch baseline commit.
- *  - `empty`  — NOTHING resolvable (no ref, no baseline yet). Reads MUST come
- *    back absent, never the store's newest-set fallback: the newest stored set
- *    can be a set written at some other commit, which must not leak into the
- *    repo-level view (the approved no-"newest by createdAt" decision).
+ *  - `empty`  — NOTHING resolvable (no ref, no baseline yet). Reads come back
+ *    absent: a version under another scope (a pull request's regenerate) is
+ *    never the default branch's, so it must not leak into the repo-level view.
  */
 type GuardReadScope =
   | { kind: 'commit'; commit: string }
@@ -454,9 +457,9 @@ export async function readGuardRunSectionSummary(
 
   const sources: GuardCoverageSources = {
     scenarios: (await getGuardStore().loadScenarios({ repoKey, commitSha: commit ?? '' })).scenarios,
-    manifest: await readManifestStore(repoKey, commit),
+    manifest: await readManifestStore(repoKey, at(commit)),
     latest,
-    result: await readGuardResultStore(repoKey, commit),
+    result: await readGuardResultStore(repoKey, at(commit)),
     flows: await readGuardFlowsFile(repoKey, commit),
     claims: await readGuardClaimsFile(repoKey, commit),
     // The externals index only ever moves a section between two statuses that
@@ -493,7 +496,7 @@ async function runSummaryCommit(
   latest: GuardLatest,
 ): Promise<string | undefined> {
   const runCommit = latest.run.commit ?? undefined
-  if (runCommit && (await readManifestStore(repoKey, runCommit))) return runCommit
+  if (runCommit && (await readManifestStore(repoKey, at(runCommit)))) return runCommit
   return (await getGuardStore().readGuardBaselineCommit(repoKey)) ?? runCommit
 }
 
@@ -1275,11 +1278,11 @@ interface GuardCorpusForView {
 /**
  * Load the stored scenario set + its manifest for a view. Corpus loads are
  * RepoRef-keyed (the store convention): the store reads the requested ref, else
- * the baseline set — never the newest, which a set written at another commit
- * would pollute. A pinned ref with NO stored set falls back to the baseline set;
- * the set moves WHOLE, so scenarios and manifest always come from the same
- * snapshot. An unresolvable scope (no ref, no baseline) is `null` — the empty
- * view, never a "newest" guess.
+ * the default branch's current set, whose commit the baseline resolves to. A
+ * pinned ref with NO stored set falls back to that set; the set moves WHOLE, so
+ * scenarios and manifest always come from the same snapshot. An unresolvable
+ * scope (no ref, nothing stored in the default branch's scope) is `null` — the
+ * empty view.
  */
 async function loadGuardCorpusForView(
   repoKey: string,
@@ -1289,12 +1292,12 @@ async function loadGuardCorpusForView(
   if (scope.kind === 'empty') return null
   let commit = scope.commit
   let { scenarios } = await getGuardStore().loadScenarios({ repoKey, commitSha: commit ?? '' })
-  let manifest = await readManifestStore(repoKey, commit)
+  let manifest = await readManifestStore(repoKey, at(commit))
   if (ref !== undefined && scenarios.length === 0 && manifest == null) {
     const base = await guardBaselineCommit(repoKey)
     if (base !== undefined && base !== commit) {
       const fromBase = await getGuardStore().loadScenarios({ repoKey, commitSha: base })
-      const baseManifest = await readManifestStore(repoKey, base)
+      const baseManifest = await readManifestStore(repoKey, at(base))
       if (fromBase.scenarios.length > 0 || baseManifest != null) {
         commit = base
         scenarios = fromBase.scenarios
@@ -1329,7 +1332,7 @@ export async function readGuardFlowsFile(
   repoKey: string,
   commit?: string,
 ): Promise<GuardFlowsFile | null> {
-  const raw = await readScenarioFile(repoKey, flowsRelPath(repoKey), commit)
+  const raw = await readScenarioFile(repoKey, flowsRelPath(repoKey), at(commit))
   if (raw == null) return null
   let parsed: unknown
   try {
@@ -2037,7 +2040,7 @@ export async function readGuardClaimsFile(
   repoKey: string,
   commit?: string,
 ): Promise<GuardClaimsFile | null> {
-  const raw = await readScenarioFile(repoKey, claimsRelPath(repoKey), commit)
+  const raw = await readScenarioFile(repoKey, claimsRelPath(repoKey), at(commit))
   if (raw == null) return null
   let parsed: unknown
   try {
@@ -2227,7 +2230,7 @@ async function bundledInterfaceCatalog(
   repoKey: string,
   ref?: string,
 ): Promise<InterfacesFile | null | undefined> {
-  const bundle = await loadGuardSetupBundle(repoKey, ref)
+  const bundle = await loadGuardSetupBundle(repoKey, at(ref))
   if (!bundle) return undefined
   const derived = parseDerivedInterfaces(bundle[GUARD_SETUP_INTERFACES_FILE])
   const authored = parseAuthoredInterfaces(bundle[GUARD_SETUP_AUTHORED_INTERFACES_FILE])
@@ -2462,14 +2465,14 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
   const scope = await resolveGuardScope(repoKey, ref)
   if (scope.kind === 'empty') return null
   let commit = scope.commit
-  let report = await readGuardResultStore(repoKey, commit)
+  let report = await readGuardResultStore(repoKey, at(commit))
   // A pinned commit that never generated falls back to the BASELINE report
   // (never "newest"). Heading joins follow `commit` so they read the docs the
   // report's sections actually live in.
   if (!report && scope.kind === 'commit' && ref !== undefined) {
     const base = await guardBaselineCommit(repoKey)
     if (base !== undefined && base !== commit) {
-      const fromBase = await readGuardResultStore(repoKey, base)
+      const fromBase = await readGuardResultStore(repoKey, at(base))
       if (fromBase) {
         report = fromBase
         commit = base
@@ -2530,12 +2533,12 @@ async function readPinnedWithBaselineFallback<T>(
 
 /** The manifest a (possibly commit-pinned) guard view joins classifications from. */
 export function readManifestForView(repoKey: string, ref?: string): Promise<GuardManifest | null> {
-  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readManifestStore(repoKey, c))
+  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readManifestStore(repoKey, at(c)))
 }
 
 /** The raw last-generate result a (possibly commit-pinned) guard view paints from. */
 export function readGuardResultForView(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
-  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardResultStore(repoKey, c))
+  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardResultStore(repoKey, at(c)))
 }
 
 /**
@@ -2548,7 +2551,7 @@ export function readGuardResultForView(repoKey: string, ref?: string): Promise<G
  * informational).
  */
 export async function readGuardRecipeCard(repoKey: string, commit?: string): Promise<GuardRecipeCard | null> {
-  const raw = await readRecipeRaw(repoKey, commit)
+  const raw = await readRecipeRaw(repoKey, at(commit))
   if (raw == null) return null
   let parsed: unknown
   try {
@@ -2631,8 +2634,8 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
 /** Map each stored scenario id → its repo-relative YAML path (first sorted file wins, matching the loader's dedup). */
 async function scenarioFilesById(repoKey: string, commit?: string): Promise<Map<string, string>> {
   const map = new Map<string, string>()
-  for (const rel of await listScenarioFiles(repoKey, commit)) {
-    const content = await readScenarioFile(repoKey, rel, commit)
+  for (const rel of await listScenarioFiles(repoKey, at(commit))) {
+    const content = await readScenarioFile(repoKey, rel, at(commit))
     if (content == null) continue
     let parsed: unknown
     try {
@@ -2709,8 +2712,8 @@ export async function readGuardScenarioSource(
   const scope = await resolveGuardScope(repoKey, ref)
   if (scope.kind === 'empty') return null
   const commit = scope.commit
-  for (const rel of await listScenarioFiles(repoKey, commit)) {
-    const raw = await readScenarioFile(repoKey, rel, commit)
+  for (const rel of await listScenarioFiles(repoKey, at(commit))) {
+    const raw = await readScenarioFile(repoKey, rel, at(commit))
     if (raw == null) continue
     let parsed: unknown
     try {
@@ -2797,7 +2800,7 @@ export async function readGuardInterfaceRaw(
   id: string,
   ref?: string,
 ): Promise<GuardArtifactSource | null> {
-  const bundle = await loadGuardSetupBundle(repoKey, ref)
+  const bundle = await loadGuardSetupBundle(repoKey, at(ref))
   if (!bundle) return null
   let found: GuardArtifactSource | null = null
   for (const rel of [GUARD_SETUP_INTERFACES_FILE, GUARD_SETUP_AUTHORED_INTERFACES_FILE]) {
@@ -2818,7 +2821,7 @@ export function readGuardFlowRaw(
 ): Promise<GuardArtifactSource | null> {
   const rel = flowsRelPath(repoKey)
   return readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
-    artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'flows', id),
+    artifactSlice(await readScenarioFile(repoKey, rel, at(commit)), rel, 'flows', id),
   )
 }
 
@@ -2832,7 +2835,7 @@ export function readGuardClaimRaw(
 ): Promise<GuardArtifactSource | null> {
   const rel = claimsRelPath(repoKey)
   return readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
-    artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'claims', id),
+    artifactSlice(await readScenarioFile(repoKey, rel, at(commit)), rel, 'claims', id),
   )
 }
 
@@ -2850,12 +2853,12 @@ export async function readGuardDependencyRaw(
 ): Promise<GuardArtifactSource | null> {
   const rel = path.relative(repoKey, dependenciesPath(repoKey)).split(path.sep).join('/')
   const fromSet = await readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
-    artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'dependencies', name, 'name'),
+    artifactSlice(await readScenarioFile(repoKey, rel, at(commit)), rel, 'dependencies', name, 'name'),
   )
   if (fromSet) return fromSet
   // The catalog is setup's artifact: a hosted repo that has not generated yet has
   // no scenario set, and the setup bundle is where setup left it.
-  const bundle = await loadGuardSetupBundle(repoKey, ref)
+  const bundle = await loadGuardSetupBundle(repoKey, at(ref))
   return artifactSlice(bundle?.[GUARD_SETUP_DEPENDENCIES_FILE] ?? null, rel, 'dependencies', name, 'name')
 }
 
@@ -2877,7 +2880,7 @@ export function readGuardRecipeRaw(
 ): Promise<GuardArtifactSource | null> {
   const rel = path.relative(repoKey, recipePath(repoKey)).split(path.sep).join('/')
   return readPinnedWithBaselineFallback(repoKey, ref, async (commit) => {
-    const raw = await readRecipeRaw(repoKey, commit)
+    const raw = await readRecipeRaw(repoKey, at(commit))
     if (raw == null) return null
     const content = maskedRecipeText(raw)
     return content == null ? null : { id: rel, file: rel, content }
@@ -3081,18 +3084,18 @@ async function storeGuardStaleness(
   refPinned: boolean,
 ): Promise<GuardStaleness> {
   const [result, manifest, runAtCommit, baseline, scenarioFiles] = await Promise.all([
-    readGuardResultStore(repoKey, commit),
-    readManifestStore(repoKey, commit),
+    readGuardResultStore(repoKey, at(commit)),
+    readManifestStore(repoKey, at(commit)),
     readGuardRunForCommitStore(repoKey, commit),
     refPinned ? Promise.resolve(null) : readGuardLatestStore(repoKey),
-    listScenarioFiles(repoKey, commit),
+    listScenarioFiles(repoKey, at(commit)),
   ])
   const base = refPinned ? await guardBaselineCommit(repoKey) : undefined
   const fallback = base !== undefined && base !== commit
   const [resultF, manifestF, scenarioFilesF] = await Promise.all([
-    fallback && result == null ? readGuardResultStore(repoKey, base) : Promise.resolve(result),
-    fallback && manifest == null ? readManifestStore(repoKey, base) : Promise.resolve(manifest),
-    fallback && scenarioFiles.length === 0 ? listScenarioFiles(repoKey, base) : Promise.resolve(scenarioFiles),
+    fallback && result == null ? readGuardResultStore(repoKey, at(base)) : Promise.resolve(result),
+    fallback && manifest == null ? readManifestStore(repoKey, at(base)) : Promise.resolve(manifest),
+    fallback && scenarioFiles.length === 0 ? listScenarioFiles(repoKey, at(base)) : Promise.resolve(scenarioFiles),
   ])
   const run = runAtCommit ?? baseline
   const hasScenarios = (manifestF?.flows?.length ?? 0) > 0 || scenarioFilesF.length > 0

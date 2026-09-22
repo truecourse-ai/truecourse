@@ -75,7 +75,15 @@ import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
 import { hostedDependenciesView } from './guard-dependencies-hosted.js';
 import { readGuardSetup } from '@truecourse/core/commands/guard-setup';
 import { readBundleGuardSetup } from '@truecourse/core/services/guard-setup/bundle';
-import { loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
+import {
+  listGuardVersions,
+  loadGuardSetupBundle,
+  readGuardVersion,
+  readManifest,
+  restoreGuardScenarioSet,
+} from '@truecourse/core/lib/guard-store';
+import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
+import { diffScenarioSets, type GuardVersionArtifact } from '@truecourse/shared';
 import { refOf } from './route-params.js';
 
 const router: Router = Router();
@@ -521,6 +529,87 @@ router.get('/:id/guard/staleness', async (req: Request, res: Response, next: Nex
 });
 
 
+/** The series a `?artifact=` names; the scenario sets when it names none. */
+function guardVersionArtifact(query: unknown): GuardVersionArtifact | null {
+  const artifact = query == null || query === '' ? 'scenarios' : String(query);
+  return artifact === 'scenarios' || artifact === 'report' || artifact === 'setup' ? artifact : null;
+}
+
+// GET — one series of this repository's generated state, newest first, each
+// version with its provenance: the run that wrote it, the model, the commit.
+// `?artifact=scenarios|report|setup` (the scenario sets unless named);
+// `?scope=` reads another line of versions than the default branch's.
+router.get('/:id/guard/versions', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
+    const artifact = guardVersionArtifact(req.query.artifact);
+    if (!artifact) {
+      res.status(400).json({ error: 'artifact must be scenarios, report or setup.' });
+      return;
+    }
+    const scope = req.query.scope ? String(req.query.scope) : undefined;
+    res.json({ versions: await listGuardVersions(repo.path, artifact, scope ? { scope } : {}) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET — what changed between two versions of the scenario set: the flows
+// added, retired and amended, the scenarios that came and went, the sections
+// that gained or lost coverage. `?from=` and `?to=` are version ids, and the
+// answer carries both versions' provenance so it can say which run, on which
+// model, made the change.
+router.get('/:id/guard/versions/diff', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
+    const fromId = String(req.query.from ?? '');
+    const toId = String(req.query.to ?? '');
+    if (!fromId || !toId) {
+      res.status(400).json({ error: 'Missing ?from=<version id>&to=<version id>.' });
+      return;
+    }
+    const [from, to] = await Promise.all([
+      readGuardVersion(repo.path, 'scenarios', fromId),
+      readGuardVersion(repo.path, 'scenarios', toId),
+    ]);
+    if (!from || !to) {
+      res.status(404).json({ error: `No scenario set version ${!from ? fromId : toId}.` });
+      return;
+    }
+    const [prior, current] = await Promise.all([
+      readManifest(repo.path, { id: from.id }),
+      readManifest(repo.path, { id: to.id }),
+    ]);
+    res.json({ from, to, diff: diffScenarioSets(prior, current) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST — roll the scenario set back to an older version. The version comes
+// back as a NEW one holding the same files, so the series stays append-only
+// and the rollback is on record; the next generate reconciles against it and
+// the next run runs it. 404 when the id names no scenario set of this repository.
+router.post(
+  '/:id/guard/versions/:versionId/restore',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const repo = await resolveProjectForRequest(org, req.params.id as string);
+      const version = await restoreGuardScenarioSet(repo.path, req.params.versionId as string);
+      if (!version) {
+        res.status(404).json({ error: 'No such scenario set version.' });
+        return;
+      }
+      // The guard surfaces re-read on this, the way they do after a generate.
+      await emitRepoLifecycle(org, repo.path, 'guard-generate');
+      res.json({ version });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 // GET — what `guard setup` last decided for this repository: the recipe it
 // derived, the dependencies it catalogued, the seed it drafted, and the step
 // spine that says which of those are settled. It lives in the setup BUNDLE
@@ -530,7 +619,7 @@ router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFun
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const commit = req.query.commit ? String(req.query.commit) : undefined;
-    const bundle = await loadGuardSetupBundle(repo.path, commit);
+    const bundle = await loadGuardSetupBundle(repo.path, commit ? { commitSha: commit } : {});
     const report = bundle ? readBundleGuardSetup(bundle) : null;
     if (!report) {
       res.status(404).json({ error: 'Guard setup has not run for this repository yet.' });
