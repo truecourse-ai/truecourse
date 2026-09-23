@@ -8,15 +8,18 @@
  *
  * Beside the tree it reports the page's UNNAMED controls ({@link UnnamedControl}):
  * the ones the tree lists with an empty or glyph-only name, with the DOM facts a
- * `css` locator is written from. And it PROBES a locator
- * ({@link WebScreenObserver.probe}): how many elements it matches at an address,
- * and whether the one it resolves to is visible — the live proof a non-canonical
- * locator is held to before it is authored.
+ * `css` locator is written from. And it PROBES locators
+ * ({@link WebScreenObserver.probe}): it walks an ordered list of actions on one
+ * page — clicks, fills, selects, navigations — and at each point it is asked to,
+ * reads how many elements a locator matches and whether the one it resolves to
+ * is visible — the live proof a non-canonical locator is held to before it is
+ * authored.
  *
  * It is READ-ONLY in intent, not by construction: an observation may ACTIVATE
  * a few controls before it looks (open a menu, a dialog, a tab), because a
- * dialog's controls exist only once it is open. The caller's doctrine decides
- * what may be pressed; this module only refuses nothing and reports
+ * dialog's controls exist only once it is open, and a probe may also type into
+ * a field or choose an option on its way to a control that only shows after.
+ * The caller's doctrine decides what may be pressed; this module only refuses nothing and reports
  * everything, the final address included, so a click that navigated is
  * visible as one.
  *
@@ -78,13 +81,23 @@ export type ObserveScreenResult =
   | { ok: true; observation: ScreenObservation }
   | { ok: false; reason: string }
 
+/**
+ * One step of a probe's walk: an action that moves the page on (a click, a
+ * value typed, an option chosen, an address opened), or a `resolve` that reads
+ * a locator where the walk stands.
+ */
+export type LocatorProbeStep =
+  | { activate: GuardWebLocator }
+  | { fill: GuardWebLocator; value: string }
+  | { select: GuardWebLocator; option: string }
+  | { navigate: string }
+  | { resolve: GuardWebLocator }
+
 export interface LocatorProbeRequest {
-  /** The address to open, every slot filled. */
+  /** The address to open first, every slot filled. */
   path: string
-  /** Controls to activate first, in order — the steps that reveal the target. */
-  activate?: readonly GuardWebLocator[]
-  /** The locator to resolve once they have run. */
-  locator: GuardWebLocator
+  /** The walk, in order, on that one page. */
+  steps: readonly LocatorProbeStep[]
 }
 
 /** What one locator resolved to on the live page. */
@@ -97,13 +110,20 @@ export interface LocatorReading {
   visible: boolean
 }
 
-export type LocatorProbeResult = { ok: true; reading: LocatorReading } | { ok: false; reason: string }
+/**
+ * One reading per `resolve` of the walk, in order. A walk that stopped (an
+ * action failed, an address would not open) says why, with the readings it took
+ * before it stopped.
+ */
+export type LocatorProbeResult =
+  | { ok: true; readings: LocatorReading[] }
+  | { ok: false; reason: string; readings?: LocatorReading[] }
 
 export interface WebScreenObserver {
   /** The credential the pages are signed in with, by name; absent when anonymous. */
   readonly principal?: string
   observe(request: ScreenObservationRequest): Promise<ObserveScreenResult>
-  /** Open an address, activate what was asked, and resolve one locator there. */
+  /** Open an address and walk the probe's steps on it, reading each locator it is asked to. */
   probe(request: LocatorProbeRequest): Promise<LocatorProbeResult>
   /** Close the contexts this observer has open. The browser stays the caller's. */
   close(): Promise<void>
@@ -215,27 +235,71 @@ export async function observeScreen(
 }
 
 /**
- * Open `request.path` on `page`, activate what was asked, and resolve the
- * locator the way the runner does: its scope, every match of its handle, and
- * the one element its `pick` (if any) leaves.
+ * Open `request.path` on `page` and walk the probe's steps there. Each `resolve`
+ * reads its locator the way the runner resolves it: its scope, every match of its
+ * handle, and the one element its `pick` (if any) leaves. An action that fails
+ * stops the walk; the readings taken before it are kept.
  */
 export async function probeLocator(
   page: Page,
   baseUrl: string,
   request: LocatorProbeRequest,
 ): Promise<LocatorProbeResult> {
-  const opened = await openAndActivate(page, baseUrl, request)
+  const opened = await openAndActivate(page, baseUrl, { path: request.path })
   if (!opened.ok) return opened
-  const { locator } = request
-  try {
-    const scopeMatches = locator.within ? await webLocator(page, locator.within).count() : undefined
-    const matches = await webLocatorMatches(page, locator).count()
-    const resolved = webLocator(page, locator)
-    const visible = (await resolved.count()) === 1 && (await resolved.isVisible())
-    return { ok: true, reading: { ...(scopeMatches !== undefined ? { scopeMatches } : {}), matches, visible } }
-  } catch (e) {
-    return { ok: false, reason: `resolving ${describeLocator(locator)} on ${pageAddress(page)} failed: ${firstLine(e)}` }
+  const readings: LocatorReading[] = []
+  for (const step of request.steps) {
+    const failed = await probeStep(page, baseUrl, step, readings)
+    if (failed) return { ok: false, reason: failed, readings }
   }
+  return { ok: true, readings }
+}
+
+/** Run one step of a probe's walk, pushing its reading; returns why it failed, if it did. */
+async function probeStep(
+  page: Page,
+  baseUrl: string,
+  step: LocatorProbeStep,
+  readings: LocatorReading[],
+): Promise<string | undefined> {
+  if ('navigate' in step) {
+    const url = surfaceUrl(step.navigate, baseUrl)
+    if (!url.ok) return url.reason
+    try {
+      await page.goto(url.url, { waitUntil: 'load', timeout: OBSERVE_NAVIGATION_TIMEOUT_MS })
+    } catch (e) {
+      return `opening ${step.navigate} failed: ${firstLine(e)}`
+    }
+    await settle(page)
+    return undefined
+  }
+  if ('resolve' in step) {
+    const { resolve: locator } = step
+    try {
+      const scopeMatches = locator.within ? await webLocator(page, locator.within).count() : undefined
+      const matches = await webLocatorMatches(page, locator).count()
+      const resolved = webLocator(page, locator)
+      const visible = (await resolved.count()) === 1 && (await resolved.isVisible())
+      readings.push({ ...(scopeMatches !== undefined ? { scopeMatches } : {}), matches, visible })
+      return undefined
+    } catch (e) {
+      return `resolving ${describeLocator(locator)} on ${pageAddress(page)} failed: ${firstLine(e)}`
+    }
+  }
+  const [verb, target] =
+    'activate' in step ? ['activating', step.activate] as const
+      : 'fill' in step ? ['filling', step.fill] as const
+        : ['selecting in', step.select] as const
+  const locator = webLocator(page, target)
+  try {
+    if ('activate' in step) await locator.click({ timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
+    else if ('fill' in step) await locator.fill(step.value, { timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
+    else await locator.selectOption({ label: step.option }, { timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
+  } catch (e) {
+    return `${verb} ${describeLocator(target)} on ${pageAddress(page)} failed: ${firstLine(e)}`
+  }
+  await settle(page)
+  return undefined
 }
 
 /** The shared half of an observation and a probe: open the address, then activate. */
@@ -259,15 +323,10 @@ async function openAndActivate(
     if (message.type() === 'error') problems.push(`console error: ${message.text().split('\n')[0]}`)
   })
 
-  // A path like `//elsewhere.example/x` starts with "/" and still leaves the
-  // surface: the address is checked where it resolves, not where it starts.
-  const resolved = new URL(request.path, baseUrl)
-  if (resolved.origin !== new URL(baseUrl).origin) {
-    return { ok: false, reason: `the path ${JSON.stringify(request.path)} leaves the served surface (${resolved.origin})` }
-  }
-  const url = resolved.toString()
+  const resolved = surfaceUrl(request.path, baseUrl)
+  if (!resolved.ok) return resolved
   try {
-    const response = await page.goto(url, { waitUntil: 'load', timeout: OBSERVE_NAVIGATION_TIMEOUT_MS })
+    const response = await page.goto(resolved.url, { waitUntil: 'load', timeout: OBSERVE_NAVIGATION_TIMEOUT_MS })
     if (response && response.status() >= 400) problems.push(`the address answered HTTP ${response.status()}`)
   } catch (e) {
     return { ok: false, reason: `opening ${request.path} failed: ${firstLine(e)}` }
@@ -293,20 +352,33 @@ async function openAndActivate(
   return { ok: true, activated, problems }
 }
 
+/**
+ * The absolute URL of a path on the served surface. A path like
+ * `//elsewhere.example/x` starts with "/" and still leaves the surface, so the
+ * address is checked where it resolves, not where it starts.
+ */
+function surfaceUrl(path: string, baseUrl: string): { ok: true; url: string } | { ok: false; reason: string } {
+  const resolved = new URL(path, baseUrl)
+  if (resolved.origin !== new URL(baseUrl).origin) {
+    return { ok: false, reason: `the path ${JSON.stringify(path)} leaves the served surface (${resolved.origin})` }
+  }
+  return { ok: true, url: resolved.toString() }
+}
+
 /** Wait for the network to go quiet, briefly — a screen that never does is still a screen. */
 async function settle(page: Page): Promise<void> {
   await page.waitForLoadState('networkidle', { timeout: OBSERVE_SETTLE_TIMEOUT_MS }).catch(() => undefined)
 }
 
-/** The tree cut at a line boundary inside the byte budget, with the rest counted. */
-export function boundTree(tree: string): { tree: string; omittedLines: number } {
-  if (Buffer.byteLength(tree) <= MAX_OBSERVATION_BYTES) return { tree, omittedLines: 0 }
+/** The tree (or any list of lines) cut at a line boundary inside a byte budget, with the rest counted. */
+export function boundTree(tree: string, maxBytes = MAX_OBSERVATION_BYTES): { tree: string; omittedLines: number } {
+  if (Buffer.byteLength(tree) <= maxBytes) return { tree, omittedLines: 0 }
   const lines = tree.split('\n')
   const kept: string[] = []
   let bytes = 0
   for (const line of lines) {
     const size = Buffer.byteLength(line) + 1
-    if (bytes + size > MAX_OBSERVATION_BYTES) break
+    if (bytes + size > maxBytes) break
     kept.push(line)
     bytes += size
   }

@@ -70,7 +70,11 @@
  *                       sidebar `button "More"` in the navigation — one title, two
  *                       controls;
  *                     - two list rows, each with an identical icon-only delete
- *                       button (the positional `pick` case).
+ *                       button (the positional `pick` case);
+ *                     - a menu trigger carrying a widget's state attribute before
+ *                       its test id, and a long `data-hint`;
+ *                     - a close button whose icon has only Tailwind utility
+ *                       classes (`w-[16px]`), which a selector must escape.
  *                   Each click writes what it did into paragraph `#status`.
  *   GET /upload   → heading "Upload"; the surface the `upload` verb needs — a
  *                   visible labelled file input, a hidden one behind a button (the
@@ -166,6 +170,8 @@ const ICONS = page(
   <button type="button" data-action="sort" onclick="say('sorted')"><i class="bi bi-chevron-expand"></i></button>
   <button type="button" onclick="say('viewed')"><span class="glyph">\uE0A1</span></button>
   <i class="bi bi-three-dots" title="More" style="cursor: pointer" onclick="say('page options')"></i>
+  <button type="button" data-state="closed" data-testid="menu-trigger" data-hint="${'h'.repeat(200)}" onclick="say('menu')"><i class="bi bi-list"></i></button>
+  <button type="button" class="p-2 hover:bg-gray-100" onclick="say('closed')"><i class="w-[16px] h-4"></i></button>
   <ul>
     <li>Alpha <button type="button" onclick="say('deleted Alpha')"><i class="bi bi-trash"></i></button></li>
     <li>Beta <button type="button" onclick="say('deleted Beta')"><i class="bi bi-trash"></i></button></li>

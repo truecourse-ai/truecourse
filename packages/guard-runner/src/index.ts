@@ -347,11 +347,12 @@ export {
   MAX_OBSERVATION_BYTES,
 } from './web/observe.js'
 export { MAX_UNNAMED_CONTROLS, type UnnamedControl } from './web/unnamed-controls.js'
-export { hasAddressSlot } from './web/address.js'
+export { addressFillsTemplate, hasAddressSlot } from './web/address.js'
 export type {
   CreateWebObserverOptions,
   LocatorProbeRequest,
   LocatorProbeResult,
+  LocatorProbeStep,
   LocatorReading,
   ObserveScreenResult,
   ScreenObservation,

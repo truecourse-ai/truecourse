@@ -10,6 +10,14 @@
  * candidate selector with the number of elements it matches right now — so an
  * author copies what it sees instead of guessing a selector.
  *
+ * The candidate prefers a test id (`data-testid`, `data-test`, `data-cy`), then
+ * another `data-*` fact, then the `title`, the icon, the `href`, and the bare tag
+ * last. A `data-*` attribute that carries a widget's momentary STATE
+ * (`data-state="closed"`, `data-highlighted`, …) is listed but never chosen: the
+ * selector would stop matching the moment the control is used. Class names and
+ * attribute names are escaped, and a candidate the page cannot parse is passed
+ * over for the next one, so one odd class never costs the rest of the list.
+ *
  * The accessible name is approximated here (aria-label, aria-labelledby, a
  * control's labels, its rendered text and image alt text, its title), which is
  * enough to tell "no name" and "only a glyph" apart from a real name.
@@ -20,7 +28,8 @@ import type { Page } from 'playwright-core'
 /** One interactive element whose accessible name is empty or glyph-only. */
 export interface UnnamedControl {
   tag: string
-  /** `title`, `role`, `aria-*`, `data-*` and `href`, as the element carries them. */
+  /** `title`, `role`, `aria-*`, `data-*` and `href`, as the element carries them, each
+   *  value cut at {@link MAX_ATTRIBUTE_CHARS} characters. */
   attributes: Record<string, string>
   /** The icon the control draws, as `<tag>.<class>` — `i.bi-chevron-expand`. */
   icon?: string
@@ -38,6 +47,9 @@ export interface UnnamedControl {
 
 /** How many unnamed controls one observation reports. */
 export const MAX_UNNAMED_CONTROLS = 40
+
+/** How much of one attribute value is listed; a longer one ends in `…`. */
+export const MAX_ATTRIBUTE_CHARS = 120
 
 /**
  * Read the page's unnamed controls. A page the scan cannot read yields none —
@@ -59,6 +71,9 @@ export async function readUnnamedControls(page: Page): Promise<UnnamedControl[]>
  */
 const SCAN = `(() => {
   const LIMIT = ${MAX_UNNAMED_CONTROLS}
+  const MAX_VALUE = ${MAX_ATTRIBUTE_CHARS}
+  const TEST_IDS = ['data-testid', 'data-test', 'data-cy']
+  const STATE_DATA = /^data-(state|highlighted|disabled|orientation|side|align|placeholder|selected|active|open|checked|focus.*|hover.*)$/
   const PUA = /^[\\uE000-\\uF8FF\\u{F0000}-\\u{FFFFD}\\u{100000}-\\u{10FFFD}]$/u
   const ICON_CLASS = /^(bi|fa|fas|far|fab|fal|fad|lucide|icon|icons|ti|ri|mdi|ph|glyphicon|octicon|feather|material-icons|material-symbols)([-_]|$)/
   const INTERACTIVE = 'button, a[href], input:not([type=hidden]), select, textarea, summary, [onclick], [tabindex]:not([tabindex="-1"]), ' +
@@ -66,7 +81,8 @@ const SCAN = `(() => {
       .map((role) => '[role=' + role + ']').join(', ')
   const LANDMARKS = { MAIN: 'main', NAV: 'navigation', HEADER: 'banner', FOOTER: 'contentinfo', ASIDE: 'complementary', FORM: 'form', DIALOG: 'dialog' }
   const clean = (text) => (text || '').replace(/\\s+/g, ' ').trim()
-  const quote = (value) => '"' + value.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"') + '"'
+  const quote = (value) => '"' + value.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"').replace(/\\n/g, '\\\\a ') + '"'
+  const cut = (value) => (value.length > MAX_VALUE ? value.slice(0, MAX_VALUE) + '…' : value)
   const visible = (el) => {
     const box = el.getBoundingClientRect()
     const style = getComputedStyle(el)
@@ -103,7 +119,7 @@ const SCAN = `(() => {
       const own = classes(node)
       const token = own.find((c) => ICON_CLASS.test(c) && /[-_]/.test(c)) || own.find((c) => ICON_CLASS.test(c)) ||
         (node.tagName.toLowerCase() === 'i' ? own[0] : undefined)
-      if (token) return { node, text: node.tagName.toLowerCase() + '.' + token, self: node === el }
+      if (token) return { node, text: node.tagName.toLowerCase() + '.' + CSS.escape(token), self: node === el }
     }
     return undefined
   }
@@ -120,7 +136,7 @@ const SCAN = `(() => {
     }
     return undefined
   }
-  const count = (selector) => { try { return document.querySelectorAll(selector).length } catch { return 0 } }
+  const matchAll = (selector) => { try { return [...document.querySelectorAll(selector)] } catch { return undefined } }
   const candidates = new Set(document.querySelectorAll(INTERACTIVE))
   for (const el of document.body.querySelectorAll('*')) if (pointerOrigin(el)) candidates.add(el)
   const out = []
@@ -130,23 +146,37 @@ const SCAN = `(() => {
     const name = nameOf(el)
     if (!unnamed(name)) continue
     const tag = el.tagName.toLowerCase()
-    const attributes = {}
+    const raw = {}
     for (const attr of el.attributes) {
       if (attr.name === 'title' || attr.name === 'role' || attr.name === 'href' || attr.name.startsWith('aria-') || attr.name.startsWith('data-')) {
-        attributes[attr.name] = attr.value
+        raw[attr.name] = attr.value
       }
     }
+    const attributes = {}
+    for (const key of Object.keys(raw)) attributes[key] = cut(raw[key])
     const icon = iconOf(el)
     const region = regionOf(el)
-    const data = Object.keys(attributes).find((key) => key.startsWith('data-') && attributes[key] && attributes[key].length <= 60)
-    let own = tag
-    if (data) own = tag + '[' + data + '=' + quote(attributes[data]) + ']'
-    else if (attributes.title) own = tag + '[title=' + quote(attributes.title) + ']'
-    else if (icon) own = icon.self ? icon.text : tag + ':has(' + icon.text + ')'
-    else if (attributes.href) own = tag + '[href=' + quote(attributes.href) + ']'
-    let selector = own
-    if (count(own) > 1 && region) selector = region.selector + ' ' + own
-    const matching = [...document.querySelectorAll(selector)]
+    const byAttribute = (key) => tag + '[' + CSS.escape(key) + '=' + quote(raw[key]) + ']'
+    const dataKeys = Object.keys(raw).filter((key) => key.startsWith('data-') && raw[key] && raw[key].length <= 60 && !STATE_DATA.test(key))
+    const own = [
+      ...dataKeys.filter((key) => TEST_IDS.includes(key)),
+      ...dataKeys.filter((key) => !TEST_IDS.includes(key)),
+    ].map(byAttribute)
+    if (raw.title && raw.title.length <= MAX_VALUE) own.push(byAttribute('title'))
+    if (icon) own.push(icon.self ? icon.text : tag + ':has(' + icon.text + ')')
+    if (raw.href && raw.href.length <= MAX_VALUE) own.push(byAttribute('href'))
+    own.push(tag)
+    let selector
+    let matching
+    for (const candidate of own) {
+      matching = matchAll(candidate)
+      if (matching && matching.includes(el)) { selector = candidate; break }
+    }
+    if (!selector) continue
+    if (matching.length > 1 && region) {
+      const scoped = matchAll(region.selector + ' ' + selector)
+      if (scoped && scoped.includes(el)) { selector = region.selector + ' ' + selector; matching = scoped }
+    }
     const entry = { tag, attributes, selector, matches: matching.length }
     if (icon) entry.icon = icon.text
     if (name) entry.glyph = glyphs(name).map((ch) => 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')).join(' ')

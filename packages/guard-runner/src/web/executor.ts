@@ -233,8 +233,9 @@ async function readVisibleText(page: Page): Promise<string> {
  * `getByPlaceholder` / `getByLabel` / `getByText` / `getByTitle` / `getByAltText`
  * for the five other things a user perceives), inside its `within` scope when it
  * has one. A selector reaches the browser only through the `css` member, which the
- * schema marks as the non-canonical escape; nothing else here addresses the
- * implementation.
+ * schema marks as the non-canonical escape, and only to the CSS engine: the
+ * `css=` prefix keeps the engine from reading it as XPath or another engine's
+ * query. Nothing else here addresses the implementation.
  *
  * An authored `pick` narrows to one match — `first`, or the 1-based position it
  * names — so downstream counting sees 0 or 1 and the strict must-be-unambiguous
@@ -268,7 +269,7 @@ function handleLocator(root: Page | Locator, target: GuardWebScope, includeHidde
             : 'title' in target
               ? root.getByTitle(target.title, { exact })
               : 'css' in target
-                ? root.locator(target.css)
+                ? root.locator(`css=${target.css}`)
                 : root.getByAltText(target.alt, { exact })
   if (target.pick === undefined || !picked) return base
   return target.pick === 'first' ? base.first() : base.nth(target.pick - 1)

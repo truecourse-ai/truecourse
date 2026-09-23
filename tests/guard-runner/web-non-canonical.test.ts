@@ -69,6 +69,12 @@ describe('css locators and positional picks', () => {
     expect(result.mismatch).toBeUndefined()
   })
 
+  it('hands a css value to the CSS engine alone, never reading it as XPath', async () => {
+    const result = await execute({ driver: 'web', click: { css: '//main/button[1]' } })
+    expect(result.mismatch).toBeDefined()
+    expect(result.visibleText).toContain('idle')
+  })
+
   it('fails a pick past the matches as a target nothing matches', async () => {
     const result = await execute({ driver: 'web', click: { css: 'button:has(i.bi-trash)', pick: 3 } })
     expect(result.mismatch?.actual).toContain('nothing on the page matches #3 css “button:has(i.bi-trash)”')

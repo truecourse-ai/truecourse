@@ -144,27 +144,63 @@ describe('the screen observer', () => {
     })
     // A glyph for a name is no name: it is listed with its code point, and
     // the only selector it has is its position inside its region.
-    expect(unnamed).toContainEqual(expect.objectContaining({ tag: 'button', glyph: 'U+E0A1', selector: 'main button', matches: 4, position: 2 }))
+    expect(unnamed).toContainEqual(expect.objectContaining({ tag: 'button', glyph: 'U+E0A1', selector: 'main button', matches: 6, position: 2 }))
     expect(unnamed.filter((control) => control.icon === 'i.bi-trash').map((control) => [control.selector, control.matches, control.position]))
       .toEqual([['main button:has(i.bi-trash)', 2, 1], ['main button:has(i.bi-trash)', 2, 2]])
+    // A widget's state attribute is listed but never chosen over its test id,
+    // and a long value is cut.
+    const trigger = unnamed.find((control) => control.attributes['data-testid'] === 'menu-trigger')
+    expect(trigger?.selector).toBe('button[data-testid="menu-trigger"]')
+    expect(trigger?.attributes['data-state']).toBe('closed')
+    expect(trigger?.attributes['data-hint']).toBe(`${'h'.repeat(120)}…`)
+    // A utility class is escaped into a selector that parses and matches.
+    expect(unnamed).toContainEqual(expect.objectContaining({ icon: 'i.w-\\[16px\\]', selector: 'button:has(i.w-\\[16px\\])', matches: 1 }))
     // Named controls are the tree's business, not this list's.
     expect(unnamed.some((control) => control.attributes.title === 'More')).toBe(false)
   }, 30_000)
 
   it('probes a locator the way the runner resolves it: its scope, its matches, and the one it picks', async () => {
-    expect(await observer.probe({ path: '/icons', locator: { title: 'More' } }))
-      .toEqual({ ok: true, reading: { matches: 2, visible: false } })
-    expect(await observer.probe({ path: '/icons', locator: { title: 'More', within: { css: 'main' } } }))
-      .toEqual({ ok: true, reading: { scopeMatches: 1, matches: 1, visible: true } })
-    expect(await observer.probe({ path: '/icons', locator: { css: 'button:has(i.bi-trash)', pick: 2 } }))
-      .toEqual({ ok: true, reading: { matches: 2, visible: true } })
-    expect(await observer.probe({ path: '/icons', locator: { css: 'button:has(i.bi-trash)', pick: 3 } }))
-      .toEqual({ ok: true, reading: { matches: 2, visible: false } })
+    const probed = await observer.probe({
+      path: '/icons',
+      steps: [
+        { resolve: { title: 'More' } },
+        { resolve: { title: 'More', within: { css: 'main' } } },
+        { resolve: { css: 'button:has(i.bi-trash)', pick: 2 } },
+        { resolve: { css: 'button:has(i.bi-trash)', pick: 3 } },
+      ],
+    })
+    expect(probed).toEqual({
+      ok: true,
+      readings: [
+        { matches: 2, visible: false },
+        { scopeMatches: 1, matches: 1, visible: true },
+        { matches: 2, visible: true },
+        { matches: 2, visible: false },
+      ],
+    })
   }, 30_000)
 
-  it('probes after the activations it is asked for', async () => {
-    const probed = await observer.probe({ path: '/', activate: [{ role: 'button', name: 'Reveal' }], locator: { text: 'the secret is out' } })
-    expect(probed).toEqual({ ok: true, reading: { matches: 1, visible: true } })
+  it('reads each locator where the walk stands: before and after a click', async () => {
+    const probed = await observer.probe({
+      path: '/',
+      steps: [
+        { resolve: { text: 'the secret is out' } },
+        { activate: { role: 'button', name: 'Reveal' } },
+        { resolve: { text: 'the secret is out' } },
+      ],
+    })
+    expect(probed).toEqual({ ok: true, readings: [{ matches: 0, visible: false }, { matches: 1, visible: true }] })
+  }, 30_000)
+
+  it('stops the walk at an action that fails, keeping the readings taken before it', async () => {
+    const probed = await observer.probe({
+      path: '/icons',
+      steps: [{ resolve: { title: 'More', within: { css: 'main' } } }, { activate: { role: 'button', name: 'Nowhere' } }, { resolve: { css: 'main' } }],
+    })
+    expect(probed.ok).toBe(false)
+    if (probed.ok) return
+    expect(probed.reason).toContain('activating button "Nowhere"')
+    expect(probed.readings).toEqual([{ scopeMatches: 1, matches: 1, visible: true }])
   }, 30_000)
 
   it('runs two observations side by side without one seeing the other', async () => {

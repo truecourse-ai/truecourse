@@ -574,7 +574,7 @@ function pathSegments(requestPath: string): string[] | null {
 }
 
 /** Segment-wise template match: `{x}` takes one segment, `{...x}` takes the rest. */
-function templateMatches(template: string, segs: readonly string[]): boolean {
+export function templateMatches(template: string, segs: readonly string[]): boolean {
   const parts = template.split('/').filter(Boolean)
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]
