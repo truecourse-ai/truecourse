@@ -176,8 +176,8 @@ function interfacesTool(input: AuthorToolsInput): SessionTool {
  *
  * A task whose locator is non-canonical (`css`) or declares a `pick` is also
  * PROVEN on the running app before it is kept ({@link proveLocators}); a `proof`
- * entry says how to reach its state when the entry carries a slot, and is kept
- * for the session like the draft is.
+ * entry fills a slotted entry and, for a task that cannot be replayed, lists the
+ * actions that reach its controls. It is kept for the session like the draft is.
  *
  * `outcome` resolves the draft by the id of the check that accepted it, exactly
  * as it always has — the artifact carries the accumulated fragment, so nothing
@@ -190,7 +190,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
   return defineSessionTool({
     name: 'check_draft',
     description:
-      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. A step whose locator uses `css` or `pick` is also PROVEN on the running app: its address is opened, the task\'s clicks before it are replayed, and it must resolve to exactly one visible element (a `pick` position within the matches); when the entry has a {slot}, pass `proof: {"<task id>": {"path": "<filled address>", "activate": [<controls that reveal the task\'s starting place>]}}`. What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
+      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. A step whose locator uses `css` or `pick` is also PROVEN on the running app: its address is opened, the task\'s clicks before it are replayed (only when every earlier step is a click and the task has no endState), and it must resolve to exactly one visible element (a `pick` position within the matches). When the task cannot be replayed, pass `proof: {"<task id>": {"steps": [{"activate": <locator>} | {"fill": <locator>, "value": "<text>"} | {"select": <locator>, "option": "<label>"}, …]}}` — never a control that submits, deletes, cancels or signs out; when the entry has a {slot}, add `"path": "<the entry with every slot filled>"`. What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
     kind: 'check-draft',
     readOnly: true,
     destructive: false,

@@ -2,7 +2,7 @@
  * THE LIVE PROOF in `check_draft`: a step whose locator carries `css`, or
  * declares a `pick`, is resolved on the running app before the draft keeps it.
  * The observer is a FAKE that answers each probe from a script — what is under
- * test is which steps are proven, where the proof opens and what it replays, and
+ * test is which steps are proven, where the proof opens, what it walks, and
  * which readings are refused.
  */
 
@@ -28,7 +28,7 @@ const DERIVED: InterfacesFile = {
 
 const toolContext = { signal: new AbortController().signal } as never
 
-/** An observer whose probes answer with `reading`, remembering every request. */
+/** An observer whose probes answer `reading` for every locator they resolve, remembering every request. */
 function probingObserver(reading: LocatorReading): { observer: LiveScreenObserver; probes: LocatorProbeRequest[] } {
   const probes: LocatorProbeRequest[] = []
   return {
@@ -39,7 +39,7 @@ function probingObserver(reading: LocatorReading): { observer: LiveScreenObserve
       },
       async probe(request) {
         probes.push(request)
-        return { ok: true, reading }
+        return { ok: true, readings: request.steps.filter((step) => 'resolve' in step).map(() => reading) }
       },
       async close() {},
     },
@@ -104,7 +104,7 @@ describe('a css locator', () => {
     const result = await checkDraft(observer)({ interfaces: [linksTask([sortStep])] })
     expect(result.isError).toBeUndefined()
     expect(result.content).toContain('Accepted and kept')
-    expect(probes).toEqual([{ path: '/links', activate: [], locator: sortStep.target }])
+    expect(probes).toEqual([{ path: '/links', steps: [{ resolve: sortStep.target }] }])
   })
 })
 
@@ -137,10 +137,11 @@ describe('where a proof opens', () => {
     steps: [
       { kind: 'activate', target: { title: 'More' }, within: { css: 'main' }, why: 'the page icon shares its title with the sidebar button' },
       { kind: 'activate', target: { role: 'menuitem', name: 'Rename' } },
-      { kind: 'input', target: { role: 'textbox', name: 'Name' } },
-      { kind: 'activate', target: { css: 'button:has(i.bi-check2)' }, why: 'icon-only confirm button' },
+      { kind: 'activate', target: { css: 'button:has(i.bi-pencil)' }, why: 'icon-only edit button' },
     ],
   }
+  const scoped = { title: 'More', within: { css: 'main' } }
+  const edit = { css: 'button:has(i.bi-pencil)' }
 
   it('asks for a filled address when the entry carries a slot', async () => {
     const { observer, probes } = probingObserver({ scopeMatches: 1, matches: 1, visible: true })
@@ -150,17 +151,106 @@ describe('where a proof opens', () => {
     expect(probes).toEqual([])
   })
 
-  it('opens the filled address and replays the task’s clicks before the step', async () => {
+  it('refuses a proof path that is not a filling of the task’s entry', async () => {
     const { observer, probes } = probingObserver({ scopeMatches: 1, matches: 1, visible: true })
-    const result = await checkDraft(observer)({ interfaces: [tagTask], proof: { 'web/rename-tag': { path: '/tags/3' } } })
+    for (const path of ['/unrelated', '/tags', '/tags/3/edit']) {
+      const result = await checkDraft(observer)({ interfaces: [tagTask], proof: { 'web/rename-tag': { path } } })
+      expect(result.isError).toBe(true)
+      expect(result.content).toContain(`the proof path \`${path}\` is not the task's entry`)
+    }
+    expect(probes).toEqual([])
+  })
+
+  it('replays a click-only task that leaves the world as it was, on one page, reading each step as it passes', async () => {
+    const { observer, probes } = probingObserver({ scopeMatches: 1, matches: 1, visible: true })
+    const result = await checkDraft(observer)({ interfaces: [tagTask], proof: { 'web/rename-tag': { path: '/tags/3?tab=all' } } })
     expect(result.isError).toBeUndefined()
     expect(probes).toEqual([
-      { path: '/tags/3', activate: [], locator: { title: 'More', within: { css: 'main' } } },
       {
-        path: '/tags/3',
-        activate: [{ title: 'More', within: { css: 'main' } }, { role: 'menuitem', name: 'Rename' }],
-        locator: { css: 'button:has(i.bi-check2)' },
+        path: '/tags/3?tab=all',
+        steps: [
+          { resolve: scoped },
+          { activate: scoped },
+          { activate: { role: 'menuitem', name: 'Rename' } },
+          { resolve: edit },
+        ],
       },
+    ])
+  })
+
+  it('never replays the clicks of a task that changes the world', async () => {
+    const { observer, probes } = probingObserver({ scopeMatches: 1, matches: 1, visible: true })
+    const renaming = { ...tagTask, endState: 'tag-renamed' }
+    const result = await checkDraft(observer)({
+      interfaces: [renaming],
+      states: [{ id: 'tag-renamed', description: 'the tag carries its new name' }],
+      proof: { 'web/rename-tag': { path: '/tags/3' } },
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('`web/rename-tag` step 3')
+    expect(result.content).toContain('the task changes the world')
+    expect(result.content).toContain('never a control that submits, deletes, cancels or signs out')
+    // The first step needs no replay, so it is still proven — alone.
+    expect(probes).toEqual([{ path: '/tags/3', steps: [{ resolve: scoped }] }])
+  })
+
+  it('refuses to replay past an input, and walks the listed actions instead', async () => {
+    const withInput = {
+      ...tagTask,
+      steps: [
+        { kind: 'input', target: { role: 'textbox', name: 'Filter' } },
+        { kind: 'activate', target: edit, why: 'icon-only edit button' },
+      ],
+    }
+    const { observer, probes } = probingObserver({ matches: 1, visible: true })
+    const refused = await checkDraft(observer)({ interfaces: [withInput], proof: { 'web/rename-tag': { path: '/tags/3' } } })
+    expect(refused.isError).toBe(true)
+    expect(refused.content).toContain('an input step comes before it')
+    expect(probes).toEqual([])
+
+    const listed = await checkDraft(observer)({
+      interfaces: [withInput],
+      proof: { 'web/rename-tag': { path: '/tags/3', steps: [{ fill: { role: 'textbox', name: 'Filter' }, value: 'work' }] } },
+    })
+    expect(listed.isError).toBeUndefined()
+    expect(probes).toEqual([
+      { path: '/tags/3', steps: [{ fill: { role: 'textbox', name: 'Filter' }, value: 'work' }, { resolve: edit }] },
+    ])
+  })
+
+  it('reads an owed step right before the listed action that acts on it', async () => {
+    const { observer, probes } = probingObserver({ scopeMatches: 1, matches: 1, visible: true })
+    const result = await checkDraft(observer)({
+      interfaces: [tagTask],
+      proof: {
+        'web/rename-tag': {
+          path: '/tags/3',
+          steps: [{ activate: { within: { css: 'main' }, title: 'More' } }, { activate: { role: 'menuitem', name: 'Rename' } }],
+        },
+      },
+    })
+    expect(result.isError).toBeUndefined()
+    expect(probes[0]?.steps).toEqual([
+      { resolve: scoped },
+      { activate: { within: { css: 'main' }, title: 'More' } },
+      { activate: { role: 'menuitem', name: 'Rename' } },
+      { resolve: edit },
+    ])
+  })
+
+  it('treats a navigate back to the entry as a fresh page, replaying nothing from before it', async () => {
+    const { observer, probes } = probingObserver({ matches: 1, visible: true })
+    const task = {
+      ...linksTask([
+        { kind: 'activate', target: { role: 'button', name: 'Show archived' } },
+        { kind: 'navigate', route: '/links' },
+        sortStep,
+      ]),
+    }
+    const result = await checkDraft(observer)({ interfaces: [task] })
+    expect(result.isError).toBeUndefined()
+    expect(probes).toEqual([
+      { path: '/links', steps: [{ activate: { role: 'button', name: 'Show archived' } }, { navigate: '/links' }, { resolve: sortStep.target }] },
     ])
   })
 })

@@ -130,6 +130,16 @@ describe('the briefing block', () => {
     expect(text).toContain('problem: console error: boom')
     expect(text).toContain('12 more line(s)')
   })
+
+  it('keeps the unnamed controls inside a byte budget and counts what it cut', () => {
+    const control = { tag: 'button', attributes: { 'data-hint': `${'h'.repeat(120)}…` }, selector: 'main button', matches: 40 }
+    const text = renderObservation({
+      path: '/', address: '/', title: '', tree: '- main', omittedLines: 0, activated: [], problems: [],
+      unnamed: Array.from({ length: 200 }, (_, i) => ({ ...control, position: i + 1 })),
+    })
+    expect(Buffer.byteLength(text)).toBeLessThan(10_000)
+    expect(text).toMatch(/… \d+ more unnamed control\(s\) not shown/)
+  })
 })
 
 describe('the fixtures a session may see', () => {

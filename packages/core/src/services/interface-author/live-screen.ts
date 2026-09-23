@@ -21,7 +21,7 @@
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import { GuardWebLocatorSchema } from '@truecourse/shared'
-import { hasAddressSlot } from '@truecourse/guard-runner'
+import { boundTree, hasAddressSlot } from '@truecourse/guard-runner'
 import type {
   ObserveScreenResult,
   ScreenObservation,
@@ -52,6 +52,9 @@ export interface LiveScreens {
    */
   fixtures?: Readonly<Record<string, Readonly<Record<string, unknown>>>>
 }
+
+/** How much of one observation the unnamed-controls list may take, beside the tree's own budget. */
+const MAX_UNNAMED_BYTES = 8_000
 
 /** How many activations one `observe_screen` call may make before it looks. */
 const MAX_ACTIVATIONS = 5
@@ -115,11 +118,13 @@ export function renderObservation(observation: ScreenObservation): string {
     lines.push(`… ${observation.omittedLines} more line(s) of the tree not shown — observe a narrower state (a tab, a dialog) to read them.`)
   }
   if (observation.unnamed && observation.unnamed.length > 0) {
+    const unnamed = boundTree(observation.unnamed.map((control) => `  ${describeUnnamedControl(control)}`).join('\n'), MAX_UNNAMED_BYTES)
     lines.push(
       '',
       'Controls the tree shows with NO accessible name (or only an icon glyph) — no role+name reaches them. Target one by a visible handle it has (its `title`), else by `css` with a `why`, copying a selector below and its match count:',
-      ...observation.unnamed.map((control) => `  ${describeUnnamedControl(control)}`),
+      unnamed.tree,
     )
+    if (unnamed.omittedLines > 0) lines.push(`… ${unnamed.omittedLines} more unnamed control(s) not shown.`)
   }
   return lines.join('\n')
 }
