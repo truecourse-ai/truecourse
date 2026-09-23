@@ -97,10 +97,20 @@ describe('web step schema', () => {
     expect(GuardWebLocatorSchema.parse({ css: '#save' })).toEqual({ css: '#save' })
     expect(() => GuardWebLocatorSchema.parse({ css: '#save', exact: true })).toThrow()
     expect(() => GuardWebLocatorSchema.parse({ css: '' })).toThrow()
+    expect(GuardWebLocatorSchema.parse({ css: 'main a[href="/x"]:has(> i.bi-sort)' }).css).toBe('main a[href="/x"]:has(> i.bi-sort)')
     expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Save', selector: '#save' })).toThrow()
     expect(() => GuardWebLocatorSchema.parse({ role: 'widget', name: 'Save' })).toThrow()
     expect(GuardWebLocatorSchema.parse({ role: 'button' })).toEqual({ role: 'button' })
     expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: '' })).toThrow()
+  })
+
+  it('a css value is a plain CSS selector: no XPath, no engine prefix, no `>>` chain', () => {
+    for (const css of ['//main/button', '..', ' //button', 'xpath=//button', 'text=Save', 'css=main', 'id=save', 'data-testid=save', 'internal:role=button', 'main >> text=Save']) {
+      const parsed = GuardWebLocatorSchema.safeParse({ css })
+      expect(parsed.success, css).toBe(false)
+      expect(!parsed.success && parsed.error.issues[0].message).toContain('plain CSS selector')
+    }
+    expect(GuardWebLocatorSchema.safeParse({ title: 'More', within: { css: 'xpath=//main' } }).success).toBe(false)
   })
 
   it('`pick` declares an ambiguity: `first`, or a 1-based position', () => {

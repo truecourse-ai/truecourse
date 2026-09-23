@@ -92,6 +92,18 @@ function parseLegacyTarget(value: unknown): unknown {
 }
 
 /**
+ * A scenario scope whose role member NAMES its element. A scenario locator may
+ * carry a bare role (`{"role": "main"}`); an interface step's target and scope
+ * may not, because the catalog proves a step's control by the name the
+ * accessibility tree lists for it, and a role alone names no control.
+ */
+function namedScope() {
+  return GuardWebScopeSchema.refine((scope) => !('role' in scope) || scope.name !== undefined, {
+    message: 'a role handle names its element — {"role": "<aria role>", "name": "<accessible name>"}',
+  })
+}
+
+/**
  * THE TARGET — the element a web step acts on, in exactly the vocabulary a
  * scenario's own locator uses ({@link GuardWebScopeSchema}), because a task's
  * steps compile into those scenarios and a second spelling of one idea is a
@@ -116,7 +128,7 @@ function parseLegacyTarget(value: unknown): unknown {
  */
 export const InterfaceTargetSchema = z.preprocess(
   parseLegacyTarget,
-  GuardWebScopeSchema,
+  namedScope(),
 ) as unknown as z.ZodType<GuardWebScope, z.ZodTypeDef, GuardWebScope>
 export type InterfaceTarget = GuardWebScope
 
@@ -144,7 +156,7 @@ export const InterfaceInputStepSchema = z
     /** Native selects choose a visible option; text controls use fill. */
     mode: z.enum(['fill', 'select']).optional(),
     target: InterfaceTargetSchema,
-    within: GuardWebScopeSchema.optional(),
+    within: namedScope().optional(),
     label: z.string().optional(),
     why,
   })
@@ -155,7 +167,7 @@ export const InterfaceActivateStepSchema = z
   .object({
     kind: z.literal('activate'),
     target: InterfaceTargetSchema,
-    within: GuardWebScopeSchema.optional(),
+    within: namedScope().optional(),
     label: z.string().optional(),
     why,
   })

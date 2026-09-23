@@ -175,6 +175,24 @@ const pick = z.union([z.literal('first'), z.number().int().positive()]).optional
 const exact = z.boolean().optional()
 
 /**
+ * What a `css` value may not look like. The browser engine reads a selector string
+ * as XPath when it starts with `//` or `..`, as ANOTHER engine when it starts with
+ * `<engine>=` (`xpath=`, `text=`, `css=`, `id=`, `data-testid=`) or `internal:`,
+ * and as a chain of engines across `>>`. A CSS selector never needs any of those,
+ * so each is refused, and the runner hands what passes to the CSS engine alone.
+ */
+const NOT_A_CSS_SELECTOR = /^(\/\/|\.\.|[a-z][\w-]*\s*=|internal:)|>>/i
+
+/** A raw CSS selector — the NON-CANONICAL escape. */
+const cssSelector = z
+  .string()
+  .min(1)
+  .refine((value) => !NOT_A_CSS_SELECTOR.test(value.trim()), {
+    message:
+      '`css` is a plain CSS selector — never XPath (`//…`, `..`), an engine prefix (`xpath=`, `text=`, `css=`, `data-testid=`, `internal:`) or a `>>` chain',
+  })
+
+/**
  * The handle each locator member addresses its element by, as raw shapes. The
  * user-perceivable six come first; `css` is the escape for an element none of them
  * reaches (see {@link GuardWebLocatorSchema}), and carries no `exact` because a
@@ -197,8 +215,8 @@ const handleShapes = {
   title: { title: z.string().min(1), exact },
   /** An image's ALT TEXT — what a user is told the picture is. */
   alt: { alt: z.string().min(1), exact },
-  /** A raw CSS selector — the NON-CANONICAL escape. */
-  css: { css: z.string().min(1) },
+  /** A raw CSS selector — the NON-CANONICAL escape ({@link NOT_A_CSS_SELECTOR}). */
+  css: { css: cssSelector },
 } as const
 
 /**
@@ -291,6 +309,24 @@ export const GuardWebLocatorSchema: z.ZodType<GuardWebLocator, z.ZodTypeDef, Gua
  */
 export function isNonCanonicalLocator(locator: GuardWebLocator | GuardWebScope): boolean {
   return 'css' in locator || ('within' in locator && locator.within !== undefined && 'css' in locator.within)
+}
+
+/**
+ * A locator as one string, the same for two locators that address their element
+ * the same way whatever order their keys were written in — `within` and `pick`
+ * included. What a proven locator is recognised by when it appears again.
+ */
+export function webLocatorKey(locator: GuardWebLocator | GuardWebScope): string {
+  return JSON.stringify(sortedKeys(locator))
+}
+
+function sortedKeys(value: object): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => [k, typeof v === 'object' && v !== null ? sortedKeys(v) : v]),
+  )
 }
 
 /**

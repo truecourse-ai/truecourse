@@ -3042,14 +3042,14 @@ describe('a step target beyond role and name', () => {
       { text: 'More' },
       { css: 'main i[title="More"]' },
       { title: 'More', pick: 2 },
-      { role: 'button' },
+      { role: 'button', name: 'More' },
     ] as const
     const prints = targets.map((target) =>
       fingerprintOf([InterfaceStepSchema.parse({ kind: 'activate', target, why: 'css needs one' })]),
     )
     expect(new Set(prints).size).toBe(targets.length)
     const scoped = (within: object) => fingerprintOf([InterfaceStepSchema.parse({ kind: 'activate', target: { title: 'More' }, within, why: 'x' })])
-    expect(scoped({ css: 'main' })).not.toBe(scoped({ role: 'main' }))
+    expect(scoped({ css: 'main' })).not.toBe(scoped({ role: 'main', name: 'Tag' }))
     expect(scoped({ css: 'main', pick: 1 })).not.toBe(scoped({ css: 'main' }))
   })
 
@@ -3079,6 +3079,17 @@ describe('a step target beyond role and name', () => {
     }
     // A position alone is canonical and needs no reason.
     expect(InterfacesFileSchema.safeParse(catalogWith([{ kind: 'activate', target: { title: 'More', pick: 2 } }])).success).toBe(true)
+  })
+
+  it('refuses a role handle with no name, as a target or as a scope', () => {
+    for (const step of [
+      { kind: 'activate', target: { role: 'button' } },
+      { kind: 'input', target: { role: 'textbox', name: 'Name' }, within: { role: 'dialog' } },
+    ]) {
+      const parsed = InterfaceStepSchema.safeParse(step)
+      expect(parsed.success).toBe(false)
+      expect(!parsed.success && parsed.error.issues[0].message).toContain('a role handle names its element')
+    }
   })
 
   it('keeps readables to the handles a user perceives', () => {
