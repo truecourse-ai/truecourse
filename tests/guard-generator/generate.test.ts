@@ -601,44 +601,100 @@ describe('generateGuards — change detection', () => {
     expect(readManifest(r)).toEqual(manifestBefore)
   }, 60_000)
 
-  it('a MOVED interface re-authors only the flow that grounds on it', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
-    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+  // A TASK CHANGE NEVER RE-WRITES A SCENARIO THAT EXISTS. Its steps were frozen
+  // when it was written; a moved task is the drift dot a run draws beside it.
+  describe('an interface that moves under a settled flow', () => {
+    const version = cliInterface(['relkit', 'version'])
+    const help = cliInterface(['relkit', 'help'])
+    /** Each flow planned on its OWN interface, or refused when the catalog has none. */
+    const ownInterface: MatchRunner = async (ctx) => {
+      const own = ctx.interfaces.find((j) => j.id.endsWith(ctx.flow.id))
+      if (!own) return { unrealizable: `no interface for ${ctx.flow.id}` }
+      return { plan: ctx.milestones.map((m) => ({ interfaceId: own.id, milestone: m.order })) }
+    }
+    /** Every committed scenario document, by path — what "untouched" is checked against. */
+    const scenarioFiles = (r: string): Record<string, string> => {
+      const out: Record<string, string> = {}
+      const walk = (dir: string): void => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const file = path.join(dir, entry.name)
+          if (entry.isDirectory()) walk(file)
+          else if (file.endsWith('.yaml')) out[path.relative(r, file)] = fs.readFileSync(file, 'utf-8')
+        }
+      }
+      walk(scenariosDir(r))
+      return out
+    }
+    async function settled(interfaces: Interface[]): Promise<string> {
+      const r = repo()
+      writeRecipe(r)
+      writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+      writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+      await runGenerate({
+        repoRoot: r,
+        interfaces: interfacesOf(r, ...interfaces),
+        extractSession: extractSessionBy({}),
+        matchRunner: ownInterface,
+        flowWorkerSession: authorsEvery(),
+      })
+      return r
+    }
+    async function regenerate(r: string, interfaces: Interface[]) {
+      const worked: string[] = []
+      const res = await runGenerate({
+        repoRoot: r,
+        interfaces: interfacesOf(r, ...interfaces),
+        extractSession: extractSessionBy({}),
+        matchRunner: ownInterface,
+        flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS), {
+          onBriefing: (task) => worked.push(task.flowId),
+        }),
+      })
+      return { res, worked }
+    }
 
-    // Two flows, each matched to its OWN interface.
-    const twoInterfaces = [cliInterface(['relkit', 'version']), cliInterface(['relkit', 'help'])]
-    const perFlow = async (ctx: Parameters<ReturnType<typeof matchAll>>[0]) => ({
-      plan: ctx.milestones.map((m) => ({
-        interfaceId: ctx.interfaces.find((j) => j.id.endsWith(ctx.flow.id))?.id ?? ctx.interfaces[0].id,
-        milestone: m.order,
-      })),
-    })
+    it('an amended task leaves the flow settled and its scenario byte for byte', async () => {
+      const r = await settled([version, help])
+      const files = scenarioFiles(r)
+      const before = readManifest(r)!.flows.map((f) => [f.flowId, f.scenarios])
 
-    await runGenerate({
-      repoRoot: r,
-      interfaces: interfacesOf(r, ...twoInterfaces),
-      extractSession: extractSessionBy({}),
-      matchRunner: perFlow,
-      flowWorkerSession: authorsEvery(),
-    })
+      // `version` gained a flag: same id, new steps, a new fingerprint.
+      const { res, worked } = await regenerate(r, [cliInterface(['relkit', 'version'], ['--json']), help])
 
-    // `version`'s interface gained a flag; `help`'s is untouched.
-    const worked: string[] = []
-    const res = await runGenerate({
-      repoRoot: r,
-      interfaces: interfacesOf(r, cliInterface(['relkit', 'version'], ['--json']), twoInterfaces[1]),
-      extractSession: extractSessionBy({}),
-      matchRunner: perFlow,
-      flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS), {
-        onBriefing: (task) => worked.push(task.flowId),
-      }),
-    })
+      expect(worked).toEqual([])
+      expect(res.flows).toMatchObject({ total: 2, skipped: 2 })
+      expect(scenarioFiles(r)).toEqual(files)
+      expect(readManifest(r)!.flows.map((f) => [f.flowId, f.scenarios])).toEqual(before)
+    }, 90_000)
 
-    expect(worked).toEqual(['version'])
-    expect(res.flows).toMatchObject({ total: 2, skipped: 1 })
-  }, 90_000)
+    it('a retired task leaves the flow settled and its scenario byte for byte', async () => {
+      const r = await settled([version, help])
+      const files = scenarioFiles(r)
+
+      // `version`'s task is gone, and nothing else realizes the flow any more.
+      const { res, worked } = await regenerate(r, [help])
+
+      expect(worked).toEqual([])
+      expect(res.flows).toMatchObject({ total: 2, skipped: 2 })
+      expect(scenarioFiles(r)).toEqual(files)
+      expect(flowEntry(r, 'version')!.scenarios).toHaveLength(1)
+    }, 90_000)
+
+    it('a new task still gives a flow the scenario it did not have, and re-writes no other', async () => {
+      // `help` has no interface yet, so it settles on a gap with no scenario.
+      const r = await settled([version])
+      expect(flowEntry(r, 'help')!.scenarios).toEqual([])
+      const files = scenarioFiles(r)
+
+      const { worked } = await regenerate(r, [version, help])
+
+      expect(worked).toEqual(['help'])
+      expect(flowEntry(r, 'help')!.scenarios).toHaveLength(1)
+      const after = scenarioFiles(r)
+      for (const [file, content] of Object.entries(files)) expect(after[file]).toBe(content)
+      expect(Object.keys(after).length).toBe(Object.keys(files).length + 1)
+    }, 90_000)
+  })
 })
 
 describe('generateGuards — the committed scenario', () => {
@@ -2090,8 +2146,10 @@ describe('generateGuards — the per-flow pipeline', () => {
     expect(first.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
     const stored = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
     expect(Object.keys(stored.generationInputs ?? {})).toEqual(
-      expect.arrayContaining(['flow', 'sections', 'interfaces', 'recipe.slice', 'roster', 'preparation']),
+      expect.arrayContaining(['flow', 'sections', 'recipe.slice', 'roster', 'preparation']),
     )
+    // It holds its scenario, so a task moving is no input of it.
+    expect(Object.keys(stored.generationInputs ?? {})).not.toContain('interfaces')
 
     // A dependency bump moves the recipe fingerprint and nothing a flow reads,
     // so no flow re-opens and nothing is re-authored.

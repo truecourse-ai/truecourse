@@ -26,7 +26,7 @@ import {
   MATCH_SESSION_KIND,
   type GenerateGuardsOptions,
 } from '@truecourse/guard-generator'
-import { movedNamedInputs } from '@truecourse/shared'
+import { movedNamedInputs, movedSchemeInputs } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -137,6 +137,7 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     interfaceFingerprints: ['i1', 'i2'],
     webCatalogFingerprint: 'w',
     webCatalogReads: ['web/home:abc'],
+    hasScenario: false,
     prerequisiteMaterial: 'p',
     prerequisiteShape: 'ps',
     recipeSlice: 'rs',
@@ -166,6 +167,24 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     expect(moved({ preparation: 'pr2' })).toEqual(['preparation'])
   })
 
+  it('leaves the interface catalog out of a flow that holds a scenario', () => {
+    const withScenario = { ...parts, hasScenario: true }
+    const base = flowGenerationInputComponents(withScenario)
+    expect(Object.keys(base)).not.toEqual(expect.arrayContaining(['assignment']))
+    expect(Object.keys(base)).not.toEqual(expect.arrayContaining(['interfaces']))
+    expect(Object.keys(base)).not.toEqual(expect.arrayContaining(['webCatalog.reads']))
+    // An amended, retired or swapped task moves nothing it is compared on.
+    expect(movedNamedInputs(base, flowGenerationInputComponents({
+      ...withScenario,
+      assignmentFingerprints: ['a2'],
+      interfaceFingerprints: ['i1'],
+      webCatalogReads: ['web/home:absent'],
+    }))).toEqual([])
+    // A row stored under the old rule still carries them, and settles.
+    const stored = flowGenerationInputComponents(parts)
+    expect(movedSchemeInputs(stored, base)).toEqual([])
+  })
+
   it('folds into the hash every member the bag always carried', () => {
     expect([...flowInterfaceFingerprintBag(parts)].sort()).toEqual(['a', 'i1', 'i2', 'p', 'w'])
     const { webCatalogFingerprint: _none, ...noWeb } = parts
@@ -179,6 +198,7 @@ describe('flowSettleVerdict — the three compare rules and the one legacy check
     sectionKeys: ['s1'],
     assignmentFingerprints: ['a'],
     interfaceFingerprints: ['i'],
+    hasScenario: false,
     prerequisiteMaterial: 'p',
     prerequisiteShape: 'ps',
     recipeSlice: 'rs',

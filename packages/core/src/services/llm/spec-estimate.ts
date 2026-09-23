@@ -976,6 +976,7 @@ async function planGuardRealizationStages(
                 webCatalogReads: authorCatalog ? catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []) : [],
               }
             : {}),
+          hasScenario: priorScenarios.length > 0,
           prerequisiteMaterial,
           prerequisiteShape,
           recipeSlice: recipeSliceOf(chosenSurface),

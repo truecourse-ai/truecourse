@@ -259,6 +259,12 @@ export interface FlowGenerationInputParts {
   prerequisiteShape: string
   /** The recipe slice of the surface this flow is realized on. */
   recipeSlice: string
+  /**
+   * Whether the flow holds a committed scenario. The interface catalog is a
+   * settle input only of a flow that does not: a task change never re-writes a
+   * scenario that exists.
+   */
+  hasScenario: boolean
   /** The seed roster entries the flow's committed scenarios name. */
   roster: string
   /** The preparation profiles those scenarios name, with their script bytes. */
@@ -283,6 +289,16 @@ export function flowInterfaceFingerprintBag(parts: FlowGenerationInputParts): st
  *
  * Prompt fingerprints are deliberately absent. A committed flow has been run
  * and proven, and rewording the prompt that wrote it does not make it wrong.
+ *
+ * The INTERFACE CATALOG (`assignment`, `interfaces`, `webCatalog.reads`) is a
+ * settle input only of a flow that holds no committed scenario: a task that
+ * is new, amended or retired may still give such a flow the scenario it lacks
+ * (a blocked flow re-briefed, a gapped one matched), but it never re-writes a
+ * scenario that exists. Its steps were frozen when it was written, and a moved
+ * task is the drift dot a run draws beside it (`isInterfaceDrifted`), never a
+ * reason to author it again. A stored row that still carries those names is
+ * compared without them (a name on one side only is no comparison), so
+ * narrowing the rule re-opens nothing.
  */
 export function flowGenerationInputComponents(parts: FlowGenerationInputParts): Record<string, string> {
   const digest = (values: readonly string[]): string =>
@@ -290,8 +306,6 @@ export function flowGenerationInputComponents(parts: FlowGenerationInputParts): 
   const components: Record<string, string> = {
     flow: digest([parts.flowFingerprint]),
     sections: digest(parts.sectionKeys),
-    assignment: digest(parts.assignmentFingerprints),
-    interfaces: digest(parts.interfaceFingerprints),
     // A NEW name, because the retired `prerequisites` folded resolved state: a
     // stored value under that name would compare unequal for every flow that
     // has one, and re-open all of them at once. Under its own name the stored
@@ -302,6 +316,9 @@ export function flowGenerationInputComponents(parts: FlowGenerationInputParts): 
     roster: digest([parts.roster]),
     preparation: digest([parts.preparation]),
   }
+  if (parts.hasScenario) return components
+  components.assignment = digest(parts.assignmentFingerprints)
+  components.interfaces = digest(parts.interfaceFingerprints)
   // The web catalog enters by what the flow's session READ, never whole: an
   // unrelated screen's re-authored readables used to re-open every web flow.
   // A row that carries no read-set (it predates the record, or its session

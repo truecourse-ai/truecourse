@@ -2067,6 +2067,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         : {}),
       prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe),
       prerequisiteShape: flowPrerequisiteShapeFingerprint(flow, prerequisiteResolution.targets, recipe),
+      hasScenario: priorScenarios.length > 0,
       // A flow with no plan is realized on no surface, so it folds the cli
       // slice as a stable stand-in: the estimate makes the same choice, and a
       // flow that later gains a plan re-opens on the surface it gained.
@@ -4235,7 +4236,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   /**
    * The flow's settle record. A flow that re-authored re-folds the components
    * the compare could only read off its PRIOR scenarios — the roster entries
-   * and the preparation its scenarios name — over the scenarios it holds NOW,
+   * and the preparation its scenarios name, and whether it holds one at all
+   * (which decides whether the catalog is an input) — over the scenarios it holds NOW,
    * which is what the next compare reads; and on web, the catalog entries its
    * session actually READ rather than the prior read-set. Every other flow
    * keeps the components the compare computed. A flow whose web session
@@ -4249,6 +4251,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         ? {
             roster: flowRosterFingerprint(recipe, written),
             preparation: flowPreparationFingerprint(repoRoot, recipe, written),
+            hasScenario: written.length > 0,
           }
         : {}),
     }

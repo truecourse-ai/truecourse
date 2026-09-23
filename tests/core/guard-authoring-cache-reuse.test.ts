@@ -70,6 +70,8 @@ const BASE_PARTS: FlowGenerationInputParts = {
   recipeSlice: 'slice',
   roster: 'roster',
   preparation: 'preparation',
+  // A blocked flow: the entries its session read are what re-open it.
+  hasScenario: false,
 }
 
 describe('author-only changes retain upstream cache compatibility', () => {

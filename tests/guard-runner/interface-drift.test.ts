@@ -250,6 +250,47 @@ describe('runGuard — interface-drift annotation', () => {
     expect(by.get('moved')).toMatchObject({ interfaceDrifted: true })
   })
 
+  // Interface reconciliation amends a task under its id, or retires it: the
+  // scenario grounded on it is never re-written, so the run's dot is what says
+  // the surface moved — and it is a dot, never a failure.
+  it('marks a scenario whose authored task was amended or retired, and changes no outcome', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [VERSION])
+    const amended: Interface = (() => {
+      const shape = {
+        type: 'web' as const,
+        entry: { method: 'GET', path: '/repos/{repoId}' },
+        steps: [{ kind: 'activate' as const, target: { role: 'button', name: 'Rule settings' } }],
+      }
+      return { ...SILENCE_RULE, ...shape, fingerprint: interfaceFingerprint(shape) }
+    })()
+    const grounded = (id: string, taskId: string) =>
+      scenario({
+        id,
+        binds: specBinds('cli/version'),
+        interface: { path: [taskId], fingerprints: [SILENCE_RULE.fingerprint] },
+        steps: [{ run: ['--version'], expect: { exit: 0 } }],
+      })
+    writeScenario(r, 'silence.yaml', grounded('silence', 'web/silence-rule'))
+
+    const drift = async () => {
+      const res = await runGuard({ repoRoot: r, skipBuild: true })
+      if (res.status !== 'ok') throw new Error('expected ok')
+      const run = res.latest.scenarios.find((s) => s.id === 'silence')!
+      return { drifted: run.interfaceDrifted, outcome: run.outcome }
+    }
+
+    writeAuthoredCatalog(r, [SILENCE_RULE])
+    expect(await drift()).toEqual({ drifted: undefined, outcome: 'pass' })
+    // Amended: same id, new steps.
+    writeAuthoredCatalog(r, [amended])
+    expect(await drift()).toEqual({ drifted: true, outcome: 'pass' })
+    // Retired: the id is gone from the merged catalog.
+    writeAuthoredCatalog(r, [])
+    expect(await drift()).toEqual({ drifted: true, outcome: 'pass' })
+  })
+
   it('annotates nothing when no mapping snapshot exists', async () => {
     const r = repo()
     writeRecipe(r)
