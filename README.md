@@ -61,7 +61,7 @@ that login and the Models page is read-only; leave the variable out to save a
 provider and key on that page instead.
 
 One model runs everything — every call and every agent session of a run. On a
-Claude Code login that model is `opus`, and `TRUECOURSE_MODEL` names another;
+Claude Code login that model is `claude-opus-5-5`, and `TRUECOURSE_MODEL` names another;
 `TRUECOURSE_FALLBACK_MODEL` is what a call retries on when the primary is
 overloaded. A workspace with its own API key names its one model on the Models
 page instead, and these variables do not apply to it.

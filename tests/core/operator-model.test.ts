@@ -23,8 +23,8 @@ afterEach(() => {
 describe('resolveModel — the one operator model', () => {
   it('defaults to opus', () => {
     delete process.env.TRUECOURSE_MODEL;
-    expect(resolveModel()).toBe('opus');
-    expect(DEFAULT_OPERATOR_MODEL).toBe('opus');
+    expect(resolveModel()).toBe('claude-opus-5-5');
+    expect(DEFAULT_OPERATOR_MODEL).toBe('claude-opus-5-5');
   });
 
   it('yields to TRUECOURSE_MODEL, trimmed', () => {
