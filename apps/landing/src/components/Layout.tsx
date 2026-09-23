@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { trackPageview } from '@/lib/posthog';
+import { trackGAPageview } from '@/lib/ga';
 
 export default function Layout() {
   const { pathname, hash } = useLocation();
@@ -18,10 +19,11 @@ export default function Layout() {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [pathname, hash]);
 
-  // PostHog SPA pageview, fired on every react-router pathname change.
-  // Initial pageview is captured automatically by posthog.init.
+  // PostHog and GA SPA pageviews, fired on every react-router pathname change.
+  // The initial pageview is captured automatically by each one's init.
   useEffect(() => {
     trackPageview(pathname + hash);
+    trackGAPageview(pathname + hash);
   }, [pathname, hash]);
 
   return (
