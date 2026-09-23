@@ -40,6 +40,12 @@ export {
   type AuthorFinding,
 } from './findings.js'
 export { MAX_PACK_BYTES, clusterPack, type ClusterPack } from './pack.js'
+export {
+  nonCanonicalLocators,
+  writeNonCanonicalLocators,
+  type NonCanonicalLocator,
+} from './non-canonical.js'
+export { LiveProofReachSchema, proveLocators, type LiveProofReach } from './live-proof.js'
 export { buildAuthorTools, type AuthorToolsInput } from './tools.js'
 export {
   liveScreenLines,

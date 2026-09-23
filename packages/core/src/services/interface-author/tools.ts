@@ -51,6 +51,7 @@ import {
 import { checkedDraftEvidence } from './checked-draft.js'
 import { scopeFragmentIds } from './identity.js'
 import { observeScreenTool, type LiveScreens } from './live-screen.js'
+import { LiveProofReachSchema, proveLocators, type LiveProofReach } from './live-proof.js'
 
 /** How many catalog entries one `list_interfaces` call hands back — a tool
  *  result is context, and context is the budget. */
@@ -173,6 +174,11 @@ function interfacesTool(input: AuthorToolsInput): SessionTool {
  * Uniqueness is why the accepted draft has to be the thing checked: an id and a
  * fingerprint name one thing across the whole draft, not within one call.
  *
+ * A task whose locator is non-canonical (`css`) or declares a `pick` is also
+ * PROVEN on the running app before it is kept ({@link proveLocators}); a `proof`
+ * entry says how to reach its state when the entry carries a slot, and is kept
+ * for the session like the draft is.
+ *
  * `outcome` resolves the draft by the id of the check that accepted it, exactly
  * as it always has — the artifact carries the accumulated fragment, so nothing
  * about resolution (or about a resume, which reads the artifact off the
@@ -180,16 +186,17 @@ function interfacesTool(input: AuthorToolsInput): SessionTool {
  */
 function checkDraftTool(input: AuthorToolsInput): SessionTool {
   let accepted: AuthoredFragment = EMPTY_FRAGMENT
+  let reach: LiveProofReach = {}
   return defineSessionTool({
     name: 'check_draft',
     description:
-      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the role/name target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
+      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. A step whose locator uses `css` or `pick` is also PROVEN on the running app: its address is opened, the task\'s clicks before it are replayed, and it must resolve to exactly one visible element (a `pick` position within the matches); when the entry has a {slot}, pass `proof: {"<task id>": {"path": "<filled address>", "activate": [<controls that reveal the task\'s starting place>]}}`. What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
     kind: 'check-draft',
     readOnly: true,
     destructive: false,
-    inputSchema: AuthoredFragmentSchema,
-    async execute(args) {
-      const combined = foldAuthoredFragment(accepted, args)
+    inputSchema: AuthoredFragmentSchema.extend({ proof: LiveProofReachSchema.optional() }),
+    async execute({ proof, ...piece }) {
+      const combined = foldAuthoredFragment(accepted, piece)
       const fragment = collapseAuthoredIds(scopeFragmentIds(combined, input))
       const result = validateFragment({
         derived: input.derived,
@@ -206,6 +213,17 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
           isError: true,
         }
       }
+      const proven = { ...reach, ...proof }
+      const unproven = await proveLocators(piece.interfaces, input.live, proven)
+      if (unproven.length > 0) {
+        return {
+          content: `${unproven.length} locator(s) did not hold on the live screen — nothing in this call was accepted, and the draft still holds ${
+            accepted.interfaces.length
+          } task(s):\n- ${unproven.join('\n- ')}`,
+          isError: true,
+        }
+      }
+      reach = proven
       accepted = fragment
       const artifact = checkedDraftEvidence(fragment)
       return {

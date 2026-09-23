@@ -34,6 +34,7 @@ function seedRepo(repoRoot: string): void {
   write(repoRoot, '.truecourse/guard/interfaces.json', '{"version":2,"interfaces":[]}');
   write(repoRoot, '.truecourse/guard/interfaces.authored.json', '{"version":2,"interfaces":[]}');
   write(repoRoot, '.truecourse/guard/interfaces.findings.md', '# interface findings\n');
+  write(repoRoot, '.truecourse/guard/interfaces.noncanonical.json', '{"locators":[]}');
   write(
     repoRoot,
     '.truecourse/scenarios/recipe.json',
@@ -59,6 +60,7 @@ describe('collectGuardSetupBundle', () => {
       '.truecourse/guard/interfaces.authored.json',
       '.truecourse/guard/interfaces.findings.md',
       '.truecourse/guard/interfaces.json',
+      '.truecourse/guard/interfaces.noncanonical.json',
       '.truecourse/guard/setup.findings.md',
       '.truecourse/guard/setup.json',
       '.truecourse/scenarios/dependencies.json',

@@ -26,6 +26,7 @@ import type {
   ObserveScreenResult,
   ScreenObservation,
   ScreenObservationRequest,
+  UnnamedControl,
   WebScreenObserver,
 } from '@truecourse/guard-runner'
 
@@ -75,7 +76,7 @@ export function observeScreenTool(live: LiveScreens): SessionTool {
   return defineSessionTool({
     name: 'observe_screen',
     description:
-      'Open an address of the RUNNING app in the signed-in browser and return its accessibility tree — every control with the role and accessible name a step target may use. Fill every {param} slot with a real value first (the briefing lists the seeded fixtures). `activate` clicks up to 5 targets in order BEFORE the tree is read, which is how a menu, a dialog or a tab panel is opened for reading; never activate anything that submits, deletes or signs out.',
+      'Open an address of the RUNNING app in the signed-in browser and return its accessibility tree — every control with the role and accessible name a step target may use — and, for every control the tree shows with no name or only an icon glyph, its tag, attributes, icon, region and a candidate css selector with its match count. Fill every {param} slot with a real value first (the briefing lists the seeded fixtures). `activate` clicks up to 5 targets in order BEFORE the tree is read, which is how a menu, a dialog or a tab panel is opened for reading; never activate anything that submits, deletes or signs out.',
     kind: 'observe-screen',
     readOnly: true,
     destructive: false,
@@ -113,7 +114,29 @@ export function renderObservation(observation: ScreenObservation): string {
   if (observation.omittedLines > 0) {
     lines.push(`… ${observation.omittedLines} more line(s) of the tree not shown — observe a narrower state (a tab, a dialog) to read them.`)
   }
+  if (observation.unnamed && observation.unnamed.length > 0) {
+    lines.push(
+      '',
+      'Controls the tree shows with NO accessible name (or only an icon glyph) — no role+name reaches them. Target one by a visible handle it has (its `title`), else by `css` with a `why`, copying a selector below and its match count:',
+      ...observation.unnamed.map((control) => `  ${describeUnnamedControl(control)}`),
+    )
+  }
   return lines.join('\n')
+}
+
+/** `button · data-action="sort" · icon i.bi-sort · in main · css `main button:has(i.bi-sort)` (2 matches, this is #1)` */
+function describeUnnamedControl(control: UnnamedControl): string {
+  const matches = control.matches === 1
+    ? '1 match'
+    : `${control.matches} matches${control.position ? `, this is #${control.position}` : ''}`
+  return [
+    control.tag,
+    ...Object.entries(control.attributes).map(([name, value]) => `${name}=${JSON.stringify(value)}`),
+    ...(control.icon ? [`icon ${control.icon}`] : []),
+    ...(control.glyph ? [`glyph ${control.glyph}`] : []),
+    ...(control.region ? [`in ${control.region}`] : []),
+    `css \`${control.selector}\` (${matches})`,
+  ].join(' · ')
 }
 
 /**

@@ -355,8 +355,8 @@ export interface ValidateFragmentInput {
 /**
  * Hold a fragment to every rule at once and return the file it would produce.
  * The schema does the structural half (ids resolve in the area registry, a
- * screen sits on nothing, a state id is not a sentence, a step's target is an
- * ARIA role and an accessible name); this adds the five rules that are about
+ * screen sits on nothing, a state id is not a sentence, a step's target is one
+ * locator handle and a `css` one says why); this adds the rules that are about
  * AUTHORING rather than about the shape:
  *
  *  1. an id names one thing — no collision with a derived or authored entry;

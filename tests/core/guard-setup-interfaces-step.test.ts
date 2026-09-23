@@ -388,7 +388,11 @@ describe('the live screens', () => {
   function liveSeam(open: LiveScreensOpen | 'throw' = 'ok') {
     const events: string[] = [];
     const live: LiveScreens = {
-      observer: { async observe() { return { ok: false, reason: 'stubbed' }; }, async close() {} },
+      observer: {
+        async observe() { return { ok: false, reason: 'stubbed' }; },
+        async probe() { return { ok: false, reason: 'stubbed' }; },
+        async close() {},
+      },
     };
     const seam = async (): Promise<LiveScreensOpen> => {
       events.push('open');

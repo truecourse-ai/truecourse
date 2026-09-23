@@ -65,6 +65,9 @@ function fakeObserver(principal?: string): { observer: LiveScreenObserver; reque
         },
       }
     },
+    async probe() {
+      return { ok: false, reason: 'this fake proves nothing' }
+    },
     async close() {},
   }
   return { observer, requests }
@@ -160,7 +163,8 @@ describe('the observe_screen tool', () => {
     const { observer } = fakeObserver()
     const schema = observeScreenTool({ observer }).inputSchema
     expect(schema.safeParse({ path: '/', activate: Array(6).fill({ role: 'button', name: 'x' }) }).success).toBe(false)
-    expect(schema.safeParse({ path: '/', activate: [{ css: '#save' }] }).success).toBe(false)
+    expect(schema.safeParse({ path: '/', activate: [{ xpath: '//button' }] }).success).toBe(false)
+    expect(schema.safeParse({ path: '/', activate: [{ css: 'main button:has(i.bi-three-dots)' }] }).success).toBe(true)
     expect(schema.safeParse({ path: '/', activate: [{ label: 'URL' }] }).success).toBe(true)
   })
 })

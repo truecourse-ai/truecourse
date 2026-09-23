@@ -21,6 +21,7 @@
 
 import {
   appendInterfaceFindings,
+  writeNonCanonicalLocators,
   authorWebInterfaces,
   planWorkItems,
   reconcileAuthoredStates,
@@ -255,6 +256,10 @@ export async function runGuardInterfaceAuthoring(
         complete: stateReconcileComplete(driver, run.persistence, opts.signal),
       });
     }
+
+    // THE NON-CANONICAL RECORD: every step that needed `css`, regenerated from
+    // the catalog as it now stands, beside the findings it is reported with.
+    writeNonCanonicalLocators(repoRoot);
 
     ownedRun?.finish(runStatus(result.places, opts.signal));
     return {
