@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { repositories, workspaceEntitlements } from '@truecourse/db';
+import { repositories, workspaceEntitlements, workspaceProfiles } from '@truecourse/db';
 import {
   installEntitlementsStore,
   type InstalledEntitlementsStore,
@@ -131,5 +131,17 @@ describe('PgEntitlementsStore', () => {
       { workspaceOrgId: ORG, features: ['connections'] },
       { workspaceOrgId: OTHER, features: [] },
     ]);
+  });
+
+  it('lists a workspace that has only said what it builds', async () => {
+    // A new workspace states its description at creation, before any provider
+    // or repository, and the console is where it gets its first grant.
+    await installed.db.insert(workspaceProfiles).values({
+      workspaceOrgId: OTHER,
+      description: 'A shared todo list.',
+      updatedAt: '2026-03-01T10:00:00.000Z',
+    });
+
+    expect(await installed.store.workspaces()).toEqual([{ workspaceOrgId: OTHER, features: [] }]);
   });
 });

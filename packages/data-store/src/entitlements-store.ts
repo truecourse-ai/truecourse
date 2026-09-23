@@ -13,6 +13,7 @@ import {
   llmProviderConfig,
   repositories,
   workspaceEntitlements,
+  workspaceProfiles,
   type Db,
 } from '@truecourse/db';
 import { ENTERPRISE_FEATURES, type EnterpriseFeature } from '@truecourse/shared';
@@ -55,12 +56,19 @@ export class PgEntitlementsStore implements EntitlementsStore {
 
   /**
    * Every workspace the console lists: those with a grant, plus those that
-   * exist at all (a saved provider, a connected repository), so a workspace
-   * that has never been granted anything is still there to grant to.
+   * exist at all (a stated description, a saved provider, a connected
+   * repository), so a workspace that has never been granted anything is still
+   * there to grant to. The description is stated at creation, so it is what
+   * lists a new workspace before it has connected anything.
    */
   async workspaces(): Promise<EntitlementWorkspaceRecord[]> {
     const granted = await this.db.select().from(workspaceEntitlements);
     const known = new Set<string>(granted.map((row) => row.workspaceOrgId));
+    for (const row of await this.db
+      .select({ org: workspaceProfiles.workspaceOrgId })
+      .from(workspaceProfiles)) {
+      known.add(row.org);
+    }
     for (const row of await this.db
       .selectDistinct({ org: llmProviderConfig.orgId })
       .from(llmProviderConfig)) {
