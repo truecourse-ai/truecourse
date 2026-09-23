@@ -20,7 +20,7 @@
 
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
-import { GuardWebLocatorSchema } from '@truecourse/shared'
+import { ANONYMOUS_PRINCIPAL, GuardWebLocatorSchema } from '@truecourse/shared'
 import { boundTree, hasAddressSlot } from '@truecourse/guard-runner'
 import type {
   ObserveScreenResult,
@@ -45,7 +45,14 @@ export type LiveScreenObserver = WebScreenObserver
  * so a session can fill an address slot with a row that really exists.
  */
 export interface LiveScreens {
+  /** The principal a session observes as unless it names another. */
   observer: LiveScreenObserver
+  /**
+   * Every principal a page can be observed as, by name — each web session the
+   * seed minted, and `anonymous`, a browser signed in as nobody. The default
+   * observer is one of them. Absent on a run that stood up one observer only.
+   */
+  principals?: ReadonlyMap<string, LiveScreenObserver>
   /**
    * The seed's published fixtures, name → declared fields, with every secret-
    * shaped field already removed ({@link publicFixtureFields}). What a session
@@ -75,12 +82,32 @@ export function publicFixtureFields(
   return out
 }
 
+/**
+ * The observer for a principal by name — the default when none is named. A name
+ * the run cannot sign in as resolves to nothing.
+ */
+export function observerFor(live: LiveScreens, principal: string | undefined): LiveScreenObserver | undefined {
+  if (principal === undefined || principal === live.observer.principal) return live.observer
+  return live.principals?.get(principal)
+}
+
+/** The principals a session may name, the default first. */
+export function principalNames(live: LiveScreens): string[] {
+  const names = [...(live.principals?.keys() ?? [])]
+  const own = live.observer.principal
+  return own ? [own, ...names.filter((name) => name !== own)] : names
+}
+
 /** The tool: open an address in the signed-in browser and read its tree. */
 export function observeScreenTool(live: LiveScreens): SessionTool {
+  const names = principalNames(live)
   return defineSessionTool({
     name: 'observe_screen',
     description:
-      'Open an address of the RUNNING app in the signed-in browser and return its accessibility tree — every control with the role and accessible name a step target may use — and, for every control the tree shows with no name or only an icon glyph, its tag, attributes, icon, region and a candidate css selector with its match count. Fill every {param} slot with a real value first (the briefing lists the seeded fixtures). `activate` clicks up to 5 targets in order BEFORE the tree is read, which is how a menu, a dialog or a tab panel is opened for reading; never activate anything that submits, deletes or signs out.',
+      'Open an address of the RUNNING app in the signed-in browser and return its accessibility tree — every control with the role and accessible name a step target may use — and, for every control the tree shows with no name or only an icon glyph, its tag, attributes, icon, region and a candidate css selector with its match count. Fill every {param} slot with a real value first (the briefing lists the seeded fixtures). `activate` clicks up to 5 targets in order BEFORE the tree is read, which is how a menu, a dialog or a tab panel is opened for reading; never activate anything that submits, deletes or signs out.' +
+      (names.length > 1
+        ? ` \`principal\` opens it as another principal instead of this session's (${names.map((name) => `\`${name}\``).join(', ')}; \`anonymous\` is signed out).`
+        : ''),
     kind: 'observe-screen',
     readOnly: true,
     destructive: false,
@@ -92,10 +119,15 @@ export function observeScreenTool(live: LiveScreens): SessionTool {
           .max(MAX_ACTIVATIONS)
           .optional()
           .describe('Targets to click before reading, in order — the same locator shape a step uses.'),
+        principal: z.string().min(1).optional().describe('Observe as this principal instead of the session\'s own.'),
       })
       .strict(),
     async execute(args) {
-      const result = await live.observer.observe({
+      const observer = observerFor(live, args.principal)
+      if (!observer) {
+        return { content: `No principal named \`${args.principal}\` — the run can observe as ${names.map((name) => `\`${name}\``).join(', ')}.`, isError: true }
+      }
+      const result = await observer.observe({
         path: args.path,
         ...(args.activate ? { activate: args.activate } : {}),
       })
@@ -186,14 +218,40 @@ export function liveScreenLines(input: {
   address?: string
   /** The observation taken at the address before the session started, when the address had no slot. */
   observation?: ObserveScreenResult
+  /**
+   * Set when no principal the run can sign in as stays at this address — every
+   * one of them was sent elsewhere — so what the session authors comes from
+   * source, and a `css` locator is accepted unproven.
+   */
+  unreachable?: true
 }): string[] {
+  const own = input.live.observer.principal
   const lines = [
     ``,
     `THE LIVE SCREEN. The app is running, and a browser is open on it` +
-      (input.live.observer.principal
-        ? ` signed in as the seeded principal \`${input.live.observer.principal}\`.`
-        : ` with no principal signed in (the seed minted no web credential).`),
+      (own === ANONYMOUS_PRINCIPAL
+        ? ` NOT SIGNED IN (\`anonymous\`): this screen is the one a signed-out user sees, and a signed-in session is sent away from it.`
+        : own
+          ? ` signed in as the seeded principal \`${own}\`.`
+          : ` with no principal signed in (the seed minted no web credential).`),
   ]
+  const others = principalNames(input.live).filter((name) => name !== own)
+  if (others.length > 0) {
+    lines.push(
+      `The run can also observe as ${others.map((name) => `\`${name}\``).join(', ')} (\`observe_screen\` with \`principal\`).`,
+      `A task only another principal can perform (an admin-only control, a member's`,
+      `leave action, a signed-out form, an empty state a user with no data sees) carries`,
+      `\`principal: "<name>"\`, and is proven as that principal.`,
+    )
+  }
+  if (input.unreachable) {
+    lines.push(
+      `NO PRINCIPAL REACHES THIS ADDRESS: every one the run can sign in as was sent`,
+      `elsewhere (the observation below shows where). Author from source; a \`css\``,
+      `locator written from source is accepted here UNPROVEN (with its \`why\`), and`,
+      `recorded as unproven.`,
+    )
+  }
   if (input.observation) {
     if (input.observation.ok) {
       lines.push(

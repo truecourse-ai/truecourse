@@ -34,7 +34,7 @@ import {
 } from '@truecourse/shared'
 import { addressFillsTemplate, hasAddressSlot, type LocatorProbeStep, type LocatorReading } from '@truecourse/guard-runner'
 import type { AuthoredTask } from './draft.js'
-import type { LiveScreens } from './live-screen.js'
+import { observerFor, type LiveScreens } from './live-screen.js'
 
 /** How many actions a proof may be told to take. */
 const MAX_PROOF_STEPS = 10
@@ -118,7 +118,8 @@ export async function proveLocators(
     const plan = proofPlan(task, owed, reach[task.id])
     for (const { target, problem } of plan.refused) problems.push(`${where(target)}: ${problem}`)
     if (plan.resolves.length === 0) continue
-    const probed = await live.observer.probe({ path: plan.path, steps: plan.steps })
+    const observer = observerFor(live, task.principal) ?? live.observer
+    const probed = await observer.probe({ path: plan.path, steps: plan.steps })
     plan.resolves.forEach(({ target, at }, i) => {
       const reading: LocatorReading | undefined = probed.readings?.[i]
       if (!reading) {

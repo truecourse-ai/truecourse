@@ -38,6 +38,8 @@ export type NonCanonicalLocator =
       step: number
       locator: GuardWebLocator
       why: string
+      /** Set when no browser vouched for the selector: it was written from source on a screen no principal reaches. */
+      proven?: false
     }
   | {
       kind: 'readable'
@@ -66,7 +68,15 @@ export function nonCanonicalLocators(catalog: InterfacesFile | null): NonCanonic
         if (step.kind !== 'input' && step.kind !== 'activate') return []
         const locator = interfaceStepLocator(step)
         if (!isNonCanonicalLocator(locator)) return []
-        return [{ kind: 'step', ...(screen ? { screen } : {}), task: task.id, step: index + 1, locator, why: step.why ?? '' }]
+        return [{
+          kind: 'step',
+          ...(screen ? { screen } : {}),
+          task: task.id,
+          step: index + 1,
+          locator,
+          why: step.why ?? '',
+          ...(step.proven === false ? { proven: false as const } : {}),
+        }]
       })
     })
   const readables = [...places.values()].flatMap((place) => {

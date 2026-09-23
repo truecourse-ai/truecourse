@@ -1337,7 +1337,8 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // Native selection and named-container scopes change the authored vocabulary.
     // Verified preparation profiles also change the browser authoring schema.
     // The non-canonical `css` member and the positional `pick` change it again.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('0ddbe762871ed697')
+    // A task's `principal` (a credential to sign in with, or none) moves it once more.
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('f3756f61dcc654a8')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {

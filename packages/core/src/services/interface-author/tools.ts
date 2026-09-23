@@ -37,7 +37,7 @@
 
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
-import type { InterfacesFile } from '@truecourse/shared'
+import { interfaceStepLocator, isNonCanonicalLocator, type InterfacesFile } from '@truecourse/shared'
 import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js'
 import { liveAuthorCatalog } from './catalog-context.js'
 import {
@@ -47,10 +47,11 @@ import {
   foldAuthoredFragment,
   validateFragment,
   type AuthoredFragment,
+  type AuthoredTask,
 } from './draft.js'
 import { checkedDraftEvidence } from './checked-draft.js'
 import { scopeFragmentIds } from './identity.js'
-import { observeScreenTool, type LiveScreens } from './live-screen.js'
+import { observeScreenTool, observerFor, principalNames, type LiveScreens } from './live-screen.js'
 import { LiveProofReachSchema, proveLocators, proveReadables, type LiveProofReach } from './live-proof.js'
 
 /** How many catalog entries one `list_interfaces` call hands back — a tool
@@ -69,6 +70,12 @@ export interface AuthorToolsInput {
   scope?: { screenId: string; address?: string }
   /** The running app, when the run booted one — adds `observe_screen`. */
   live?: LiveScreens
+  /**
+   * No principal the run can sign in as stays at this place's address: a `css`
+   * locator written from source is accepted there UNPROVEN, stamped
+   * `proven: false`, instead of refused.
+   */
+  unreachable?: true
 }
 
 export function buildAuthorTools(input: AuthorToolsInput): SessionTool[] {
@@ -195,7 +202,15 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
     readOnly: true,
     destructive: false,
     inputSchema: AuthoredFragmentSchema.extend({ proof: LiveProofReachSchema.optional() }),
-    async execute({ proof, ...piece }) {
+    async execute({ proof, ...sent }) {
+      const piece = stampProof(sent, input.live !== undefined && input.unreachable === true)
+      const unknownPrincipals = input.live ? unknownPrincipalProblems(piece.interfaces, input.live) : []
+      if (unknownPrincipals.length > 0) {
+        return {
+          content: `${unknownPrincipals.length} problem(s) — nothing in this call was accepted, and the draft still holds ${accepted.interfaces.length} task(s):\n- ${unknownPrincipals.join('\n- ')}`,
+          isError: true,
+        }
+      }
       const combined = foldAuthoredFragment(accepted, piece)
       const fragment = collapseAuthoredIds(scopeFragmentIds(combined, input))
       const result = validateFragment({
@@ -214,10 +229,14 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
         }
       }
       const proven = { ...reach, ...proof }
-      const unproven = [
-        ...(await proveLocators(piece.interfaces, input.live, proven)),
-        ...(await proveReadables(piece.resources ?? [], input.live, proven, input.scope?.address)),
-      ]
+      // On a screen no principal reaches there is nothing to prove on: the css
+      // it carries was stamped unproven above.
+      const unproven = input.unreachable && input.live
+        ? []
+        : [
+            ...(await proveLocators(piece.interfaces, input.live, proven)),
+            ...(await proveReadables(piece.resources ?? [], input.live, proven, input.scope?.address)),
+          ]
       if (unproven.length > 0) {
         return {
           content: `${unproven.length} locator(s) did not hold on the live screen — nothing in this call was accepted, and the draft still holds ${
@@ -243,6 +262,35 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
       }
     },
   })
+}
+
+/**
+ * The piece as the draft keeps it: `proven` is the check's word, never the
+ * session's, so any the session wrote is dropped — and on a screen no principal
+ * reaches, every step whose locator carries `css` is stamped `proven: false`.
+ */
+function stampProof(piece: AuthoredFragment, unreachable: boolean): AuthoredFragment {
+  return {
+    ...piece,
+    interfaces: piece.interfaces.map((task) => ({
+      ...task,
+      steps: task.steps.map((step) => {
+        if (step.kind === 'navigate') return step
+        const { proven: _sessionWord, ...rest } = step
+        return unreachable && isNonCanonicalLocator(interfaceStepLocator(rest)) ? { ...rest, proven: false as const } : rest
+      }),
+    })),
+  }
+}
+
+/** A task that names a principal the run cannot sign in as. */
+function unknownPrincipalProblems(tasks: readonly AuthoredTask[], live: LiveScreens): string[] {
+  const names = principalNames(live)
+  return tasks.flatMap((task) =>
+    task.principal !== undefined && !observerFor(live, task.principal)
+      ? [`\`${task.id}\` names principal \`${task.principal}\`, which the run cannot observe as — use one of ${names.map((name) => `\`${name}\``).join(', ')}, or omit it for this session's own`]
+      : [],
+  )
 }
 
 /** How many of the accepted task ids the tool result names before it counts the

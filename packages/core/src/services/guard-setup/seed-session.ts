@@ -222,7 +222,7 @@ export type SeedSessionOutcome = z.infer<typeof SeedSessionOutcomeSchema>;
  * execution is not made wrong by a reworded prompt; a prompt change that fixes
  * WRONG output bumps this in the same commit.
  */
-export const SEED_STAGE_VERSION = 1;
+export const SEED_STAGE_VERSION = 2;
 
 /** `sha256(stage version :: the seed step's input fingerprint)` — the step
  *  fingerprint already folds the recipe contract and the catalog's identity. */
@@ -394,6 +394,12 @@ export function missingPrincipalSurfaces(
         (r.surface === 'web' ? ' carrying its `login` proof' : ''),
     }));
 }
+
+/** The credential an admin user's web session is published under, when the app has an admin. */
+export const ADMIN_WEB_CREDENTIAL = 'adminWebSession';
+
+/** The credential a non-owner member's web session is published under, when the app shares records. */
+export const MEMBER_WEB_CREDENTIAL = 'memberWebSession';
 
 /** The fixture name a sacrificial principal is published under. */
 export const SACRIFICIAL_FIXTURE = 'sacrificialUser';
@@ -651,6 +657,7 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
         `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page);`,
         `  4. when the login endpoint pairs a body token with a cookie (a CSRF double-submit — the login route compares \`body.csrfToken\` to a cookie a mint route set), add \`"csrf": {"path": "/<the csrf mint route>"}\` to the \`login\` block — the engine GETs it fresh before each login POST, carries its cookies, and injects the token into the body. NEVER publish a csrf token as a fixture: it is minted per exchange, and a static one can never validate.`,
         `  5. also create a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` (same login fields, its own stable email); credential-mutation tests burn it. It needs no credential and no probe, and a draft that omits it is refused without running.`,
+        `  6. the screens are authored and tested as more than one user. When the app has an ADMIN (an instance-admin user id or flag, an admin role, pages only an admin may load), also mint a web session for an admin user, published as the credential \`${ADMIN_WEB_CREDENTIAL}\` (\`header: "Cookie"\`) and probed on a page only an admin may load. When the app shares records between users (members, collaborators, teams), also mint one for a user who is a non-owner MEMBER of a record the primary principal shares and who owns nothing else, published as \`${MEMBER_WEB_CREDENTIAL}\` — member flows (leaving, roles) and empty states are observed as that user. Prove each like the first; skip one the app has no concept of, and say why in a finding.`,
       );
     }
   }

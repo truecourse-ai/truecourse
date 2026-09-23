@@ -98,6 +98,13 @@ describe('the record', () => {
     ])
   })
 
+  it('marks a selector no browser vouched for as unproven', () => {
+    const unproven = { ...RENAME, steps: [{ ...RENAME.steps[2], proven: false as const }] }
+    expect(nonCanonicalLocators({ ...DERIVED, interfaces: [unproven] })).toEqual([
+      { kind: 'step', screen: 'tags-id', task: 'web/rename-tag', step: 1, locator: { css: 'button:has(i.bi-check2)' }, why: 'icon-only confirm button', proven: false },
+    ])
+  })
+
   it('finds the screen of a task located by its entry address alone', () => {
     const located = { ...RENAME, at: undefined, entry: { method: 'GET', path: '/links' } }
     expect(nonCanonicalLocators({ ...DERIVED, interfaces: [located] }).map((row) => row.screen)).toEqual(['links', 'links'])

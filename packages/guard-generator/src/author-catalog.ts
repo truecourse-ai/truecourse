@@ -11,7 +11,7 @@ export interface CatalogSearch { query: string; purpose?: 'task' | 'control'; re
 export interface CatalogIds { ids: string[]; cursor?: string }
 export interface CatalogGet extends CatalogIds { includeResources?: boolean }
 export interface CatalogReport { content: string; isError?: boolean }
-export interface AuthorCatalogSummary { id?: string; title?: string; entry?: Interface['entry']; purpose?: string; at?: string; to?: string; startingState?: string; endState?: string; omittedFields: string[]; error?: string; identityHash?: string; instruction?: string }
+export interface AuthorCatalogSummary { id?: string; title?: string; entry?: Interface['entry']; purpose?: string; at?: string; to?: string; principal?: string; startingState?: string; endState?: string; omittedFields: string[]; error?: string; identityHash?: string; instruction?: string }
 export interface AuthorCatalog {
   fingerprint: string
   search(input: CatalogSearch): CatalogReport
@@ -35,7 +35,7 @@ function stable(value: unknown): string {
 const hash = (v: unknown): string => createHash('sha256').update(stable(v)).digest('hex')
 const error = (code: string): CatalogReport => ({ content: JSON.stringify({ error: code, instruction: 'Retrieval failed; do not infer absent product behavior. Resolve retrieval before authoring dependent steps.' }), isError: true })
 function summary(i: Interface) {
-  return { id: i.id, title: i.title, entry: i.entry, purpose: i.purpose, at: i.at, to: i.to, startingState: i.startingState, endState: i.endState }
+  return { id: i.id, title: i.title, entry: i.entry, purpose: i.purpose, at: i.at, to: i.to, principal: i.principal, startingState: i.startingState, endState: i.endState }
 }
 /** Optional metadata is omitted whole, never clipped. Search still uses the full metadata. */
 function boundedSummary(full: ReturnType<typeof summary>): AuthorCatalogSummary {

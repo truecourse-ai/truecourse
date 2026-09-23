@@ -333,3 +333,66 @@ describe('a css readable', () => {
     expect(result.content).toContain('proof: {"delete-link": {"steps": [...]}}')
   })
 })
+
+describe('a screen no principal reaches', () => {
+  function checkUnreached(observer: LiveScreenObserver, unreachable: boolean) {
+    const tools = buildAuthorTools({
+      repoRoot: '/nowhere',
+      derived: DERIVED,
+      authored: null,
+      replaceable: new Set(),
+      live: { observer },
+      ...(unreachable ? { unreachable: true as const } : {}),
+    })
+    const tool = tools.find((t) => t.name === 'check_draft')!
+    return (args: unknown) => tool.execute(args, toolContext)
+  }
+
+  it('accepts a css step written from source, stamped unproven, and proves nothing', async () => {
+    const { observer, probes } = probingObserver({ matches: 0, visible: false })
+    const result = await checkUnreached(observer, true)({ interfaces: [linksTask([sortStep])] })
+    expect(result.isError, String(result.content)).toBeFalsy()
+    expect(probes).toEqual([])
+    const draft = (result.artifact as { fragment: { interfaces: { steps: { proven?: false }[] }[] } }).fragment
+    expect(draft.interfaces[0].steps[0].proven).toBe(false)
+  })
+
+  it('is the only place a css step goes unproven: a session’s own `proven: false` is dropped and the proof runs', async () => {
+    const { observer, probes } = probingObserver({ matches: 0, visible: false })
+    const result = await checkUnreached(observer, false)({ interfaces: [linksTask([{ ...sortStep, proven: false }])] })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('matches nothing')
+    expect(probes).toHaveLength(1)
+  })
+})
+
+describe('a task performed by another principal', () => {
+  function checkAs(principals: Record<string, LiveScreenObserver>, own: LiveScreenObserver) {
+    const tools = buildAuthorTools({
+      repoRoot: '/nowhere',
+      derived: DERIVED,
+      authored: null,
+      replaceable: new Set(),
+      live: { observer: own, principals: new Map(Object.entries(principals)) },
+    })
+    const tool = tools.find((t) => t.name === 'check_draft')!
+    return (args: unknown) => tool.execute(args, toolContext)
+  }
+
+  it('is proven as that principal', async () => {
+    const own = probingObserver({ matches: 0, visible: false })
+    const admin = probingObserver({ matches: 1, visible: true })
+    const check = checkAs({ adminWebSession: admin.observer, anonymous: probingObserver({ matches: 0, visible: false }).observer }, own.observer)
+    const result = await check({ interfaces: [{ ...linksTask([sortStep]), principal: 'adminWebSession' }] })
+    expect(result.isError, String(result.content)).toBeFalsy()
+    expect(admin.probes).toHaveLength(1)
+    expect(own.probes).toHaveLength(0)
+  })
+
+  it('is refused when it names a principal the run cannot observe as', async () => {
+    const own = probingObserver({ matches: 1, visible: true })
+    const result = await checkAs({ anonymous: own.observer }, own.observer)({ interfaces: [{ ...linksTask([sortStep]), principal: 'rootSession' }] })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('names principal `rootSession`, which the run cannot observe as')
+  })
+})

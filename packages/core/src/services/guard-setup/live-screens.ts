@@ -6,7 +6,8 @@
  * the first half of what a run does: install and build the app (a fresh clone
  * has nothing to serve), bring the services up, run the seed so the world
  * holds the rows and the principals the tests will reference, boot the web
- * surface, launch a browser and put a seeded credential into it. Every piece
+ * surface, launch a browser and put a seeded credential into it — one browser
+ * context per web session the seed minted, and one signed out. Every piece
  * is the runner's own (`runSeed`, `startWebSurface`, `launchWebBrowser`), and
  * so is the world they run in (`observationWorld`): the seed gets the provided
  * external accounts on top of the default server's env and masks their
@@ -37,7 +38,9 @@ import {
   type Recipe,
   type ResolvedCredential,
 } from '@truecourse/guard-runner';
-import { publicFixtureFields, type LiveScreens } from '../interface-author/live-screen.js';
+import { ANONYMOUS_PRINCIPAL } from '@truecourse/shared';
+import { publicFixtureFields, type LiveScreenObserver, type LiveScreens } from '../interface-author/live-screen.js';
+import { ADMIN_WEB_CREDENTIAL, MEMBER_WEB_CREDENTIAL } from './seed-session.js';
 import { outputTail, servicesController } from './services-lifecycle.js';
 
 export interface OpenLiveScreensOptions {
@@ -165,22 +168,28 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
       await browser.close();
     });
 
-    // The principal: a Cookie credential is what a signed-in browser carries;
-    // any other header still rides every request when that is all there is.
-    const principal = webPrincipal(credentials);
-    const observer = await createWebObserver({
-      browser,
-      baseUrl: server.baseUrl,
-      ...(principal ? { credential: principal } : {}),
-    });
-    if (!observer.ok) return refuse(observer.reason);
-    teardown.push(() => observer.observer.close());
+    // The principals: one observer per web session the seed minted (a Cookie
+    // credential is what a signed-in browser carries; any other header still
+    // rides every request when that is all there is), the first the default,
+    // and a signed-out browser beside them.
+    const principals = new Map<string, LiveScreenObserver>();
+    for (const principal of webPrincipals(credentials)) {
+      const observer = await createWebObserver({ browser, baseUrl: server.baseUrl, credential: principal });
+      if (!observer.ok) return refuse(observer.reason);
+      teardown.push(() => observer.observer.close());
+      principals.set(principal.name, observer.observer);
+    }
+    const anonymous = await createWebObserver({ browser, baseUrl: server.baseUrl });
+    if (!anonymous.ok) return refuse(anonymous.reason);
+    teardown.push(() => anonymous.observer.close());
+    principals.set(ANONYMOUS_PRINCIPAL, anonymous.observer);
 
     const publicFixtures = publicFixtureFields(fixtures);
     return {
       ok: true,
       live: {
-        observer: observer.observer,
+        observer: principals.values().next().value ?? anonymous.observer,
+        principals,
         ...(Object.keys(publicFixtures).length > 0 ? { fixtures: publicFixtures } : {}),
       },
       close: closeAll,
@@ -190,15 +199,17 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
   }
 }
 
-/** The credential a browser signs in with: a Cookie first, else the first there is. */
-function webPrincipal(
+/**
+ * The credentials a browser can sign in with, the default first: every Cookie
+ * credential in the seed's order — the admin and member sessions after the
+ * primary one — else the first credential there is.
+ */
+export function webPrincipals(
   credentials: ReadonlyMap<string, ResolvedCredential>,
-): { name: string; credential: ResolvedCredential } | null {
-  let first: { name: string; credential: ResolvedCredential } | null = null;
-  for (const [name, credential] of credentials) {
-    if (credential.value.length === 0) continue;
-    if (credential.header.toLowerCase() === 'cookie') return { name, credential };
-    first ??= { name, credential };
-  }
-  return first;
+): { name: string; credential: ResolvedCredential }[] {
+  const usable = [...credentials].filter(([, credential]) => credential.value.length > 0);
+  const cookies = usable.filter(([, credential]) => credential.header.toLowerCase() === 'cookie');
+  const secondary = (name: string) => (name === ADMIN_WEB_CREDENTIAL || name === MEMBER_WEB_CREDENTIAL ? 1 : 0);
+  return (cookies.length > 0 ? [...cookies].sort(([a], [b]) => secondary(a) - secondary(b)) : usable.slice(0, 1))
+    .map(([name, credential]) => ({ name, credential }));
 }

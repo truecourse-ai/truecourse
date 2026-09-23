@@ -142,6 +142,17 @@ export function describeInterfaceTarget(target: InterfaceTarget): string {
   return `${kind}${value === undefined ? '' : ` "${value}"`}${exact}${picked}`
 }
 
+/** The principal a signed-out browser is: no credential at all. */
+export const ANONYMOUS_PRINCIPAL = 'anonymous'
+
+/**
+ * Set on a NON-CANONICAL step whose locator could not be proven live, because no
+ * principal the run can sign in as reaches its screen: the selector was written
+ * from source. Stamped by the authoring check, never by a session, and listed in
+ * the non-canonical record so a reader knows which selectors no browser vouched for.
+ */
+const proven = z.literal(false).optional()
+
 /**
  * Why a NON-CANONICAL step reaches its element through a selector — one line, the
  * thing a reader of the non-canonical record needs to fix the markup: what the
@@ -159,6 +170,7 @@ export const InterfaceInputStepSchema = z
     within: namedScope().optional(),
     label: z.string().optional(),
     why,
+    proven,
   })
   .strict()
 
@@ -170,6 +182,7 @@ export const InterfaceActivateStepSchema = z
     within: namedScope().optional(),
     label: z.string().optional(),
     why,
+    proven,
   })
   .strict()
 
@@ -1488,6 +1501,15 @@ export const InterfaceSchema = z
      */
     to: InterfaceResourceIdSchema.optional(),
     /**
+     * WHO performs a web task, when it is not the world's default signed-in
+     * principal: the NAME of a seeded credential (`adminWebSession`), or
+     * {@link ANONYMOUS_PRINCIPAL} for a task done signed out (a login form, a
+     * password reset). A scenario of the task starts from that session — a
+     * `credential` step naming it, or no credential at all. Absent ⇒ the default
+     * principal. Never fingerprinted: who performs a task is not WHICH task it is.
+     */
+    principal: z.string().min(1).optional(),
+    /**
      * THE UI-TO-API RELATION: the api operations this task's steps invoke, as
      * {@link InterfaceSchema.id}s of the api entries in the SAME catalog
      * (`api/get-api-repos-id-violations`, …). Ids rather than method+path so the
@@ -1658,6 +1680,12 @@ export const InterfaceAuthoringRecordSchema = z
      * screen the analyzer could not ground.
      */
     sources: z.record(z.string().min(1), z.string().min(1)).optional(),
+    /**
+     * Who the live screen was observed as, when it was not the default
+     * principal: a seeded credential's name, or `anonymous`. Absent when the
+     * default reached it, or when nothing was observed.
+     */
+    principal: z.string().min(1).optional(),
   })
   .strict()
 export type InterfaceAuthoringRecord = z.infer<typeof InterfaceAuthoringRecordSchema>

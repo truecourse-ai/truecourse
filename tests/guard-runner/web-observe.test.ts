@@ -296,4 +296,14 @@ describe('the screen observer with a header credential', () => {
     expect(seen.ok && seen.observation.tree).toContain('authorization: Bearer t0k3n')
     await created.observer.close()
   }, 30_000)
+
+  it('observes signed out when it is handed no credential: no cookie, no header, no principal', async () => {
+    const created = await createWebObserver({ browser, baseUrl: server.baseUrl })
+    if (!created.ok) throw new Error(created.reason)
+    expect(created.observer.principal).toBeUndefined()
+    const seen = await created.observer.observe({ path: '/whoami' })
+    expect(seen.ok && seen.observation.tree).toContain('cookie: none')
+    expect(seen.ok && seen.observation.tree).toContain('authorization: none')
+    await created.observer.close()
+  }, 30_000)
 })

@@ -96,6 +96,11 @@ export const AuthoredTaskSchema = z
     endState: InterfaceStateIdSchema.optional(),
     at: InterfaceResourceIdSchema.optional(),
     to: InterfaceResourceIdSchema.optional(),
+    /**
+     * Who performs it, when not the default principal: a seeded credential's
+     * name, or `anonymous` for a task done signed out.
+     */
+    principal: z.string().min(1).optional(),
     /** Api interface ids this task's steps reach, `[]` when it reaches none. */
     apiEffects: z.array(z.string().min(1)).optional(),
   })

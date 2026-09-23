@@ -88,9 +88,10 @@ import {
 import { clusterPlaces, orderClustersLongestFirst, type PlaceCluster } from './cluster.js'
 import type { AuthorFinding } from './findings.js'
 import { clusterPack, type ClusterPack } from './pack.js'
-import { placeSourcePack } from './place-pack.js'
+import { placeSourcePack, readPackSource } from './place-pack.js'
 import { ownTaskContext, ownTasks } from './catalog-context.js'
-import type { LiveScreens, ObserveScreenResult } from './live-screen.js'
+import { observerFor, type LiveScreens, type ObserveScreenResult } from './live-screen.js'
+import { observeAsPrincipal, principalHint, principalOrder, type PrincipalHint } from './principals.js'
 import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem, type SharedPlaceBrief } from './session.js'
 import type { SharedComponent } from './shared-places.js'
 import { recordAuthoringLedger, registerSharedPlaces, writeAuthoredCatalog } from './write.js'
@@ -395,8 +396,16 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   /** A ledger row, with the sources it settled over when the place is grounded. */
   const ledgerRow = (item: AuthorWorkItem, status: PlaceResult['status']): InterfaceAuthoringRecord => {
     const sources = sourcesOf.get(item.place.id)!
-    return { status, inputFingerprint: item.inputFingerprint, ...(Object.keys(sources).length > 0 ? { sources } : {}) }
+    const principal = looks.get(item.place.id)?.principal
+    return {
+      status,
+      inputFingerprint: item.inputFingerprint,
+      ...(Object.keys(sources).length > 0 ? { sources } : {}),
+      ...(principal !== undefined ? { principal } : {}),
+    }
   }
+  /** Who each place's session observed as — filled once the first look has run. */
+  let looks = new Map<string, FirstLook>()
   const cacheKey = (item: AuthorWorkItem, live: boolean): string =>
     fragmentCacheKey(item.inputFingerprint, sourcesOf.get(item.place.id)!, live)
 
@@ -533,10 +542,22 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const pending = live ? liveMisses : await serveCached(liveMisses, false)
 
   // THE FIRST LOOK, before any session starts: every pending screen whose
-  // address has no slot is opened once in the signed-in browser, so its tree
-  // is in the briefing (the cached prefix) rather than bought with a turn. A
-  // slotted address needs a value the session reads, so it observes itself.
-  const observations = await observeLiteralAddresses(pending, scopeOf, live, opts.signal)
+  // address has no slot is opened once, as the principal that stays on it, so
+  // its tree is in the briefing (the cached prefix) rather than bought with a
+  // turn. A slotted address needs a value the session reads, so it observes
+  // itself.
+  const hintOf = (item: AuthorWorkItem): PrincipalHint | undefined => {
+    if (item.place.kind === 'component') return undefined
+    const module = opts.context?.get(item.place.id)?.module
+    return principalHint(item.place.address, module ? readPackSource(opts.repoRoot, module) : undefined)
+  }
+  looks = await firstLooks(pending, scopeOf, hintOf, live, opts.signal)
+  /** The live screens as one place's session sees them: its principal as the default. */
+  const sessionLive = (item: AuthorWorkItem): LiveScreens | undefined => {
+    if (!live) return undefined
+    const principal = looks.get(item.place.id)?.principal
+    return { ...live, observer: (principal !== undefined ? observerFor(live, principal) : undefined) ?? live.observer }
+  }
 
   // THE PHASES: the shared components first, then the screens, so a screen's
   // briefing names the tasks its shared places already carry. Within a phase the
@@ -602,7 +623,8 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
             get authored() { return authored },
             replaceable,
             scope: scopeOf(item),
-            ...(live ? { live } : {}),
+            ...(live ? { live: sessionLive(item)! } : {}),
+            ...(looks.get(item.place.id)?.unreachable ? { unreachable: true as const } : {}),
           }),
           validateOutcome(fragment) {
             // Validate and write synchronously before the loop marks the session
@@ -641,8 +663,9 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
             ...(live
               ? {
                   live: {
-                    screens: live,
-                    ...(observations.has(item.place.id) ? { observation: observations.get(item.place.id)! } : {}),
+                    screens: sessionLive(item)!,
+                    ...(looks.get(item.place.id)?.observation ? { observation: looks.get(item.place.id)!.observation! } : {}),
+                    ...(looks.get(item.place.id)?.unreachable ? { unreachable: true as const } : {}),
                   },
                 }
               : {}),
@@ -725,35 +748,58 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   }
 }
 
-/** How many screens the first look opens at once. */
+/** How many places the first look opens at once. */
 const OBSERVE_CONCURRENCY = 4
 
+/** What the first look settled for one place: who observes it, what they saw, and whether they reached it. */
+interface FirstLook {
+  /** The principal its session observes as; absent ⇒ the run's default. */
+  principal?: string
+  observation?: ObserveScreenResult
+  /** Every principal was sent away from its address. */
+  unreachable?: true
+}
+
 /**
- * Open every pending screen whose address carries no slot, a few at a time,
- * and keep what the browser saw. A refusal is kept too: the briefing says why
- * the screen could not be observed instead of silently saying nothing.
+ * Settle every pending place's principal, a few places at a time: a place
+ * whose address carries no slot is OBSERVED as the principal its source asks
+ * for, the others tried in turn until one stays on the address
+ * ({@link observeAsPrincipal}), and what that one saw rides the briefing — a
+ * refusal too, so the briefing says why instead of saying nothing. A slotted
+ * address is observed by its own session, as the principal its source asks for.
  */
-async function observeLiteralAddresses(
+async function firstLooks(
   items: readonly AuthorWorkItem[],
   scopeOf: (item: AuthorWorkItem) => { address?: string },
+  hintOf: (item: AuthorWorkItem) => PrincipalHint | undefined,
   live: LiveScreens | undefined,
   signal?: AbortSignal,
-): Promise<Map<string, ObserveScreenResult>> {
-  const observations = new Map<string, ObserveScreenResult>()
-  if (!live) return observations
-  const queue = items.flatMap((item) => {
+): Promise<Map<string, FirstLook>> {
+  const looks = new Map<string, FirstLook>()
+  if (!live) return looks
+  const queue: { item: AuthorWorkItem; address: string }[] = []
+  for (const item of items) {
     const address = scopeOf(item).address
-    return address && !hasAddressSlot(address) ? [{ id: item.place.id, address }] : []
-  })
+    if (address && !hasAddressSlot(address)) queue.push({ item, address })
+    else {
+      const hinted = principalOrder(live, hintOf(item))[0]
+      if (hinted !== undefined && hinted !== live.observer.principal && hintOf(item)) looks.set(item.place.id, { principal: hinted })
+    }
+  }
   let next = 0
   const worker = async (): Promise<void> => {
     while (next < queue.length && !signal?.aborted) {
-      const { id, address } = queue[next++]!
-      observations.set(id, await live.observer.observe({ path: address }))
+      const { item, address } = queue[next++]!
+      const choice = await observeAsPrincipal(live, address, hintOf(item))
+      looks.set(item.place.id, {
+        ...(choice.principal !== undefined && choice.principal !== live.observer.principal ? { principal: choice.principal } : {}),
+        observation: choice.observation,
+        ...(choice.reached || !choice.observation.ok ? {} : { unreachable: true as const }),
+      })
     }
   }
   await Promise.all(Array.from({ length: Math.min(OBSERVE_CONCURRENCY, queue.length) }, worker))
-  return observations
+  return looks
 }
 
 /**
