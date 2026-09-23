@@ -67,12 +67,8 @@ overloaded. A workspace with its own API key names its one model on the Models
 page instead, and these variables do not apply to it.
 
 Every LLM call is a turn of an agent session, whether the work takes thirty
-turns or one, so what a run spent is one record per session kind. Each turn is
-priced at its model's published rates from OpenRouter's model list, one rate
-per kind of token (input, output, cache read, cache write); until that list has
-been fetched, or for a model it does not price, turns are recorded unpriced, and
-a workspace on TrueCourse credits does not start a run at all. Settings › Usage
-reads it back.
+turns or one, so what a run spent is one record per session kind, priced from
+OpenRouter's model list. Settings › Usage reads it back.
 
 ## Telemetry
 
