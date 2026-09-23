@@ -519,6 +519,7 @@ export {
   quoteInvalidOutput,
   flattenZodError,
   scenarioCompositionDefect,
+  unprovenCssLocatorDefect,
   cliCompositionDefect,
   apiCompositionDefect,
 } from './validate.js'

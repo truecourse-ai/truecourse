@@ -255,7 +255,7 @@ import {
   type SurfaceCatalog,
 } from './match.js'
 import { groundProbes, groundInputsFingerprint, type ProbeTranscript } from './ground.js'
-import { scenarioCompositionDefect } from './validate.js'
+import { scenarioCompositionDefect, unprovenCssLocatorDefect } from './validate.js'
 import { mineExampleBlocks, exampleFidelityDefect, type DocExampleBlock } from './examples.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import type { SeedDraftDatabase } from './seed-draft.js'
@@ -2821,6 +2821,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (preparationDefect) return preparationDefect
         const composition = compositionDefectOf(raw, recipe)
         if (composition) return composition
+        const unprovenCss = unprovenCssLocatorDefect(raw.steps, catalogs.get('web')?.interfaces ?? [])
+        if (unprovenCss) return unprovenCss
         const exampleDefect = exampleFidelityDefect(
           { steps: raw.steps, ...(raw.setup ? { setup: raw.setup } : {}) },
           exampleBlocksOf(task.work),
