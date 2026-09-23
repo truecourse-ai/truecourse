@@ -397,7 +397,9 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   /** A ledger row, with the sources it settled over when the place is grounded. */
   const ledgerRow = (item: AuthorWorkItem, status: PlaceResult['status'], unresolved: readonly string[] = []): InterfaceAuthoringRecord => {
     const sources = sourcesOf.get(item.place.id)!
-    const principal = looks.get(item.place.id)?.principal
+    // A place served from the cache took no first look: its row keeps the
+    // principal it was last observed as.
+    const principal = looks.has(item.place.id) ? looks.get(item.place.id)!.principal : item.record?.principal
     const gaps = stateGaps(unresolved)
     return {
       status,

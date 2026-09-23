@@ -227,16 +227,16 @@ export function liveScreenLines(input: {
   unreachable?: true
 }): string[] {
   const own = input.live.observer.principal
+  const others = principalNames(input.live).filter((name) => name !== own)
   const lines = [
     ``,
     `THE LIVE SCREEN. The app is running, and a browser is open on it` +
-      (own === ANONYMOUS_PRINCIPAL
+      (own === ANONYMOUS_PRINCIPAL && others.length > 0
         ? ` NOT SIGNED IN (\`anonymous\`): this screen is the one a signed-out user sees, and a signed-in session is sent away from it.`
-        : own
+        : own && own !== ANONYMOUS_PRINCIPAL
           ? ` signed in as the seeded principal \`${own}\`.`
           : ` with no principal signed in (the seed minted no web credential).`),
   ]
-  const others = principalNames(input.live).filter((name) => name !== own)
   if (others.length > 0) {
     lines.push(
       `The run can also observe as ${others.map((name) => `\`${name}\``).join(', ')} (\`observe_screen\` with \`principal\`).`,

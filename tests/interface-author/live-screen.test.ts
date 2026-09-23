@@ -263,3 +263,33 @@ describe('the run', () => {
     expect([calls.length, opened]).toEqual([2, 1])
   })
 })
+
+describe('the principal the briefing names', () => {
+  const bare = (principal?: string) => ({
+    ...(principal ? { principal } : {}),
+    async observe() {
+      return { ok: false as const, reason: 'unused' }
+    },
+    async probe() {
+      return { ok: true as const, readings: [] }
+    },
+    async close() {},
+  })
+
+  it('says a browser is signed in as nobody when the seed minted no web session, and not signed out on purpose', () => {
+    const anonymous = bare('anonymous')
+    const text = liveScreenLines({ live: { observer: anonymous, principals: new Map([['anonymous', anonymous]]) } }).join('\n')
+    expect(text).toContain('with no principal signed in (the seed minted no web credential)')
+    expect(text).not.toContain('NOT SIGNED IN')
+  })
+
+  it('says a screen is observed signed out when other principals exist, and names them', () => {
+    const anonymous = bare('anonymous')
+    const text = liveScreenLines({
+      live: { observer: anonymous, principals: new Map([['webSession', bare('webSession')], ['memberWebSession', bare('memberWebSession')], ['anonymous', anonymous]]) },
+    }).join('\n')
+    expect(text).toContain('NOT SIGNED IN (`anonymous`)')
+    expect(text).toContain('The run can also observe as `webSession`, `memberWebSession`')
+    expect(text).toContain('`memberWebSession` is a member who owns nothing')
+  })
+})
