@@ -353,7 +353,7 @@ describe('estimateGuardSetupCost', () => {
     expect([...new Set((named.stages ?? []).map((s) => s.model))]).toEqual(['gpt-5.5']);
 
     const ambient = await estimateGuardSetupCost(r);
-    expect([...new Set((ambient.stages ?? []).map((s) => s.model))]).toEqual(['opus']);
+    expect([...new Set((ambient.stages ?? []).map((s) => s.model))]).toEqual(['claude-opus-5-5']);
   });
 });
 

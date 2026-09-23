@@ -463,7 +463,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
     const est = await estimateScanTokens(repo);
     const models = new Set((est.stages ?? []).map((s) => s.model));
     expect(models.size).toBe(1);
-    expect([...models]).toEqual(['opus']);
+    expect([...models]).toEqual(['claude-opus-5-5']);
   });
 
   it('quotes the model the run\u2019s own driver names', async () => {
