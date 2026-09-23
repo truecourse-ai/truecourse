@@ -375,4 +375,12 @@ describe('the Confluence probe behind Test', () => {
     stub(() => ({ status: 403, body: {} }));
     await expect(probeConfluence(CONNECTION)).rejects.toThrow(/access denied/i);
   });
+
+  it('never sends the token to a non-public address when the network is public-only', async () => {
+    stub(() => ({ body: { results: [] } }));
+    await expect(
+      probeConfluence({ ...CONNECTION, baseUrl: 'https://10.0.0.5' }, { publicOnly: true }),
+    ).rejects.toThrow(/public network/);
+    expect(called()).toEqual([]);
+  });
 });

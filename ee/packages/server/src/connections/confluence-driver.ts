@@ -32,6 +32,7 @@ import { storageXhtmlToMarkdown } from './html-to-markdown.js';
 import {
   atlassianSourceId,
   getJson,
+  type AtlassianTransport,
   isoOrUndefined,
   type AtlassianCredentials,
 } from './atlassian-http.js';
@@ -60,11 +61,9 @@ interface ConfluenceList {
   _links?: { base?: string; next?: string };
 }
 
-export interface ConfluenceDriverDeps {
+export interface ConfluenceDriverDeps extends AtlassianTransport {
   /** The workspace's Confluence account, read afresh for every call. */
   connection: () => Promise<AtlassianConnection>;
-  /** How a retry waits; a test pins it to nothing. */
-  sleepMs?: (ms: number) => Promise<void>;
   /** The clock a page with no version stamp falls back to. */
   now?: () => Date;
 }
@@ -123,13 +122,13 @@ export function confluenceConfig(config: ContextSourceConfig): ConfluenceSourceC
  */
 export async function probeConfluence(
   connection: AtlassianConnection,
-  sleepMs?: (ms: number) => Promise<void>,
+  transport: AtlassianTransport = {},
 ): Promise<void> {
   await getJson<unknown>({
+    ...transport,
     credentials: connection,
     url: `${connection.baseUrl}/wiki/rest/api/content?type=page&status=current&limit=1`,
     describe: describeError,
-    ...(sleepMs ? { sleepMs } : {}),
   });
 }
 
@@ -146,6 +145,7 @@ export function createConfluenceDriver(deps: ConfluenceDriverDeps): ContextSourc
       url: `${connection.baseUrl}/wiki/rest/api${path}`,
       describe: describeError,
       ...(deps.sleepMs ? { sleepMs: deps.sleepMs } : {}),
+      ...(deps.publicOnly ? { publicOnly: true } : {}),
       ...(opts?.signal ? { signal: opts.signal } : {}),
     });
   }

@@ -40,6 +40,7 @@ import { adfToMarkdown } from './adf-to-markdown.js';
 import {
   atlassianSourceId,
   getJson,
+  type AtlassianTransport,
   isoOrUndefined,
   yamlValue,
   type AtlassianCredentials,
@@ -123,11 +124,9 @@ interface StatusChange {
   to: string;
 }
 
-export interface JiraDriverDeps {
+export interface JiraDriverDeps extends AtlassianTransport {
   /** The workspace's Jira account, read afresh for every call. */
   connection: () => Promise<AtlassianConnection>;
-  /** How a retry waits; a test pins it to nothing. */
-  sleepMs?: (ms: number) => Promise<void>;
   /** The clock a document with no `updated` falls back to. */
   now?: () => Date;
 }
@@ -292,13 +291,13 @@ export function jiraConfig(config: ContextSourceConfig): JiraSourceConfig {
  */
 export async function probeJira(
   connection: AtlassianConnection,
-  sleepMs?: (ms: number) => Promise<void>,
+  transport: AtlassianTransport = {},
 ): Promise<void> {
   await getJson<unknown>({
+    ...transport,
     credentials: connection,
     url: `${connection.baseUrl}/rest/api/3/project/search?maxResults=1`,
     describe: describeError,
-    ...(sleepMs ? { sleepMs } : {}),
   });
 }
 
@@ -315,6 +314,7 @@ export function createJiraDriver(deps: JiraDriverDeps): ContextSourceDriver {
       url: `${connection.baseUrl}/rest/api/3${path}`,
       describe: describeError,
       ...(deps.sleepMs ? { sleepMs: deps.sleepMs } : {}),
+      ...(deps.publicOnly ? { publicOnly: true } : {}),
       ...(opts?.signal ? { signal: opts.signal } : {}),
     });
   }

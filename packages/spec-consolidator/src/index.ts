@@ -173,6 +173,8 @@ export {
   LlmsTxtFetchError,
   SourcePathError,
   USER_AGENT,
+  fetchPublicSource,
+  SourceNetworkPolicyError,
 } from './sources/index.js';
 export type {
   LlmsTxtDoc,

@@ -405,6 +405,9 @@ importers:
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
+      '@truecourse/spec-consolidator':
+        specifier: workspace:*
+        version: link:../../../packages/spec-consolidator
       '@workos-inc/node':
         specifier: ^7.0.0
         version: 7.82.0(express@4.22.1)

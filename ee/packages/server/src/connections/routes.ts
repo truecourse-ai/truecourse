@@ -45,7 +45,7 @@ import {
 import type { ServerFeatureContext } from '@truecourse/dashboard-server';
 import { log } from '@truecourse/core/lib/logger';
 import { pauseContextSourcesOfKinds } from '@truecourse/core/lib/context-store';
-import { ConnectionStore, type AtlassianConnection } from './store.js';
+import { ConnectionStore, normalizeBaseUrl, type AtlassianConnection } from './store.js';
 
 /** The grant a workspace must hold to reach any of this. */
 const ENTITLEMENT = 'connections' as const;
@@ -139,7 +139,8 @@ export function createConnectionsRouter(deps: ConnectionsRouterDeps): Router {
   });
 
   // One bounded read per product the account serves. The submitted token is
-  // used when there is one, the stored one when the field was left masked. A
+  // used when there is one, the stored one when the field was left masked, and
+  // only against the site it was stored with: a changed site needs its own. A
   // product that refuses is reported in its own driver's words, and the account
   // is usable as long as one product answered.
   router.post('/:provider/test', async (req: Request, res: Response) => {
@@ -150,15 +151,22 @@ export function createConnectionsRouter(deps: ConnectionsRouterDeps): Router {
 
     const body = (req.body ?? {}) as { baseUrl?: unknown; accountEmail?: unknown; apiToken?: unknown };
     const stored = await deps.store.getConnection(org, provider);
-    const baseUrl = typeof body.baseUrl === 'string' && body.baseUrl.trim()
-      ? body.baseUrl.trim().replace(/\/+$/, '')
-      : (stored?.baseUrl ?? '');
+    let baseUrl = stored?.baseUrl ?? '';
+    if (typeof body.baseUrl === 'string' && body.baseUrl.trim()) {
+      try {
+        baseUrl = normalizeBaseUrl(body.baseUrl);
+      } catch (err) {
+        return res.status(400).json({ ok: false, error: (err as Error).message });
+      }
+    }
     const accountEmail = typeof body.accountEmail === 'string' && body.accountEmail.trim()
       ? body.accountEmail.trim()
       : (stored?.accountEmail ?? '');
     const apiToken = typeof body.apiToken === 'string' && body.apiToken.trim()
       ? body.apiToken.trim()
-      : (stored?.apiToken ?? '');
+      : stored && stored.baseUrl === baseUrl
+        ? stored.apiToken
+        : '';
     if (!baseUrl || !accountEmail || !apiToken) {
       return res.status(400).json({
         ok: false,

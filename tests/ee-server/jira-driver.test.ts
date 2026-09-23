@@ -508,4 +508,16 @@ describe('the Jira probe behind Test', () => {
     stub(() => ({ status: 401, body: { errorMessages: [], errors: {} } }));
     await expect(probeJira(CONNECTION)).rejects.toThrow(/authentication failed/i);
   });
+
+  it('never sends the token to a non-public address when the network is public-only', async () => {
+    stub(() => ({ body: { values: [], total: 0 } }));
+    const internal = { ...CONNECTION, baseUrl: 'https://169.254.169.254' };
+    await expect(probeJira(internal, { publicOnly: true })).rejects.toThrow(/public network/);
+    await expect(
+      createJiraDriver({ connection: async () => internal, publicOnly: true }).check(
+        jiraConfig({ projectKey: 'ACME' }),
+      ),
+    ).rejects.toThrow(/public network/);
+    expect(called()).toEqual([]);
+  });
 });

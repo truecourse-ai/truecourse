@@ -10,7 +10,13 @@
  * never travels in it: the token, the URL, the path, the JQL, or the raw JSON
  * — the reason is read by a person on the Context page, and a failed sync
  * stores it verbatim.
+ *
+ * A server hands its drivers `publicOnly`, the network policy site sources
+ * have: the site URL is whatever a member typed, so a call may only reach a
+ * public address, and the token is dropped if a redirect leaves the site.
  */
+
+import { fetchPublicSource } from '@truecourse/spec-consolidator';
 
 /** How many times a rate-limited request is retried before it surfaces. */
 const RETRY_LIMIT = 3;
@@ -62,6 +68,20 @@ export interface AtlassianRequest {
   /** How long a retry may sleep; a test pins it to nothing. */
   sleepMs?: (ms: number) => Promise<void>;
   signal?: AbortSignal;
+  /** Refuse any address that is not public; see the note at the top. */
+  publicOnly?: boolean;
+}
+
+/** How a driver reaches Atlassian: its retry clock and its network policy. */
+export type AtlassianTransport = Pick<AtlassianRequest, 'sleepMs' | 'publicOnly'>;
+
+/** One GET with the request's headers, under its network policy. */
+function send(request: AtlassianRequest): Promise<Response> {
+  const headers = { Authorization: authHeader(request.credentials), Accept: 'application/json' };
+  if (request.publicOnly) {
+    return fetchPublicSource(request.url, headers, request.signal ?? new AbortController().signal);
+  }
+  return fetch(request.url, { headers, ...(request.signal ? { signal: request.signal } : {}) });
 }
 
 /** One GET, retried while Atlassian says to wait, or a refusal that says why. */
@@ -69,10 +89,7 @@ export async function getJson<T>(request: AtlassianRequest): Promise<T> {
   const wait = request.sleepMs ?? sleep;
   for (let attempt = 0; ; attempt++) {
     request.signal?.throwIfAborted();
-    const res = await fetch(request.url, {
-      headers: { Authorization: authHeader(request.credentials), Accept: 'application/json' },
-      ...(request.signal ? { signal: request.signal } : {}),
-    });
+    const res = await send(request);
     if (res.ok) return (await res.json()) as T;
     const retryable = res.status === 429 || (res.status === 503 && res.headers.has('retry-after'));
     if (retryable && attempt < RETRY_LIMIT) {

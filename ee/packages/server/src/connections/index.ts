@@ -36,26 +36,34 @@ export const connectionsFeature: ServerFeature = {
         router: createConnectionsRouter({
           store,
           probe: (kind, connection) =>
-            kind === 'jira' ? probeJira(connection) : probeConfluence(connection),
+            kind === 'jira'
+              ? probeJira(connection, { publicOnly: true })
+              : probeConfluence(connection, { publicOnly: true }),
           context,
         }),
       },
     ];
   },
 
+  // Every call to Atlassian goes to a site URL a member typed, so all of them
+  // run under the public-only network policy site sources have.
   contextDrivers(context): FeatureContextDriver[] {
     const store = new ConnectionStore(context.db, context.masterSecret);
     return [
       {
         kind: 'jira',
         driver: (org) =>
-          createJiraDriver({ connection: () => store.requireConnection(org, 'atlassian') }),
+          createJiraDriver({
+            connection: () => store.requireConnection(org, 'atlassian'),
+            publicOnly: true,
+          }),
       },
       {
         kind: 'confluence',
         driver: (org) =>
           createConfluenceDriver({
             connection: () => store.requireConnection(org, 'atlassian'),
+            publicOnly: true,
           }),
       },
     ];

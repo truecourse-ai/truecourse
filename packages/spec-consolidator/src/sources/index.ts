@@ -33,3 +33,5 @@ export { SourceSkipReasonSchema, SourceSkipSchema } from './types.js';
 export type { SourceSkipReason, SourceSkip } from './types.js';
 
 export { InvalidSourceUrlError, LlmsTxtFetchError, SourcePathError } from './errors.js';
+
+export { fetchPublicSource, SourceNetworkPolicyError } from './public-fetch.js';

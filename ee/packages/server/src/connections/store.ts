@@ -55,7 +55,10 @@ interface StoredConfig {
   accountEmail?: string;
 }
 
-/** A site base URL as it is stored: absolute, https, no trailing slash. */
+/**
+ * A site base URL as it is stored: absolute, https, no credentials, no trailing
+ * slash. The token travels to it as Basic auth, so it is never sent in clear.
+ */
 export function normalizeBaseUrl(raw: string): string {
   const value = raw.trim().replace(/\/+$/, '');
   if (!value) throw new Error('The site URL is required.');
@@ -65,10 +68,21 @@ export function normalizeBaseUrl(raw: string): string {
   } catch {
     throw new Error('The site URL must be a full URL, e.g. https://your-site.atlassian.net.');
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error('The site URL must be a full URL, e.g. https://your-site.atlassian.net.');
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new Error('The site URL must be an https URL, e.g. https://your-site.atlassian.net.');
   }
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
+
+/**
+ * The stored token belongs to the site it was saved with. Moving the site
+ * without a new token would send that token to a host nobody vouched for.
+ */
+export class SiteChangeNeedsTokenError extends Error {
+  constructor() {
+    super('Enter the API token again to change the site URL.');
+    this.name = 'SiteChangeNeedsTokenError';
+  }
 }
 
 export class ConnectionStore {
@@ -156,7 +170,10 @@ export class ConnectionStore {
     return connection;
   }
 
-  /** Connect or re-save. An omitted token keeps the stored one. */
+  /**
+   * Connect or re-save. An omitted token keeps the stored one, but only for the
+   * site it was stored with ({@link SiteChangeNeedsTokenError}).
+   */
   async save(
     org: string,
     provider: ContextConnectionProvider,
@@ -166,6 +183,10 @@ export class ConnectionStore {
       baseUrl: normalizeBaseUrl(input.baseUrl),
       accountEmail: input.accountEmail.trim(),
     };
+    if (!input.apiToken) {
+      const stored = (await this.getRow(org, provider))?.config as StoredConfig | null | undefined;
+      if (stored?.baseUrl && stored.baseUrl !== config.baseUrl) throw new SiteChangeNeedsTokenError();
+    }
     const tokenEnc = input.apiToken ? encryptSecret(input.apiToken, this.masterSecret) : null;
     const now = new Date().toISOString();
     await this.db

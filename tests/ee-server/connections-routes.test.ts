@@ -162,6 +162,36 @@ describe('saving a connection', () => {
     });
   });
 
+  it('refuses to move the stored token to another site without a new token', async () => {
+    await request(app).put('/api/connections/atlassian').send(ACCOUNT).expect(200);
+    const moved = await request(app)
+      .put('/api/connections/atlassian')
+      .send({ baseUrl: 'https://evil.example', accountEmail: ACCOUNT.accountEmail })
+      .expect(400);
+    expect(moved.body.error).toMatch(/API token again/);
+    expect((await store.getConnection(ORG, 'atlassian'))?.baseUrl).toBe(ACCOUNT.baseUrl);
+
+    // With a token of its own, the site may change.
+    await request(app)
+      .put('/api/connections/atlassian')
+      .send({ ...ACCOUNT, baseUrl: 'https://other.atlassian.net', apiToken: 'new-token' })
+      .expect(200);
+    expect(await store.getConnection(ORG, 'atlassian')).toMatchObject({
+      baseUrl: 'https://other.atlassian.net',
+      apiToken: 'new-token',
+    });
+  });
+
+  it('refuses a site URL that is not https, or carries credentials', async () => {
+    for (const baseUrl of ['http://acme.atlassian.net', 'https://user:pw@acme.atlassian.net']) {
+      const got = await request(app)
+        .put('/api/connections/atlassian')
+        .send({ ...ACCOUNT, baseUrl })
+        .expect(400);
+      expect(got.body.error).toMatch(/https/);
+    }
+  });
+
   it('refuses a first connection with no token, and an unusable site URL', async () => {
     const tokenless = await request(app)
       .put('/api/connections/atlassian')
@@ -215,6 +245,16 @@ describe('testing a connection', () => {
       'super-secret-token',
       'super-secret-token',
     ]);
+  });
+
+  it('never pairs the STORED token with a site other than the stored one', async () => {
+    await request(app).put('/api/connections/atlassian').send(ACCOUNT).expect(200);
+    const got = await request(app)
+      .post('/api/connections/atlassian/test')
+      .send({ baseUrl: 'https://evil.example', accountEmail: ACCOUNT.accountEmail })
+      .expect(400);
+    expect(got.body.error).toMatch(/API token/);
+    expect(probes).toEqual([]);
   });
 
   it('is a usable account when one product answers and the other has no licence', async () => {

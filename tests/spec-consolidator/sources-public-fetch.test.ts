@@ -88,6 +88,21 @@ describe('hosted source network policy', () => {
     await res.body?.cancel();
   });
 
+  it('carries credentials across a same-origin redirect and drops them on a cross-origin one', async () => {
+    replies.push({ status: 302, headers: { location: '/moved' } });
+    replies.push({ status: 302, headers: { location: 'https://other.example/api' } });
+    const res = await fetchPublicSource(
+      'https://acme.example/api',
+      { Authorization: 'Basic c2VjcmV0' },
+      AbortSignal.timeout(1000),
+    );
+    await res.body?.cancel();
+    const authOf = (i: number) => (requests[i]!.options.headers as Record<string, string>).Authorization;
+    expect(authOf(0)).toBe('Basic c2VjcmV0');
+    expect(authOf(1)).toBe('Basic c2VjcmV0');
+    expect(authOf(2)).toBeUndefined();
+  });
+
   it('rejects a public index redirected to loopback without retrying', async () => {
     replies.push({ status: 302, headers: { location: 'http://127.0.0.1/internal/config' } });
     await expect(previewSource('https://docs.example/llms.txt', { publicOnly: true })).rejects.toThrow('public network');
