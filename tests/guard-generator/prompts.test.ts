@@ -1290,8 +1290,10 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# THE LOCATOR POLICY')
     // Role + accessible name primary, the five alternates, and the exclusions.
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('role + accessible name')
-    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('NO CSS selectors, NO XPath, NO test ids')
-    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"pick": "first"')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('NO XPath, NO test ids, and NO CSS selector of your own')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"pick"')
+    // A plan target that is already a JSON locator (css, pick, any handle) is copied verbatim.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('`{ "driver": "web", "click": { "css": "main button:has(i.bi-sort)" } }`')
     // The translation rule — realization lines become locators, one worked example.
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('click: button "Add Repository"')
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"click": { "role": "button", "name": "Add Repository" }')
@@ -1320,7 +1322,8 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // near 131K chars; named under `definitions` the whole prompt stays bounded.
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"definitions"')
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('#/definitions/webLocator')
-    expect(GENERATE_WEB_SYSTEM_PROMPT.length).toBeLessThan(40_000)
+    // The css member, the numeric pick and the named scope grew it ~1.9K past 39K.
+    expect(GENERATE_WEB_SYSTEM_PROMPT.length).toBeLessThan(42_000)
   })
 
   it('GENERATE_WEB_PROMPT_FINGERPRINT is pinned — and the cli/api pins did not move with the arm', () => {
@@ -1333,7 +1336,8 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // (the login form is for flows ABOUT signing in).
     // Native selection and named-container scopes change the authored vocabulary.
     // Verified preparation profiles also change the browser authoring schema.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('6774e7b1b310fa4b')
+    // The non-canonical `css` member and the positional `pick` change it again.
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('0ddbe762871ed697')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {

@@ -33,9 +33,13 @@ import {
   describeInterfaceTarget,
   describeWebLocator,
   interfaceFingerprint,
+  interfaceStepLocator,
   type GuardDriverId,
   type GuardFlow,
+  type GuardWebScope,
   type Interface,
+  type InterfaceActivateStep,
+  type InterfaceInputStep,
   type InterfaceStep,
 } from '@truecourse/shared'
 import { RealizationMatchSchema, type RealizationStep, type RealizationGap, type RealizationMatch } from './schemas.js'
@@ -162,8 +166,21 @@ function stepSummary(step: InterfaceStep): string {
     case 'navigate':
       return `navigate: ${step.route}`
     default:
-      return `${step.kind}${step.kind === 'input' && step.mode ? ` (${step.mode})` : ''}: ${describeInterfaceTarget(step.target)}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
+      return `${step.kind}${step.kind === 'input' && step.mode ? ` (${step.mode})` : ''}: ${targetWords(step)}`
   }
+}
+
+/**
+ * A targeted step's locator as the authoring prompt reads it. A role+name target
+ * (and a role+name scope) reads as it always has — `button "Save" within dialog “Delete”`;
+ * any other handle, a `pick` or a `css` is the scenario locator itself, as JSON, so
+ * it is copied rather than translated.
+ */
+function targetWords(step: InterfaceInputStep | InterfaceActivateStep): string {
+  const locator = interfaceStepLocator(step)
+  const named = (scope: GuardWebScope): boolean => 'role' in scope && scope.name !== undefined && scope.pick === undefined
+  if (!named(step.target) || (step.within && !named(step.within))) return JSON.stringify(locator)
+  return `${describeInterfaceTarget(step.target)}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
 }
 
 // ---------------------------------------------------------------------------
@@ -200,9 +217,9 @@ function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
     case 'navigate':
       return `navigate: ${step.route}`
     case 'input':
-      return `${step.mode === 'select' ? 'select' : 'fill'}: ${describeInterfaceTarget(step.target)}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
+      return `${step.mode === 'select' ? 'select' : 'fill'}: ${targetWords(step)}`
     default:
-      return `click: ${describeInterfaceTarget(step.target)}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
+      return `click: ${targetWords(step)}`
   }
 }
 

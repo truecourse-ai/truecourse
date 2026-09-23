@@ -33,6 +33,7 @@ import {
   GuardWebExpectSchema,
   GuardWebFileSchema,
   GuardWebLocatorSchema,
+  GuardWebScopeSchema,
   GuardWebStateSchema,
   type GuardDriverId,
 } from '@truecourse/shared'
@@ -60,6 +61,7 @@ const API_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedApiScenarioSchema.st
  *  renders at ~119K characters — named under `definitions`, ~18K. */
 const WEB_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedWebScenarioObjectSchema.strip(), {
   webLocator: GuardWebLocatorSchema,
+  webScope: GuardWebScopeSchema,
   webState: GuardWebStateSchema,
   webExpect: GuardWebExpectSchema,
   webCaptures: GuardWebCapturesSchema,
@@ -682,21 +684,28 @@ closed to the handles a USER perceives:
   prompt inside an empty input), \`label\` (the visible label of a form control),
   \`text\` (the element's own visible words), \`title\` (the tooltip), \`alt\` (an
   image's alt text). Each member is exclusive — one handle per locator.
-- NO CSS selectors, NO XPath, NO test ids: those address the IMPLEMENTATION, and a
-  scenario that addresses the implementation stops being a user-replayable probe of
-  the promise.
+- NO XPath, NO test ids, and NO CSS selector of your own: those address the
+  IMPLEMENTATION, and a scenario that addresses the implementation stops being a
+  user-replayable probe of the promise. The one exception is a plan target written
+  as a JSON locator carrying \`css\`: the interface catalog proved it on the running
+  app for a control no user-perceivable handle reaches, so copy it verbatim.
 - The match is case-insensitive substring by default; \`"exact": true\` demands the
   whole string (use it when one name is a prefix of another).
 - A locator is STRICT: it must resolve to exactly ONE element. Two matches is a
-  genuine ambiguity and fails loudly. \`"pick": "first"\` is the one authored
-  exception, for a page that legitimately shows many controls reading the same (a
-  grid of slot buttons) where ANY serves the flow.
+  genuine ambiguity and fails loudly. \`"pick"\` is the one authored exception, for
+  a page that legitimately shows many controls reading the same: \`"first"\` when ANY
+  serves the flow (a grid of slot buttons), or a 1-based position (\`"pick": 2\`)
+  when a plan target names one.
 - A locator can carry \`within: { "role": "dialog", "name": "Delete expense", "exact": true }\` to address a control inside a named container. Preserve the plan's scope. When the page opener and confirmation share a name, scope to the dialog; do not use \`pick: first\` to hide the ambiguity.
 - A native select uses \`{ "driver": "web", "select": { "role": "combobox", "name": "Category" }, "option": "Food & drink" }\`. Never fill a native select. For custom menus, click the opener then its option; fill only editable controls. An interface input with mode select compiles to select, not fill.
 - An element no user-perceivable handle reaches is NOT guessed at: the milestone
   that needs it makes the flow blocked — name the unlocatable element in
   \`blockedOn\`.
-The realization plan writes targets as \`<role> "<name>"\`. Translate them directly:
+The realization plan writes a target either as a JSON locator — copy it verbatim as
+the step's locator, \`css\`, \`within\` and \`pick\` included, so
+\`click: {"css":"main button:has(i.bi-sort)"}\` becomes
+\`{ "driver": "web", "click": { "css": "main button:has(i.bi-sort)" } }\` — or as
+\`<role> "<name>"\`. Translate those directly:
 \`click: button "Add Repository"\` becomes
 \`{ "driver": "web", "click": { "role": "button", "name": "Add Repository" } }\`, and
 \`fill: textbox "Repository path"\` becomes
