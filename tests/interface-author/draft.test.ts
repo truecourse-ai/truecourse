@@ -18,6 +18,9 @@ import {
 } from '../../packages/core/src/services/interface-author/draft'
 import { interfaceFingerprint, type InterfacesFile } from '../../packages/shared/src/index'
 
+/** The four empty kinds — what a place that shows nothing of them claims. */
+const NO_READABLES = { markers: [], elements: [], controls: [], rows: [] } as const
+
 const DERIVED: InterfacesFile = {
   version: 2,
   generatedAt: '2026-08-17T00:00:00.000Z',
@@ -205,7 +208,7 @@ describe('a task is reachable and located where it says', () => {
             steps: [{ kind: 'activate', target: { role: 'button', name: 'Security' } }],
           }),
         ],
-        resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid' }],
+        resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid', readables: NO_READABLES }],
       }),
     )
     expect(result.errors).toEqual([])
@@ -229,7 +232,7 @@ describe('the session authors ONE place', () => {
             steps: [{ kind: 'activate', target: { role: 'button', name: 'Security' } }],
           }),
         ],
-        resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid' }],
+        resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid', readables: NO_READABLES }],
       }),
       { scope: { screenId: 'repos-repoid', address: '/repos/{repoId}' } },
     )
@@ -317,8 +320,10 @@ describe('resource enrichment', () => {
     const derived: InterfacesFile = { ...DERIVED, resources: { web: [{ ...screen,
       description: 'The home screen', readables: { elements: [{ element: { role: 'heading', name: 'Home' } }] },
     }] } }
+    // `elements` is already established on the derived place, so stating the
+    // other three answers for all four kinds.
     const first = validate({ interfaces: [], resources: [{ id: 'root', title: '/', kind: 'screen',
-      readables: { markers: [{ id: 'empty', marker: 'No repositories' }] },
+      readables: { markers: [{ id: 'empty', marker: 'No repositories' }], controls: [], rows: [] },
     }] }, { derived, scope: { screenId: 'root', address: '/' } })
     expect(first.errors).toEqual([])
     const resource = first.authored!.resources!.web[0]
@@ -327,8 +332,33 @@ describe('resource enrichment', () => {
     } })
     const second = validate({ interfaces: [], resources: [{ id: 'root', title: '/', kind: 'screen', readables: { markers: [] } }] },
       { derived, authored: first.authored! })
-    expect(second.authored!.resources!.web[0].readables).toEqual({ markers: [], elements: resource.readables!.elements })
-    expect(second.authored!.resources!.web[0].readables).not.toHaveProperty('rows')
+    expect(second.authored!.resources!.web[0].readables).toEqual({
+      markers: [], elements: resource.readables!.elements, controls: [], rows: [],
+    })
+  })
+
+  /**
+   * An omitted readable kind is UNKNOWN, and the ledger closes the screen the
+   * moment the outcome is accepted — so the write path refuses the fragment
+   * rather than filling the array in, which would be the engine claiming a
+   * reading nobody made.
+   */
+  it('refuses a declared place that leaves a readable kind unstated', () => {
+    const missing = validate({ interfaces: [], resources: [{ id: 'root', title: '/', kind: 'screen',
+      readables: { markers: [], elements: [], controls: [] } }] }, { scope: { screenId: 'root', address: '/' } })
+    expect(missing.ok).toBe(false)
+    expect(missing.errors.join('\n')).toContain('`root` leaves `rows` unstated')
+    expect(missing.errors.join('\n')).toContain('`[]` when this place has none of that kind')
+
+    const none = validate({ interfaces: [], resources: [{ id: 'root', title: '/', kind: 'screen' }] },
+      { scope: { screenId: 'root', address: '/' } })
+    expect(none.errors.join('\n')).toContain('leaves `markers`, `elements`, `controls`, `rows` unstated')
+
+    // The four explicit empties are a claim, and they are accepted as one.
+    const stated = validate({ interfaces: [], resources: [{ id: 'root', title: '/', kind: 'screen',
+      readables: { markers: [], elements: [], controls: [], rows: [] } }] }, { scope: { screenId: 'root', address: '/' } })
+    expect(stated.errors).toEqual([])
+    expect(stated.authored!.resources!.web[0].readables).toEqual({ markers: [], elements: [], controls: [], rows: [] })
   })
 
   it('rejects resource-only writes outside the screen scope and changes to place identity', () => {

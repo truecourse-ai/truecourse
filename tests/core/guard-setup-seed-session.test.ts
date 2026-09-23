@@ -33,13 +33,16 @@ import {
 } from '@truecourse/guard-runner';
 import {
   collectProbeCandidates,
-  ecosystemFingerprint,
+  computeSeedStepFingerprint,
+  legacyRecipeStepFingerprint,
+  legacySeedStepFingerprint,
   runGuardSetup,
   type GuardSetupOptions,
   type GuardSetupSeedSessionInput,
   type SeedDraftDatabase,
 } from '@truecourse/guard-generator';
 import { FINGERPRINT_INPUTS } from '@truecourse/guard-runner';
+import { seedSessionCacheKey, seedSessionLegacyCacheKey } from '../../packages/core/src/services/guard-setup/index';
 import {
   buildSeedSession,
   existingSeedMachinery,
@@ -1965,11 +1968,12 @@ describe('runGuardSetup — the seed step honors confirmSeedReplace', () => {
 // Root-cause cleanup: one FINGERPRINT_INPUTS list
 // ---------------------------------------------------------------------------
 
-describe('ecosystemFingerprint', () => {
-  // `FINGERPRINT_INPUTS` used to be mirrored privately in two packages. It is
-  // exported now, and this pins that the setup step really hashes THAT list —
-  // path-tagged, present files only, and never the recipe (whose own edits are
-  // the step's OUTPUT, not its subject).
+describe('legacyRecipeStepFingerprint', () => {
+  // The recipe step's OLD subject, kept as the one check a row written before
+  // the needs got. `FINGERPRINT_INPUTS` used to be mirrored privately in two
+  // packages; it is exported now, and this pins that the legacy value really
+  // hashes THAT list — path-tagged, present files only, and never the recipe
+  // (whose own edits were never the step's subject).
   it('is the runner’s own input list, hashed directly', () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -1985,11 +1989,42 @@ describe('ecosystemFingerprint', () => {
       expected.update('\0');
     }
 
-    expect(ecosystemFingerprint(r)).toBe(expected.digest('hex'));
+    expect(legacyRecipeStepFingerprint(r)).toBe(expected.digest('hex'));
     // The recipe is folded by `computeRecipeFingerprint`, never here.
-    const before = ecosystemFingerprint(r);
+    const before = legacyRecipeStepFingerprint(r);
     writeRecipe(r, { readyTimeoutMs: 9000 });
-    expect(ecosystemFingerprint(r)).toBe(before);
+    expect(legacyRecipeStepFingerprint(r)).toBe(before);
     expect(computeRecipeFingerprint(r)).not.toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The seed step's key, and the one it had
+// ---------------------------------------------------------------------------
+
+describe('the seed step key', () => {
+  it('follows the recipe contract and the catalog identity, not a dependency bump', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const before = computeSeedStepFingerprint(r);
+
+    // A dependency bump moves the recipe fingerprint, so it moves the OLD key.
+    // The step reads neither the manifests nor a dependency version.
+    fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }));
+    expect(computeSeedStepFingerprint(r)).toBe(before);
+    expect(legacySeedStepFingerprint(r)).not.toBe(before);
+
+    // A recipe edit is the contract moving, and the step re-opens on it.
+    writeRecipe(r, { readyTimeoutMs: 9000 });
+    expect(computeSeedStepFingerprint(r)).not.toBe(before);
+  });
+
+  it('the session key drops the prompt, and the old key stays computable', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const current = seedSessionCacheKey(computeSeedStepFingerprint(r));
+    const legacy = seedSessionLegacyCacheKey(legacySeedStepFingerprint(r));
+    expect(current).toMatch(/^[0-9a-f]{64}$/);
+    expect(legacy).not.toBe(current);
   });
 });

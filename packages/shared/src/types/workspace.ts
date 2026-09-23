@@ -135,3 +135,59 @@ export interface WorkspaceSummary {
 export interface WorkspacesResponse {
   workspaces: WorkspaceSummary[]
 }
+
+/**
+ * WHAT THE WORKSPACE'S PRODUCT IS, in one sentence.
+ *
+ * The workspace states it; nothing derives it. It is the ONLY subject the
+ * Document scan attributes a document against — "is this doc about OUR product
+ * or someone else's?" has no answer without a statement of what ours is, and a
+ * curator asked that question with no subject substitutes one out of whatever
+ * the document names. A workspace holding several repositories has no single
+ * name to stand in either, and code is often connected after the documentation,
+ * so the connected repositories are least able to say it exactly when
+ * attribution needs it said.
+ *
+ * It is therefore REQUIRED: a workspace states it at creation, and until it has
+ * one nothing may be connected into it (see {@link WORKSPACE_DESCRIPTION_REQUIRED}).
+ */
+
+/**
+ * The bound on any product description that reaches a prompt. The scan's
+ * identity block is built from it, and the classifier needs "what kind of
+ * system is this", not the pitch.
+ */
+export const PRODUCT_DESCRIPTION_MAX_CHARS = 400
+
+/** Short of this, it is a keystroke rather than a statement of what a product is. */
+export const WORKSPACE_DESCRIPTION_MIN_CHARS = 10
+
+/** What the routes say when a description is asked for and not given. */
+export const BAD_WORKSPACE_DESCRIPTION = `Say what this workspace's product is, in one sentence (${WORKSPACE_DESCRIPTION_MIN_CHARS}–${PRODUCT_DESCRIPTION_MAX_CHARS} characters).`
+
+/**
+ * The refusal code every entry point that brings material into a workspace
+ * answers with while the workspace has no description: connecting a repository,
+ * adding a documentation source, and the scan itself. The client reads it and
+ * sends the person to Settings › Workspace rather than showing a dead end.
+ */
+export const WORKSPACE_DESCRIPTION_REQUIRED = 'workspace-description-required'
+
+/**
+ * A description as it may be stored, or null when it is not one. The single
+ * reduction: whitespace collapsed, then the bounds. Every writer uses it, so
+ * the form, the two creation routes and the profile route agree on what counts.
+ */
+export function normalizeWorkspaceDescription(raw: unknown): string | null {
+  const text = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : ''
+  if (text.length < WORKSPACE_DESCRIPTION_MIN_CHARS) return null
+  if (text.length > PRODUCT_DESCRIPTION_MAX_CHARS) return null
+  return text
+}
+
+/** Settings › Workspace: what this workspace says its product is. */
+export interface WorkspaceProfileResponse {
+  /** Null until it has been set — which no route that connects anything allows. */
+  description: string | null
+  updatedAt: string | null
+}

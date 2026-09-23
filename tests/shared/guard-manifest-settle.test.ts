@@ -10,6 +10,8 @@ import { describe, it, expect } from 'vitest'
 import {
   unaccountedSurfaces,
   violatesSettleInvariant,
+  movedNamedInputs,
+  movedSchemeInputs,
   type GuardManifestFlow,
 } from '@truecourse/shared'
 
@@ -78,5 +80,35 @@ describe('unaccountedSurfaces', () => {
     expect(unaccountedSurfaces(flow)).toEqual(['cli'])
     // …but with no hash the next generate re-runs it anyway, which is the fix.
     expect(violatesSettleInvariant(flow)).toBe(false)
+  })
+})
+
+describe('movedNamedInputs', () => {
+  it('names every input whose value differs, on either side', () => {
+    expect(movedNamedInputs({ flow: 'a', sections: 'b', prompts: 'c' }, { flow: 'a', sections: 'x', roster: 'r' })).toEqual([
+      'prompts',
+      'roster',
+      'sections',
+    ])
+    expect(movedNamedInputs({ flow: 'a' }, { flow: 'a' })).toEqual([])
+  })
+
+  it('keeps "nothing was recorded" apart from "nothing moved"', () => {
+    expect(movedNamedInputs(undefined, { flow: 'a' })).toBeNull()
+  })
+})
+
+describe('movedSchemeInputs', () => {
+  it('compares only the names both records carry', () => {
+    expect(movedSchemeInputs({ flow: 'a', sections: 'b' }, { flow: 'a', sections: 'x' })).toEqual(['sections'])
+    expect(movedSchemeInputs({ flow: 'a', sections: 'b' }, { flow: 'a', sections: 'b' })).toEqual([])
+  })
+
+  it('ignores a name the scheme retired, so dropping an input re-opens nothing', () => {
+    expect(movedSchemeInputs({ flow: 'a', prompts: 'old' }, { flow: 'a' })).toEqual([])
+  })
+
+  it('fills a name the scheme gained, so adding an input re-opens nothing', () => {
+    expect(movedSchemeInputs({ flow: 'a' }, { flow: 'a', roster: 'r' })).toEqual([])
   })
 })

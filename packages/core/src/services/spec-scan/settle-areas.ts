@@ -29,6 +29,7 @@ import {
   type VocabMap,
 } from '@truecourse/spec-consolidator'
 import { promptFingerprint } from '../agent/session-cache.js'
+import { LEGACY_SETTLE_AREAS_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
   docTitle,
   docsWithLabelTool,
@@ -155,8 +156,13 @@ export function collectAreaVocab(tagsByPath: ReadonlyMap<string, readonly AreaTa
  * non-core product still sessions, because that product needs its verdict),
  * OR any concern past the subdivision threshold.
  */
-export function settleAreasGate(vocab: AreaVocabView): boolean {
-  return vocab.products.size >= 1 || vocab.concerns.size >= 2 || vocab.overThreshold.length > 0
+export function settleAreasGate(vocab: AreaVocabView, prior: readonly string[] = []): boolean {
+  if (vocab.products.size >= 1 || vocab.concerns.size >= 2 || vocab.overThreshold.length > 0) return true
+  // A prior area whose label no doc carries any more is either retired or
+  // re-spelled, and only a session briefed with the prior can say which.
+  if (vocab.concerns.size === 0) return false
+  const { concerns, products } = priorAxisLabels(prior)
+  return [...concerns].some((c) => !vocab.concerns.has(c)) || [...products].some((p) => !vocab.products.has(p))
 }
 
 export const SETTLE_AREAS_SYSTEM_PROMPT = `You settle the AREA VOCABULARY that emerged from curating ONE repository's docs. Each doc was tagged independently, so the same thing may appear under different names, a feature may masquerade as a product, and a broad concern may have swallowed too many docs. You have the WHOLE vocabulary in front of you; your settlement is applied before the docs are grouped into areas.
@@ -174,12 +180,24 @@ You decide FOUR things:
 
 4. SUBDIVISIONS — a concern flagged as oversized in the briefing may be split into 2+ finer concerns. If you subdivide, you MUST assign EVERY doc of that label to exactly one of the new concerns — an unassigned doc is a validation error. An oversized label is the one case where the briefing's list may be cut short: call \`docs_with_label\` on THAT label to get its full list before you assign. Subdivide only when the label genuinely bundles distinct slices (an "api" label holding auth + billing + webhooks); a large-but-coherent label stays whole. The new concerns become ordinary areas.
 
+PRIOR AREAS. When the briefing lists the areas the LAST scan settled, they are this corpus's identities: everything downstream — the flows, the tests, the pages people bookmark — is keyed on them. A label that names the same thing as a prior area merges INTO the prior area's label (a prior label is a legal merge target even when no doc carries it right now); never merge a prior area's label away into a new one, and never mint a new label for a topic a prior area already names. A prior area whose docs all left retires by itself. Renaming an area is a defect, not a judgment.
+
 VALIDATE BEFORE YOU FINISH: call \`check_settlement\` with your complete draft. It runs the exact checks the run applies — missing product verdicts, merge targets not in the briefing, incomplete subdivision assignments — and a problem it finds costs one turn here instead of your whole settlement at the outcome.
 
 The outcome is one object: { "concernMerges": {...}, "productMerges": {...}, "productVerdicts": [...], "subdivisions": [...] }. Empty containers are fine where there is truly nothing to do, but judge the GRAIN before you decide that: docs cluster into a handful of areas, so a vocabulary of dozens of concerns over a few dozen docs — most labels carrying one or two docs — is UNDER-MERGED, not settled. An empty settlement on such a vocabulary is almost always wrong; read a few docs and fold the subtopics into their umbrellas first.`
 
 /** Exported for the step-7 estimate rework (probe the REAL keys). */
 export const SETTLE_AREAS_PROMPT_FINGERPRINT = promptFingerprint(SETTLE_AREAS_SYSTEM_PROMPT)
+
+/**
+ * THE SETTLE-AREAS STAGE'S VERSION, bumped by hand. A reworded prompt does not
+ * make a settled vocabulary wrong; a prompt change that fixes WRONG output
+ * bumps this in the same commit. The prior-areas block did not bump it: a
+ * settlement judged without the prior replays through a fold that keeps the
+ * prior labels deterministically, so the cached value is not wrong, it is
+ * merely corrected on the way through.
+ */
+export const SETTLE_AREAS_STAGE_VERSION = 1
 
 /**
  * The cache key covers everything the BRIEFING says — which, since the map
@@ -190,8 +208,18 @@ export const SETTLE_AREAS_PROMPT_FINGERPRINT = promptFingerprint(SETTLE_AREAS_SY
  * appendable tail (step 6's orchestrator `instructions` land there).
  */
 export function settleAreasCacheKey(vocab: AreaVocabView, extraParts: readonly string[] = []): string {
+  return settleAreasKeyOver(`settle-areas-v${SETTLE_AREAS_STAGE_VERSION}`, vocab, extraParts)
+}
+
+/** {@link settleAreasCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to. Delete with the legacy hash. */
+export function settleAreasLegacyCacheKey(vocab: AreaVocabView, extraParts: readonly string[] = []): string {
+  return settleAreasKeyOver(LEGACY_SETTLE_AREAS_PROMPT_FINGERPRINT, vocab, extraParts)
+}
+
+function settleAreasKeyOver(stage: string, vocab: AreaVocabView, extraParts: readonly string[]): string {
   return scanCacheKey([
-    SETTLE_AREAS_PROMPT_FINGERPRINT,
+    stage,
     labelMapKeyPart(vocab.products),
     labelMapKeyPart(vocab.concerns),
     [...vocab.overThreshold].sort().join(','),
@@ -211,21 +239,33 @@ function labelMapKeyPart(map: ReadonlyMap<string, readonly string[]>): string {
  * The validation `check_settlement` runs in-session and the fold re-runs on
  * the outcome (never trust the transcript). Returns problems; empty = valid.
  */
-export function validateSettlement(settlement: AreaSettlement, vocab: AreaVocabView): string[] {
+export function validateSettlement(
+  settlement: AreaSettlement,
+  vocab: AreaVocabView,
+  prior: readonly string[] = [],
+): string[] {
   const errors: string[] = []
   const products = new Set(vocab.products.keys())
   const concerns = new Set(vocab.concerns.keys())
+  const priorLabels = priorAxisLabels(prior)
 
   for (const [from, to] of Object.entries(settlement.concernMerges)) {
     if (!concerns.has(from)) errors.push(`concernMerges: \`${from}\` is not a concern label of this corpus`)
-    else if (!concerns.has(to)) errors.push(`concernMerges: target \`${to}\` is not a concern label of this corpus`)
-    else if (from === to) errors.push(`concernMerges: \`${from}\` maps to itself`)
+    else if (!concerns.has(to) && !priorLabels.concerns.has(to)) {
+      errors.push(`concernMerges: target \`${to}\` is not a concern label of this corpus`)
+    } else if (from === to) errors.push(`concernMerges: \`${from}\` maps to itself`)
+    else if (priorLabels.concerns.has(from) && !priorLabels.concerns.has(to)) {
+      errors.push(`concernMerges: \`${from}\` is an existing area's label — merge \`${to}\` into it, not away from it`)
+    }
   }
   for (const [from, to] of Object.entries(settlement.productMerges)) {
     if (!products.has(from)) errors.push(`productMerges: \`${from}\` is not a non-core product of this corpus`)
-    else if (to !== CORE_PRODUCT && !products.has(to)) {
+    else if (to !== CORE_PRODUCT && !products.has(to) && !priorLabels.products.has(to)) {
       errors.push(`productMerges: target \`${to}\` is neither a product of this corpus nor \`core\``)
     } else if (from === to) errors.push(`productMerges: \`${from}\` maps to itself`)
+    else if (to !== CORE_PRODUCT && priorLabels.products.has(from) && !priorLabels.products.has(to)) {
+      errors.push(`productMerges: \`${from}\` is an existing area's product — merge \`${to}\` into it, not away from it`)
+    }
     if (to === PROCESS_PRODUCT) errors.push(`productMerges: \`${from}\` may never map to \`process\``)
   }
 
@@ -316,19 +356,38 @@ function compressMergeChains(map: Record<string, string>): Record<string, string
  * doc is skipped, an unassigned doc keeps its label, and an invalid mapping is
  * dropped rather than refusing the settlement whole.
  */
-export function applySettlement(settlement: AreaSettlement, vocab: AreaVocabView): AppliedSettlement {
+export function applySettlement(
+  settlement: AreaSettlement,
+  vocab: AreaVocabView,
+  prior: readonly string[] = [],
+): AppliedSettlement {
   const products = new Set(vocab.products.keys())
   const concerns = new Set(vocab.concerns.keys())
+  const priorLabels = priorAxisLabels(prior)
   const map: VocabMap = { products: {}, concerns: {} }
 
+  // A merge AWAY from a prior area's label onto a label with no prior area is
+  // inverted, not dropped: the prior label wins, the new label folds into it.
+  // That is what keeps a cached settlement judged without the prior from
+  // renaming an area on replay — the identity rule holds in the fold, not in
+  // the model's goodwill.
   for (const [from, to] of Object.entries(settlement.concernMerges)) {
-    if (from === to || !concerns.has(from) || !concerns.has(to)) continue
+    if (from === to || !concerns.has(from)) continue
+    if (!concerns.has(to) && !priorLabels.concerns.has(to)) continue
+    if (priorLabels.concerns.has(from) && !priorLabels.concerns.has(to)) {
+      map.concerns[to] = from
+      continue
+    }
     map.concerns[from] = to
   }
   for (const [from, to] of Object.entries(settlement.productMerges)) {
     if (from === to || !products.has(from)) continue
-    if (to !== CORE_PRODUCT && !products.has(to)) continue
+    if (to !== CORE_PRODUCT && !products.has(to) && !priorLabels.products.has(to)) continue
     if (to === PROCESS_PRODUCT) continue
+    if (to !== CORE_PRODUCT && priorLabels.products.has(from) && !priorLabels.products.has(to)) {
+      map.products[to] = from
+      continue
+    }
     map.products[from] = to
   }
   // A collapse-to-core verdict IS a product merge onto core, however stated.
@@ -423,7 +482,7 @@ function emptyDraftPushback(vocab: AreaVocabView): string {
   )
 }
 
-function checkSettlementTool(vocab: AreaVocabView): SessionTool {
+function checkSettlementTool(vocab: AreaVocabView, prior: readonly string[]): SessionTool {
   // One refusal cycle, mirroring the outcomePrecondition below: the FIRST
   // no-op draft on a fragmented vocabulary is pushed back with the numbers;
   // an identical resubmit passes, so a deliberate "nothing to merge" still
@@ -442,7 +501,7 @@ function checkSettlementTool(vocab: AreaVocabView): SessionTool {
     },
     inputSchema: AreaSettlementSchema,
     async execute(args) {
-      const errors = validateSettlement(args, vocab)
+      const errors = validateSettlement(args, vocab, prior)
       if (errors.length === 0) {
         if (!pushedBack && isNoOpSettlement(args) && fragmentedVocab(vocab)) {
           pushedBack = true
@@ -460,6 +519,46 @@ function checkSettlementTool(vocab: AreaVocabView): SessionTool {
 export interface SettleAreasSessionInput {
   vocab: AreaVocabView
   universe: ScanDocUniverse
+  /** The area ids the last scan settled — briefed, checked against and kept
+   *  by the fold. NOT part of the cache key: they supply identity, not an answer. */
+  prior?: readonly string[]
+}
+
+/** The prior area ids split per axis: the labels a settlement may target and may not merge away. */
+export function priorAxisLabels(prior: readonly string[]): { products: Set<string>; concerns: Set<string> } {
+  const products = new Set<string>()
+  const concerns = new Set<string>()
+  for (const id of prior) {
+    const { product, concern } = splitArea(id)
+    if (product === PROCESS_PRODUCT) continue
+    if (product !== CORE_PRODUCT) products.add(product)
+    concerns.add(concern)
+  }
+  return { products, concerns }
+}
+
+/**
+ * Keep a document's area labels the way the last scan had them when the
+ * curation session only re-spelled them: a tag whose concern is a
+ * morphological variant of one this document carried before (`bookings` for
+ * `booking`, `booking-attendees` for `bookings-attendees`) becomes that prior
+ * concern. Deterministic and per document — a genuinely new label rides
+ * through untouched, and the settle session still judges the corpus.
+ */
+export function reconcileDocTagsWithPrior(tags: readonly AreaTag[], prior: readonly string[]): AreaTag[] {
+  if (prior.length === 0) return [...tags]
+  const priorByKey = new Map<string, AreaTag>()
+  for (const id of prior) {
+    const tag = splitArea(id)
+    priorByKey.set(`${tag.product}\0${morphKey(tag.concern)}`, tag)
+  }
+  return tags.map((tag) => {
+    const id = normalizeArea(tag)
+    if (!id) return tag
+    const canonical = splitArea(id)
+    const kept = priorByKey.get(`${canonical.product}\0${morphKey(canonical.concern)}`)
+    return kept && kept.concern !== canonical.concern ? { ...canonical, concern: kept.concern } : tag
+  })
 }
 
 /** What the settlement changed, per decision the session makes. */
@@ -494,7 +593,7 @@ export function settleAreasSessionDef(input: SettleAreasSessionInput): SessionDe
         one: "I opened one of a label's docs to judge it by more than its title",
         many: 'I opened {n} docs to judge the labels by more than their titles',
       }),
-      checkSettlementTool(input.vocab),
+      checkSettlementTool(input.vocab, input.prior ?? []),
     ],
     outcomeSchema: AreaSettlementSchema,
     budget: SETTLE_AREAS_BUDGET,
@@ -549,6 +648,7 @@ export function settleAreasBriefing(
   vocab: AreaVocabView,
   universe: ScanDocUniverse,
   instructions: readonly string[] = [],
+  prior: readonly string[] = [],
 ): string {
   const perLabel = briefedDocsPerLabel(vocab)
   const block = (map: Map<string, string[]>): string[] =>
@@ -591,6 +691,18 @@ export function settleAreasBriefing(
       '',
       `Oversized concerns (over ${SUBDIVISION_DOC_THRESHOLD} docs) — subdivision candidates:`,
       ...vocab.overThreshold.map((label) => `  ${label}`),
+    )
+  }
+  if (prior.length > 0) {
+    const live = new Set([...vocab.concerns.keys()])
+    lines.push(
+      '',
+      `PRIOR AREAS — the ${prior.length} area(s) the last scan settled; these ids are what everything downstream is keyed on:`,
+      ...[...prior].sort().map((id) => {
+        const { product, concern } = splitArea(id)
+        return `  ${id}${product !== PROCESS_PRODUCT && !live.has(concern) ? '  (no doc carries this label now — merge the label that replaced it INTO it)' : ''}`
+      }),
+      'A label naming the same thing as a prior area merges INTO the prior label; never the other way, and never a new label for it.',
     )
   }
   const singletons = [...vocab.concerns.values()].filter((refs) => refs.length <= 1).length

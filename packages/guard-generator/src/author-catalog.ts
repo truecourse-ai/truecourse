@@ -1,6 +1,6 @@
 /** Deterministic, invocation-local author lookup. No source or execution access. */
 import { createHash } from 'node:crypto'
-import type { Interface, InterfaceResource, InterfaceState } from '@truecourse/shared'
+import type { GuardFlow, Interface, InterfaceResource, InterfaceState } from '@truecourse/shared'
 import { buildResourceHints } from './grounding.js'
 
 export const AUTHOR_CATALOG_VERSION = 'web-author-catalog-v4'
@@ -19,6 +19,13 @@ export interface AuthorCatalog {
   getResources(input: CatalogIds): CatalogReport
   getStates(input: CatalogIds): CatalogReport
   candidates(own: readonly Interface[], terms: string): AuthorCatalogSummary[]
+  /**
+   * ONE entry's fingerprint — an action, or a resource a `get` returns beside
+   * one. `null` when the id has left the catalog. It is what the settle compare
+   * folds for the entries a flow's session actually read, so a screen the
+   * session never asked for cannot re-open it.
+   */
+  entryFingerprint(id: string): string | null
 }
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`
@@ -69,6 +76,12 @@ export function createAuthorCatalog(interfaces: readonly Interface[], resources?
   const payloads = new Map(entries.map(i => [i.id, { interface: i, resources: buildResourceHints([i], registry) }]))
   const reachableResources = [...new Map([...payloads.values()].flatMap(p => p.resources).map(r => [r.id, r])).values()].sort((a, b) => a.id.localeCompare(b.id))
   const fingerprint = hash([AUTHOR_CATALOG_VERSION, entries, reachableResources, stateRegistry])
+  // Per-entry fingerprints for the settle compare. Resources go in first so an
+  // action wins a shared id: an action is what a scenario is authored against.
+  const entryFingerprints = new Map<string, string>([
+    ...reachableResources.map((r) => [r.id, hash([AUTHOR_CATALOG_VERSION, r])] as const),
+    ...entries.map((i) => [i.id, hash([AUTHOR_CATALOG_VERSION, i])] as const),
+  ])
   const summaries = entries.map(summary)
   function page(items: unknown[], binding: unknown, limit: number, cursor?: string, metadata?: (end: number) => object): CatalogReport {
     // Bind to exactly the requested data and projection. Unrelated peer writes
@@ -140,11 +153,92 @@ export function createAuthorCatalog(interfaces: readonly Interface[], resources?
     },
     getResources(input) { return definitions(input, 'resources', resourceById) },
     getStates(input) { return definitions(input, 'states', stateById) },
+    entryFingerprint(id) { return entryFingerprints.get(id) ?? null },
     candidates(own, terms) {
       const ids = new Set(own.map(i => i.id))
       return ranked(`${terms} ${own.map(i => [i.title, i.at, i.to, i.startingState, i.endState].filter(Boolean).join(' ')).join(' ')}`).filter(s => !ids.has(s.id)).slice(0, 6).map(boundedSummary)
     },
   }
+}
+
+/** One task's recording view of the shared catalog — see {@link recordCatalogReads}. */
+export interface CatalogReadLog {
+  /** The catalog to hand the session: the same reads, recorded. */
+  catalog: AuthorCatalog
+  /** The entry ids served so far, sorted. */
+  ids(): string[]
+  /** Adopt the read-set a cached result was stored with, so a cache HIT records
+   *  what the live session would have. */
+  adopt(ids: readonly string[]): void
+}
+
+/**
+ * Record what one authoring session is SERVED out of the shared catalog. The
+ * catalog runs once per run over every browser screen, and a session reaches
+ * whichever of them it searches for, so the only honest per-flow input is the
+ * set of entries its `search` and `get` calls actually returned — read back off
+ * the rendered pages, which are the session's whole view of the catalog. The
+ * flow's settle compare then folds those entries alone.
+ */
+export function recordCatalogReads(catalog: AuthorCatalog): CatalogReadLog {
+  const seen = new Set<string>()
+  const record = (report: CatalogReport): CatalogReport => {
+    if (!report.isError) for (const id of servedIds(report.content)) seen.add(id)
+    return report
+  }
+  return {
+    catalog: {
+      ...catalog,
+      search: (input) => record(catalog.search(input)),
+      get: (input) => record(catalog.get(input)),
+    },
+    ids: () => [...seen].sort(),
+    adopt: (ids) => { for (const id of ids) seen.add(id) },
+  }
+}
+
+/** The entry ids one rendered page carries; none from anything but a page. */
+function servedIds(content: string): string[] {
+  let page: unknown
+  try { page = JSON.parse(content) } catch { return [] }
+  if (!page || typeof page !== 'object' || !('items' in page) || !Array.isArray(page.items)) return []
+  return page.items.flatMap((item: unknown) =>
+    item && typeof item === 'object' && 'id' in item && typeof item.id === 'string' ? [item.id] : [])
+}
+
+/**
+ * A read-set as the settle compare folds it: each entry id with its CURRENT
+ * fingerprint, `absent` for an id the catalog no longer holds. An entry that is
+ * gone moves the component, because the flow authored against something that
+ * has left the product.
+ */
+export function catalogReadMaterial(catalog: AuthorCatalog, ids: readonly string[]): string[] {
+  return [...ids].sort().map((id) => `${id}:${catalog.entryFingerprint(id) ?? 'absent'}`)
+}
+
+/** The setup-action shortlist a web briefing offers, ranked against the flow. */
+export function webSetupCandidates(catalog: AuthorCatalog, own: readonly Interface[], flow: GuardFlow): AuthorCatalogSummary[] {
+  return catalog.candidates(own, JSON.stringify(flow))
+}
+
+/**
+ * The web arm of a worker's cache key: everything the authoring session is
+ * handed BEFORE it reads anything — its own plan's scoped resources and the
+ * shortlist the briefing offers. The rest of the catalog stays out, so one
+ * screen's re-authored readables no longer re-key every web flow; what a
+ * session then reaches for through its tools is recorded on the flow instead
+ * (see {@link recordCatalogReads}). The accepted risk is that a cached result
+ * can predate an entry the session would now find through `search` — and the
+ * worker key is only consulted after the settle compare already re-opened the
+ * flow.
+ */
+export function webAuthorKeyMaterial(
+  catalog: AuthorCatalog,
+  own: readonly Interface[],
+  flow: GuardFlow,
+  resources?: Record<string, InterfaceResource[]>,
+): string {
+  return hash([AUTHOR_CATALOG_VERSION, scopedAuthorResources(own, resources), webSetupCandidates(catalog, own, flow)])
 }
 
 /** Keep resource identity and only readables explicitly referenced by selected action data. */

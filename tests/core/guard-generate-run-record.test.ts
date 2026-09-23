@@ -1,9 +1,8 @@
 /**
  * `guard generate` leaves a RUN RECORD, like the scan and setup do: one
  * `sessions/guard-generate/<runId>/run.json` carrying the step checklist, what
- * the run ran on and how it ended. Generate spends one-shot calls rather than
- * sessions, so the record is the only thing a surface that never saw the
- * process can read — and a hosted run keys it by repo identity, not by the
+ * the run ran on and how it ended — the only thing a surface that never saw
+ * the process can read. A hosted run keys it by repo identity, not by the
  * throwaway clone it ran in.
  *
  * Nothing here reaches a model: a repo with no corpus ends `no-docs` before the
@@ -13,7 +12,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import {
   guardGenerateInProcess,
   EstimateDeclined,
@@ -29,8 +27,6 @@ import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree
 
 let repo: string;
 let sessionsKey: string;
-
-const transport = (async () => '{}') as LlmTransport;
 
 beforeEach(() => {
   resetSpecStore();
@@ -53,7 +49,6 @@ describe('guard generate run record', () => {
     const tracker = new StepTracker(() => {}, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
     const { guard } = await guardGenerateInProcess(repo, {
       tracker,
-      transport,
       transportMode: 'api',
       attribution: { provider: 'anthropic', model: 'claude-workspace' },
       sessionsKey,
@@ -88,17 +83,17 @@ describe('guard generate run record', () => {
     // run.json files every session under its step instead of after the list.
     expect(checklist?.items.map((i) => [i.key, i.sessionKinds])).toEqual([
       ['index', []],
-      ['extract', ['guard-generate.extract']],
+      ['extract', ['guard-generate.claim-diff', 'guard-generate.extract']],
       ['interfaces', []],
       ['flows', ['guard-generate.flows']],
-      ['match', []],
-      ['author', ['guard-generate.flow-worker', 'guard-generate.fidelity']],
+      ['match', ['guard-generate.match']],
+      ['author', ['guard-generate.world-classify', 'guard-generate.flow-worker', 'guard-generate.fidelity']],
       ['validate', []],
     ]);
   });
 
   it('defaults the record to the working tree, and names the saved provider', async () => {
-    await guardGenerateInProcess(repo, { transport, transportMode: 'claude-code' });
+    await guardGenerateInProcess(repo, { transportMode: 'claude-code' });
     const [run] = await listStoredSessionRuns(repo, 'guard-generate');
     expect(run).toMatchObject({ status: 'failed', llm: { mode: 'claude-code', provider: 'claude-code' } });
     expect(run.llm?.model).toBeTruthy();
@@ -108,7 +103,7 @@ describe('guard generate run record', () => {
     const controller = new AbortController();
     controller.abort();
     await expect(
-      guardGenerateInProcess(repo, { transport, transportMode: 'api', signal: controller.signal, sessionsKey }),
+      guardGenerateInProcess(repo, { transportMode: 'api', signal: controller.signal, sessionsKey }),
     ).rejects.toBeInstanceOf(GuardGenerateAborted);
     const [run] = await listStoredSessionRuns(sessionsKey, 'guard-generate');
     expect(run).toMatchObject({ status: 'interrupted' });
@@ -144,7 +139,7 @@ describe('a generate the gates stop is on record too', () => {
 
     const tracker = new StepTracker(() => {}, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
     await expect(
-      guardGenerateInProcess(repo, { tracker, transport, transportMode: 'api', sessionsKey }),
+      guardGenerateInProcess(repo, { tracker, transportMode: 'api', sessionsKey }),
     ).rejects.toBeInstanceOf(OpenConflictsError);
 
     const [run] = await listStoredSessionRuns(sessionsKey, 'guard-generate');
@@ -179,8 +174,7 @@ describe('a generate the gates stop is on record too', () => {
 
     await expect(
       guardGenerateInProcess(repo, {
-        transport,
-        transportMode: 'api',
+                transportMode: 'api',
         sessionsKey,
         onLlmEstimate: async () => false,
       }),

@@ -19,12 +19,6 @@ import { readGuardInterfacesAuthorView, runGuardInterfaceAuthoring } from '../..
 import { stubDriver, outcome, toolResult } from './spec-scan-session-stub.js';
 import { createStoredSessionRun, listStoredSessionRuns } from '../../packages/core/src/lib/sessions-store';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
-import type { LlmTransport } from '@truecourse/shared/llm';
-
-/** Nothing is authored in these runs, so the closing reconciliation never asks. */
-const noOneShot: LlmTransport = async () => {
-  throw new Error('no one-shot call is expected here');
-};
 
 let repo: string;
 
@@ -132,7 +126,7 @@ describe('the sessions store', () => {
       await call.emit(toolResult('check_draft'));
       return outcome({ interfaces: [], unresolved: ['No actions on this screen'] });
     });
-    const result = await runGuardInterfaceAuthoring({ repoRoot: repo, driver, transport: noOneShot, transportMode: 'api', sessionRun: parent, onRunStarted });
+    const result = await runGuardInterfaceAuthoring({ repoRoot: repo, driver, transportMode: 'api', sessionRun: parent, onRunStarted });
     const runs = await listStoredSessionRuns(repo);
     expect(runs).toHaveLength(1);
     expect(runs[0].command).toBe(shared ? 'guard-setup' : 'guard-interfaces');
@@ -158,7 +152,7 @@ describe('the sessions store', () => {
     const parent = shared ? await createStoredSessionRun(repo, { command: 'guard-setup', gitRef: 'abc' }) : undefined;
     const { driver } = stubDriver(() => outcome({ interfaces: [] }));
     await expect(runGuardInterfaceAuthoring({
-      repoRoot: repo, driver, transport: noOneShot, transportMode: 'api', sessionRun: parent,
+      repoRoot: repo, driver, transportMode: 'api', sessionRun: parent,
       onStatus: () => { throw new Error('context failed'); },
     })).rejects.toThrow('context failed');
     const runs = await listStoredSessionRuns(repo);

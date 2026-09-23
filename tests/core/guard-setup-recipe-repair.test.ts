@@ -25,7 +25,7 @@ import {
   RECIPE_CACHE_NAME,
   type RecipeProposal,
 } from '@truecourse/guard-generator';
-import { computeRecipeFingerprint, createWorkingSandbox } from '@truecourse/guard-runner';
+import { computeRecipeFingerprint, createWorkingSandbox, type Recipe } from '@truecourse/guard-runner';
 import { setCacheEntry, getCacheEntry } from '@truecourse/llm';
 import {
   buildRecipeRepair,
@@ -63,6 +63,16 @@ function repo(): string {
 }
 
 const GOOD: RecipeProposal = { build: 'true', entry: ['node', FIXTURE_BIN] };
+
+/** A recipe a real boot already proved, with an inline secret in it. */
+const STANDING: Recipe = {
+  build: 'pnpm build',
+  api: {
+    serve: ['node', 'dist/server.js'],
+    healthPath: '/health',
+    credentials: { owner: { header: 'Authorization', value: 'sk-live-not-a-real-key' } },
+  },
+};
 
 /** One assistant turn, priced — what the loop counts `spent.turns` off. */
 const turn = (text: string) =>
@@ -287,6 +297,80 @@ describe('recipeRepairBriefing', () => {
     });
 
     expect(text).toContain('-p truecourse-org-123-acme-widgets-ace2710c15');
+  });
+
+  // A repository that HAS a recipe is never asked for an open proposal: what it
+  // has was proved by a real boot, and rewording it re-authors its whole corpus.
+  it('shows a standing recipe, the needs it must answer and the fields it may touch', () => {
+    const text = recipeRepairBriefing({
+      repoRoot: '/tmp/x',
+      inputs: { packageJson: '{}', presentInputs: ['package.json'] },
+      inputsFingerprint: 'sha256:abc',
+      existing: {
+        recipe: STANDING,
+        scope: {
+          kind: 'needs',
+          unprovided: [
+            {
+              need: { kind: 'datastore', id: 'datastore:redis:REDIS_URL', scheme: 'redis', envVar: 'REDIS_URL' },
+              provides: 'an `api.services` bring-up for the redis datastore',
+              answer: 'recipe',
+            },
+          ],
+        },
+      },
+      database: null,
+      datastoreUrls: [],
+      composeGenerated: false,
+    });
+
+    expect(text).toMatch(/ALREADY HAS/);
+    expect(text).toContain('datastore:redis:REDIS_URL');
+    expect(text).toContain('api.services');
+    expect(text).toContain('"/health"');
+    // The value of an inline credential never enters a persisted transcript.
+    expect(text).not.toContain('sk-live-not-a-real-key');
+    expect(text).not.toMatch(/could not derive a recipe/);
+  });
+
+  it('leads a boot repair with the engine verdict and holds nothing back', () => {
+    const text = recipeRepairBriefing({
+      repoRoot: '/tmp/x',
+      inputs: { packageJson: '{}', presentInputs: ['package.json'] },
+      inputsFingerprint: 'sha256:abc',
+      existing: {
+        recipe: STANDING,
+        scope: { kind: 'boot', failure: 'the server never became healthy', failureClass: 'endpoint-probe' },
+      },
+      database: null,
+      datastoreUrls: [],
+      composeGenerated: false,
+    });
+
+    expect(text).toContain('the server never became healthy');
+    expect(text).toMatch(/Any field may change/);
+  });
+
+  it('turns a needs-driven outcome back when it reaches outside the world', () => {
+    const sandbox = createWorkingSandbox();
+    cleanup.push(() => sandbox.cleanup());
+    const def = recipeRepairSessionDef({
+      repoRoot: process.cwd(),
+      sandbox,
+      existing: { recipe: STANDING, scope: { kind: 'needs', unprovided: [] } },
+    });
+
+    const inScope = def.validateOutcome?.({
+      build: 'pnpm build',
+      api: { serve: ['node', 'dist/server.js'], healthPath: '/health', services: { up: 'docker compose up -d' } },
+    });
+    const outOfScope = def.validateOutcome?.({
+      build: 'pnpm build',
+      api: { serve: ['node', 'dist/other.js'], healthPath: '/health' },
+    });
+
+    expect(inScope).toBeUndefined();
+    expect(outOfScope).toContain('api.serve');
   });
 
   it('says so when there was no prior proposal at all', () => {

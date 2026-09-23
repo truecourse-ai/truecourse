@@ -27,7 +27,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recipePath, readGuardSetup, writeGuardSetup, computeRecipeFingerprint, computePreparationFingerprint } from '@truecourse/guard-runner';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import type {
   GuardSetupAuthStep,
   GuardSetupCatalogSession,
@@ -124,7 +123,6 @@ const neverCalled = async (): Promise<never> => {
 /** Every session seam, recording which ones a run actually reached. */
 function seams(): {
   reached: string[];
-  transport: LlmTransport;
   catalogSession: GuardSetupCatalogSession;
   authorInterfaces: GuardSetupInterfacesStep;
   seedSession: GuardSetupSeedSession;
@@ -134,7 +132,6 @@ function seams(): {
   const reached: string[] = [];
   return {
     reached,
-    transport: async () => 'ok',
     catalogSession: async () => {
       reached.push('catalog');
       return { status: 'ok', added: [], findings: [] };
@@ -399,9 +396,13 @@ describe('only: preparations', () => {
     const r = fixtureRepo(); writeRecipe(r);
     await guardSetupInProcess(r, { interfaces: interfaces(), recipeRunner: neverCalled, ...seams() });
     const old = readGuardSetup(r)!;
-    old.steps.find(row => row.key === 'preparations')!.inputFingerprint = version === 'legacy'
+    const row = old.steps.find(step => step.key === 'preparations')!;
+    row.inputFingerprint = version === 'legacy'
       ? computeRecipeFingerprint(r)
       : createHash('sha256').update(version === 'postgres-v2' ? 'guard-preparations:2-postgres-database\n' : 'guard-preparations:3-verifier-inputs\n').update(computeRecipeFingerprint(r)).digest('hex');
+    // A row an older build wrote names no inputs, so its fingerprint is what
+    // the gate compares — once.
+    delete row.inputComponents;
     writeGuardSetup(r, old);
     const before = fs.readFileSync(recipePath(r), 'utf8');
     const estimate = await estimateGuardSetupCost(r, { only: 'preparations' });

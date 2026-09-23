@@ -5,6 +5,7 @@ import yaml from 'js-yaml'
 import {
   generateGuards,
   birthValidate,
+  readFlowsFile,
   type BirthCandidate,
   type FlowWorkerTask,
   type MatchRunner,
@@ -47,6 +48,7 @@ import {
   flowPerClaimSession,
   flowWorkerSessionOf,
   submitWorkerSessions,
+  flowsAreaSessionOf,
   matchAll,
   matchBy,
   cliInterface,
@@ -335,6 +337,7 @@ describe('browser setup grounding', () => {
     const briefings: string[] = []
     const cacheInputs: string[][] = []
     const fetched: string[] = []
+    const reads: string[][] = []
     const run = (setup: Interface) => runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface(), setup),
@@ -343,6 +346,7 @@ describe('browser setup grounding', () => {
       flowWorkerSession: submitWorkerSessions((task) => {
         cacheInputs.push(task.cacheMaterial.interfaceFingerprints)
         fetched.push(task.catalog!.get({ ids: [setup.id] }).content)
+        reads.push(task.catalogReads!())
         return { blocked: [{ order: 1, capability: 'missing-data: record' }] }
       }, { onBriefing: (_task, briefing) => briefings.push(briefing) }),
     })
@@ -356,7 +360,11 @@ describe('browser setup grounding', () => {
     expect(briefings).toHaveLength(2)
     expect(briefings[1]).not.toContain('New record')
     expect(fetched[1]).toContain('New record')
-    expect(cacheInputs[0]).not.toEqual(cacheInputs[1])
+    // A setup action outside the plan is offered as a shortlist SUMMARY, which
+    // its re-authored steps do not move, so the worker key stands. The session
+    // fetched it, and that read is what the flow's settle compare folds.
+    expect(cacheInputs[0]).toEqual(cacheInputs[1])
+    expect(reads[1]).toContain(create.id)
   })
 })
 
@@ -543,6 +551,54 @@ describe('generateGuards — change detection', () => {
     // The flow is skipped, not re-settled: its stored scenario stands.
     expect(res2.flows).toMatchObject({ total: 1, skipped: 1, settled: 1, unsettled: 0 })
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
+  }, 60_000)
+
+  it('a second generate over unchanged inputs with the session cache CLEARED returns the same ids and fingerprints, and writes nothing', async () => {
+    const r = seed()
+    const briefed: GuardFlow[][] = []
+    // A reconciling session: what a live model does when briefed with the
+    // existing flows — continue each one by id, unchanged. No cache is
+    // consulted anywhere: every run below is a session that ran.
+    const reconciling = flowsAreaSessionOf((area, prior) => {
+      briefed.push([...prior])
+      return {
+        flows: area.claims.map((c) => {
+          const existing = prior.find((f) => f.milestones.some((m) => m.claimTitle === c.title))
+          return {
+            ...(existing ? { id: existing.id } : {}),
+            title: existing ? `re-worded ${c.anchor}` : c.anchor,
+            goal: `verify ${c.title}`,
+            milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title }],
+          }
+        }),
+        noFlowClaims: [],
+      }
+    })
+
+    const first = await runGenerate({ repoRoot: r, extractSession: versionCliBgUntestable, flowsAreaSession: reconciling, flowWorkerSession: authorsEvery() })
+    expect(first.written).toHaveLength(1)
+    expect(briefed[0]).toEqual([])
+    const flowsBefore = readFlowsFile(r)!.flows
+    const manifestBefore = readManifest(r)!
+
+    let workerTasks = 0
+    const second = await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowsAreaSession: reconciling,
+      flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS), { onBriefing: () => workerTasks++ }),
+    })
+
+    // The session was briefed with the committed flow and continued it.
+    expect(briefed[1].map((f) => f.id)).toEqual(flowsBefore.map((f) => f.id))
+    // Same ids, same fingerprints, the re-worded title discarded: byte-identical.
+    expect(readFlowsFile(r)!.flows).toEqual(flowsBefore)
+    expect(second.flows.reconciled).toEqual({ kept: flowsBefore.length, amended: 0, added: 0, retired: 0, carried: 0 })
+    // And nothing to author: the manifest stands, no worker ran, no file was written.
+    expect(second.noChanges).toBe(true)
+    expect(second.written).toEqual([])
+    expect(workerTasks).toBe(0)
+    expect(readManifest(r)).toEqual(manifestBefore)
   }, 60_000)
 
   it('a MOVED interface re-authors only the flow that grounds on it', async () => {
@@ -1995,13 +2051,75 @@ describe('generateGuards — the per-flow pipeline', () => {
     expect(ids).toEqual(['limits', 'limits-2'])
 
     // Re-run against a STALE manifest: both flows re-author and must land on the
-    // SAME ids (each frees its own before assigning), never colliding.
+    // SAME ids (each frees its own before assigning), never colliding. Stale
+    // means the settle record is gone, names and all — a hash alone is only ever
+    // checked the legacy way.
     writeManifest(r, {
-      flows: readManifest(r)!.flows.map((f) => ({ ...f, generationInputsHash: 'sha256:stale' })),
+      flows: readManifest(r)!.flows.map(({ generationInputs: _named, ...f }) => ({ ...f, generationInputsHash: 'sha256:stale' })),
     })
     const second = await runGenerate(opts)
     expect(second.written.map((w) => w.id).sort()).toEqual(ids)
     expect(new Set(loadScenarios(r).scenarios.map((s) => s.id)).size).toBe(2)
+  }, 90_000)
+
+  it('a flow authored from scratch is stamped over the roster its NEW scenario names, so the next run is a no-op', async () => {
+    const r = seed()
+    const opts = {
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      // The scenario names a fixture no prior scenario named: the roster the
+      // compare read BEFORE the session ran is not the roster the flow holds now.
+      flowWorkerSession: submitWorkerSessions((task) => raw(`${task.flowId} for {{fixture:org.id}}`, PASSING_STEPS)),
+    }
+    const first = await runGenerate(opts)
+    expect(first.written).toHaveLength(1)
+
+    const second = await runGenerate(opts)
+    expect(second.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
+    expect(second.written).toEqual([])
+  }, 90_000)
+
+  it('names the settle input that re-opened a flow, and a dependency bump names none', async () => {
+    const r = seed()
+    const opts = {
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
+    }
+    const first = await runGenerate(opts)
+    expect(first.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
+    const stored = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
+    expect(Object.keys(stored.generationInputs ?? {})).toEqual(
+      expect.arrayContaining(['flow', 'sections', 'interfaces', 'recipe.slice', 'roster', 'preparation']),
+    )
+
+    // A dependency bump moves the recipe fingerprint and nothing a flow reads,
+    // so no flow re-opens and nothing is re-authored.
+    fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }))
+    const second = await runGenerate(opts)
+    expect(second.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
+    expect(second.written).toEqual([])
+
+    // One stored component no longer matches: that flow re-opens, by name.
+    writeManifest(r, {
+      flows: readManifest(r)!.flows.map((f) => ({
+        ...f,
+        generationInputs: { ...f.generationInputs, sections: 'f'.repeat(16) },
+      })),
+    })
+    const facts: string[] = []
+    const third = await runGenerate({ ...opts, onFact: (_step, line) => facts.push(line) })
+    expect(third.flows.reopened).toEqual({ flows: 1, byInput: { sections: 1 }, unrecorded: 0 })
+    expect(facts).toContain('1 flow re-opened: 1 sections, 0 interfaces')
+
+    // An entry stored before the inputs were named can only say it moved.
+    writeManifest(r, {
+      flows: readManifest(r)!.flows.map(({ generationInputs: _named, ...f }) => ({ ...f, generationInputsHash: `sha256:${'0'.repeat(64)}` })),
+    })
+    const fourth = await runGenerate(opts)
+    expect(fourth.flows.reopened).toEqual({ flows: 1, byInput: {}, unrecorded: 1 })
+    // And it leaves with names, so the next run compares them.
+    expect(readManifest(r)!.flows[0].generationInputs).toBeDefined()
   }, 90_000)
 
   it('stops after synthesis when the internal seam asks it to', async () => {

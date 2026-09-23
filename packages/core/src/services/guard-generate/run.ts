@@ -37,7 +37,7 @@ import type {
   SessionOutcome,
   SessionPersistence,
 } from '@truecourse/agent-loop'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import {
   GUARD_REVIEW_POLICY_VERSION,
   ExtractOutcomeSchema,
@@ -45,6 +45,7 @@ import {
   settledScenariosOf,
   type ExtractOutcome,
   type GuardFlowWorkerOutcome,
+  type GuardPrerequisiteTarget,
 } from '@truecourse/shared'
 import {
   GENERATE_SESSION_STEPS,
@@ -54,6 +55,7 @@ import {
   flowSectionKey,
   EpicSynthesisSchema,
   FlowSetSchema,
+  type ExtractPrior,
   type ExtractResult,
   type ExtractSessionSeam,
   type ReuseExtractionSeam,
@@ -84,7 +86,9 @@ import {
   extractSessionBriefing,
   extractContextSchema,
   extractSessionCacheKey,
+  extractSessionLegacyCacheKey,
   extractSessionCacheKeyForContentHash,
+  extractSessionLegacyCacheKeyForContentHash,
   extractSessionDef,
   extractSessionWorkItem,
 } from './extract.js'
@@ -95,9 +99,11 @@ import {
   flowSetRefusalReason,
   flowsEpicSessionBriefing,
   flowsEpicSessionCacheKey,
+  flowsEpicSessionLegacyCacheKey,
   flowsEpicSessionDef,
   flowsSessionBriefing,
   flowsSessionCacheKey,
+  flowsSessionLegacyCacheKey,
   flowsSessionDef,
   flowsSessionWorkItem,
   type FlowsCheckerContext,
@@ -109,6 +115,7 @@ import {
   FLOW_WORKER_SESSION_KIND,
   cacheableWorkerOutcome,
   flowWorkerCacheKey,
+  flowWorkerLegacyCacheKeys,
   flowWorkerSessionDef,
   flowWorkerSystemPrompt,
   type CachedWorkerEntry,
@@ -219,6 +226,9 @@ interface CachedPoolOptions<TItem, TOutcome> {
   items: readonly TItem[]
   workItem(item: TItem): string
   cacheKey(item: TItem): string
+  /** The keys this kind computed before its formula changed, newest first; a
+   *  miss under `cacheKey` reads them in turn. Delete with the legacy hash. */
+  legacyCacheKeys?(item: TItem): readonly string[]
   schema: z.ZodType<TOutcome>
   session(item: TItem): SessionDef<TOutcome>
   briefing(item: TItem): string
@@ -302,6 +312,7 @@ async function runCachedGuardPool<TItem, TOutcome>(
       repoRoot: opts.repoRoot,
       cacheName: opts.cacheName,
       key: opts.cacheKey(item),
+      ...(opts.legacyCacheKeys ? { legacyKeys: opts.legacyCacheKeys(item) } : {}),
       schema: opts.schema,
       run: () => {
         toRun.push(item)
@@ -454,6 +465,11 @@ export function createGuardGenerateSessionSeams(
 
   const extractSession: ExtractSessionSeam = async (input) => {
     const universe = buildGuardDocUniverse(input.docs)
+    // The document's last extraction rides the session, never its cache key.
+    const priorOf = (doc: GuardDoc): { prior?: ExtractPrior } => {
+      const prior = input.priors?.get(doc.doc)
+      return prior ? { prior } : {}
+    }
     const byDoc = new Map<string, ExtractResult>()
     let done = 0
     const total = input.docs.length
@@ -465,9 +481,10 @@ export function createGuardGenerateSessionSeams(
       items: input.docs,
       workItem: (doc) => extractSessionWorkItem(doc.doc),
       cacheKey: (doc) => extractSessionCacheKey(doc, input.prerequisiteTargets),
+      legacyCacheKeys: (doc) => [extractSessionLegacyCacheKey(doc, input.prerequisiteTargets)],
       schema: extractContextSchema(input.prerequisiteTargets),
-      session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets }),
-      briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets),
+      session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets, ...priorOf(doc) }),
+      briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets, input.priors?.get(doc.doc)),
       driver: acquire,
       ...(replayOnly('extract') ? { cacheOnly: 'extract' as const } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -512,9 +529,10 @@ export function createGuardGenerateSessionSeams(
       items: input.areas,
       workItem: (area) => flowsSessionWorkItem(area.areaId, area.chunk),
       cacheKey: (area) => flowsSessionCacheKey(area),
+      legacyCacheKeys: (area) => [flowsSessionLegacyCacheKey(area)],
       schema: FlowSetSchema,
-      session: (area) => flowsSessionDef({ area, universe, checker }),
-      briefing: (area) => flowsSessionBriefing(area, input.grounding),
+      session: (area) => flowsSessionDef({ area, universe, checker, prior: input.prior?.get(flowAreaKey(area)) ?? [] }),
+      briefing: (area) => flowsSessionBriefing(area, input.grounding, input.prior?.get(flowAreaKey(area)) ?? []),
       driver: acquire,
       ...(replayOnly('flows') ? { cacheOnly: 'flows' as const } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -522,7 +540,7 @@ export function createGuardGenerateSessionSeams(
       // The fold-side refusal (never trust the transcript): the SAME checker
       // `check_flows` ran in-session, so a draft that checked clean lands clean.
       rejectOutput: (area, output) =>
-        flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, catalogNames: checker.catalogNames })),
+        flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, catalogNames: checker.catalogNames, prior: input.prior?.get(flowAreaKey(area)) ?? [] })),
       fold: (area, result) => {
         if (result.outcome.status === 'completed') {
           byArea.set(flowAreaKey(area), {
@@ -556,15 +574,16 @@ export function createGuardGenerateSessionSeams(
       items: [FLOWS_EPIC_WORK_ITEM],
       workItem: () => FLOWS_EPIC_WORK_ITEM,
       cacheKey: () => flowsEpicSessionCacheKey(input.digests),
+      legacyCacheKeys: () => [flowsEpicSessionLegacyCacheKey(input.digests)],
       schema: EpicSynthesisSchema,
-      session: () => flowsEpicSessionDef({ digests: input.digests, claims: input.claims }),
-      briefing: () => flowsEpicSessionBriefing(input.digests),
+      session: () => flowsEpicSessionDef({ digests: input.digests, claims: input.claims, prior: input.prior ?? [] }),
+      briefing: () => flowsEpicSessionBriefing(input.digests, input.prior ?? []),
       driver: acquire,
       concurrency: 1,
       ...(replayOnly('flows') ? { cacheOnly: 'flows' as const } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       rejectOutput: (_item, output) => {
-        const { unknownReferences } = checkEpicSet(output, input.digests, input.claims)
+        const { unknownReferences } = checkEpicSet(output, input.digests, input.claims, input.prior ?? [])
         return unknownReferences.length > 0 ? `epic pass refused: ${unknownReferences[0]}` : null
       },
       fold: (_item, poolResult) => {
@@ -620,7 +639,12 @@ export function createGuardGenerateSessionSeams(
         // rejected scenario, and re-serving it would re-flag and treadmill.
         const hit = task.taint
           ? null
-          : await getCacheEntry(opts.repoRoot, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task)).catch(() => null)
+          : await getCacheEntryOrLegacy(
+              opts.repoRoot,
+              FLOW_WORKER_CACHE_NAME,
+              flowWorkerCacheKey(task),
+              ...flowWorkerLegacyCacheKeys(task),
+            ).catch(() => null)
         if (hit !== null) {
           const parsed = CachedWorkerEntrySchema.safeParse(hit)
           if (parsed.success) {
@@ -650,6 +674,10 @@ export function createGuardGenerateSessionSeams(
               // session runs.
               if (await task.confirmCached(accepted.map((s, i) => ({ yaml: yamls[i]!, expectedReds: s.expectedReds, review: parsed.data.reviews![i] })))) {
                 if (task.validateOutcome(outcome)) { misses.push(task); continue }
+                // The served entry stands in for the session, so the flow
+                // records what that session read. An entry written before the
+                // read-set existed replays none, and the flow keeps its own.
+                if (parsed.data.catalogReads) task.replayCatalogReads?.(parsed.data.catalogReads)
                 summary.fromCache++
                 byTask.set(task.workItem, { kind: 'outcome', outcome, fromCache: true })
                 tick('settled')
@@ -777,12 +805,16 @@ export function createGuardGenerateSessionSeams(
               const reviews = accepted.map((s) => task.stashedReview(s.scenarioYamlSha))
               if (yamls.length > 0 && yamls.every((y): y is string => y !== undefined) &&
                 reviews.every((r): r is NonNullable<typeof r> => r !== undefined)) {
+                // The read-set rides the entry: a later HIT must record the
+                // same catalog entries the flow's settle compare folds.
+                const catalogReads = task.catalogReads?.() ?? []
                 const entry: CachedWorkerEntry = {
                   outcome: settled.output,
                   version: GUARD_REVIEW_POLICY_VERSION,
                   reviews,
                   scenarioYaml: yamls[0]!,
                   ...(yamls.length > 1 ? { scenarioYamls: yamls } : {}),
+                  ...(catalogReads.length > 0 ? { catalogReads } : {}),
                 }
                 await setCacheEntry(opts.repoRoot, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), entry).catch(
                   () => undefined,
@@ -827,25 +859,33 @@ export function createGuardGenerateSessionSeams(
   // The claim-diff gate's view of the extract cache. `lookup` reads the raw
   // outcome cached for the doc's PRIOR content; `reuse` copies it under the
   // doc's CURRENT key so the pool above hits without a session. Both address
-  // the cache through the same key recipe the pool uses, so a prompt edit
-  // (which re-keys every doc) naturally finds no prior and re-extracts.
+  // the cache through the same key recipe the pool uses — including its OLD
+  // key, because the prior extraction the gate is looking for was written
+  // before the formula changed, and not finding it costs a full re-extraction
+  // of every edited document.
+  const priorExtraction = async (
+    doc: GuardDoc,
+    priorContentHash: string,
+    targets: readonly GuardPrerequisiteTarget[],
+  ): Promise<unknown | null> =>
+    getCacheEntryOrLegacy(
+      opts.repoRoot,
+      EXTRACT_SESSION_CACHE_NAME,
+      extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
+      extractSessionLegacyCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
+    ).catch(() => null)
+
   const reuseExtraction: ReuseExtractionSeam = {
     async lookup(doc, priorContentHash, targets = []) {
-      const cached = await getCacheEntry(
-        opts.repoRoot,
-        EXTRACT_SESSION_CACHE_NAME,
-        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
-      ).catch(() => null)
-      const parsed = extractContextSchema(targets).safeParse(cached)
+      const parsed = extractContextSchema(targets).safeParse(
+        await priorExtraction(doc, priorContentHash, targets),
+      )
       return parsed.success ? parsed.data : null
     },
     async reuse(doc, priorContentHash, targets = []) {
-      const cached = await getCacheEntry(
-        opts.repoRoot,
-        EXTRACT_SESSION_CACHE_NAME,
-        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
-      ).catch(() => null)
-      const parsed = extractContextSchema(targets).safeParse(cached)
+      const parsed = extractContextSchema(targets).safeParse(
+        await priorExtraction(doc, priorContentHash, targets),
+      )
       if (!parsed.success) return
       await setCacheEntry(opts.repoRoot, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc, targets), parsed.data).catch(
         () => undefined,

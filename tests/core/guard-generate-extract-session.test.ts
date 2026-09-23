@@ -26,6 +26,7 @@ import {
   collectWorkDocs,
   generateGuards,
   planGuardWork,
+  type ExtractPrior,
   type ExtractResult,
   type ExtractSessionSeam,
   type FlowClaimInput,
@@ -44,6 +45,8 @@ import {
   docChunkCount,
   extractSessionBriefing,
   extractSessionCacheKey,
+  extractSessionCacheKeyForContentHash,
+  extractDocContentHash,
   extractSessionDef,
   renderDocChunk,
   validateExtractDraft,
@@ -524,6 +527,71 @@ describe('suppression', () => {
     const briefing = extractSessionBriefing({ ...doc, suppressedQuotes: [QUOTE] }, TARGETS)
     expect(briefing).toContain('RESOLVED — STALE, DO NOT EXTRACT')
     expect(briefing).toContain(QUOTE)
+  })
+})
+
+describe('reconciling against the last extraction', () => {
+  /** The listing section's prior claim, the creating section settled. */
+  const priorOf = (settled: string[] = [CREATING]): ExtractPrior => ({
+    claims: [claim(CREATING), claim(LISTING, { claim: '`relkit list` prints one line per open task, newest first', needs: [{ kind: 'fixture', name: 'sample-tasks' }] })],
+    untestable: [],
+    settledAnchors: settled,
+  })
+  const LIST = '`relkit list` prints one line per open task, newest first'
+
+  it('briefs the settled sections as fixed, the rest with their prior claims to account for, and the need names in use', () => {
+    const doc = docsOf(docRepo())[0]
+    expect(extractSessionBriefing(doc, TARGETS)).not.toContain('LAST EXTRACTION')
+    const briefing = extractSessionBriefing(doc, TARGETS, priorOf())
+    expect(briefing).toContain('LAST EXTRACTION of this document')
+    expect(briefing).toContain(`- ${CREATING}: 1 claim(s)`)
+    // The H1 container is a section of its own and is not settled either.
+    expect(briefing).toContain(`Sections to EXTRACT: tasks, ${LISTING}.`)
+    expect(briefing).toContain(`"${LIST}" (cli) [cases: created-id]`)
+    expect(briefing).toContain('Need names in use — reuse them for the same needs: sample-tasks.')
+  })
+
+  it('`check_claims` refuses an unaccounted prior claim and a claim on a settled section, and passes a reconciled draft', () => {
+    const doc = docsOf(docRepo())[0]
+    const unaccounted = validateExtractDraft({ claims: [], untestable: [] }, doc, TARGETS, priorOf())
+    expect(unaccounted).toEqual([expect.stringContaining(`prior claim "${LIST}"`)])
+    const settledTouched = validateExtractDraft({ claims: [claim(CREATING), claim(LISTING, { claim: LIST })], untestable: [] }, doc, TARGETS, priorOf())
+    expect(settledTouched).toEqual([expect.stringContaining(`a section unchanged since the last extraction`)])
+    expect(validateExtractDraft({ claims: [claim(LISTING, { claim: LIST })], untestable: [] }, doc, TARGETS, priorOf())).toEqual([])
+    expect(validateExtractDraft({ claims: [claim(LISTING, { claim: 'lists tasks', replaces: LIST })], untestable: [] }, doc, TARGETS, priorOf())).toEqual([])
+  })
+
+  it('the outcome the loop returns holds the settled section verbatim beside what the session extracted', async () => {
+    const doc = docsOf(docRepo())[0]
+    const prior = priorOf()
+    const fresh: ExtractOutcome = { claims: [claim(LISTING, { claim: 'lists tasks, newest first', replaces: LIST })], untestable: [], retiredClaims: [] }
+    const stub = stubDriver(async ({ input, emit }) => {
+      await emit({ type: 'assistant-turn', text: 'finish', usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0, costSource: 'unpriced' } })
+      expect((await callTool(input, 'check_claims', fresh)).isError).toBeUndefined()
+      return outcome(fresh)
+    })
+    const { persistence } = memoryPersistence()
+    const settled = await runAgentLoop<ExtractOutcome>({
+      def: extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS, prior }),
+      workItem: `doc:${doc.doc}`,
+      initialMessages: [extractSessionBriefing(doc, TARGETS, prior)],
+      driver: stub.driver, persistence, sessionId: 'extract-reconcile',
+    }).outcome
+
+    expect(settled.status).toBe('completed')
+    if (settled.status !== 'completed') return
+    expect(settled.output.claims).toEqual([
+      { ...prior.claims[0], needs: [] },
+      { ...fresh.claims[0], sectionAnchor: LISTING },
+    ])
+    expect(settled.output).not.toHaveProperty('retiredClaims')
+  })
+
+  it('the prior is outside the cache key: the key is the content-hash recipe alone', () => {
+    const doc = docsOf(docRepo())[0]
+    expect(extractSessionCacheKey(doc, TARGETS)).toBe(
+      extractSessionCacheKeyForContentHash(extractDocContentHash(doc.content), doc.suppressedQuotes, TARGETS),
+    )
   })
 })
 

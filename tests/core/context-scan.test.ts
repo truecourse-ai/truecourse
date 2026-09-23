@@ -31,6 +31,11 @@ import {
 } from '@truecourse/core/commands/context-scan';
 import type { CuratedCorpus, DecisionsFile } from '@truecourse/spec-consolidator';
 import { memoryContextStore } from '../helpers/memory-context-store';
+import {
+  TEST_WORKSPACE_DESCRIPTION,
+  installWorkspaceProfiles,
+  resetWorkspaceProfiles,
+} from '../helpers/workspace-profile';
 import { memorySpecStore } from '../helpers/memory-spec-store';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { outcome, stubDriver, type StubCall } from './spec-scan-session-stub';
@@ -49,6 +54,9 @@ beforeEach(() => {
   // A workspace's runs are rows keyed by the workspace, not by any repository
   // and not inside any tree.
   installMemorySessionRuns();
+  // The scan attributes every document against what the workspace says its
+  // product is, so a workspace that never said it cannot be scanned at all.
+  installWorkspaceProfiles([ORG]);
 });
 
 afterEach(() => {
@@ -56,6 +64,7 @@ afterEach(() => {
   resetContextStore();
   resetSpecStore();
   resetSessionRuns();
+  resetWorkspaceProfiles();
 });
 
 /** A workspace with two sources: a repository's own markdown, and a site. */
@@ -145,7 +154,6 @@ describe('the workspace Document scan', () => {
 
     const result = await workspaceContextScanInProcess({
       workspaceOrgId: ORG,
-      repositories: ['acme/widgets'],
       driver: driver.driver,
     });
 
@@ -183,15 +191,13 @@ describe('the workspace Document scan', () => {
     expect(auth?.lastTouched.slice(0, 10)).toBe('2026-03-01');
   });
 
-  it('briefs the curator with the workspace and with each document’s source', async () => {
+  it('briefs the curator with what the workspace says it builds, and with each document’s source', async () => {
     await seedTwoSources();
     await setStoredDecisions(covered([REPO_SOURCE, SITE_SOURCE]));
     const driver = stubDriver(keepEverything);
 
     await workspaceContextScanInProcess({
       workspaceOrgId: ORG,
-      workspaceName: 'Acme',
-      repositories: ['acme/widgets'],
       driver: driver.driver,
     });
 
@@ -200,9 +206,14 @@ describe('the workspace Document scan', () => {
       .map((c) => c.briefing);
     expect(briefings).toHaveLength(3);
     for (const briefing of briefings) {
-      expect(briefing).toContain('IDENTITY: the workspace being scanned');
-      expect(briefing).toContain('This workspace is: Acme');
-      expect(briefing).toContain('- acme/widgets');
+      const identity = briefing.slice(0, briefing.indexOf('--- end identity ---'));
+      expect(identity).toContain('IDENTITY: the workspace being scanned');
+      expect(identity).toContain(`This workspace's product is: ${TEST_WORKSPACE_DESCRIPTION}`);
+      // The connected repositories are NOT the subject: a workspace can hold
+      // several whose names say nothing about the product. `acme/widgets` still
+      // appears further down as the document's SOURCE, which is a fact about
+      // where the document came from, not a claim about what we build.
+      expect(identity).not.toContain('acme/widgets');
     }
     expect(briefings.find((b) => b.includes(SITE_SOURCE))).toContain('SOURCE: Stripe Docs (site)');
     expect(briefings.find((b) => b.includes('users.md'))).toContain(
@@ -299,23 +310,35 @@ describe('the workspace Document scan', () => {
 });
 
 describe('the workspace identity', () => {
-  it('names the connected repositories, and the workspace when the server knows it', () => {
-    const identity = workspaceIdentity({
-      workspaceName: 'Acme',
-      repositories: ['acme/widgets', 'acme/docs'],
+  it('is the workspace’s own sentence, and nothing else', async () => {
+    installWorkspaceProfiles([ORG], 'Acme Widgets, a warehouse inventory service.');
+    const identity = await workspaceIdentity(ORG);
+    expect(identity).toMatchObject({
+      scope: 'workspace',
+      description: 'Acme Widgets, a warehouse inventory service.',
+      // No name and no matchable aliases: a workspace is not a product NAME,
+      // and the connected repositories never become one.
+      name: '',
+      aliases: [],
     });
-    expect(identity).toMatchObject({ scope: 'workspace', name: 'Acme' });
-    expect(identity?.repositories).toEqual(['acme/docs', 'acme/widgets']);
-    // The names its documents may call it come from the repositories themselves.
-    expect(identity?.aliases).toContain('widgets');
   });
 
-  it('falls back to the one repository’s own product name', () => {
-    expect(workspaceIdentity({ repositories: ['acme/widgets'] })?.name).toBe('widgets');
+  it('refuses a workspace that has not said what its product is', async () => {
+    installWorkspaceProfiles([]);
+    await expect(workspaceIdentity(ORG)).rejects.toThrow(/has not said what its product is/);
   });
 
-  it('is null when nothing identifies the workspace', () => {
-    expect(workspaceIdentity({ repositories: [] })).toBeNull();
+  it('refuses to scan a workspace that has not said what its product is', async () => {
+    await seedTwoSources();
+    installWorkspaceProfiles([]);
+    await expect(
+      workspaceContextScanInProcess({
+        workspaceOrgId: ORG,
+        driver: stubDriver(keepEverything).driver,
+      }),
+    ).rejects.toThrow(/has not said what its product is/);
+    // Nothing was written: the scan refused before it read a document.
+    expect(await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: ORG }, 'corpus')).toBeNull();
   });
 });
 

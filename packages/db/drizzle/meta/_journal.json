@@ -208,15 +208,29 @@
     {
       "idx": 29,
       "version": "7",
-      "when": 1789956896573,
-      "tag": "0029_integration_connections",
+      "when": 1790026458283,
+      "tag": "0029_workspace_profiles",
       "breakpoints": true
     },
     {
       "idx": 30,
       "version": "7",
-      "when": 1789956896574,
-      "tag": "0030_workspace_entitlements",
+      "when": 1790126458283,
+      "tag": "0030_versioned_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1790126458284,
+      "tag": "0031_integration_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790126458285,
+      "tag": "0032_workspace_entitlements",
       "breakpoints": true
     }
   ]

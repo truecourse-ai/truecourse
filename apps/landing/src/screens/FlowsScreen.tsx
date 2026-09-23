@@ -17,7 +17,7 @@ import {
   order,
   type Col,
 } from './primitives';
-import { baseline, textWidth, ui, type Tone } from './theme';
+import { SCREEN_H, baseline, textWidth, ui, type Tone } from './theme';
 import { useCompact } from './use-compact';
 
 interface Flow {
@@ -134,7 +134,7 @@ export function FlowsScreen() {
 
 function Full() {
   const W = 1040;
-  const H = 560;
+  const H = SCREEN_H;
   const cols: Col[] = [
     { label: 'Flow', left: SIDEBAR_W + 12, right: 580 },
     { label: 'Status', left: 580, right: 690 },

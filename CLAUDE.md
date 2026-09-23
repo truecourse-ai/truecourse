@@ -90,6 +90,17 @@ the tree outlives the run, is shown to anyone, or is committed. Every path
 inside it is derived in `packages/shared/src/fs/work-tree.ts` — add a document
 by adding it there, never by spelling the segments at the call site.
 
+**Generated state is versioned, never overwritten.** Everything a run
+produces is a series: each producing run inserts a new version stamped with its
+run and model, and the current one is the newest of its scope. A rollback
+inserts a copy. Only the decisions ledgers are edited in place.
+
+**Cache keys never fold a prompt's text.** Each LLM stage carries a hand-bumped
+`*_STAGE_VERSION`: a prompt change that fixes wrong output bumps it in the same
+commit, and any other prompt edit invalidates nothing. A flow and a setup step
+settle by NAMED inputs, so changing what a key folds is a change to that list
+of names.
+
 **Conventions.** Tests live in `tests/`, never beside the source. Types shared
 between client and server live in `packages/shared`. Comments say what is true
 now, never what the plan was or which change introduced it.

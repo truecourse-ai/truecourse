@@ -29,7 +29,7 @@ import {
   subscribeSessionRunWrites,
   workspaceOfRepo,
 } from './stores.js';
-import { PgInviteLinkStore, PgRepositoryStore } from '@truecourse/data-store';
+import { PgInviteLinkStore, PgRepositoryStore, sweepStoredVersions } from '@truecourse/data-store';
 import { setRepoProviderLookup } from './services/work-tree.service.js';
 import { startRunChangeRelay } from './services/run-events.service.js';
 import {
@@ -115,6 +115,15 @@ export async function startServer(): Promise<void> {
   await reconcileStoredRuns();
   sweepRunClones();
   sweepSeedColdCopies();
+  // Retention over every versioned series, and the content pools behind them:
+  // what an earlier deployment left unreferenced goes now. Off the boot path,
+  // since a large pool is minutes of work and nothing waits on it.
+  void sweepStoredVersions(getDb())
+    .then((swept) => {
+      const pools = Object.entries(swept.bodies).map(([pool, n]) => `${pool} ${n}`).join(', ');
+      log.info(`[Server] version sweep: ${swept.versions} versions trimmed, bodies swept: ${pools || 'none'}`);
+    })
+    .catch((err: unknown) => log.warn(`[Server] the version sweep failed: ${(err as Error).message}`));
   if (operatorClaudeCode()) {
     log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
   }

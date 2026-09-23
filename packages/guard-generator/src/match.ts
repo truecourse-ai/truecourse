@@ -14,14 +14,14 @@
  * Every interface id the model returns is validated against the catalog and every
  * milestone against the flow — a plan is never trusted to name something real.
  * The cache lives under `.cache/guard/match` (derived, deletable), keyed on the
- * flow fingerprint + the surface's catalog fingerprint + the prompt fingerprint +
- * the format version, so an unchanged flow on an unchanged surface costs nothing.
+ * flow fingerprint + the surface's IDENTITY + the stage and format versions, so
+ * an unchanged flow on a structurally unchanged surface costs nothing.
  * {@link planFlowMatching} is the ONE planner the runtime and the pre-flight
  * estimate share, so the estimate probes exactly the cache the run reads.
  */
 
 import { createHash } from 'node:crypto'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import {
   GUARD_OBSERVATION_CAPABILITIES,
   isCreditsExhausted,
@@ -39,14 +39,14 @@ import {
   type InterfaceStep,
 } from '@truecourse/shared'
 import { RealizationMatchSchema, type RealizationStep, type RealizationGap, type RealizationMatch } from './schemas.js'
+import { LEGACY_MATCH_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import {
-  MATCH_PROMPT_FINGERPRINT,
   type InterfaceDigest,
   type MatchIssues,
   type MatchUserContext,
 } from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
-import type { MatchRunner } from './runners.js'
+import type { MatchRunner } from './leaf-seams.js'
 import { PROVIDER_CONTROL_VERSION, resolveProviderControl, type Recipe, type ResolvedProviderControl } from '@truecourse/guard-runner'
 
 export const MATCH_CACHE_NAME = 'guard/match'
@@ -64,12 +64,29 @@ export function matchProviderControls(flow: GuardFlow, driver: GuardDriverId, ta
 // Catalogs
 // ---------------------------------------------------------------------------
 
-/** One surface's interfaces plus the fingerprint over that set (the cache key half). */
+/** One surface's interfaces, its IDENTITY (the cache key half) and the wider
+ *  fingerprint that also folds the authored prose. */
 export interface SurfaceCatalog {
   surface: GuardDriverId
   interfaces: Interface[]
-  /** `sha256:…` over the surface's sorted interface fingerprints. */
+  /** `sha256:…` over the surface's sorted interface fingerprints AND the
+   *  authored `context` prose of each — everything the matcher is shown. */
   fingerprint: string
+  /** {@link surfaceIdentityFingerprint} — what the match key folds. */
+  identity: string
+}
+
+/**
+ * The surface's IDENTITY: its interface ids with each one's structural
+ * fingerprint, sorted. It is what a realization plan can actually depend on —
+ * a route that moved, an interface that appeared or left — and it deliberately
+ * excludes the authored `context` prose, so re-wording a purpose re-plans
+ * nothing. A new interface id DOES move it: that is the event which should let
+ * every flow on the surface reconsider its route.
+ */
+export function surfaceIdentityFingerprint(interfaces: readonly Interface[]): string {
+  const body = interfaces.map((j) => `${j.id}:${j.fingerprint || interfaceFingerprint(j)}`).sort().join('\n')
+  return `sha256:${createHash('sha256').update(body, 'utf-8').digest('hex')}`
 }
 
 /**
@@ -105,6 +122,7 @@ export function buildSurfaceCatalogs(interfaces: readonly Interface[]): Map<Guar
       surface,
       interfaces: list,
       fingerprint: `sha256:${createHash('sha256').update(body, 'utf-8').digest('hex')}`,
+      identity: surfaceIdentityFingerprint(list),
     })
   }
   return out
@@ -193,30 +211,81 @@ function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
 // ---------------------------------------------------------------------------
 
 /**
- * A (flow, surface) match's content key: the flow's milestone composition, the
- * surface's catalog fingerprint, the matching prompt, and the format version.
- * Editing a doc that moves the flow's fingerprint, or a code change that moves the
- * surface, re-matches; nothing else does.
+ * THE MATCH STAGE'S VERSION, bumped by hand. A reworded matching prompt does
+ * not make a cached verdict wrong, so the prompt is not in the key; when a
+ * prompt change fixes WRONG output, this is bumped in the same commit and every
+ * flow re-matches.
+ */
+export const MATCH_STAGE_VERSION = 1
+
+/**
+ * A (flow, surface) match's content key: the stage version, the flow's milestone
+ * composition, the surface's IDENTITY and the format version. Editing a doc that
+ * moves the flow's fingerprint, or a code change that adds, removes or
+ * restructures an interface, re-matches; nothing else does.
+ *
+ * The authored `context` prose is deliberately out. A plan the matcher already
+ * returned still names interfaces that exist and still drives them the same way;
+ * a reworded purpose can only suggest a more direct route, and a less direct
+ * route is not a wrong test. {@link MATCH_CONTEXT_CACHE_NAME} counts how often a
+ * verdict is served across such an edit, which is what would justify folding the
+ * prose of the interfaces IN the plan later.
  */
 export function matchCacheKey(
   flow: Pick<GuardFlow, 'fingerprint'>,
+  catalog: Pick<SurfaceCatalog, 'surface' | 'identity'>,
+  providerControls: readonly ResolvedProviderControl[] = [],
+): string {
+  return matchKeyOver(`match-v${MATCH_STAGE_VERSION}`, flow, catalog.surface, catalog.identity, providerControls)
+}
+
+/**
+ * {@link matchCacheKey} under the two formulas that came before it, newest
+ * first: the whole catalog fingerprint (authored prose included) under this
+ * stage version, and the same fingerprint under the prompt fingerprint the key
+ * used to fold. A miss reads them in turn, so no workspace pays to re-match
+ * what it already has. Delete with the legacy hash.
+ */
+export function matchLegacyCacheKeys(
+  flow: Pick<GuardFlow, 'fingerprint'>,
   catalog: Pick<SurfaceCatalog, 'surface' | 'fingerprint'>,
   providerControls: readonly ResolvedProviderControl[] = [],
+): string[] {
+  return [
+    matchKeyOver(`match-v${MATCH_STAGE_VERSION}`, flow, catalog.surface, catalog.fingerprint, providerControls),
+    matchKeyOver(LEGACY_MATCH_PROMPT_FINGERPRINT, flow, catalog.surface, catalog.fingerprint, providerControls),
+  ]
+}
+
+function matchKeyOver(
+  stage: string,
+  flow: Pick<GuardFlow, 'fingerprint'>,
+  surface: GuardDriverId,
+  catalogFingerprint: string,
+  providerControls: readonly ResolvedProviderControl[],
 ): string {
   return createHash('sha256')
     .update(
       [
-        MATCH_PROMPT_FINGERPRINT,
+        stage,
         'case-assignments-v2',
-        JSON.stringify(GUARD_OBSERVATION_CAPABILITIES[catalog.surface] ?? []),
+        JSON.stringify(GUARD_OBSERVATION_CAPABILITIES[surface] ?? []),
         JSON.stringify(providerControls.length ? [PROVIDER_CONTROL_VERSION, providerControls.map(c => JSON.stringify(c)).sort()] : []),
-        catalog.surface,
-        catalog.fingerprint,
+        surface,
+        catalogFingerprint,
         flow.fingerprint,
       ].join('::'),
     )
     .digest('hex')
 }
+
+/**
+ * The cache holding one marker per settled verdict, under the verdict's own
+ * key: the catalog fingerprint the surface wore when the verdict was last seen.
+ * A hit whose marker names a different fingerprint is a verdict served across a
+ * context edit — the trade {@link matchCacheKey} makes, counted.
+ */
+const MATCH_CONTEXT_CACHE_NAME = 'guard/match-context'
 
 /**
  * The cached verdict for one (flow, surface), re-validated against the live
@@ -234,7 +303,7 @@ export async function readCachedMatch(
 ): Promise<{ plan: RealizationPlan | null } | null> {
   cacheKey ??= matchCacheKey(flow, catalog, providerControls)
   if (!capabilityPartition(flow, catalog.surface).flow.milestones.length) return { plan: null }
-  const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
+  const cached = await getCacheEntryOrLegacy(repoRoot, MATCH_CACHE_NAME, cacheKey, ...matchLegacyCacheKeys(flow, catalog, providerControls))
   if (!cached) return null
   const parsed = RealizationMatchSchema.safeParse(cached)
   if (!parsed.success || parsed.data.unrealizable) return null
@@ -307,10 +376,15 @@ export interface RealizationPlan {
   interfaces: Interface[]
 }
 
-/** A flow's verdict on one surface: a plan, a stated refusal, or a stage failure. */
+/**
+ * A flow's verdict on one surface: a plan, a stated refusal, or a stage failure.
+ * `contextMoved` marks a verdict SERVED FROM CACHE although the surface's
+ * authored prose had moved since it was stored — the key folds the surface's
+ * identity alone, so the flow kept a plan an edited catalog might have changed.
+ */
 export type MatchOutcome =
-  | { kind: 'plan'; plan: RealizationPlan; gaps: RealizationGap[]; calls: number }
-  | { kind: 'gap'; gaps: RealizationGap[]; calls: number }
+  | { kind: 'plan'; plan: RealizationPlan; gaps: RealizationGap[]; calls: number; contextMoved?: true }
+  | { kind: 'gap'; gaps: RealizationGap[]; calls: number; contextMoved?: true }
   | { kind: 'error'; reason: string; calls: number }
 
 /** Validation of one raw match reply against the flow and the surface's catalog. */
@@ -565,12 +639,24 @@ export async function matchFlow(
       : { kind: 'gap', gaps, calls }
   }
 
-  const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
+  // The context marker: the catalog fingerprint this verdict was last seen
+  // under, written beside every settled verdict and re-stamped on every hit.
+  const markContext = (): Promise<void> =>
+    setCacheEntry(repoRoot, MATCH_CONTEXT_CACHE_NAME, cacheKey!, { catalog: catalog.fingerprint })
+
+  const cached = await getCacheEntryOrLegacy(repoRoot, MATCH_CACHE_NAME, cacheKey, ...matchLegacyCacheKeys(flow, catalog, providerControls))
   if (cached) {
     const parsed = RealizationMatchSchema.safeParse(cached)
     if (parsed.success && !parsed.data.unrealizable) {
       const settled = settle(parsed.data, 0)
-      if (settled) return settled
+      if (settled) {
+        const marker = (await getCacheEntry(repoRoot, MATCH_CONTEXT_CACHE_NAME, cacheKey)) as { catalog?: unknown } | null
+        // A verdict cached before the marker existed gets one now and says
+        // nothing: what the surface read then is unknown, not unchanged.
+        const moved = marker !== null && marker.catalog !== catalog.fingerprint
+        if (marker === null || moved) await markContext()
+        return moved && settled.kind !== 'error' ? { ...settled, contextMoved: true } : settled
+      }
     }
   }
 
@@ -602,7 +688,9 @@ export async function matchFlow(
       const data = settled.kind === 'plan'
         ? { plan: settled.plan.steps.map((s) => ({ interfaceId: s.interface.id, milestone: s.milestone, ...(s.checks ? { checks: s.checks } : {}), ...(s.note ? { note: s.note } : {}) })), gaps: settled.gaps }
         : settled.kind === 'gap' ? { gaps: settled.gaps } : null
-      if (data) await setCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey, data)
+      if (!data || settled.kind === 'error') return settled
+      await setCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey, data)
+      await markContext()
       return settled
     }
     const partial = settle(independentMatchPortions(matchableFlow, catalog, parsed.data), calls, true)

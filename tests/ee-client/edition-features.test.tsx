@@ -131,6 +131,7 @@ describe('Settings › Connections', () => {
     const sections = await screen.findByRole('navigation', { name: 'Settings sections' });
     await waitFor(() =>
       expect(within(sections).getAllByRole('link').map((link) => link.textContent)).toEqual([
+        'Workspace',
         'Members',
         'Repositories',
         'Models',
@@ -147,6 +148,7 @@ describe('Settings › Connections', () => {
     const sections = await screen.findByRole('navigation', { name: 'Settings sections' });
     await waitFor(() =>
       expect(within(sections).getAllByRole('link').map((link) => link.textContent)).toEqual([
+        'Workspace',
         'Members',
         'Repositories',
         'Models',

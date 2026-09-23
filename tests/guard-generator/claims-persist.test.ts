@@ -139,3 +139,52 @@ it('updates prerequisite metadata without replacing the claim id or adding a cla
   expect(second.added).toBe(0);expect(second.updated).toBe(1);expect(second.file.claims[0].id).toBe(id)
   expect(second.file.claims[0].verification?.cases?.[0].prerequisites?.[0].dependency).toBe('currencybeacon')
 })
+
+describe('a claim that replaces a prior one', () => {
+  it('takes the prior row over: same id, new identity, fresh content hash, no row left behind', () => {
+    const first = mergeExtractedClaims(null, [extractedCartLocale], NOW)
+    const id = first.file.claims[0].id
+    const reworded = {
+      doc: 'docs/cart.mdx',
+      outcome: {
+        claims: [
+          {
+            claim: 'A cart created with a locale keeps that locale on the Cart model.',
+            driver: 'api' as const,
+            sectionAnchor: 'cart/locale',
+            reason: 'POST /store/carts with a locale, read it back',
+            needs: [],
+            replaces: extractedCartLocale.outcome.claims[0].claim,
+          },
+        ],
+      },
+    }
+    const second = mergeExtractedClaims(first.file, [reworded], '2026-09-10T00:00:00Z')
+
+    expect(second).toMatchObject({ added: 0, updated: 0, replaced: 1 })
+    expect(second.file.claims).toHaveLength(1)
+    const row = second.file.claims[0]
+    expect(row.id).toBe(id)
+    expect(row.title).toBe(reworded.outcome.claims[0].claim)
+    expect(row.contentHash).toBe(claimContentHash(row))
+    expect(row.driver).toBe('api')
+    // The old identity resolves nowhere; the new one resolves to the same id.
+    expect(crossCheckClaimRefs({ claims: second.file, flows: { version: 1, generatedAt: NOW, flows: [], noFlowClaims: [] }, scenarios: [] })).toEqual([])
+  })
+
+  it('records the driver on a new row and refreshes it on a kept one', () => {
+    const first = mergeExtractedClaims(null, [extractedCartLocale], NOW)
+    expect(first.file.claims[0].driver).toBe('api')
+    expect(first.file.claims[0].alternativeDrivers).toBeUndefined()
+    const withAlternative = { ...extractedCartLocale, outcome: { claims: [{ ...extractedCartLocale.outcome.claims[0], alternativeDrivers: ['web' as const] }] } }
+    const second = mergeExtractedClaims(first.file, [withAlternative], '2026-09-10T00:00:00Z')
+    expect(second.updated).toBe(1)
+    expect(second.file.claims[0].alternativeDrivers).toEqual(['web'])
+  })
+
+  it('adds a replacement as a new row when the prior sentence is nowhere in the store', () => {
+    const orphan = { ...extractedCartLocale, outcome: { claims: [{ ...extractedCartLocale.outcome.claims[0], replaces: 'a sentence the store never held' }] } }
+    const merged = mergeExtractedClaims(null, [orphan], NOW)
+    expect(merged).toMatchObject({ added: 1, replaced: 0 })
+  })
+})

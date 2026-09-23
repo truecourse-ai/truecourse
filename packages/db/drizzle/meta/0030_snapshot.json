@@ -1,6 +1,6 @@
 {
-  "id": "fec2a621-e2aa-46ec-9c45-ce9f5d439b7a",
-  "prevId": "f32b98b1-46e2-4768-a52d-9698a0b83317",
+  "id": "a143aaad-2549-478d-8307-136b9f95a81a",
+  "prevId": "aceb9069-f281-4f3f-a682-45218844165a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -432,6 +432,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "pending": {
+          "name": "pending",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -630,6 +636,12 @@
       "name": "workspace_spec_sets",
       "schema": "",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
         "workspace_org_id": {
           "name": "workspace_org_id",
           "type": "text",
@@ -648,30 +660,75 @@
           "primaryKey": false,
           "notNull": true
         },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'default'"
+        },
+        "produced_by_run": {
+          "name": "produced_by_run",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_commit": {
+          "name": "source_commit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "workspace_spec_sets_workspace_org_id_artifact_pk": {
-          "name": "workspace_spec_sets_workspace_org_id_artifact_pk",
+      "indexes": {
+        "workspace_spec_sets_scope_idx": {
+          "name": "workspace_spec_sets_scope_idx",
           "columns": [
-            "workspace_org_id",
-            "artifact"
-          ]
+            {
+              "expression": "workspace_org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "scope",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "artifact",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -995,6 +1052,12 @@
       "name": "guard_results",
       "schema": "",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
         "repo_key": {
           "name": "repo_key",
           "type": "text",
@@ -1020,12 +1083,36 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
-        "is_baseline": {
-          "name": "is_baseline",
-          "type": "boolean",
+        "scope": {
+          "name": "scope",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": false
+          "default": "'default'"
+        },
+        "produced_by_run": {
+          "name": "produced_by_run",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "scenario_set_id": {
+          "name": "scenario_set_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "restored_from": {
+          "name": "restored_from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "generated_at": {
           "name": "generated_at",
@@ -1038,25 +1125,45 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "guard_results_repo_key_commit_sha_pk": {
-          "name": "guard_results_repo_key_commit_sha_pk",
+      "indexes": {
+        "guard_results_scope_idx": {
+          "name": "guard_results_scope_idx",
           "columns": [
-            "repo_key",
-            "commit_sha"
-          ]
+            {
+              "expression": "repo_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "scope",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "commit_sha",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -1121,12 +1228,24 @@
           "primaryKey": false,
           "notNull": false
         },
-        "is_baseline": {
-          "name": "is_baseline",
-          "type": "boolean",
+        "scope": {
+          "name": "scope",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": false
+          "default": "'default'"
+        },
+        "produced_by_run": {
+          "name": "produced_by_run",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "ran_at": {
           "name": "ran_at",
@@ -1163,8 +1282,8 @@
           "method": "btree",
           "with": {}
         },
-        "guard_runs_baseline_idx": {
-          "name": "guard_runs_baseline_idx",
+        "guard_runs_scope_idx": {
+          "name": "guard_runs_scope_idx",
           "columns": [
             {
               "expression": "repo_key",
@@ -1173,7 +1292,13 @@
               "nulls": "last"
             },
             {
-              "expression": "is_baseline",
+              "expression": "scope",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "commit_sha",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1189,36 +1314,15 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "guard_runs_repo_run_idx": {
-          "name": "guard_runs_repo_run_idx",
-          "columns": [
-            {
-              "expression": "repo_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "guard_runs_repo_key_commit_sha_pk": {
-          "name": "guard_runs_repo_key_commit_sha_pk",
+        "guard_runs_repo_key_run_id_pk": {
+          "name": "guard_runs_repo_key_run_id_pk",
           "columns": [
             "repo_key",
-            "commit_sha"
+            "run_id"
           ]
         }
       },
@@ -1231,6 +1335,12 @@
       "name": "guard_scenario_sets",
       "schema": "",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
         "repo_key": {
           "name": "repo_key",
           "type": "text",
@@ -1261,30 +1371,75 @@
           "primaryKey": false,
           "notNull": true
         },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'default'"
+        },
+        "produced_by_run": {
+          "name": "produced_by_run",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "restored_from": {
+          "name": "restored_from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "guard_scenario_sets_repo_key_commit_sha_pk": {
-          "name": "guard_scenario_sets_repo_key_commit_sha_pk",
+      "indexes": {
+        "guard_scenario_sets_scope_idx": {
+          "name": "guard_scenario_sets_scope_idx",
           "columns": [
-            "repo_key",
-            "commit_sha"
-          ]
+            {
+              "expression": "repo_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "scope",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "commit_sha",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -1294,6 +1449,12 @@
       "name": "guard_setup_sets",
       "schema": "",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
         "repo_key": {
           "name": "repo_key",
           "type": "text",
@@ -1324,30 +1485,69 @@
           "primaryKey": false,
           "notNull": true
         },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'default'"
+        },
+        "produced_by_run": {
+          "name": "produced_by_run",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "guard_setup_sets_repo_key_commit_sha_pk": {
-          "name": "guard_setup_sets_repo_key_commit_sha_pk",
+      "indexes": {
+        "guard_setup_sets_scope_idx": {
+          "name": "guard_setup_sets_scope_idx",
           "columns": [
-            "repo_key",
-            "commit_sha"
-          ]
+            {
+              "expression": "repo_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "scope",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "commit_sha",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -1851,6 +2051,37 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.workspace_profiles": {
+      "name": "workspace_profiles",
+      "schema": "",
+      "columns": {
+        "workspace_org_id": {
+          "name": "workspace_org_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.llm_usage": {
       "name": "llm_usage",
       "schema": "",
@@ -2183,73 +2414,6 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.workspace_entitlements": {
-      "name": "workspace_entitlements",
-      "schema": "",
-      "columns": {
-        "workspace_org_id": {
-          "name": "workspace_org_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "feature": {
-          "name": "feature",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "granted_at": {
-          "name": "granted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "granted_by": {
-          "name": "granted_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "workspace_entitlements_org_idx": {
-          "name": "workspace_entitlements_org_idx",
-          "columns": [
-            {
-              "expression": "workspace_org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "workspace_entitlements_workspace_org_id_feature_pk": {
-          "name": "workspace_entitlements_workspace_org_id_feature_pk",
-          "columns": [
-            "workspace_org_id",
-            "feature"
-          ]
-        }
-      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

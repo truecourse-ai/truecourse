@@ -25,6 +25,17 @@ import {
   registerServerFeature,
 } from '../../apps/dashboard/server/src/features';
 import { ENTERPRISE_FEATURES } from '@truecourse/shared';
+import {
+  installWorkspaceProfiles,
+  resetWorkspaceProfiles,
+  type MemoryWorkspaceProfiles,
+} from '../helpers/workspace-profile';
+import { memoryContextStore } from '../helpers/memory-context-store';
+import {
+  contextChangedAt,
+  resetContextStore,
+  setContextStore,
+} from '@truecourse/core/lib/context-store';
 
 /** Local mode issues no invite links; the store is handed over and never read. */
 const deps = { inviteLinks: new MemoryInviteLinkStore(), manyWorkspaces: false };
@@ -54,6 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetWorkspaceProfiles();
   resetRegistryStore();
   for (const [key, value] of Object.entries(saved)) {
     if (value === undefined) delete process.env[key];
@@ -223,6 +235,83 @@ describe('the local gate', () => {
     expect(res.body.members[0]).toMatchObject({ isSelf: true });
     expect(res.body.invitations).toEqual([]);
     expect(res.body.inviteLinks).toEqual([]);
+  });
+});
+
+/**
+ * SETTING WHAT THE WORKSPACE BUILDS, ON A MACHINE WITH NO SIGN-IN.
+ *
+ * Nothing connects into a workspace that has not said what its product is, and
+ * creating a workspace — where a hosted one states it — is enterprise and does
+ * not exist here: local mode has ONE implicit workspace behind a fixed org id.
+ * So the profile route is mounted in every mode, and Settings › Workspace is
+ * where a local developer says it. Without this, `TRUECOURSE_MODE=local` could
+ * connect nothing at all.
+ */
+describe('the local workspace saying what its product is', () => {
+  let profiles: MemoryWorkspaceProfiles;
+
+  const localApp = () => {
+    const auth = createAuth('local', deps);
+    return createApp({
+      serveStatic: false,
+      authVerifier: auth.verify,
+      authRouter: auth.router,
+      workspaceRouter: auth.members,
+      repoLinks: null,
+      github: null,
+      jobs: null,
+    });
+  };
+
+  beforeEach(() => {
+    profiles = installWorkspaceProfiles([]);
+    setContextStore(memoryContextStore());
+  });
+
+  afterEach(() => {
+    resetContextStore();
+  });
+
+  it('reads as not set on a fresh checkout, and is set from the one page every mode has', async () => {
+    const app = localApp();
+
+    const before = await request(app).get('/api/workspace/profile').expect(200);
+    expect(before.body).toEqual({ description: null, updatedAt: null });
+    expect(await contextChangedAt(LOCAL_ORG_ID)).toBeNull();
+
+    const saved = await request(app)
+      .put('/api/workspace/profile')
+      .send({ description: '  Orders API, a  fulfilment service for online shops.  ' })
+      .expect(200);
+    // Whitespace collapsed and trimmed: the stored sentence is the one the
+    // scan's identity block carries.
+    expect(saved.body.description).toBe('Orders API, a fulfilment service for online shops.');
+    expect(saved.body.updatedAt).toBeTruthy();
+    // The sentence is part of every curation verdict's key, so the corpus is
+    // stale from this moment: the workspace's changed-at stamp moves with it.
+    expect(await contextChangedAt(LOCAL_ORG_ID)).toBe(saved.body.updatedAt);
+
+    // It is the machine's ONE implicit workspace that holds it.
+    expect(profiles.all()).toEqual([
+      expect.objectContaining({
+        workspaceOrgId: LOCAL_ORG_ID,
+        description: 'Orders API, a fulfilment service for online shops.',
+      }),
+    ]);
+    const after = await request(app).get('/api/workspace/profile').expect(200);
+    expect(after.body.description).toBe('Orders API, a fulfilment service for online shops.');
+  });
+
+  it('refuses a sentence that says nothing, and stores nothing', async () => {
+    const app = localApp();
+    for (const description of [undefined, '', '   ', 'too short', 'x'.repeat(401)]) {
+      await request(app)
+        .put('/api/workspace/profile')
+        .send(description === undefined ? {} : { description })
+        .expect(400);
+    }
+    expect(profiles.all()).toEqual([]);
   });
 });
 

@@ -24,6 +24,7 @@ import { setContextStore } from '@truecourse/core/lib/context-store';
 import { setUsageStore } from '@truecourse/core/lib/usage-store';
 import { setCreditsStore } from '@truecourse/core/lib/credits-store';
 import { setEntitlementsStore } from '@truecourse/core/lib/entitlements-store';
+import { setWorkspaceProfileStore } from '@truecourse/core/lib/workspace-profile-store';
 import { setRegistryStore } from '@truecourse/core/config/registry';
 import { setSessionRunBackend } from '@truecourse/core/lib/sessions-store';
 import { setKvCacheStore } from '@truecourse/llm';
@@ -39,9 +40,9 @@ import {
   PgUsageStore,
   PgCreditsStore,
   PgEntitlementsStore,
+  PgWorkspaceProfileStore,
   purgeRepoData,
 } from '@truecourse/data-store';
-import { setShowResolvedStageModel, setShowStageUsage } from '@truecourse/core/commands/spec-in-process';
 import { setWorkspaceLlmConfigStore } from './services/workspace-llm.service.js';
 import { setRepoDataPurge } from './services/repo-removal.service.js';
 
@@ -163,10 +164,12 @@ export function installDbStores(
   // Which enterprise features each workspace may use. An operator grants them;
   // mounting a router is what this deployment CARRIES, not what a workspace holds.
   setEntitlementsStore(new PgEntitlementsStore(db));
+
+  // What the workspace says its product is — the one thing about a workspace
+  // that is ours rather than the identity provider's, and the whole subject the
+  // Document scan attributes a document against.
+  setWorkspaceProfileStore(new PgWorkspaceProfileStore(db));
   // Each workspace names ONE model, and its transport ignores the per-stage
-  // hint, so rendering the per-stage tiers would be a lie.
-  setShowResolvedStageModel(false);
-  setShowStageUsage(false);
 
   sessionRuns = new PgSessionRunStore(db, lockPool);
   setSessionRunBackend(sessionRuns);

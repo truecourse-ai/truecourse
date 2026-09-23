@@ -62,6 +62,7 @@ import {
 import { addContextSource, listContextConnections, previewContextSource } from '@/lib/api';
 import { fetchGithubStatus, fetchInstallationRepos } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
+import { toldToDescribeWorkspace } from '@/dashboard/data/workspace-profile';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { registeredSettingsTabs, registeredSourceKindMark } from '@/dashboard/shell/registry';
 import { Stepper } from '@/dashboard/ui/stepper';
@@ -341,7 +342,13 @@ export function AddContextDialog({
         onOpenChange(false);
         navigate(sourceHref(res.source.id));
       })
-      .catch((e: unknown) => setFailure(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => {
+        // A workspace that has not said what its product is cannot hold a
+        // source: the remedy is a page, so the toast carries the way there
+        // rather than the dialog showing a wall.
+        if (toldToDescribeWorkspace(e, navigate)) return;
+        setFailure(e instanceof Error ? e.message : String(e));
+      })
       .finally(() => setAdding(false));
   };
 

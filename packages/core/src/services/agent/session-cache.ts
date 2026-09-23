@@ -30,7 +30,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import type { SessionOutcome } from '@truecourse/agent-loop'
 import type { z } from 'zod'
 
@@ -39,8 +39,12 @@ export interface CachedSessionOptions<TOutcome> {
   /** Cache directory name, e.g. `'guard/generate'` — reuse a legacy stage's
    *  name where its keys survive the move to sessions. */
   cacheName: string
-  /** sha256 over the prompt fingerprint + every behavior-affecting input. */
+  /** sha256 over the stage version + every behavior-affecting input. */
   key: string
+  /** The keys this kind computed before its formula changed, newest formula
+   *  first: a miss reads them in turn and re-saves the hit under `key`.
+   *  Delete with the legacy hash. */
+  legacyKeys?: readonly string[]
   /** The outcome schema of the session kind — gates a cached value on read. */
   schema: z.ZodType<TOutcome>
   /** Runs the session on a miss. Its outcome is returned as-is (and written
@@ -57,38 +61,63 @@ export interface CachedSessionOptions<TOutcome> {
 export async function cachedSessionOutcome<TOutcome>(
   opts: CachedSessionOptions<TOutcome>,
 ): Promise<SessionOutcome<TOutcome> & { fromCache?: true }> {
-  const cached = await getCacheEntry(opts.repoRoot, opts.cacheName, opts.key).catch(() => null)
+  const cached = await readCachedSessionOutput(opts)
   if (cached !== null) {
-    const parsed = opts.schema.safeParse(cached)
-    // A malformed entry is a miss: the schema moved (or the entry rotted), and
-    // the honest response is to re-run and overwrite, never to fail the run.
-    if (parsed.success) {
-      return {
-        status: 'completed',
-        output: parsed.data,
-        pendingQuestions: [],
-        spent: { turns: 0, tokens: 0, costUsd: 0 },
-        fromCache: true,
-      }
+    return {
+      status: 'completed',
+      output: cached,
+      pendingQuestions: [],
+      spent: { turns: 0, tokens: 0, costUsd: 0 },
+      fromCache: true,
     }
   }
 
   const outcome = await opts.run()
   if (outcome.status === 'completed') {
-    // Store the output only, not the envelope — `spent`/`pendingQuestions` are
-    // facts about the run that produced it, and a hit reports its own (zero).
-    await setCacheEntry(opts.repoRoot, opts.cacheName, opts.key, outcome.output).catch(
-      () => undefined,
-    )
+    await storeCachedSessionOutput(opts, outcome.output)
   }
   return outcome
 }
 
 /**
- * The prompt half of a cache key: `sha256(systemPrompt).slice(0, 16)`, the
- * same convention the one-shot stages use — so editing a session kind's system
- * prompt invalidates exactly that kind's cache and nothing else. Fold it into
- * the material `key` is hashed over alongside every behavior-affecting input.
+ * The READ half, for a pool that runs its own sessions: the stored output for
+ * these inputs, or `null` on a miss. A value the schema no longer accepts is a
+ * miss too — the schema moved (or the entry rotted), and the honest response is
+ * to re-run and overwrite, never to fail the run.
+ */
+export async function readCachedSessionOutput<TOutcome>(
+  opts: Pick<CachedSessionOptions<TOutcome>, 'repoRoot' | 'cacheName' | 'key' | 'legacyKeys' | 'schema'>,
+): Promise<TOutcome | null> {
+  const cached = await getCacheEntryOrLegacy(
+    opts.repoRoot,
+    opts.cacheName,
+    opts.key,
+    ...(opts.legacyKeys ?? []),
+  ).catch(() => null)
+  if (cached === null) return null
+  const parsed = opts.schema.safeParse(cached)
+  return parsed.success ? parsed.data : null
+}
+
+/**
+ * The WRITE half. The output only, never the envelope — `spent` and
+ * `pendingQuestions` are facts about the run that produced it, and a hit
+ * reports its own (zero). Only a session that COMPLETED is ever stored.
+ */
+export async function storeCachedSessionOutput<TOutcome>(
+  opts: Pick<CachedSessionOptions<TOutcome>, 'repoRoot' | 'cacheName' | 'key'>,
+  output: TOutcome,
+): Promise<void> {
+  await setCacheEntry(opts.repoRoot, opts.cacheName, opts.key, output).catch(() => undefined)
+}
+
+/**
+ * A system prompt's fingerprint: `sha256(systemPrompt).slice(0, 16)`. NOT a
+ * cache-key ingredient any more — a session's output for unchanged inputs is
+ * almost always what a reworded prompt would produce too, so each kind folds a
+ * hand-bumped STAGE VERSION where this used to sit, and the frozen literals in
+ * `../legacy-prompt-fingerprints.js` rebuild the old keys for the fallback read.
+ * It survives as the diagnostic it also always was.
  */
 export function promptFingerprint(systemPrompt: string): string {
   return createHash('sha256').update(systemPrompt, 'utf-8').digest('hex').slice(0, 16)

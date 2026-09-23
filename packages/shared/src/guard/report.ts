@@ -753,14 +753,47 @@ export const GuardFlowsReportSchema = z
     skipped: z.number().int().nonnegative(),
     /** Flows dropped by a `dismissedFlows` entry. */
     dismissed: z.number().int().nonnegative(),
-    /** Committed flows no re-synthesized flow claimed — their scenarios were dropped. */
+    /** Committed flows the reconciliation RETIRED whose scenarios were kept and
+     *  marked orphaned (a retired flow without a test is pruned, not counted). */
     orphaned: z.number().int().nonnegative(),
+    /**
+     * What the reconciliation against the committed corpus did to each flow:
+     * `kept` came back byte-identical under its id, `amended` kept its id under
+     * a new milestone set, `added` is new, `retired` left the corpus with a
+     * reason, `carried` is a prior flow of an area that failed to settle, kept
+     * as it was. Absent on a report written before flows were reconciled.
+     */
+    reconciled: z
+      .object({
+        kept: z.number().int().nonnegative(),
+        amended: z.number().int().nonnegative(),
+        added: z.number().int().nonnegative(),
+        retired: z.number().int().nonnegative(),
+        carried: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
     /** Near-duplicates the deterministic subsumption pass dropped. */
     subsumed: z.number().int().nonnegative(),
     /** Runnable claims synthesis deliberately placed in no flow, with a reason. */
     noFlowClaims: z.number().int().nonnegative(),
     /** Areas whose synthesis failed — their claims produced no flow this run. */
     unsettledAreas: z.array(GuardUnsettledFlowAreaSchema).default([]),
+    /**
+     * Why settled flows re-opened this run. `flows` is how many had a stored
+     * hash that no longer matched; `byInput` counts, per named settle input,
+     * the flows it moved for (one flow counts under every input that moved);
+     * `unrecorded` counts the flows whose stored entry named no inputs, so
+     * nothing can be said about them. Absent on a report written before the field.
+     */
+    reopened: z
+      .object({
+        flows: z.number().int().nonnegative(),
+        byInput: z.record(z.string(), z.number().int().nonnegative()),
+        unrecorded: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 export type GuardFlowsReport = z.infer<typeof GuardFlowsReportSchema>
@@ -865,7 +898,11 @@ export const GuardUnadjudicatedStageSchema = z
   .strict()
 export type GuardUnadjudicatedStage = z.infer<typeof GuardUnadjudicatedStageSchema>
 
-/** LLM call/token/cost totals for the generate run — omitted when unmeasured. */
+/**
+ * LLM call/token/cost totals a generate report stored before every call became
+ * a turn of a session carried. Never written now — what a run spends is one
+ * `llm_usage` row per session kind, and the run record carries the total.
+ */
 export const GuardGenerateUsageSchema = z
   .object({
     calls: z.number().int().nonnegative(),
@@ -912,6 +949,15 @@ export const GuardGenerateReportSchema = z
     cosmeticSections: z.number().int().nonnegative().optional(),
     /** Live claim-diff gate calls this run made (cache hits excluded). */
     claimDiffCalls: z.number().int().nonnegative().optional(),
+    /**
+     * Cached match verdicts SERVED although the surface's authored context
+     * (purpose, at/to, the states) had moved since the verdict was stored. The
+     * key folds the surface's identity alone, so a prose edit re-plans nothing;
+     * this counts the flows that kept a plan an edited catalog might have
+     * changed, which is what would justify folding the prose of the interfaces
+     * a plan walks.
+     */
+    matchContextMoved: z.number().int().nonnegative().optional(),
     /** Prior scenarios editing workers deliberately dropped this run, each with
      *  the vanished obligation it named. Absent on reports that predate
      *  incremental authoring. */

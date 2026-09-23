@@ -65,8 +65,7 @@ let enqueued: { task: string; queue: string | undefined }[];
 
 const testLlm = {
   mode: 'api',
-  driver: () => ({}) as never,
-  transport: () => ({}) as never,
+  driver: () => ({ attribution: { provider: 'test', model: 'test-model' } }) as never,
 } as unknown as WorkspaceLlm;
 
 const hub = { start: async () => {}, stop: async () => {}, subscribe: () => () => {} };

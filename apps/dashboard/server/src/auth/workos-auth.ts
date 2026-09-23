@@ -11,8 +11,12 @@ import { Router, type Request, type Response } from 'express';
 import { WorkOS } from '@workos-inc/node';
 import type { OrganizationMembership, User } from '@workos-inc/node';
 import type { AuthMeResponse, AuthResult, AuthUser, AuthVerifier } from '@truecourse/shared';
-import { editionOf } from '@truecourse/shared';
+import { BAD_WORKSPACE_DESCRIPTION, editionOf, normalizeWorkspaceDescription } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
+import {
+  readWorkspaceProfile,
+  saveWorkspaceProfile,
+} from '@truecourse/core/lib/workspace-profile-store';
 import type { WorkosConfig } from './config.js';
 import { parseCookies, serializeCookie } from './cookies.js';
 import { captureWorkspaceCreated } from '../observability/posthog.js';
@@ -149,6 +153,18 @@ async function resolveIsMember(
     .finally(() => membershipInFlight.delete(key));
   membershipInFlight.set(key, pending);
   return pending;
+}
+
+/**
+ * Give a workspace the sentence typed for it when it has none. A create that
+ * made the org and the membership but failed at the profile save leaves a
+ * workspace nothing can connect to; the retry lands on the idempotent paths,
+ * and this is where the typed description completes it. A workspace that has
+ * already said what it builds keeps its own sentence.
+ */
+async function describeIfUndescribed(organizationId: string, description: string): Promise<void> {
+  if (await readWorkspaceProfile(organizationId)) return;
+  await saveWorkspaceProfile(organizationId, description);
 }
 
 /** The organization the session claims, when the user is still in it; null otherwise. */
@@ -629,10 +645,16 @@ export function createAuthRouter(
   });
 
   // Self-serve onboarding: a signed-in user who belongs to no organization
-  // (AuthKit signups land org-less) names a workspace; we create the WorkOS
-  // org, add them as a member, and RE-MINT the session into it so the cookie
-  // carries `organizationId` (everything org-scoped keys off that). Idempotent:
-  // a user who already has an org gets it back without creating a second one.
+  // (AuthKit signups land org-less) names AND DESCRIBES a workspace; we create
+  // the WorkOS org, add them as a member, and RE-MINT the session into it so the
+  // cookie carries `organizationId` (everything org-scoped keys off that).
+  // Idempotent: a user who already has an org gets it back without creating a
+  // second one, and the description they typed is not applied to it — that one
+  // was described when it was made.
+  //
+  // The description is collected here rather than asked for later because
+  // nothing connects into a workspace that has no description, so a workspace
+  // created without one would begin at a refusal.
   router.post('/workspace', async (req, res) => {
     const sealed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (!sealed) {
@@ -643,6 +665,13 @@ export function createAuthRouter(
     const name = typeof raw === 'string' ? raw.trim() : '';
     if (!name || name.length > 80) {
       res.status(400).json({ error: 'A workspace name (1–80 characters) is required.' });
+      return;
+    }
+    const description = normalizeWorkspaceDescription(
+      (req.body as { description?: unknown })?.description,
+    );
+    if (!description) {
+      res.status(400).json({ error: BAD_WORKSPACE_DESCRIPTION });
       return;
     }
     try {
@@ -660,6 +689,7 @@ export function createAuthRouter(
       // member removed from the workspace it names is in none.
       const current = await standingOrganization(workos, authed.user.id, authed.organizationId);
       if (current) {
+        await describeIfUndescribed(current, description);
         res.json({ user: toAuthUser(authed.user, current) });
         return;
       }
@@ -669,6 +699,7 @@ export function createAuthRouter(
       // workspace.
       const adopted = await adoptExistingOrganization(workos, cfg, sealed, authed.user.id);
       if (adopted) {
+        await describeIfUndescribed(adopted.organizationId, description);
         res.setHeader('Set-Cookie', adopted.setCookie);
         res.json({
           user: toAuthUser(adopted.user, adopted.organizationId, adopted.organizationName),
@@ -681,6 +712,7 @@ export function createAuthRouter(
         organizationId: org.id,
         userId: authed.user.id,
       });
+      await saveWorkspaceProfile(org.id, description);
       captureWorkspaceCreated({
         userId: authed.user.id,
         email: authed.user.email,

@@ -167,6 +167,42 @@ describe('resolveFlowIdentity', () => {
     expect(orphaned).toEqual([])
   })
 
+  it('a STATED continuation keeps the id under a moved contract (amended)', () => {
+    const prev = [flow('task-lifecycle', [CREATE, LIST, COMPLETE, FILTER])]
+    const next = [flow('provisional', [CREATE, LIST, COMPLETE])]
+    const { verdicts, orphaned } = resolveFlowIdentity(prev, next, new Map([[0, 'task-lifecycle']]))
+    expect(verdicts).toEqual([{ kind: 'amended', id: 'task-lifecycle' }])
+    expect(orphaned).toEqual([])
+  })
+
+  it('a stated continuation of an identical contract is a plain remap', () => {
+    const prev = [flow('task-lifecycle', [CREATE, LIST, COMPLETE])]
+    const next = [flow('provisional', [CREATE, LIST, COMPLETE], 'Retitled')]
+    expect(resolveFlowIdentity(prev, next, new Map([[0, 'task-lifecycle']])).verdicts).toEqual([{ kind: 'remap', id: 'task-lifecycle' }])
+  })
+
+  it('a stated continuation wins over a contract match by another flow', () => {
+    const prev = [flow('task-lifecycle', [CREATE, LIST, COMPLETE])]
+    const next = [
+      flow('exact', [CREATE, LIST, COMPLETE]),
+      flow('shorter', [CREATE, LIST]),
+    ]
+    const { verdicts, orphaned } = resolveFlowIdentity(prev, next, new Map([[1, 'task-lifecycle']]))
+    expect(verdicts).toEqual([
+      { kind: 'new', id: 'exact' },
+      { kind: 'amended', id: 'task-lifecycle' },
+    ])
+    expect(orphaned).toEqual([])
+  })
+
+  it('a continuation naming no prior flow is ignored, not invented', () => {
+    const prev = [flow('task-lifecycle', [CREATE, LIST, COMPLETE])]
+    const next = [flow('provisional', [CREATE])]
+    const { verdicts, orphaned } = resolveFlowIdentity(prev, next, new Map([[0, 'no-such-flow']]))
+    expect(verdicts).toEqual([{ kind: 'new', id: 'provisional' }])
+    expect(orphaned.map((f) => f.id)).toEqual(['task-lifecycle'])
+  })
+
   it('never resolves by title', () => {
     const prev = [flow('task-lifecycle', [CREATE, LIST], 'Task lifecycle')]
     const next = [flow('task-lifecycle', [milestone(1, 'billing/plans', 'Plans are listed')], 'Task lifecycle')]

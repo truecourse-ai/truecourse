@@ -10,7 +10,6 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { noProviderTransport } from '@truecourse/shared/llm'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -20,7 +19,6 @@ let sessionScript: StubScript = () => {
   throw new Error('no session script installed for this case')
 }
 vi.mock('../../packages/core/dist/services/llm/session-driver.js', () => ({
-  SESSION_MODEL_CLAUDE_CODE: 'opus',
   assertSessionBackendReady: async () => {},
   createClaudeCodeSessionDriver: () => {
     const { driver } = stubDriver((call) => sessionScript(call))
@@ -37,6 +35,8 @@ import {
 import {
   ADJUDICATE_CACHE_NAME,
   ADJUDICATE_PROMPT_FINGERPRINT,
+  ADJUDICATE_STAGE_VERSION,
+  adjudicationLegacyCacheKey,
   adjudicationCacheKey,
   adjudicationSessionDef,
   scenarioBehaviorHash,
@@ -129,14 +129,14 @@ describe('adjudicationCacheKey', () => {
    * it by hand is the only assertion that actually pins the fingerprint is in
    * there — a "changing `actual` changes the key" check would pass without it.
    */
-  it('is the sha256 of prompt-fingerprint :: identity :: behavior hash', () => {
+  it('is the sha256 of stage version :: identity :: behavior hash', () => {
     const scenario = scenarioDoc('scn.a')
     const subject = item({ flowId: 'flow.a', scenario })
 
     const expected = createHash('sha256')
       .update(
         [
-          ADJUDICATE_PROMPT_FINGERPRINT,
+          `adjudicate-v${ADJUDICATE_STAGE_VERSION}`,
           'flow.a',
           'cli',
           '3',
@@ -148,6 +148,9 @@ describe('adjudicationCacheKey', () => {
       .digest('hex')
 
     expect(adjudicationCacheKey(subject)).toBe(expected)
+    // Rewording the prompt does not re-adjudicate an unchanged failure; the old
+    // key is still readable, so nothing is re-run on the way over.
+    expect(adjudicationLegacyCacheKey(subject)).not.toBe(adjudicationCacheKey(subject))
     expect(ADJUDICATE_PROMPT_FINGERPRINT).toHaveLength(16)
   })
 
@@ -185,7 +188,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
     const { r, key } = seedOneFailure()
     await seedCache(r, key, DRIFT)
 
-    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
+    const run = await runGuardAdjudication({ repoRoot: r })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'cache' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')
@@ -263,7 +266,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
       return outcome(DRIFT)
     }
 
-    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'], transport: noProviderTransport })
+    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'] })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'session' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')
@@ -295,7 +298,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
       sessions: 0,
     })
 
-    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'], transport: noProviderTransport })
+    const run = await runGuardAdjudication({ repoRoot: r, scenarios: ['scn.a'] })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'pre-pass' })
     expect(run.scenarios[0].verdict?.class).toBe('expected-red')
@@ -485,7 +488,7 @@ describe('runGuardAdjudication — a refused verdict costs a re-run, never a cac
       })
     }
 
-    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
+    const run = await runGuardAdjudication({ repoRoot: r })
 
     expect(controlRef).toMatch(/^control-[0-9a-f]{8}$/)
     expect(run.scenarios[0].source).toBe('session')
@@ -520,7 +523,7 @@ describe('runGuardAdjudication — a refused verdict costs a re-run, never a cac
       return outcome({ ...DRIFT, findings: ['docs/spec.md says exit 0; the CLI has always exited 2'] })
     }
 
-    const run = await runGuardAdjudication({ repoRoot: r, transport: noProviderTransport })
+    const run = await runGuardAdjudication({ repoRoot: r })
 
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'session' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')

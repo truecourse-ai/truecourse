@@ -110,6 +110,10 @@ import type { UserInstallation } from '../../packages/github-app/src/oauth';
 import { signConnectState } from '../../packages/github-app/src/connect-state';
 import { MemoryInstallationStore, seedInstallation } from '../github-app/memory-store';
 import { memoryContextStore } from '../helpers/memory-context-store';
+import {
+  installDescribedWorkspaces,
+  resetWorkspaceProfiles,
+} from '../helpers/workspace-profile';
 
 const ORG = 'org_A';
 const OTHER_ORG = 'org_B';
@@ -262,10 +266,14 @@ beforeEach(async () => {
     getView: async () => null,
     save: async () => {},
   });
-  setWorkspaceLlmBackend({ probe: async () => {}, driver: () => ({}) as never });
+  setWorkspaceLlmBackend({ probe: async () => {}, driver: () => ({ attribution: { provider: 'test', model: 'test-model' } }) as never });
+  // Nothing connects into a workspace that has not said what its product is;
+  // the refusal itself is pinned in the connect router's own suite.
+  installDescribedWorkspaces();
 });
 
 afterEach(() => {
+  resetWorkspaceProfiles();
   resetRegistryStore();
   resetContextStore();
   resetWorkspaceLlmConfigStore();

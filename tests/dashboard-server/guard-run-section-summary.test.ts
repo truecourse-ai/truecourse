@@ -29,8 +29,8 @@ const BODY = '# Refunds\n\nA refund settles within two business days.\n\n# Timin
 
 let repo: TestFixture;
 
-/** The scenario set: one flow bound to the Refunds section. */
-function writeManifest(repoPath: string): void {
+/** The scenario set: one flow bound to the Refunds section, plus any extra entries. */
+function writeManifest(repoPath: string, extraFlows: object[] = []): void {
   fs.mkdirSync(path.dirname(manifestPath(repoPath)), { recursive: true });
   fs.writeFileSync(
     manifestPath(repoPath),
@@ -46,6 +46,7 @@ function writeManifest(repoPath: string): void {
           gaps: [],
           retiredScenarios: [],
         },
+        ...extraFlows,
       ],
     }),
   );
@@ -113,6 +114,35 @@ describe('a run’s coverage summaries', () => {
       [`${DOC}#timing`]: 'blocked',
     });
     // The flow the failing scenario belongs to, in the Flows page's words.
+    expect(stored!.flows).toEqual({ f1: 'failed' });
+  });
+
+  it('leaves a flow the corpus retired out of the flow summary — history, not coverage', async () => {
+    // An entry the last generate marked orphaned: its scenario still runs and
+    // shows on the Flows page under "not in specs", but it is no flow of the
+    // repository any more, so the trend must not count it.
+    writeManifest(repo.repoPath, [
+      {
+        flowId: 'retired-flow',
+        flowFingerprint: 'sha256:old',
+        bindings: [{ doc: DOC, anchor: 'timing', fingerprint: 'sha256:old' }],
+        scenarios: [{ id: 's-old', drivers: ['cli'], status: 'passing' }],
+        interfaces: [],
+        generationInputsHash: null,
+        gaps: [],
+        retiredScenarios: [],
+        orphaned: true,
+        orphanedReason: 'the claims no longer describe a timing guarantee',
+      },
+    ]);
+
+    await persistGuardRun(
+      { repoKey: repo.repoPath, commitSha: 'abcdef1234567890' },
+      repo.repoPath,
+      run('run-2', '2026-09-02T10:00:00.000Z'),
+    );
+
+    const [stored] = await readGuardRunCoverage(repo.repoPath);
     expect(stored!.flows).toEqual({ f1: 'failed' });
   });
 

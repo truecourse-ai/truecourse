@@ -28,6 +28,7 @@ import {
   GUARD_WEB_STATES,
   GuardWebLocatorSchema,
   GuardWebScopeSchema,
+  type GuardWebLocator,
   type GuardWebScope,
 } from './guard/web-steps.js'
 
@@ -1526,6 +1527,33 @@ export const MapperDiagnosticSchema = z
 export type MapperDiagnostic = z.infer<typeof MapperDiagnosticSchema>
 
 /**
+ * What an authoring session settled on ONE screen. The four words are the
+ * authoring run's own terminal states: `authored` = tasks or readable facts
+ * landed, `empty` = the session established that there is neither, `rejected` =
+ * the outcome broke a rule the write path enforces, `failed` = the session
+ * never reached an outcome. There is deliberately no `partial`: a screen the
+ * write path accepted is complete by the session's own claim, since an accepted
+ * outcome states every readable kind of every place it declares.
+ */
+export const InterfaceAuthoringStatusSchema = z.enum(['authored', 'empty', 'rejected', 'failed'])
+export type InterfaceAuthoringStatus = z.infer<typeof InterfaceAuthoringStatusSchema>
+
+/**
+ * ONE screen's row of the authoring ledger: what its last session settled, and
+ * the digest of the inputs it settled over. A screen whose status did not settle
+ * (`failed`, `rejected`) is work again only when that digest MOVES — so a dead
+ * provider costs one screen one run, not one screen every run forever.
+ */
+export const InterfaceAuthoringRecordSchema = z
+  .object({
+    status: InterfaceAuthoringStatusSchema,
+    /** The digest of everything that decides what a session for this screen produces. */
+    inputFingerprint: z.string().min(1),
+  })
+  .strict()
+export type InterfaceAuthoringRecord = z.infer<typeof InterfaceAuthoringRecordSchema>
+
+/**
  * `.truecourse/guard/interfaces.json` — the last mapping's catalog (gitignored).
  *
  * ONE SHAPE, TWO HOMES: the same shape validates
@@ -1590,6 +1618,20 @@ const InterfacesFileShapeSchema = z
     resources: z.record(z.string(), z.array(InterfaceResourceSchema)).optional(),
     /** Per interface TYPE (a driver-registry id) → how that catalog was derived. */
     source: z.record(z.string(), InterfaceCatalogSourceSchema).optional(),
+    /**
+     * THE AUTHORING LEDGER: web screen id → what authoring settled there
+     * ({@link InterfaceAuthoringRecordSchema}). Only `interfaces.authored.json`
+     * carries it — it is a fact about the SESSIONS that wrote this half, and
+     * nothing derives it — and it is keyed by place id rather than per area
+     * because web is the one surface authoring writes.
+     *
+     * It is what makes a screen's settlement readable instead of inferred: a
+     * screen used to count as done once it carried a task and some readables,
+     * which cannot tell a screen whose session failed from one that never ran.
+     * Additive and optional: a file written before it parses unchanged, and
+     * every screen it does not name is judged by that old inference ONCE.
+     */
+    authoring: z.record(z.string(), InterfaceAuthoringRecordSchema).optional(),
   })
   .strict()
 
@@ -1840,6 +1882,13 @@ function stepIdentity(step: InterfaceStep): string {
 export function interfaceFingerprint(
   iface: Pick<Interface, 'type' | 'entry' | 'steps'>,
 ): string {
+  return fingerprintOver(iface, iface.steps.map(stepIdentity))
+}
+
+function fingerprintOver(
+  iface: Pick<Interface, 'type' | 'entry'>,
+  stepIdentities: readonly string[],
+): string {
   const entryIdentity =
     'command' in iface.entry
       ? iface.entry.command.map(normalizeToken).join(' ')
@@ -1847,6 +1896,107 @@ export function interfaceFingerprint(
           normalizeToken(iface.entry.method).toUpperCase(),
           normalizeToken(iface.entry.path),
         ].join(' ')
-  const body = [iface.type, entryIdentity, ...iface.steps.map(stepIdentity)].join('\n')
+  const body = [iface.type, entryIdentity, ...stepIdentities].join('\n')
   return `sha256:${crypto.createHash('sha256').update(body, 'utf-8').digest('hex')}`
+}
+
+/**
+ * {@link interfaceFingerprint} with a web step's identity taken from the ENTITY
+ * its locator resolves to, rather than from the label the author wrote for it.
+ *
+ * A web step is identified by a role and an accessible name, so a re-authored
+ * screen moves a task's key whenever a session words the same button
+ * differently — and every scenario grounded on that task is re-authored for a
+ * rewording. Where the step's locator matches a readable the place DECLARES,
+ * the pair (place id, readable id) names the same control whatever it is called,
+ * so that is what the fold carries.
+ *
+ * Resolution is deterministic and deliberately narrow, because a wrong match
+ * merges two tasks into one:
+ *
+ *  - only `controls` and `elements` are candidates, the two readable kinds that
+ *    carry a role+name locator, and only those with an `id` — the id IS the
+ *    identity;
+ *  - role, name and `exact` must match exactly, and exactly one readable may
+ *    match. Two readables that read alike stay unresolved;
+ *  - a step or a readable carrying `within` (or a readable carrying `pick`) is
+ *    unresolved: the scope is part of how the label is disambiguated, and
+ *    matching across it would be a guess.
+ *
+ * A step that resolves nothing keeps `stepIdentity` verbatim, so an interface
+ * whose steps all fail to resolve — every entry written before places declared
+ * their readables — fingerprints byte-identically to before. This is why the
+ * function is separate rather than an option on the one above: a STORED
+ * fingerprint is authoritative everywhere it is read, so only the authoring
+ * write path computes one this way, and nothing recomputes a stored one.
+ */
+export function resolvedInterfaceFingerprint(
+  iface: Pick<Interface, 'type' | 'entry' | 'steps'>,
+  place: Pick<InterfaceResource, 'id' | 'readables'> | undefined,
+): string {
+  return fingerprintOver(
+    iface,
+    iface.steps.map((step) => resolvedStepIdentity(step, place) ?? stepIdentity(step)),
+  )
+}
+
+/** The step's identity through the readable it resolves to, or nothing. */
+function resolvedStepIdentity(
+  step: InterfaceStep,
+  place: Pick<InterfaceResource, 'id' | 'readables'> | undefined,
+): string | undefined {
+  if (!place || !('target' in step) || step.within) return undefined
+  const named = [...(place.readables?.controls ?? []).map((fact) => ({ id: fact.id, locator: fact.control })),
+    ...(place.readables?.elements ?? []).map((fact) => ({ id: fact.id, locator: fact.element }))]
+  const matches = named.filter(
+    (candidate): candidate is { id: string; locator: typeof candidate.locator } =>
+      candidate.id !== undefined && sameSurfaceHandle(candidate.locator, step.target),
+  )
+  if (matches.length !== 1) return undefined
+  return [
+    step.kind,
+    'resolved',
+    place.id,
+    matches[0].id,
+    ...(step.kind === 'input' && step.mode === 'select' ? ['select'] : []),
+  ].join('\u0000')
+}
+
+/** Does a readable's locator address the same element as a step's target? */
+function sameSurfaceHandle(locator: GuardWebLocator, target: InterfaceTarget): boolean {
+  if (!('role' in locator) || locator.within || locator.pick) return false
+  return (
+    locator.role === target.role &&
+    locator.name !== undefined &&
+    normalizeToken(locator.name) === normalizeToken(target.name) &&
+    (locator.exact ?? false) === (target.exact ?? false)
+  )
+}
+
+/**
+ * True when two versions of a task differ in fingerprint ONLY through the
+ * wording of a step's label: the same type, entry, step kinds and modes, with
+ * a `target` or `within` name that reads differently. A web step's identity is
+ * the label the author chose, so a re-authored screen can move a task's key
+ * without the task changing; this is how often that happens, measured.
+ */
+export function isLabelOnlyRekey(
+  before: Pick<Interface, 'type' | 'entry' | 'steps'>,
+  after: Pick<Interface, 'type' | 'entry' | 'steps'>,
+): boolean {
+  if (interfaceFingerprint(before) === interfaceFingerprint(after)) return false
+  const unlabelled = (iface: Pick<Interface, 'type' | 'entry' | 'steps'>): string =>
+    interfaceFingerprint({
+      ...iface,
+      steps: iface.steps.map((step) =>
+        'target' in step
+          ? {
+              ...step,
+              target: { ...step.target, name: '' },
+              ...(step.within ? { within: { ...step.within, name: '' } } : {}),
+            }
+          : step,
+      ),
+    })
+  return unlabelled(before) === unlabelled(after)
 }

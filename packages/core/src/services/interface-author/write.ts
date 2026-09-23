@@ -10,7 +10,11 @@
  */
 
 import { atomicWriteJson, guardAuthoredInterfacesPath } from '@truecourse/guard-runner'
-import { InterfacesFragmentSchema, type InterfacesFile } from '@truecourse/shared'
+import {
+  InterfacesFragmentSchema,
+  type InterfaceAuthoringRecord,
+  type InterfacesFile,
+} from '@truecourse/shared'
 
 export interface WriteAuthoredInput {
   repoRoot: string
@@ -52,4 +56,39 @@ export function writeAuthoredCatalog(input: WriteAuthoredInput): { path: string;
   const path = guardAuthoredInterfacesPath(input.repoRoot)
   atomicWriteJson(path, parsed.data)
   return { path, file: parsed.data }
+}
+
+export interface RecordAuthoringLedgerInput {
+  repoRoot: string
+  /** The authored file as it stands; null when nothing has been authored yet. */
+  authored: InterfacesFile | null
+  /** The derived snapshot, for the envelope's recipe fingerprint. */
+  derived: InterfacesFile | null
+  /** The rows to lay over the ledger, by screen id. */
+  rows: Readonly<Record<string, InterfaceAuthoringRecord>>
+  now?: () => string
+}
+
+/**
+ * Record what authoring settled on one or more screens. Laid over the existing
+ * ledger by id and written through the same validated path the fragments take,
+ * so a row lands whether or not the session that produced it wrote a task — a
+ * screen whose session failed has nothing else to leave behind, and the row IS
+ * what keeps the next run from buying that failure again.
+ */
+export function recordAuthoringLedger(
+  input: RecordAuthoringLedgerInput,
+): { path: string; file: InterfacesFile } {
+  const base: InterfacesFile = input.authored ?? {
+    version: 2,
+    generatedAt: '',
+    recipeFingerprint: '',
+    interfaces: [],
+  }
+  return writeAuthoredCatalog({
+    repoRoot: input.repoRoot,
+    derived: input.derived,
+    candidate: { ...base, authoring: { ...base.authoring, ...input.rows } },
+    ...(input.now ? { now: input.now } : {}),
+  })
 }

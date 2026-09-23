@@ -13,9 +13,10 @@
  *   - the scope session stays, over the CONTEXT grammar: a verdict subject is a
  *     source id (the whole source) or `context/<sourceId>/<dir>` (a subtree of a
  *     repository source), and the settled verdicts are the workspace's;
- *   - the curator is briefed with the WORKSPACE identity — its name when the
- *     server knows one, and the connected repositories' — and, per document,
- *     the source it came from and that source's kind;
+ *   - the curator is briefed with the WORKSPACE identity — the one sentence the
+ *     workspace states about its product, which is the whole subject "ours or
+ *     someone else's?" is judged against — and, per document, the source it came
+ *     from and that source's kind;
  *   - what it writes is the workspace spec set: the corpus (each document
  *     stamped with its `sourceId`/`sourceKind`), the decisions the run settled,
  *     and a snapshot of every kept document's body, so a document stays readable
@@ -40,6 +41,7 @@ import {
 import type { ContextDocument, ContextSource } from '@truecourse/shared';
 import { contextDocRef, parseContextDocRef } from '../lib/context-ref.js';
 import { log } from '../lib/logger.js';
+import { requireWorkspaceDescription } from '../lib/workspace-profile-store.js';
 import { isCreditsExhausted } from '../lib/credits-store.js';
 import { openStoredSessionRun, workspaceSessionsKey } from '../lib/sessions-store.js';
 import {
@@ -93,10 +95,6 @@ export interface WorkspaceContextScanResult {
 
 export interface WorkspaceContextScanOptions {
   workspaceOrgId: string;
-  /** The workspace's own name, when the server knows one. */
-  workspaceName?: string;
-  /** The connected repositories, `owner/repo` — the identity block's subjects. */
-  repositories?: readonly string[];
   /** Seams the caller threads in: progress, cancellation, the run's driver. */
   tracker?: CurateInProcessOptions['tracker'];
   driver?: CurateInProcessOptions['driver'];
@@ -118,6 +116,10 @@ export async function workspaceContextScanInProcess(
 ): Promise<WorkspaceContextScanResult> {
   const org = options.workspaceOrgId;
   const ref = { workspaceOrgId: org };
+  // What this workspace says its product is — the whole subject every document
+  // is attributed against. Read FIRST: a scan with no subject is the failure
+  // this is here to prevent, so it refuses before it reads a document.
+  const identity = await workspaceIdentity(org);
   const [sources, documents, previousCorpus, storedDecisions] = await Promise.all([
     listContextSources(org),
     listContextDocuments(org),
@@ -133,7 +135,6 @@ export async function workspaceContextScanInProcess(
     // uses; what the run settles comes back on the result and is stored below.
     writeDecisions(tmp, decisions);
 
-    const identity = workspaceIdentity(options);
     const scopeSources = scopeSourceViews(sources, materialized.perSource);
     // What each source yielded, one fact each, under the discovery step: the
     // scan no longer walks a repository, and the reader must see where the
@@ -146,6 +147,7 @@ export async function workspaceContextScanInProcess(
       const { curate, sessionsRunDir, noChanges } = await curateInProcess(tmp, {
         skipGit: true,
         decisions,
+        previousCorpus,
         repoIdentity: identity,
         sessionsKey: workspaceSessionsKey(org),
         scopeSources,
@@ -165,9 +167,11 @@ export async function workspaceContextScanInProcess(
       // The stamp is the artifact's own record of where a document came from,
       // so nothing downstream has to re-derive it from a ref.
       const corpus = stampCorpusSources(curate.corpus, sources);
-      await saveWorkspaceSpec(ref, 'corpus', corpus);
+      // The versions this scan writes say which run wrote them and on which model.
+      const provenance = { producedByRun: runId, model: options.driver?.attribution.model ?? null };
+      await saveWorkspaceSpec(ref, 'corpus', corpus, provenance);
       await saveWorkspaceSpec(ref, 'decisions', curate.decisions);
-      await saveWorkspaceSpecDocs(ref, snapshotBodies(corpus, materialized.bodies));
+      await saveWorkspaceSpecDocs(ref, snapshotBodies(corpus, materialized.bodies), provenance);
       await closeRun(org, runId, options.signal?.aborted ? 'interrupted' : 'completed');
 
       return {
@@ -222,15 +226,14 @@ async function closeRun(
   }
 }
 
-/** The identity the curator attributes every document against. */
-export function workspaceIdentity(options: {
-  workspaceName?: string;
-  repositories?: readonly string[];
-}): RepoIdentity | null {
-  return resolveWorkspaceIdentity({
-    ...(options.workspaceName ? { name: options.workspaceName } : {}),
-    repositories: options.repositories ?? [],
-  });
+/**
+ * The identity the curator attributes every document against: the ONE SENTENCE
+ * the workspace states about its product. Never null — the description is
+ * required, and a workspace that has not set one connects nothing and scans
+ * nothing (`requireWorkspaceDescription` refuses here too).
+ */
+export async function workspaceIdentity(workspaceOrgId: string): Promise<RepoIdentity> {
+  return resolveWorkspaceIdentity(await requireWorkspaceDescription(workspaceOrgId));
 }
 
 interface MaterializedWorkspace {

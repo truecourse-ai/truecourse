@@ -21,6 +21,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { LEGACY_EXTRACT_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
 import {
   verificationBoundaryProblems,
@@ -30,7 +31,17 @@ import {
   type ExtractOutcome,
   type GuardPrerequisiteTarget,
 } from '@truecourse/shared'
-import { snapExtraction, suppressionKey, type GuardDoc } from '@truecourse/guard-generator'
+import {
+  carryPriorCaseIdentity,
+  mergeSettledSections,
+  priorClaimsToAccount,
+  reconciliationProblems,
+  snapExtraction,
+  suppressionKey,
+  type ExtractPrior,
+  type GuardDoc,
+  type PriorClaim,
+} from '@truecourse/guard-generator'
 import { promptFingerprint } from '../agent/session-cache.js'
 import {
   docChunkCount,
@@ -180,6 +191,9 @@ For every claim, report its \`needs\`: the prerequisites a test would require BE
   - manual     — a step only a human can perform.
 Give each need a short stable \`name\` (lower-kebab-case, e.g. \`github-token\`, \`sample-repo\`) and reuse the SAME name when two claims need the same thing. Needs describe what the DOC presupposes — never speculate about implementation details.
 
+# Reconciling against the last extraction
+When the briefing carries the LAST EXTRACTION of this document, you are not extracting from scratch. SETTLED sections are unchanged since then: their claims are fixed, listed for context only, and you extract NOTHING for them. Every other section is yours to extract, and its PRIOR claims are listed: return each one KEPT (the same \`claim\` sentence, verbatim, when the text still states it), REPLACED (a new claim whose \`replaces\` is the prior sentence, verbatim, when the edit reworded, split or narrowed what it states) or RETIRED (in \`retiredClaims\`, with the reason, when the text no longer supports it). A claim without \`replaces\` is NEW: emit one only for behavior the text now states that no prior claim did. Never re-emit a prior claim's behavior as a new claim, never replace one prior claim twice, and never both continue and retire one. Reuse the prior claims' case ids for the cases that still hold, and the prior need names for the same needs. \`check_claims\` refuses a draft that leaves a prior claim unaccounted for or touches a settled section.
+
 # Sections and anchors
 The OUTLINE lists every section with its exact ANCHOR. Each claim MUST carry the anchor of the section whose own text states it, copied VERBATIM from the outline — never invent, abbreviate, translate, or reformat an anchor. Bind a claim to the NARROWEST section that states it.
 
@@ -203,6 +217,13 @@ One object: { "claims": [ { "claim", "driver", "alternativeDrivers"?, "verificat
 export const EXTRACT_SESSION_PROMPT_FINGERPRINT = promptFingerprint(EXTRACT_SESSION_SYSTEM_PROMPT)
 
 /**
+ * THE EXTRACT STAGE'S VERSION, bumped by hand. Rewording the prompt does not
+ * make a document's extracted claims wrong; a prompt change that fixes WRONG
+ * output bumps this in the same commit and every document re-extracts.
+ */
+export const EXTRACT_STAGE_VERSION = 1
+
+/**
  * The per-doc cache key: prompt fingerprint :: the doc's
  * content hash [:: its suppression key, appended ONLY when quotes are
  * suppressed — so an unsuppressed doc keys off its text alone and a resolved
@@ -222,10 +243,26 @@ export function extractDocContentHash(content: string): string {
 
 /** {@link extractSessionCacheKey} from an already-computed content hash. */
 export function extractSessionCacheKeyForContentHash(contentHash: string, suppressedQuotes: readonly string[], targets: readonly GuardPrerequisiteTarget[] = []): string {
+  return extractKeyOver(`extract-v${EXTRACT_STAGE_VERSION}`, contentHash, suppressedQuotes, targets)
+}
+
+/** {@link extractSessionCacheKey} as it was computed while the prompt was in it
+ *  — the key a miss falls back to. Delete with the legacy hash. */
+export function extractSessionLegacyCacheKey(doc: Pick<GuardDoc, 'content' | 'suppressedQuotes'>, targets: readonly GuardPrerequisiteTarget[] = []): string {
+  return extractSessionLegacyCacheKeyForContentHash(extractDocContentHash(doc.content), doc.suppressedQuotes, targets)
+}
+
+/** {@link extractSessionLegacyCacheKey} from an already-computed content hash —
+ *  what the claim-diff gate addresses a PRIOR extraction by. */
+export function extractSessionLegacyCacheKeyForContentHash(contentHash: string, suppressedQuotes: readonly string[], targets: readonly GuardPrerequisiteTarget[] = []): string {
+  return extractKeyOver(LEGACY_EXTRACT_SESSION_PROMPT_FINGERPRINT, contentHash, suppressedQuotes, targets)
+}
+
+function extractKeyOver(stage: string, contentHash: string, suppressedQuotes: readonly string[], targets: readonly GuardPrerequisiteTarget[]): string {
   const context = targets.map(t => [t.name, [...t.aliases].sort(), [...t.credentialEnv].sort(),
     (t.providers ?? []).map(p => [p.service, [...p.baseUrlEnvs].sort()]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))])
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
-  const base = `${EXTRACT_SESSION_PROMPT_FINGERPRINT}::${contentHash}${context.length ? `::${JSON.stringify(context)}` : ''}`
+  const base = `${stage}::${contentHash}${context.length ? `::${JSON.stringify(context)}` : ''}`
   const suppression = suppressionKey(suppressedQuotes)
   return createHash('sha256').update(suppression ? `${base}::${suppression}` : base).digest('hex')
 }
@@ -244,6 +281,7 @@ export function validateExtractDraft(
   draft: ExtractOutcome,
   doc: GuardDoc,
   prerequisiteTargets: readonly GuardPrerequisiteTarget[],
+  prior?: ExtractPrior,
 ): string[] {
   const snapped = snapExtraction(draft, doc.sections)
   const normalize = (text: string): string => text.replace(/\s+/g, ' ').trim().toLowerCase()
@@ -275,6 +313,9 @@ export function validateExtractDraft(
     }
     seenNoteAnchor.add(snappedTo.sectionAnchor)
   }
+  // The reconciliation half, over the snapped draft: anchors compare as the
+  // fold will bind them, and `replaces` rides through the snap untouched.
+  if (prior) problems.push(...reconciliationProblems({ claims: snapped.claims, retiredClaims: draft.retiredClaims }, prior))
   return problems
 }
 
@@ -361,26 +402,40 @@ export function extractContextSchema(targets: readonly GuardPrerequisiteTarget[]
   }).transform(draft => canonicalizeExtractPrerequisites(draft, targets))
 }
 
-/** Rechecked on the final outcome, even when the model changes a checked draft. */
-function checkedExtractionSchema(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[]) {
+/**
+ * Rechecked on the final outcome, even when the model changes a checked draft.
+ * The transform is the FOLD: prerequisites canonicalized, and — against a
+ * prior — the settled sections' claims merged in verbatim, so the outcome the
+ * loop returns, the cache keeps and the seam re-snaps is a whole-document
+ * extraction whichever sections the session actually worked on.
+ */
+function checkedExtractionSchema(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[], prior?: ExtractPrior) {
   return ExtractOutcomeSchema.superRefine((draft, ctx) => {
-    const problems = validateExtractDraft(draft, doc, prerequisiteTargets)
+    const problems = validateExtractDraft(draft, doc, prerequisiteTargets, prior)
     for (const c of draft.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
     for (const message of new Set(problems)) ctx.addIssue({ code: 'custom', message })
-  }).transform((draft) => canonicalizeExtractPrerequisites(draft, prerequisiteTargets))
+  }).transform((draft): ExtractOutcome => {
+    const canonical = canonicalizeExtractPrerequisites(draft, prerequisiteTargets)
+    if (!prior) return canonical
+    // The settled sections' prior claims are compared by their snapped anchors,
+    // so the draft is snapped once here for the merge; the seam's fold re-snaps
+    // the whole outcome anyway.
+    const snapped = snapExtraction(canonical, doc.sections)
+    return mergeSettledSections({ ...snapped, claims: carryPriorCaseIdentity(snapped, prior) }, prior)
+  })
 }
 
-function checkClaimsTool(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[]): SessionTool {
+function checkClaimsTool(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[], prior?: ExtractPrior): SessionTool {
   return defineSessionTool({
     name: 'check_claims',
     description:
-      'Check a draft extraction against the live section index — every anchor is snapped exactly as the engine will snap it. Call it on your complete draft (claims AND untestable notes) before you produce the outcome.',
+      'Check a draft extraction against the live section index — every anchor is snapped exactly as the engine will snap it — and, when the briefing carried the last extraction, against it: every prior claim of a section you extract must be kept, replaced or retired. Call it on your complete draft (claims AND untestable notes) before you produce the outcome.',
     kind: 'check-extract-claims',
     readOnly: true,
     destructive: false,
     inputSchema: ExtractOutcomeSchema,
     async execute(args) {
-      const problems = validateExtractDraft(args, doc, prerequisiteTargets)
+      const problems = validateExtractDraft(args, doc, prerequisiteTargets, prior)
       for (const c of args.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
       if (problems.length === 0) {
         return {
@@ -398,6 +453,10 @@ export interface ExtractSessionInput {
   /** The declared dependencies a case prerequisite may name (the catalog plus
    *  the recipe's externals), as the generator resolves them. */
   prerequisiteTargets: readonly GuardPrerequisiteTarget[]
+  /** The document's last extraction, when it has one: briefed, checked
+   *  against, and merged into the outcome for the sections it settles. It is
+   *  NOT part of the cache key — it supplies identity, not an answer. */
+  prior?: ExtractPrior
 }
 
 export function extractSessionDef(input: ExtractSessionInput): SessionDef<ExtractOutcome> {
@@ -409,9 +468,9 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
       readOwnChunkTool(input.doc),
       readOwnSectionTool(input.doc),
       readReferencedDocTool(input.universe),
-      checkClaimsTool(input.doc, input.prerequisiteTargets),
+      checkClaimsTool(input.doc, input.prerequisiteTargets, input.prior),
     ],
-    outcomeSchema: checkedExtractionSchema(input.doc, input.prerequisiteTargets),
+    outcomeSchema: checkedExtractionSchema(input.doc, input.prerequisiteTargets, input.prior),
     // A revised draft can still violate a verification boundary. Return the
     // terminal validation errors to the session before losing the whole doc.
     outcomeSchemaRepairs: 2,
@@ -436,6 +495,7 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
 export function extractSessionBriefing(
   doc: GuardDoc,
   prerequisiteTargets: readonly GuardPrerequisiteTarget[],
+  prior?: ExtractPrior,
 ): string {
   const areas = doc.sections[0]?.areaTags ?? []
   const chunks = docChunkCount(doc)
@@ -478,10 +538,62 @@ export function extractSessionBriefing(
           "carry such requirements in the claim's `needs`.",
         ]),
   )
+  if (prior) lines.push('', ...priorExtractionLines(doc, prior))
   lines.push('', renderDocChunk(doc, 1).content)
   if (chunks > 1) {
     lines.push('', `${chunks - 1} more chunk(s) — use \`read_chunk\` to page through the rest before you finish.`)
   }
   lines.push('', 'Read the whole document, check the draft with `check_claims`, then produce the outcome.')
   return lines.join('\n')
+}
+
+/** One prior claim as the briefing lists it: the sentence, its driver, its case ids. */
+function priorClaimLine(c: PriorClaim): string {
+  const cases = c.verification?.cases?.map((k) => k.id) ?? []
+  return `  • "${c.claim}"${c.driver ? ` (${c.driver})` : ''}${cases.length ? ` [cases: ${cases.join(', ')}]` : ''}`
+}
+
+/**
+ * The LAST EXTRACTION block: the settled sections with their fixed claims
+ * (context only), then the sections to extract with the prior claims each one
+ * must account for, then the need names to reuse.
+ */
+export function priorExtractionLines(doc: GuardDoc, prior: ExtractPrior): string[] {
+  const settled = new Set(prior.settledAnchors)
+  const byAnchor = new Map<string, PriorClaim[]>()
+  for (const c of prior.claims) {
+    const list = byAnchor.get(c.sectionAnchor)
+    if (list) list.push(c)
+    else byAnchor.set(c.sectionAnchor, [c])
+  }
+  const toAccount = priorClaimsToAccount(prior)
+  const lines = [
+    `LAST EXTRACTION of this document — reconcile against it (${prior.claims.length} prior claim(s)).`,
+  ]
+  const settledSections = doc.sections.filter((s) => settled.has(s.anchor))
+  if (settledSections.length > 0) {
+    lines.push('', `SETTLED sections — unchanged since then; their claims are fixed. Extract NOTHING for them:`)
+    for (const s of settledSections) {
+      const own = byAnchor.get(s.anchor) ?? []
+      lines.push(`- ${s.anchor}: ${own.length} claim(s)`)
+      for (const c of own) lines.push(priorClaimLine(c))
+    }
+  }
+  const extractSections = doc.sections.filter((s) => !settled.has(s.anchor))
+  lines.push('', `Sections to EXTRACT: ${extractSections.map((s) => s.anchor).join(', ') || '(none)'}.`)
+  if (toAccount.length > 0) {
+    lines.push(
+      'Their PRIOR claims — return every one KEPT (its sentence verbatim), REPLACED (a new claim',
+      'with `replaces` set to the prior sentence, verbatim) or RETIRED (in `retiredClaims`, with a reason):',
+    )
+    for (const s of extractSections) {
+      const own = byAnchor.get(s.anchor) ?? []
+      if (own.length === 0) continue
+      lines.push(`- ${s.anchor}`)
+      for (const c of own) lines.push(priorClaimLine(c))
+    }
+  }
+  const needNames = [...new Set(prior.claims.flatMap((c) => (c.needs ?? []).map((n) => n.name)))].sort()
+  if (needNames.length > 0) lines.push('', `Need names in use — reuse them for the same needs: ${needNames.join(', ')}.`)
+  return lines
 }

@@ -207,7 +207,9 @@ export class PgUsageStore implements UsageStore {
     }));
   }
 
-  /** The model that did most of each job's work, by tokens; ties go to the name. */
+  /** Each job's model. Every row of a job names the same one, so this answers
+   *  it; a job a FALLBACK model also served reports whichever did the most
+   *  work, by tokens, with ties going to the name. */
   private async modelsOf(jobIds: readonly string[]): Promise<Map<string, string>> {
     if (jobIds.length === 0) return new Map();
     const rows = await this.db

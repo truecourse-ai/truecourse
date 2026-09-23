@@ -10,7 +10,7 @@
  * see `@truecourse/data-store`'s `crypto.ts`).
  *
  * The table is created by the init migration and created again, if missing,
- * by `0029_integration_connections`: a database that ran the migration-era
+ * by `0031_integration_connections`: a database that ran the migration-era
  * draft of `0021` dropped it, and a migration is recorded by its timestamp,
  * not its text, so nothing else would bring it back.
  */

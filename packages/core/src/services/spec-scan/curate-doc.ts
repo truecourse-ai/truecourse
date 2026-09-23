@@ -30,6 +30,7 @@ import {
 } from '@truecourse/spec-consolidator'
 import { planDocChunks } from '@truecourse/shared'
 import { promptFingerprint } from '../agent/session-cache.js'
+import { LEGACY_CURATE_DOC_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
   DOC_CHUNK_CHARS,
   corpusVocabTool,
@@ -144,6 +145,8 @@ MULTI-AREA: a doc often covers several areas. List EVERY area it materially spec
 
 PROCESS BUCKET: sections that are pure overview / goals / non-goals / open-questions and spec no behavior map to product "process" with one of these concerns: overview, goals, non-goals, open-questions. A doc that is ONLY process gets only process areas; a substantive doc that merely has a Goals section does NOT need a process area.
 
+PREVIOUS AREAS: when the briefing lists the areas the last scan tagged this document with, reuse those exact labels unless what the document says has actually moved — and when it has, say in \`reason\` what moved. A re-spelled label for the same topic is a defect: everything downstream is keyed on the area's id.
+
 STATUS: if the doc header states a lifecycle (Status: shipped / planned / deferred / deprecated / out-of-scope, or equivalents like "done"/"draft"), report it verbatim in \`status\`; otherwise null.
 
 # Tools — when to use them
@@ -162,6 +165,17 @@ One object: { "keep": true|false, "reason": "short explanation", "subject": "thi
 /** The prompt half of every curate-doc cache key — exported for the step-7
  *  estimate rework, which must probe the REAL keys. */
 export const CURATE_DOC_PROMPT_FINGERPRINT = promptFingerprint(CURATE_DOC_SYSTEM_PROMPT)
+
+/**
+ * THE CURATE-DOC STAGE'S VERSION, bumped by hand. The previous-areas block did
+ * not bump it: a cached verdict is never re-briefed, and the fold keeps a
+ * re-spelled prior label deterministically, so a stored verdict is corrected
+ * on the way through rather than re-bought. A reworded prompt does not
+ * make a keep/skip judgment wrong, and this cache IS the scan's skip: a moved
+ * key re-curates every document a workspace has. A prompt change that fixes
+ * WRONG output bumps this in the same commit, deliberately.
+ */
+export const CURATE_DOC_STAGE_VERSION = 1
 
 /**
  * The cache key: prompt fingerprint :: identity fingerprint :: path :: content
@@ -197,13 +211,44 @@ export function curateDocCacheKey(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
 ): string {
-  return scanCacheKey([
-    CURATE_DOC_PROMPT_FINGERPRINT,
+  return curateDocKeyOver(
+    `curate-doc-v${CURATE_DOC_STAGE_VERSION}`,
     identityFingerprint(input.identity),
-    input.doc.path,
-    input.doc.contentHash,
-    ...extraParts,
-  ])
+    input.doc,
+    extraParts,
+  )
+}
+
+/**
+ * {@link curateDocCacheKey} under the formula that came before it: the same
+ * identity while the prompt's fingerprint, not the stage version, was in the
+ * key. A miss reads it. Curate-doc's cache IS the scan's skip, so without this
+ * a changed key re-curates every document once. A workspace identity has no
+ * older form to fall back to: its subject moved from the connected repositories
+ * to the sentence the workspace states, and its documents re-judge once.
+ * Delete with the legacy hash.
+ */
+export function curateDocLegacyCacheKeys(
+  input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
+  extraParts: readonly string[] = [],
+): string[] {
+  return [
+    curateDocKeyOver(
+      LEGACY_CURATE_DOC_PROMPT_FINGERPRINT,
+      identityFingerprint(input.identity),
+      input.doc,
+      extraParts,
+    ),
+  ]
+}
+
+function curateDocKeyOver(
+  stage: string,
+  identity: string,
+  doc: Pick<DocCandidate, 'path' | 'contentHash'>,
+  extraParts: readonly string[],
+): string {
+  return scanCacheKey([stage, identity, doc.path, doc.contentHash, ...extraParts])
 }
 
 export interface CurateDocSessionInput {
@@ -264,6 +309,9 @@ export function curateDocBriefing(
   identity: RepoIdentity | null,
   instructions: readonly string[] = [],
   origin?: DocOrigin,
+  /** The area ids the last scan tagged this document with — briefed for
+   *  identity, never part of the cache key (a cached verdict is never re-briefed). */
+  priorAreas: readonly string[] = [],
 ): string {
   const chunks = planDocChunks(doc.path, docBody(doc), DOC_CHUNK_CHARS)
   const first = chunks[0]
@@ -275,6 +323,9 @@ export function curateDocBriefing(
     ...docLifecycleLines(doc),
     `Detected kind: ${doc.kind}`,
     `Size: ${doc.size} bytes`,
+    ...(priorAreas.length > 0
+      ? [`PREVIOUS AREAS (the last scan tagged this document): ${[...priorAreas].sort().join(', ')} — reuse these labels unless what the document says has moved.`]
+      : []),
     '',
     chunks.length > 1 ? `--- doc (chunk 1/${chunks.length}) ---` : '--- doc ---',
     first?.text ?? '',

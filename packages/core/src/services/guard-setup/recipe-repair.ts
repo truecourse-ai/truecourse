@@ -1,12 +1,22 @@
 /**
  * THE RECIPE REPAIR SESSION — `guard-setup.recipe-repair`.
  *
- * Loop ONLY on the failure path: `proposeRecipe` → `verifyProposal` run first,
- * deterministically, and a clean repo spends zero sessions. Only when the
- * deterministic proposal was rejected (or refused to propose) does this session
- * run — briefed on the failed proposal, the engine's own verdict, and the
- * evidence the one-shot fallback used to get — and iterate in ONE
- * {@link WorkingSandbox} where installs and builds accumulate call over call.
+ * Loop ONLY on the failure path, in both of the situations that reach it:
+ *
+ * - DERIVING. `proposeRecipe` → `verifyProposal` run first, deterministically,
+ *   and a clean repo spends zero sessions. Only when the deterministic proposal
+ *   was rejected (or refused to propose) does the session run, briefed on the
+ *   failed proposal, the engine's own verdict, and the evidence the one-shot
+ *   fallback used to get.
+ * - REPAIRING A STANDING RECIPE. The repository already has one and setup found
+ *   that it no longer holds — it does not provide a need the code declares, or
+ *   it no longer starts. The briefing carries the recipe itself, secret-
+ *   stripped, and the session is held to the scope: a needs-driven outcome that
+ *   changes anything but the world the app runs in is turned back naming the
+ *   fields it moved, here and again at the fold.
+ *
+ * Either way it iterates in ONE {@link WorkingSandbox} where installs and
+ * builds accumulate call over call.
  *
  * The session's `verify_recipe` tool is its in-session done-check (the REAL
  * `verifyProposal`, expensive, result returned verbatim), and the def's
@@ -17,19 +27,26 @@
  * before. A fold-verify failure fails the run with the structured reason — the
  * session is not re-entered this run; resume is the next run's path.
  *
- * CACHE: the settled proposal keeps the legacy `guard/recipe` name AND key
+ * CACHE: a DERIVED proposal keeps the legacy `guard/recipe` name AND key
  * (`recipeCacheKey(inputsFingerprint, composeProject)`), via
  * `cachedSessionOutcome` — a proposal the one-shot era settled stays a hit, and
- * verification always re-runs on hits, today's semantics exactly. The run's
- * compose project is part of the key because it is part of the proposal: the
- * recipe carries it in every `-p`.
+ * verification always re-runs on hits, today's semantics exactly. A repair of a
+ * standing recipe keys on that recipe plus the situation instead
+ * (`recipeRepairCacheKey`), so an outcome can never be replayed against a
+ * recipe or a failure it does not describe. The run's compose project is part
+ * of both keys because it is part of the proposal: the recipe carries it in
+ * every `-p`.
  */
 
 import { z } from 'zod';
 import { defineSessionTool, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
 import {
   RECIPE_CACHE_NAME,
+  NEEDS_REPAIR_FIELDS,
   recipeCacheKey,
+  recipeRepairCacheKey,
+  foldRepairedRecipe,
+  needsScopeRefusal,
   staticProposalComplaints,
   verifyProposal,
   RecipeProposalSchema,
@@ -37,8 +54,15 @@ import {
   type RecipeAppInventoryEntry,
   type RecipeRepairContext,
   type RecipeRepairFn,
+  type RecipeRepairScope,
 } from '@truecourse/guard-generator';
-import { createWorkingSandbox, maskedRecipeText, type WorkingSandbox } from '@truecourse/guard-runner';
+import {
+  createWorkingSandbox,
+  maskedRecipeText,
+  recipeContractFingerprint,
+  type Recipe,
+  type WorkingSandbox,
+} from '@truecourse/guard-runner';
 import { isCreditsExhausted } from '@truecourse/shared';
 import { cachedSessionOutcome } from '../agent/session-cache.js';
 import { runSessionPool } from '../agent/session-pool.js';
@@ -71,9 +95,17 @@ export interface RecipeRepairSessionInput {
    *  Both recipe tools hold a draft to it, so the session cannot settle on a
    *  world of its own invention. */
   composeProject?: string;
+  /**
+   * The recipe this session is REPAIRING and the scope it is held to. Present ⇒
+   * a needs-driven outcome that changes anything but the world the app runs in
+   * is turned back with the fields it moved, before the fold refuses it minutes
+   * later. Absent ⇒ the session is deriving, and there is nothing to diff.
+   */
+  existing?: { recipe: Recipe; scope: RecipeRepairScope };
 }
 
 export function recipeRepairSessionDef(input: RecipeRepairSessionInput): SessionDef<RecipeProposal> {
+  const standing = input.existing;
   return {
     kind: RECIPE_REPAIR_SESSION_KIND,
     display: {
@@ -83,6 +115,15 @@ export function recipeRepairSessionDef(input: RecipeRepairSessionInput): Session
     systemPrompt: SYSTEM_PROMPT,
     tools: buildRepairTools(input),
     outcomeSchema: RecipeProposalSchema,
+    // The scope, enforced where the session can still act on it. The fold runs
+    // the identical check on whatever comes back, so a session that never
+    // complies costs a turn here and a refusal there, never a rewritten recipe.
+    ...(standing?.scope.kind === 'needs'
+      ? {
+          validateOutcome: (outcome: RecipeProposal): string | undefined =>
+            needsScopeRefusal(standing.recipe, foldRepairedRecipe(standing.recipe, outcome)),
+        }
+      : {}),
     budget: RECIPE_REPAIR_BUDGET,
     // The structural half of "prove it before you claim it": an outcome that was
     // never run through the real verification is almost certainly unverified, and
@@ -105,17 +146,22 @@ export function recipeRepairSessionDef(input: RecipeRepairSessionInput): Session
 }
 
 /**
- * The opening message: repair-to-green, never re-derivation. The failed
- * proposal and the engine's own report LEAD — they are the ground truth about
- * this repository — followed by everything the one-shot proposer used to see.
+ * The opening message: repair-to-green, never re-derivation. What LEADS is the
+ * ground truth about this repository — the recipe it already has and what is
+ * wrong with it, or (when it has none) the proposal the engine ran and its own
+ * report — followed by everything the one-shot proposer used to see.
  */
 export function recipeRepairBriefing(ctx: RecipeRepairContext): string {
-  const lines: string[] = [
-    'Repair ONE recipe proposal to green.',
-    '',
-  ];
-  if (ctx.failed) {
+  const lines: string[] = [];
+  if (ctx.existing) {
+    // A repository that HAS a recipe is never asked for an open proposal: what
+    // it has was proved by a real install, build and boot, and a rewording of
+    // it re-authors every test written against it.
+    lines.push(...standingRecipeOpening(ctx.existing));
+  } else if (ctx.failed) {
     lines.push(
+      'Repair ONE recipe proposal to green.',
+      '',
       `A recipe derived from the repository's own manifests was RUN by the engine and rejected at the \`${ctx.failed.stage}\` stage. Repair it — do not re-derive from scratch; the parts that did not fail are probably right.`,
       '',
       'The proposal the engine ran:',
@@ -128,6 +174,8 @@ export function recipeRepairBriefing(ctx: RecipeRepairContext): string {
     );
   } else {
     lines.push(
+      'Repair ONE recipe proposal to green.',
+      '',
       'The deterministic proposer could not derive a recipe from the manifests below, so there is no prior proposal — read the repository and propose one.',
     );
   }
@@ -184,6 +232,40 @@ export function recipeRepairBriefing(ctx: RecipeRepairContext): string {
     'Work in your sandbox (`sandbox_exec` / `sandbox_shell`) to test theories cheaply — check tool versions, run the package manager, try the build. Read the repository (`read_file` / `search_repo`) for what the manifests actually declare. Run `check_recipe` on a draft for the free static refusals, and `verify_recipe` on the complete proposal — that is the real verification the engine will re-run on your outcome, so do not produce an outcome it has not passed.',
   );
   return lines.join('\n');
+}
+
+/**
+ * The opening for a repository that ALREADY has a recipe: the recipe itself,
+ * secret-stripped, and the one thing that must change about it. The scope is
+ * stated before the recipe is shown, so "change only this" is read first.
+ */
+function standingRecipeOpening(existing: { recipe: Recipe; scope: RecipeRepairScope }): string[] {
+  const shown =
+    maskedRecipeText(JSON.stringify(existing.recipe, null, 2)) ?? JSON.stringify(existing.recipe, null, 2);
+  if (existing.scope.kind === 'needs') {
+    return [
+      'Repair the recipe THIS REPOSITORY ALREADY HAS. It was proved by really installing, building and booting this application, and every test in the suite was written against it — so a reworded version of it is a wrong answer even when it verifies.',
+      '',
+      'What the repository needs and this recipe does not provide:',
+      ...existing.scope.unprovided.map((entry) => `  - ${entry.need.id} — ${entry.provides}`),
+      '',
+      `You may change ONLY the world the app runs in: ${NEEDS_REPAIR_FIELDS.join(', ')}. Everything else — what is installed, what is built, what is served and where — stays exactly as it is below, character for character. An outcome that moves anything else is refused and handed back to you.`,
+      '',
+      'The recipe as it stands (inline secrets masked; return it complete, with your change folded in):',
+      shown,
+    ];
+  }
+  return [
+    'Repair the recipe THIS REPOSITORY ALREADY HAS: it no longer starts.',
+    '',
+    'The engine reported (ground truth — it names what was actually found):',
+    existing.scope.failure,
+    '',
+    'Any field may change, because the broken one cannot be known in advance — but change what the report proves wrong and keep what it does not. Every test in the suite was written against this recipe.',
+    '',
+    'The recipe as it stands (inline secrets masked; return it complete, with your fix folded in):',
+    shown,
+  ];
 }
 
 function buildRepairTools(input: RecipeRepairSessionInput): SessionTool[] {
@@ -351,7 +433,16 @@ export function buildRecipeRepair(
       const outcome = await cachedSessionOutcome<RecipeProposal>({
         repoRoot: ctx.repoRoot,
         cacheName: RECIPE_CACHE_NAME,
-        key: recipeCacheKey(ctx.inputsFingerprint, ctx.composeProject),
+        // A repair of a STANDING recipe keys on that recipe and the situation
+        // it was asked to fix, never on the discovery inputs: an outcome
+        // settled against one recipe describes no other.
+        key: ctx.existing
+          ? recipeRepairCacheKey({
+              contractFingerprint: recipeContractFingerprint(ctx.repoRoot),
+              scope: ctx.existing.scope,
+              ...(ctx.composeProject ? { composeProject: ctx.composeProject } : {}),
+            })
+          : recipeCacheKey(ctx.inputsFingerprint, ctx.composeProject),
         schema: RecipeProposalSchema,
         run: async () => {
           const { driver, persistence } = await context.acquire();
@@ -366,6 +457,7 @@ export function buildRecipeRepair(
                   sandbox,
                   ...(ctx.inputs.apps ? { apps: ctx.inputs.apps } : {}),
                   ...(ctx.composeProject ? { composeProject: ctx.composeProject } : {}),
+                  ...(ctx.existing ? { existing: ctx.existing } : {}),
                 }),
               briefing: () => [recipeRepairBriefing(ctx)],
               driver,
@@ -445,7 +537,10 @@ const SYSTEM_PROMPT = `You repair RECIPE PROPOSALS for TrueCourse guard: the sma
 
 # The job
 
-A deterministic proposal derived from the repository's own manifests FAILED the engine's verification (or none could be derived). Your briefing quotes the failed proposal and the engine's own report verbatim. Repair it to green: change what the report proves wrong, keep what it does not. This is repair, never re-derivation — the engine's report is ground truth about this repository.
+Repair to green: change what the briefing proves wrong, keep what it does not. This is repair, never re-derivation — the briefing is ground truth about this repository. It comes in one of two shapes, and it says which:
+
+- The repository has NO recipe yet, and a proposal derived from its own manifests FAILED the engine's verification (or none could be derived). The briefing quotes that proposal and the engine's report verbatim.
+- The repository HAS a recipe, quoted in the briefing, and something about it no longer holds — it does not provide something the code now needs, or it no longer starts. That recipe was proved by really installing, building and booting this application, and every test in the suite was written against it, so restating it in your own words is a WRONG answer even when it verifies. Return it complete with your change folded in, and change nothing the briefing did not name; when it names the fields you may touch, an outcome that moves any other is refused and handed back to you.
 
 # The shape you produce
 

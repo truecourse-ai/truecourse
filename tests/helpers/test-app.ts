@@ -29,6 +29,7 @@ import {
   setWorkspaceLlmBackend,
   setWorkspaceLlmConfigStore,
 } from '../../apps/dashboard/server/src/services/workspace-llm.service';
+import { installDescribedWorkspaces } from './workspace-profile';
 
 export const TEST_ORG = 'org_test';
 /** The signed-in person every route test runs as. */
@@ -171,8 +172,7 @@ export function installTestWorkspaceLlm(): void {
   });
   setWorkspaceLlmBackend({
     probe: async () => {},
-    driver: () => ({}) as never,
-    transport: (async () => '{}') as never,
+    driver: () => ({ attribution: { provider: 'test', model: 'test-model' } }) as never,
   });
 }
 
@@ -182,12 +182,14 @@ export function resetTestWorkspaceLlm(): void {
 }
 
 /** `createApp` wired for route tests: authenticated as TEST_ORG, all repos visible,
- *  and the workspace's LLM provider configured and answering.
+ *  the workspace's LLM provider configured and answering, and the workspace
+ *  having said what its product is (without which it connects nothing).
  *  Runs "clone" in place: the fixture repos ARE local paths, so the work-tree
  *  provider hands the registered path back with a no-op dispose. */
 export function createTestApp(overrides: Partial<CreateAppOptions> = {}) {
   setWorkTreeProvider('github', async (repoKey) => ({ dir: repoKey, dispose: () => {} }));
   installTestWorkspaceLlm();
+  installDescribedWorkspaces();
   return createApp({
     serveStatic: false,
     authVerifier: testAuthVerifier(),

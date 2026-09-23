@@ -147,10 +147,12 @@ export function createRepoGuardRunTask(
         // The judge is the only thing here that spends, and it is annotation-only
         // — but a run that could not afford its verdicts is a run whose board is
         // missing them, so it pauses rather than storing a half-judged board.
+        const judge = llm ? llm.driver() : null;
         const result = await withCredits(meter, () =>
           runGuard(tree.dir, {
             tracker: mirrorTracker(ctx, GUARD_RUN_STEPS),
-            ...(llm ? { visualJudge: createGuardVisualJudge(tree.dir, { transport: llm.transport() }) } : {}),
+            ...(llm && judge ? { judgeDriver: judge, transportMode: llm.mode, sessionsKey: repoFullName } : {}),
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
           }),
         );
         // A stop the user asked for: the harness settles the row cancelled, and
@@ -158,7 +160,12 @@ export function createRepoGuardRunTask(
         if (ctx.signal?.aborted) return { notification: null };
         if (result.status !== 'ok') throw new Error(runFailureReason(result));
 
-        await persistGuardRun(ref, tree.dir, result.latest);
+        // A run opens no session record of its own; the judge's model, when
+        // it was on, is the one model the stored run was on.
+        await persistGuardRun(ref, tree.dir, result.latest, {
+          producedByRun: null,
+          model: judge?.attribution.model ?? null,
+        });
 
         const { summary } = result.latest;
         const jobResult: GuardRunJobResult = {

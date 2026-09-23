@@ -183,6 +183,23 @@ export const GuardManifestFlowSchema = z
     interfaces: z.array(GuardManifestFlowInterfacesSchema).default([]),
     /** Hash of the inputs the generator used; unset until a generator authors. */
     generationInputsHash: z.string().nullable().default(null),
+    /**
+     * The settle inputs behind `generationInputsHash`, by NAME (component →
+     * its fingerprint), so a hash that moved can say which input moved it.
+     * Written with the hash; absent on a manifest written before the field.
+     */
+    generationInputs: z.record(z.string(), z.string()).optional(),
+    /**
+     * The browser-catalog entries this flow's web authoring session was SERVED
+     * by its search and get tools — the only part of that catalog its scenario
+     * can depend on, since a committed web scenario holds raw locators and no
+     * catalog ids. The settle compare folds these entries' CURRENT
+     * fingerprints, so an unrelated screen moving re-opens nothing and an id
+     * that has left the catalog re-opens this flow. Absent for a non-web flow
+     * and for a row written before the record existed; such a row has nothing
+     * to compare and is not re-opened through this path until it authors again.
+     */
+    catalogReads: z.array(z.string().min(1)).optional(),
     /** Per-surface gaps: why a surface has no scenario. */
     gaps: z.array(GuardManifestGapSchema).default([]),
     /** Prior scenarios an editing worker deliberately dropped (see
@@ -200,6 +217,13 @@ export const GuardManifestFlowSchema = z
      * `guard generate` prunes it and its gaps die with it.
      */
     orphaned: z.boolean().optional(),
+    /**
+     * Why the flow left the corpus, when synthesis said: the reconciliation's
+     * retirement reason ("the claims no longer describe a sign-up step"), written
+     * with the `orphaned` mark so every reader can say why instead of only that.
+     * Absent on an entry orphaned before the reason was recorded.
+     */
+    orphanedReason: z.string().min(1).optional(),
   })
   .strict()
 export type GuardManifestFlow = z.infer<typeof GuardManifestFlowSchema>
@@ -293,6 +317,47 @@ export function unaccountedSurfaces(flow: GuardManifestFlow): GuardDriverId[] {
  */
 export function violatesSettleInvariant(flow: GuardManifestFlow): boolean {
   return flow.generationInputsHash !== null && unaccountedSurfaces(flow).length > 0
+}
+
+/**
+ * The names of the inputs that differ between a stored record of named inputs
+ * (a flow's `generationInputs`, a setup step's `inputComponents`) and the one
+ * computed now, sorted. A name present on one side only counts as moved.
+ * `null` when nothing was stored, so "nothing moved" and "cannot tell" stay apart.
+ */
+export function movedNamedInputs(
+  prior: Readonly<Record<string, string>> | undefined,
+  current: Readonly<Record<string, string>>,
+): string[] | null {
+  if (!prior) return null
+  const names = new Set([...Object.keys(prior), ...Object.keys(current)])
+  return [...names].filter((name) => prior[name] !== current[name]).sort()
+}
+
+/**
+ * THE COMPONENT COMPARE — the names that moved between a record of named
+ * inputs stored on a settled row and the record the CURRENT scheme computes.
+ * Three rules, and they are what makes changing a key formula free:
+ *
+ * - a name on BOTH sides must match, or it moved;
+ * - a name stored but no longer in the scheme is ignored, so retiring an input
+ *   re-opens nothing;
+ * - a name in the scheme but missing from the stored row is filled in, not
+ *   moved, so adding an input re-opens nothing either.
+ *
+ * Which means a formula change is a change to a list of names, with no scheme
+ * version, no re-stamp and no migration pass. The price is that a genuinely
+ * changed input can only be seen through a name both records carry, which is
+ * why {@link movedNamedInputs} — the reporting question, "what is different
+ * about these two rows" — stays a different function.
+ */
+export function movedSchemeInputs(
+  prior: Readonly<Record<string, string>>,
+  current: Readonly<Record<string, string>>,
+): string[] {
+  return Object.keys(current)
+    .filter((name) => name in prior && prior[name] !== current[name])
+    .sort()
 }
 
 /**

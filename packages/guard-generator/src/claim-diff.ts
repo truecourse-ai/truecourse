@@ -17,14 +17,15 @@ import type { GuardPrerequisiteTarget } from '@truecourse/shared'
  * the document to extraction exactly as before the gate existed.
  */
 import { createHash } from 'node:crypto'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import { guardManifestSections, isCreditsExhausted, type GuardManifest } from '@truecourse/shared'
 import { extractSectionTexts, nodeRefContext, normalizeSectionText } from '@truecourse/guard-runner'
-import { snapExtraction, type ReuseExtractionSeam } from './extract.js'
+import { snapExtraction, type PriorExtraction, type ReuseExtractionSeam } from './extract.js'
 import { flowSectionKey } from './flows.js'
-import { CLAIM_DIFF_PROMPT_FINGERPRINT, type ClaimDiffSectionInput } from './prompts.js'
+import { type ClaimDiffSectionInput } from './prompts.js'
+import { LEGACY_CLAIM_DIFF_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { ClaimDiffSchema, type ClaimDiff } from './schemas.js'
-import type { ClaimDiffRunner } from './runners.js'
+import type { ClaimDiffRunner } from './leaf-seams.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
 
 export const CLAIM_DIFF_CACHE_NAME = 'guard/claim-diff'
@@ -39,6 +40,9 @@ export interface ClaimDiffGateResult {
   cosmetic: Map<string, string>
   /** Documents whose prior extraction was reused this run. */
   reusedDocs: string[]
+  /** The prior extraction the gate found for each edited document it judged,
+   *  reused or not — handed on so the next reader does not fetch it again. */
+  priors: Map<string, PriorExtraction>
   /** Live gate calls made (cache hits excluded). */
   calls: number
   /** One message per document the gate could not judge (runner failure) and
@@ -46,7 +50,7 @@ export interface ClaimDiffGateResult {
   errors: string[]
 }
 
-export const EMPTY_CLAIM_DIFF_GATE: ClaimDiffGateResult = { cosmetic: new Map(), reusedDocs: [], calls: 0, errors: [] }
+export const EMPTY_CLAIM_DIFF_GATE: ClaimDiffGateResult = { cosmetic: new Map(), reusedDocs: [], priors: new Map(), calls: 0, errors: [] }
 
 export interface ReuseCosmeticExtractionsInput {
   repoRoot: string
@@ -73,22 +77,39 @@ export async function rememberDocTexts(repoRoot: string, docs: readonly GuardDoc
   }
 }
 
-/** The gate's cache key: doctrine :: section :: old text :: new text :: prior
- *  claims. The same edit judged against the same prior is judged once. */
+/**
+ * THE CLAIM-DIFF STAGE'S VERSION, bumped by hand. A reworded prompt does not
+ * make a cosmetic-vs-substantive verdict wrong; a prompt change that fixes
+ * WRONG output bumps this in the same commit.
+ */
+export const CLAIM_DIFF_STAGE_VERSION = 1
+
+/** The gate's cache key: stage version :: section :: old text :: new text ::
+ *  prior claims. The same edit judged against the same prior is judged once. */
 export function claimDiffCacheKey(section: ClaimDiffSectionInput): string {
+  return claimDiffKeyOver(`claim-diff-v${CLAIM_DIFF_STAGE_VERSION}`, section)
+}
+
+/** {@link claimDiffCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to. Delete with the legacy hash. */
+export function claimDiffLegacyCacheKey(section: ClaimDiffSectionInput): string {
+  return claimDiffKeyOver(LEGACY_CLAIM_DIFF_PROMPT_FINGERPRINT, section)
+}
+
+function claimDiffKeyOver(stage: string, section: ClaimDiffSectionInput): string {
   const prior = JSON.stringify({
     claims: [...section.priorClaims].map((c) => [c.claim, c.reason]).sort(),
     untestable: section.priorUntestable ?? null,
   })
   return createHash('sha256')
     .update(
-      [CLAIM_DIFF_PROMPT_FINGERPRINT, section.doc, section.anchor, normalizeSectionText(section.oldText), normalizeSectionText(section.newText), prior].join('\0'),
+      [stage, section.doc, section.anchor, normalizeSectionText(section.oldText), normalizeSectionText(section.newText), prior].join('\0'),
     )
     .digest('hex')
 }
 
 export async function reuseCosmeticExtractions(input: ReuseCosmeticExtractionsInput): Promise<ClaimDiffGateResult> {
-  const result: ClaimDiffGateResult = { cosmetic: new Map(), reusedDocs: [], calls: 0, errors: [] }
+  const result: ClaimDiffGateResult = { cosmetic: new Map(), reusedDocs: [], priors: new Map(), calls: 0, errors: [] }
   const priorDocs = new Map((input.priorManifest?.docs ?? []).map((d) => [d.doc, d.contentHash]))
   if (priorDocs.size === 0) return result
 
@@ -119,6 +140,7 @@ export async function reuseCosmeticExtractions(input: ReuseCosmeticExtractionsIn
     const changed = doc.sections.filter((s) => priorFingerprints.get(flowSectionKey(s.doc, s.anchor)) !== s.fingerprint)
     const prior = await input.seam.lookup(doc, priorHash, input.prerequisiteTargets)
     if (!prior) continue
+    result.priors.set(doc.doc, prior)
     const snapped = snapExtraction(prior, doc.sections)
 
     // Deepest first, so an ancestor whose own text did not move inherits its
@@ -177,7 +199,9 @@ async function judge(
   result: ClaimDiffGateResult,
 ): Promise<ClaimDiff | null> {
   const key = claimDiffCacheKey(section)
-  const cached = ClaimDiffSchema.safeParse(await getCacheEntry(input.repoRoot, CLAIM_DIFF_CACHE_NAME, key).catch(() => null))
+  const cached = ClaimDiffSchema.safeParse(
+    await getCacheEntryOrLegacy(input.repoRoot, CLAIM_DIFF_CACHE_NAME, key, claimDiffLegacyCacheKey(section)).catch(() => null),
+  )
   if (cached.success) return cached.data
   let lastError = 'invalid reply'
   for (let attempt = 0; attempt < 2; attempt++) {

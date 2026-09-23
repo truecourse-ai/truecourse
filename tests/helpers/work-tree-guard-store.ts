@@ -49,6 +49,7 @@ import {
   type GuardStore,
   type RepoRef,
   type SaveScenariosResult,
+  type VersionAt,
   type WrittenGuardRun,
 } from '@truecourse/core/lib/guard-store';
 import {
@@ -205,7 +206,7 @@ export class WorkTreeGuardStore implements GuardStore {
 
   // The tree holds one state, so there is no per-commit history and `commitSha`
   // is ignored. Same for the corpus reads below.
-  async readGuardResult(repoKey: string, _commitSha?: string): Promise<GuardGenerateReport | null> {
+  async readGuardResult(repoKey: string, _at?: VersionAt): Promise<GuardGenerateReport | null> {
     return fileReadGuardResult(repoKey);
   }
 
@@ -289,19 +290,19 @@ export class WorkTreeGuardStore implements GuardStore {
   async saveScenarios(ref: RepoRef, _sourceDir: string): Promise<SaveScenariosResult> {
     // The corpus is already on disk (the guard-runner/generator wrote it in place),
     // so there is nothing to copy — report the count, matching the contract store.
-    // The commit is ignored: a tree has no per-commit history.
-    return { fileCount: walkScenarioRelFiles(scenariosDir(ref.repoKey)).length };
+    // The commit is ignored: a tree has no per-commit history, and one version.
+    return { fileCount: walkScenarioRelFiles(scenariosDir(ref.repoKey)).length, versionId: WORK_TREE_COMMIT };
   }
 
   async loadScenarios(ref: RepoRef): Promise<LoadedScenarios> {
     return fileLoadScenarios(ref.repoKey);
   }
 
-  async readManifest(repoKey: string, _commitSha?: string): Promise<GuardManifest | null> {
+  async readManifest(repoKey: string, _at?: VersionAt): Promise<GuardManifest | null> {
     return fileReadManifest(repoKey);
   }
 
-  async readRecipeRaw(repoKey: string, _commitSha?: string): Promise<string | null> {
+  async readRecipeRaw(repoKey: string, _at?: VersionAt): Promise<string | null> {
     const file = recipePath(repoKey);
     if (!fs.existsSync(file)) return null;
     try {
@@ -311,13 +312,13 @@ export class WorkTreeGuardStore implements GuardStore {
     }
   }
 
-  async listScenarioFiles(repoKey: string, _commitSha?: string): Promise<string[]> {
+  async listScenarioFiles(repoKey: string, _at?: VersionAt): Promise<string[]> {
     return collectYamlFiles(scenariosDir(repoKey))
       .map((f) => path.relative(repoKey, f).split(path.sep).join('/'))
       .sort();
   }
 
-  async readScenarioFile(repoKey: string, relPath: string, _commitSha?: string): Promise<string | null> {
+  async readScenarioFile(repoKey: string, relPath: string, _at?: VersionAt): Promise<string | null> {
     const root = path.resolve(scenariosDir(repoKey));
     const full = path.resolve(repoKey, relPath);
     if (full !== root && !full.startsWith(root + path.sep)) return null;
@@ -336,6 +337,20 @@ export class WorkTreeGuardStore implements GuardStore {
   async loadGuardSetupBundle(repoKey: string): Promise<Record<string, string> | null> {
     const files = collectGuardSetupBundle(repoKey);
     return Object.keys(files).length > 0 ? files : null;
+  }
+
+  // A tree holds one version of everything, so there is no series to list and
+  // nothing older to restore.
+  async listGuardVersions(): Promise<[]> {
+    return [];
+  }
+
+  async readGuardVersion(): Promise<null> {
+    return null;
+  }
+
+  async restoreGuardScenarioSet(): Promise<null> {
+    return null;
   }
 
   async readGuardDecisions(repoPath: string): Promise<GuardDecisions> {

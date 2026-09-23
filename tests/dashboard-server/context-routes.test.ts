@@ -19,6 +19,7 @@ import {
   resetContextStore,
   setContextStore,
 } from '@truecourse/core/lib/context-store';
+import { installWorkspaceProfiles } from '../helpers/workspace-profile';
 import {
   createTestApp,
   stubJobs,
@@ -140,6 +141,31 @@ function addSite(url = 'https://docs.acme.com/llms.txt', repoIds: string[] = [])
     .post('/api/context/sources')
     .send({ kind: 'site', config: { llmsTxtUrl: url }, repoIds });
 }
+
+/**
+ * NOTHING ENTERS A WORKSPACE THAT HAS NOT SAID WHAT ITS PRODUCT IS.
+ *
+ * A source is documentation, and documentation is kept or dropped by whether it
+ * describes the workspace's product — so a workspace with no statement of it has
+ * nothing to attribute against, and the route refuses before it writes a row.
+ * The refusal carries a CODE so the client can offer the page rather than a wall.
+ */
+describe('POST /api/context/sources for a workspace that has not described itself', () => {
+  it('refuses, stores no source and enqueues no sync', async () => {
+    installWorkspaceProfiles([]);
+    const res = await addSite().expect(409);
+    expect(res.body).toMatchObject({ error: 'workspace-description-required' });
+    expect(res.body.message).toMatch(/Settings/);
+    expect(await store.listSources(TEST_ORG)).toEqual([]);
+    expect(syncs).toEqual([]);
+  });
+
+  it('stores the source once the workspace has said it', async () => {
+    installWorkspaceProfiles([TEST_ORG]);
+    await addSite().expect(202);
+    expect(await store.listSources(TEST_ORG)).toHaveLength(1);
+  });
+});
 
 describe('GET /api/context/sources', () => {
   it('is empty for a workspace with nothing registered', async () => {

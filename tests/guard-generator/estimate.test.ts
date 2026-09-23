@@ -14,9 +14,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runnableDriverIds } from '@truecourse/shared'
+import { manifestPath } from '@truecourse/shared/work-tree'
 import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index'
 import { setCacheEntry } from '@truecourse/llm'
 import { estimateGuardTokens } from '../../packages/core/src/services/llm/spec-estimate.js'
+import { resolveModel } from '../../packages/core/src/config/llm-models.js'
 import {
   EXTRACT_SESSION_CACHE_NAME,
   EXTRACT_SESSION_BUDGET,
@@ -26,13 +28,16 @@ import {
   FLOWS_SESSION_KIND,
   FLOW_WORKER_SESSION_KIND,
   FLOW_WORKER_BUDGET,
+  FLOW_WORKER_CACHE_NAME,
   FIDELITY_SESSION_KIND,
   flowsSessionCacheKey,
+  flowWorkerCacheKey,
 } from '../../packages/core/src/services/guard-generate/index.js'
 import {
   planGuardWork,
   collectWorkDocs,
   type FlowSynthesisArea,
+  type FlowWorkerTask,
 } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
@@ -154,6 +159,43 @@ async function generateAndWarm(r: string, extractor = extract, author = worker, 
   }
   return result
 }
+
+// ---------------------------------------------------------------------------
+// One model, so one price.
+// ---------------------------------------------------------------------------
+
+describe('estimateGuardTokens — every stage priced at the one model', () => {
+  const savedModel = process.env.TRUECOURSE_MODEL
+  afterEach(() => {
+    if (savedModel === undefined) delete process.env.TRUECOURSE_MODEL
+    else process.env.TRUECOURSE_MODEL = savedModel
+  })
+
+  /** Every quoted stage's model, one-shots and sessions alike. */
+  const modelsOf = async (r: string): Promise<Set<string>> =>
+    new Set(((await estimateGuardTokens(r)).stages ?? []).map((s) => s.model))
+
+  it('quotes the operator model for the one-shots as well as the sessions', async () => {
+    const bare = repo()
+    writeCorpus(bare, [{ ref: DOC }])
+    writeDoc(bare, DOC, DOC_CONTENT)
+    // A repo with no recipe quotes `guardRecipe` too, so the set covers both
+    // the surviving one-shots and every session kind.
+    const stages = new Map(((await estimateGuardTokens(bare)).stages ?? []).map((s) => [s.stage, s]))
+    expect(stages.has('guardRecipe')).toBe(true)
+    expect(await modelsOf(bare)).toEqual(new Set([resolveModel()]))
+  })
+
+  it('follows TRUECOURSE_MODEL, so the ceiling prices what will really run', async () => {
+    process.env.TRUECOURSE_MODEL = 'sonnet'
+    expect(await modelsOf(coldRepo())).toEqual(new Set(['sonnet']))
+  })
+
+  it("takes the run's own model when its driver names one", async () => {
+    const est = await estimateGuardTokens(coldRepo(), undefined, { sessionModel: 'gpt-5.5' })
+    expect(new Set((est.stages ?? []).map((s) => s.model))).toEqual(new Set(['gpt-5.5']))
+  })
+})
 
 // ---------------------------------------------------------------------------
 // Session math: items, expected turns, and the budget ceiling.
@@ -474,7 +516,9 @@ describe('estimateGuardTokens — the surfaces a missing recipe is priced on', (
 })
 
 
-it('quotes account-bound cases with the same normalized eligibility and cache keys as generation', async () => {
+/** A repo whose one flow binds a case to a supplied account nobody registered.
+ *  `onTask` sees each worker task the run builds, cache material and all. */
+function accountBoundRepo(onTask?: (task: FlowWorkerTask) => void) {
   const r = coldRepo()
   writeRecipe(r, { api: { serve: ['node', 'unused.js'], externals: {
     currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', baseUrl: 'http://127.0.0.1:1', env: { CURRENCYBEACON_API_KEY: {} } },
@@ -486,12 +530,17 @@ it('quotes account-bound cases with the same normalized eligibility and cache ke
   }] })
   const author = submitWorkerSessions(() => raw('v', PASSING_STEPS.map(step => ({ ...step, milestone: 1, checks: ['version'] }))), {
     judge: async () => ({ kind: 'faithful', evidence: [{ milestone: 1, caseId: 'version', steps: [1], reason: 'Observes the documented CLI version output.' }] }),
+    ...(onTask ? { onBriefing: onTask } : {}),
   })
+  return { r, extractor, author, overlay: path.join(r, '.truecourse/scenarios/externals.local.json') }
+}
+
+it('quotes account-bound cases with the same normalized eligibility and cache keys as generation', async () => {
+  const { r, extractor, author, overlay } = accountBoundRepo()
   const missing = await generateAndWarm(r, extractor, author)
   expect(missing.written).toEqual([])
   expect((await estimateGuardTokens(r)).stages).toEqual([])
 
-  const overlay = path.join(r, '.truecourse/scenarios/externals.local.json')
   fs.writeFileSync(overlay, JSON.stringify({ currencybeacon: { env: { CURRENCYBEACON_API_KEY: 'first-fixture-key' } } }))
   const provided = await stagesOf(r)
   expect(provided.get('guardMatch')?.calls).toBe(1)
@@ -503,6 +552,35 @@ it('quotes account-bound cases with the same normalized eligibility and cache ke
 
   fs.writeFileSync(overlay, JSON.stringify({ currencybeacon: { env: { CURRENCYBEACON_API_KEY: 'rotated-fixture-key' } } }))
   expect((await estimateGuardTokens(r)).stages).toEqual([])
+})
+
+it('probes the worker key a prerequisite-bound task was authored under, not one of its own', async () => {
+  const tasks: FlowWorkerTask[] = []
+  const { r, extractor, author, overlay } = accountBoundRepo((task) => tasks.push(task))
+  fs.writeFileSync(overlay, JSON.stringify({ currencybeacon: { env: { CURRENCYBEACON_API_KEY: 'fixture-key' } } }))
+  expect((await generateAndWarm(r, extractor, author)).written).toHaveLength(1)
+  expect(tasks).toHaveLength(1)
+
+  // The entry a real worker session would have left, under the key the RUN
+  // computes for this task — prerequisite material and all.
+  await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(tasks[0]), {
+    outcome: { kind: 'settled', scenarioYamlSha: 'a'.repeat(64), expectedReds: [] },
+    scenarioYaml: 'title: v\nsteps: []\n',
+  })
+  // Unsettle the flow and nothing else: its sections are untouched, so the
+  // estimate stays on its exact path and reaches that entry. A key the estimate
+  // builds differently quotes a whole re-author instead.
+  const manifest = JSON.parse(fs.readFileSync(manifestPath(r), 'utf-8'))
+  for (const flow of manifest.flows) {
+    flow.generationInputsHash = null
+    delete flow.generationInputs
+  }
+  fs.writeFileSync(manifestPath(r), JSON.stringify(manifest))
+
+  const stages = await stagesOf(r)
+  expect(stages.has(EXTRACT_SESSION_KIND)).toBe(false)
+  expect(stages.has('guardMatch')).toBe(false)
+  expect(stages.has(FLOW_WORKER_SESSION_KIND)).toBe(false)
 })
 
 it('estimates one complete alternative realization and keeps its valid prior choice on a no-op run', async () => {

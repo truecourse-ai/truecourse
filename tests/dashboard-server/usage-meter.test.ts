@@ -1,16 +1,15 @@
 /**
  * The meter a job spends through, end to end into the store.
  *
- * What is pinned: a one-shot call reaches it through the transport the run was
- * built with, an agent session reaches it through the `assistant-turn` events
- * the driver already emits, a pool of sessions of one KIND is ONE row, the row
- * exists before the run ends, the run id names rows written before it opened,
- * and a run that throws has still paid for what it spent.
+ * What is pinned: every LLM call reaches it the ONE way there is — the
+ * `assistant-turn` events the session driver already emits — so a pool of
+ * sessions of one KIND is ONE row and a one-turn leaf judgement is a row of its
+ * own; the row exists before the run ends, the run id names rows written before
+ * it opened, and a run that throws has still paid for what it spent.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { SessionDef, SessionDriver, SessionEventBody } from '@truecourse/agent-loop';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import { z } from 'zod';
 import {
   resetWorkspaceLlmBackend,
@@ -84,7 +83,7 @@ function runOneSession(driver: SessionDriver, kind: string): void {
   });
 }
 
-/** A workspace on an API provider whose transport reports what a call spent. */
+/** A workspace on an API provider whose sessions report what a turn spent. */
 function installBackend(): void {
   setWorkspaceLlmConfigStore({
     getConfig: async () => ({ provider: 'anthropic' as const, model: 'claude-opus-5', apiKey: 'sk-test' }),
@@ -98,18 +97,6 @@ function installBackend(): void {
   setWorkspaceLlmBackend({
     probe: async () => {},
     driver: () => fakeDriver(),
-    transport: (_config, onUsage): LlmTransport => async (req) => {
-      onUsage?.({
-        stage: req.stage ?? 'unknown',
-        model: 'claude-haiku-5',
-        inputTokens: 90,
-        outputTokens: 10,
-        cacheReadTokens: 0,
-        cacheCreateTokens: 0,
-        costUsd: 0.25,
-      });
-      return '{}';
-    },
   });
 }
 
@@ -131,17 +118,22 @@ afterEach(async () => {
 });
 
 describe('the usage meter', () => {
-  it('records a one-shot call as its stage', async () => {
+  it('records a ONE-TURN leaf judgement as a session of its own kind', async () => {
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
 
-    await llm.transport()({ stage: 'guard.recipe-propose', system: '', user: 'x' });
+    runOneSession(llm.driver(), 'guard-generate.match');
     await meter.close();
 
+    const rows = await installed.db.query.llmUsage.findMany();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      subject: 'guard-generate.match',
+      subjectKind: 'session',
+      calls: 1,
+    });
     const runs = await installed.store.runs(ALL, 10);
-    expect(runs).toHaveLength(1);
-    expect(runs[0]).toMatchObject({ jobId: JOB, costUsd: 0.25, tokens: 100, calls: 1 });
-    expect(await installed.store.totals(ALL)).toMatchObject({ calls: 1, runs: 1 });
+    expect(runs[0]).toMatchObject({ jobId: JOB, costUsd: 0.5, tokens: 1_350, calls: 1 });
   });
 
   it('folds a pool of sessions of one kind into one row and counts every turn', async () => {
@@ -166,18 +158,22 @@ describe('the usage meter', () => {
     expect(rows.find((row) => row.subject === 'guard-generate.extract')!.calls).toBe(1);
   });
 
-  it('keeps both halves of a run on the one job', async () => {
+  it('keeps every kind of a run on the one job, and names one model', async () => {
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
 
     runOneSession(llm.driver(), 'guard-generate.flow-worker');
-    await llm.transport()({ stage: 'guard.recipe-propose', system: '', user: 'x' });
+    runOneSession(llm.driver(), 'guard-generate.match');
     await meter.close();
 
     const runs = await installed.store.runs(ALL, 10);
     expect(runs).toHaveLength(1);
-    expect(runs[0]!.costUsd).toBe(0.75);
+    expect(runs[0]!.costUsd).toBe(1);
     expect(runs[0]!.calls).toBe(2);
+    // One model ran the whole job, so that is what the run reports.
+    expect(runs[0]!.model).toBe('claude-opus-5-20260101');
+    const rows = await installed.db.query.llmUsage.findMany();
+    expect(new Set(rows.map((row) => row.model))).toEqual(new Set(['claude-opus-5-20260101']));
   });
 
   it('has the row before the run ends, and grows it as the run goes', async () => {
@@ -239,7 +235,7 @@ describe('the usage meter', () => {
     const llm = await startWorkspaceLlm(ORG);
 
     runOneSession(llm.driver(), 'guard-generate.flow-worker');
-    await llm.transport()({ stage: 'guard.recipe-propose', system: '', user: 'x' });
+    runOneSession(llm.driver(), 'guard-generate.match');
 
     expect(await installed.store.totals(ALL)).toMatchObject({ runs: 0, calls: 0 });
   });

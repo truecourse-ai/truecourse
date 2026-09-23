@@ -15,8 +15,7 @@
 
 import yaml from 'js-yaml';
 import { WRAP_UP_TURNS, type SessionEvent } from '@truecourse/agent-loop';
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import type { LlmTransport } from '@truecourse/shared/llm';
+import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm';
 import {
   evidenceRelPath,
   guardAdjudicateFindingsPath,
@@ -57,6 +56,7 @@ import {
   ADJUDICATE_CACHE_NAME,
   adjudicationBriefing,
   adjudicationCacheKey,
+  adjudicationLegacyCacheKey,
   adjudicationSessionDef,
   adjudicationWorkItem,
   sectionTextsForItem,
@@ -289,7 +289,12 @@ async function prepareAdjudication(
       continue;
     }
     if (!scoped) {
-      const entry = await getCacheEntry(repoRoot, ADJUDICATE_CACHE_NAME, adjudicationCacheKey(item)).catch(
+      const entry = await getCacheEntryOrLegacy(
+        repoRoot,
+        ADJUDICATE_CACHE_NAME,
+        adjudicationCacheKey(item),
+        adjudicationLegacyCacheKey(item),
+      ).catch(
         () => null,
       );
       if (entry !== null) {
@@ -362,8 +367,6 @@ export type AdjudicationProgress =
 
 export interface RunGuardAdjudicationOptions {
   repoRoot: string;
-  /** The run's transport: what the sessions' `visual_judge` tool asks through. */
-  transport: LlmTransport;
   /** Restrict to failures whose recorded actual came from this run; default:
    *  the board as it stands (every current fail/error row). */
   runId?: string;
@@ -514,7 +517,7 @@ export async function runGuardAdjudication(
         session: (item) => {
           const state = newSessionState();
           states.set(item.scenarioId, state);
-          return adjudicationSessionDef({ repoRoot, item, exec, state, transport: opts.transport });
+          return adjudicationSessionDef({ repoRoot, item, exec, state });
         },
         briefing: (item) => [briefings.get(item.scenarioId)!],
         driver,

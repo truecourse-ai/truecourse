@@ -16,6 +16,7 @@ export * from './jobs.js';
 export * from './guard.js';
 export * from './context.js';
 export * from './workspace-invite-links.js';
+export * from './workspace-profile.js';
 export * from './llm-usage.js';
 export * from './credits.js';
 export * from './entitlements.js';
@@ -42,6 +43,7 @@ import {
   contextWorkspaces,
 } from './context.js';
 import { workspaceInviteLinks } from './workspace-invite-links.js';
+import { workspaceProfiles } from './workspace-profile.js';
 import { llmUsage } from './llm-usage.js';
 import { creditLedger, creditBalances } from './credits.js';
 import { workspaceEntitlements } from './entitlements.js';
@@ -70,6 +72,7 @@ export const schema = {
   contextBindings,
   contextWorkspaces,
   workspaceInviteLinks,
+  workspaceProfiles,
   llmUsage,
   creditLedger,
   creditBalances,

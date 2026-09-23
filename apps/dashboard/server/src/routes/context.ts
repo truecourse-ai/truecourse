@@ -71,7 +71,12 @@ import {
   type CuratedCorpus,
   type DecisionsFile,
 } from '@truecourse/spec-consolidator';
-import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import {
+  listWorkspaceSpecVersions,
+  loadWorkspaceSpec,
+  readWorkspaceSpecVersion,
+} from '@truecourse/core/lib/spec-store';
+import { diffCorpora } from '@truecourse/spec-consolidator';
 import {
   addWorkspaceConflictResolution,
   addWorkspaceManualExclude,
@@ -85,6 +90,10 @@ import {
   docCoveragePlainStatus,
   readGuardCoverageSources,
 } from '@truecourse/core/commands/guard-read';
+import {
+  requireWorkspaceDescription,
+  WorkspaceDescriptionRequiredError,
+} from '@truecourse/core/lib/workspace-profile-store';
 import {
   CreditsProviderUnavailableError,
   LlmNotConfiguredError,
@@ -161,6 +170,12 @@ function statusOf(err: unknown): number | null {
 }
 
 function respond(res: Response, next: NextFunction, err: unknown): void {
+  // A workspace that has not said what its product is refuses with a CODE, not
+  // a sentence: the client reads it and offers the page where it is set.
+  if (err instanceof WorkspaceDescriptionRequiredError) {
+    res.status(err.statusCode).json({ error: err.code, message: err.message });
+    return;
+  }
   const status = statusOf(err);
   if (status === null) {
     next(err);
@@ -456,6 +471,48 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     }
   });
 
+  // GET — the workspace's corpus versions, newest first, each with its
+  // provenance: the scan that wrote it and the model it ran on.
+  router.get('/versions', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      res.json({ versions: await listWorkspaceSpecVersions({ workspaceOrgId: org }, 'corpus') });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // GET — what changed between two corpus versions: the documents added,
+  // removed and re-tagged, the areas that appeared or emptied, the overlap
+  // flags that opened or closed. `?from=` and `?to=` are version ids.
+  router.get('/versions/diff', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const fromId = String(req.query.from ?? '');
+      const toId = String(req.query.to ?? '');
+      if (!fromId || !toId) {
+        res.status(400).json({ error: 'Missing ?from=<version id>&to=<version id>.' });
+        return;
+      }
+      const [from, to] = await Promise.all([
+        readWorkspaceSpecVersion(org, 'corpus', fromId),
+        readWorkspaceSpecVersion(org, 'corpus', toId),
+      ]);
+      if (!from || !to) {
+        res.status(404).json({ error: `No corpus version ${!from ? fromId : toId}.` });
+        return;
+      }
+      const ref = { workspaceOrgId: org };
+      const [prior, current] = await Promise.all([
+        loadWorkspaceSpec<CuratedCorpus>(ref, 'corpus', { id: from.id }),
+        loadWorkspaceSpec<CuratedCorpus>(ref, 'corpus', { id: to.id }),
+      ]);
+      res.json({ from, to, diff: diffCorpora(prior, current) });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
   /**
    * THE Documents view: one row per document of the workspace
    * corpus, composed here rather than in the browser — the row's status is a
@@ -592,7 +649,11 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/scan', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      // The balance first: proving a provider that cannot be paid for is work
+      // THE SUBJECT FIRST: the scan attributes every document against what the
+      // workspace says its product is, so with no sentence there is nothing to
+      // scan against — and this is the backstop for every other entry point.
+      await requireWorkspaceDescription(org);
+      // Then the balance: proving a provider that cannot be paid for is work
       // nobody asked for, and the refusal is about the money either way.
       if (await refusedWithoutCredits(req, res)) return;
       try {
@@ -865,6 +926,9 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/sources', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
+      // Nothing enters a workspace that has not said what its product is: the
+      // documents this source yields would be attributed against nothing.
+      await requireWorkspaceDescription(org);
       const body = (req.body ?? {}) as {
         kind?: unknown;
         config?: unknown;

@@ -51,6 +51,7 @@ export {
   type PlaceBriefingInput,
 } from './session.js'
 export {
+  INTERFACE_AUTHOR_CACHE_NAME,
   authorWebInterfaces,
   defaultAuthorConcurrency,
   planWorkItems,
@@ -62,8 +63,7 @@ export {
   type PlaceResult,
 } from './author.js'
 export {
-  STATE_RECONCILE_RESPONSE_SCHEMA,
-  STATE_RECONCILE_STAGE,
+  STATE_RECONCILE_SESSION_KIND,
   StateMergeSchema,
   StateReconcileResponseSchema,
   reconcileAuthoredStates,

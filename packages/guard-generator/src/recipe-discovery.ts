@@ -25,7 +25,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import {
   loadRecipe,
   resolveEntry,
@@ -49,10 +49,10 @@ import {
   type Recipe,
   type RouteManifestApp,
 } from '@truecourse/guard-runner'
-import { isCreditsExhausted, type DatastoreUrlRef } from '@truecourse/shared'
+import { isCreditsExhausted, type DatastoreUrlRef, type GuardDriverId } from '@truecourse/shared'
+import { LEGACY_RECIPE_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
 import {
-  RECIPE_PROMPT_FINGERPRINT,
   type RecipeAppInventoryEntry,
   type RecipeDiscoveryInput,
   type RecipeRetryContext,
@@ -69,7 +69,14 @@ import {
   type ApiRouteRef,
 } from './recipe-propose.js'
 import { GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
-import type { RecipeRunner } from './runners.js'
+import { needsFingerprint, type UnprovidedNeed } from './recipe-needs.js'
+import {
+  changedRecipeFields,
+  foldRepairedRecipe,
+  movedFlowSlices,
+  needsScopeRefusal,
+} from './recipe-scope.js'
+import type { RecipeRunner } from './leaf-seams.js'
 
 export const RECIPE_CACHE_NAME = 'guard/recipe'
 
@@ -243,10 +250,28 @@ export type RecipeDiscoveryResult =
 // depend on: core builds a `RecipeRepairFn` and injects it.
 // ---------------------------------------------------------------------------
 
+/**
+ * What a repair of a STANDING recipe is asked to fix. Its presence is what
+ * turns the session from "propose a recipe" into "repair this one": an open
+ * proposal is never issued for a repository that already has a recipe, because
+ * what comes back would be a rewording of something a real boot already proved.
+ */
+export type RecipeRepairScope =
+  /** The repository needs things the recipe does not provide. Narrow scope. */
+  | { kind: 'needs'; unprovided: readonly UnprovidedNeed[] }
+  /** The recipe no longer boots. Any field may change; the run reports which did. */
+  | { kind: 'boot'; failure: string; failureClass: string }
+
 /** Everything the repair session's briefing states — the failed proposal, the
  *  engine's own verdict, and the deterministic evidence discovery already has. */
 export interface RecipeRepairContext {
   repoRoot: string
+  /**
+   * The recipe this repository already has, and what must change about it.
+   * Present ⇒ the session is shown the recipe (secret-stripped) and held to the
+   * scope; absent ⇒ this is a derivation, and there is nothing to preserve.
+   */
+  existing?: { recipe: Recipe; scope: RecipeRepairScope }
   /** What the model proposer used to read: the root manifest + the app inventory. */
   inputs: { packageJson: string; presentInputs: string[]; apps?: RecipeAppInventoryEntry[] }
   /** `computeRecipeFingerprint(repoRoot)` at repair time — the cache key input. */
@@ -352,6 +377,13 @@ export interface DiscoverRecipeOptions {
 }
 
 /**
+ * THE RECIPE STAGE'S VERSION, bumped by hand. A reworded proposal prompt does
+ * not make a verified recipe wrong, so the prompt is not in the key; a prompt
+ * change that fixes WRONG output bumps this in the same commit.
+ */
+export const RECIPE_STAGE_VERSION = 1
+
+/**
  * The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`, plus
  * the compose PROJECT when the caller named one. Exported so the repair session
  * keeps the exact key: a proposal the one-shot era settled stays a hit in the
@@ -364,8 +396,45 @@ export interface DiscoverRecipeOptions {
  * setup). A key with no project keys exactly as it always did.
  */
 export function recipeCacheKey(inputsFingerprint: string, composeProject?: string): string {
-  const material = `${RECIPE_PROMPT_FINGERPRINT}::${inputsFingerprint}${composeProject ? `::${composeProject}` : ''}`
+  return recipeKeyOver(`recipe-v${RECIPE_STAGE_VERSION}`, inputsFingerprint, composeProject)
+}
+
+/** {@link recipeCacheKey} as it was computed while the prompt was in it — the key
+ *  a miss falls back to. Delete with the legacy hash. */
+export function recipeLegacyCacheKey(inputsFingerprint: string, composeProject?: string): string {
+  return recipeKeyOver(LEGACY_RECIPE_PROMPT_FINGERPRINT, inputsFingerprint, composeProject)
+}
+
+function recipeKeyOver(stage: string, inputsFingerprint: string, composeProject?: string): string {
+  const material = `${stage}::${inputsFingerprint}${composeProject ? `::${composeProject}` : ''}`
   return createHash('sha256').update(material).digest('hex')
+}
+
+/**
+ * The cache key for a repair of a STANDING recipe: the recipe it was handed
+ * plus the situation it was asked to fix. Both halves are load-bearing — an
+ * outcome settled against one recipe says nothing about the next one, and an
+ * outcome settled against one boot failure says nothing about a different one.
+ *
+ * It shares the `guard/recipe` cache NAME with the derivation key and can never
+ * collide with it (the stage label differs), and it reads no older key: a
+ * repair of an existing recipe is new work, so nothing was ever stored under a
+ * key that could describe it.
+ */
+export function recipeRepairCacheKey(args: {
+  contractFingerprint: string
+  scope: RecipeRepairScope
+  composeProject?: string
+}): string {
+  const situation =
+    args.scope.kind === 'needs'
+      ? `needs::${needsFingerprint(args.scope.unprovided.map((entry) => entry.need))}`
+      : `boot::${args.scope.failureClass}`
+  return recipeKeyOver(
+    `recipe-repair-v${RECIPE_STAGE_VERSION}::${situation}`,
+    args.contractFingerprint,
+    args.composeProject,
+  )
 }
 
 /**
@@ -566,7 +635,12 @@ export async function discoverRecipe(
   // The LLM proposal is cached on the discovery-input fingerprint — unchanged
   // inputs reuse the prior proposal, but verification always re-runs.
   let proposal: RecipeProposal | null = null
-  const cached = await getCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint, composeProject))
+  const cached = await getCacheEntryOrLegacy(
+    repoRoot,
+    RECIPE_CACHE_NAME,
+    recipeCacheKey(inputsFingerprint, composeProject),
+    recipeLegacyCacheKey(inputsFingerprint, composeProject),
+  )
   if (cached) {
     const parsed = RecipeProposalSchema.safeParse(cached)
     if (parsed.success) proposal = parsed.data
@@ -634,6 +708,101 @@ export async function discoverRecipe(
     ...writeRecipeFile(repoRoot, recipe),
     source: 'llm',
     todos: verdict.ok ? (verdict.warnings ?? []) : [],
+  }
+}
+
+/** What a scoped repair did to the standing recipe. */
+export type RepairExistingRecipeResult =
+  | {
+      status: 'repaired'
+      recipe: Recipe
+      wrotePath: string
+      /** The recipe fields the repair moved, by the names the scope uses. */
+      changed: string[]
+      /** Surfaces whose flow recipe slice moved — every flow on them re-authors. */
+      movedSlices: GuardDriverId[]
+      sessionRunId?: string
+    }
+  /** The session settled on the recipe it was given: nothing was written. */
+  | { status: 'unchanged'; recipe: Recipe; sessionRunId?: string }
+  | { status: 'failed'; reason: string; sessionRunId?: string }
+
+export interface RepairExistingRecipeOptions {
+  repair: RecipeRepairFn
+  /** The recipe on disk, and what the session must fix about it. */
+  recipe: Recipe
+  scope: RecipeRepairScope
+  /** The same lazy seams discovery takes; the briefing states what they answer. */
+  database?: () => Promise<DatabaseDependencyHint | null>
+  datastores?: () => Promise<readonly DatastoreUrlRef[]>
+  composeKey?: string
+  onPhase?: (phase: RecipeDiscoveryPhase) => void
+}
+
+/**
+ * REPAIR THE RECIPE THIS REPOSITORY ALREADY HAS.
+ *
+ * The session is handed the recipe and the named situation, returns a FULL
+ * proposal (it has to hold the whole thing to verify it boots), and the engine
+ * folds that proposal onto the standing recipe rather than replacing it: the
+ * blocks no proposal can carry survive, and a NEEDS-driven outcome that reaches
+ * outside its scope is refused with the fields it moved — the session's own
+ * turn back already said the same thing, so arriving here means it never
+ * complied and nothing is written.
+ *
+ * The gate of record is `verifyProposal`, exactly as it is for a derivation: a
+ * folded recipe that does not install, build and boot never reaches disk.
+ */
+export async function repairExistingRecipe(
+  repoRoot: string,
+  options: RepairExistingRecipeOptions,
+): Promise<RepairExistingRecipeResult> {
+  const inputs = readDiscoveryInputs(repoRoot)
+  const composeProject = options.composeKey ? composeProjectName(options.composeKey) : undefined
+  options.onPhase?.({ kind: 'proposing' })
+  const repaired = await options.repair({
+    repoRoot,
+    inputs,
+    inputsFingerprint: computeRecipeFingerprint(repoRoot),
+    existing: { recipe: options.recipe, scope: options.scope },
+    database: options.database ? await Promise.resolve(options.database()).catch(() => null) : null,
+    datastoreUrls: options.datastores ? await options.datastores() : [],
+    composeGenerated: false,
+    ...(composeProject ? { composeProject } : {}),
+  })
+  const sessionRunId = repaired.sessionRunId
+  const carry = sessionRunId ? { sessionRunId } : {}
+  if ('error' in repaired) {
+    return { status: 'failed', reason: repaired.error, ...carry }
+  }
+
+  const folded = foldRepairedRecipe(options.recipe, repaired.proposal)
+  if (options.scope.kind === 'needs') {
+    const refusal = needsScopeRefusal(options.recipe, folded)
+    if (refusal) return { status: 'failed', reason: refusal, ...carry }
+  }
+  const changed = changedRecipeFields(options.recipe, folded)
+  if (changed.length === 0) {
+    return { status: 'unchanged', recipe: options.recipe, ...carry }
+  }
+
+  const verdict = await verifyProposal(repoRoot, folded, {
+    ...(options.database ? { database: options.database } : {}),
+    ...(inputs.apps ? { apps: inputs.apps } : {}),
+    ...(composeProject ? { composeProject } : {}),
+    ...(options.onPhase
+      ? { onPhase: (p) => options.onPhase?.({ kind: 'verifying', revision: false, ...p }) }
+      : {}),
+  })
+  if (!verdict.ok) return { status: 'failed', reason: verdict.reason, ...carry }
+
+  return {
+    status: 'repaired',
+    recipe: folded,
+    wrotePath: writeRecipeFile(repoRoot, folded).wrotePath,
+    changed,
+    movedSlices: movedFlowSlices(options.recipe, folded),
+    ...carry,
   }
 }
 

@@ -54,3 +54,33 @@ export const setCacheEntry = (
   key: string,
   value: unknown,
 ): Promise<void> => active.set(scope, cacheName, key, value);
+
+/**
+ * THE OLD-KEY READ — one entry, looked up under the key a stage computes now
+ * and, on a miss, under each key it computed before its formula changed, newest
+ * formula first. A legacy hit is served AND written under the new key, so the
+ * fallback is paid at most once per entry and the next run finds it directly.
+ *
+ * Every cache whose key formula changes reads this way, because without it a
+ * formula change bills every workspace one full re-run of that stage — which is
+ * exactly the cost the change exists to remove. A stage whose formula has moved
+ * twice hands both old keys, so an entry stored under either is still served.
+ * It goes away with the legacy keys themselves.
+ */
+export const getCacheEntryOrLegacy = async (
+  scope: string,
+  cacheName: string,
+  key: string,
+  ...legacyKeys: readonly string[]
+): Promise<unknown | null> => {
+  const current = await active.get(scope, cacheName, key);
+  if (current !== null) return current;
+  for (const legacyKey of legacyKeys) {
+    if (legacyKey === key) continue;
+    const legacy = await active.get(scope, cacheName, legacyKey);
+    if (legacy === null) continue;
+    await active.set(scope, cacheName, key, legacy);
+    return legacy;
+  }
+  return null;
+};

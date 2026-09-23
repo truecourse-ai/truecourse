@@ -77,9 +77,17 @@ it('retains a legacy partial file when setup disappears but never restores its p
   fs.writeFileSync(recipeFile, JSON.stringify(recipe))
   await runGenerate({ ...options(root), flowWorkerSession: flowWorkerSessionOf(async () => { throw Error('Incomplete flow must not author') }) })
   expect(loadScenarios(root).scenarios.find(s => s.id === before.id)).toEqual(before)
-  const current = readManifest(root)!.flows.find(f => !f.orphaned)!
-  expect(current.scenarios).toHaveLength(0)
+  // The flow is amended in place (same id, the new case set), so the partial
+  // file stays its scenario — but its proof is not restored: the entry is
+  // unsettled, the aggregate case blocks on configuration and the record case
+  // is reported unverified.
+  const [current] = readManifest(root)!.flows
+  expect(current.flowId).toBe(before.flow!.id)
+  expect(current.orphaned).toBeUndefined()
+  expect(current.scenarios.map(s => s.id)).toEqual([before.id])
+  expect(current.generationInputsHash).toBeNull()
   expect(current.gaps.some(g => g.blocker?.kind === 'configuration')).toBe(true)
+  expect(current.gaps.some(g => g.obligations?.some(o => o.caseId === 'record') && g.blocker?.kind === 'generation')).toBe(true)
 })
 
 it('retains the same complete scenario but revokes its proof when only its preparation profile disappears', async () => {

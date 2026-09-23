@@ -167,7 +167,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
   return defineSessionTool({
     name: 'check_draft',
     description:
-      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the role/name target policy, reachability, and the catalog schema. What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
+      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the role/name target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
     kind: 'check-draft',
     readOnly: true,
     destructive: false,

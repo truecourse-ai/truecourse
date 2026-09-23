@@ -20,11 +20,22 @@
  * classes. Grounding orients composition; the independence rule survives in a
  * weaker, honest form — a flow still states WHAT the product does, and a
  * milestone still snaps onto a CLAIM, never onto an interface.
+ *
+ * And it carries the unit's EXISTING FLOWS. A session reconciles against the
+ * corpus it is handed rather than composing one from the claims alone: an
+ * unchanged flow comes back under its id with the same milestones, a changed
+ * one under its id with the new ones, and one the claims no longer support is
+ * retired with a reason. Reinvention — the same journey re-emitted with no
+ * id — is a defect the checker refuses. The existing flows are OUTSIDE the
+ * cache key: they only supply identity and retirements, which the fold
+ * resolves against the live corpus, so a cached outcome replayed against a
+ * corpus that moved converges on the same answer without a session.
  */
 
 import { createHash } from 'node:crypto'
+import { LEGACY_FLOWS_SESSION_PROMPT_FINGERPRINT, LEGACY_FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
-import { isRunnableDriver } from '@truecourse/shared'
+import { isRunnableDriver, type GuardFlow, type GuardNoFlowClaim } from '@truecourse/shared'
 import {
   FlowSetSchema,
   EpicSynthesisSchema,
@@ -92,6 +103,14 @@ mix these boundaries are upstream defects: report them precisely in check_flows;
 do not silently drop clauses, invent case IDs, or broaden proof drivers. A case
 requiring a common transition must keep that transition in its composed path.
 
+# Reconcile against the EXISTING FLOWS — reinvention is a defect
+When the briefing lists EXISTING FLOWS, they are the corpus as it stands, with proven tests behind them. You are reconciling, not composing from scratch: every existing flow MUST come back as exactly one of
+- KEPT — the claims still support the same path: emit it with its \`id\` and the SAME milestones (same claims, same order, same caseIds). Do not retitle or reword it; an unchanged flow is returned unchanged.
+- AMENDED — the claims changed what the path is (a milestone added, removed, re-ordered or re-cased): emit it with its \`id\` and the new milestones. The id is the journey's identity; keep it whenever the journey is the same one a user would recognise.
+- RETIRED — the claims no longer support the journey at all: list it in \`retiredFlows\` with the reason, in the claims' own terms.
+A flow with no \`id\` is NEW. Emit one only for a journey no existing flow is. Never re-emit an existing journey as a new flow, never continue one id with two flows, and never both continue and retire an id. \`check_flows\` refuses a draft that leaves an existing flow unaccounted for.
+The EXISTING NO-FLOW DECISIONS are reconciled the same way: a claim that already carries one comes back in \`noFlowClaims\` with that decision's reason verbatim, unless you now place it in a flow — the milestone is the account. Never drop one in silence; \`check_flows\` refuses that too.
+
 # Coverage honesty — the rule you are graded on
 Every case of a claim marked \`account: required\` MUST appear in a milestone selection or a scoped \`noFlowClaims\` selection. Claims without cases are indivisible. No source obligation may be both assigned and marked no-flow. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both. Claims marked \`account: optional\` sit on surfaces with no test runner today: use one as a milestone when it truly belongs to the path, but you never have to account for it.
 Legitimate \`noFlowClaims\` reasons: the claim is an edge/error condition no user path reaches, it restates another claim, or it describes a static property rather than something a user does. "It didn't fit" is not a reason.
@@ -101,9 +120,10 @@ Legitimate \`noFlowClaims\` reasons: the claim is an edge/error condition no use
 - \`check_flows\` — REQUIRED before you finish: call it with your complete draft. It snaps every reference, checks the coverage rule, and reports near-duplicates and unbound needs — a defect costs one turn here instead of a refused outcome at the fold. Fix what it reports, then produce the outcome.
 
 # The outcome
-One object with BOTH arrays, either possibly empty:
-  { "flows": [ { "title", "goal", "notes"?, "startingState"?, "milestones": [ { "order", "doc", "anchor", "claimTitle", "caseIds"?, "note"? } ] } ],
-    "noFlowClaims": [ { "doc", "anchor", "claimTitle", "caseIds"?, "reason" } ] }`
+One object with BOTH arrays, either possibly empty, plus \`retiredFlows\` when an existing flow is retired:
+  { "flows": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "milestones": [ { "order", "doc", "anchor", "claimTitle", "caseIds"?, "note"? } ] } ],
+    "noFlowClaims": [ { "doc", "anchor", "claimTitle", "caseIds"?, "reason" } ],
+    "retiredFlows": [ { "id", "reason" } ] }`
 
 /** Exported for the step-20 estimate rework (probe the REAL keys). */
 export const FLOWS_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FLOWS_SESSION_SYSTEM_PROMPT)
@@ -112,6 +132,9 @@ export const FLOWS_EPIC_SESSION_SYSTEM_PROMPT = `You are given the FLOWS a produ
 
 # The default answer is none
 Most products have zero or one epic. An epic is justified only when a user genuinely walks the whole chain in one sitting and each link depends on the previous one's state. Two flows that merely belong to the same product are NOT an epic. When in doubt, produce { "epics": [] } — a wrong epic costs real test runs, a missing one costs nothing.
+
+# Reconcile against the EXISTING EPICS
+When the briefing lists EXISTING EPICS, every one of them comes back as KEPT (its \`id\`, the same milestones), AMENDED (its \`id\`, new milestones or composed flows) or RETIRED (in \`retiredEpics\`, with the reason). Never re-emit an existing epic as a new one. \`check_flows\` refuses a draft that leaves an existing epic unaccounted for.
 
 # Rules for an epic you do emit
 - \`composedOf\`: the refs (\`F1\`, \`F2\`, …) of the flows it chains — at least TWO, from DIFFERENT areas. Copy the refs exactly as listed.
@@ -124,9 +147,17 @@ Most products have zero or one epic. An epic is justified only when a user genui
 - \`check_flows\` — REQUIRED before you finish: call it with your complete draft (even { "epics": [] }). It verifies every ref and milestone against the composed flows, so a wrong reference costs one turn here instead of a refused outcome at the fold.
 
 # The outcome
-One object: { "epics": [ { "title", "goal", "notes"?, "startingState"?, "composedOf": ["F1","F4"], "milestones": [ { "order", "doc", "anchor", "claimTitle", "caseIds"? } ] } ] } — or { "epics": [] } when nothing chains.`
+One object: { "epics": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "composedOf": ["F1","F4"], "milestones": [ { "order", "doc", "anchor", "claimTitle", "caseIds"? } ] } ], "retiredEpics"?: [ { "id", "reason" } ] } — or { "epics": [] } when nothing chains.`
 
 export const FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FLOWS_EPIC_SESSION_SYSTEM_PROMPT)
+
+/**
+ * THE SYNTHESIS STAGES' VERSIONS, bumped by hand. Rewording either prompt does
+ * not make a synthesized flow set wrong; a prompt change that fixes WRONG
+ * output bumps its version in the same commit.
+ */
+export const FLOWS_STAGE_VERSION = 1
+export const FLOWS_EPIC_STAGE_VERSION = 1
 
 function sha(text: string): string {
   return createHash('sha256').update(text).digest('hex')
@@ -139,17 +170,34 @@ function sha(text: string): string {
  * fingerprint. Grounding (interface digests, dependency catalog) is
  * deliberately OUTSIDE the key: it orients composition the way tool results
  * do, and keying on the whole catalog would re-synthesize every area on
- * unrelated route churn.
+ * unrelated route churn. So are the unit's EXISTING FLOWS: they supply the ids
+ * and the retirements, which the fold resolves against the live corpus, and
+ * folding them would cost every real change a second session (the corpus
+ * moves after the first).
  */
 export function flowsSessionCacheKey(area: FlowSynthesisArea): string {
-  return sha(
-    `${FLOWS_SESSION_PROMPT_FINGERPRINT}::${area.areaId}::${sha(flowAreaClaimsMaterial(area))}::${sha(flowAreaOutlinesMaterial(area))}`,
-  )
+  return flowsKeyOver(`flows-v${FLOWS_STAGE_VERSION}`, area)
 }
 
-/** The epic session's cache key: its prompt fingerprint over the digests hash. */
+/** {@link flowsSessionCacheKey} as it was computed while the prompt was in it —
+ *  the key a miss falls back to. Delete with the legacy hash. */
+export function flowsSessionLegacyCacheKey(area: FlowSynthesisArea): string {
+  return flowsKeyOver(LEGACY_FLOWS_SESSION_PROMPT_FINGERPRINT, area)
+}
+
+function flowsKeyOver(stage: string, area: FlowSynthesisArea): string {
+  return sha(`${stage}::${area.areaId}::${sha(flowAreaClaimsMaterial(area))}::${sha(flowAreaOutlinesMaterial(area))}`)
+}
+
+/** The epic session's cache key: its stage version over the digests hash. */
 export function flowsEpicSessionCacheKey(digests: readonly FlowDigest[]): string {
-  return sha(`${FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT}::${sha(flowEpicDigestsMaterial(digests))}`)
+  return sha(`flows-epic-v${FLOWS_EPIC_STAGE_VERSION}::${sha(flowEpicDigestsMaterial(digests))}`)
+}
+
+/** {@link flowsEpicSessionCacheKey} as it was computed while the prompt was in
+ *  it — the key a miss falls back to. Delete with the legacy hash. */
+export function flowsEpicSessionLegacyCacheKey(digests: readonly FlowDigest[]): string {
+  return sha(`${LEGACY_FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT}::${sha(flowEpicDigestsMaterial(digests))}`)
 }
 
 /** The work items, as the session index and the transcripts record them. A
@@ -169,6 +217,8 @@ function renderFlowSetReport(report: FlowSetCheckReport): { content: string; isE
   const refusals = [
     ...report.unknownReferences.map((r) => `matched no claim: ${r}`),
     ...report.uncoveredClaims.map((c) => `required claim unaccounted (put it in a flow, or in noFlowClaims with a reason): ${c}`),
+    ...report.unaccountedFlows.map((f) => `${f} — continue it by id (kept or amended) or list it in retiredFlows with a reason`),
+    ...report.unaccountedNoFlow.map((n) => `${n} — re-emit it with its reason, or put the claim in a flow`),
   ]
   const notes = [
     ...report.subsumed.map((s) => `near-duplicate: "${s.title}" is contained in "${s.supersededBy}" — the engine will drop it; emit the longest path once`),
@@ -193,7 +243,12 @@ export interface FlowsCheckerContext {
   catalogNames: ReadonlySet<string>
 }
 
-function checkFlowsTool(area: FlowSynthesisArea, checker: FlowsCheckerContext): SessionTool {
+function checkFlowsTool(
+  area: FlowSynthesisArea,
+  checker: FlowsCheckerContext,
+  prior: readonly GuardFlow[],
+  priorNoFlow: readonly GuardNoFlowClaim[] = [],
+): SessionTool {
   return defineSessionTool({
     name: 'check_flows',
     description:
@@ -207,13 +262,15 @@ function checkFlowsTool(area: FlowSynthesisArea, checker: FlowsCheckerContext): 
         area,
         sectionKeys: checker.sectionKeys,
         catalogNames: checker.catalogNames,
+        prior,
+        priorNoFlow,
       })
       return renderFlowSetReport(report)
     },
   })
 }
 
-function checkEpicsTool(digests: readonly FlowDigest[], claims: readonly FlowClaimInput[]): SessionTool {
+function checkEpicsTool(digests: readonly FlowDigest[], claims: readonly FlowClaimInput[], prior: readonly GuardFlow[]): SessionTool {
   return defineSessionTool({
     name: 'check_flows',
     description:
@@ -223,7 +280,7 @@ function checkEpicsTool(digests: readonly FlowDigest[], claims: readonly FlowCla
     destructive: false,
     inputSchema: EpicSynthesisSchema,
     async execute(args) {
-      const { unknownReferences, notes } = checkEpicSet(args, digests, claims)
+      const { unknownReferences, notes } = checkEpicSet(args, digests, claims, prior)
       if (unknownReferences.length > 0) {
         const lines = [
           `${unknownReferences.length} problem(s) that would refuse the outcome:`,
@@ -246,6 +303,10 @@ export interface FlowsSessionInput {
   area: FlowSynthesisArea
   universe: GuardDocUniverse
   checker: FlowsCheckerContext
+  /** The unit's EXISTING flows the session reconciles against. */
+  prior?: readonly GuardFlow[]
+  /** The unit's EXISTING no-flow decisions the session reconciles against. */
+  priorNoFlow?: readonly GuardNoFlowClaim[]
 }
 
 export function flowsSessionDef(input: FlowsSessionInput): SessionDef<FlowSet> {
@@ -253,7 +314,7 @@ export function flowsSessionDef(input: FlowsSessionInput): SessionDef<FlowSet> {
     kind: FLOWS_SESSION_KIND,
     display: { title: 'Flow synthesis' },
     systemPrompt: FLOWS_SESSION_SYSTEM_PROMPT,
-    tools: [readUniverseSectionTool(input.universe), checkFlowsTool(input.area, input.checker)],
+    tools: [readUniverseSectionTool(input.universe), checkFlowsTool(input.area, input.checker, input.prior ?? [], input.priorNoFlow ?? [])],
     outcomeSchema: FlowSetSchema,
     budget: FLOWS_SESSION_BUDGET,
     outcomePrecondition: {
@@ -268,6 +329,8 @@ export interface FlowsEpicSessionInput {
   digests: readonly FlowDigest[]
   /** The whole run's claim inventory — the epic checker's snapping set. */
   claims: readonly FlowClaimInput[]
+  /** The EXISTING epics the session reconciles against. */
+  prior?: readonly GuardFlow[]
 }
 
 export function flowsEpicSessionDef(input: FlowsEpicSessionInput): SessionDef<EpicSynthesis> {
@@ -275,7 +338,7 @@ export function flowsEpicSessionDef(input: FlowsEpicSessionInput): SessionDef<Ep
     kind: FLOWS_SESSION_KIND,
     display: { title: 'Flow synthesis' },
     systemPrompt: FLOWS_EPIC_SESSION_SYSTEM_PROMPT,
-    tools: [checkEpicsTool(input.digests, input.claims)],
+    tools: [checkEpicsTool(input.digests, input.claims, input.prior ?? [])],
     outcomeSchema: EpicSynthesisSchema,
     budget: FLOWS_SESSION_BUDGET,
     outcomePrecondition: {
@@ -321,15 +384,31 @@ function groundingLines(grounding: FlowsSessionGrounding | undefined): string[] 
   return lines
 }
 
+/** One existing flow, as both briefings render it: id, title, goal, starting
+ *  state and the milestones with their case selections. */
+function existingFlowLines(flow: GuardFlow): string[] {
+  const lines = [``, `--- existing ${flow.composedOf.length > 0 ? 'epic' : 'flow'}`, `id: ${flow.id}`, `title: ${flow.title}`, `goal: ${flow.goal}`]
+  if (flow.startingState) lines.push(`startingState: ${JSON.stringify(flow.startingState)}`)
+  if (flow.composedOf.length > 0) lines.push(`composedOf: ${flow.composedOf.join(', ')}`)
+  lines.push('milestones:')
+  for (const m of [...flow.milestones].sort((a, b) => a.order - b.order)) {
+    lines.push(`  ${m.order}. ${m.doc}#${m.anchor} — ${m.claimTitle}${m.caseIds ? ` [caseIds: ${m.caseIds.join(', ')}]` : ''}`)
+  }
+  return lines
+}
+
 /**
  * The opening message: the area's doc outlines (with the untestable gaps), the
- * closed claim set — needs and coverage accounting inline — and the grounding
- * block. Mirrors the one-shot `buildFlowsUserPrompt` line-for-line where the
- * content overlaps, so prompt-quality lessons carry over.
+ * closed claim set — needs and coverage accounting inline — the grounding
+ * block, and the unit's EXISTING FLOWS to reconcile against. Mirrors the
+ * one-shot `buildFlowsUserPrompt` line-for-line where the content overlaps, so
+ * prompt-quality lessons carry over.
  */
 export function flowsSessionBriefing(
   area: FlowSynthesisArea,
   grounding: FlowsSessionGrounding | undefined,
+  prior: readonly GuardFlow[] = [],
+  priorNoFlow: readonly GuardNoFlowClaim[] = [],
 ): string {
   const lines: string[] = [`Compose the flows of ONE specification area.`, ``, `Area: ${area.areaId}`]
   if (area.docs.length > 0) {
@@ -358,18 +437,47 @@ export function flowsSessionBriefing(
     )
   }
   lines.push(...groundingLines(grounding))
+  if (prior.length > 0) {
+    lines.push(
+      '',
+      `EXISTING FLOWS OF THIS AREA — ${prior.length} flow(s) with proven tests behind them.`,
+      'Reconcile against them: every one comes back KEPT (its `id`, the same milestones),',
+      'AMENDED (its `id`, the new milestones) or RETIRED (in `retiredFlows`, with a reason).',
+      'A flow with no `id` is new; never re-emit one of these as new:',
+    )
+    for (const flow of prior) lines.push(...existingFlowLines(flow))
+  }
+  if (priorNoFlow.length > 0) {
+    lines.push(
+      '',
+      `EXISTING NO-FLOW DECISIONS OF THIS AREA — ${priorNoFlow.length} claim(s) deliberately in no flow.`,
+      'Each comes back in `noFlowClaims` with its reason verbatim, unless you now place it in a flow:',
+    )
+    for (const c of priorNoFlow) {
+      lines.push(`  ${c.doc}#${c.anchor} — ${c.claimTitle}${c.caseIds ? ` [caseIds: ${c.caseIds.join(', ')}]` : ''} — ${c.reason}`)
+    }
+  }
   lines.push('', 'Check the draft with `check_flows`, then produce the outcome.')
   return lines.join('\n')
 }
 
-/** The epic briefing: the digests, exactly as the one-shot pass rendered them. */
-export function flowsEpicSessionBriefing(digests: readonly FlowDigest[]): string {
+/** The epic briefing: the digests, exactly as the one-shot pass rendered them,
+ *  and the existing epics to reconcile against. */
+export function flowsEpicSessionBriefing(digests: readonly FlowDigest[], prior: readonly GuardFlow[] = []): string {
   const lines: string[] = [
     'FLOWS (digests only — no document text). Chain these by ref, or produce no epics:',
   ]
   for (const d of digests) {
     lines.push('', `--- ${d.ref}  (area: ${d.areaId})`, `title: ${d.title}`, `goal: ${d.goal}`, 'milestones:')
     d.milestones.forEach((m, i) => lines.push(`  ${i + 1}. ${m.doc}#${m.anchor} — ${m.claimTitle}${m.caseIds ? ` [caseIds: ${m.caseIds.join(", ")}]` : ""}`))
+  }
+  if (prior.length > 0) {
+    lines.push(
+      '',
+      `EXISTING EPICS — ${prior.length} epic(s) in the corpus. Every one comes back KEPT (its \`id\`),`,
+      'AMENDED (its `id`, new milestones or composed flows) or RETIRED (in `retiredEpics`, with a reason):',
+    )
+    for (const flow of prior) lines.push(...existingFlowLines(flow))
   }
   lines.push('', 'Check the draft with `check_flows` (an empty epic set is a valid draft), then produce the outcome.')
   return lines.join('\n')
@@ -384,6 +492,12 @@ export function flowSetRefusalReason(report: FlowSetCheckReport): string | null 
   }
   if (report.uncoveredClaims.length > 0) {
     parts.push(`${report.uncoveredClaims.length} claim(s) left unaccounted (${report.uncoveredClaims[0]})`)
+  }
+  if (report.unaccountedFlows.length > 0) {
+    parts.push(`${report.unaccountedFlows.length} existing flow(s) left unaccounted (${report.unaccountedFlows[0]})`)
+  }
+  if (report.unaccountedNoFlow.length > 0) {
+    parts.push(`${report.unaccountedNoFlow.length} existing no-flow decision(s) left unaccounted (${report.unaccountedNoFlow[0]})`)
   }
   return `flow synthesis refused: ${parts.join('; ')}`
 }

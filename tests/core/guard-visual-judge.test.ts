@@ -17,17 +17,25 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
 import type { GuardVisualJudgeInput } from '@truecourse/guard-runner';
-import type { LlmRequest } from '@truecourse/shared/llm';
+import type { GuardVisualJudgment } from '@truecourse/shared';
 import {
   buildVisualJudgeUserPrompt,
   MAX_SCREENSHOT_BYTES,
   runVisualJudge,
-  spawnVisualJudgeRunner,
+  visualJudgeSessionRunner,
   visualJudgeCacheKey,
   VISUAL_JUDGE_PROMPT_FINGERPRINT,
+  VISUAL_JUDGE_SESSION_KIND,
   VISUAL_JUDGE_SYSTEM_PROMPT,
   type VisualJudgeRunner,
 } from '../../packages/core/src/services/llm/guard-visual-judge.js';
+import {
+  memoryPersistence,
+  outcome as sessionOutcome,
+  stubDriver,
+  transportFailure,
+} from './spec-scan-session-stub.js';
+import type { SessionImage } from '../../packages/agent-loop/src/index.js';
 
 /** A tiny but real PNG header — enough that "these are the pixels" is meaningful. */
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
@@ -66,12 +74,14 @@ function input(overrides: Partial<GuardVisualJudgeInput> = {}): GuardVisualJudge
   };
 }
 
-/** A runner that answers from a script and counts how often it was asked. */
-function scriptedRunner(...replies: Array<unknown | Error>) {
-  const calls: Array<{ correction?: unknown; base64: string }> = [];
-  const runner: VisualJudgeRunner = async (ctx, base64) => {
+/** A runner that answers from a script and counts how often it was asked. The
+ *  session validates and repairs its own answer, so what reaches here is
+ *  either a verdict or a throw naming why there is none. */
+function scriptedRunner(...replies: Array<GuardVisualJudgment | Error>) {
+  const calls: Array<{ base64: string }> = [];
+  const runner: VisualJudgeRunner = async (_ctx, base64) => {
     const reply = replies[Math.min(calls.length, replies.length - 1)];
-    calls.push({ correction: ctx.correction, base64 });
+    calls.push({ base64 });
     if (reply instanceof Error) throw reply;
     return reply;
   };
@@ -124,21 +134,13 @@ describe('runVisualJudge — the happy path and its cache', () => {
   });
 });
 
-describe('runVisualJudge — the corrective re-ask', () => {
-  it('re-asks ONCE with the invalid output quoted back, then accepts', async () => {
-    const { runner, calls } = scriptedRunner({ verdict: 'nope' }, VALID);
-    const outcome = await runVisualJudge(repo, input(), runner);
-    expect(outcome).toEqual({ status: 'judged', judgment: VALID });
-    expect(calls).toHaveLength(2);
-    expect(calls[0].correction).toBeUndefined();
-    expect(JSON.stringify(calls[1].correction)).toContain('nope');
-  });
-
-  it('two invalid replies fail soft — and are NEVER cached', async () => {
-    const first = scriptedRunner({ verdict: 'nope' }, { still: 'wrong' });
-    const outcome = await runVisualJudge(repo, input(), first.runner);
-    expect(outcome.status).toBe('failed');
-    expect(first.calls).toHaveLength(2);
+describe('runVisualJudge — an ask that produced no verdict', () => {
+  it('fails soft, names why, and is NEVER cached', async () => {
+    const first = scriptedRunner(new Error('the session ended malformed: outcome failed schema'));
+    const failed = await runVisualJudge(repo, input(), first.runner);
+    expect(failed.status).toBe('failed');
+    expect(failed).toMatchObject({ reason: expect.stringContaining('malformed') });
+    expect(first.calls).toHaveLength(1);
     // Nothing was written, so the next run gets a real attempt rather than a
     // cached non-answer.
     const second = scriptedRunner(VALID);
@@ -147,13 +149,6 @@ describe('runVisualJudge — the corrective re-ask', () => {
       judgment: VALID,
     });
     expect(second.calls).toHaveLength(1);
-  });
-
-  it('a THROWN call is not re-asked — a dead transport does not improve on retry', async () => {
-    const { runner, calls } = scriptedRunner(new Error('no transport'), VALID);
-    const outcome = await runVisualJudge(repo, input(), runner);
-    expect(outcome.status).toBe('failed');
-    expect(calls).toHaveLength(1);
   });
 });
 
@@ -230,31 +225,44 @@ describe('the prompts', () => {
   });
 });
 
-describe('spawnVisualJudgeRunner', () => {
-  it('sends the screenshot, the stage and the response schema over the transport', async () => {
-    const seen: LlmRequest[] = [];
-    const runner = spawnVisualJudgeRunner({
-      transport: async (req) => {
-        seen.push(req);
-        return JSON.stringify(VALID);
-      },
-      model: 'opus',
-    });
+describe('visualJudgeSessionRunner — one turn, one picture', () => {
+  it('runs one tool-less session and shows it the screenshot', async () => {
+    const stub = stubDriver(() => sessionOutcome(VALID));
+    const { persistence } = memoryPersistence();
+    const runner = visualJudgeSessionRunner({ driver: stub.driver, persistence });
+
     expect(await runner(input(), PNG_BYTES.toString('base64'))).toEqual(VALID);
-    expect(seen).toHaveLength(1);
-    expect(seen[0].stage).toBe('guard.visualJudge');
-    expect(seen[0].model).toBe('opus');
-    expect(seen[0].responseFormat).toBe('json');
-    expect(seen[0].schema).toContain('expectedVisible');
-    expect(seen[0].images).toEqual([
+    expect(stub.calls).toHaveLength(1);
+
+    const call = stub.calls[0];
+    expect(call.kind).toBe(VISUAL_JUDGE_SESSION_KIND);
+    expect(call.def.tools).toEqual([]);
+    expect(call.def.budget).toMatchObject({ turns: 2, maxResumes: 0 });
+    // The pixels ride the session message itself.
+    expect(call.input.images as readonly SessionImage[]).toEqual([
       { mediaType: 'image/png', data: PNG_BYTES.toString('base64') },
     ]);
+    expect(call.briefing).toContain('THE DETERMINISTIC MISMATCH');
   });
 
-  it('tolerates a fenced/chatty reply the way every other guard stage does', async () => {
-    const runner = spawnVisualJudgeRunner({
-      transport: async () => '```json\n' + JSON.stringify(VALID) + '\n```',
-    });
-    expect(await runner(input(), 'AAA')).toEqual(VALID);
+  it('records what it SHOWED on the transcript, never the bytes', async () => {
+    const stub = stubDriver(() => sessionOutcome(VALID));
+    const memory = memoryPersistence();
+    const runner = visualJudgeSessionRunner({ driver: stub.driver, persistence: memory.persistence });
+    await runner(input(), PNG_BYTES.toString('base64'));
+
+    const events = [...memory.events.values()].flat();
+    const shown = events.find((e) => e.type === 'user-message' && e.images);
+    // The stub driver emits the user message without the driver's image
+    // bookkeeping, so what this pins is that no event carries base64 pixels.
+    expect(shown).toBeUndefined();
+    expect(JSON.stringify(events)).not.toContain(PNG_BYTES.toString('base64'));
+  });
+
+  it('a lost session is a throw naming why, which the judge flattens to no verdict', async () => {
+    const stub = stubDriver(() => transportFailure());
+    const { persistence } = memoryPersistence();
+    const runner = visualJudgeSessionRunner({ driver: stub.driver, persistence });
+    await expect(runner(input(), 'AAA')).rejects.toThrow(/the provider failed/);
   });
 });

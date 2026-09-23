@@ -33,7 +33,7 @@ import { log } from '@truecourse/core/lib/logger';
 import {
   CreditsProviderUnavailableError,
   creditsOffered,
-  OPERATOR_PROVIDER,
+  operatorProvider,
   offeredProviderChoices,
   operatorClaudeCode,
   platformCreditsConfig,
@@ -99,7 +99,7 @@ router.get('/config', async (req: Request, res: Response) => {
     res.json({
       config: await workspaceLlmConfigStore().getView(orgId),
       providers: offeredProviderChoices(),
-      ...(operatorClaudeCode() ? { operator: OPERATOR_PROVIDER } : {}),
+      ...(operatorClaudeCode() ? { operator: operatorProvider() } : {}),
       ...(creditsOffered() ? { credits: { balance: await creditsBalance(orgId) } } : {}),
     });
   } catch (err) {

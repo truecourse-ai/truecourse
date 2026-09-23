@@ -22,23 +22,22 @@ import { fileURLToPath } from 'node:url';
 import {
   recipePath,
   computeRecipeFingerprint,
-  computePreparationFingerprint,
+  legacyPreparationFingerprint,
   readGuardSetup,
   writeGuardSetup,
   dependenciesPath,
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
 } from '@truecourse/guard-runner';
-import { noProviderTransport } from '@truecourse/shared/llm';
 import { setCacheEntry } from '@truecourse/llm';
 import {
   proposeRecipe,
   recipeCacheKey,
   RECIPE_CACHE_NAME,
-  interfacesFingerprint,
-  computeSeedStepFingerprint,
+  legacyInterfacesFingerprint,
+  legacySeedStepFingerprint,
   authFingerprint,
-  ecosystemFingerprint,
+  legacyRecipeStepFingerprint,
   type GuardSetupSeedSession,
 } from '@truecourse/guard-generator';
 import type { GuardSetupReport, InterfacesFile } from '@truecourse/shared';
@@ -77,8 +76,6 @@ vi.mock('../../packages/core/src/services/llm/session-driver.js', async (importO
 import {
   guardSetupInProcess,
   estimateGuardSetupCost,
-  assertLlmProviderConfigured,
-  NoLlmProviderError,
   EstimateDeclined,
   GUARD_SETUP_STEPS,
 } from '../../packages/core/src/commands/guard-setup.js';
@@ -184,7 +181,6 @@ const neverCalled = async (): Promise<never> => {
 
 /** The seed/auth seams stubbed out: those sessions are covered by their own lanes. */
 const inertSeams = {
-  transport: async () => 'ok',
   authorInterfaces: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
   seedSession: (async () => ({ status: 'skipped', reason: 'stubbed in this test' })) as GuardSetupSeedSession,
   preparationSession: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
@@ -221,17 +217,6 @@ function detailRecorder(): { tracker: StepTracker; details: Map<string, string[]
 // ---------------------------------------------------------------------------
 // Step 0 — the provider check
 // ---------------------------------------------------------------------------
-
-describe('assertLlmProviderConfigured', () => {
-  it('refuses the EE no-provider sentinel', () => {
-    expect(() => assertLlmProviderConfigured(noProviderTransport)).toThrow(NoLlmProviderError);
-  });
-
-  it('accepts a real transport', () => {
-    expect(() => assertLlmProviderConfigured(async () => 'ok')).not.toThrow();
-  });
-
-});
 
 // ---------------------------------------------------------------------------
 // The pre-flight estimate — six SESSION kinds
@@ -415,14 +400,16 @@ function settledRepo(): string {
     status: 'ok',
     recipe: { status: 'ok', outcome: 'exists' },
     steps: [
-      { key: 'recipe', status: 'ok', inputFingerprint: ecosystemFingerprint(r) },
+      { key: 'recipe', status: 'ok', inputFingerprint: legacyRecipeStepFingerprint(r) },
       { key: 'detect', status: 'ok', inputFingerprint: '' },
       // The catalog fingerprint folds the detection snapshot, which only an
       // analysis pass can produce — the estimate only asks whether a row settled.
       { key: 'catalog', status: 'ok', inputFingerprint: 'settled-catalog' },
-      { key: 'interfaces', status: 'ok', inputFingerprint: interfacesFingerprint(r) },
-      { key: 'seed', status: 'ok', inputFingerprint: computeSeedStepFingerprint(r) },
-      { key: 'preparations', status: 'ok', inputFingerprint: computePreparationFingerprint(r) },
+      // A spine an older build wrote: no named inputs, so each row is checked
+      // against the step's OLD fingerprint once and settles.
+      { key: 'interfaces', status: 'ok', inputFingerprint: legacyInterfacesFingerprint(r) },
+      { key: 'seed', status: 'ok', inputFingerprint: legacySeedStepFingerprint(r) },
+      { key: 'preparations', status: 'ok', inputFingerprint: legacyPreparationFingerprint(r) },
       { key: 'auth', status: 'ok', inputFingerprint: authFingerprint(r) },
     ],
   };
@@ -473,8 +460,10 @@ describe('guardSetupInProcess', () => {
 
     const { report } = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
 
-    // Nothing one-shot ran: the whole spend is sessions.
-    expect(report.usage?.calls).toBe(0);
+    // Every LLM call a run makes is a turn of a session, so that is the whole
+    // of what `usage` says.
+    expect(report.usage?.calls).toBeUndefined();
+    expect(report.usage?.costUsd).toBe(report.usage?.sessions?.costUsd);
     expect(report.usage?.sessions?.count).toBeGreaterThan(0);
     expect(report.usage?.sessions?.turns).toBeGreaterThan(0);
     // The catalog row names the sessions-store run its session ran under.
@@ -524,11 +513,13 @@ describe('guardSetupInProcess', () => {
     await guardSetupInProcess(r, { tracker, interfaces: interfaces(), ...inertSeams });
 
     // Step 1 reuses the existing recipe, so what it spends its time on is the
-    // live probe: booting the server and calling a real route on it.
-    expect(details.get('recipe')?.[0]).toBe('probing a live route');
-    // The analysis pass is reported against whichever step first needs it — here
-    // step 2, because step 1 never had to derive a route surface.
-    expect(details.get('detect')?.[0]).toBe('analyzing the repository');
+    // analysis pass its needs comparison reads, then the live probe: booting
+    // the server and calling a real route on it.
+    expect(details.get('recipe')?.[0]).toBe('analyzing the repository');
+    expect(details.get('recipe')?.some((line) => line.endsWith('probing a live route'))).toBe(true);
+    // The pass is reported against whichever step first needs it, and step 2
+    // reads the same memoized one back — so it announces nothing of its own.
+    expect(details.get('detect') ?? []).not.toContain('analyzing the repository');
     // The catalog session is the one long thing inside step 3.
     expect(details.get('catalog')?.[0]).toBe('classifying the dependency catalog');
   }, 120_000);
@@ -565,24 +556,6 @@ describe('guardSetupInProcess', () => {
   });
 
   // Never ask to spend, then fail: step 0 runs BEFORE the estimate gate.
-  it('fails the provider check before the estimate is even offered', async () => {
-    const r = fixtureRepo();
-    let asked = false;
-
-    await expect(
-      guardSetupInProcess(r, {
-        recipeRunner: neverCalled,
-        ...inertSeams,
-        transport: noProviderTransport,
-        onLlmEstimate: async () => {
-          asked = true;
-          return true;
-        },
-      }),
-    ).rejects.toBeInstanceOf(NoLlmProviderError);
-
-    expect(asked).toBe(false);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -640,7 +613,6 @@ describe('guardSetupInProcess — hosted injection', () => {
 
     const { report, sessionsRunDirs } = await guardSetupInProcess(r, {
       driver,
-      transport: async () => 'ok',
       transportMode: 'api',
       sessionsKey: key,
       interfaces: interfaces(),
@@ -682,7 +654,7 @@ describe('guardSetupInProcess — hosted injection', () => {
     const { report, sessionsRunDirs } = await guardSetupInProcess(r, {
       ...inertSeams, authorInterfaces: undefined,
       catalogSession: async () => ({ status: 'ok', added: [], findings: [] }),
-      driver, transport: neverCalled, transportMode: 'api', sessionsKey: key,
+      driver, transportMode: 'api', sessionsKey: key,
       sessionRun: parent, tracker, onRunStarted, interfaces: interfaces(),
       seedSession: async () => {
         // Interfaces must not close the run before setup's later steps execute.
@@ -707,7 +679,9 @@ describe('guardSetupInProcess — hosted injection', () => {
   }, 120_000);
 
   // An eager run is VISIBLE from the moment it starts — including one that dies
-  // before any session exists, which a lazy, driver-first run leaves unrecorded.
+  // at the recipe gate, which a lazy, driver-first run leaves unrecorded. The
+  // dead server reaches a boot repair first, and the session it could not run
+  // is part of the record.
   it('opens the run eagerly with the step checklist, and closes it failed with the reason', async () => {
     const r = fixtureRepo();
     writeRecipe(r, { serve: ['node', path.join(r, 'missing.mjs')], readyTimeoutMs: 4000 });
@@ -716,7 +690,6 @@ describe('guardSetupInProcess — hosted injection', () => {
 
     const { report } = await guardSetupInProcess(r, {
       driver: forbiddenDriver('the recipe gate fails before any session'),
-      transport: neverCalled,
       transportMode: 'claude-code',
       sessionsKey: key,
       eagerRun: true,
@@ -727,7 +700,9 @@ describe('guardSetupInProcess — hosted injection', () => {
 
     expect(report.status).toBe('failed');
     const [run] = await listStoredSessionRuns(key, 'guard-setup');
-    expect(run.sessions).toEqual([]);
+    expect(run.sessions.map((s) => [s.kind, s.status])).toEqual([
+      ['guard-setup.recipe-repair', 'failed'],
+    ]);
     expect(run.status).toBe('failed');
     expect(run.error).toEqual({ message: report.reason, kind: 'setup' });
     expect(run.llm).toEqual({ mode: 'claude-code', provider: 'test', model: 'scripted' });

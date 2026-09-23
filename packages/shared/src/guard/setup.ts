@@ -71,6 +71,22 @@ export const GuardSetupInterfaceResolutionSchema = z
   .strict()
 export type GuardSetupInterfaceResolution = z.infer<typeof GuardSetupInterfaceResolutionSchema>
 
+/**
+ * One screen whose authoring session did not settle. The step records these
+ * because the ledger now holds them: such a screen is NOT re-attempted on the
+ * next setup (its inputs have not moved), so the report is what tells a person
+ * there is something to ask for a refresh of.
+ */
+export const GuardSetupFailedScreenSchema = z
+  .object({
+    /** The web place id the session was given. */
+    place: z.string().min(1),
+    /** Why it did not settle, in the run's own words. */
+    reason: z.string().min(1).optional(),
+  })
+  .strict()
+export type GuardSetupFailedScreen = z.infer<typeof GuardSetupFailedScreenSchema>
+
 export const GuardSetupTaxonomyStepSchema = z
   .object({
     key: GuardSetupTaxonomyKeySchema,
@@ -83,6 +99,12 @@ export const GuardSetupTaxonomyStepSchema = z
      * and always runs).
      */
     inputFingerprint: z.string(),
+    /**
+     * The inputs behind `inputFingerprint`, by NAME (input → its digest), read
+     * off the same tree, so a step that re-opens can say which input moved.
+     * Absent on a row written before the field.
+     */
+    inputComponents: z.record(z.string(), z.string()).optional(),
     reason: z.string().optional(),
     /** The sessions-store run that carried this step's agent sessions, if any. */
     sessionRunId: z.string().optional(),
@@ -97,6 +119,17 @@ export const GuardSetupTaxonomyStepSchema = z
     resolutions: z.array(GuardSetupInterfaceResolutionSchema).optional(),
     /** INTERFACES step only: the catalog edits the resolutions produced, one line each. */
     changes: z.array(z.string()).optional(),
+    /**
+     * INTERFACES step only: re-authored tasks whose fingerprint moved through a
+     * reworded step label alone. Recorded when an authoring run re-authored a place.
+     */
+    labelRekeys: z.number().int().nonnegative().optional(),
+    /**
+     * INTERFACES step only: the screens whose sessions did not settle this run.
+     * They keep their place in the catalog and are not re-attempted until their
+     * inputs move or somebody asks for a refresh.
+     */
+    failedScreens: z.array(GuardSetupFailedScreenSchema).optional(),
   })
   .strict()
   .superRefine((step, ctx) => {
@@ -132,6 +165,24 @@ export const GuardSetupServerProbeSchema = z
   .strict()
 export type GuardSetupServerProbe = z.infer<typeof GuardSetupServerProbeSchema>
 
+/**
+ * ONE thing the repository's own code needs of the world a run boots, that the
+ * recipe does not provide. `answer` says where the answer belongs: `recipe` is
+ * the engine's (a service to bring up, a variable to point at it, which a
+ * scoped repair writes), `registration` is a person's (an account for a third
+ * party nobody may fabricate) and changes no recipe at all.
+ */
+export const GuardSetupUnprovidedNeedSchema = z
+  .object({
+    /** The need's identity, stable across runs (`datastore:redis:REDIS_URL`). */
+    need: z.string().min(1),
+    /** What providing it would mean, in the engine's own words. */
+    provides: z.string().min(1),
+    answer: z.enum(['recipe', 'registration']),
+  })
+  .strict()
+export type GuardSetupUnprovidedNeed = z.infer<typeof GuardSetupUnprovidedNeedSchema>
+
 /** Step 1 — the recipe, the only hard gate. */
 export const GuardSetupRecipeStepSchema = z
   .object({
@@ -149,6 +200,20 @@ export const GuardSetupRecipeStepSchema = z
     todos: z.array(z.string()).optional(),
     /** The per-server live endpoint probes; empty for a cli-only recipe. */
     probes: z.array(GuardSetupServerProbeSchema).optional(),
+    /**
+     * What the repository needs and this recipe does not provide, as the needs
+     * comparison found it. The `recipe`-answered entries are what a scoped
+     * repair was briefed with; the `registration`-answered ones are the honest
+     * to-do list and changed nothing.
+     */
+    unprovidedNeeds: z.array(GuardSetupUnprovidedNeedSchema).optional(),
+    /**
+     * Surfaces whose flow recipe SLICE a repair moved. Only a boot-driven
+     * repair may move one, and every committed flow on that surface re-authors
+     * because of it — which is why the run records it beside the recipe rather
+     * than leaving generate's reopened report to be read without it.
+     */
+    movedFlowSlices: z.array(z.string().min(1)).optional(),
   })
   .strict()
 export type GuardSetupRecipeStep = z.infer<typeof GuardSetupRecipeStepSchema>
@@ -239,20 +304,15 @@ export const GuardSetupReportSchema = z
       })
       .strict()
       .optional(),
-    /** LLM call/token/cost totals for the run — omitted when nothing was spent. */
+    /** LLM cost totals for the run — omitted when nothing was spent. */
     usage: z
       .object({
-        calls: z.number().int().nonnegative(),
-        inputTokens: z.number().int().nonnegative(),
-        outputTokens: z.number().int().nonnegative(),
         costUsd: z.number().nonnegative(),
         /**
-         * The AGENT-SESSION share of the spend, in the loop's own units.
-         * `BudgetSpent` counts turns and TOTAL tokens (no input/output split),
-         * so it is recorded beside the one-shot fields rather than folded into
-         * them — mapping total tokens onto `inputTokens` would be a lie the
-         * cost column then repeats. `costUsd` above is the whole run
-         * (one-shots + sessions); this block says how much of it was sessions.
+         * What the run's AGENT SESSIONS spent, in the loop's own units:
+         * `BudgetSpent` counts turns and TOTAL tokens, with no input/output
+         * split, because that is what a turn reports. Every LLM call a run
+         * makes is a turn of a session, so this is the whole of it.
          */
         sessions: z
           .object({
@@ -263,6 +323,11 @@ export const GuardSetupReportSchema = z
           })
           .strict()
           .optional(),
+        /** The per-call token totals a report stored before every stage became
+         *  a session carried. Never written now. */
+        calls: z.number().int().nonnegative().optional(),
+        inputTokens: z.number().int().nonnegative().optional(),
+        outputTokens: z.number().int().nonnegative().optional(),
       })
       .strict()
       .optional(),

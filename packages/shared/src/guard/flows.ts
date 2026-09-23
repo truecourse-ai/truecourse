@@ -429,14 +429,17 @@ export const FLOW_IDENTITY_OVERLAP_THRESHOLD = 0.5
 
 /**
  * What happens to one re-synthesized flow's identity:
- *  - `remap` — its milestone multiset is identical to a prior flow's; it keeps that
- *    flow's `id` (and takes the new title).
+ *  - `remap` — KEPT: its contract (milestone multiset + starting state) is
+ *    identical to a prior flow's, whether synthesis named that flow's id or the
+ *    engine found it; it keeps that flow's `id`.
+ *  - `amended` — synthesis named a prior flow's id as the one it continues, and
+ *    the contract moved; it keeps the id under a new fingerprint.
  *  - `stale` — legacy serialized verdict, retained for reader compatibility.
  *  - `new` — nothing prior claims it; it keeps the id it came in with.
  */
 export interface GuardFlowIdentityVerdict {
-  kind: 'remap' | 'stale' | 'new'
-  /** The id the flow should carry: the prior flow's for `remap`/`stale`, its own for `new`. */
+  kind: 'remap' | 'amended' | 'stale' | 'new'
+  /** The id the flow should carry: the prior flow's for `remap`/`amended`/`stale`, its own for `new`. */
   id: string
 }
 
@@ -448,19 +451,40 @@ export interface GuardFlowIdentityResolution {
   orphaned: GuardFlow[]
 }
 
-/** Preserve only one unambiguous identical complete behavior. Splits get new IDs. */
+/** The contract identity resolves on: the milestone multiset and the starting state. */
+export function flowContractKey(flow: Pick<GuardFlow, 'milestones' | 'startingState'>): string {
+  return JSON.stringify(canonicalProofValue({ fingerprint: flowFingerprint(flow.milestones), startingState: flow.startingState ?? null }))
+}
+
+/**
+ * Resolve each next flow's identity against the prior corpus.
+ *
+ * `continues` is what synthesis SAID: next index → the prior id it continues.
+ * A stated continuation wins over everything else, so a flow whose milestones
+ * moved keeps its id (`amended`) instead of orphaning its scenarios. Without a
+ * statement, only one unambiguous identical contract inherits: a split never
+ * takes a parent's id by overlap, and a tie is nobody's.
+ */
 export function resolveFlowIdentity(
   prev: readonly GuardFlow[],
   next: readonly GuardFlow[],
+  continues: ReadonlyMap<number, string> = new Map(),
 ): GuardFlowIdentityResolution {
   const claimedPrev = new Set<number>()
   const verdicts: GuardFlowIdentityVerdict[] = next.map(flow => ({ kind: 'new', id: flow.id }))
-  const contract = (flow: GuardFlow) => JSON.stringify(canonicalProofValue({ fingerprint: flowFingerprint(flow.milestones), startingState: flow.startingState ?? null }))
+  const prevIndex = new Map(prev.map((flow, p) => [flow.id, p]))
+  for (const [n, id] of continues) {
+    const p = prevIndex.get(id)
+    if (p === undefined || claimedPrev.has(p) || n < 0 || n >= next.length) continue
+    claimedPrev.add(p)
+    verdicts[n] = { kind: flowContractKey(prev[p]) === flowContractKey(next[n]) ? 'remap' : 'amended', id }
+  }
   for (let n = 0; n < next.length; n++) {
-    const key = contract(next[n])
-    const matches = prev.flatMap((flow, p) => !claimedPrev.has(p) && contract(flow) === key ? [p] : [])
+    if (verdicts[n].kind !== 'new') continue
+    const key = flowContractKey(next[n])
+    const matches = prev.flatMap((flow, p) => !claimedPrev.has(p) && flowContractKey(flow) === key ? [p] : [])
     // Ambiguous old identities stay orphaned; a split never inherits a parent by overlap.
-    if (matches.length !== 1 || next.filter(flow => contract(flow) === key).length !== 1) continue
+    if (matches.length !== 1 || next.filter((flow, m) => verdicts[m].kind === 'new' && flowContractKey(flow) === key).length !== 1) continue
     claimedPrev.add(matches[0])
     verdicts[n] = { kind: 'remap', id: prev[matches[0]].id }
   }

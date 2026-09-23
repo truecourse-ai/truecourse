@@ -1,16 +1,20 @@
 /**
- * `@truecourse/guard-generator` — the LLM side of guard: whole-document claim
- * extraction, recipe discovery, batched scenario authoring, and birth validation.
- * Authorship is output-only — the model returns content through the shared
- * transport seam and the engine (this package) parses, validates, birth-validates,
- * and writes. Depends on `@truecourse/guard-runner` (the deterministic engine) and
+ * `@truecourse/guard-generator` — the DETERMINISTIC half of guard: the work
+ * plan, the section plan, recipe discovery, realization matching, birth
+ * validation and every write. The model's part arrives through injected SEAMS
+ * (`leaf-seams.ts` and the session seams on `generateGuards`), implemented in
+ * `@truecourse/core`, which this package cannot depend on. Depends on
+ * `@truecourse/guard-runner` (the deterministic engine) and
  * `@truecourse/shared`; those never depend back on it.
  */
 
 export {
   generateGuards,
   looksWorldMutating,
+  buildWebAuthorCatalog,
   workerCacheKey,
+  workerRecipeMaterial,
+  flowWorkerKeyFingerprints,
   // Single-step mode (`only`): the pipeline's session
   // steps in order. `@truecourse/core` enforces the cache-only replay of the
   // prior ones against these.
@@ -20,7 +24,6 @@ export {
   // One line per thing a run did, filed under the phase that did it.
   type GuardGenerateFactStep,
   type GuardGenerateResult,
-  type GuardGenerateModels,
   type GeneratedScenarioInfo,
   type GuardBirthFinding,
   type GuardGenerateError,
@@ -46,7 +49,13 @@ export {
   hasGuardUniverse,
   readCorpusAreaTags,
   sectionInputsKey,
-  flowGenerationInputsHash,
+  legacyFlowGenerationInputsHash,
+  flowGenerationInputComponents,
+  flowInterfaceFingerprintBag,
+  flowSettleDigest,
+  flowSettleVerdict,
+  type FlowGenerationInputParts,
+  type FlowSettleCheck,
   type GuardWorkPlan,
   type GuardDoc,
   type SectionInput,
@@ -63,6 +72,9 @@ export {
   realizationAssignmentFingerprint,
   partitionPlanPreparations,
   matchCacheKey,
+  matchLegacyCacheKeys,
+  surfaceIdentityFingerprint,
+  MATCH_STAGE_VERSION,
   MATCH_CACHE_NAME,
   type MatchOutcome,
   type MatchPlan,
@@ -104,14 +116,23 @@ export {
 export {
   snapExtraction,
   isSystemicSessionLoss,
+  reconciliationProblems,
+  mergeSettledSections,
+  carryPriorCaseIdentity,
+  priorClaimsToAccount,
   type DocClaims,
   type ExtractResult,
   type ExtractedClaimWithNeeds,
+  type ExtractPrior,
+  type PriorClaim,
+  type ReconcilableDraft,
   type ExtractSessionSeam,
   type PriorExtraction,
   type ReuseExtractionSeam,
   type GuardSessionSummary,
 } from './extract.js'
+
+export { priorExtractions, type PriorExtractionsInput } from './extract-prior.js'
 
 export {
   mergeExtractedClaims,
@@ -150,12 +171,15 @@ export {
   type FlowsSessionGrounding,
   type SubsumedFlow,
   type UnsettledArea,
+  type RetiredFlowRecord,
+  type FlowReconciliation,
 } from './flows.js'
 
 export {
   discoverRecipe,
   verifyProposal,
   recipeCacheKey,
+  recipeLegacyCacheKey,
   staticProposalComplaints,
   failureReport,
   RECIPE_CACHE_NAME,
@@ -168,10 +192,38 @@ export {
   type VerifiableProposal,
   type VerifyContext,
   type ProposalVerdict,
+  repairExistingRecipe,
+  recipeRepairCacheKey,
   type RecipeRepairContext,
   type RecipeRepairResult,
   type RecipeRepairFn,
+  type RecipeRepairScope,
+  type RepairExistingRecipeOptions,
+  type RepairExistingRecipeResult,
 } from './recipe-discovery.js'
+
+// Needs vs provides — the deterministic detector behind the recipe gate, and
+// the scope a repair of a standing recipe is held to.
+export {
+  recipeNeeds,
+  recipeNeedsDiff,
+  recipeNeedsOf,
+  needsFingerprint,
+  parseDetectionSnapshot,
+  type DetectedWorld,
+  type RecipeNeed,
+  type RecipeNeedsDiff,
+  type UnprovidedNeed,
+  type NeedAnswer,
+} from './recipe-needs.js'
+export {
+  NEEDS_REPAIR_FIELDS,
+  foldRepairedRecipe,
+  changedRecipeFields,
+  outOfScopeChanges,
+  needsScopeRefusal,
+  movedFlowSlices,
+} from './recipe-scope.js'
 
 export {
   proposeRecipe,
@@ -214,6 +266,7 @@ export {
   deriveExpansionProbes,
   captureProbes,
   groundProbes,
+  groundInputsFingerprint,
   defaultProbeExecutor,
   GROUND_CACHE_NAME,
   MAX_PROBES_PER_BATCH,
@@ -248,11 +301,16 @@ export {
   runGuardSetup,
   readSpecExcerpts,
   collectSecuritySchemes,
-  ecosystemFingerprint,
+  recipeStepFingerprint,
+  legacyRecipeStepFingerprint,
   interfacesFingerprint,
+  legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  legacySeedStepFingerprint,
   authFingerprint,
-  settledFingerprints,
+  settledSteps,
+  stepSettled,
+  type SettledStepRow,
   GUARD_SETUP_STEPS,
   GUARD_SETUP_ONLY_STEPS,
   SetupStepNotReadyError,
@@ -343,6 +401,10 @@ export {
   CLAIM_DIFF_PROMPT_FINGERPRINT,
   buildClaimDiffUserPrompt,
   type ClaimDiffSectionInput,
+  WORLD_CLASSIFY_SYSTEM_PROMPT,
+  WORLD_CLASSIFY_PROMPT_FINGERPRINT,
+  buildWorldClassifyUserPrompt,
+  type WorldClassifyFlowInput,
 } from './prompts.js'
 
 // Example mining (D3) — the doc's own examples run verbatim.
@@ -357,20 +419,22 @@ export {
 } from './examples.js'
 
 export {
-  spawnRecipeRunner,
-  spawnMatchRunner,
-  spawnWorldClassifyRunner,
-  spawnClaimDiffRunner,
+  RECIPE_PROPOSE_SESSION_KIND,
+  MATCH_SESSION_KIND,
+  CLAIM_DIFF_SESSION_KIND,
+  WORLD_CLASSIFY_SESSION_KIND,
   type RecipeRunner,
   type MatchRunner,
   type WorldClassifyRunner,
   type ClaimDiffRunner,
-} from './runners.js'
+  type LeafSummaries,
+} from './leaf-seams.js'
 
 export {
   reuseCosmeticExtractions,
   rememberDocTexts,
   claimDiffCacheKey,
+  claimDiffLegacyCacheKey,
   docContentHash,
   CLAIM_DIFF_CACHE_NAME,
   DOC_TEXT_CACHE_NAME,
@@ -425,8 +489,11 @@ export {
   type SynthesizedFlow,
   type SynthesizedMilestone,
   type SynthesizedEpicFlow,
+  type RetiredFlow,
   ClaimDiffSchema,
   type ClaimDiff,
+  WorldClassifySchema,
+  type WorldClassify,
 } from './schemas.js'
 
 // The app↔server join — which recipe server serves a flow's paths, and
@@ -460,8 +527,8 @@ export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
 
 export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'
 
-export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowInvocationGaps } from './prerequisites.js'
+export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 
 export { completeRealization } from './match.js'
 
-export { createAuthorCatalog, scopedAuthorResources, AUTHOR_CATALOG_VERSION, AUTHOR_TOOL_RESULT_CHARS, AUTHOR_INITIAL_BYTES, type AuthorCatalog, type CatalogSearch, type CatalogGet } from './author-catalog.js'
+export { createAuthorCatalog, scopedAuthorResources, catalogReadMaterial, recordCatalogReads, webAuthorKeyMaterial, webSetupCandidates, AUTHOR_CATALOG_VERSION, AUTHOR_TOOL_RESULT_CHARS, AUTHOR_INITIAL_BYTES, type AuthorCatalog, type CatalogReadLog, type CatalogSearch, type CatalogGet } from './author-catalog.js'

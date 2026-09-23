@@ -7,10 +7,12 @@
  * it before running, and lift what the generator wrote out again before the
  * clone goes:
  *
- *   IN  — the user's guard decisions (dismissed claims and flows), the baseline
- *         scenario set (the manifest is what makes an unchanged section a skip
- *         and keeps scenario ids stable across runs) and the baseline report
- *         (the birth findings a no-op generate carries forward).
+ *   IN  — the user's guard decisions (dismissed claims and flows), the current
+ *         scenario set — every file of it: the manifest is what makes an
+ *         unchanged section a skip and keeps scenario ids stable across runs,
+ *         and the flows and claims beside it are what synthesis reconciles
+ *         against — and the current report (the birth findings a no-op
+ *         generate carries forward).
  *   OUT — the scenario tree, the report (flagged as the repo's guard BASELINE:
  *         the job only ever runs on the default branch), and every birth-finding
  *         transcript, which lives in a gitignored evidence dir the clone takes
@@ -44,7 +46,6 @@ import {
   type GuardLatest,
 } from '@truecourse/shared';
 import {
-  listScenarioFiles,
   readGuardBaselineCommit,
   readGuardDecisions,
   readGuardResult,
@@ -57,11 +58,13 @@ import {
   writeGuardResultEvidence,
   writeGuardRunCoverage,
   type RepoRef,
+  type VersionProvenance,
 } from '@truecourse/core/lib/guard-store';
 import {
   readGuardRunFlowSummary,
   readGuardRunSectionSummary,
 } from '@truecourse/core/commands/guard-read';
+import { storedScenarioSetFiles } from '@truecourse/core/lib/guard-read-tree';
 import { log } from '@truecourse/core/lib/logger';
 import { assertSafeRel, safeJoin } from '@truecourse/core/lib/safe-path';
 
@@ -71,8 +74,9 @@ function writeFile(file: string, body: string): void {
 }
 
 /**
- * Put the repo's stored guard state into `treeDir`. Returns the baseline
- * commit the scenario set came from, or `null` when the repo has never
+ * Put the repo's stored guard state into `treeDir`: the CURRENT scenario set
+ * and report of the default branch (the newest version of each). Returns the
+ * commit the current set came from, or `null` when the repo has never
  * generated — a first generate starts from nothing, which is fine.
  */
 export async function materializeStoredGuardState(
@@ -90,15 +94,22 @@ export async function materializeStoredGuardState(
   const baseline = await readGuardBaselineCommit(repoKey);
   if (!baseline) return null;
 
-  const manifest = await readManifest(repoKey, baseline);
+  // The newest version of each: the set rolled back to is what the next
+  // generate reconciles against, and a rollback re-stores the report that set
+  // was born with beside it, so the scope's newest report is its pair — or
+  // the blocked report of a generate that stored no set, carried forward.
+  const manifest = await readManifest(repoKey);
   if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
-  for (const rel of await listScenarioFiles(repoKey, baseline)) {
-    const body = await readScenarioFile(repoKey, rel, baseline);
+  // Every file of the set, not only the scenario yaml: the committed flows and
+  // claims beside the manifest are what synthesis reconciles against, and a
+  // clone without them makes every flow look new.
+  for (const rel of await storedScenarioSetFiles(repoKey, treeDir)) {
+    const body = await readScenarioFile(repoKey, rel);
     if (body == null) continue;
     assertSafeRel(rel);
     writeFile(safeJoin(treeDir, rel), body);
   }
-  const report = await readGuardResult(repoKey, baseline);
+  const report = await readGuardResult(repoKey);
   if (report) writeCloneGuardResult(treeDir, report);
   return baseline;
 }
@@ -123,18 +134,20 @@ export interface PersistedGuardGenerate {
 }
 
 /**
- * Lift what a completed generate wrote in `treeDir` into the store under
- * `ref`: the scenario tree, the report (baseline), then every birth-finding
- * transcript the report and the manifest point at. The report row is written
- * before the evidence, which attaches to it.
+ * Lift what a completed generate wrote in `treeDir` into the store as new
+ * versions of `ref`'s series: the scenario tree, the report, then every
+ * birth-finding transcript the report and the manifest point at. Both carry
+ * `provenance` — the run that wrote them and its model. The report row is
+ * written before the evidence, which attaches to it.
  */
 export async function persistGeneratedGuard(
   ref: RepoRef,
   treeDir: string,
   report: GuardGenerateReport,
+  provenance?: VersionProvenance,
 ): Promise<PersistedGuardGenerate> {
-  const { fileCount } = await saveScenarios(ref, scenariosDir(treeDir));
-  await writeGuardResult(ref, report, { baseline: true });
+  const { fileCount } = await saveScenarios(ref, scenariosDir(treeDir), provenance);
+  await writeGuardResult(ref, report, provenance);
   await persistBirthEvidence(ref, treeDir, report);
   return { fileCount };
 }
@@ -163,19 +176,21 @@ async function persistBirthEvidence(
 
 /**
  * Lift a completed run out of `treeDir` into the store: the snapshot the runner
- * left as the repo's BASELINE run (keyed by the clone's commit), its SECTION
- * and FLOW summaries, then every scenario's evidence bundle, which attaches to
- * that run row. The snapshot is written first, since the evidence manifest lives
- * on it, and the summaries are derived against the run that is now stored.
+ * left as a run of `ref`'s scope (keyed by the clone's commit) with its
+ * `provenance`, its SECTION and FLOW summaries, then every scenario's evidence
+ * bundle, which attaches to that run row. The snapshot is written first, since
+ * the evidence manifest lives on it, and the summaries are derived against the
+ * run that is now stored.
  */
 export async function persistGuardRun(
   ref: RepoRef,
   treeDir: string,
   run: GuardLatest,
+  provenance?: VersionProvenance,
 ): Promise<void> {
   // The stored record says where it ran: this is the hosted runner's run.
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
-  await writeGuardLatest(ref.repoKey, latest);
+  await writeGuardLatest(ref.repoKey, latest, { scope: ref.scope, ...(provenance ? { provenance } : {}) });
   await recordGuardRunCoverage(ref.repoKey, latest);
   const runId = latest.run.runId;
   for (const scenario of latest.scenarios) {

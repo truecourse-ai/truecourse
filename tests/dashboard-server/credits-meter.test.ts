@@ -3,17 +3,16 @@
  * granted balance, and this is where the check before and the debit after live.
  *
  * What is pinned: the platform block comes from the environment and never from
- * the store, both halves of a run report and are charged, the debit references
- * the `llm_usage` row it charges so the two agree to the cent, a one-shot call
- * on an empty balance is REFUSED rather than made, a session on one PARKS with
- * its journal, and the job's own assertion turns whatever the engine said into
- * the pause.
+ * the store, every turn of every session reports and is charged, the debit
+ * references the `llm_usage` row it charges so the two agree to the cent, a
+ * session that opens on an empty balance PARKS with its journal rather than
+ * spending, and the job's own assertion turns whatever the engine said into the
+ * pause.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
 import type { SessionDef, SessionDriver, SessionEventBody } from '@truecourse/agent-loop';
-import type { LlmTransport } from '@truecourse/shared/llm';
 import {
   resetWorkspaceLlmBackend,
   resetWorkspaceLlmConfigStore,
@@ -125,28 +124,27 @@ function fakeDriver(turns: number, costUsd: number): SessionDriver {
 }
 
 /** The backend a credits run gets: it records the block it was handed. */
-function installBackend(driver: SessionDriver, costUsd = 0.25): void {
+function installBackend(driver: SessionDriver): void {
   setWorkspaceLlmBackend({
     probe: async (config) => {
       built = { provider: config.provider, model: config.model, ...(config.apiKey ? { apiKey: config.apiKey } : {}) };
     },
     driver: () => driver,
-    transport:
-      (_config, onUsage): LlmTransport =>
-      async (req) => {
-        onUsage?.({
-          stage: req.stage ?? 'unknown',
-          model: 'gpt-5.6',
-          inputTokens: 90,
-          outputTokens: 10,
-          cacheReadTokens: 0,
-          cacheCreateTokens: 0,
-          costUsd,
-        });
-        return '{}';
-      },
   });
 }
+
+/** One session of `kind`, started the way every run starts one. */
+function runSession(driver: SessionDriver, kind: string): ReturnType<SessionDriver['runSession']> {
+  return driver.runSession({
+    def: def(kind),
+    initialMessages: [],
+    onEvent: () => {},
+    signal: new AbortController().signal,
+  });
+}
+
+/** The leaf judgement a credits run spends one turn on. */
+const LEAF = 'guard-generate.match';
 
 const meterFor = (jobId = JOB) =>
   createUsageMeter(
@@ -175,12 +173,12 @@ describe('the platform key', () => {
 
   it('is what a credits run is probed and built with, named as truecourse', async () => {
     await grant(1000);
-    installBackend(fakeDriver(1, 0));
+    installBackend(fakeDriver(1, 0.25));
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
     expect(built).toEqual({ provider: 'openai', model: 'gpt-5.6', apiKey: 'sk-platform-secret' });
 
-    await llm.transport()({ stage: 'guard.match', system: '', user: '' });
+    runSession(llm.driver(), LEAF);
     await meter.close();
     const rows = await installed.usage.runs({ workspaceOrgId: ORG, from: '2000-01-01T00:00:00.000Z', to: '2100-01-01T00:00:00.000Z' }, 10);
     expect(rows).toHaveLength(1);
@@ -194,22 +192,22 @@ describe('the platform key', () => {
 
   it('refuses to start a workspace whose server holds no platform key', async () => {
     delete process.env[KEY];
-    installBackend(fakeDriver(1, 0));
+    installBackend(fakeDriver(1, 0.25));
     await expect(startWorkspaceLlm(ORG, meterFor())).rejects.toThrow(/no credits provider/i);
   });
 });
 
 describe('charging', () => {
-  it('debits a one-shot call against the usage row it spent on', async () => {
+  it('debits a LEAF judgement against the usage row it spent on', async () => {
     await grant(1000);
-    installBackend(fakeDriver(1, 0), 0.25);
+    installBackend(fakeDriver(1, 0.25));
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
-    await llm.transport()({ stage: 'guard.match', system: '', user: '' });
-    await llm.transport()({ stage: 'guard.match', system: '', user: '' });
+    runSession(llm.driver(), LEAF);
+    runSession(llm.driver(), LEAF);
     await meter.close();
 
-    // 2 calls × $0.25 = 50 credits.
+    // 2 one-turn sessions × $0.25 = 50 credits.
     expect((await installed.store.balance(ORG)).balance).toBe(950);
     const [debit] = (await installed.store.ledger(ORG, 10)).filter((row) => row.kind === 'debit');
     const [usage] = await installed.db.query.llmUsage.findMany();
@@ -223,12 +221,7 @@ describe('charging', () => {
     installBackend(fakeDriver(3, 0.1));
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
-    llm.driver().runSession({
-      def: def('guard.flow-worker'),
-      initialMessages: [],
-      onEvent: () => {},
-      signal: new AbortController().signal,
-    });
+    runSession(llm.driver(), 'guard.flow-worker');
     await meter.close();
 
     // 3 turns × $0.10 = 30 credits, on one row for the kind.
@@ -241,11 +234,11 @@ describe('charging', () => {
 
   it('charges the whole of a run, not each flush rounded — sub-cent calls add up', async () => {
     await grant(1000);
-    installBackend(fakeDriver(1, 0), 0.004);
+    installBackend(fakeDriver(1, 0.004));
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
     for (let i = 0; i < 10; i++) {
-      await llm.transport()({ stage: 'guard.match', system: '', user: '' });
+      runSession(llm.driver(), LEAF);
       await meter.flush();
     }
     await meter.close();
@@ -263,10 +256,10 @@ describe('charging', () => {
       getView: async () => null,
       save: async () => {},
     });
-    installBackend(fakeDriver(1, 0), 5);
+    installBackend(fakeDriver(1, 5));
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
-    await llm.transport()({ stage: 'guard.match', system: '', user: '' });
+    runSession(llm.driver(), LEAF);
     await meter.close();
     expect((await installed.store.balance(ORG)).balance).toBe(0);
     expect(await installed.store.ledger(ORG, 10)).toEqual([]);
@@ -275,54 +268,33 @@ describe('charging', () => {
 });
 
 describe('the gate', () => {
-  it('refuses the call that would follow an empty balance, and the job pauses', async () => {
-    // One call's worth, then nothing.
+  it('parks the session that opens on an empty balance, with nothing spent', async () => {
+    // One session's worth of credit, then nothing.
     await grant(25);
-    installBackend(fakeDriver(1, 0), 0.25);
+    installBackend(fakeDriver(1, 0.25));
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
-    const transport = llm.transport();
-
-    await transport({ stage: 'guard.match', system: '', user: '' });
+    runSession(llm.driver(), LEAF);
     await meter.flush();
     expect((await installed.store.balance(ORG)).balance).toBe(0);
 
-    await expect(transport({ stage: 'guard.match', system: '', user: '' })).rejects.toSatisfy(
-      isCreditsExhausted,
-    );
-    expect(meter.exhausted()).toBe(true);
-    await meter.close();
-    // The refused call never reached the model, so it is on no usage row.
-    const rows = await installed.db.query.llmUsage.findMany();
-    expect(rows[0]?.calls).toBe(1);
-  });
-
-  it('parks a session that opens on an empty balance, with nothing spent', async () => {
-    await grant(25);
-    installBackend(fakeDriver(1, 0), 0.25);
-    const meter = meterFor();
-    const llm = await startWorkspaceLlm(ORG, meter);
-    await llm.transport()({ stage: 'guard.match', system: '', user: '' });
-    await meter.flush();
-
-    const driver = llm.driver();
-    const handle = driver.runSession({
-      def: def('guard.flow-worker'),
-      initialMessages: [],
-      onEvent: () => {},
-      signal: new AbortController().signal,
-    });
+    const handle = runSession(llm.driver(), 'guard.flow-worker');
     expect(handle.status()).toBe('parked');
     await expect(handle.done).resolves.toMatchObject({
       kind: 'failure',
       failure: { kind: 'transport', detail: 'out of credits', retryability: 'blocked' },
     });
+    expect(meter.exhausted()).toBe(true);
     await meter.close();
+    // The parked session never reached the model, so it is on no usage row.
+    const rows = await installed.db.query.llmUsage.findMany();
+    expect(rows.map((row) => row.subject)).toEqual([LEAF]);
+    expect(rows[0]?.calls).toBe(1);
   });
 
   it('stops a session part-way once its turns have emptied the balance', async () => {
     await grant(25);
-    installBackend(fakeDriver(4, 0.25), 0);
+    installBackend(fakeDriver(4, 0.25));
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
     const seen: string[] = [];
@@ -343,17 +315,12 @@ describe('the gate', () => {
 
   it('turns whatever the engine said into the pause, on both paths', async () => {
     await grant(25);
-    installBackend(fakeDriver(1, 0), 0.25);
+    installBackend(fakeDriver(1, 0.25));
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
-    await llm.transport()({ stage: 'guard.match', system: '', user: '' });
+    runSession(llm.driver(), LEAF);
     await meter.flush();
-    llm.driver().runSession({
-      def: def('guard.flow-worker'),
-      initialMessages: [],
-      onEvent: () => {},
-      signal: new AbortController().signal,
-    });
+    runSession(llm.driver(), 'guard.flow-worker');
 
     await expect(
       withCredits(meter, async () => {
@@ -366,10 +333,10 @@ describe('the gate', () => {
 
   it('lets a run that never ran out through untouched', async () => {
     await grant(1000);
-    installBackend(fakeDriver(1, 0), 0.25);
+    installBackend(fakeDriver(1, 0.25));
     const meter = meterFor();
     const llm = await startWorkspaceLlm(ORG, meter);
-    await llm.transport()({ stage: 'guard.match', system: '', user: '' });
+    runSession(llm.driver(), LEAF);
     await meter.flush();
     await expect(withCredits(meter, async () => 'finished')).resolves.toBe('finished');
     await expect(withCredits(meter, async () => Promise.reject(new Error('real failure')))).rejects.toThrow(

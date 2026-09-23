@@ -1,13 +1,13 @@
 /**
- * THE SESSION DRIVER a run's agent sessions run on — the injection point
- * sessions have that one-shot calls have in `install-transport.ts`. A workspace
+ * THE SESSION DRIVER a run's agent sessions run on — and every LLM call the
+ * product makes is a turn of one. A workspace
  * on an API provider gets the per-turn loop against that provider; operator
  * mode gets the Agent SDK driver, one `claude` subprocess per session on this
  * process's own login.
  *
  * ONE MODEL EVERYWHERE: every session of every workstream runs on the same
- * capable model — Opus in claude-code mode, the workspace's flagship in api
- * mode. There is deliberately no per-session model knob to turn.
+ * model — operator mode's `resolveModel()` in claude-code mode, the workspace's
+ * own in api mode. There is deliberately no per-session model knob to turn.
  *
  * Nothing about a SESSION TYPE reaches this module — it answers "which backend,
  * on which model", and the workstreams answer everything else.
@@ -21,11 +21,9 @@ import {
 } from '@truecourse/llm-claude-agent';
 import type { SessionDriver, SessionLlm } from '@truecourse/agent-loop';
 import { resolveClaudeBinary } from '@truecourse/shared';
+import { resolveFallbackModel, resolveModel } from '../../config/llm-models.js';
 import type { LlmApiConfig, LlmTransportMode } from './provider-config.js';
-import { buildProviderConfig, pricingFor } from './install-transport.js';
-
-/** The model claude-code mode runs every session on. */
-export const SESSION_MODEL_CLAUDE_CODE = 'opus';
+import { buildProviderConfig, pricingFor } from './provider.js';
 
 export interface ConfiguredSessionDriver {
   driver: SessionDriver;
@@ -65,14 +63,18 @@ export function createApiSessionDriverFor(
 /**
  * The claude-code session driver — the Agent SDK on the `claude` login of
  * whoever runs this process. Operator mode
- * (`TRUECOURSE_LLM_TRANSPORT=claude-code`) hands it to every run.
+ * (`TRUECOURSE_LLM_TRANSPORT=claude-code`) hands it to every run, on the one
+ * operator model, with `TRUECOURSE_FALLBACK_MODEL` as the retry when that
+ * model is overloaded.
  */
 export function createClaudeCodeSessionDriver(
   opts: SessionDriverOptions = {},
 ): ConfiguredSessionDriver {
+  const fallbackModel = resolveFallbackModel();
   const driver = createClaudeAgentSessionDriver({
     pathToClaudeCodeExecutable: resolveClaudeBinary(),
-    model: SESSION_MODEL_CLAUDE_CODE,
+    model: resolveModel(),
+    ...(fallbackModel ? { fallbackModel } : {}),
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
     ...(opts.providerStateDir ? { sessionStore: providerSessionStore(opts.providerStateDir) } : {}),
   });

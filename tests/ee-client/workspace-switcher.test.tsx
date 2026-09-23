@@ -67,6 +67,7 @@ interface World {
   /** What the session says this workspace may use. */
   entitlements: EnterpriseFeature[];
   switched: string[];
+  /** `<name> — <description>`: a workspace is named AND described when it is made. */
   created: string[];
   /** The answer to POST /workspaces; the default one creates. */
   create: (name: string) => Response;
@@ -103,9 +104,9 @@ function serve(over: Partial<World> = {}) {
       return json({ workspaces: world.workspaces });
     }
     if (pathname === '/api/auth/workspaces' && method === 'POST') {
-      const name = (JSON.parse(String(init?.body)) as { name: string }).name;
-      world.created.push(name);
-      return world.create(name);
+      const body = JSON.parse(String(init?.body)) as { name: string; description: string };
+      world.created.push(`${body.name} — ${body.description}`);
+      return world.create(body.name);
     }
     if (pathname === '/api/auth/workspaces/switch') {
       const id = (JSON.parse(String(init?.body)) as { organizationId: string }).organizationId;
@@ -219,9 +220,18 @@ describe('the workspace switcher', () => {
 
     expect(await screen.findByText('Create workspace', { selector: 'h2' })).toBeInTheDocument();
     await user.type(screen.getByLabelText('Name'), 'Third');
+    // Create stays refused until the workspace has said what it builds: the
+    // description is what every document it holds is attributed against.
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+    await user.type(
+      screen.getByLabelText("What it builds"),
+      'A payroll service for small companies.',
+    );
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
-    await waitFor(() => expect(world.created).toEqual(['Third']));
+    await waitFor(() =>
+      expect(world.created).toEqual(['Third — A payroll service for small companies.']),
+    );
     await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
   });
 
@@ -233,6 +243,11 @@ describe('the workspace switcher', () => {
     renderShell();
     await user.click(await switcher());
     await user.click(screen.getByRole('button', { name: 'Create workspace' }));
+    await user.type(screen.getByLabelText('Name'), 'Third');
+    await user.type(
+      screen.getByLabelText("What it builds"),
+      'A payroll service for small companies.',
+    );
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText(refusal)).toBeInTheDocument();

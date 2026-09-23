@@ -14,9 +14,9 @@
  * appended to its journal. Setup supplies its own run so authoring remains part
  * of the setup activity and lifecycle.
  *
- * One stage here is NOT a session: the state reconciliation that closes a run
- * is a single schema-bearing completion, so it resolves the ordinary
- * one-shot transport beside the session driver rather than through it.
+ * The state reconciliation that closes a run is a session too — a ONE-TURN
+ * one: the whole registry is its briefing, so it reads nothing, answers once,
+ * and ends.
  */
 
 import {
@@ -24,25 +24,28 @@ import {
   authorWebInterfaces,
   planWorkItems,
   reconcileAuthoredStates,
-  STATE_RECONCILE_STAGE,
+  STATE_RECONCILE_SESSION_KIND,
+  StateReconcileResponseSchema,
   type AuthorProgress,
   type AuthorRunResult,
   type PlaceResult,
   type ReconcileComplete,
   type StateReconciliation,
 } from '../services/interface-author/index.js';
-import { readAuthoredInterfaceCatalog, readInterfaceCatalog } from '@truecourse/guard-runner';
 import {
-  extractJsonValue,
-  type LlmTransport,
-} from '@truecourse/shared/llm';
-import type { SessionDriver, SessionEvent } from '@truecourse/agent-loop';
+  readAuthoredInterfaceCatalog,
+  readInterfaceCatalog,
+  recipeContractFingerprint,
+} from '@truecourse/guard-runner';
+import { CreditsExhaustedError, isCreditsPauseFailure } from '@truecourse/shared';
+import type { SessionDriver, SessionEvent, SessionPersistence } from '@truecourse/agent-loop';
 import path from 'node:path';
 import { createStoredSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import { createClaudeCodeSessionDriver } from '../services/llm/session-driver.js';
 import { deriveWebAuthoringContext } from '../services/web-context.service.js';
-import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
+import { runOneTurnSession, withOutcomeDelivery } from '../services/agent/one-turn.js';
+import { describeSessionFailure } from '../services/guard-setup/session-context.js';
 import type { LlmTransportMode } from '../services/llm/provider-config.js';
 
 export interface GuardInterfacePlaceView {
@@ -76,7 +79,7 @@ export function readGuardInterfacesAuthorView(repoRoot: string): GuardInterfaces
   const derived = readInterfaceCatalog(repoRoot);
   const authored = readAuthoredInterfaceCatalog(repoRoot);
   return {
-    places: planWorkItems(derived, authored).map((item) => ({
+    places: planWorkItems(derived, authored, recipeContractFingerprint(repoRoot, 'seed')).map((item) => ({
       id: item.place.id,
       kind: item.place.kind,
       title: item.place.title,
@@ -102,6 +105,8 @@ export interface RunGuardInterfaceAuthorOptions {
   places?: readonly string[];
   /** Re-author places that already carry tasks. */
   replace?: boolean;
+  /** Retry the screens whose last session never settled, whatever their inputs say. */
+  refresh?: boolean;
   limit?: number;
   /** How many sessions run at once; the authoring default answers otherwise. */
   concurrency?: number;
@@ -113,12 +118,6 @@ export interface RunGuardInterfaceAuthorOptions {
   driver?: SessionDriver;
   /** The mode an explicit `driver` runs in — the run record's attribution. */
   transportMode?: LlmTransportMode;
-  /**
-   * The transport the closing state reconciliation asks through: one
-   * schema-bearing completion, the run's own provider, never a process-wide
-   * default.
-   */
-  transport: LlmTransport;
   /**
    * Where the run record and transcripts are keyed — the repo IDENTITY when
    * `repoRoot` is an ephemeral clone deleted after the run. Defaults to
@@ -221,6 +220,7 @@ export async function runGuardInterfaceAuthoring(
       context: context.contexts,
       ...(opts.places ? { places: opts.places } : {}),
       ...(opts.replace !== undefined ? { replace: opts.replace } : {}),
+      ...(opts.refresh !== undefined ? { refresh: opts.refresh } : {}),
       ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
@@ -248,7 +248,7 @@ export async function runGuardInterfaceAuthoring(
       opts.onStatus?.('reconciling the state registry');
       reconcile = await reconcileAuthoredStates({
         repoRoot,
-        complete: stateReconcileComplete(opts.transport),
+        complete: stateReconcileComplete(driver, run.persistence, opts.signal),
       });
     }
 
@@ -270,49 +270,60 @@ export async function runGuardInterfaceAuthoring(
 
 export interface RunGuardInterfaceReconcileOptions {
   repoRoot: string;
-  /** The transport the one reconciliation call goes through. */
-  transport: LlmTransport;
+  /** The driver the one reconciliation session runs on. */
+  driver: SessionDriver;
+  /** Where its transcript is journalled. */
+  persistence: SessionPersistence;
+  signal?: AbortSignal;
 }
 
 /**
  * Reconcile an EXISTING catalog's state registry without authoring anything.
  * The same pass the authoring run closes with, reachable on its own:
  * a catalog authored before this pass existed — or one whose registry drifted
- * apart over several partial runs — is fixed for one call, and no session runs.
+ * apart over several partial runs — is fixed for one session.
  */
 export async function runGuardInterfaceReconcile(
   opts: RunGuardInterfaceReconcileOptions,
 ): Promise<StateReconciliation> {
   return reconcileAuthoredStates({
     repoRoot: opts.repoRoot,
-    complete: stateReconcileComplete(opts.transport),
+    complete: stateReconcileComplete(opts.driver, opts.persistence, opts.signal),
   });
 }
 
 /**
- * The one-shot model call the reconciliation asks through. It is NOT the session
- * driver: this is a single schema-bearing completion with no tools and no
- * transcript, so it goes through the ordinary `LlmTransport` seam every other
- * one-shot stage uses — the run's own transport, handed in by the caller.
+ * The reconciliation's one ask, as a ONE-TURN SESSION: the whole registry in,
+ * the groups that name the same world out. It has nothing to look up — the
+ * registry IS the briefing — so it takes one turn, on the run's own driver and
+ * its own journal.
+ *
+ * A registry of 300 states is a long read and a long answer, which is what the
+ * token ceiling is sized for.
  */
-function stateReconcileComplete(transport: LlmTransport): ReconcileComplete {
-  const model = resolveModel(STATE_RECONCILE_STAGE);
-  const fallbackModel = resolveFallbackModel();
-  return async (prompt, schema) => {
-    const raw = await transport({
-      id: STATE_RECONCILE_STAGE,
-      stage: STATE_RECONCILE_STAGE,
-      model,
-      ...(fallbackModel ? { fallbackModel } : {}),
-      system: prompt.system,
-      user: prompt.user,
-      responseFormat: 'json',
-      schema,
-      // One call over the whole registry — a 300-state list is a long read and a
-      // long answer, so the ceiling is the authoring stages' order, not a view's.
-      timeoutMs: 600_000,
+function stateReconcileComplete(
+  driver: SessionDriver,
+  persistence: SessionPersistence,
+  signal?: AbortSignal,
+): ReconcileComplete {
+  return async (prompt) => {
+    const outcome = await runOneTurnSession({
+      session: {
+        kind: STATE_RECONCILE_SESSION_KIND,
+        title: 'State reconcile',
+        systemPrompt: withOutcomeDelivery(prompt.system),
+        outcomeSchema: StateReconcileResponseSchema,
+        tokenCeiling: 300_000,
+      },
+      workItem: 'state registry',
+      briefing: prompt.user,
+      driver,
+      persistence,
+      ...(signal ? { signal } : {}),
     });
-    return JSON.parse(extractJsonValue(raw));
+    if (outcome.status === 'completed') return outcome.output;
+    if (isCreditsPauseFailure(outcome.failure)) throw new CreditsExhaustedError();
+    throw new Error(describeSessionFailure(outcome.failure));
   };
 }
 

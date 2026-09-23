@@ -147,7 +147,7 @@ describe('0022_provider_repositories', () => {
 });
 
 describe('0021_drop_ee_era', () => {
-  it('keeps every document connection with its token; the cached sweep delta is cleared, then dropped by 0029', async () => {
+  it('keeps every document connection with its token; the cached sweep delta is cleared, then dropped by 0031', async () => {
     const { sql, finish } = await databaseBefore('0021_drop_ee_era');
     await sql.query(
       `INSERT INTO integration_connections (workspace_org_id, provider, config, token_enc, pending, created_at, updated_at)
@@ -165,7 +165,7 @@ describe('0021_drop_ee_era', () => {
       { provider: 'confluence', config: { spaceKey: 'ENG' }, token_enc: 'enc-confluence' },
       { provider: 'jira', config: { baseUrl: 'https://acme.atlassian.net' }, token_enc: 'enc-jira' },
     ]);
-    // 0021 nulled the column; 0029_integration_connections removed it.
+    // 0021 nulled the column; 0031_integration_connections removed it.
     const columns = await sql.query<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns WHERE table_name = 'integration_connections' ORDER BY ordinal_position`,
     );

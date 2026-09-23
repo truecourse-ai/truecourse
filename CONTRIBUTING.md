@@ -31,8 +31,8 @@ variables are a hosted deployment's, and a local server never reads them.
 ```
 apps/dashboard/client/    — Vite + React frontend (Tailwind CSS)
 apps/dashboard/server/    — Express + Socket.io HTTP layer (thin adapter over core)
-packages/core/            — The engine the server runs: the agent sessions, the store seams, the LLM transports
-packages/shared/          — Shared Zod schemas and types, the transport seam, the work-tree layout
+packages/core/            — The engine the server runs: the agent sessions, the store seams, the session-driver construction
+packages/shared/          — Shared Zod schemas and types, the prompt/output contracts, the work-tree layout
 packages/guard-runner/    — The deterministic test runner and its drivers
 packages/guard-generator/ — The deterministic half of flow generation
 packages/spec-consolidator/ — The deterministic half of the document scan

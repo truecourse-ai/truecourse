@@ -52,11 +52,13 @@ import {
   installationSettingsUrl,
 } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
+import { toldToDescribeWorkspace } from '@/dashboard/data/workspace-profile';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import type { EnterpriseFeature, ServerMode } from '@truecourse/shared';
 import { useEntitlements } from '@/auth/AuthContext';
 import { MembersTab, type InviteKind } from '@/dashboard/pages/MembersTab';
 import { UsageTab } from '@/dashboard/pages/UsageTab';
+import { WorkspaceTab } from '@/dashboard/pages/WorkspaceTab';
 import { CreditsTab } from '@/dashboard/pages/CreditsTab';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { registeredSettingsTabs, type SettingsTab } from '@/dashboard/shell/registry';
@@ -426,9 +428,13 @@ function RepositoriesTab() {
       }
       closePick();
     } catch (error: unknown) {
-      toast.error('Could not connect the accounts', {
-        description: error instanceof Error ? error.message : undefined,
-      });
+      // A workspace with no description connects nothing; the toast carries
+      // the page where that is set.
+      if (!toldToDescribeWorkspace(error, navigate)) {
+        toast.error('Could not connect the accounts', {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      }
     } finally {
       setAttaching(false);
     }
@@ -941,8 +947,9 @@ function ModelsTab() {
 
 /**
  * The sections of Settings: the ones the product has, then whichever of this
- * edition's the workspace is entitled to. A bare `/settings` lands on the first,
- * and an address whose section is not this workspace's lands there too.
+ * edition's the workspace is entitled to. A bare `/settings` lands on the first
+ * (Workspace, where the sentence everything else waits on is set), and an
+ * address whose section is not this workspace's lands there too.
  */
 function settingsTabs(
   invite: InviteKind | null,
@@ -951,6 +958,10 @@ function settingsTabs(
   entitlements: ReadonlySet<EnterpriseFeature>,
 ): SettingsTab[] {
   const base: SettingsTab[] = [
+    // What this workspace's product is. First because nothing connects until it
+    // is set, and in every mode because a local server has no other place to
+    // say it.
+    { id: 'workspace', label: 'Workspace', render: () => <WorkspaceTab /> },
     {
       id: 'members',
       label: 'Members',

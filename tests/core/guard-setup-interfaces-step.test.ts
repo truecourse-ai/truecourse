@@ -22,7 +22,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { GuardSetupInterfacesStepInput } from '@truecourse/guard-generator';
-import { guardAuthoredInterfacesPath, guardInterfacesPath } from '@truecourse/guard-runner';
+import {
+  guardAuthoredInterfacesPath,
+  guardInterfacesPath,
+  recipeContractFingerprint,
+  screenAuthoringFingerprint,
+} from '@truecourse/guard-runner';
 import type { InterfacesFile, MapperDiagnostic } from '@truecourse/shared';
 import {
   buildInterfacesStep,
@@ -78,6 +83,25 @@ function authored(places: string[]): InterfacesFile {
   };
 }
 
+/** Give the authored half a ledger row per named screen, at today's inputs. */
+function withLedger(r: string, rows: Record<string, 'authored' | 'failed'>): void {
+  const half: InterfacesFile = JSON.parse(fs.readFileSync(guardAuthoredInterfacesPath(r), 'utf-8'));
+  half.authoring = Object.fromEntries(
+    Object.entries(rows).map(([id, status]) => [
+      id,
+      {
+        status,
+        inputFingerprint: screenAuthoringFingerprint({
+          derived: DERIVED,
+          place: DERIVED.resources!.web.find((place) => place.id === id)!,
+          recipeContract: recipeContractFingerprint(r),
+        }),
+      },
+    ]),
+  );
+  fs.writeFileSync(guardAuthoredInterfacesPath(r), JSON.stringify(half));
+}
+
 function writeHalves(r: string, opts: { authoredPlaces?: string[] } = {}): void {
   fs.writeFileSync(guardInterfacesPath(r), JSON.stringify(DERIVED));
   if (opts.authoredPlaces) {
@@ -122,8 +146,8 @@ function stubContext(): { context: GuardSetupSessionContext; spend: { sessions: 
 /** An authoring thunk answering from a fixed run, recording what it was asked. */
 function authoring(
   run: Partial<InterfacesAuthorRun> = {},
-): { author: InterfacesAuthorFn; calls: { repoRoot: string; replace: boolean }[] } {
-  const calls: { repoRoot: string; replace: boolean }[] = [];
+): { author: InterfacesAuthorFn; calls: { repoRoot: string; replace: boolean; refresh: boolean }[] } {
+  const calls: { repoRoot: string; replace: boolean; refresh: boolean }[] = [];
   const author: InterfacesAuthorFn = async (opts) => {
     calls.push(opts);
     return {
@@ -193,7 +217,7 @@ describe('buildInterfacesStep — the authoring half', () => {
 
     const result = await buildInterfacesStep(stub.context, { author })(stepInput(r));
 
-    expect(calls).toEqual([{ repoRoot: r, replace: false }]);
+    expect(calls).toEqual([{ repoRoot: r, replace: false, refresh: false }]);
     expect(result).toMatchObject({ status: 'ok', sessionRunId: 'run-author' });
     expect(result.reason).toMatch(/authored 3 task\(s\) across 1 place\(s\)/);
     // The authoring run's spend is folded into the setup run's usage totals.
@@ -211,7 +235,7 @@ describe('buildInterfacesStep — the authoring half', () => {
       stepInput(r, { replace: true }),
     );
 
-    expect(calls).toEqual([{ repoRoot: r, replace: true }]);
+    expect(calls).toEqual([{ repoRoot: r, replace: true, refresh: false }]);
     expect(result.status).toBe('ok');
   });
 
@@ -252,12 +276,50 @@ describe('buildInterfacesStep — the authoring half', () => {
     expect(allFailed.status).toBe('failed');
     expect(allFailed.reason).toMatch(/every authoring session failed \(2 place\(s\)\)/);
 
+    // One screen that failed no longer holds the step open: it carries a ledger
+    // row now, so the step has settled its whole work list and the row names
+    // what did not settle.
     const partial = await buildInterfacesStep(stubContext().context, {
       author: authoring({ places: [{ status: 'failed', placeId: 'expenses-id', problems: ['expense-exists already names a different state'] }, { status: 'authored', placeId: 'root' }], authored: 1 }).author,
     })(stepInput(r));
-    expect(partial.status).toBe('failed');
+    expect(partial.status).toBe('ok');
     expect(partial.reason).toContain('authored 1 task(s) across 1 place(s)');
     expect(partial.reason).toContain('expenses-id: expense-exists already names a different state');
+    expect(partial.failedScreens).toEqual([
+      { place: 'expenses-id', reason: 'expense-exists already names a different state' },
+    ]);
+  });
+
+  /**
+   * A screen the ledger holds as unsettled is not work by itself — its inputs
+   * have not moved — so the step spends nothing on it and the ROW is what says
+   * it is there to be refreshed.
+   */
+  it('names the screens the ledger holds as unsettled, and spends nothing on them', async () => {
+    const r = repo();
+    writeHalves(r, { authoredPlaces: ['root', 'repos-repoid'] });
+    withLedger(r, { root: 'failed' });
+    const { author, calls } = authoring();
+
+    const result = await buildInterfacesStep(stubContext().context, { author })(stepInput(r));
+
+    expect(calls).toEqual([]);
+    expect(result.status).toBe('ok');
+    expect(result.reason).toMatch(/1 of them unauthored, awaiting a refresh/);
+    expect(result.failedScreens).toEqual([{ place: 'root', reason: 'authoring failed' }]);
+  });
+
+  it('re-opens an unsettled screen on a refresh, and a retry that authored is no longer awaiting one', async () => {
+    const r = repo();
+    writeHalves(r, { authoredPlaces: ['root', 'repos-repoid'] });
+    withLedger(r, { root: 'failed' });
+    const { author, calls } = authoring({ places: [{ status: 'authored', placeId: 'root' }], authored: 1 });
+
+    const result = await buildInterfacesStep(stubContext().context, { author })(stepInput(r, { refresh: true }));
+
+    expect(calls).toEqual([{ repoRoot: r, replace: false, refresh: true }]);
+    expect(result.status).toBe('ok');
+    expect(result.failedScreens).toBeUndefined();
   });
 
   // Run reporting lands on the step ROW — never in the catalog.

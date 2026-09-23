@@ -5,9 +5,9 @@
  * installed at boot. Nothing is installed by default, and a read that arrives
  * before boot says so rather than inventing a workspace that spent nothing.
  *
- * The unit is one (job, subject): a subject is a one-shot STAGE or a kind of
- * agent SESSION, so a generate's dozens of flow-worker sessions are one row for
- * the kind. {@link UsageStore.record} is an ADD — it folds a flush's tokens,
+ * The unit is one (job, subject): a subject is a KIND of agent session, so a
+ * generate's dozens of flow-worker sessions are one row for the kind and its
+ * one-turn realization matches are another. {@link UsageStore.record} is an ADD — it folds a flush's tokens,
  * calls and cost onto the row and widens its interval — which is what lets a
  * meter write while the run is still going and leaves the spend on record when
  * the run dies.
@@ -25,7 +25,8 @@ export interface UsageDelta {
   /** The run record this job opened, when it has one by now. */
   runId: string | null;
   subjectKind: UsageSubjectKind;
-  /** The stage name, or the session kind. */
+  /** The session kind, or — on a row written before every call became a turn of
+   *  a session — the stage name. */
   subject: string;
   provider: string;
   model: string;
@@ -41,6 +42,11 @@ export interface UsageDelta {
   finishedAt: string;
 }
 
+/**
+ * What a usage row is FOR. Every row written now is a `session`: one per session
+ * kind per job, because every LLM call the product makes is a turn of one.
+ * `stage` is what a row written before that says, and is still read.
+ */
 export type UsageSubjectKind = 'stage' | 'session';
 
 /** The slice every read is over: a workspace, a period, and the two filters. */
@@ -90,7 +96,8 @@ export interface UsageRunRecord {
   costUsd: number;
   tokens: number;
   calls: number;
-  /** The model that did most of the work. */
+  /** The model the run ran on. Every row of a run names the same one; a run a
+   *  FALLBACK model also served reports whichever did the most work. */
   model: string;
   startedAt: string;
   finishedAt: string;
