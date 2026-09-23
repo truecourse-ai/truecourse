@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it, expect } from 'vitest'
@@ -3008,5 +3009,85 @@ describe('resolvedInterfaceFingerprint', () => {
     for (const iface of (referenceCatalog ?? EMPTY_CATALOG).interfaces) {
       expect(resolvedInterfaceFingerprint(iface, undefined), iface.id).toBe(iface.fingerprint)
     }
+  })
+})
+
+/**
+ * NON-CANONICAL STEP TARGETS. A step may address its element by any handle of
+ * the scenario locator family, `css` included, and a step whose target or scope
+ * carries `css` says why. None of it may move the identity of a step written in
+ * role + name, which is every step stored before the other handles existed.
+ */
+describe('a step target beyond role and name', () => {
+  const entry = { method: 'GET' as const, path: '/tags/{id}' }
+  const fingerprintOf = (steps: InterfaceStep[]) => interfaceFingerprint({ type: 'web', entry, steps })
+
+  it('keeps the identity of a role+name step and its role+name scope byte for byte', () => {
+    const step: InterfaceStep = {
+      kind: 'activate',
+      target: { role: 'button', name: 'Delete  tag', exact: true },
+      within: { role: 'dialog', name: 'Delete tag' },
+    }
+    // The fold as it was written before targets took other handles.
+    const body = ['web', 'GET /tags/{id}', ['activate', 'button "Delete tag"', 'exact', 'within', 'dialog', 'Delete tag', 'false'].join('\u0000')].join('\n')
+    const before = `sha256:${crypto.createHash('sha256').update(body, 'utf-8').digest('hex')}`
+    expect(fingerprintOf([step])).toBe(before)
+    // The reason never enters it either.
+    expect(fingerprintOf([{ ...step, why: 'a note' }])).toBe(before)
+  })
+
+  it('takes every handle, a css escape and a position, and folds each apart', () => {
+    const targets = [
+      { title: 'More' },
+      { text: 'More' },
+      { css: 'main i[title="More"]' },
+      { title: 'More', pick: 2 },
+      { role: 'button' },
+    ] as const
+    const prints = targets.map((target) =>
+      fingerprintOf([InterfaceStepSchema.parse({ kind: 'activate', target, why: 'css needs one' })]),
+    )
+    expect(new Set(prints).size).toBe(targets.length)
+    const scoped = (within: object) => fingerprintOf([InterfaceStepSchema.parse({ kind: 'activate', target: { title: 'More' }, within, why: 'x' })])
+    expect(scoped({ css: 'main' })).not.toBe(scoped({ role: 'main' }))
+    expect(scoped({ css: 'main', pick: 1 })).not.toBe(scoped({ css: 'main' }))
+  })
+
+  it('renders every handle in a reader’s words', () => {
+    expect(describeInterfaceTarget({ title: 'More' })).toBe('title "More"')
+    expect(describeInterfaceTarget({ css: 'main button:has(i.bi-sort)', pick: 2 })).toBe('css "main button:has(i.bi-sort)" (#2)')
+    expect(describeInterfaceTarget({ role: 'button', name: 'Save', pick: 'first' })).toBe('button "Save" (first)')
+  })
+
+  const catalogWith = (steps: unknown[], readables?: object): unknown => ({
+    version: 2,
+    generatedAt: '2026-09-23T00:00:00.000Z',
+    recipeFingerprint: 'sha256:recipe',
+    interfaces: [{ id: 'web/rename-tag', type: 'web', title: 'Rename a tag', entry, at: 'tags-id', steps, fingerprint: 'sha256:x' }],
+    resources: { web: [{ id: 'tags-id', kind: 'screen', title: 'Tag', address: '/tags/{id}', ...(readables ? { readables } : {}) }] },
+  })
+
+  it('refuses a step reaching its element through css, in its target or its scope, without a why', () => {
+    for (const step of [
+      { kind: 'activate', target: { css: 'button:has(i.bi-check2)' } },
+      { kind: 'activate', target: { title: 'More' }, within: { css: 'main' } },
+    ]) {
+      const parsed = InterfacesFileSchema.safeParse(catalogWith([step]))
+      expect(parsed.success).toBe(false)
+      expect(!parsed.success && parsed.error.issues.map((i) => i.path.join('.'))).toContain('interfaces.0.steps.0.why')
+      expect(InterfacesFileSchema.safeParse(catalogWith([{ ...step, why: 'icon-only confirm button' }])).success).toBe(true)
+    }
+    // A position alone is canonical and needs no reason.
+    expect(InterfacesFileSchema.safeParse(catalogWith([{ kind: 'activate', target: { title: 'More', pick: 2 } }])).success).toBe(true)
+  })
+
+  it('keeps readables to the handles a user perceives', () => {
+    const parsed = InterfacesFileSchema.safeParse(
+      catalogWith([{ kind: 'activate', target: { role: 'button', name: 'Save' } }], {
+        elements: [{ element: { css: 'main h1' } }],
+      }),
+    )
+    expect(parsed.success).toBe(false)
+    expect(!parsed.success && parsed.error.issues[0].message).toContain('`css` is for step targets only')
   })
 })

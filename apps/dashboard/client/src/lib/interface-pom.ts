@@ -176,7 +176,7 @@ export function webArgs(steps: readonly InterfaceStep[]): string[] {
   const args: string[] = [];
   for (const step of steps) {
     if (step.kind !== 'activate' && step.kind !== 'input') continue;
-    const names = placeholders(step.target.name);
+    const names = placeholders(webLocatorHandle(step.target).value ?? '');
     if (names.length > 0) args.push(...names);
     else if (step.kind === 'input') args.push('text');
   }

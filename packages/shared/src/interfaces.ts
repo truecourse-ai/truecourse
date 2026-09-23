@@ -28,6 +28,8 @@ import {
   GUARD_WEB_STATES,
   GuardWebLocatorSchema,
   GuardWebScopeSchema,
+  isNonCanonicalLocator,
+  webLocatorHandle,
   type GuardWebLocator,
   type GuardWebScope,
 } from './guard/web-steps.js'
@@ -90,19 +92,22 @@ function parseLegacyTarget(value: unknown): unknown {
 }
 
 /**
- * THE TARGET — the element a web step acts on, as the two things a user
- * perceives about it: the ARIA role the browser resolves, and the accessible
- * name it carries. Exactly the vocabulary a scenario's own locator uses
- * ({@link GuardWebScopeSchema}), because a task's steps compile into those
- * scenarios and a second spelling of one idea is a translation nobody wrote.
+ * THE TARGET — the element a web step acts on, in exactly the vocabulary a
+ * scenario's own locator uses ({@link GuardWebScopeSchema}), because a task's
+ * steps compile into those scenarios and a second spelling of one idea is a
+ * translation nobody wrote. The primary member is the two things a user
+ * perceives about a control, its ARIA role and accessible name; the visible
+ * handles (title, label, placeholder, text, alt) are canonical too; `css` is the
+ * marked escape, and a step whose target or scope carries it is NON-CANONICAL
+ * ({@link interfaceStepLocator}) and must say `why`.
  *
- * It was one string, and the string is why this schema exists: a nested pair of
- * double quotes inside a JSON string argument is the hardest thing a model has
- * to write, and an authoring session that lost the closing quote of
+ * It was one string, and the string is why this schema is an object: a nested
+ * pair of double quotes inside a JSON string argument is the hardest thing a
+ * model has to write, and an authoring session that lost the closing quote of
  * `button "Add expense"` mid-argument then wrote ten million space characters
- * against the provider's output limit. Two fields have no quoting problem at
- * all, and the role arrives as an enumerated value the model is handed rather
- * than a token it has to spell.
+ * against the provider's output limit. Fields have no quoting problem at all,
+ * and the role arrives as an enumerated value the model is handed rather than a
+ * token it has to spell.
  *
  * The declared INPUT type is the object, not `unknown`: the legacy string is
  * something a stored file may still hold, never something a writer may hand in,
@@ -111,23 +116,26 @@ function parseLegacyTarget(value: unknown): unknown {
  */
 export const InterfaceTargetSchema = z.preprocess(
   parseLegacyTarget,
-  z
-    .object(GuardWebScopeSchema.shape, {
-      // What a step target that is not an object gets told — a CSS selector, an
-      // XPath or a test id arrives here, and the shape is the answer to all
-      // three.
-      invalid_type_error:
-        'a step target is {"role": "<aria role>", "name": "<accessible name>"} — a role and an accessible name, never a selector',
-    })
-    .strict(),
+  GuardWebScopeSchema,
 ) as unknown as z.ZodType<GuardWebScope, z.ZodTypeDef, GuardWebScope>
 export type InterfaceTarget = GuardWebScope
 
-/** A target in the words a person reads it in — `button "Add expense"`. The one
- *  rendering, shared by the prompts, the catalog views and the error messages. */
+/** A target in the words a person reads it in — `button "Add expense"`, `title "More"`,
+ *  `css "main button:has(i.bi-sort)"`. The one rendering, shared by the prompts, the
+ *  catalog views and the error messages. */
 export function describeInterfaceTarget(target: InterfaceTarget): string {
-  return `${target.role} "${target.name}"${target.exact ? ' (exact)' : ''}`
+  const { kind, value } = webLocatorHandle(target)
+  const picked = target.pick === undefined ? '' : target.pick === 'first' ? ' (first)' : ` (#${target.pick})`
+  const exact = 'exact' in target && target.exact ? ' (exact)' : ''
+  return `${kind}${value === undefined ? '' : ` "${value}"`}${exact}${picked}`
 }
+
+/**
+ * Why a NON-CANONICAL step reaches its element through a selector — one line, the
+ * thing a reader of the non-canonical record needs to fix the markup: what the
+ * control is and why no accessible handle reaches it.
+ */
+const why = z.string().min(1).optional()
 
 /** Put a value into a field — the target as the surface names it. */
 export const InterfaceInputStepSchema = z
@@ -138,6 +146,7 @@ export const InterfaceInputStepSchema = z
     target: InterfaceTargetSchema,
     within: GuardWebScopeSchema.optional(),
     label: z.string().optional(),
+    why,
   })
   .strict()
 
@@ -148,6 +157,7 @@ export const InterfaceActivateStepSchema = z
     target: InterfaceTargetSchema,
     within: GuardWebScopeSchema.optional(),
     label: z.string().optional(),
+    why,
   })
   .strict()
 
@@ -164,6 +174,15 @@ export type InterfaceNavigateStep = z.infer<typeof InterfaceNavigateStepSchema>
 export type InterfaceInputStep = z.infer<typeof InterfaceInputStepSchema>
 export type InterfaceActivateStep = z.infer<typeof InterfaceActivateStepSchema>
 export type InterfaceStep = z.infer<typeof InterfaceStepSchema>
+
+/**
+ * The one scenario locator a targeted step compiles to: its target, scoped by its
+ * `within`. What the runner resolves, what a live proof resolves, and what decides
+ * whether the step is non-canonical ({@link isNonCanonicalLocator}).
+ */
+export function interfaceStepLocator(step: InterfaceInputStep | InterfaceActivateStep): GuardWebLocator {
+  return step.within ? { ...step.target, within: step.within } : step.target
+}
 
 // ---------------------------------------------------------------------------
 // NAMED STATES — the per-area registry an interface's state contract points into
@@ -1274,6 +1293,24 @@ export const InterfaceResourceSchema = z
         seen.add(fact.id)
       })
     }
+    // A readable is what a user READS, addressed the way a user finds it. The
+    // `css` escape belongs to step targets only, where a task says why it needs it.
+    const readables = resource.readables
+    const located = [
+      ...(readables?.markers ?? []).map((fact, i) => ['markers', i, 'within', fact.within] as const),
+      ...(readables?.elements ?? []).map((fact, i) => ['elements', i, 'element', fact.element] as const),
+      ...(readables?.controls ?? []).map((fact, i) => ['controls', i, 'control', fact.control] as const),
+      ...(readables?.rows ?? []).map((fact, i) => ['rows', i, 'within', fact.within] as const),
+    ]
+    for (const [kind, i, field, locator] of located) {
+      if (locator && isNonCanonicalLocator(locator)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['readables', kind, i, field],
+          message: 'a readable is addressed the way a user finds it — `css` is for step targets only',
+        })
+      }
+    }
   })
 export type InterfaceResource = z.infer<typeof InterfaceResourceSchema>
 
@@ -1772,6 +1809,19 @@ export const InterfacesFileSchema = InterfacesFileShapeSchema
           })
         }
       }
+      // A selector is allowed only as a MARKED escape: a step whose locator
+      // carries `css` anywhere says why no accessible handle reaches its element,
+      // which is what the non-canonical record reports.
+      iface.steps.forEach((step, s) => {
+        if (step.kind !== 'input' && step.kind !== 'activate') return
+        if (step.why === undefined && isNonCanonicalLocator(interfaceStepLocator(step))) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['interfaces', i, 'steps', s, 'why'],
+            message: 'this step reaches its element through `css`, so it must say `why`: what the control is and why no role+name, title, label, placeholder, text or alt reaches it',
+          })
+        }
+      })
       // A contract describes THIS entry's surface or it describes nothing: an
       // api operation's grammar attached to a cli command is not a contract for
       // that command, it is a decoding error waiting to be read as truth.
@@ -1837,17 +1887,43 @@ function stepIdentity(step: InterfaceStep): string {
     case 'navigate':
       return [step.kind, normalizeToken(step.route)].join('\u0000')
     default:
-      // The target folds as the ONE STRING it used to be, so splitting it in
-      // two moved no stored fingerprint and no scenario's grounding with it.
-      // `exact` folds only when it is set, for the same reason.
       return [
         step.kind,
-        normalizeToken(`${step.target.role} "${step.target.name}"`),
-        ...(step.target.exact ? ['exact'] : []),
+        ...targetIdentity(step.target),
         ...(step.kind === 'input' && step.mode === 'select' ? ['select'] : []),
-        ...(step.within ? ['within', step.within.role, normalizeToken(step.within.name), String(step.within.exact ?? false)] : []),
+        ...(step.within ? ['within', ...scopeIdentity(step.within)] : []),
       ].join('\u0000')
   }
+}
+
+/**
+ * A target's part of a step's identity. A role+name target folds as the ONE
+ * STRING it used to be, so splitting it in two moved no stored fingerprint and
+ * no scenario's grounding with it; `exact` and `pick` fold only when they are
+ * set, for the same reason. Every other handle folds as its key and its value.
+ */
+function targetIdentity(target: InterfaceTarget): string[] {
+  const { key, value } = webLocatorHandle(target)
+  const handle =
+    'role' in target
+      ? normalizeToken(target.name === undefined ? target.role : `${target.role} "${target.name}"`)
+      : `${key}:${normalizeToken(value ?? '')}`
+  return [
+    handle,
+    ...('exact' in target && target.exact ? ['exact'] : []),
+    ...(target.pick !== undefined ? ['pick', String(target.pick)] : []),
+  ]
+}
+
+/** A scope's part of a step's identity — the role+name fold it always had, and
+ *  any other handle by its key and value. */
+function scopeIdentity(scope: GuardWebScope): string[] {
+  const { key, value } = webLocatorHandle(scope)
+  return [
+    ...('role' in scope ? [scope.role, normalizeToken(scope.name ?? '')] : [`${key}:`, normalizeToken(value ?? '')]),
+    String(('exact' in scope && scope.exact) ?? false),
+    ...(scope.pick !== undefined ? ['pick', String(scope.pick)] : []),
+  ]
 }
 
 /**
@@ -1955,11 +2031,13 @@ function resolvedStepIdentity(
   place: Pick<InterfaceResource, 'id' | 'readables'> | undefined,
 ): string | undefined {
   if (!place || !('target' in step) || step.within) return undefined
+  const target = step.target
+  if (!('role' in target) || target.pick !== undefined) return undefined
   const named = [...(place.readables?.controls ?? []).map((fact) => ({ id: fact.id, locator: fact.control })),
     ...(place.readables?.elements ?? []).map((fact) => ({ id: fact.id, locator: fact.element }))]
   const matches = named.filter(
     (candidate): candidate is { id: string; locator: typeof candidate.locator } =>
-      candidate.id !== undefined && sameSurfaceHandle(candidate.locator, step.target),
+      candidate.id !== undefined && sameSurfaceHandle(candidate.locator, target),
   )
   if (matches.length !== 1) return undefined
   return [
@@ -1972,11 +2050,15 @@ function resolvedStepIdentity(
 }
 
 /** Does a readable's locator address the same element as a step's target? */
-function sameSurfaceHandle(locator: GuardWebLocator, target: InterfaceTarget): boolean {
+function sameSurfaceHandle(
+  locator: GuardWebLocator,
+  target: Extract<InterfaceTarget, { role: string }>,
+): boolean {
   if (!('role' in locator) || locator.within || locator.pick) return false
   return (
     locator.role === target.role &&
     locator.name !== undefined &&
+    target.name !== undefined &&
     normalizeToken(locator.name) === normalizeToken(target.name) &&
     (locator.exact ?? false) === (target.exact ?? false)
   )
@@ -2001,11 +2083,16 @@ export function isLabelOnlyRekey(
         'target' in step
           ? {
               ...step,
-              target: { ...step.target, name: '' },
-              ...(step.within ? { within: { ...step.within, name: '' } } : {}),
+              target: unnamed(step.target),
+              ...(step.within ? { within: unnamed(step.within) } : {}),
             }
           : step,
       ),
     })
   return unlabelled(before) === unlabelled(after)
+}
+
+/** A role+name handle with its name blanked — its label taken out of its identity. */
+function unnamed(scope: GuardWebScope): GuardWebScope {
+  return 'role' in scope ? { ...scope, name: '' } : scope
 }

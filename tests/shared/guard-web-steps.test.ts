@@ -22,6 +22,7 @@ import {
   describeWebExpect,
   describeWebLocator,
   firstInvalidMatchPattern,
+  isNonCanonicalLocator,
   isWebClickStep,
   isWebCredentialStep,
   isWebExpectStep,
@@ -91,20 +92,24 @@ describe('web step schema', () => {
     expect(() => GuardWebStepSchema.parse({ driver: 'web', navigate: 'notes' })).toThrow()
   })
 
-  it('the locator supports role-only selection but rejects CSS and unknown roles', () => {
-    expect(GuardWebLocatorSchema.parse({ role: 'link', name: 'Notes', exact: true }).exact).toBe(true)
-    expect(() => GuardWebLocatorSchema.parse({ css: '#save' })).toThrow()
+  it('the locator supports role-only selection and a css escape, and rejects unknown roles', () => {
+    expect(GuardWebLocatorSchema.parse({ role: 'link', name: 'Notes', exact: true })).toEqual({ role: 'link', name: 'Notes', exact: true })
+    expect(GuardWebLocatorSchema.parse({ css: '#save' })).toEqual({ css: '#save' })
+    expect(() => GuardWebLocatorSchema.parse({ css: '#save', exact: true })).toThrow()
+    expect(() => GuardWebLocatorSchema.parse({ css: '' })).toThrow()
     expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Save', selector: '#save' })).toThrow()
     expect(() => GuardWebLocatorSchema.parse({ role: 'widget', name: 'Save' })).toThrow()
     expect(GuardWebLocatorSchema.parse({ role: 'button' })).toEqual({ role: 'button' })
     expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: '' })).toThrow()
   })
 
-  it('`pick: first` is the one declared-ambiguity escape — and only `first`', () => {
+  it('`pick` declares an ambiguity: `first`, or a 1-based position', () => {
     expect(GuardWebLocatorSchema.parse({ role: 'button', name: ':00', pick: 'first' }).pick).toBe('first')
+    expect(GuardWebLocatorSchema.parse({ role: 'button', name: ':00', pick: 2 }).pick).toBe(2)
     expect(GuardWebLocatorSchema.parse({ role: 'button', name: 'Save' }).pick).toBeUndefined()
-    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: ':00', pick: 'last' })).toThrow()
-    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: ':00', pick: 2 })).toThrow()
+    for (const pick of ['last', 0, -1, 1.5]) {
+      expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: ':00', pick })).toThrow()
+    }
   })
 
   it('a web expectation needs something to assert, and `within` needs text', () => {
@@ -140,10 +145,10 @@ describe('the widened locator family', () => {
     expect(() => GuardWebLocatorSchema.parse({ text: '12', pick: 'last' })).toThrow()
   })
 
-  it('the implementation-addressing family stays refused, and a member is exactly one', () => {
+  it('test ids and XPath stay refused, and a member is exactly one', () => {
     expect(() => GuardWebLocatorSchema.parse({ testId: 'save' })).toThrow()
-    expect(() => GuardWebLocatorSchema.parse({ css: '#save' })).toThrow()
     expect(() => GuardWebLocatorSchema.parse({ xpath: '//button' })).toThrow()
+    expect(() => GuardWebLocatorSchema.parse({ css: 'button', role: 'button' })).toThrow()
     // Two members at once is a locator nobody can read: strict members refuse it.
     expect(() => GuardWebLocatorSchema.parse({ text: 'a', placeholder: 'b' })).toThrow()
     expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Save', text: 'Save' })).toThrow()
@@ -411,6 +416,13 @@ describe('the upload verb', () => {
     expect(() =>
       GuardWebStepSchema.parse({
         driver: 'web',
+        upload: { role: 'button', name: 'Attach', within: { css: 'form' } },
+        file: { text: 'x', as: 'a.txt' },
+      }),
+    ).toThrow()
+    expect(() =>
+      GuardWebStepSchema.parse({
+        driver: 'web',
         upload: { role: 'button', name: 'Attach', testId: 'document-upload-input' },
         file: { text: 'x', as: 'a.txt' },
       }),
@@ -622,7 +634,6 @@ describe('the web capture vocabulary', () => {
     expect(() => GuardWebCaptureSchema.parse({ from: { text: 'x' }, get: { property: 'value' } })).toThrow()
     expect(() => GuardWebCaptureSchema.parse({ from: { text: 'x' }, get: { state: 'focused' } })).toThrow()
     expect(() => GuardWebCaptureSchema.parse({ get: 'text' })).toThrow()
-    expect(() => GuardWebCaptureSchema.parse({ from: { css: '#seats' }, get: 'text' })).toThrow()
   })
 
   it('slices a number out of the read value with the ONE-capturing-group rule', () => {
@@ -694,6 +705,7 @@ describe('web rendering helpers', () => {
     expect(describeWebLocator({ role: 'button', name: 'Save' })).toBe('button “Save”')
     expect(describeWebLocator({ role: 'button', name: 'Save', exact: true })).toBe('button “Save” (exact)')
     expect(describeWebLocator({ role: 'button', name: ':00', pick: 'first' })).toBe('first button “:00”')
+    expect(describeWebLocator({ title: 'More', pick: 2, within: { css: 'main' } })).toBe('#2 title “More” within css “main”')
     expect(describeWebCommand({ driver: 'web', navigate: '/a' } as GuardWebStep)).toBe('navigate /a')
     expect(describeWebExpect(undefined)).toBe('')
     expect(
@@ -716,7 +728,27 @@ describe('native selection and scoped actions', () => {
   it('keeps scoping semantic and refuses mixed actions or unnamed options', () => {
     expect(() => GuardWebStepSchema.parse({ driver: 'web', select: { role: 'combobox', name: 'Category' }, option: '' })).toThrow();
     expect(() => GuardWebStepSchema.parse({ driver: 'web', select: { role: 'combobox', name: 'Category' }, option: 'Food', fill: { label: 'Category' }, value: 'Food' })).toThrow();
-    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Delete', within: { css: '#confirm' } })).toThrow();
-    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Delete', within: { ...within, pick: 'first' } })).toThrow();
+    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Delete', within: { ...within, within } })).toThrow();
+  });
+  it('scopes by any handle, a css region and a position included', () => {
+    expect(GuardWebLocatorSchema.parse({ title: 'More', within: { css: 'main' } })).toEqual({ title: 'More', within: { css: 'main' } });
+    expect(GuardWebLocatorSchema.parse({ role: 'button', name: 'Delete', within: { ...within, pick: 2 } }).within).toEqual({ ...within, pick: 2 });
   });
 });
+
+describe('a non-canonical locator', () => {
+  it('is one that carries css anywhere — as its handle or in its scope', () => {
+    expect(isNonCanonicalLocator({ css: 'main button:has(i.bi-sort)' })).toBe(true)
+    expect(isNonCanonicalLocator({ title: 'More', within: { css: 'main' } })).toBe(true)
+    expect(isNonCanonicalLocator({ css: 'button', pick: 2, within: { role: 'main' } })).toBe(true)
+  })
+
+  it('is never one addressed by a handle a user perceives, whatever its pick', () => {
+    expect(isNonCanonicalLocator({ role: 'button', name: 'Save' })).toBe(false)
+    expect(isNonCanonicalLocator({ title: 'More', pick: 1 })).toBe(false)
+    expect(isNonCanonicalLocator({ text: 'Show all', pick: 'first', within: { role: 'navigation', name: 'Sidebar', pick: 2 } })).toBe(false)
+    for (const handle of [{ label: 'Email' }, { placeholder: 'Search' }, { alt: 'Logo' }]) {
+      expect(isNonCanonicalLocator(handle)).toBe(false)
+    }
+  })
+})
