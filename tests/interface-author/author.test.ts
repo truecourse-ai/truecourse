@@ -2112,3 +2112,95 @@ describe('readable authoring through storage and the screen read view', () => {
     expect(planWorkItems(DERIVED, readAuthoredFile(), authoringRecipeContract(repo), repo)[0].needsAuthoring).toBe(false)
   })
 })
+
+/**
+ * SHARED PLACES — a component several screens render is registered as a place of
+ * kind `component`, authored ONCE before the screens, and named in each screen's
+ * briefing with its tasks instead of being authored again there.
+ */
+describe('a shared component', () => {
+  const SIDEBAR = { id: 'component-sidebar-1a2b3c4d', module: 'src/Sidebar.tsx', title: 'Sidebar', screens: ['root', 'repos-repoid'] }
+  const shared = { components: [SIDEBAR], rendered: new Map([['root', [SIDEBAR.id]], ['repos-repoid', [SIDEBAR.id]]]) }
+  const grounding = (module: string) => ({ module, renders: [], closure: 1, apiEffects: [], unjoined: [], rpcCalls: [] })
+  const context = new Map([
+    ['root', grounding('src/Home.tsx')],
+    ['repos-repoid', grounding('src/Report.tsx')],
+    [SIDEBAR.id, grounding(SIDEBAR.module)],
+  ])
+  const COLLAPSE = {
+    id: 'web/collapse-sidebar',
+    type: 'web' as const,
+    title: 'Collapse the sidebar',
+    entry: { method: 'GET', path: '/' },
+    steps: [{ kind: 'activate' as const, target: { role: 'button', name: 'Collapse' } }],
+    at: SIDEBAR.id,
+  }
+  const script: Script = async (place, input) => {
+    if (place !== SIDEBAR.id) return { kind: 'outcome', value: { interfaces: [] } }
+    const checked = await callTool(input, 'check_draft', { interfaces: [COLLAPSE] })
+    expect(checked).toContain('Accepted and kept')
+    return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+  }
+
+  beforeEach(() => {
+    installMemoryKvCache()
+    fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return <button onClick={() => toggle()}>Collapse</button> }\n')
+    fs.writeFileSync(path.join(repo, 'src', 'Report.tsx'), 'export function Report() { return <h1>Report</h1> }\n')
+  })
+  afterEach(() => resetKvCacheStore())
+
+  it('is registered as its own place and authored once, before the screens, at a screen that renders it', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver, seen } = scriptedDriver(script)
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, context, shared })
+    expect(seen.map(placeOf)).toEqual([SIDEBAR.id, 'root', 'repos-repoid'])
+    // The task's id lands in the component's own namespace, like any place's.
+    const [collapse] = result.places.find((place) => place.placeId === SIDEBAR.id)!.taskIds
+    expect(collapse).toMatch(/^web\/screen-component-sidebar-.*-task-collapse-sidebar-/)
+    const file = readAuthoredFile()
+    expect(file.resources!.web.find((place) => place.id === SIDEBAR.id)).toMatchObject({ kind: 'component', title: 'Sidebar' })
+    expect(file.interfaces.map((task) => [task.id, task.type === 'web' && task.at])).toEqual([[collapse, SIDEBAR.id]])
+    expect(file.authoring?.[SIDEBAR.id]?.sources).toEqual({ [SIDEBAR.module]: expect.any(String) })
+    // The component's session is told what it is and where it is observed.
+    expect(seen[0].initialMessages.at(-1)).toContain('This place is a SHARED COMPONENT: `src/Sidebar.tsx`, rendered by 2 screen(s)')
+    // Each screen is told the shared place it renders, with its tasks, and never asked to author it.
+    for (const screen of seen.slice(1)) {
+      expect(screen.initialMessages.at(-1)).toContain(`${SIDEBAR.id}  ·  Sidebar  ·  ${collapse}`)
+    }
+  })
+
+  it('refuses a screen session that authors the shared component’s controls', async () => {
+    const { persistence } = memoryPersistence()
+    const refusals: string[] = []
+    const { driver } = scriptedDriver(async (place, input) => {
+      if (place !== 'root') return script(place, input)
+      refusals.push(await callTool(input, 'check_draft', { interfaces: [{ ...COLLAPSE, id: 'web/collapse-sidebar-again' }] }))
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, context, shared })
+    expect(refusals[0]).toContain('is not a task of `root`')
+  })
+
+  it('is served from the cache on the next run, and re-opened when its module changes', async () => {
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
+    const again = scriptedDriver(script)
+    const second = await authorWebInterfaces({ repoRoot: repo, driver: again.driver, persistence: memoryPersistence().persistence, context, shared })
+    expect(again.seen).toHaveLength(0)
+    expect(second.skipped).toContain(SIDEBAR.id)
+
+    fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return <button onClick={() => collapse()}>Collapse</button> }\n')
+    const third = scriptedDriver(script)
+    await authorWebInterfaces({ repoRoot: repo, driver: third.driver, persistence: memoryPersistence().persistence, context, shared })
+    expect(third.seen.map(placeOf)).toEqual([SIDEBAR.id])
+  })
+
+  it('earns no session once the grounding no longer finds it shared', async () => {
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
+    fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return null }\n')
+    const next = scriptedDriver(script)
+    const result = await authorWebInterfaces({ repoRoot: repo, driver: next.driver, persistence: memoryPersistence().persistence, context })
+    expect(next.seen).toHaveLength(0)
+    expect(result.skipped).toContain(SIDEBAR.id)
+    expect(readAuthoredFile().interfaces.map((task) => task.type === 'web' && task.at)).toEqual([SIDEBAR.id])
+  })
+})

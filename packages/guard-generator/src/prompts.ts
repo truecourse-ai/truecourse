@@ -1165,6 +1165,12 @@ function resourceLines(place: InterfaceResource): string[] {
       place.description ? `: ${place.description}` : ''
     }`,
   ]
+  // A shared component is rendered by several screens and owns no address: its
+  // tasks' steps hold wherever it is rendered, so a scenario runs them on the
+  // screen it is already on rather than navigating to their entry.
+  if (place.kind === 'component') {
+    lines.push('    shared: rendered on several screens — run its tasks on the screen the scenario is on; their entry path is one such screen, not a navigation they need')
+  }
   const r = place.readables
   // A cli command group and an api noun carry NO readables — those are DOM
   // facts — so such a place renders its identity line and stops,

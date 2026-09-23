@@ -13,8 +13,10 @@ import { atomicWriteJson, guardAuthoredInterfacesPath } from '@truecourse/guard-
 import {
   InterfacesFragmentSchema,
   type InterfaceAuthoringRecord,
+  type InterfaceResource,
   type InterfacesFile,
 } from '@truecourse/shared'
+import type { SharedComponent } from './shared-places.js'
 
 export interface WriteAuthoredInput {
   repoRoot: string
@@ -89,6 +91,43 @@ export function recordAuthoringLedger(
     repoRoot: input.repoRoot,
     derived: input.derived,
     candidate: { ...base, authoring: { ...base.authoring, ...input.rows } },
+    ...(input.now ? { now: input.now } : {}),
+  })
+}
+
+export interface RegisterSharedPlacesInput {
+  repoRoot: string
+  authored: InterfacesFile | null
+  derived: InterfacesFile | null
+  components: readonly SharedComponent[]
+  now?: () => string
+}
+
+/**
+ * Put every shared component in the authored catalog as a `component` place:
+ * its id, its name, and the module it is rendered from. A place already there
+ * keeps everything else it carries (its readables above all); nothing is
+ * written when every place already stands as it would. `undefined` ⇒ no write.
+ */
+export function registerSharedPlaces(input: RegisterSharedPlacesInput): { path: string; file: InterfacesFile } | undefined {
+  const existing = new Map((input.authored?.resources?.web ?? []).map((place) => [place.id, place]))
+  const registered = input.components.map((component): InterfaceResource => ({
+    ...existing.get(component.id),
+    id: component.id,
+    kind: 'component',
+    title: component.title,
+    description: `shared UI rendered from ${component.module}`,
+  }))
+  const changed = registered.filter((place) => JSON.stringify(place) !== JSON.stringify(existing.get(place.id)))
+  if (changed.length === 0) return undefined
+  const base: InterfacesFile = input.authored ?? { version: 2, generatedAt: '', recipeFingerprint: '', interfaces: [] }
+  const byId = new Map(changed.map((place) => [place.id, place]))
+  const web = (base.resources?.web ?? []).map((place) => byId.get(place.id) ?? place)
+  for (const place of changed) if (!existing.has(place.id)) web.push(place)
+  return writeAuthoredCatalog({
+    repoRoot: input.repoRoot,
+    derived: input.derived,
+    candidate: { ...base, resources: { ...base.resources, web } },
     ...(input.now ? { now: input.now } : {}),
   })
 }

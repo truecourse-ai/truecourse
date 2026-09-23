@@ -15,6 +15,7 @@ import fs from 'node:fs'
 import {
   interfaceStepLocator,
   isNonCanonicalLocator,
+  isRootPlace,
   readableLocators,
   type GuardWebLocator,
   type InterfaceEntry,
@@ -98,12 +99,12 @@ export function writeNonCanonicalLocators(repoRoot: string): { path: string; cou
   return { path, count: locators.length }
 }
 
-/** The screen a place sits on, walking the `of` chain up; a screen is itself. */
+/** The root place (screen or shared component) a place sits on, walking the `of` chain up; a root is itself. */
 function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): string | undefined {
   const seen = new Set<string>()
   for (let place = places.get(id); place && !seen.has(place.id); place = place.of ? places.get(place.of) : undefined) {
     seen.add(place.id)
-    if (place.kind === 'screen') return place.id
+    if (isRootPlace(place)) return place.id
   }
   return undefined
 }

@@ -125,6 +125,28 @@ describe('deriveWebAuthoringContext', () => {
     expect(tasks?.apiEffects).toEqual(['api/get-api-tasks']);
   });
 
+  it('makes a view two screens render into a shared place, grounded on its own and out of both screens', async () => {
+    writeApp();
+    write(
+      'app/archive/page.tsx',
+      `import { TaskList } from '../../components/task-list'
+export default function ArchivePage() {
+  return <TaskList />
+}
+`,
+    );
+    const { contexts, shared, sharedRendered } = await deriveWebAuthoringContext(repo, { catalog: CATALOG });
+    expect(shared.map(({ module, title, screens }) => ({ module, title, screens: [...screens].sort() }))).toEqual([
+      { module: 'components/task-list.tsx', title: 'task-list', screens: ['archive', 'tasks'] },
+    ]);
+    const [list] = shared;
+    expect(contexts.get(list.id)?.module).toBe('components/task-list.tsx');
+    expect(contexts.get(list.id)?.apiEffects).toEqual(['api/get-api-tasks']);
+    expect(contexts.get('tasks')?.renders).toEqual([]);
+    expect(sharedRendered.get('tasks')).toEqual([list.id]);
+    expect(sharedRendered.get('archive')).toEqual([list.id]);
+  });
+
   it('returns an empty pack for a repository with no web places at all', async () => {
     write('src/index.ts', 'export const noop = () => {}\n');
     const { contexts } = await deriveWebAuthoringContext(repo, { catalog: CATALOG });

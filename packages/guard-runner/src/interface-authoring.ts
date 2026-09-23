@@ -26,11 +26,12 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import type {
-  Interface,
-  InterfaceAuthoringRecord,
-  InterfaceResource,
-  InterfacesFile,
+import {
+  isRootPlace,
+  type Interface,
+  type InterfaceAuthoringRecord,
+  type InterfaceResource,
+  type InterfacesFile,
 } from '@truecourse/shared'
 import { staleAuthoredPlaceDiagnostics, webScreensNeedingReadables } from './store.js'
 
@@ -45,7 +46,10 @@ const AUTHORED_SURFACE = 'web'
  */
 export const INTERFACE_AUTHOR_STAGE_VERSION = 4
 
-/** One screen, what authoring has settled on it, and what it would run over. */
+/**
+ * One screen — or one shared component, the other place authoring owes a
+ * session — what authoring has settled on it, and what it would run over.
+ */
 export interface WebScreenAuthoringState {
   place: InterfaceResource
   /** Ids of the authored tasks located on this screen (directly or nested). */
@@ -73,15 +77,17 @@ export interface WebScreenAuthoringInput {
 }
 
 /**
- * Every SCREEN both catalog halves know, in catalog order, with what authoring
- * has settled on it. It writes nothing, and reads the tree only for the source
- * files a row recorded (when `repoRoot` is given).
+ * Every SCREEN and every shared COMPONENT both catalog halves know (the root
+ * places, {@link isRootPlace}), in catalog order, with what authoring has
+ * settled on it. It writes nothing, and reads the tree only for the source files
+ * a row recorded (when `repoRoot` is given).
  */
 export function webScreenAuthoringStates(
   input: WebScreenAuthoringInput,
 ): WebScreenAuthoringState[] {
   const places = placeIndex(input.derived, input.authored)
-  const screens = [...places.values()].filter((place) => place.kind === 'screen')
+  const roots = [...places.values()].filter(isRootPlace)
+  const screens = roots.filter((place) => place.kind === 'screen')
   const located = new Map<string, string[]>()
   for (const task of input.authored?.interfaces ?? []) {
     if (task.type !== AUTHORED_SURFACE) continue
@@ -93,7 +99,7 @@ export function webScreenAuthoringStates(
   const ledger = input.authored?.authoring ?? {}
   const derivedPlaces = derivedPlaceIndex(input.derived)
 
-  return screens.map((place) => {
+  return roots.map((place) => {
     const record = ledger[place.id]
     const inputFingerprint = fingerprintOf(derivedPlaces, place, input.recipeContract)
     return {
@@ -222,7 +228,7 @@ function derivedPlaceIndex(derived: InterfacesFile | null): Map<string, Interfac
   return new Map((derived?.resources?.[AUTHORED_SURFACE] ?? []).map((place) => [place.id, place]))
 }
 
-/** The screen a place sits on, walking `of` up; a screen resolves to itself. */
+/** The root place (screen or component) a place sits on, walking `of` up; a root resolves to itself. */
 function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): string | undefined {
   const seen = new Set<string>()
   let current: string | undefined = id
@@ -230,7 +236,7 @@ function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): s
     seen.add(current)
     const place: InterfaceResource | undefined = places.get(current)
     if (!place) return undefined
-    if (place.kind === 'screen') return place.id
+    if (isRootPlace(place)) return place.id
     current = place.of
   }
   return undefined

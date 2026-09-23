@@ -39,6 +39,7 @@ import {
   InterfaceStateIdSchema,
   InterfaceStateSchema,
   InterfacesFileSchema,
+  isRootPlace,
   resolvedInterfaceFingerprint,
   type Interface,
   type InterfaceResource,
@@ -101,10 +102,10 @@ export const AuthoredTaskSchema = z
   .strict()
 export type AuthoredTask = z.infer<typeof AuthoredTaskSchema>
 
-/** A new place or an enrichment of this screen and its nested places. */
+/** A new place or an enrichment of this screen (or shared component) and its nested places. */
 export const AuthoredPlaceSchema = InterfaceResourceSchema.refine(
-  (place) => place.kind === 'screen' || place.kind === 'panel' || place.kind === 'dialog',
-  { path: ['kind'], message: 'web authoring declares screens, panels and dialogs only' },
+  (place) => place.kind === 'screen' || place.kind === 'component' || place.kind === 'panel' || place.kind === 'dialog',
+  { path: ['kind'], message: 'web authoring declares screens, shared components, panels and dialogs only' },
 )
 export type AuthoredPlace = z.infer<typeof AuthoredPlaceSchema>
 
@@ -674,7 +675,7 @@ function overlay<T extends { id: string }>(base: readonly T[], additions: readon
   return result
 }
 
-/** The screen a place sits on, walking the `of` chain up; a screen is itself. */
+/** The root place (a screen, or a shared component) a place sits on, walking the `of` chain up; a root is itself. */
 function screenFor(
   id: string,
   places: ReadonlyMap<string, InterfaceResource>,
@@ -685,7 +686,7 @@ function screenFor(
     seen.add(current)
     const place: InterfaceResource | undefined = places.get(current)
     if (!place) return undefined
-    if (place.kind === 'screen') return place
+    if (isRootPlace(place)) return place
     current = place.of
   }
   return undefined

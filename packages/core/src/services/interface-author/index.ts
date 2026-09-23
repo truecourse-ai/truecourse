@@ -93,4 +93,11 @@ export {
   type StateMerge,
   type StateReconciliation,
 } from './reconcile.js'
-export { writeAuthoredCatalog, type WriteAuthoredInput } from './write.js'
+export { registerSharedPlaces, writeAuthoredCatalog, type WriteAuthoredInput } from './write.js'
+export {
+  MAX_SHARED_COMPONENTS,
+  detectSharedComponents,
+  ownsHandler,
+  sharedComponentId,
+  type SharedComponent,
+} from './shared-places.js'

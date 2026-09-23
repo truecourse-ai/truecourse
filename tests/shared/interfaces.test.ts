@@ -2518,13 +2518,15 @@ describe('the resource registry', () => {
     ...over,
   })
 
-  it('a resource is a place: id, kind, title — and the kind set is closed at five', () => {
+  it('a resource is a place: id, kind, title — and the kind set is closed at six', () => {
     expect(() => InterfaceResourceSchema.parse(rulesDialog())).not.toThrow()
-    // Three web kinds, plus the cli and api places the SOM restructure added.
+    // Four web kinds (the shared component among them), plus the cli and api
+    // places the SOM restructure added.
     expect(InterfaceResourceKindSchema.options).toEqual([
       'screen',
       'dialog',
       'panel',
+      'component',
       'command-group',
       'rest-noun',
     ])
@@ -2532,6 +2534,8 @@ describe('the resource registry', () => {
       expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind }))).not.toThrow()
     }
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'modal' }))).toThrow()
+    // A shared component, like a screen, sits on nothing.
+    expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'component', of: 'repos-repoid' }))).toThrow(/a component sits on nothing/)
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'dropdown' }))).toThrow()
     // Ids are kebab-case, exactly like state ids and for the same reason.
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ id: 'The Rules Dialog' }))).toThrow()

@@ -35,6 +35,7 @@ import {
   GuardSetupReportSchema,
   InterfacesFileSchema,
   InterfacesFragmentSchema,
+  isRootPlace,
   type GuardAutoResolutions,
   type GuardClaimsFile,
   type GuardFlowsFile,
@@ -297,7 +298,7 @@ export function mergeInterfaceCatalogs(
   }
 }
 
-/** Screens with unestablished readable kinds, including their nested places.
+/** Root places (screens and shared components) with unestablished readable kinds, including their nested places.
  * Missing means unknown; only an explicit array (including []) settles a kind.
  * Stale authored routes are excluded by the same rule as authoring's work list. */
 export function webScreensNeedingReadables(
@@ -315,7 +316,7 @@ export function webScreensNeedingReadables(
     const seen = new Set<string>()
     while (current && !seen.has(current.id)) {
       seen.add(current.id)
-      if (current.kind === 'screen') {
+      if (isRootPlace(current)) {
         if (!stale.has(current.id)) missing.add(current.id)
         break
       }

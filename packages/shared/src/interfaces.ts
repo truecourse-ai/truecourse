@@ -1078,7 +1078,10 @@ export type InterfaceResourceId = z.infer<typeof InterfaceResourceIdSchema>
  *
  *  - web: a `screen` owns an address (a navigate step reaches it), a `dialog`
  *    opens over one and blocks it, a `panel` is a region of one that swaps in
- *    without leaving it.
+ *    without leaving it, and a `component` is SHARED UI several screens render
+ *    (a layout's sidebar, a card's action menu, a search modal) — authored once,
+ *    as its own place, sitting on no screen and owning no address: its tasks
+ *    are performed on whichever screen renders it.
  *  - cli: a `command-group` is a node of the command tree — the `spec` family,
  *    the `spec docs` family under it. Its actions are the commands registered in
  *    it; its `of` is the group it is registered under.
@@ -1099,10 +1102,20 @@ export const InterfaceResourceKindSchema = z.enum([
   'screen',
   'dialog',
   'panel',
+  'component',
   'command-group',
   'rest-noun',
 ])
 export type InterfaceResourceKind = z.infer<typeof InterfaceResourceKindSchema>
+
+/**
+ * A ROOT web place — one that sits on nothing, so the `of` chain of every other
+ * place ends at one: a screen, or a shared component. Authoring runs one session
+ * per root, and a task belongs to the root its `at` chain reaches.
+ */
+export function isRootPlace(place: { kind: InterfaceResourceKind }): boolean {
+  return place.kind === 'screen' || place.kind === 'component'
+}
 
 /**
  * A readable's name — same enforced kebab-case as every id here. Optional on
@@ -1287,11 +1300,11 @@ export const InterfaceResourceSchema = z
   })
   .strict()
   .superRefine((resource, ctx) => {
-    if (resource.kind === 'screen' && resource.of) {
+    if (isRootPlace(resource) && resource.of) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['of'],
-        message: 'a screen sits on nothing — `of` belongs to a panel or a dialog',
+        message: `a ${resource.kind} sits on nothing — \`of\` belongs to a panel or a dialog`,
       })
     }
     if (resource.kind !== 'screen' && resource.address) {

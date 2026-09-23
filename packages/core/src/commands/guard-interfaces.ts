@@ -209,12 +209,13 @@ export async function runGuardInterfaceAuthoring(
 
     // The GROUNDING, once per run and amortised over every place in it:
     // the route module of each place, the modules it renders, and the api effects
-    // its requests join to. One analyzer pass, so the sessions read instead of
+    // its requests join to — and the shared components several screens render. One analyzer pass, so the sessions read instead of
     // rediscovering. It degrades to nothing rather than failing the run.
     opts.onStatus?.('reading the working tree');
     const context = await deriveWebAuthoringContext(repoRoot, { catalog: readInterfaceCatalog(repoRoot) });
     opts.onStatus?.(
-      `context: ${context.contexts.size} place(s) grounded from ${context.files} file(s) in ${context.seconds}s`,
+      `context: ${context.contexts.size} place(s) grounded from ${context.files} file(s) in ${context.seconds}s` +
+        (context.shared.length > 0 ? `, ${context.shared.length} shared component(s)` : ''),
     );
 
     const result = await authorWebInterfaces({
@@ -222,6 +223,7 @@ export async function runGuardInterfaceAuthoring(
       driver,
       persistence: run.persistence,
       context: context.contexts,
+      shared: { components: context.shared, rendered: context.sharedRendered },
       ...(opts.openLive ? { openLive: opts.openLive } : {}),
       ...(opts.places ? { places: opts.places } : {}),
       ...(opts.replace !== undefined ? { replace: opts.replace } : {}),

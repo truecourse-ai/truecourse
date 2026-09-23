@@ -84,8 +84,12 @@ export interface WebPlaceContext {
 export interface DeriveWebPlaceContextsInput {
   /** Absolute repo root — every path in the pack is relative to it. */
   repoRoot: string
-  /** Place id → the seed it was minted from (`formWebResources().seeds`). */
-  seeds: ReadonlyMap<string, WebPlace>
+  /**
+   * Place id → the module that is the place and the address it is reached at:
+   * a screen's seed (`formWebResources().seeds`), or a shared component's module
+   * with no address of its own (`''`).
+   */
+  seeds: ReadonlyMap<string, Pick<WebPlace, 'filePath' | 'address'>>
   fileAnalyses: readonly FileAnalysis[]
   /**
    * Resolved import edges — `buildDependencyGraph(fileAnalyses, repoRoot)`. A

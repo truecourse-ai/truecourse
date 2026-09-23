@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { Interface, InterfaceResource, InterfacesFile } from '@truecourse/shared'
+import { isRootPlace, type Interface, type InterfaceResource, type InterfacesFile } from '@truecourse/shared'
 import type { AuthoredFragment } from './draft.js'
 
 export interface ScreenIdentityScope {
@@ -43,7 +43,7 @@ function resourceOwner(id: string, resources: ReadonlyMap<string, InterfaceResou
     seen.add(current)
     const resource: InterfaceResource | undefined = resources.get(current)
     if (!resource) return undefined
-    if (resource.kind === 'screen') return resource.id
+    if (isRootPlace(resource)) return resource.id
     current = resource.of
   }
   return undefined
@@ -80,7 +80,8 @@ export function scopeFragmentIds(fragment: AuthoredFragment, input: ScopeFragmen
     // Root screens are derived identities, never screen-local aliases. Invalid
     // kinds, ids, cycles, or foreign parents must remain visible to validation.
     if ((resource.kind !== 'panel' && resource.kind !== 'dialog') || !SLUG.test(resource.id)) continue
-    if (resources.get(resource.id)?.kind === 'screen') continue
+    const known = resources.get(resource.id)
+    if (known && isRootPlace(known)) continue
     if (resourceOwner(resource.id, proposedResources) !== scope.screenId) continue
     if (resourceOwner(resource.id, resources) === scope.screenId) continue
     resourceIds.set(resource.id, qualifiedId(resource.id, `${prefix}-place-`, resources.has(resource.id)))

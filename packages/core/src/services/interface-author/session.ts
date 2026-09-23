@@ -90,8 +90,23 @@ export function placeWorkItem(placeId: string): string {
   return `web:${placeId}`
 }
 
+/** A shared place another session authors, as a briefing names it. */
+export interface SharedPlaceBrief {
+  id: string
+  title: string
+  /** The tasks the catalog already has at it — what a session references instead of authoring. */
+  tasks: readonly string[]
+}
+
 export interface PlaceBriefingInput {
   place: InterfaceResource
+  /**
+   * Set when the place is a SHARED COMPONENT: the module it is rendered from,
+   * the screens that render it, and the address of the one it is authored at.
+   */
+  component?: { module: string; screens: readonly string[]; address?: string }
+  /** The shared places this place renders — authored in sessions of their own. */
+  sharedPlaces?: readonly SharedPlaceBrief[]
   /** Ids of the tasks already authored at this place — the ones the session accounts for. */
   existing: readonly string[]
   ownTaskContext?: string
@@ -149,21 +164,31 @@ export function placeBriefing({
   screens,
   nested,
   live,
+  component,
+  sharedPlaces = [],
 }: PlaceBriefingInput): string {
+  const address = place.address ?? component?.address
   const lines = [
     `Author the web tasks and readable facts of ONE place.`,
     ``,
     `  place    ${place.id} (${place.kind})`,
-    `  address  ${place.address ?? '— (this place has no address of its own; it sits on one)'}`,
+    `  address  ${
+      place.address ??
+      (component?.address
+        ? `— (a shared component has no address of its own; it is authored at ${component.address})`
+        : '— (this place has no address of its own; it sits on one)')
+    }`,
     `  title    ${place.title}`,
     ``,
-    screenIdentityGuidance({ screenId: place.id, address: place.address }),
+    screenIdentityGuidance({ screenId: place.id, address }),
     ``,
+    ...(component ? componentLines(place.id, component) : []),
     ...(context ? contextLines(context) : []),
     `Every task you author is performed HERE: \`at: "${place.id}"\`, or at a dialog`,
     `or panel that sits on this place — declare any such place in \`resources\` with`,
-    `\`of: "${place.id}"\`. Their \`entry.path\` is this place's address either way.`,
+    `\`of: "${place.id}"\`. Their \`entry.path\` is ${address ? `\`${address}\`` : "this place's address"} either way.`,
     `A task of another screen belongs to another session and will be refused.`,
+    ...sharedPlaceLines(sharedPlaces),
   ]
   if (existing.length > 0) {
     lines.push(
@@ -189,7 +214,7 @@ export function placeBriefing({
     lines.push(
       ...liveScreenLines({
         live: live.screens,
-        ...(place.address ? { address: place.address } : {}),
+        ...(address ? { address } : {}),
         ...(live.observation ? { observation: live.observation } : {}),
       }),
     )
@@ -273,6 +298,53 @@ function contextLines(context: WebPlaceContext): string[] {
   )
   return lines
 }
+
+/**
+ * What a shared component's session is told about the place it authors: that
+ * it is shared, where it is rendered from, and that its tasks are performed
+ * wherever it is rendered — one session instead of one per screen.
+ */
+function componentLines(placeId: string, component: NonNullable<PlaceBriefingInput['component']>): string[] {
+  const screens = component.screens.slice(0, MAX_RENDERING_SCREENS)
+  return [
+    `This place is a SHARED COMPONENT: \`${component.module}\`, rendered by ${component.screens.length} screen(s)`,
+    `(${screens.join(', ')}${component.screens.length > screens.length ? ', …' : ''}). It is authored ONCE, here: every`,
+    `control it owns is a task \`at: "${placeId}"\` — the menu it opens, the dialog it shows,`,
+    `the close button of its modal — and no screen session authors them again.`,
+    `Its tasks run wherever it is rendered, so their steps must not depend on which`,
+    `screen that is: \`entry.path\` names the screen you observe it at, and nothing more.`,
+    component.address
+      ? `Observe it at \`${component.address}\` (or at any screen above).`
+      : `Every screen that renders it carries a slot: fill one from a seeded fixture to observe it.`,
+    ``,
+  ]
+}
+
+/** How many rendering screens a component's briefing names. */
+const MAX_RENDERING_SCREENS = 12
+
+/**
+ * The shared places this place renders. Their controls are authored by their
+ * own sessions: a session here references their tasks and never re-authors
+ * them, and does not report them in `unresolved`.
+ */
+function sharedPlaceLines(shared: readonly SharedPlaceBrief[]): string[] {
+  if (shared.length === 0) return []
+  return [
+    ``,
+    `The SHARED places this one renders. They are authored ONCE, in sessions of their`,
+    `own, as places of kind \`component\`: do NOT author their controls here, do not`,
+    `declare them, and do not list them in \`unresolved\` — reference them instead`,
+    `(a task here may leave the user at one with \`to\`, and a scenario runs their tasks`,
+    `on this screen). What they already carry:`,
+    ...shared.map((place) =>
+      `  ${place.id}  ·  ${place.title}  ·  ${place.tasks.length > 0 ? place.tasks.slice(0, MAX_SHARED_TASKS_BRIEFED).join(', ') + (place.tasks.length > MAX_SHARED_TASKS_BRIEFED ? `, … ${place.tasks.length - MAX_SHARED_TASKS_BRIEFED} more` : '') : '(authored in its own session)'}`,
+    ),
+  ]
+}
+
+/** How many of a shared place's tasks a briefing names. */
+const MAX_SHARED_TASKS_BRIEFED = 20
 
 /**
  * The places already on this one: what `of` names, and what a session must not
@@ -437,6 +509,10 @@ Readable locators use the same order of preference as step targets: role/name fi
 Every place you declare states ALL FOUR kinds: \`markers\`, \`elements\`, \`controls\`, \`rows\`. An explicit [] means you established that it has none of that kind, and the write path REFUSES a place that leaves a kind unstated — nothing returns to this screen once your outcome is accepted until its source changes, so an omitted kind stays unknown. Read the place well enough to answer for each kind; where you truly cannot, say what you could not inspect in \`unresolved\` and still state the kind. Never fill arrays just to populate a table, and never mark uninspected content empty. Existing kinds established by an earlier session of this screen are preserved when you omit them; a supplied kind replaces that kind, so include its surviving established facts. Readables alone are a valid outcome with \`interfaces: []\`. They do not require a new task or changed task steps.
 
 Every fact must come from source you READ (or source already provided in the briefing pack), or from a screen you OBSERVED with \`observe_screen\` when the run offers it. Use the session's read_file/search_repo tools for evidence, and run check_draft on the resource facts as well as the tasks. Without \`observe_screen\` these tools provide source evidence only; do not claim to have inspected runtime state you did not observe.
+
+# Shared components
+
+UI that several screens render — a layout's sidebar and top bar, a list's card actions, a search modal, a modal's close button — is a SHARED COMPONENT: a place of kind \`component\` that is authored once, by its own session. When the briefing names shared places this place renders, their controls are not yours: reference their tasks, never author or declare them again, and never write an \`unresolved\` line about them. When the briefing says THIS place is a shared component, author every control it owns \`at\` it, with steps that hold on any screen that renders it.
 
 # The live screen
 

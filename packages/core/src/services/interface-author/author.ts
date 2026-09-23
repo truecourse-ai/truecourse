@@ -57,6 +57,7 @@ import type {
 } from '@truecourse/agent-loop'
 import {
   hasAddressSlot,
+  mergeInterfaceCatalogs,
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
   authoringRecipeContract,
@@ -72,7 +73,7 @@ import type {
   InterfacesFile,
   MapperDiagnostic,
 } from '@truecourse/shared'
-import { isLabelOnlyRekey } from '@truecourse/shared'
+import { isLabelOnlyRekey, isRootPlace } from '@truecourse/shared'
 import { readCachedSessionOutput, storeCachedSessionOutput } from '../agent/session-cache.js'
 import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
@@ -88,10 +89,11 @@ import { clusterPlaces, orderClustersLongestFirst, type PlaceCluster } from './c
 import type { AuthorFinding } from './findings.js'
 import { clusterPack, type ClusterPack } from './pack.js'
 import { placeSourcePack } from './place-pack.js'
-import { ownTaskContext } from './catalog-context.js'
+import { ownTaskContext, ownTasks } from './catalog-context.js'
 import type { LiveScreens, ObserveScreenResult } from './live-screen.js'
-import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem } from './session.js'
-import { recordAuthoringLedger, writeAuthoredCatalog } from './write.js'
+import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem, type SharedPlaceBrief } from './session.js'
+import type { SharedComponent } from './shared-places.js'
+import { recordAuthoringLedger, registerSharedPlaces, writeAuthoredCatalog } from './write.js'
 
 /**
  * Where a screen's accepted fragment is stored, keyed on the digest of what its
@@ -163,6 +165,19 @@ export interface AuthorRunOptions {
    * A place with no entry is briefed exactly as it was before the pack existed.
    */
   context?: ReadonlyMap<string, WebPlaceContext>
+  /**
+   * The shared places the context pass found ({@link detectSharedComponents}),
+   * and which of them each place renders. Each is registered in the authored
+   * catalog as a `component` place and authored ONCE, before the screens, at a
+   * screen that renders it; a screen's briefing names the shared places it
+   * renders with their tasks instead of handing it their source. A component
+   * place the pass no longer finds earns no session. Absent ⇒ no component is
+   * authored.
+   */
+  shared?: {
+    components: readonly SharedComponent[]
+    rendered: ReadonlyMap<string, readonly string[]>
+  }
   /**
    * Stands the running app up, when the caller can: called at most once, and
    * only when a screen's live fragment is not cached — a run served wholly from
@@ -308,6 +323,18 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   let authored = readAuthoredInterfaceCatalog(opts.repoRoot)
   const recipeContract = authoringRecipeContract(opts.repoRoot)
 
+  // THE SHARED PLACES, registered before the work list is planned: each is a
+  // root place of its own, so it is planned, ledgered and cached like a screen.
+  const components = new Map((opts.shared?.components ?? []).map((component) => [component.id, component]))
+  const registered = registerSharedPlaces({
+    repoRoot: opts.repoRoot,
+    authored,
+    derived,
+    components: [...components.values()],
+    ...(opts.now ? { now: opts.now } : {}),
+  })
+  if (registered) authored = registered.file
+
   const all = planWorkItems(derived, authored, recipeContract, opts.repoRoot)
 
   // THE STALE-PLACE RULE — a WORK-LIST rule, never a merge rule.
@@ -342,6 +369,12 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const skipped: string[] = []
   const selected = all.filter((item) => {
     if (stale.has(item.place.id)) return false
+    // A component this run's grounding no longer finds shared has no module to
+    // brief and no screen to observe it at: it keeps its tasks and earns no session.
+    if (item.place.kind === 'component' && !components.has(item.place.id)) {
+      skipped.push(item.place.id)
+      return false
+    }
     if (named) return named.has(item.place.id)
     // An explicit refresh re-opens what never settled, whatever its inputs say:
     // a screen whose provider died is exactly the screen nothing else retries.
@@ -366,6 +399,29 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   }
   const cacheKey = (item: AuthorWorkItem, live: boolean): string =>
     fragmentCacheKey(item.inputFingerprint, sourcesOf.get(item.place.id)!, live)
+
+  // Where a shared component is authored and observed: the first screen that
+  // renders it at an address with no slot, else the first that renders it.
+  const allPlaces = placeIndex(derived, authored)
+  const representative = new Map<string, string>()
+  for (const component of components.values()) {
+    const addresses = component.screens.flatMap((id) => allPlaces.get(id)?.address ?? [])
+    const address = addresses.find((candidate) => !hasAddressSlot(candidate)) ?? addresses[0]
+    if (address !== undefined) representative.set(component.id, address)
+  }
+  /** The shared places a place renders, each with the tasks the catalog already has at it. */
+  const sharedPlacesOf = (placeId: string, catalog: InterfacesFile | null): SharedPlaceBrief[] => {
+    const merged = mergeInterfaceCatalogs(derived, catalog)
+    return (opts.shared?.rendered.get(placeId) ?? []).flatMap((id) => {
+      const component = components.get(id)
+      return component ? [{ id, title: component.title, tasks: ownTasks(merged, id).map((task) => task.id) }] : []
+    })
+  }
+  /** The place a session authors — its root, and the address it is authored at. */
+  const scopeOf = (item: AuthorWorkItem): { screenId: string; address?: string } => {
+    const address = item.place.address ?? representative.get(item.place.id)
+    return { screenId: item.place.id, ...(address ? { address } : {}) }
+  }
 
   const results: PlaceResult[] = []
   const prepared = new Map<string, PreparedPlace['place']>()
@@ -411,7 +467,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     briefedWith: InterfacesFile | null,
     carryUnaccounted: boolean,
   ): PreparedPlace => {
-    const result = preparePlace({ item, fragment, derived, authored, briefedWith, carryUnaccounted })
+    const result = preparePlace({ item, scope: scopeOf(item), fragment, derived, authored, briefedWith, carryUnaccounted })
     if (result.candidate) {
       const before = new Map((authored?.interfaces ?? []).map((task) => [task.id, task]))
       for (const task of result.candidate.interfaces) {
@@ -480,161 +536,175 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   // address has no slot is opened once in the signed-in browser, so its tree
   // is in the briefing (the cached prefix) rather than bought with a turn. A
   // slotted address needs a value the session reads, so it observes itself.
-  const observations = await observeLiteralAddresses(pending, live, opts.signal)
+  const observations = await observeLiteralAddresses(pending, scopeOf, live, opts.signal)
 
-  // THE CLUSTERS: the places that read the same modules, grouped. They
-  // become the pool's serial groups — one worker per cluster, members in order.
-  const clusters = clusterPlaces({
-    places: pending.map((item) => item.place.id),
-    context: opts.context ?? new Map(),
-  })
-  const clusterOf = new Map<string, PlaceCluster>()
-  for (const cluster of clusters) {
-    for (const placeId of cluster.places) clusterOf.set(placeId, cluster)
-  }
-  // THE HAND-OFF ORDER (step 2j): longest cluster first. The pool starts serial
-  // groups in first-appearance order of the item list, so the ORDER of this
-  // list IS the schedule — LPT here means the longest serial chain starts at
-  // t=0 instead of last. The REPORT is unaffected: results are re-sorted to
-  // the work-list order below, whatever order the sessions ran in.
-  const itemOf = new Map(pending.map((item) => [item.place.id, item]))
-  const scheduled = orderClustersLongestFirst(clusters).flatMap((cluster) =>
-    cluster.places.map((placeId) => itemOf.get(placeId)!),
-  )
-  // The pack, read ONCE per cluster at its first member: every member opens with
-  // the same bytes, which is what makes it a shared prefix rather than a
-  // per-session copy of the same files. Members run serially, so "first member"
-  // is well-defined and the read happens when the cluster starts, not before.
-  const packs = new Map<string, { pack?: ClusterPack; prefix?: SharedPromptPrefix }>()
-  const packOf = (placeId: string) => {
-    const cluster = clusterOf.get(placeId)!
-    if (!packs.has(cluster.id)) {
-      const pack = clusterPack(opts.repoRoot, cluster)
-      packs.set(cluster.id, pack ? { pack, prefix: { messages: [pack.text], cacheKey: cluster.id } } : {})
+  // THE PHASES: the shared components first, then the screens, so a screen's
+  // briefing names the tasks its shared places already carry. Within a phase the
+  // clusters run side by side.
+  const runSessions = async (items: readonly AuthorWorkItem[]): Promise<void> => {
+    if (items.length === 0) return
+    // THE CLUSTERS: the places that read the same modules, grouped. They
+    // become the pool's serial groups — one worker per cluster, members in order.
+    const clusters = clusterPlaces({
+      places: items.map((item) => item.place.id),
+      context: opts.context ?? new Map(),
+    })
+    const clusterOf = new Map<string, PlaceCluster>()
+    for (const cluster of clusters) {
+      for (const placeId of cluster.places) clusterOf.set(placeId, cluster)
     }
-    return packs.get(cluster.id)!
-  }
-
-  // Per-session captures, keyed by place: the catalog each session was BRIEFED
-  // with (taken when its def is built — the pool builds def and briefing in one
-  // tick). Outcome validation reads the live catalog —
-  // between the two lies everything its peers landed while it was thinking. For
-  // a peer of the same cluster there is nothing there: it already folded.
-  const briefed = new Map<string, InterfacesFile | null>()
-  const placeOf = new Map(pending.map((item) => [placeWorkItem(item.place.id), item.place.id]))
-
-  await runSessionPool<AuthorWorkItem, AuthoredFragment>({
-    items: scheduled,
-    workItem: (item) => placeWorkItem(item.place.id),
-    serialKey: (item) => clusterOf.get(item.place.id)!.id,
-    sharedPrefix: (item) => packOf(item.place.id).prefix,
-    session: (item) => {
-      // A session may amend or retire THIS place's own tasks and nothing else:
-      // every other authored entry is somebody else's work.
-      const replaceable = new Set(item.existing)
-      briefed.set(item.place.id, authored)
-      return {
-        ...interfaceAuthorSessionDef({
-          repoRoot: opts.repoRoot,
-          derived,
-          // Tools must see peers' accepted work, even on a resumed session.
-          get authored() { return authored },
-          replaceable,
-          scope: scopeOf(item),
-          ...(live ? { live } : {}),
-        }),
-        validateOutcome(fragment) {
-          // Validate and write synchronously before the loop marks the session
-          // completed. No peer can change the catalog between these operations.
-          const result = foldFragment(item, fragment, briefed.get(item.place.id) ?? null, false)
-          prepared.set(item.place.id, result.place)
-          if (result.place.status === 'rejected') {
-            return `The catalog cannot accept this outcome. Correct these problems, run check_draft on the corrected pieces, and return the draftId of the check that accepted them:\n- ${result.place.problems.join('\n- ')}`
-          }
-        },
+    // THE HAND-OFF ORDER (step 2j): longest cluster first. The pool starts serial
+    // groups in first-appearance order of the item list, so the ORDER of this
+    // list IS the schedule — LPT here means the longest serial chain starts at
+    // t=0 instead of last. The REPORT is unaffected: results are re-sorted to
+    // the work-list order below, whatever order the sessions ran in.
+    const itemOf = new Map(items.map((item) => [item.place.id, item]))
+    const scheduled = orderClustersLongestFirst(clusters).flatMap((cluster) =>
+      cluster.places.map((placeId) => itemOf.get(placeId)!),
+    )
+    // The pack, read ONCE per cluster at its first member: every member opens with
+    // the same bytes, which is what makes it a shared prefix rather than a
+    // per-session copy of the same files. Members run serially, so "first member"
+    // is well-defined and the read happens when the cluster starts, not before.
+    const packs = new Map<string, { pack?: ClusterPack; prefix?: SharedPromptPrefix }>()
+    const packOf = (placeId: string) => {
+      const cluster = clusterOf.get(placeId)!
+      if (!packs.has(cluster.id)) {
+        const pack = clusterPack(opts.repoRoot, cluster)
+        packs.set(cluster.id, pack ? { pack, prefix: { messages: [pack.text], cacheKey: cluster.id } } : {})
       }
-    },
-    briefing: (item) => {
-      // The catalog as it stood when this session started: every place already
-      // folded, and none of the peers still running beside it.
-      const briefedWith = briefed.get(item.place.id) ?? null
-      const places = placeIndex(derived, briefedWith)
-      return [
-        placeBriefing({
-          place: item.place,
-          existing: item.existing,
-          ownTaskContext: ownTaskContext({ derived, authored: briefedWith, screenId: item.place.id }),
-          sourcePack: placeSourcePack(opts.repoRoot, opts.context?.get(item.place.id), packOf(item.place.id).pack?.modules)?.text,
-          states: registryStates(derived, briefedWith),
-          screens: screenTable(places),
-          nested: placesOn(item.place.id, places),
-          ...(opts.context?.get(item.place.id)
-            ? { context: opts.context.get(item.place.id)! }
-            : {}),
-          ...(live
-            ? {
-                live: {
-                  screens: live,
-                  ...(observations.has(item.place.id) ? { observation: observations.get(item.place.id)! } : {}),
-                },
-              }
-            : {}),
-        }),
-      ]
-    },
-    driver: opts.driver,
-    persistence: opts.persistence,
-    ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
-    ...(opts.signal ? { signal: opts.signal } : {}),
-    ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
-    ...(opts.now ? { now: opts.now } : {}),
-    onProgress: (event) => {
-      if (event.kind !== 'item-start') return
-      opts.onProgress?.({
-        kind: 'place-start',
-        placeId: placeOf.get(event.workItem)!,
-        index: event.index,
-        total: event.total,
-      })
-    },
-    onSessionEvent: (workItem, event) => opts.onSessionEvent?.(placeOf.get(workItem)!, event),
-    // Persistence happens in validateOutcome; the fold records final spend
-    // and failures after any corrections have finished.
-    fold: async (item, outcome, sessionId) => {
-      const last = prepared.get(item.place.id)
-      const place: PlaceResult = outcome.status === 'completed'
-        ? { ...last!, sessionId, spent: outcome.spent }
-        : {
-            placeId: item.place.id, sessionId, spent: outcome.spent,
-            status: 'failed', taskIds: [],
-            unresolved: last?.unresolved ?? [],
-            findings: last?.findings ?? [],
-            problems: [...(last?.problems ?? []), describeFailure(outcome.failure)],
-            resumable: outcome.resumable,
-          }
-      results.push(place)
-      // The ledger row, whatever the verdict: a screen that failed is a screen
-      // this run REACHED, and recording that is what stops the next run paying
-      // for the same failure. The digest is the one the work list planned over.
-      recordLedger({ [item.place.id]: ledgerRow(item, place.status) })
-      // The fragment an accepted outcome produced, under this screen's digest:
-      // the next run over the same inputs folds it instead of buying it again.
-      if (outcome.status === 'completed' && (place.status === 'authored' || place.status === 'empty')) {
-        await storeCachedSessionOutput(
-          {
+      return packs.get(cluster.id)!
+    }
+
+    // Per-session captures, keyed by place: the catalog each session was BRIEFED
+    // with (taken when its def is built — the pool builds def and briefing in one
+    // tick). Outcome validation reads the live catalog —
+    // between the two lies everything its peers landed while it was thinking. For
+    // a peer of the same cluster there is nothing there: it already folded.
+    const briefed = new Map<string, InterfacesFile | null>()
+    const placeOf = new Map(items.map((item) => [placeWorkItem(item.place.id), item.place.id]))
+
+    await runSessionPool<AuthorWorkItem, AuthoredFragment>({
+      items: scheduled,
+      workItem: (item) => placeWorkItem(item.place.id),
+      serialKey: (item) => clusterOf.get(item.place.id)!.id,
+      sharedPrefix: (item) => packOf(item.place.id).prefix,
+      session: (item) => {
+        // A session may amend or retire THIS place's own tasks and nothing else:
+        // every other authored entry is somebody else's work.
+        const replaceable = new Set(item.existing)
+        briefed.set(item.place.id, authored)
+        return {
+          ...interfaceAuthorSessionDef({
             repoRoot: opts.repoRoot,
-            cacheName: INTERFACE_AUTHOR_CACHE_NAME,
-            key: cacheKey(item, live !== undefined),
+            derived,
+            // Tools must see peers' accepted work, even on a resumed session.
+            get authored() { return authored },
+            replaceable,
+            scope: scopeOf(item),
+            ...(live ? { live } : {}),
+          }),
+          validateOutcome(fragment) {
+            // Validate and write synchronously before the loop marks the session
+            // completed. No peer can change the catalog between these operations.
+            const result = foldFragment(item, fragment, briefed.get(item.place.id) ?? null, false)
+            prepared.set(item.place.id, result.place)
+            if (result.place.status === 'rejected') {
+              return `The catalog cannot accept this outcome. Correct these problems, run check_draft on the corrected pieces, and return the draftId of the check that accepted them:\n- ${result.place.problems.join('\n- ')}`
+            }
           },
-          outcome.output,
-        )
-      }
-      spent.turns += place.spent.turns
-      spent.tokens += place.spent.tokens
-      spent.costUsd += place.spent.costUsd
-      opts.onProgress?.({ kind: 'place-done', place })
-    },
-  })
+        }
+      },
+      briefing: (item) => {
+        // The catalog as it stood when this session started: every place already
+        // folded, and none of the peers still running beside it.
+        const briefedWith = briefed.get(item.place.id) ?? null
+        const places = placeIndex(derived, briefedWith)
+        const component = components.get(item.place.id)
+        const address = scopeOf(item).address
+        return [
+          placeBriefing({
+            place: item.place,
+            existing: item.existing,
+            ...(component
+              ? { component: { module: component.module, screens: component.screens, ...(address ? { address } : {}) } }
+              : {}),
+            sharedPlaces: sharedPlacesOf(item.place.id, briefedWith),
+            ownTaskContext: ownTaskContext({ derived, authored: briefedWith, screenId: item.place.id }),
+            sourcePack: placeSourcePack(opts.repoRoot, opts.context?.get(item.place.id), packOf(item.place.id).pack?.modules)?.text,
+            states: registryStates(derived, briefedWith),
+            screens: screenTable(places),
+            nested: placesOn(item.place.id, places),
+            ...(opts.context?.get(item.place.id)
+              ? { context: opts.context.get(item.place.id)! }
+              : {}),
+            ...(live
+              ? {
+                  live: {
+                    screens: live,
+                    ...(observations.has(item.place.id) ? { observation: observations.get(item.place.id)! } : {}),
+                  },
+                }
+              : {}),
+          }),
+        ]
+      },
+      driver: opts.driver,
+      persistence: opts.persistence,
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
+      ...(opts.now ? { now: opts.now } : {}),
+      onProgress: (event) => {
+        if (event.kind !== 'item-start') return
+        opts.onProgress?.({
+          kind: 'place-start',
+          placeId: placeOf.get(event.workItem)!,
+          index: event.index,
+          total: event.total,
+        })
+      },
+      onSessionEvent: (workItem, event) => opts.onSessionEvent?.(placeOf.get(workItem)!, event),
+      // Persistence happens in validateOutcome; the fold records final spend
+      // and failures after any corrections have finished.
+      fold: async (item, outcome, sessionId) => {
+        const last = prepared.get(item.place.id)
+        const place: PlaceResult = outcome.status === 'completed'
+          ? { ...last!, sessionId, spent: outcome.spent }
+          : {
+              placeId: item.place.id, sessionId, spent: outcome.spent,
+              status: 'failed', taskIds: [],
+              unresolved: last?.unresolved ?? [],
+              findings: last?.findings ?? [],
+              problems: [...(last?.problems ?? []), describeFailure(outcome.failure)],
+              resumable: outcome.resumable,
+            }
+        results.push(place)
+        // The ledger row, whatever the verdict: a screen that failed is a screen
+        // this run REACHED, and recording that is what stops the next run paying
+        // for the same failure. The digest is the one the work list planned over.
+        recordLedger({ [item.place.id]: ledgerRow(item, place.status) })
+        // The fragment an accepted outcome produced, under this screen's digest:
+        // the next run over the same inputs folds it instead of buying it again.
+        if (outcome.status === 'completed' && (place.status === 'authored' || place.status === 'empty')) {
+          await storeCachedSessionOutput(
+            {
+              repoRoot: opts.repoRoot,
+              cacheName: INTERFACE_AUTHOR_CACHE_NAME,
+              key: cacheKey(item, live !== undefined),
+            },
+            outcome.output,
+          )
+        }
+        spent.turns += place.spent.turns
+        spent.tokens += place.spent.tokens
+        spent.costUsd += place.spent.costUsd
+        opts.onProgress?.({ kind: 'place-done', place })
+      },
+    })
+  }
+  await runSessions(pending.filter((item) => item.place.kind === 'component'))
+  await runSessions(pending.filter((item) => item.place.kind !== 'component'))
 
   // Completion order is provider latency; the report is the work list.
   const order = new Map(work.map((item, index) => [item.place.id, index]))
@@ -665,17 +735,21 @@ const OBSERVE_CONCURRENCY = 4
  */
 async function observeLiteralAddresses(
   items: readonly AuthorWorkItem[],
+  scopeOf: (item: AuthorWorkItem) => { address?: string },
   live: LiveScreens | undefined,
   signal?: AbortSignal,
 ): Promise<Map<string, ObserveScreenResult>> {
   const observations = new Map<string, ObserveScreenResult>()
   if (!live) return observations
-  const queue = items.filter((item) => item.place.address && !hasAddressSlot(item.place.address))
+  const queue = items.flatMap((item) => {
+    const address = scopeOf(item).address
+    return address && !hasAddressSlot(address) ? [{ id: item.place.id, address }] : []
+  })
   let next = 0
   const worker = async (): Promise<void> => {
     while (next < queue.length && !signal?.aborted) {
-      const item = queue[next++]!
-      observations.set(item.place.id, await live.observer.observe({ path: item.place.address! }))
+      const { id, address } = queue[next++]!
+      observations.set(id, await live.observer.observe({ path: address }))
     }
   }
   await Promise.all(Array.from({ length: Math.min(OBSERVE_CONCURRENCY, queue.length) }, worker))
@@ -691,6 +765,8 @@ export { defaultPoolConcurrency as defaultAuthorConcurrency }
 
 interface PrepareInput {
   item: AuthorWorkItem
+  /** The place the session authored, and the address it authored it at. */
+  scope: { screenId: string; address?: string }
   fragment: AuthoredFragment
   derived: InterfacesFile | null
   /** The catalog as it stands NOW — what the fragment is validated against. */
@@ -740,7 +816,7 @@ function preparePlace(input: PrepareInput): PreparedPlace {
     fragment,
     replaceable: prior,
     carryUnaccounted: input.carryUnaccounted,
-    scope: scopeOf(item),
+    scope: input.scope,
   })
   if (!validation.ok) {
     // The loop returns these errors to the session before accepting its output.
@@ -833,20 +909,12 @@ function screenTable(
     .map((place) => ({ id: place.id, ...(place.address ? { address: place.address } : {}) }))
 }
 
-/** The dialogs and panels that sit on one screen, however deeply nested. */
+/** The dialogs and panels that sit on one root place, however deeply nested. */
 function placesOn(
-  screenId: string,
+  rootId: string,
   places: ReadonlyMap<string, InterfaceResource>,
 ): InterfaceResource[] {
-  return [...places.values()].filter((place) => place.kind !== 'screen' && screenOf(place.id, places) === screenId)
-}
-
-/** The place a session authors — its screen, and the address it sits at. */
-function scopeOf(item: AuthorWorkItem): { screenId: string; address?: string } {
-  return {
-    screenId: item.place.id,
-    ...(item.place.address ? { address: item.place.address } : {}),
-  }
+  return [...places.values()].filter((place) => !isRootPlace(place) && screenOf(place.id, places) === rootId)
 }
 
 function describeFailure(failure: { kind: string } & Record<string, unknown>): string {
@@ -866,7 +934,7 @@ function describeFailure(failure: { kind: string } & Record<string, unknown>): s
   }
 }
 
-/** The screen a place sits on, walking `of` up; a screen resolves to itself. */
+/** The root place (screen or component) a place sits on, walking `of` up; a root resolves to itself. */
 function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): string | undefined {
   const seen = new Set<string>()
   let current: string | undefined = id
@@ -874,7 +942,7 @@ function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): s
     seen.add(current)
     const place: InterfaceResource | undefined = places.get(current)
     if (!place) return undefined
-    if (place.kind === 'screen') return place.id
+    if (isRootPlace(place)) return place.id
     current = place.of
   }
   return undefined
