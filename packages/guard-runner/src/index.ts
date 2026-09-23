@@ -342,12 +342,17 @@ export type { StartWebSurfaceOptions, WebSurfaceHandle } from './web/surface.js'
 export {
   createWebObserver,
   observeScreen,
+  probeLocator,
   boundTree,
   MAX_OBSERVATION_BYTES,
 } from './web/observe.js'
+export { MAX_UNNAMED_CONTROLS, type UnnamedControl } from './web/unnamed-controls.js'
 export { hasAddressSlot } from './web/address.js'
 export type {
   CreateWebObserverOptions,
+  LocatorProbeRequest,
+  LocatorProbeResult,
+  LocatorReading,
   ObserveScreenResult,
   ScreenObservation,
   ScreenObservationRequest,

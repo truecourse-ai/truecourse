@@ -39,6 +39,7 @@ import {
   type GuardWebCaptures,
   type GuardWebExpect,
   type GuardWebLocator,
+  type GuardWebScope,
   type GuardWebState,
   type GuardWebStep,
 } from '@truecourse/shared'
@@ -230,18 +231,31 @@ async function readVisibleText(page: Page): Promise<string> {
  * The locator for one authored target — the handle the member names, compiled 1:1
  * to the browser engine's own query for it (`getByRole` for the primary member,
  * `getByPlaceholder` / `getByLabel` / `getByText` / `getByTitle` / `getByAltText`
- * for the five other things a user perceives). Nothing here can address the
- * implementation: there is no branch that takes a selector, because the schema has
- * no member that carries one.
+ * for the five other things a user perceives), inside its `within` scope when it
+ * has one. A selector reaches the browser only through the `css` member, which the
+ * schema marks as the non-canonical escape; nothing else here addresses the
+ * implementation.
  *
- * An authored `pick: first` narrows to the first match, so downstream counting sees
- * 0 or 1 and the strict must-be-unambiguous check never fires for declared grids.
+ * An authored `pick` narrows to one match — `first`, or the 1-based position it
+ * names — so downstream counting sees 0 or 1 and the strict must-be-unambiguous
+ * check never fires for a declared ambiguity. A position past the matches leaves
+ * nothing, which fails as an absent target.
  */
 export function webLocator(page: Page, target: GuardWebLocator, includeHidden = false): Locator {
-  const root = target.within
-    ? page.getByRole(target.within.role, { name: target.within.name, exact: target.within.exact ?? false })
-    : page
-  const exact = target.exact ?? false
+  return handleLocator(target.within ? handleLocator(page, target.within, false) : page, target, includeHidden)
+}
+
+/**
+ * Every element the target's handle matches inside its scope, BEFORE its own
+ * `pick` narrows them — the count a declared position is checked against.
+ */
+export function webLocatorMatches(page: Page, target: GuardWebLocator): Locator {
+  return handleLocator(target.within ? handleLocator(page, target.within, false) : page, target, false, false)
+}
+
+/** One member's query under `root`, with its `pick` applied unless asked not to. */
+function handleLocator(root: Page | Locator, target: GuardWebScope, includeHidden: boolean, picked = true): Locator {
+  const exact = 'exact' in target ? target.exact ?? false : false
   const base =
     'role' in target
       ? root.getByRole(target.role, { name: target.name, exact, includeHidden })
@@ -253,8 +267,11 @@ export function webLocator(page: Page, target: GuardWebLocator, includeHidden = 
             ? root.getByText(target.text, { exact })
             : 'title' in target
               ? root.getByTitle(target.title, { exact })
-              : root.getByAltText(target.alt, { exact })
-  return target.pick === 'first' ? base.first() : base
+              : 'css' in target
+                ? root.locator(target.css)
+                : root.getByAltText(target.alt, { exact })
+  if (target.pick === undefined || !picked) return base
+  return target.pick === 'first' ? base.first() : base.nth(target.pick - 1)
 }
 
 /**

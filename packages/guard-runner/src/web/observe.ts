@@ -6,6 +6,13 @@
  * (`{"role": "button", "name": "Save"}`), so what it lists is exactly what a
  * task can target, and what it lacks is exactly what `unresolved` must name.
  *
+ * Beside the tree it reports the page's UNNAMED controls ({@link UnnamedControl}):
+ * the ones the tree lists with an empty or glyph-only name, with the DOM facts a
+ * `css` locator is written from. And it PROBES a locator
+ * ({@link WebScreenObserver.probe}): how many elements it matches at an address,
+ * and whether the one it resolves to is visible — the live proof a non-canonical
+ * locator is held to before it is authored.
+ *
  * It is READ-ONLY in intent, not by construction: an observation may ACTIVATE
  * a few controls before it looks (open a menu, a dialog, a tab), because a
  * dialog's controls exist only once it is open. The caller's doctrine decides
@@ -25,11 +32,12 @@
  */
 
 import type { BrowserContext, Page } from 'playwright-core'
-import type { GuardWebLocator } from '@truecourse/shared'
+import { describeInterfaceTarget, type GuardWebLocator } from '@truecourse/shared'
 import { hasAddressSlot } from './address.js'
 import { parseCookieHeader, type WorldCredential } from './credential.js'
-import { webLocator, pageAddress } from './executor.js'
+import { webLocator, webLocatorMatches, pageAddress } from './executor.js'
 import { WEB_CONTEXT_OPTIONS, type WebBrowserHandle } from './browser.js'
+import { readUnnamedControls, type UnnamedControl } from './unnamed-controls.js'
 
 /** How much of one accessibility tree an observation carries. A tree is
  *  context, and context is the budget; a screen past this is cut at a line
@@ -62,16 +70,41 @@ export interface ScreenObservation {
   activated: string[]
   /** Page errors and console errors the load raised — a broken screen says so. */
   problems: string[]
+  /** The interactive elements the tree lists with an empty or glyph-only name. */
+  unnamed?: UnnamedControl[]
 }
 
 export type ObserveScreenResult =
   | { ok: true; observation: ScreenObservation }
   | { ok: false; reason: string }
 
+export interface LocatorProbeRequest {
+  /** The address to open, every slot filled. */
+  path: string
+  /** Controls to activate first, in order — the steps that reveal the target. */
+  activate?: readonly GuardWebLocator[]
+  /** The locator to resolve once they have run. */
+  locator: GuardWebLocator
+}
+
+/** What one locator resolved to on the live page. */
+export interface LocatorReading {
+  /** How many elements its `within` scope matches, when it has one. */
+  scopeMatches?: number
+  /** How many elements its handle matches inside that scope, before its own `pick`. */
+  matches: number
+  /** The element it resolves to (after `pick`) exists exactly once and is visible. */
+  visible: boolean
+}
+
+export type LocatorProbeResult = { ok: true; reading: LocatorReading } | { ok: false; reason: string }
+
 export interface WebScreenObserver {
   /** The credential the pages are signed in with, by name; absent when anonymous. */
   readonly principal?: string
   observe(request: ScreenObservationRequest): Promise<ObserveScreenResult>
+  /** Open an address, activate what was asked, and resolve one locator there. */
+  probe(request: LocatorProbeRequest): Promise<LocatorProbeResult>
   /** Close the contexts this observer has open. The browser stays the caller's. */
   close(): Promise<void>
 }
@@ -102,28 +135,29 @@ export async function createWebObserver(opts: CreateWebObserverOptions): Promise
     }
   }
   const open = new Set<BrowserContext>()
+  /** Run `look` on a fresh signed-in page, in a context of its own that closes after. */
+  const onFreshPage = async <T>(look: (page: Page) => Promise<T | { ok: false; reason: string }>) => {
+    let context: BrowserContext
+    try {
+      context = await browser.newContext(WEB_CONTEXT_OPTIONS)
+    } catch (e) {
+      return { ok: false as const, reason: `the browser could not open a context: ${firstLine(e)}` }
+    }
+    open.add(context)
+    try {
+      if (opts.credential) await signIn(context, opts.baseUrl, opts.credential.credential)
+      return await look(await context.newPage())
+    } catch (e) {
+      return { ok: false as const, reason: `the browser could not open a signed-in page: ${firstLine(e)}` }
+    } finally {
+      open.delete(context)
+      await context.close().catch(() => undefined)
+    }
+  }
   const observer: WebScreenObserver = {
     ...(opts.credential ? { principal: opts.credential.name } : {}),
-    async observe(request) {
-      let context: BrowserContext
-      let page: Page
-      try {
-        context = await browser.newContext(WEB_CONTEXT_OPTIONS)
-      } catch (e) {
-        return { ok: false, reason: `the browser could not open a context: ${firstLine(e)}` }
-      }
-      open.add(context)
-      try {
-        if (opts.credential) await signIn(context, opts.baseUrl, opts.credential.credential)
-        page = await context.newPage()
-        return await observeScreen(page, opts.baseUrl, request)
-      } catch (e) {
-        return { ok: false, reason: `the browser could not open a signed-in page: ${firstLine(e)}` }
-      } finally {
-        open.delete(context)
-        await context.close().catch(() => undefined)
-      }
-    },
+    observe: (request) => onFreshPage((page) => observeScreen(page, opts.baseUrl, request)),
+    probe: (request) => onFreshPage((page) => probeLocator(page, opts.baseUrl, request)),
     async close() {
       for (const context of open) await context.close().catch(() => undefined)
       open.clear()
@@ -155,6 +189,61 @@ export async function observeScreen(
   baseUrl: string,
   request: ScreenObservationRequest,
 ): Promise<ObserveScreenResult> {
+  const opened = await openAndActivate(page, baseUrl, request)
+  if (!opened.ok) return opened
+  let tree: string
+  try {
+    tree = await page.locator('body').ariaSnapshot({ timeout: OBSERVE_SETTLE_TIMEOUT_MS })
+  } catch (e) {
+    return { ok: false, reason: `reading the accessibility tree of ${pageAddress(page)} failed: ${firstLine(e)}` }
+  }
+  const bounded = boundTree(tree)
+  const unnamed = await readUnnamedControls(page)
+  return {
+    ok: true,
+    observation: {
+      path: request.path,
+      address: pageAddress(page),
+      title: await page.title().catch(() => ''),
+      tree: bounded.tree,
+      omittedLines: bounded.omittedLines,
+      activated: opened.activated,
+      problems: opened.problems,
+      ...(unnamed.length > 0 ? { unnamed } : {}),
+    },
+  }
+}
+
+/**
+ * Open `request.path` on `page`, activate what was asked, and resolve the
+ * locator the way the runner does: its scope, every match of its handle, and
+ * the one element its `pick` (if any) leaves.
+ */
+export async function probeLocator(
+  page: Page,
+  baseUrl: string,
+  request: LocatorProbeRequest,
+): Promise<LocatorProbeResult> {
+  const opened = await openAndActivate(page, baseUrl, request)
+  if (!opened.ok) return opened
+  const { locator } = request
+  try {
+    const scopeMatches = locator.within ? await webLocator(page, locator.within).count() : undefined
+    const matches = await webLocatorMatches(page, locator).count()
+    const resolved = webLocator(page, locator)
+    const visible = (await resolved.count()) === 1 && (await resolved.isVisible())
+    return { ok: true, reading: { ...(scopeMatches !== undefined ? { scopeMatches } : {}), matches, visible } }
+  } catch (e) {
+    return { ok: false, reason: `resolving ${describeLocator(locator)} on ${pageAddress(page)} failed: ${firstLine(e)}` }
+  }
+}
+
+/** The shared half of an observation and a probe: open the address, then activate. */
+async function openAndActivate(
+  page: Page,
+  baseUrl: string,
+  request: ScreenObservationRequest,
+): Promise<{ ok: true; activated: string[]; problems: string[] } | { ok: false; reason: string }> {
   if (!request.path.startsWith('/')) {
     return { ok: false, reason: `the path must start with "/" (got ${JSON.stringify(request.path)})` }
   }
@@ -188,7 +277,7 @@ export async function observeScreen(
   const activated: string[] = []
   for (const target of request.activate ?? []) {
     const locator = webLocator(page, target)
-    const label = describeTarget(target)
+    const label = describeLocator(target)
     try {
       await locator.click({ timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
     } catch (e) {
@@ -201,26 +290,7 @@ export async function observeScreen(
     await settle(page)
     activated.push(`${label} → now at ${pageAddress(page)}`)
   }
-
-  let tree: string
-  try {
-    tree = await page.locator('body').ariaSnapshot({ timeout: OBSERVE_SETTLE_TIMEOUT_MS })
-  } catch (e) {
-    return { ok: false, reason: `reading the accessibility tree of ${pageAddress(page)} failed: ${firstLine(e)}` }
-  }
-  const bounded = boundTree(tree)
-  return {
-    ok: true,
-    observation: {
-      path: request.path,
-      address: pageAddress(page),
-      title: await page.title().catch(() => ''),
-      tree: bounded.tree,
-      omittedLines: bounded.omittedLines,
-      activated,
-      problems,
-    },
-  }
+  return { ok: true, activated, problems }
 }
 
 /** Wait for the network to go quiet, briefly — a screen that never does is still a screen. */
@@ -243,16 +313,10 @@ export function boundTree(tree: string): { tree: string; omittedLines: number } 
   return { tree: kept.join('\n'), omittedLines: lines.length - kept.length }
 }
 
-/** `button "Save"` — the target as an authored step writes it. */
-function describeTarget(target: GuardWebLocator): string {
-  const member =
-    'role' in target ? `${target.role} ${JSON.stringify(target.name)}`
-      : 'label' in target ? `label ${JSON.stringify(target.label)}`
-        : 'placeholder' in target ? `placeholder ${JSON.stringify(target.placeholder)}`
-          : 'text' in target ? `text ${JSON.stringify(target.text)}`
-            : 'title' in target ? `title ${JSON.stringify(target.title)}`
-              : `alt ${JSON.stringify(target.alt)}`
-  return target.within ? `${member} within ${target.within.role} ${JSON.stringify(target.within.name)}` : member
+/** `button "Save"` / `css "main button" within navigation "Sidebar"` — the target as an authored step writes it. */
+function describeLocator(target: GuardWebLocator): string {
+  const member = describeInterfaceTarget(target)
+  return target.within ? `${member} within ${describeInterfaceTarget(target.within)}` : member
 }
 
 function firstLine(e: unknown): string {

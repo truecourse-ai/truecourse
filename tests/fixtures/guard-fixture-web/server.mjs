@@ -60,6 +60,18 @@
  *                     - image with alt text "Company logo";
  *                     - button with the title "Close the panel";
  *                     - paragraph "row two of three" (the plain-text handle).
+ *   GET /icons    → heading "Icons"; the controls NO user-perceivable handle
+ *                   reaches, the surface the non-canonical `css` locator and the
+ *                   observer's unnamed-element details need:
+ *                     - in `main`, a sort button that is a lone icon
+ *                       (`<i class="bi bi-chevron-expand">`, no name at all) and a
+ *                       view button whose only content is a private-use glyph;
+ *                     - an `<i title="More">` page-options trigger in `main`, and a
+ *                       sidebar `button "More"` in the navigation — one title, two
+ *                       controls;
+ *                     - two list rows, each with an identical icon-only delete
+ *                       button (the positional `pick` case).
+ *                   Each click writes what it did into paragraph `#status`.
  *   GET /upload   → heading "Upload"; the surface the `upload` verb needs — a
  *                   visible labelled file input, a hidden one behind a button (the
  *                   react-dropzone shape), an `accept=".pdf"` one that refuses
@@ -142,6 +154,25 @@ const SLOW = page(
   `<h1>Slow</h1>
 <p id="slow">still working</p>
 <script>setTimeout(function () { document.getElementById('slow').textContent = 'ready at last' }, ${delayMs})</script>`,
+)
+
+/** Controls with no accessible name, or one name shared by two controls. */
+const ICONS = page(
+  'Icons',
+  `<style>i.bi { display: inline-block; width: 16px; height: 16px }</style>
+<nav aria-label="Sidebar"><button type="button" title="More" onclick="say('sidebar more')">More</button></nav>
+<main>
+  <h1>Icons</h1>
+  <button type="button" data-action="sort" onclick="say('sorted')"><i class="bi bi-chevron-expand"></i></button>
+  <button type="button" onclick="say('viewed')"><span class="glyph">\uE0A1</span></button>
+  <i class="bi bi-three-dots" title="More" style="cursor: pointer" onclick="say('page options')"></i>
+  <ul>
+    <li>Alpha <button type="button" onclick="say('deleted Alpha')"><i class="bi bi-trash"></i></button></li>
+    <li>Beta <button type="button" onclick="say('deleted Beta')"><i class="bi bi-trash"></i></button></li>
+  </ul>
+  <p id="status">idle</p>
+</main>
+<script>function say(text) { document.getElementById('status').textContent = text }</script>`,
 )
 
 /**
@@ -413,6 +444,8 @@ const server = http.createServer(async (req, res) => {
             ? LONG
           : url.pathname === '/controls'
             ? CONTROLS
+            : url.pathname === '/icons'
+              ? ICONS
             : url.pathname === '/capture'
               ? CAPTURE
               : url.pathname === '/upload'

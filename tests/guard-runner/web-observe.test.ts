@@ -129,6 +129,44 @@ describe('the screen observer', () => {
     expect(result.observation.problems).toContain('the address answered HTTP 404')
   }, 30_000)
 
+  it('lists the controls the tree shows with no name, with what a css locator is written from', async () => {
+    const result = await observer.observe({ path: '/icons' })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const unnamed = result.observation.unnamed ?? []
+    expect(unnamed).toContainEqual({
+      tag: 'button',
+      attributes: { 'data-action': 'sort' },
+      icon: 'i.bi-chevron-expand',
+      region: 'main',
+      selector: 'button[data-action="sort"]',
+      matches: 1,
+    })
+    // A glyph for a name is no name: it is listed with its code point, and
+    // the only selector it has is its position inside its region.
+    expect(unnamed).toContainEqual(expect.objectContaining({ tag: 'button', glyph: 'U+E0A1', selector: 'main button', matches: 4, position: 2 }))
+    expect(unnamed.filter((control) => control.icon === 'i.bi-trash').map((control) => [control.selector, control.matches, control.position]))
+      .toEqual([['main button:has(i.bi-trash)', 2, 1], ['main button:has(i.bi-trash)', 2, 2]])
+    // Named controls are the tree's business, not this list's.
+    expect(unnamed.some((control) => control.attributes.title === 'More')).toBe(false)
+  }, 30_000)
+
+  it('probes a locator the way the runner resolves it: its scope, its matches, and the one it picks', async () => {
+    expect(await observer.probe({ path: '/icons', locator: { title: 'More' } }))
+      .toEqual({ ok: true, reading: { matches: 2, visible: false } })
+    expect(await observer.probe({ path: '/icons', locator: { title: 'More', within: { css: 'main' } } }))
+      .toEqual({ ok: true, reading: { scopeMatches: 1, matches: 1, visible: true } })
+    expect(await observer.probe({ path: '/icons', locator: { css: 'button:has(i.bi-trash)', pick: 2 } }))
+      .toEqual({ ok: true, reading: { matches: 2, visible: true } })
+    expect(await observer.probe({ path: '/icons', locator: { css: 'button:has(i.bi-trash)', pick: 3 } }))
+      .toEqual({ ok: true, reading: { matches: 2, visible: false } })
+  }, 30_000)
+
+  it('probes after the activations it is asked for', async () => {
+    const probed = await observer.probe({ path: '/', activate: [{ role: 'button', name: 'Reveal' }], locator: { text: 'the secret is out' } })
+    expect(probed).toEqual({ ok: true, reading: { matches: 1, visible: true } })
+  }, 30_000)
+
   it('runs two observations side by side without one seeing the other', async () => {
     const [a, b] = await Promise.all([
       observer.observe({ path: '/', activate: [{ role: 'button', name: 'Reveal' }] }),
