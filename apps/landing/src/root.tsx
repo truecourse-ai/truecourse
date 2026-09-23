@@ -3,6 +3,7 @@ import { Links, Meta, Outlet, Scripts } from 'react-router';
 import type { LinksFunction } from 'react-router';
 import stylesheet from './globals.css?url';
 import { initPostHog } from '@/lib/posthog';
+import { initGA } from '@/lib/ga';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheet },
@@ -41,6 +42,7 @@ export function HydrateFallback() {
 export default function App() {
   useEffect(() => {
     initPostHog();
+    initGA();
   }, []);
   return <Outlet />;
 }
