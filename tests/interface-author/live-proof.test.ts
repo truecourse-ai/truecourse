@@ -254,3 +254,82 @@ describe('where a proof opens', () => {
     ])
   })
 })
+
+describe('a css readable', () => {
+  function checkLinksDraft(observer?: LiveScreenObserver) {
+    const tools = buildAuthorTools({
+      repoRoot: '/nowhere',
+      derived: DERIVED,
+      authored: null,
+      replaceable: new Set(),
+      scope: { screenId: 'links', address: '/links' },
+      ...(observer ? { live: { observer } } : {}),
+    })
+    const tool = tools.find((t) => t.name === 'check_draft')!
+    return (args: unknown) => tool.execute(args, toolContext)
+  }
+  const cards = { within: { css: 'main .cards' }, item: 'generic', template: '<title>', slots: [{ name: 'title', kind: 'text' }], why: 'the card list is plain divs with no list role' }
+  const screen = (rows: unknown[]) => ({
+    id: 'links',
+    kind: 'screen',
+    title: '/links',
+    address: '/links',
+    readables: { markers: [], elements: [], controls: [], rows },
+  })
+
+  it('needs a `why`', async () => {
+    const { observer } = probingObserver({ matches: 1, visible: true })
+    const result = await checkLinksDraft(observer)({ interfaces: [], resources: [screen([{ ...cards, why: undefined }])] })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('must say `why`')
+  })
+
+  it('is refused when the run has no live screen to prove it on', async () => {
+    const result = await checkLinksDraft()({ interfaces: [], resources: [screen([cards])] })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('no live screen to prove it on')
+  })
+
+  it('is proven at the screen address, and a dialog fact after the actions that open the dialog', async () => {
+    const { observer, probes } = probingObserver({ matches: 1, visible: true })
+    const dialog = {
+      id: 'delete-link',
+      kind: 'dialog',
+      title: 'Delete link',
+      of: 'links',
+      readables: {
+        markers: [{ marker: 'Delete link', within: { css: 'div:has(> div > button[data-testid="close"])' }, why: 'the modal has no dialog role' }],
+        elements: [],
+        controls: [],
+        rows: [],
+      },
+    }
+    const result = await checkLinksDraft(observer)({
+      interfaces: [],
+      resources: [screen([cards]), dialog],
+      proof: { 'delete-link': { steps: [{ activate: { role: 'button', name: 'Delete' } }] } },
+    })
+    expect(result.isError, String(result.content)).toBeFalsy()
+    expect(probes).toEqual([
+      { path: '/links', steps: [{ resolve: { css: 'main .cards' } }] },
+      {
+        path: '/links',
+        steps: [{ activate: { role: 'button', name: 'Delete' } }, { resolve: { css: 'div:has(> div > button[data-testid="close"])' } }],
+      },
+    ])
+  })
+
+  it('names the way into a dialog when its fact did not resolve on the bare screen', async () => {
+    const { observer } = probingObserver({ matches: 0, visible: false })
+    const result = await checkLinksDraft(observer)({
+      interfaces: [],
+      resources: [
+        screen([]),
+        { id: 'delete-link', kind: 'dialog', title: 'Delete link', of: 'links', readables: { markers: [{ marker: 'Delete link', within: { css: 'div.modal' }, why: 'no dialog role' }], elements: [], controls: [], rows: [] } },
+      ],
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('matches nothing on /links')
+    expect(result.content).toContain('proof: {"delete-link": {"steps": [...]}}')
+  })
+})

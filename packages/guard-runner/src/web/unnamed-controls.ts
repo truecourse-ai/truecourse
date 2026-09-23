@@ -10,6 +10,18 @@
  * candidate selector with the number of elements it matches right now — so an
  * author copies what it sees instead of guessing a selector.
  *
+ * Two more kinds of element the tree cannot show are reported beside them:
+ *
+ *  - a CLICKABLE element with no interactive role (a click-handled `div`, a
+ *    react-select option rendered as a plain `div`): the tree lists its text as
+ *    text, never as a control. It is found by its origin of a pointer cursor, a
+ *    focusable `tabindex`, or a react-select option id, and listed with its
+ *    visible text, which a `{text}` handle reaches;
+ *  - an unnamed DIALOG-LIKE CONTAINER: a fixed overlay covering most of the
+ *    viewport and holding controls, with no `dialog` role anywhere in it (a modal
+ *    drawn from plain `div`s). No role+name scopes a step to it, so it is listed
+ *    with a candidate container selector a `within: {css}` can copy.
+ *
  * The candidate prefers a test id (`data-testid`, `data-test`, `data-cy`), then
  * another `data-*` fact, then the `title`, the icon, the `href`, and the bare tag
  * last. A `data-*` attribute that carries a widget's momentary STATE
@@ -43,24 +55,67 @@ export interface UnnamedControl {
   matches: number
   /** Its 1-based position among those matches, when there is more than one. */
   position?: number
+  /**
+   * Set on a clickable element with NO interactive role: the tree shows it as
+   * text, never as a control, and `text` is what a `{text}` handle reaches it by.
+   */
+  noRole?: true
+  /** Its visible text, cut at {@link MAX_TEXT_CHARS} — present on a `noRole` element. */
+  text?: string
+}
+
+/** A fixed overlay holding controls with no `dialog` role: a modal no role+name scopes. */
+export interface UnnamedContainer {
+  tag: string
+  /** As on {@link UnnamedControl}. */
+  attributes: Record<string, string>
+  /** The first heading inside it, else the start of its text — what tells two apart. */
+  heading?: string
+  /** How many interactive elements it holds. */
+  controls: number
+  /** A candidate selector for the container itself, for a `within: {css}`. */
+  selector: string
+  /** How many elements that selector matches right now — a scope must match one. */
+  matches: number
+}
+
+/** What one scan of a page finds. */
+export interface UnnamedScan {
+  controls: UnnamedControl[]
+  containers: UnnamedContainer[]
 }
 
 /** How many unnamed controls one observation reports. */
 export const MAX_UNNAMED_CONTROLS = 40
 
+/** How many of those are clickable elements with no role — kept below the whole so they never crowd the unnamed ones out. */
+export const MAX_NO_ROLE_CONTROLS = 20
+
+/** How many unnamed dialog-like containers one observation reports. */
+export const MAX_UNNAMED_CONTAINERS = 5
+
 /** How much of one attribute value is listed; a longer one ends in `…`. */
 export const MAX_ATTRIBUTE_CHARS = 120
 
+/** How much of a no-role element's text, or a container's heading, is listed. */
+export const MAX_TEXT_CHARS = 80
+
 /**
- * Read the page's unnamed controls. A page the scan cannot read yields none —
- * the tree is still the observation, and this is only what it cannot carry.
+ * Read the page's unnamed controls and containers. A page the scan cannot read
+ * yields none — the tree is still the observation, and this is only what it
+ * cannot carry.
  */
-export async function readUnnamedControls(page: Page): Promise<UnnamedControl[]> {
+export async function readUnnamedElements(page: Page): Promise<UnnamedScan> {
   try {
     const found: unknown = await page.evaluate(SCAN)
-    return Array.isArray(found) ? (found as UnnamedControl[]) : []
+    if (typeof found !== 'object' || found === null) return { controls: [], containers: [] }
+    const scan = found as Partial<UnnamedScan>
+    return {
+      controls: Array.isArray(scan.controls) ? scan.controls : [],
+      containers: Array.isArray(scan.containers) ? scan.containers : [],
+    }
   } catch {
-    return []
+    return { controls: [], containers: [] }
   }
 }
 
@@ -71,18 +126,24 @@ export async function readUnnamedControls(page: Page): Promise<UnnamedControl[]>
  */
 const SCAN = `(() => {
   const LIMIT = ${MAX_UNNAMED_CONTROLS}
+  const NO_ROLE_LIMIT = ${MAX_NO_ROLE_CONTROLS}
+  const CONTAINER_LIMIT = ${MAX_UNNAMED_CONTAINERS}
   const MAX_VALUE = ${MAX_ATTRIBUTE_CHARS}
+  const MAX_TEXT = ${MAX_TEXT_CHARS}
   const TEST_IDS = ['data-testid', 'data-test', 'data-cy']
   const STATE_DATA = /^data-(state|highlighted|disabled|orientation|side|align|placeholder|selected|active|open|checked|focus.*|hover.*)$/
   const PUA = /^[\\uE000-\\uF8FF\\u{F0000}-\\u{FFFFD}\\u{100000}-\\u{10FFFD}]$/u
   const ICON_CLASS = /^(bi|fa|fas|far|fab|fal|fad|lucide|icon|icons|ti|ri|mdi|ph|glyphicon|octicon|feather|material-icons|material-symbols)([-_]|$)/
-  const INTERACTIVE = 'button, a[href], input:not([type=hidden]), select, textarea, summary, [onclick], [tabindex]:not([tabindex="-1"]), ' +
-    ['button', 'link', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'checkbox', 'switch', 'radio', 'option', 'combobox', 'treeitem']
-      .map((role) => '[role=' + role + ']').join(', ')
+  const NATIVE = 'button, a[href], input:not([type=hidden]), select, textarea, summary'
+  const ROLES = ['button', 'link', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'checkbox', 'switch', 'radio', 'option', 'combobox', 'treeitem']
+  const INTERACTIVE = NATIVE + ', [onclick], [tabindex]:not([tabindex="-1"]), ' + ROLES.map((role) => '[role=' + role + ']').join(', ')
+  const OPTION_IDS = '[id*="-option-"]'
+  const DIALOGS = '[role=dialog], [role=alertdialog], dialog'
+  const hasRole = (el) => el.matches(NATIVE) || ROLES.includes(el.getAttribute('role'))
   const LANDMARKS = { MAIN: 'main', NAV: 'navigation', HEADER: 'banner', FOOTER: 'contentinfo', ASIDE: 'complementary', FORM: 'form', DIALOG: 'dialog' }
   const clean = (text) => (text || '').replace(/\\s+/g, ' ').trim()
   const quote = (value) => '"' + value.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"').replace(/\\n/g, '\\\\a ') + '"'
-  const cut = (value) => (value.length > MAX_VALUE ? value.slice(0, MAX_VALUE) + '…' : value)
+  const cut = (value, max = MAX_VALUE) => (value.length > max ? value.slice(0, max) + '…' : value)
   const visible = (el) => {
     const box = el.getBoundingClientRect()
     const style = getComputedStyle(el)
@@ -137,15 +198,7 @@ const SCAN = `(() => {
     return undefined
   }
   const matchAll = (selector) => { try { return [...document.querySelectorAll(selector)] } catch { return undefined } }
-  const candidates = new Set(document.querySelectorAll(INTERACTIVE))
-  for (const el of document.body.querySelectorAll('*')) if (pointerOrigin(el)) candidates.add(el)
-  const out = []
-  for (const el of candidates) {
-    if (out.length >= LIMIT) break
-    if (!visible(el)) continue
-    const name = nameOf(el)
-    if (!unnamed(name)) continue
-    const tag = el.tagName.toLowerCase()
+  const describedAttributes = (el) => {
     const raw = {}
     for (const attr of el.attributes) {
       if (attr.name === 'title' || attr.name === 'role' || attr.name === 'href' || attr.name.startsWith('aria-') || attr.name.startsWith('data-')) {
@@ -154,6 +207,24 @@ const SCAN = `(() => {
     }
     const attributes = {}
     for (const key of Object.keys(raw)) attributes[key] = cut(raw[key])
+    return { raw, attributes }
+  }
+  const candidates = new Set(document.querySelectorAll(INTERACTIVE + ', ' + OPTION_IDS))
+  for (const el of document.body.querySelectorAll('*')) if (pointerOrigin(el)) candidates.add(el)
+  const out = []
+  let roleless = 0
+  for (const el of candidates) {
+    if (out.length >= LIMIT) break
+    if (!visible(el)) continue
+    // A clickable element with no role and real text is a control the tree
+    // shows as text; one with no text falls through to the unnamed check.
+    const text = hasRole(el) ? '' : clean(el.innerText || el.textContent || '')
+    const noRole = text !== '' && !unnamed(text)
+    if (noRole && roleless >= NO_ROLE_LIMIT) continue
+    const name = noRole ? '' : nameOf(el)
+    if (!noRole && !unnamed(name)) continue
+    const tag = el.tagName.toLowerCase()
+    const { raw, attributes } = describedAttributes(el)
     const icon = iconOf(el)
     const region = regionOf(el)
     const byAttribute = (key) => tag + '[' + CSS.escape(key) + '=' + quote(raw[key]) + ']'
@@ -182,7 +253,67 @@ const SCAN = `(() => {
     if (name) entry.glyph = glyphs(name).map((ch) => 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')).join(' ')
     if (region) entry.region = region.words
     if (matching.length > 1) entry.position = matching.indexOf(el) + 1
+    if (noRole) {
+      entry.noRole = true
+      entry.text = cut(text, MAX_TEXT)
+      roleless++
+    }
     out.push(entry)
   }
-  return out
+
+  // A selector for a container: a stable attribute of its own, else the child
+  // path down to the nearest descendant that carries one, else its position
+  // from the body. The first that matches exactly this element wins.
+  const containerSelectors = (el) => {
+    const tag = el.tagName.toLowerCase()
+    const own = [...el.attributes]
+      .filter((attr) => (attr.name === 'aria-modal' || (attr.name.startsWith('data-') && !STATE_DATA.test(attr.name))) && attr.value.length <= 60)
+      .sort((a, b) => Number(TEST_IDS.includes(b.name)) - Number(TEST_IDS.includes(a.name)))
+      .map((attr) => tag + '[' + CSS.escape(attr.name) + '=' + quote(attr.value) + ']')
+    const queue = [{ node: el, path: [] }]
+    for (let i = 0; i < queue.length && i < 400; i++) {
+      const { node, path } = queue[i]
+      if (path.length >= 6) continue
+      const found = [...node.children].find((child) => [...child.attributes].some((attr) => TEST_IDS.includes(attr.name)))
+      if (found) {
+        const attr = [...found.attributes].find((a) => TEST_IDS.includes(a.name))
+        own.push(tag + ':has(> ' + [...path, found.tagName.toLowerCase() + '[' + CSS.escape(attr.name) + '=' + quote(attr.value) + ']'].join(' > ') + ')')
+        break
+      }
+      for (const child of node.children) queue.push({ node: child, path: [...path, child.tagName.toLowerCase()] })
+    }
+    const steps = []
+    for (let node = el; node && node.parentElement && node !== document.body; node = node.parentElement) {
+      steps.unshift(node.tagName.toLowerCase() + ':nth-child(' + ([...node.parentElement.children].indexOf(node) + 1) + ')')
+    }
+    own.push(['body', ...steps].join(' > '))
+    return own
+  }
+  const containers = []
+  for (const el of document.body.querySelectorAll('*')) {
+    if (containers.length >= CONTAINER_LIMIT) break
+    if (getComputedStyle(el).position !== 'fixed' || !visible(el)) continue
+    const box = el.getBoundingClientRect()
+    if (box.width < innerWidth * 0.5 || box.height < innerHeight * 0.5) continue
+    if (el.matches(DIALOGS) || el.closest(DIALOGS) || el.querySelector(DIALOGS)) continue
+    if (containers.some((found) => found.el.contains(el))) continue
+    const controls = [...el.querySelectorAll(INTERACTIVE)].filter(visible).length
+    if (controls === 0) continue
+    let selector
+    let matches = 0
+    for (const candidate of containerSelectors(el)) {
+      const matching = matchAll(candidate)
+      if (!matching || !matching.includes(el)) continue
+      selector = candidate
+      matches = matching.length
+      if (matches === 1) break
+    }
+    if (!selector) continue
+    const headingNode = el.querySelector('h1, h2, h3, h4, h5, h6, [role=heading]')
+    const heading = clean(headingNode ? headingNode.textContent : el.innerText)
+    const entry = { el, tag: el.tagName.toLowerCase(), attributes: describedAttributes(el).attributes, controls, selector, matches }
+    if (heading) entry.heading = cut(heading, MAX_TEXT)
+    containers.push(entry)
+  }
+  return { controls: out, containers: containers.map(({ el, ...entry }) => entry) }
 })()`

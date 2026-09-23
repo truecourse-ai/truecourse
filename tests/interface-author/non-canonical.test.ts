@@ -60,8 +60,41 @@ const SORT: Interface = {
 describe('the record', () => {
   it('lists every css step with its screen, task, step and reason — and no canonical one', () => {
     expect(nonCanonicalLocators({ ...DERIVED, interfaces: [RENAME, SORT] })).toEqual([
-      { screen: 'tags-id', task: 'web/rename-tag', step: 1, locator: { title: 'More', within: { css: 'main' } }, why: 'the page icon shares its title with the sidebar button' },
-      { screen: 'tags-id', task: 'web/rename-tag', step: 3, locator: { css: 'button:has(i.bi-check2)' }, why: 'icon-only confirm button' },
+      { kind: 'step', screen: 'tags-id', task: 'web/rename-tag', step: 1, locator: { title: 'More', within: { css: 'main' } }, why: 'the page icon shares its title with the sidebar button' },
+      { kind: 'step', screen: 'tags-id', task: 'web/rename-tag', step: 3, locator: { css: 'button:has(i.bi-check2)' }, why: 'icon-only confirm button' },
+    ])
+  })
+
+  it('lists every css readable with its place, kind and reason, beside the steps', () => {
+    const withReadables: InterfacesFile = {
+      ...DERIVED,
+      interfaces: [RENAME],
+      resources: {
+        web: [
+          ...DERIVED.resources!.web!,
+          {
+            id: 'delete-dialog',
+            kind: 'dialog',
+            title: 'Delete link',
+            of: 'links',
+            readables: {
+              markers: [{ marker: 'Delete link', within: { css: 'div:has(> button[data-testid="close"])' }, why: 'the modal has no dialog role' }],
+              elements: [{ element: { role: 'heading', name: 'Delete link' } }],
+            },
+          },
+        ],
+      },
+    }
+    expect(nonCanonicalLocators(withReadables).filter((row) => row.kind === 'readable')).toEqual([
+      {
+        kind: 'readable',
+        screen: 'links',
+        place: 'delete-dialog',
+        readable: 'markers',
+        index: 1,
+        locator: { css: 'div:has(> button[data-testid="close"])' },
+        why: 'the modal has no dialog role',
+      },
     ])
   })
 

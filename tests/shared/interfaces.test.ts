@@ -23,6 +23,7 @@ import {
   InterfaceStateIdSchema,
   InterfaceStateSchema,
   InterfaceStepSchema,
+  readableLocators,
   InterfaceStepKindSchema,
   InterfacesFileSchema,
   type InterfacesFile,
@@ -3092,13 +3093,29 @@ describe('a step target beyond role and name', () => {
     }
   })
 
-  it('keeps readables to the handles a user perceives', () => {
-    const parsed = InterfacesFileSchema.safeParse(
-      catalogWith([{ kind: 'activate', target: { role: 'button', name: 'Save' } }], {
-        elements: [{ element: { css: 'main h1' } }],
-      }),
+  it('lets a readable reach its element through css only when it says why', () => {
+    const step = [{ kind: 'activate', target: { role: 'button', name: 'Save' } }]
+    const unexplained = InterfacesFileSchema.safeParse(catalogWith(step, { rows: [{ within: { css: 'main .cards' }, item: 'generic', template: '<name>', slots: [{ name: 'name', kind: 'text' }] }] }))
+    expect(unexplained.success).toBe(false)
+    expect(!unexplained.success && unexplained.error.issues[0].path.slice(-4)).toEqual(['readables', 'rows', 0, 'why'])
+    expect(!unexplained.success && unexplained.error.issues[0].message).toContain('must say `why`')
+    const explained = InterfacesFileSchema.safeParse(
+      catalogWith(step, { elements: [{ element: { css: 'main h1' }, why: 'the heading is a styled div with no heading role' }] }),
     )
-    expect(parsed.success).toBe(false)
-    expect(!parsed.success && parsed.error.issues[0].message).toContain('`css` is for step targets only')
+    expect(explained.success).toBe(true)
+  })
+
+  it('lists every readable locator with the fact it belongs to', () => {
+    expect(
+      readableLocators({
+        readables: {
+          markers: [{ marker: 'Saved' }, { marker: 'Delete link', within: { css: 'div.modal' }, why: 'no dialog role' }],
+          controls: [{ id: 'pick', control: { role: 'checkbox', name: 'Pick' }, states: ['checked'] }],
+        },
+      }),
+    ).toEqual([
+      { kind: 'markers', index: 1, locator: { css: 'div.modal' }, why: 'no dialog role' },
+      { kind: 'controls', index: 0, id: 'pick', locator: { role: 'checkbox', name: 'Pick' } },
+    ])
   })
 })

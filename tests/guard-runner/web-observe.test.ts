@@ -159,6 +159,33 @@ describe('the screen observer', () => {
     expect(unnamed.some((control) => control.attributes.title === 'More')).toBe(false)
   }, 30_000)
 
+  it('lists clickable elements with no role by their text, and a modal with no dialog role as a container', async () => {
+    const result = await observer.observe({ path: '/widgets' })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const noRole = (result.observation.unnamed ?? []).filter((control) => control.noRole)
+    expect(noRole.map((control) => [control.tag, control.text])).toEqual([
+      ['div', 'Work'],
+      ['div', 'Personal'],
+      ['div', 'Guard Seed Link'],
+    ])
+    // Buttons with a name are the tree's; the icon-only close button is not.
+    expect(result.observation.unnamed?.some((control) => control.text === 'Cancel')).toBe(false)
+    expect(result.observation.unnamed).toContainEqual(
+      expect.objectContaining({ tag: 'button', selector: 'button[data-testid="close-modal-button"]', matches: 1 }),
+    )
+    expect(result.observation.containers).toEqual([
+      {
+        tag: 'div',
+        attributes: {},
+        heading: 'Delete link',
+        controls: 3,
+        selector: 'div:has(> div > div > button[data-testid="close-modal-button"])',
+        matches: 1,
+      },
+    ])
+  }, 30_000)
+
   it('probes a locator the way the runner resolves it: its scope, its matches, and the one it picks', async () => {
     const probed = await observer.probe({
       path: '/icons',

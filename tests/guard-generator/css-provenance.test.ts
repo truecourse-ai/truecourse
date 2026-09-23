@@ -50,6 +50,27 @@ describe('a css locator in a generated scenario', () => {
     }
   })
 
+  it('passes a css locator copied from a readable the catalog proved, as an element or a scope', () => {
+    const places = [
+      {
+        id: 'links',
+        kind: 'screen' as const,
+        title: 'Links',
+        address: '/links',
+        readables: {
+          markers: [{ marker: 'Delete link', within: { css: 'div:has(> button[data-testid="close"])' }, why: 'the modal has no dialog role' }],
+          elements: [{ element: { css: 'main .cards' }, why: 'the card list has no list role' }],
+        },
+      },
+    ]
+    const steps = [
+      { driver: 'web', navigate: '/links', expect: { visible: { css: 'main .cards' } } },
+      { driver: 'web', click: { role: 'button', name: 'Cancel' }, expect: { text: { contains: 'Delete link' }, within: { css: 'div:has(> button[data-testid="close"])' } } },
+    ]
+    expect(unprovenCssLocatorDefect(steps, [], places)).toBeNull()
+    expect(unprovenCssLocatorDefect(steps, [])).toContain('step 1 addresses')
+  })
+
   it('leaves canonical locators and other drivers alone', () => {
     const steps = [
       { driver: 'web', click: { title: 'More', within: { role: 'main', name: 'Links' } } },

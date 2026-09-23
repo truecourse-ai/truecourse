@@ -1116,6 +1116,14 @@ export const InterfaceReadableIdSchema = z
 export type InterfaceReadableId = z.infer<typeof InterfaceReadableIdSchema>
 
 /**
+ * Why a readable reaches its element through `css` — the same one line a
+ * non-canonical step carries: what the element is and why no role+name, label,
+ * placeholder, text, title or alt reaches it (a modal drawn with no dialog role,
+ * a card list with no list role).
+ */
+const readableWhy = z.string().min(1).optional()
+
+/**
  * One TEXT MARKER a resource shows: a stable visible substring, as the page
  * renders it — never a value, a count, or anything that moves between runs
  * (the varying lines belong to {@link InterfaceRowsReadableSchema}). `within`
@@ -1131,6 +1139,7 @@ export const InterfaceMarkerReadableSchema = z
     marker: z.string().min(1),
     /** The one condition it appears under. */
     when: z.string().min(1).optional(),
+    why: readableWhy,
   })
   .strict()
 export type InterfaceMarkerReadable = z.infer<typeof InterfaceMarkerReadableSchema>
@@ -1149,6 +1158,7 @@ export const InterfaceElementReadableSchema = z
     id: InterfaceReadableIdSchema.optional(),
     element: GuardWebLocatorSchema,
     when: z.string().min(1).optional(),
+    why: readableWhy,
   })
   .strict()
 export type InterfaceElementReadable = z.infer<typeof InterfaceElementReadableSchema>
@@ -1172,6 +1182,7 @@ export const InterfaceControlReadableSchema = z
     /** The ARIA states this control exposes — the driver's own closed set. */
     states: z.array(z.enum(GUARD_WEB_STATES)).min(1),
     when: z.string().min(1).optional(),
+    why: readableWhy,
   })
   .strict()
   .refine((fact) => new Set(fact.states).size === fact.states.length, {
@@ -1208,6 +1219,7 @@ export const InterfaceRowsReadableSchema = z
     slots: z.array(InterfaceRowSlotSchema).min(1),
     /** The one condition the items appear under. */
     when: z.string().min(1).optional(),
+    why: readableWhy,
   })
   .strict()
   .superRefine(rowGrammarIssues)
@@ -1305,26 +1317,52 @@ export const InterfaceResourceSchema = z
         seen.add(fact.id)
       })
     }
-    // A readable is what a user READS, addressed the way a user finds it. The
-    // `css` escape belongs to step targets only, where a task says why it needs it.
-    const readables = resource.readables
-    const located = [
-      ...(readables?.markers ?? []).map((fact, i) => ['markers', i, 'within', fact.within] as const),
-      ...(readables?.elements ?? []).map((fact, i) => ['elements', i, 'element', fact.element] as const),
-      ...(readables?.controls ?? []).map((fact, i) => ['controls', i, 'control', fact.control] as const),
-      ...(readables?.rows ?? []).map((fact, i) => ['rows', i, 'within', fact.within] as const),
-    ]
-    for (const [kind, i, field, locator] of located) {
-      if (locator && isNonCanonicalLocator(locator)) {
+    // A readable is addressed the way a user finds it, and `css` is the same
+    // MARKED escape it is for a step: a readable that reaches its element
+    // through a selector says why, which is what the non-canonical record reports.
+    for (const { kind, index, locator, why } of readableLocators(resource)) {
+      if (why === undefined && isNonCanonicalLocator(locator)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['readables', kind, i, field],
-          message: 'a readable is addressed the way a user finds it — `css` is for step targets only',
+          path: ['readables', kind, index, 'why'],
+          message: 'this readable reaches its element through `css`, so it must say `why`: what the element is and why no role+name, label, placeholder, text, title or alt reaches it',
         })
       }
     }
   })
 export type InterfaceResource = z.infer<typeof InterfaceResourceSchema>
+
+/** The four readable kinds, in the order a place states them. */
+export const INTERFACE_READABLE_KINDS = ['markers', 'elements', 'controls', 'rows'] as const
+export type InterfaceReadableKind = (typeof INTERFACE_READABLE_KINDS)[number]
+
+/** One locator a place's readables carry: which fact, and the reason it gave for a selector. */
+export interface InterfaceReadableLocator {
+  kind: InterfaceReadableKind
+  /** 0-based, within its kind. */
+  index: number
+  /** The readable's own id, when it has one. */
+  id?: string
+  locator: GuardWebLocator
+  why?: string
+}
+
+/**
+ * Every locator a place's readables carry — a marker's and a row grammar's
+ * `within`, an element's and a control's own — in the order the place states
+ * them. What the non-canonical rules walk, for readables as for steps.
+ */
+export function readableLocators(place: { readables?: InterfaceReadables }): InterfaceReadableLocator[] {
+  const readables = place.readables
+  const entry = (kind: InterfaceReadableKind, index: number, fact: { id?: string; why?: string }, locator: GuardWebLocator | undefined): InterfaceReadableLocator[] =>
+    locator ? [{ kind, index, ...(fact.id ? { id: fact.id } : {}), locator, ...(fact.why ? { why: fact.why } : {}) }] : []
+  return [
+    ...(readables?.markers ?? []).flatMap((fact, i) => entry('markers', i, fact, fact.within)),
+    ...(readables?.elements ?? []).flatMap((fact, i) => entry('elements', i, fact, fact.element)),
+    ...(readables?.controls ?? []).flatMap((fact, i) => entry('controls', i, fact, fact.control)),
+    ...(readables?.rows ?? []).flatMap((fact, i) => entry('rows', i, fact, fact.within)),
+  ]
+}
 
 /**
  * WHERE one interface came from: `derived` = a mapping read it off the working

@@ -26,6 +26,7 @@ import type {
   ObserveScreenResult,
   ScreenObservation,
   ScreenObservationRequest,
+  UnnamedContainer,
   UnnamedControl,
   WebScreenObserver,
 } from '@truecourse/guard-runner'
@@ -117,14 +118,32 @@ export function renderObservation(observation: ScreenObservation): string {
   if (observation.omittedLines > 0) {
     lines.push(`… ${observation.omittedLines} more line(s) of the tree not shown — observe a narrower state (a tab, a dialog) to read them.`)
   }
-  if (observation.unnamed && observation.unnamed.length > 0) {
-    const unnamed = boundTree(observation.unnamed.map((control) => `  ${describeUnnamedControl(control)}`).join('\n'), MAX_UNNAMED_BYTES)
+  const unnamedControls = (observation.unnamed ?? []).filter((control) => !control.noRole)
+  if (unnamedControls.length > 0) {
+    const unnamed = boundTree(unnamedControls.map((control) => `  ${describeUnnamedControl(control)}`).join('\n'), MAX_UNNAMED_BYTES)
     lines.push(
       '',
       'Controls the tree shows with NO accessible name (or only an icon glyph) — no role+name reaches them. Target one by a visible handle it has (its `title`), else by `css` with a `why`, copying a selector below and its match count:',
       unnamed.tree,
     )
     if (unnamed.omittedLines > 0) lines.push(`… ${unnamed.omittedLines} more unnamed control(s) not shown.`)
+  }
+  const noRole = (observation.unnamed ?? []).filter((control) => control.noRole)
+  if (noRole.length > 0) {
+    const listed = boundTree(noRole.map((control) => `  ${describeUnnamedControl(control)}`).join('\n'), MAX_UNNAMED_BYTES)
+    lines.push(
+      '',
+      'Clickable elements with NO interactive role — the tree shows their text as text, not as a control (a react-select option, a click-handled card). Target one by `{"text": "<its text>"}`; fall back to `css` with a `why` only when the text is not unique or not stable:',
+      listed.tree,
+    )
+    if (listed.omittedLines > 0) lines.push(`… ${listed.omittedLines} more clickable element(s) not shown.`)
+  }
+  if (observation.containers && observation.containers.length > 0) {
+    lines.push(
+      '',
+      'Overlays holding controls with NO dialog role (a modal drawn from plain elements) — no role+name scopes a step to one. Scope a step inside it with `within: {"css": "<selector>"}` and a `why`, copying the selector:',
+      ...observation.containers.map((container) => `  ${describeContainer(container)}`),
+    )
   }
   return lines.join('\n')
 }
@@ -136,11 +155,23 @@ function describeUnnamedControl(control: UnnamedControl): string {
     : `${control.matches} matches${control.position ? `, this is #${control.position}` : ''}`
   return [
     control.tag,
+    ...(control.text !== undefined ? [`text ${JSON.stringify(control.text)}`] : []),
     ...Object.entries(control.attributes).map(([name, value]) => `${name}=${JSON.stringify(value)}`),
     ...(control.icon ? [`icon ${control.icon}`] : []),
     ...(control.glyph ? [`glyph ${control.glyph}`] : []),
     ...(control.region ? [`in ${control.region}`] : []),
     `css \`${control.selector}\` (${matches})`,
+  ].join(' · ')
+}
+
+/** `div · heading "Delete link" · 3 controls · css `div:has(> div > button[data-testid="close"])` (1 match)` */
+function describeContainer(container: UnnamedContainer): string {
+  return [
+    container.tag,
+    ...Object.entries(container.attributes).map(([name, value]) => `${name}=${JSON.stringify(value)}`),
+    ...(container.heading ? [`heading ${JSON.stringify(container.heading)}`] : []),
+    `${container.controls} control(s)`,
+    `css \`${container.selector}\` (${container.matches === 1 ? '1 match' : `${container.matches} matches`})`,
   ].join(' · ')
 }
 

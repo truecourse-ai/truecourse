@@ -51,7 +51,7 @@ import {
 import { checkedDraftEvidence } from './checked-draft.js'
 import { scopeFragmentIds } from './identity.js'
 import { observeScreenTool, type LiveScreens } from './live-screen.js'
-import { LiveProofReachSchema, proveLocators, type LiveProofReach } from './live-proof.js'
+import { LiveProofReachSchema, proveLocators, proveReadables, type LiveProofReach } from './live-proof.js'
 
 /** How many catalog entries one `list_interfaces` call hands back — a tool
  *  result is context, and context is the budget. */
@@ -190,7 +190,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
   return defineSessionTool({
     name: 'check_draft',
     description:
-      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. A step whose locator uses `css` or `pick` is also PROVEN on the running app: its address is opened, the task\'s clicks before it are replayed (only when every earlier step is a click and the task has no endState), and it must resolve to exactly one visible element (a `pick` position within the matches). When the task cannot be replayed, pass `proof: {"<task id>": {"steps": [{"activate": <locator>} | {"fill": <locator>, "value": "<text>"} | {"select": <locator>, "option": "<label>"}, …]}}` — never a control that submits, deletes, cancels or signs out; when the entry has a {slot}, add `"path": "<the entry with every slot filled>"`. What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
+      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. A step whose locator uses `css` or `pick` is also PROVEN on the running app: its address is opened, the task\'s clicks before it are replayed (only when every earlier step is a click and the task has no endState), and it must resolve to exactly one visible element (a `pick` position within the matches). When the task cannot be replayed, pass `proof: {"<task id>": {"steps": [{"activate": <locator>} | {"fill": <locator>, "value": "<text>"} | {"select": <locator>, "option": "<label>"}, …]}}` — never a control that submits, deletes, cancels or signs out; when the entry has a {slot}, add `"path": "<the entry with every slot filled>"`. A readable whose locator uses `css` is proven the same way at this place\'s address, after the actions a `proof` entry keyed by the place\'s id lists (the way into a dialog). What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
     kind: 'check-draft',
     readOnly: true,
     destructive: false,
@@ -214,7 +214,10 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
         }
       }
       const proven = { ...reach, ...proof }
-      const unproven = await proveLocators(piece.interfaces, input.live, proven)
+      const unproven = [
+        ...(await proveLocators(piece.interfaces, input.live, proven)),
+        ...(await proveReadables(piece.resources ?? [], input.live, proven, input.scope?.address)),
+      ]
       if (unproven.length > 0) {
         return {
           content: `${unproven.length} locator(s) did not hold on the live screen — nothing in this call was accepted, and the draft still holds ${

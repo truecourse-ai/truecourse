@@ -25,10 +25,12 @@ import { z } from 'zod'
 import {
   GuardWebLocatorSchema,
   describeWebLocator,
+  readableLocators,
   interfaceStepLocator,
   isNonCanonicalLocator,
   webLocatorKey,
   type GuardWebLocator,
+  type InterfaceResource,
 } from '@truecourse/shared'
 import { addressFillsTemplate, hasAddressSlot, type LocatorProbeStep, type LocatorReading } from '@truecourse/guard-runner'
 import type { AuthoredTask } from './draft.js'
@@ -125,6 +127,72 @@ export async function proveLocators(
       }
       const problem = readingProblem(target.locator, reading)
       if (problem) problems.push(`${where(target)} ${problem} ${at}`)
+    })
+  }
+  return problems
+}
+
+/**
+ * Prove every readable locator of `places` that owes a proof, on `live` when the
+ * run has it, at `address` — the screen the session authors. Returns one line
+ * per problem; an empty list means every one held.
+ */
+export async function proveReadables(
+  places: readonly InterfaceResource[],
+  live: LiveScreens | undefined,
+  reach: LiveProofReach,
+  address: string | undefined,
+): Promise<string[]> {
+  const problems: string[] = []
+  for (const place of places) {
+    const owed = readableLocators(place).filter((readable) => owesProof(readable.locator))
+    if (owed.length === 0) continue
+    const where = (readable: (typeof owed)[number]) =>
+      `\`${place.id}\` ${readable.kind}[${readable.index}]${readable.id ? ` (\`${readable.id}\`)` : ''} (${describeWebLocator(readable.locator)})`
+    if (!live) {
+      for (const readable of owed.filter((o) => isNonCanonicalLocator(o.locator))) {
+        problems.push(
+          `${where(readable)} reaches its element through \`css\`, and this run has no live screen to prove it on — use a role+name or visible-attribute handle, or leave the fact out and say why in \`unresolved\``,
+        )
+      }
+      continue
+    }
+    const path = reach[place.id]?.path ?? address
+    const refused = (problem: string) => owed.forEach((readable) => problems.push(`${where(readable)}: ${problem}`))
+    if (path === undefined) {
+      refused('its place has no address to prove it on')
+      continue
+    }
+    if (reach[place.id]?.path !== undefined && address !== undefined && !addressFillsTemplate(path, address)) {
+      refused(`the proof path \`${path}\` is not the screen's address \`${address}\` — fill each {slot} and change nothing else`)
+      continue
+    }
+    if (hasAddressSlot(path)) {
+      refused(`its screen's address \`${path}\` carries a slot — pass \`proof: {"${place.id}": {"path": "<the address with every slot filled from a seeded fixture>"}}\` so it can be proven live`)
+      continue
+    }
+    const actions = reach[place.id]?.steps ?? []
+    const at = pageState(path, actions.map(describeAction))
+    const probed = await live.observer.probe({
+      path,
+      steps: [...actions, ...owed.map((readable) => ({ resolve: readable.locator }))],
+    })
+    owed.forEach((readable, i) => {
+      const reading: LocatorReading | undefined = probed.readings?.[i]
+      if (!reading) {
+        problems.push(`${where(readable)} could not be proven ${at}: ${probed.ok ? 'the walk never reached it' : probed.reason}`)
+        return
+      }
+      const problem = readingProblem(readable.locator, reading)
+      if (problem) {
+        problems.push(
+          `${where(readable)} ${problem} ${at}${
+            actions.length === 0 && place.kind !== 'screen'
+              ? ` — a fact of a ${place.kind} is read once it is open: pass \`proof: {"${place.id}": {"steps": [...]}}\` listing the actions that open it`
+              : ''
+          }`,
+        )
+      }
     })
   }
   return problems

@@ -1,21 +1,24 @@
 /**
  * THE NON-CANONICAL RECORD — `guard/interfaces.noncanonical.json`, every authored
- * step that reaches its element through `css`, with the reason the task gave.
+ * step and every readable that reaches its element through `css`, with the reason
+ * it gave.
  *
  * A `css` locator exists because the app gives a control no handle a user or an
  * assistive reader can find it by. That is a fact about the app worth reporting
- * on its own, so the catalog's non-canonical steps are listed in one place:
- * the screen, the task, the step, the locator and its `why`. The list is DERIVED
- * from the catalog after each authoring run, never appended, so it always says
- * what the catalog holds now.
+ * on its own, so the catalog's non-canonical locators are listed in one place:
+ * a step's screen, task and position, a readable's place and kind, the locator
+ * and its `why`. The list is DERIVED from the catalog after each authoring run,
+ * never appended, so it always says what the catalog holds now.
  */
 
 import fs from 'node:fs'
 import {
   interfaceStepLocator,
   isNonCanonicalLocator,
+  readableLocators,
   type GuardWebLocator,
   type InterfaceEntry,
+  type InterfaceReadableKind,
   type InterfaceResource,
   type InterfacesFile,
 } from '@truecourse/shared'
@@ -23,31 +26,64 @@ import { guardNonCanonicalLocatorsPath } from '@truecourse/shared/work-tree'
 import { atomicWriteJson, readMergedInterfaceCatalog } from '@truecourse/guard-runner'
 import { AUTHORED_SURFACE } from './draft.js'
 
-/** One step whose locator is non-canonical. */
-export interface NonCanonicalLocator {
-  /** The screen the task is performed on, when its location resolves to one. */
-  screen?: string
-  task: string
-  /** 1-based, the way a reader counts a task's steps. */
-  step: number
-  locator: GuardWebLocator
-  why: string
-}
+/** One step, or one readable, whose locator is non-canonical. */
+export type NonCanonicalLocator =
+  | {
+      kind: 'step'
+      /** The screen the task is performed on, when its location resolves to one. */
+      screen?: string
+      task: string
+      /** 1-based, the way a reader counts a task's steps. */
+      step: number
+      locator: GuardWebLocator
+      why: string
+    }
+  | {
+      kind: 'readable'
+      /** The screen the place sits on, when it resolves to one. */
+      screen?: string
+      place: string
+      readable: InterfaceReadableKind
+      /** 1-based within its kind. */
+      index: number
+      id?: string
+      locator: GuardWebLocator
+      why: string
+    }
 
-/** Every non-canonical step locator the catalog's web tasks carry, in catalog order. */
+/**
+ * Every non-canonical locator the catalog carries, in catalog order: the web
+ * tasks' steps first, then the web places' readables.
+ */
 export function nonCanonicalLocators(catalog: InterfacesFile | null): NonCanonicalLocator[] {
   const places = new Map((catalog?.resources?.[AUTHORED_SURFACE] ?? []).map((place) => [place.id, place]))
-  return (catalog?.interfaces ?? [])
+  const steps = (catalog?.interfaces ?? [])
     .filter((task) => task.type === AUTHORED_SURFACE)
     .flatMap((task) => {
       const screen = task.at ? screenOf(task.at, places) : screenAt(task.entry, places)
-      return task.steps.flatMap((step, index) => {
+      return task.steps.flatMap((step, index): NonCanonicalLocator[] => {
         if (step.kind !== 'input' && step.kind !== 'activate') return []
         const locator = interfaceStepLocator(step)
         if (!isNonCanonicalLocator(locator)) return []
-        return [{ ...(screen ? { screen } : {}), task: task.id, step: index + 1, locator, why: step.why ?? '' }]
+        return [{ kind: 'step', ...(screen ? { screen } : {}), task: task.id, step: index + 1, locator, why: step.why ?? '' }]
       })
     })
+  const readables = [...places.values()].flatMap((place) => {
+    const screen = screenOf(place.id, places)
+    return readableLocators(place)
+      .filter((readable) => isNonCanonicalLocator(readable.locator))
+      .map((readable): NonCanonicalLocator => ({
+        kind: 'readable',
+        ...(screen ? { screen } : {}),
+        place: place.id,
+        readable: readable.kind,
+        index: readable.index + 1,
+        ...(readable.id ? { id: readable.id } : {}),
+        locator: readable.locator,
+        why: readable.why ?? '',
+      }))
+  })
+  return [...steps, ...readables]
 }
 
 /**

@@ -1600,6 +1600,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const outboundRequestHints = buildOutboundRequestHints(mapped.outboundRequests, externalServices)
   const outboundRequestsOverflow = outboundOverflow(mapped.outboundRequests)
   const catalogs = buildSurfaceCatalogs(catalog)
+  // The web places, whose css readables a scenario may copy like a css step.
+  const webPlaces = mapped.resources?.web ?? []
   // The WHOLE api surface, so a flow can reach for the operations it does
   // not itself walk when a SETUP step needs one (sign up, then sign in, then test
   // favorites). Empty for a repo with no api interfaces — the block simply renders not.
@@ -2821,7 +2823,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (preparationDefect) return preparationDefect
         const composition = compositionDefectOf(raw, recipe)
         if (composition) return composition
-        const unprovenCss = unprovenCssLocatorDefect(raw.steps, catalogs.get('web')?.interfaces ?? [])
+        const unprovenCss = unprovenCssLocatorDefect(raw.steps, catalogs.get('web')?.interfaces ?? [], webPlaces)
         if (unprovenCss) return unprovenCss
         const exampleDefect = exampleFidelityDefect(
           { steps: raw.steps, ...(raw.setup ? { setup: raw.setup } : {}) },

@@ -76,6 +76,17 @@
  *                     - a close button whose icon has only Tailwind utility
  *                       classes (`w-[16px]`), which a selector must escape.
  *                   Each click writes what it did into paragraph `#status`.
+ *   GET /widgets  → heading "Widgets"; controls with NO interactive role, the
+ *                   surface the observer's no-role controls and unnamed containers
+ *                   need:
+ *                     - a react-select-shaped list whose options are plain `div`s
+ *                       with `-option-` ids (no role, no pointer cursor), and a
+ *                       click-handled card `div` with a pointer cursor;
+ *                     - a modal drawn from plain `div`s: a fixed overlay over the
+ *                       whole viewport, a heading "Delete link", buttons "Cancel"
+ *                       and "Confirm", and an icon-only close button carrying a
+ *                       test id — no `dialog` role anywhere.
+ *                   Each click writes what it did into paragraph `#status`.
  *   GET /upload   → heading "Upload"; the surface the `upload` verb needs — a
  *                   visible labelled file input, a hidden one behind a button (the
  *                   react-dropzone shape), an `accept=".pdf"` one that refuses
@@ -178,6 +189,29 @@ const ICONS = page(
   </ul>
   <p id="status">idle</p>
 </main>
+<script>function say(text) { document.getElementById('status').textContent = text }</script>`,
+)
+
+/** Clickable elements with no role, and a modal with no dialog role. */
+const WIDGETS = page(
+  'Widgets',
+  `<main>
+  <h1>Widgets</h1>
+  <div class="rs__menu">
+    <div id="react-select-7-option-0" tabindex="-1" onclick="say('chose Work')">Work</div>
+    <div id="react-select-7-option-1" tabindex="-1" onclick="say('chose Personal')">Personal</div>
+  </div>
+  <div class="card" style="cursor: pointer" onclick="say('opened card')">Guard Seed Link</div>
+  <p id="status">idle</p>
+</main>
+<div style="position: fixed; inset: 0; background: rgba(0,0,0,0.2)">
+  <div class="panel">
+    <div><button type="button" data-testid="close-modal-button" onclick="say('closed')"><i class="bi bi-x"></i></button></div>
+    <h2>Delete link</h2>
+    <button type="button" onclick="say('cancelled')">Cancel</button>
+    <button type="button" onclick="say('confirmed')">Confirm</button>
+  </div>
+</div>
 <script>function say(text) { document.getElementById('status').textContent = text }</script>`,
 )
 
@@ -452,6 +486,8 @@ const server = http.createServer(async (req, res) => {
             ? CONTROLS
             : url.pathname === '/icons'
               ? ICONS
+            : url.pathname === '/widgets'
+              ? WIDGETS
             : url.pathname === '/capture'
               ? CAPTURE
               : url.pathname === '/upload'

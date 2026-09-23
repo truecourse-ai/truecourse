@@ -43,7 +43,7 @@ const AUTHORED_SURFACE = 'web'
  * bumps this in the same commit, which re-opens every screen and re-keys every
  * cached fragment.
  */
-export const INTERFACE_AUTHOR_STAGE_VERSION = 3
+export const INTERFACE_AUTHOR_STAGE_VERSION = 4
 
 /** One screen, what authoring has settled on it, and what it would run over. */
 export interface WebScreenAuthoringState {

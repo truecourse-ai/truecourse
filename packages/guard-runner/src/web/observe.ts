@@ -7,8 +7,10 @@
  * task can target, and what it lacks is exactly what `unresolved` must name.
  *
  * Beside the tree it reports the page's UNNAMED controls ({@link UnnamedControl}):
- * the ones the tree lists with an empty or glyph-only name, with the DOM facts a
- * `css` locator is written from. And it PROBES locators
+ * the ones the tree lists with an empty or glyph-only name, and the clickable
+ * ones it lists as text because they carry no role, with the DOM facts a locator
+ * is written from — and the unnamed overlays a step cannot be scoped to by role
+ * ({@link UnnamedContainer}). And it PROBES locators
  * ({@link WebScreenObserver.probe}): it walks an ordered list of actions on one
  * page — clicks, fills, selects, navigations — and at each point it is asked to,
  * reads how many elements a locator matches and whether the one it resolves to
@@ -40,7 +42,7 @@ import { hasAddressSlot } from './address.js'
 import { parseCookieHeader, type WorldCredential } from './credential.js'
 import { webLocator, webLocatorMatches, pageAddress } from './executor.js'
 import { WEB_CONTEXT_OPTIONS, type WebBrowserHandle } from './browser.js'
-import { readUnnamedControls, type UnnamedControl } from './unnamed-controls.js'
+import { readUnnamedElements, type UnnamedContainer, type UnnamedControl } from './unnamed-controls.js'
 
 /** How much of one accessibility tree an observation carries. A tree is
  *  context, and context is the budget; a screen past this is cut at a line
@@ -73,8 +75,11 @@ export interface ScreenObservation {
   activated: string[]
   /** Page errors and console errors the load raised — a broken screen says so. */
   problems: string[]
-  /** The interactive elements the tree lists with an empty or glyph-only name. */
+  /** The interactive elements the tree lists with an empty or glyph-only name,
+   *  and the clickable ones it lists as text because they carry no role. */
   unnamed?: UnnamedControl[]
+  /** The fixed overlays holding controls with no `dialog` role — modals no role+name scopes. */
+  containers?: UnnamedContainer[]
 }
 
 export type ObserveScreenResult =
@@ -218,7 +223,7 @@ export async function observeScreen(
     return { ok: false, reason: `reading the accessibility tree of ${pageAddress(page)} failed: ${firstLine(e)}` }
   }
   const bounded = boundTree(tree)
-  const unnamed = await readUnnamedControls(page)
+  const { controls: unnamed, containers } = await readUnnamedElements(page)
   return {
     ok: true,
     observation: {
@@ -230,6 +235,7 @@ export async function observeScreen(
       activated: opened.activated,
       problems: opened.problems,
       ...(unnamed.length > 0 ? { unnamed } : {}),
+      ...(containers.length > 0 ? { containers } : {}),
     },
   }
 }

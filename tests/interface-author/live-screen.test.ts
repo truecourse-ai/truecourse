@@ -140,6 +140,18 @@ describe('the briefing block', () => {
     expect(Buffer.byteLength(text)).toBeLessThan(10_000)
     expect(text).toMatch(/… \d+ more unnamed control\(s\) not shown/)
   })
+
+  it('lists clickable elements with no role by their text, and overlays with no dialog role by a container selector', () => {
+    const text = renderObservation({
+      path: '/', address: '/', title: '', tree: '- main', omittedLines: 0, activated: [], problems: [],
+      unnamed: [{ tag: 'div', attributes: {}, selector: 'div', matches: 30, position: 4, noRole: true, text: 'Work' }],
+      containers: [{ tag: 'div', attributes: {}, heading: 'Delete link', controls: 3, selector: 'div:has(> button[data-testid="close"])', matches: 1 }],
+    })
+    expect(text).toContain('Clickable elements with NO interactive role')
+    expect(text).toContain('div · text "Work" · css `div` (30 matches, this is #4)')
+    expect(text).not.toContain('Controls the tree shows with NO accessible name')
+    expect(text).toContain('div · heading "Delete link" · 3 control(s) · css `div:has(> button[data-testid="close"])` (1 match)')
+  })
 })
 
 describe('the fixtures a session may see', () => {
