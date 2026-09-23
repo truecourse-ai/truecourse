@@ -45,6 +45,11 @@ import {
   type WorkerFidelityJudge,
 } from '@truecourse/guard-generator'
 import { promptFingerprint } from '../agent/session-cache.js'
+import {
+  LEGACY_FLOW_WORKER_API_PROMPT_FINGERPRINT,
+  LEGACY_FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
+  LEGACY_FLOW_WORKER_WEB_PROMPT_FINGERPRINT,
+} from '../legacy-prompt-fingerprints.js'
 
 export const FLOW_WORKER_SESSION_KIND = 'guard-generate.flow-worker'
 
@@ -137,11 +142,14 @@ with exactly one row per outstanding assigned case:
   "evidence": "the current observed defect", "issueId": "engine-provided issue ID" }.
 Use reasonKind assertion, annotation, preparation, unsupported-capability,
 review-unavailable, or not-attempted. Copy the current engine issueId when provided;
-do not reclassify an assertion defect as unavailable preparation. A stale aggregate
-failure does not explain a later Cancel rejection. Before retiring actionable work,
-submit a changed executable candidate for every case the engine asks you to repair,
-within the SAME budget. Rewording remaining rows or resubmitting identical behavior
-does not count. Submit one complete revised candidate and preserve every flow obligation.
+do not reclassify an assertion defect as unavailable preparation. When a fidelity
+review rejected a case because the runner cannot observe what would prove it, answer
+with that review's issueId and reasonKind unsupported-capability, naming the missing
+capability in evidence. Every failing run records a new issueId, so copy it from the
+latest correction. A stale aggregate failure does not explain a later Cancel
+rejection. The engine asks once per case for a changed executable candidate before
+you end blocked or retired, within the SAME budget; submit one complete revised
+candidate and preserve every flow obligation.
 For Cancel, arrange a fully valid unsaved form including ALL required inputs, verify
 the dialog is visible, cancel, verify closure and that this draft was not saved.
 A required Amount left blank cannot prove Cancel prevented a save.
@@ -183,10 +191,10 @@ const SYSTEM_PROMPT_BY_SURFACE: Partial<Record<GuardDriverId, string>> = {
   api: FLOW_WORKER_API_SYSTEM_PROMPT,
   web: FLOW_WORKER_WEB_SYSTEM_PROMPT,
 }
-const PROMPT_FINGERPRINT_BY_SURFACE: Partial<Record<GuardDriverId, string>> = {
-  cli: FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
-  api: FLOW_WORKER_API_PROMPT_FINGERPRINT,
-  web: FLOW_WORKER_WEB_PROMPT_FINGERPRINT,
+const LEGACY_PROMPT_FINGERPRINT_BY_SURFACE: Partial<Record<GuardDriverId, string>> = {
+  cli: LEGACY_FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
+  api: LEGACY_FLOW_WORKER_API_PROMPT_FINGERPRINT,
+  web: LEGACY_FLOW_WORKER_WEB_PROMPT_FINGERPRINT,
 }
 
 /**
@@ -202,10 +210,10 @@ export function flowWorkerSystemPrompt(surface: GuardDriverId): string {
   return SYSTEM_PROMPT_BY_SURFACE[surface] ?? FLOW_WORKER_CLI_SYSTEM_PROMPT
 }
 
-/** Each surface authors under its own prompt, so a scenario's cache entry moves
- *  only when ITS prompt changes — the one-shot rule, kept. */
+/** The prompt fingerprint a surface's worker cache keys folded before the
+ *  prompt left the key, frozen so the old key stays readable after a prompt edit. */
 export function flowWorkerPromptFingerprint(surface: GuardDriverId): string {
-  return PROMPT_FINGERPRINT_BY_SURFACE[surface] ?? FLOW_WORKER_CLI_PROMPT_FINGERPRINT
+  return LEGACY_PROMPT_FINGERPRINT_BY_SURFACE[surface] ?? LEGACY_FLOW_WORKER_CLI_PROMPT_FINGERPRINT
 }
 
 /**

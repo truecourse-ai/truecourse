@@ -3,29 +3,59 @@ import type { GuardObligation, GuardRemainingObligation } from '@truecourse/shar
 export type RepairIssue = Pick<GuardRemainingObligation, 'reasonKind' | 'evidence' | 'issueId'> & { source?: 'execution' | 'review' }
 export const obligationKey = (o: { milestone: number; caseId?: string }) => `${o.milestone}:${o.caseId ?? ''}`
 
-/** A bounded corrective request is keyed by engine state, never by the worker's
- * changing prose. An unchanged failure cannot obtain endless fresh attempts. */
+/** Checks a worker's `remaining` rows against the engine's current issue per
+ * outstanding obligation. A row must name the current issue and its kind; the one
+ * reclassification allowed is a fidelity-review finding answered as an
+ * unsupported capability (the runner cannot observe what would prove the case). */
 export function reconcileRemaining(
   outstanding: readonly GuardObligation[],
   issues: ReadonlyMap<string, RepairIssue>,
   supplied: readonly GuardRemainingObligation[] | undefined,
 ) {
-  const current = outstanding.map(o => ({ milestone: o.milestone, ...(o.caseId ? { caseId: o.caseId } : {}),
-    ...currentIssue(issues.get(obligationKey(o))) }))
   const problems: string[] = []
-  for (const row of current) {
+  const repairable: GuardRemainingObligation[] = []
+  const current = outstanding.map((o): GuardRemainingObligation => {
+    const issue = issues.get(obligationKey(o))
+    const row = { milestone: o.milestone, ...(o.caseId ? { caseId: o.caseId } : {}), ...currentIssue(issue) }
+    if (['assertion', 'annotation', 'not-attempted'].includes(row.reasonKind)) repairable.push(row)
     const rows = supplied?.filter(r => obligationKey(r) === obligationKey(row)) ?? []
-    if (rows.length !== 1) problems.push(`${obligationKey(row)} needs exactly one current remaining disposition.`)
-    else if (row.issueId && (rows[0].issueId !== row.issueId || rows[0].reasonKind !== row.reasonKind))
+    if (rows.length !== 1) {
+      problems.push(`${obligationKey(row)} needs exactly one current remaining disposition.`)
+      return row
+    }
+    const [answer] = rows
+    if (row.issueId && answer.issueId === row.issueId && issue?.source === 'review' && answer.reasonKind === 'unsupported-capability')
+      return { ...row, reasonKind: 'unsupported-capability', evidence: answer.evidence }
+    if (row.issueId && (answer.issueId !== row.issueId || answer.reasonKind !== row.reasonKind))
       problems.push(`${obligationKey(row)} must reference current ${row.reasonKind} issue ${row.issueId}.`)
-    else if (!row.issueId && rows[0].reasonKind !== 'not-attempted')
-      problems.push(`${obligationKey(row)} has no engine observation establishing ${rows[0].reasonKind}.`)
-  }
+    else if (!row.issueId && answer.reasonKind !== 'not-attempted')
+      problems.push(`${obligationKey(row)} has no engine observation establishing ${answer.reasonKind}.`)
+    return row
+  })
   for (const row of supplied ?? []) if (!current.some(o => obligationKey(o) === obligationKey(row)))
     problems.push(`${obligationKey(row)} is already covered or is not assigned to this worker.`)
-  const repairable = current.filter(r => ['assertion', 'annotation', 'not-attempted'].includes(r.reasonKind))
-  const identity = JSON.stringify(current.map(r => [obligationKey(r), r.reasonKind, r.issueId ?? null]))
-  return { current, problems, repairable, identity }
+  return { current, problems, repairable }
+}
+
+/** The correction a blocked or retired outcome draws, or undefined when it stands.
+ * Each repairable case is asked for one changed candidate once per session
+ * (`asked` records the ask): every failing run records a fresh issue, so a
+ * demand re-armed by new evidence would never let the worker stop. */
+export function outcomeCorrection(
+  reconciled: ReturnType<typeof reconcileRemaining>,
+  asked: Set<string>,
+): string | undefined {
+  const unasked = reconciled.repairable.filter(row => !asked.has(obligationKey(row)))
+  if (!reconciled.problems.length && !unasked.length) return undefined
+  for (const row of unasked) asked.add(obligationKey(row))
+  return 'Outcome needs correction: remaining work must follow the current case-specific findings. ' +
+    (unasked.length
+      ? 'Submit a changed executable candidate for each case listed below before ending blocked or retired; this is asked once per case, and your next outcome is judged on its remaining rows. ' +
+        `Cases to repair: ${unasked.map(obligationKey).join(', ')}.\n`
+      : 'Correct the remaining rows: copy each current issueId and reasonKind. ') +
+    'Preserve the entire flow contract. This correction does not grant more budget.\n' +
+    reconciled.problems.map(p => p + '\n').join('') +
+    'CURRENT REMAINING: ' + JSON.stringify(reconciled.current)
 }
 
 function currentIssue(issue: RepairIssue | undefined) {

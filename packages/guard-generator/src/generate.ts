@@ -12,7 +12,7 @@ import { completeRealization } from './match.js'
 import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
 import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
-import { reconcileRemaining, type RepairIssue } from './worker-repair.js'
+import { outcomeCorrection, reconcileRemaining, type RepairIssue } from './worker-repair.js'
 import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
@@ -122,7 +122,6 @@ import {
   describeOutstandingObligations,
   GUARD_REVIEW_POLICY_VERSION,
   scenarioMilestoneScopeDefect,
-  milestoneRefs,
   coversFlowMilestones,
   verificationCapabilityGap,
   verificationCasePreparation,
@@ -2737,8 +2736,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         pendingFidelityFinding?: GuardBirthFinding
         rejectionByObligation: Map<string, string>
         repairIssues: Map<string, RepairIssue>
-        requestedRepairs: Map<string, Map<string, Set<string>>>
-        repairAttempts: Map<string, Set<string>>
+        /** Obligations a correction has already asked to repair (once each). */
+        repairsAsked: Set<string>
             }
       const states = new Map<string, WorkerTaskState>()
       for (const task of runnable) {
@@ -2769,8 +2768,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           fidelityFlags: 0,
           rejectionByObligation: new Map(),
           repairIssues: new Map(),
-          requestedRepairs: new Map(),
-          repairAttempts: new Map(),
+          repairsAsked: new Set(),
         })
       }
 
@@ -3131,30 +3129,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const validateTaskOutcome = (state: WorkerTaskState, outcome: GuardFlowWorkerOutcome): string | undefined => {
         const progress = taskProgress(state)
         if (outcome.kind === 'settled' && outcome.additionalScenarios !== undefined) return 'One flow accepts one complete test; additionalScenarios is not allowed.'
-        if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && progress.outstanding.some(o => o.caseId)) {
-          const reconciled = reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining)
-          let requested = state.requestedRepairs.get(reconciled.identity)
-          if (!requested) {
-            requested = new Map(reconciled.repairable.map(row => {
-              const key = `${row.milestone}:${row.caseId ?? ''}`
-              return [key, new Set(state.repairAttempts.get(key) ?? [])]
-            }))
-            state.requestedRepairs.set(reconciled.identity, requested)
-          }
-          const unattempted = reconciled.repairable.filter(row => {
-            const key = `${row.milestone}:${row.caseId ?? ''}`
-            const before = requested!.get(key) ?? new Set<string>()
-            return ![...(state.repairAttempts.get(key) ?? [])].some(candidate => !before.has(candidate))
-          })
-          if (reconciled.problems.length || unattempted.length) {
-            return 'Outcome needs correction: remaining work must follow the current case-specific findings. ' +
-              'Submit a changed executable candidate for each actionable case before retiring; correcting remaining-case prose or resubmitting the same behavior is not a repair attempt. ' +
-              'Preserve the entire flow contract. This correction does not grant more budget.\n' +
-              (unattempted.length ? `Cases still needing a repair submission: ${unattempted.map(row => `${row.milestone}:${row.caseId}`).join(', ')}.\n` : '') +
-              reconciled.problems.join('\n') + '\nCURRENT REMAINING: ' + JSON.stringify(reconciled.current)
-          }
-          return undefined
-        }
+        if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && progress.outstanding.some(o => o.caseId))
+          return outcomeCorrection(reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining), state.repairsAsked)
         if (outcome.kind === 'blocked' && outcome.perMilestone?.some(m => !progress.outstanding.some(o => o.milestone === m.order)))
           return 'Outcome refused: blockers must identify outstanding milestones assigned to this worker.'
         if (outcome.kind !== 'settled') return undefined
@@ -3571,16 +3547,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             if (state.acceptedSha) id = stash.get(state.acceptedSha)?.candidate.scenario.id ?? id
             const built = buildCandidate(state, parsed.raw, id)
             if ('error' in built) return { content: `the scenario does not build: ${built.error}`, isError: true }
-            for (const proof of scenarioMilestoneProof(built.candidate.scenario.steps)) for (const caseId of proof.checks ?? ['']) {
-              const key = `${proof.milestone}:${caseId}`
-              const attempt = scenarioReviewFingerprint({ setup: built.candidate.scenario.setup ?? null,
-                steps: built.candidate.scenario.steps.filter(step => !step.checks?.length ||
-                  (step.checks.includes(caseId) && milestoneRefs(step.milestone).includes(proof.milestone))),
-                normalize: built.candidate.scenario.normalize ?? [] })
-              const attempts = state.repairAttempts.get(key) ?? new Set<string>()
-              attempts.add(attempt)
-              state.repairAttempts.set(key, attempts)
-            }
             const run = await executeOnce(built.candidate, task)
             if ('report' in run) return run.report
             return settleSubmission(state, built.candidate, run.result, evidence.expectedReds, judge)
