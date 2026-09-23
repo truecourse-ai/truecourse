@@ -18,7 +18,7 @@
 import { z } from 'zod';
 import yaml from 'js-yaml';
 import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop';
-import { GuardScenarioSchema, firstInvalidMatchPattern, guardExecutionSteps } from '@truecourse/shared';
+import { GuardScenarioSchema, firstInvalidMatchPattern, guardExecutionSteps, regexLiteral } from '@truecourse/shared';
 import { executeOneScenario, type AdjudicationExecution } from './execute.js';
 
 export const CONTROL_SESSION_KIND = 'guard-adjudicate.control';
@@ -136,7 +136,7 @@ function runControlTool(exec: AdjudicationExecution, state: { executions: number
       const badRe = firstInvalidMatchPattern(guardExecutionSteps(parsed.data));
       if (badRe) {
         return {
-          content: `step ${badRe.step} ${badRe.where} /${badRe.pattern}/ is not a valid regular expression: ${badRe.error}`,
+          content: `step ${badRe.step} ${badRe.where} ${regexLiteral(badRe.pattern, badRe.flags)} is not a valid regular expression: ${badRe.error}`,
           isError: true,
         };
       }

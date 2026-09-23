@@ -31,7 +31,7 @@ it('resolves every new locator and matcher token and exposes regexes to validati
   } })
   const resolved = resolveWebStep(step, text => text.replaceAll('${unique}', 'expense'))
   expect(JSON.stringify(resolved)).not.toContain('${unique}')
-  expect(webStepPatterns(resolved)).toContainEqual({ where: 'expect.inputValue.expected', pattern: 'expense' })
+  expect(webStepPatterns(resolved)).toContainEqual({ where: 'expect.inputValue.expected', pattern: 'expense', takesFlags: true })
   expect(describeWebExpect(resolved.expect)).toContain('hidden or absent')
   expect(describeWebExpect(resolved.expect)).toContain('0 visible matches')
   expect(describeWebExpect({ inputValue: { target, expected: { browserDate: 'today' } } })).toContain('browser timezone')

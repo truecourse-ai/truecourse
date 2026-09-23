@@ -142,3 +142,20 @@ describe('native-when-whole-value — request JSON body leaves', () => {
     expect(out.json).toEqual({ owner: 'pro' })
   })
 })
+
+describe('interpolation keeps a matcher whole', () => {
+  it('a body, header or json matcher keeps its regex flags', () => {
+    const vars = new Map([['title', 'milk']])
+    const out = interpolateApiExpect(
+      {
+        body: { matches: '${title}', flags: 'i' },
+        headers: { 'x-title': { matches: '${title}', flags: 'i' } },
+        json: { title: { matches: '${title}', flags: 'i' } },
+      },
+      vars,
+    )
+    expect(out.body).toEqual({ matches: 'milk', flags: 'i' })
+    expect(out.headers!['x-title']).toEqual({ matches: 'milk', flags: 'i' })
+    expect(out.json!.title).toEqual({ matches: 'milk', flags: 'i' })
+  })
+})

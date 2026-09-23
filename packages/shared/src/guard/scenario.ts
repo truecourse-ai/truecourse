@@ -47,8 +47,10 @@ import type { GuardStepActual } from './step-actuals.js'
 import {
   milestoneClaims,
   milestoneOrder,
+  hasInlineFlagGroup,
   type GuardStepKind,
   type GuardStepMilestone,
+  type StepPattern,
 } from './step-parts.js'
 import {
   GuardCliStepSchema,
@@ -758,9 +760,10 @@ export type GuardScenario = GuardSandboxScenario | GuardApiScenario
 
 /**
  * A regex source in a scenario that does not compile — the offending step
- * (1-based), where in the step it sits, the source, and the `new RegExp` error
- * text. Both the authoring validate path and the committed-scenario loader report
- * an uncompilable pattern from this same evidence.
+ * (1-based), where in the step it sits, the source and its flags, and the
+ * `new RegExp` error text (with a hint when the cause is a known one). Both the
+ * authoring validate path and the committed-scenario loader report an
+ * uncompilable pattern from this same evidence.
  */
 export interface InvalidMatchPattern {
   /** 1-based index of the offending step. */
@@ -769,12 +772,14 @@ export interface InvalidMatchPattern {
   where: string
   /** The regex source that failed to compile. */
   pattern: string
+  /** The flags it was compiled with. */
+  flags?: string
   /** The `new RegExp` compile-error message. */
   error: string
 }
 
 /** Every regex source one step carries — each driver names its own. */
-function stepPatterns(step: GuardScenarioStep): Array<{ where: string; pattern: string }> {
+function stepPatterns(step: GuardScenarioStep): StepPattern[] {
   if (isWebStep(step)) return webStepPatterns(step)
   if (isApiStep(step)) return apiStepPatterns(step)
   return cliStepPatterns(step as GuardCliStep)
@@ -782,7 +787,7 @@ function stepPatterns(step: GuardScenarioStep): Array<{ where: string; pattern: 
 
 /**
  * The first step carrying a regex source that does not compile under `new RegExp`
- * — the exact call the runner makes when it evaluates the matcher (no flags).
+ * with its flags — the exact call the runner makes when it evaluates the matcher.
  * Returns null when every pattern compiles (or none is present). A non-compiling
  * pattern is always a bug: the log matcher throws outright and the stream/body/json
  * matchers turn into an unconditional mismatch, so it is rejected before birth
@@ -792,11 +797,17 @@ export function firstInvalidMatchPattern(
   steps: readonly GuardScenarioStep[],
 ): InvalidMatchPattern | null {
   for (let i = 0; i < steps.length; i++) {
-    for (const { where, pattern } of stepPatterns(steps[i])) {
+    for (const { where, pattern, flags, takesFlags } of stepPatterns(steps[i])) {
       try {
-        new RegExp(pattern)
+        new RegExp(pattern, flags)
       } catch (e) {
-        return { step: i + 1, where, pattern, error: e instanceof Error ? e.message : String(e) }
+        const error = e instanceof Error ? e.message : String(e)
+        const hint = !hasInlineFlagGroup(pattern)
+          ? ''
+          : takesFlags
+            ? ' — JavaScript has no inline flag groups like (?i); drop it and set "flags" (e.g. "flags": "i")'
+            : ' — JavaScript has no inline flag groups like (?i), and this pattern takes no flags; drop it and spell the case out (e.g. [Cc]ost)'
+        return { step: i + 1, where, pattern, ...(flags ? { flags } : {}), error: `${error}${hint}` }
       }
     }
   }

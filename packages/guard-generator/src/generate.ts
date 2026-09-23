@@ -173,6 +173,7 @@ import {
   type GuardUnadjudicatedStage,
   milestoneOrder,
   flowDriversToMatch,
+  regexLiteral,
   scenarioMilestoneProof,
   type Interface,
   type InterfaceResource,
@@ -2826,7 +2827,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (exampleDefect) return exampleDefect
         const badRe = firstInvalidMatchPattern(raw.steps)
         if (badRe) {
-          return `step ${badRe.step} ${badRe.where}: /${badRe.pattern}/ is not a valid regular expression — ${badRe.error}`
+          return `step ${badRe.step} ${badRe.where}: ${regexLiteral(badRe.pattern, badRe.flags)} is not a valid regular expression — ${badRe.error}`
         }
         return null
       }

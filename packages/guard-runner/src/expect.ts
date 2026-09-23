@@ -15,7 +15,7 @@ import type {
   GuardStreamMatcher,
   GuardFileMatcher,
 } from '@truecourse/shared'
-import { describeOffset } from '@truecourse/shared'
+import { describeOffset, regexLiteral } from '@truecourse/shared'
 
 export interface ExpectMismatch {
   observation?: GuardFailureObservation
@@ -133,7 +133,7 @@ export function describeTextMatcher(label: string, matcher: GuardStreamMatcher):
   const parts: string[] = []
   if (matcher.equals !== undefined) parts.push(`equals ${JSON.stringify(truncate(matcher.equals))}`)
   if (matcher.contains !== undefined) parts.push(`contains ${JSON.stringify(matcher.contains)}`)
-  if (matcher.matches !== undefined) parts.push(`matches /${matcher.matches}/`)
+  if (matcher.matches !== undefined) parts.push(`matches ${regexLiteral(matcher.matches, matcher.flags)}`)
   if (matcher.compare) parts.push(describeComparison(matcher.compare))
   return `${label} ${parts.join(' and ')}`
 }
@@ -226,19 +226,20 @@ export function matchTextMatcher(
     let re: RegExp | null = null
     let reError = ''
     try {
-      re = new RegExp(matcher.matches)
+      re = new RegExp(matcher.matches, matcher.flags)
     } catch (e) {
       reError = e instanceof Error ? e.message : String(e)
     }
     if (!re || !re.test(value)) {
-      const caseOnly = re !== null && new RegExp(matcher.matches, 'i').test(value)
+      const caseOnly = re !== null && !re.ignoreCase && new RegExp(re.source, `${re.flags}i`).test(value)
+      const literal = regexLiteral(matcher.matches, matcher.flags)
       return {
         subject,
         ...(subject === 'text' ? { matcherOperator: 'matches' as const } : {}),
-        expected: `${label} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
+        expected: `${label} matches ${literal}${reError ? ` (invalid regex: ${reError})` : ''}`,
         actual: `${label} was ${JSON.stringify(truncate(value, limit))}${caseNote(caseOnly)}`,
         detail: [
-          `expected ${label} to match /${matcher.matches}/`,
+          `expected ${label} to match ${literal}`,
           `--- actual ${label} ---`,
           value,
           ...caseDetail(subject, caseOnly),

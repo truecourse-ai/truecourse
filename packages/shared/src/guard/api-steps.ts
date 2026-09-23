@@ -21,9 +21,12 @@ import { stepChecks } from './step-parts.js'
 import { z } from 'zod'
 import { GuardComparisonSchema, describeComparison } from './capture.js'
 import {
+  GuardRegexFlagsSchema,
   GuardStreamMatcherSchema,
   describeStreamMatcher,
   matcherPatterns,
+  regexLiteral,
+  type StepPattern,
   stepMilestone as milestone,
   stepNote as note,
 } from './step-parts.js'
@@ -75,8 +78,10 @@ export const GuardJsonMatcherSchema = z
   .object({
     equals: z.unknown().optional(),
     contains: z.string().optional(),
-    /** Regex source; matched with `RegExp(pattern).test(String(value))`. */
+    /** Regex source; matched with `new RegExp(matches, flags).test(String(value))`. */
     matches: z.string().optional(),
+    /** The flags of `matches`. */
+    flags: GuardRegexFlagsSchema.optional(),
     exists: z.boolean().optional(),
     absent: z.boolean().optional(),
     /**
@@ -97,6 +102,9 @@ export const GuardJsonMatcherSchema = z
       m.compare !== undefined,
     { message: 'json matcher needs one of equals | contains | matches | exists | absent | compare' },
   )
+  .refine((m) => m.flags === undefined || m.matches !== undefined, {
+    message: '`flags` belongs to `matches`; a matcher without `matches` carries none',
+  })
 
 export const GuardApiExpectSchema = z
   .object({
@@ -233,10 +241,10 @@ export const GuardSignalSchema = z
   })
   .strict()
 
-/** A log-line matcher: a plain substring, or `{ pattern }` as a regex source. */
+/** A log-line matcher: a plain substring, or `{ pattern, flags? }` as a regex source. */
 export const GuardLogMatchSchema = z.union([
   z.string().min(1),
-  z.object({ pattern: z.string().min(1) }).strict(),
+  z.object({ pattern: z.string().min(1), flags: GuardRegexFlagsSchema.optional() }).strict(),
 ])
 
 /**
@@ -337,7 +345,7 @@ export function describeJsonMatcher(m: GuardJsonMatcher): string {
   if (m.absent) return 'is absent'
   if (m.equals !== undefined) return `is ${JSON.stringify(m.equals)}`
   if (m.contains !== undefined) return `contains “${m.contains}”`
-  if (m.matches !== undefined) return `matches /${m.matches}/`
+  if (m.matches !== undefined) return `matches ${regexLiteral(m.matches, m.flags)}`
   return describeComparison(m.compare!)
 }
 
@@ -364,9 +372,9 @@ export function describeApiExpect(expect: GuardApiExpect): string {
   return parts.join(' · ')
 }
 
-/** `“x”` / `/x/` — one log-line matcher, in the words a reader needs. */
+/** `“x”` / `/x/i` — one log-line matcher, in the words a reader needs. */
 export function describeLogMatch(m: GuardLogMatch): string {
-  return typeof m === 'string' ? `“${m}”` : `/${m.pattern}/`
+  return typeof m === 'string' ? `“${m}”` : regexLiteral(m.pattern, m.flags)
 }
 
 /**
@@ -419,7 +427,7 @@ export type GuardApiStep = z.infer<typeof GuardApiStepSchema>
 // --- Cross-step passes, the api driver's half --------------------------
 
 /** Every regex source an api step carries, with the path that names it. */
-export function apiStepPatterns(step: GuardApiStep): Array<{ where: string; pattern: string }> {
+export function apiStepPatterns(step: GuardApiStep): StepPattern[] {
   if (isApiRequestStep(step)) {
     return [
       ...(step.expect.body ? matcherPatterns('expect.body', step.expect.body) : []),
@@ -432,7 +440,7 @@ export function apiStepPatterns(step: GuardApiStep): Array<{ where: string; patt
     ]
   }
   if (isApiLogsStep(step) && typeof step.logs.match !== 'string') {
-    return [{ where: 'logs.match', pattern: step.logs.match.pattern }]
+    return [{ where: 'logs.match', pattern: step.logs.match.pattern, flags: step.logs.match.flags, takesFlags: true }]
   }
   return []
 }

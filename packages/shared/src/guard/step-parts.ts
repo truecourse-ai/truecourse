@@ -15,6 +15,33 @@
 import { z } from 'zod'
 import { GuardComparisonSchema, describeComparison, type GuardComparison } from './capture.js'
 
+// --- Regex sources ---------------------------------------------------
+
+/**
+ * The flags a scenario regex may carry beside its source: `i` (ignore case), `m`
+ * (`^`/`$` match at line breaks), `s` (`.` matches a newline). JavaScript has no
+ * inline `(?i)` group, so this field is the only way to ask for them.
+ */
+export const GuardRegexFlagsSchema = z
+  .string()
+  .regex(/^[ims]{1,3}$/, 'flags is a combination of i, m and s, e.g. "i"')
+  .refine((f) => new Set(f).size === f.length, 'flags names each of i, m and s at most once')
+  .describe('Flags of the regex: any of i (ignore case), m (multiline), s (dotAll). Never inline (?i).')
+
+/** `/source/flags` — how a scenario regex reads in a description or a failure. */
+export function regexLiteral(pattern: string, flags?: string): string {
+  return `/${pattern}/${flags ?? ''}`
+}
+
+/**
+ * Whether a regex source leads with a PCRE/Python inline flag group (`(?i)…`),
+ * which JavaScript rejects. The usual reason a model-written regex does not
+ * compile, so an error names the field that carries flags instead.
+ */
+export function hasInlineFlagGroup(pattern: string): boolean {
+  return /^\(\?[a-zA-Z]+\)/.test(pattern)
+}
+
 // --- Text matchers ---------------------------------------------------
 
 /**
@@ -26,8 +53,10 @@ export const GuardStreamMatcherSchema = z
   .object({
     equals: z.string().optional(),
     contains: z.string().optional(),
-    /** Regex source; matched with `RegExp(pattern).test(value)`. */
+    /** Regex source; matched with `new RegExp(matches, flags).test(value)`. */
     matches: z.string().optional(),
+    /** The flags of `matches`. */
+    flags: GuardRegexFlagsSchema.optional(),
     /**
      * A NUMERIC comparison on what the text carries — the form a CAPTURED value
      * makes assertable (`atMost: "${captured:estimate}"`). See
@@ -45,25 +74,41 @@ export const GuardStreamMatcherSchema = z
       m.compare !== undefined,
     { message: 'stream matcher needs one of equals | contains | matches | compare' },
   )
+  .refine((m) => m.flags === undefined || m.matches !== undefined, {
+    message: '`flags` belongs to `matches`; a matcher without `matches` carries none',
+  })
 
 export type GuardStreamMatcher = z.infer<typeof GuardStreamMatcherSchema>
 
-/** `contains “x”` / `matches /x/` / `is “x”` / `at most N` — one text matcher. */
+/** `contains “x”` / `matches /x/i` / `is “x”` / `at most N` — one text matcher. */
 export function describeStreamMatcher(m: GuardStreamMatcher): string {
   if (m.equals !== undefined) return `is “${m.equals}”`
   if (m.contains !== undefined) return `contains “${m.contains}”`
-  if (m.matches !== undefined) return `matches /${m.matches}/`
+  if (m.matches !== undefined) return `matches ${regexLiteral(m.matches, m.flags)}`
   return describeComparison(m.compare!)
+}
+
+/**
+ * One regex source a step carries: where it sits, the source, its flags, and
+ * whether its field has a `flags` beside it at all (a capture's slicer does not).
+ */
+export interface StepPattern {
+  where: string
+  pattern: string
+  flags?: string
+  takesFlags: boolean
 }
 
 /** The two regex sources one matcher can carry, with the paths that name them. */
 export function matcherPatterns(
   where: string,
-  m: { matches?: string; compare?: GuardComparison },
-): Array<{ where: string; pattern: string }> {
-  const out: Array<{ where: string; pattern: string }> = []
-  if (m.matches !== undefined) out.push({ where, pattern: m.matches })
-  if (m.compare?.number !== undefined) out.push({ where: `${where}.compare.number`, pattern: m.compare.number })
+  m: { matches?: string; flags?: string; compare?: GuardComparison },
+): StepPattern[] {
+  const out: StepPattern[] = []
+  if (m.matches !== undefined) out.push({ where, pattern: m.matches, flags: m.flags, takesFlags: true })
+  if (m.compare?.number !== undefined) {
+    out.push({ where: `${where}.compare.number`, pattern: m.compare.number, takesFlags: false })
+  }
   return out
 }
 
