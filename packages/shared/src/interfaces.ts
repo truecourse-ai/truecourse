@@ -1686,6 +1686,12 @@ export const InterfaceAuthoringRecordSchema = z
      * default reached it, or when nothing was observed.
      */
     principal: z.string().min(1).optional(),
+    /**
+     * The session's `unresolved` lines about a world state the seeded world
+     * lacked ("renders only when a pinned link exists; the seed has none") —
+     * what the next setup's seed is briefed with, so it can seed that state.
+     */
+    stateGaps: z.array(z.string().min(1)).optional(),
   })
   .strict()
 export type InterfaceAuthoringRecord = z.infer<typeof InterfaceAuthoringRecordSchema>

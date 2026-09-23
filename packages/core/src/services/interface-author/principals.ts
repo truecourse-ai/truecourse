@@ -14,6 +14,12 @@ import { ANONYMOUS_PRINCIPAL } from '@truecourse/shared'
 import type { LiveScreenObserver, LiveScreens, ObserveScreenResult } from './live-screen.js'
 import { principalNames } from './live-screen.js'
 
+/** The credential an admin user's web session is published under, when the app has an admin. */
+export const ADMIN_WEB_CREDENTIAL = 'adminWebSession'
+
+/** The credential a non-owner member's web session is published under, when the app shares records. */
+export const MEMBER_WEB_CREDENTIAL = 'memberWebSession'
+
 /** Which principal a screen's source or address asks for, when it asks. */
 export type PrincipalHint = 'admin' | 'anonymous'
 

@@ -76,6 +76,8 @@ import {
   loadDependencyCatalog,
   PORT_PLACEHOLDER,
   preflightApiServer,
+  readAuthoredInterfaceCatalog,
+  readInterfaceCatalog,
   recipePath,
   resolveApiServers,
   resolveEntry,
@@ -95,6 +97,10 @@ import { proveSeedFromColdClone } from './seed-cold-proof.js';
 import { outputTail, servicesController } from './services-lifecycle.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
+import { ADMIN_WEB_CREDENTIAL, MEMBER_WEB_CREDENTIAL } from '../interface-author/principals.js';
+import { readPackSource } from '../interface-author/place-pack.js';
+import { deriveScreenNeeds, type ScreenNeed } from '../interface-author/screen-needs.js';
+import { deriveWebAuthoringContext } from '../web-context.service.js';
 import { isCreditsExhausted } from '@truecourse/shared';
 
 export const SEED_SESSION_KIND = 'guard-setup.seed';
@@ -213,6 +219,11 @@ export const SeedSessionOutcomeSchema = z
     /** Required (by the fold) for every declared credential; see the probe schema. */
     probes: z.record(z.string(), SeedCredentialProbeSchema).optional(),
     findings: z.array(z.string()),
+    /**
+     * The screen needs the briefing listed that this seed does not meet, one
+     * line each with why — notes on the step, never a failure.
+     */
+    unmetNeeds: z.array(z.string().min(1)).optional(),
   })
   .strict();
 export type SeedSessionOutcome = z.infer<typeof SeedSessionOutcomeSchema>;
@@ -395,12 +406,6 @@ export function missingPrincipalSurfaces(
     }));
 }
 
-/** The credential an admin user's web session is published under, when the app has an admin. */
-export const ADMIN_WEB_CREDENTIAL = 'adminWebSession';
-
-/** The credential a non-owner member's web session is published under, when the app shares records. */
-export const MEMBER_WEB_CREDENTIAL = 'memberWebSession';
-
 /** The fixture name a sacrificial principal is published under. */
 export const SACRIFICIAL_FIXTURE = 'sacrificialUser';
 
@@ -477,6 +482,8 @@ interface SeedSessionWorld {
   lastVerified?: Pick<SeedSessionOutcome, 'script' | 'command' | 'provides' | 'probes'>;
   /** Set when the fold consumed `lastVerified` instead of a session outcome. */
   salvaged?: boolean;
+  /** The states the screens' sources branch on, gathered before the session. */
+  screenNeeds?: ScreenNeed[];
   signal?: AbortSignal;
 }
 
@@ -599,6 +606,7 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     ...requiredSurfaceLines(input),
     ...probeCandidateLines(input),
     ...requiredResourceLines(input),
+    ...screenNeedLines(world.screenNeeds ?? []),
     '',
     '## The dependency catalog (scenarios/dependencies.json)',
     catalog.dependencies.length === 0
@@ -622,7 +630,7 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     '',
     grounding,
     '',
-    'Work loop: PRINCIPALS FIRST — your first `run_seed_draft` must already mint and probe every principal the "Runnable surfaces" section above requires, with only the rows they need; grow the fixtures in later drafts (a draft omitting a required principal is refused without running, and a budget death only salvages what has verified). Draft EARLY, iterate from real errors. Read only what the briefing above does not already answer, then `check_provides` for the free shape check and `run_seed_draft` to PROVE the draft (idempotence included: run it twice — the second run against the rows the first left behind is the real test). For every credential you mint, the same call must declare `probes` — per credential, an endpoint that REQUIRES it; the engine sends the minted value verbatim and also checks the same request is refused without it. Then produce the outcome `{script, command, provides, probes, findings}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty.',
+    'Work loop: PRINCIPALS FIRST — your first `run_seed_draft` must already mint and probe every principal the "Runnable surfaces" section above requires, with only the rows they need; grow the fixtures in later drafts (a draft omitting a required principal is refused without running, and a budget death only salvages what has verified). Draft EARLY, iterate from real errors. Read only what the briefing above does not already answer, then `check_provides` for the free shape check and `run_seed_draft` to PROVE the draft (idempotence included: run it twice — the second run against the rows the first left behind is the real test). For every credential you mint, the same call must declare `probes` — per credential, an endpoint that REQUIRES it; the engine sends the minted value verbatim and also checks the same request is refused without it. Then produce the outcome `{script, command, provides, probes, findings, unmetNeeds}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty. `unmetNeeds` names each screen state the briefing listed that the seed does not hold, with why; omit it when there were none or every one is met.',
   ];
   return lines.join('\n');
 }
@@ -662,6 +670,38 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
     }
   }
   return lines;
+}
+
+/**
+ * The briefing's screen-needs section: the states the web screens' sources
+ * branch on, which the interface authoring right after the seed can observe
+ * only if the seeded world holds them.
+ */
+export function screenNeedLines(needs: readonly ScreenNeed[]): string[] {
+  if (needs.length === 0) return [];
+  return [
+    '',
+    '## Screen states the interface catalog needs',
+    "The web screens are authored LIVE against this seed's world right after it runs, and a screen shows only what the world holds. Each line is a state a screen's source branches on, or one an earlier authoring could not reach. Where the app can hold it, SEED it — owned by the web principal and published and proved like every fixture (a pinned item, a second tag so a merge can run, a record the member principal is a member of, a child record under a parent). A state a background job produces (an archive, a preview, a processed file): trigger the job or wait for it inside the seed, and leave it when neither is possible. An EMPTY state needs nothing: the member principal owns no data and is observed for it. Name every need you do not meet in the outcome's `unmetNeeds`, one line each with why — a note on the step, never a failure.",
+    ...needs.map((need) => `- ${need.screen}: ${need.need}`),
+  ];
+}
+
+/**
+ * The needs of the screens this repository's web surface will author: from the
+ * authoring ledger when an earlier setup grounded its screens (its rows' source
+ * files and state gaps), else from a fresh grounding of the working tree.
+ */
+export async function gatherScreenNeeds(repoRoot: string): Promise<ScreenNeed[]> {
+  const ledger = readAuthoredInterfaceCatalog(repoRoot)?.authoring ?? {};
+  const files = new Map(
+    Object.entries(ledger).flatMap(([id, row]) => (row.sources ? [[id, Object.keys(row.sources)] as const] : [])),
+  );
+  if (files.size === 0) {
+    const { contexts } = await deriveWebAuthoringContext(repoRoot, { catalog: readInterfaceCatalog(repoRoot) });
+    for (const [id, context] of contexts) files.set(id, [context.module, ...context.renders]);
+  }
+  return deriveScreenNeeds({ files, ledger, readSource: (file) => readPackSource(repoRoot, file) });
 }
 
 /** The briefing's candidate-probe section: confirming a probe is a LOOKUP. */
@@ -1428,6 +1468,9 @@ export function buildSeedSession(
         schema: SeedSessionOutcomeSchema,
         run: async () => {
           const { driver, persistence } = await context.acquire();
+          // What the screens need the world to hold: only when a web surface
+          // will be authored against this seed, and only when a session runs.
+          if (resolveWebSurface(input.recipe)) world.screenNeeds = await gatherScreenNeeds(input.repoRoot);
           // The session's world: ONE boot, before the first turn; the fold
           // rebuilds a fresh one for the proof, and the finally below tears
           // down whatever is still standing.
@@ -1524,6 +1567,7 @@ export function buildSeedSession(
         ...(outcome.fromCache ? { fromCache: true } : {}),
         ...(world.salvaged ? { salvaged: true } : {}),
         ...(folded.coldProofSkipped ? { coldProofSkipped: folded.coldProofSkipped } : {}),
+        ...(outcome.output.unmetNeeds && outcome.output.unmetNeeds.length > 0 ? { unmetNeeds: outcome.output.unmetNeeds } : {}),
       };
     } catch (error) {
       // An empty balance did not refuse the seed — it refused to buy one. The

@@ -388,6 +388,34 @@ describe('runGuardSetup — the step spine', () => {
     )
   })
 
+  // A screen state the seed could not hold is a note on the seed step, never
+  // a failure: the step is ok, and each unmet need is one fact.
+  it('records each screen state the seed did not seed as a fact on an ok step', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const facts: string[] = []
+
+    const { report } = await runGuardSetup(
+      baseOpts(r, {
+        seedSession: seedSeam({
+          status: 'ok',
+          scriptPath: 'scripts/guard-seed.mjs',
+          command: 'node scripts/guard-seed.mjs',
+          unmetNeeds: ['preserved-id: a preserved archive — the archiver runs in a worker the seed cannot start'],
+        }).seam,
+        onStepFact: (step, line) => {
+          if (step === 'seed') facts.push(line)
+        },
+      }),
+    )
+
+    expect(report.status).toBe('ok')
+    expect(report.steps.find((step) => step.key === 'seed')?.status).not.toBe('failed')
+    expect(facts).toContain(
+      'screen state not seeded: preserved-id: a preserved archive — the archiver runs in a worker the seed cannot start',
+    )
+  })
+
   it('retries unavailable preparation authoring when a session becomes available', async () => {
     const r = fixtureRepo(); writeRecipe(r);
     writeGuardSetup(r, (await runGuardSetup(baseOpts(r, { seedSession: seedSeam().seam }))).report);

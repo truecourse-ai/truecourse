@@ -40,7 +40,7 @@ import {
 } from '@truecourse/guard-runner';
 import { ANONYMOUS_PRINCIPAL } from '@truecourse/shared';
 import { publicFixtureFields, type LiveScreenObserver, type LiveScreens } from '../interface-author/live-screen.js';
-import { ADMIN_WEB_CREDENTIAL, MEMBER_WEB_CREDENTIAL } from './seed-session.js';
+import { ADMIN_WEB_CREDENTIAL, MEMBER_WEB_CREDENTIAL } from '../interface-author/principals.js';
 import { outputTail, servicesController } from './services-lifecycle.js';
 
 export interface OpenLiveScreensOptions {
