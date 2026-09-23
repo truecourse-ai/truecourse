@@ -20,11 +20,13 @@ let initialized = false;
 
 /**
  * Loads gtag.js and configures GA. Safe to call multiple times; only the first
- * call has effect. Skipped in SSR (no `window`).
+ * call has effect. Skipped in SSR (no `window`) and in local dev, so local
+ * traffic never reaches the GA property.
  */
 export function initGA(): void {
   if (initialized) return;
   if (typeof window === 'undefined') return;
+  if (import.meta.env.DEV) return;
 
   const script = document.createElement('script');
   script.async = true;
