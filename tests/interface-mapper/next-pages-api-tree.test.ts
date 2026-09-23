@@ -4,7 +4,7 @@ import { analyzeFile } from '../../packages/source-facts/src/file-analyzer'
 import { deriveApiInterfacesFromTree } from '../../packages/interface-mapper/src/api-tree'
 import type { FileAnalysis } from '../../packages/shared/src/index'
 
-// A pages-router api surface, the shape linkwarden's 56 handlers take: one
+// A pages-router api surface, the shape a real Next.js app's handlers take: one
 // default export per file, methods told apart inside the body.
 const root = path.resolve('tests/fixtures/next-pages-api')
 
