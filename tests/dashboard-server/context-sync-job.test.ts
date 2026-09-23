@@ -360,3 +360,89 @@ describe('what the job refuses to do', () => {
     expect(settled?.error).toContain('not available yet');
   });
 });
+
+/**
+ * A tool source an edition's driver carries. The job neither knows nor cares
+ * which edition registered the driver: a Jira source is stored, stamped and
+ * settled exactly as a site is, and its documents keep the issue's own
+ * `updated` rather than the sync's clock.
+ */
+describe('a source an edition drives', () => {
+  /** A scripted Jira driver: two issues, the second one edited on the re-sync. */
+  function jiraDriver(documents: ContextDriverDocument[]): ContextSourceDriver {
+    const site = scriptedDriver(documents, { title: 'ENG (Jira)' });
+    return { ...site, kind: 'jira' };
+  }
+
+  const issue = (key: string, body: string, updatedAt: string): ContextDriverDocument =>
+    doc(key === 'ENG-1' ? '10001' : '10002', body, {
+      docPath: `${key}.md`,
+      title: `${key}: ${body}`,
+      url: `https://acme.atlassian.net/browse/${key}`,
+      updatedAt,
+    });
+
+  beforeEach(async () => {
+    await store.createSource(ORG, {
+      id: SOURCE,
+      kind: 'jira',
+      title: 'ENG (Jira)',
+      config: { projectKey: 'ENG' },
+    });
+  });
+
+  it('stores the issues it read, each with the stamp the issue carries', async () => {
+    const { settled, result } = await runSync(
+      jiraDriver([
+        issue('ENG-1', 'Orders', '2026-03-02T17:00:00.000Z'),
+        issue('ENG-2', 'Refunds', '2026-04-01T09:00:00.000Z'),
+      ]),
+    );
+    expect(settled?.status).toBe('succeeded');
+    expect(result).toMatchObject({ outcome: 'synced', added: 2 });
+
+    const rows = await store.listDocuments(ORG, SOURCE);
+    expect(rows.map((row) => [row.docId, row.docPath, row.updatedAt])).toEqual([
+      ['10001', 'ENG-1.md', '2026-03-02T17:00:00.000Z'],
+      ['10002', 'ENG-2.md', '2026-04-01T09:00:00.000Z'],
+    ]);
+    expect(await store.readBody(ORG, hashOf('Orders'))).toBe('Orders');
+    expect(await store.getSource(ORG, SOURCE)).toMatchObject({ status: 'synced', title: 'ENG (Jira)' });
+  });
+
+  it('keeps an unchanged issue’s stamp, and takes the new one for an edit', async () => {
+    await runSync(
+      jiraDriver([
+        issue('ENG-1', 'Orders', '2026-03-02T17:00:00.000Z'),
+        issue('ENG-2', 'Refunds', '2026-04-01T09:00:00.000Z'),
+      ]),
+    );
+    const { result } = await runSync(
+      jiraDriver([
+        // Untouched: Jira bumped nothing, and neither does the ledger.
+        issue('ENG-1', 'Orders', '2026-09-01T00:00:00.000Z'),
+        issue('ENG-2', 'Refunds, revised', '2026-09-02T00:00:00.000Z'),
+      ]),
+      {},
+      '2026-09-11T12:00:00.000Z',
+    );
+    expect(result).toMatchObject({ added: 0, changed: 1, unchanged: 1, removed: 0 });
+    const rows = await store.listDocuments(ORG, SOURCE);
+    expect(rows.map((row) => [row.docId, row.updatedAt])).toEqual([
+      ['10001', '2026-03-02T17:00:00.000Z'],
+      ['10002', '2026-09-02T00:00:00.000Z'],
+    ]);
+  });
+
+  it('fails with the account’s own reason when the driver refuses', async () => {
+    const reason = 'Authentication failed — check the account email and API token.';
+    const { settled } = await runSync(
+      { ...jiraDriver([]), sync: async () => { throw new Error(reason); } },
+    );
+    expect(settled?.status).toBe('failed');
+    expect(await store.getSource(ORG, SOURCE)).toMatchObject({
+      status: 'failed',
+      statusNote: reason,
+    });
+  });
+});

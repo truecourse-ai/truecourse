@@ -84,6 +84,13 @@ export {
 } from './area-tagger.js';
 export type { DocAreaTags } from './area-tagger.js';
 
+// Beside the readers above, because it answers the same question about the same
+// doc. It is IMPLEMENTED in `@truecourse/shared` rather than here: the dashboard
+// renders the very same facts on a document's page, and the client cannot import
+// this package (node builtins).
+export { readDocFrontmatter } from '@truecourse/shared';
+export type { DocFrontmatter, StatusTransition } from '@truecourse/shared';
+
 export { groupByArea } from './area-grouper.js';
 export type { GroupResult } from './area-grouper.js';
 
@@ -129,7 +136,7 @@ export {
 } from './repo-identity.js';
 export type { RepoIdentity, RepoIdentityInput } from './repo-identity.js';
 
-export { discoverDocs, classifyDoc, docBody, isStructuralSpecDoc } from './discovery.js';
+export { discoverDocs, classifyDoc, docBody, docProse, isStructuralSpecDoc } from './discovery.js';
 export type { DocCandidate, DiscoveryOptions } from './discovery.js';
 export { prefilterDocs } from './relevance-filter.js';
 
@@ -166,6 +173,8 @@ export {
   LlmsTxtFetchError,
   SourcePathError,
   USER_AGENT,
+  fetchPublicSource,
+  SourceNetworkPolicyError,
 } from './sources/index.js';
 export type {
   LlmsTxtDoc,

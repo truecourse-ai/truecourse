@@ -23,7 +23,7 @@
 import { z } from 'zod';
 import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm';
 import { stripMarkdownExtension } from '@truecourse/shared';
-import { docBody, isStructuralSpecDoc, type DocCandidate } from './discovery.js';
+import { docBody, docProse, isStructuralSpecDoc, type DocCandidate } from './discovery.js';
 import { aliasMatcher, identityBlock, stripForNames, type RepoIdentity } from './repo-identity.js';
 
 /**
@@ -264,7 +264,7 @@ function isVersionBumpLine(line: string): boolean {
  * lone `## 1.2.0` heading never trips the rule.
  */
 function looksLikeChangelogContent(doc: DocCandidate): boolean {
-  const lines = docBody(doc)
+  const lines = docProse(doc)
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
@@ -377,7 +377,9 @@ const MIN_DEDUP_LINES = 8;
  */
 function dedupeNearDuplicates(docs: DocCandidate[]): Array<{ path: string; reason: string }> {
   const sigs = docs.map((d) => {
-    const body = docBody(d);
+    // Prose: two synced issues share their whole metadata block, and a
+    // signature counting those lines reads thin tickets as near-duplicates.
+    const body = docProse(d);
     return { doc: d, lines: normalizedLines(body), len: body.length };
   });
   const droppedSet = new Set<string>();

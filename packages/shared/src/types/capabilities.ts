@@ -1,20 +1,70 @@
 /**
- * Edition, mode and capability contract for the dashboard.
+ * Edition, mode and entitlement contract for the dashboard.
  *
- * The server reports `edition`, the MODE it runs in and `capabilities` — the
- * feature gates that are currently turned on for this deployment. Capability
- * identifiers are deliberately typed as plain strings so a gate can be added
- * without a shared-schema change.
+ * Two questions, answered in two places because they are asked at two
+ * different moments. HOW THIS SERVER RUNS is public (`GET /api/capabilities`):
+ * the sign-in screen itself differs in local mode, so the client needs it
+ * before it has a session. WHAT THIS WORKSPACE MAY USE rides the authenticated
+ * answer (`GET /api/auth/me`), because it is a fact about the workspace and not
+ * about the deployment — the same hosted server opens Atlassian to one customer
+ * and keeps it closed for the next.
  */
+
+import {
+  CONTEXT_CONNECTION_KINDS,
+  CONTEXT_CONNECTION_PROVIDERS,
+  type ContextSourceKind,
+} from './context.js'
 
 export type Edition = 'community' | 'enterprise'
 
 /**
- * Deliberately a plain string (see module doc). The one identifier in use is
- * `local-filesystem`, the inverse gate described below, which no deployment
- * advertises.
+ * The enterprise features a workspace can be granted. They are INDEPENDENT —
+ * one grant each, and a workspace may hold any of them without the others.
  */
-export type Capability = string
+export const ENTERPRISE_FEATURES = [
+  'connections',
+  'repository-providers',
+  'workspaces',
+] as const
+
+export type EnterpriseFeature = (typeof ENTERPRISE_FEATURES)[number]
+
+/** What each grant is called in the product. */
+export const ENTERPRISE_FEATURE_LABEL: Record<EnterpriseFeature, string> = {
+  connections: 'Connections',
+  'repository-providers': 'Repository providers',
+  workspaces: 'Workspaces',
+}
+
+export function isEnterpriseFeature(value: string): value is EnterpriseFeature {
+  return (ENTERPRISE_FEATURES as readonly string[]).includes(value)
+}
+
+/**
+ * The context source kinds a feature READS THROUGH, which are what a revoke
+ * has to stop and what the operator's console warns it will. Only the document
+ * connections have any: a repository provider and a second workspace feed no
+ * source. One map, because the server pauses by it and the console names it.
+ */
+export const ENTERPRISE_FEATURE_SOURCE_KINDS: Record<
+  EnterpriseFeature,
+  readonly ContextSourceKind[]
+> = {
+  connections: CONTEXT_CONNECTION_PROVIDERS.flatMap(
+    (provider) => CONTEXT_CONNECTION_KINDS[provider],
+  ),
+  'repository-providers': [],
+  workspaces: [],
+}
+
+/**
+ * The one word for a set of grants. A workspace holding none of them is the
+ * open product, whatever bundle the server it reached was built with.
+ */
+export function editionOf(features: readonly EnterpriseFeature[]): Edition {
+  return features.length > 0 ? 'enterprise' : 'community'
+}
 
 /**
  * How the server runs.
@@ -29,19 +79,38 @@ export type ServerMode = 'hosted' | 'local'
 
 export const DEFAULT_SERVER_MODE: ServerMode = 'hosted'
 
+/**
+ * `GET /api/capabilities`: how this server runs, and nothing about a caller.
+ * Anything that depends on WHO is asking belongs on the authenticated answer.
+ */
 export interface CapabilitiesResponse {
-  edition: Edition
-  /** How this server runs; the client reads it before it has a session. */
   mode: ServerMode
-  capabilities: Capability[]
 }
 
-/**
- * Capabilities the community build advertises. `local-filesystem` — the inverse
- * gate a feature that reads a live checkout requires — is deliberately NOT here:
- * connected repos have no persistent working copy (runs clone ephemerally and
- * all state lives in the database), so no deployment carries a per-user
- * filesystem to browse. The gate stays in the vocabulary so such a surface
- * vanishes without branching.
- */
-export const COMMUNITY_CAPABILITIES: readonly Capability[] = []
+/** One workspace, as the operator's entitlements console lists it. */
+export interface OperatorEntitlementRow {
+  workspaceOrgId: string
+  /** The identity provider's name for it; null when nobody could name it. */
+  workspaceName: string | null
+  features: EnterpriseFeature[]
+}
+
+export interface OperatorEntitlementsResponse {
+  workspaces: OperatorEntitlementRow[]
+}
+
+/** What an operator's grant or revoke names: one workspace, one feature. */
+export interface OperatorEntitlementMovementRequest {
+  workspaceOrgId: string
+  feature: EnterpriseFeature
+  /** Why, on a grant. A revoke keeps nothing: the row it deleted is gone. */
+  note?: string
+}
+
+/** What a grant or a revoke left behind. */
+export interface OperatorEntitlementMovementResponse {
+  workspaceOrgId: string
+  features: EnterpriseFeature[]
+  /** The context sources a revoke paused, if any. */
+  paused?: string[]
+}

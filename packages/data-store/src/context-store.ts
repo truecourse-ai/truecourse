@@ -39,14 +39,15 @@ import {
   contextWorkspaces,
   type Db,
 } from '@truecourse/db';
-import type {
-  ContextBinding,
-  ContextDocument,
-  ContextSource,
-  ContextSourceConfig,
-  ContextSourceKind,
-  ContextSourceStatus,
-  ContextSyncRecord,
+import {
+  CLOCK_SWEPT_CONTEXT_SOURCE_KINDS,
+  type ContextBinding,
+  type ContextDocument,
+  type ContextSource,
+  type ContextSourceConfig,
+  type ContextSourceKind,
+  type ContextSourceStatus,
+  type ContextSyncRecord,
 } from '@truecourse/shared';
 import type {
   ContextLedgerWrite,
@@ -95,8 +96,10 @@ export interface DueContextSource {
  * Every source of EVERY workspace the sweep should sync, excluding the ones the
  * user paused:
  *
- *  - a SITE whose last sync is older than `before` — a site has no event that
- *    announces a change, so it is refreshed on the clock;
+ *  - a CLOCK-SWEPT source (`CLOCK_SWEPT_CONTEXT_SOURCE_KINDS`: a site, a Jira
+ *    project, a Confluence space) whose last sync is older than `before` —
+ *    nothing announces a change to any of them, so they are refreshed on the
+ *    clock;
  *  - a source of ANY KIND that has NEVER synced — a repository source is
  *    normally synced by its push, but one whose first sync was lost with the
  *    process that ran it would otherwise wait for a commit that may never come.
@@ -116,7 +119,10 @@ export async function listDueContextSources(db: Db, before: string): Promise<Due
         ne(contextSources.status, 'paused'),
         or(
           isNull(contextSources.lastSyncAt),
-          and(eq(contextSources.kind, 'site'), lt(contextSources.lastSyncAt, before)),
+          and(
+            inArray(contextSources.kind, [...CLOCK_SWEPT_CONTEXT_SOURCE_KINDS]),
+            lt(contextSources.lastSyncAt, before),
+          ),
         ),
       ),
     )

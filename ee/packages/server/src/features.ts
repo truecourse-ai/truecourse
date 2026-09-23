@@ -4,6 +4,7 @@
  */
 
 import type { ServerFeature } from '@truecourse/dashboard-server';
+import { connectionsFeature } from './connections/index.js';
 import { workspacesFeature } from './workspaces/index.js';
 
-export const eeServerFeatures: readonly ServerFeature[] = [workspacesFeature];
+export const eeServerFeatures: readonly ServerFeature[] = [workspacesFeature, connectionsFeature];

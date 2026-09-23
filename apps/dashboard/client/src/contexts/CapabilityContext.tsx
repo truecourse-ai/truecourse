@@ -1,15 +1,16 @@
 /**
- * App-level edition + capability context.
+ * How the server runs, read once at the root of <App>.
  *
- * Mounted once at the root of <App>. On boot it calls
- * `GET /api/capabilities` and exposes the result through hooks and a
- * declarative <RequiresCapability> wrapper. While the fetch is in
- * flight (or if it fails) the context returns the safe community
- * default — no enterprise UI ever flashes before its gate has been
- * verified.
+ * `GET /api/capabilities` is public and answers one thing: `hosted` or `local`.
+ * The client needs it before it has a session, because the sign-in screen
+ * itself differs — a local server has nobody to sign in — so it cannot ride the
+ * authenticated answer.
  *
- * Tests can bypass the fetch by passing `initial` to AppProvider,
- * e.g. `<AppProvider initial={{ edition: 'enterprise', capabilities: ['sso'] }}>`.
+ * WHAT THE WORKSPACE MAY USE is not here. That is a fact about the workspace
+ * rather than the deployment, so it rides `/api/auth/me` and is read through
+ * `useEntitlement` (see `auth/AuthContext`).
+ *
+ * Tests can bypass the fetch by passing `initial` to AppProvider.
  */
 
 import {
@@ -20,20 +21,13 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type {
-  Capability,
-  CapabilitiesResponse,
-  Edition,
-  ServerMode,
-} from '@truecourse/shared';
-import { COMMUNITY_CAPABILITIES, DEFAULT_SERVER_MODE } from '@truecourse/shared';
+import type { CapabilitiesResponse, ServerMode } from '@truecourse/shared';
+import { DEFAULT_SERVER_MODE } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
 export interface CapabilityContextValue {
-  edition: Edition;
   /** How the server runs: hosted behind a sign-in, or local on this machine. */
   mode: ServerMode;
-  capabilities: ReadonlySet<Capability>;
   /** True while the initial fetch is in flight. */
   isLoading: boolean;
   /** Last error from /api/capabilities, if any. */
@@ -41,11 +35,9 @@ export interface CapabilityContextValue {
 }
 
 const DEFAULT_VALUE: CapabilityContextValue = {
-  edition: 'community',
   // Hosted until the server says otherwise: the local surfaces are the ones
   // that assume a shared filesystem, so an unanswered probe must not show them.
   mode: DEFAULT_SERVER_MODE,
-  capabilities: new Set<Capability>(COMMUNITY_CAPABILITIES),
   isLoading: true,
   error: null,
 };
@@ -62,18 +54,11 @@ export interface AppProviderProps {
 }
 
 export function AppProvider({ children, initial }: AppProviderProps) {
-  const [state, setState] = useState<CapabilityContextValue>(() => {
-    if (initial) {
-      return {
-        edition: initial.edition,
-        mode: initial.mode ?? DEFAULT_SERVER_MODE,
-        capabilities: new Set(initial.capabilities),
-        isLoading: false,
-        error: null,
-      };
-    }
-    return DEFAULT_VALUE;
-  });
+  const [state, setState] = useState<CapabilityContextValue>(() =>
+    initial
+      ? { mode: initial.mode ?? DEFAULT_SERVER_MODE, isLoading: false, error: null }
+      : DEFAULT_VALUE,
+  );
 
   useEffect(() => {
     if (initial) return;
@@ -82,21 +67,13 @@ export function AppProvider({ children, initial }: AppProviderProps) {
       try {
         const resp = await api.getCapabilities();
         if (cancelled) return;
-        setState({
-          edition: resp.edition,
-          mode: resp.mode ?? DEFAULT_SERVER_MODE,
-          capabilities: new Set(resp.capabilities),
-          isLoading: false,
-          error: null,
-        });
+        setState({ mode: resp.mode ?? DEFAULT_SERVER_MODE, isLoading: false, error: null });
       } catch (err) {
         if (cancelled) return;
-        // Fail closed: keep community defaults so enterprise UI stays
-        // hidden if the endpoint is unreachable.
+        // Fail closed: hosted is the answer that assumes nothing about this
+        // machine, so an unreachable endpoint shows no local surface.
         setState({
-          edition: 'community',
           mode: DEFAULT_SERVER_MODE,
-          capabilities: new Set(COMMUNITY_CAPABILITIES),
           isLoading: false,
           error: err instanceof Error ? err : new Error(String(err)),
         });
@@ -116,11 +93,6 @@ export function AppProvider({ children, initial }: AppProviderProps) {
   );
 }
 
-/** Current edition (`community` or `enterprise`). */
-export function useEdition(): Edition {
-  return useContext(CapabilityContext).edition;
-}
-
 /**
  * How the server runs. `local` means this machine: there is no sign-in to
  * offer and folders on it can be connected as repositories.
@@ -129,35 +101,7 @@ export function useServerMode(): ServerMode {
   return useContext(CapabilityContext).mode;
 }
 
-/** True iff `cap` is currently turned on. Defaults to false while loading. */
-export function useCapability(cap: Capability): boolean {
-  const { capabilities } = useContext(CapabilityContext);
-  return capabilities.has(cap);
-}
-
-/** Full context value — needed only by code that has to branch on edition or
- *  display a loading skeleton. Prefer `useCapability` / `useEdition`. */
+/** Full context value — needed only by code that has to show a loading skeleton. */
 export function useCapabilityContext(): CapabilityContextValue {
   return useContext(CapabilityContext);
-}
-
-/**
- * Renders `children` only when `cap` is on. Optional `fallback` renders
- * when the capability is missing (e.g. an upgrade CTA).
- *
- * While the initial fetch is in flight, renders the fallback (or
- * nothing) — never the gated children. This is what prevents an
- * enterprise screen from flashing on first paint.
- */
-export function RequiresCapability({
-  cap,
-  fallback = null,
-  children,
-}: {
-  cap: Capability;
-  fallback?: ReactNode;
-  children: ReactNode;
-}) {
-  const enabled = useCapability(cap);
-  return <>{enabled ? children : fallback}</>;
 }

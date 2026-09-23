@@ -10,10 +10,20 @@
  *
  * Creating the FIRST workspace is not here: an org-less signup naming its
  * workspace is onboarding, which every edition has.
+ *
+ * The GRANT is asked for on the CREATE alone. What a workspace pays for is
+ * being allowed to have another, and the two reads are how a person reaches
+ * the ones they are already in — withholding those would shut someone inside a
+ * workspace whose grant lapsed, with the way out drawn from the same grant
+ * they no longer hold.
  */
 
 import { Router } from 'express';
-import type { ServerFeature, WorkspaceSessionTools } from '@truecourse/dashboard-server';
+import type {
+  ServerFeature,
+  ServerFeatureContext,
+  WorkspaceSessionTools,
+} from '@truecourse/dashboard-server';
 import type { WorkspaceSummary, WorkspacesResponse } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
 import { saveWorkspaceProfile } from '@truecourse/core/lib/workspace-profile-store';
@@ -21,6 +31,12 @@ import {
   BAD_WORKSPACE_DESCRIPTION,
   normalizeWorkspaceDescription,
 } from '@truecourse/shared';
+
+const ENTITLEMENT = 'workspaces' as const;
+
+/** What an ungranted workspace is told, in the words a member can act on. */
+const NOT_ENTITLED =
+  'More than one workspace is not part of this workspace’s plan. Ask TrueCourse to open it.';
 
 /** A workspace name as it may be stored, or null when it is not one. */
 function workspaceNameOf(body: unknown): string | null {
@@ -31,7 +47,10 @@ function workspaceNameOf(body: unknown): string | null {
 
 const BAD_WORKSPACE_NAME = 'A workspace name of 1 to 80 characters is required.';
 
-export function createWorkspacesRouter(tools: WorkspaceSessionTools): Router {
+export function createWorkspacesRouter(
+  tools: WorkspaceSessionTools,
+  entitled: ServerFeatureContext['entitled'],
+): Router {
   const router: Router = Router();
 
   // The workspaces the signed-in user can be in: their active memberships, with
@@ -85,6 +104,13 @@ export function createWorkspacesRouter(tools: WorkspaceSessionTools): Router {
     try {
       const session = await tools.requireSession(req, res);
       if (!session) return;
+      // The grant belongs to the workspace this session is in, so a session in
+      // none has nothing to be granted: an org-less signup makes its first
+      // workspace through onboarding, not here.
+      if (!session.organizationId || !(await entitled(session.organizationId, ENTITLEMENT))) {
+        res.status(403).json({ error: NOT_ENTITLED });
+        return;
+      }
       const org = await tools.workos.organizations.createOrganization({ name });
       await tools.workos.userManagement.createOrganizationMembership({
         organizationId: org.id,
@@ -139,16 +165,17 @@ export function createWorkspacesRouter(tools: WorkspaceSessionTools): Router {
 
 export const workspacesFeature: ServerFeature = {
   name: 'multiple workspaces',
+  entitlement: 'workspaces',
   manyWorkspaces: true,
   // A session moves between workspaces through the identity provider, so a
   // server that has none — one machine, one implicit workspace — mounts
   // nothing rather than offering a switch that cannot happen.
-  mount: ({ workspaceSession }) =>
+  mount: ({ workspaceSession, entitled }) =>
     workspaceSession
       ? [
           {
             path: '/api/auth/workspaces',
-            router: createWorkspacesRouter(workspaceSession),
+            router: createWorkspacesRouter(workspaceSession, entitled),
             public: true,
           },
         ]

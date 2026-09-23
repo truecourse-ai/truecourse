@@ -3,8 +3,12 @@
  *
  * Adding a source enqueues it, Sync now enqueues it, a push to a repository's
  * default branch enqueues its Repository source's, and the daily sweep enqueues
- * every site's. Single-flight per source (the queue key is the source id), so a
- * push storm, a double click and the sweep collapse into one run.
+ * every source nothing announces a change to (a site, a Jira project, a
+ * Confluence space). Single-flight per source (the queue key is the source id),
+ * so a push storm, a double click and the sweep collapse into one run.
+ *
+ * The driver is whatever the server registered for the source's KIND, this
+ * edition's tool drivers included — the body neither knows nor cares which.
  *
  * The job is the only writer: the driver reads the origin and hands back the
  * current document set with the added / changed / removed / unchanged diff, and
@@ -31,10 +35,10 @@ import {
   writeContextDocuments,
   type ContextDocumentWrite,
 } from '@truecourse/core/lib/context-store';
-import { ContextKindUnsupportedError, contextDrivers } from '@truecourse/core/services/context';
-import type { ContextLedgerEntry } from '@truecourse/core/services/context';
-import type { ContextSourceStatus } from '@truecourse/shared';
-import { contextDriverDeps, emitContextChanged } from '../../services/context.service.js';
+import { ContextKindUnsupportedError } from '@truecourse/core/services/context';
+import type { ContextLedgerEntry, ContextSourceDriver } from '@truecourse/core/services/context';
+import type { ContextSourceKind, ContextSourceStatus } from '@truecourse/shared';
+import { emitContextChanged, serverContextDrivers } from '../../services/context.service.js';
 
 export const CONTEXT_SYNC_TASK = 'context.sync';
 
@@ -63,7 +67,9 @@ export interface ContextSyncJobResult {
 
 export interface ContextSyncTaskDeps {
   /** The drivers the body runs, for one workspace. Production builds them from the server's deps. */
-  drivers?: (workspaceOrgId: string) => ReturnType<typeof contextDrivers>;
+  drivers?: (
+    workspaceOrgId: string,
+  ) => Promise<Map<ContextSourceKind, ContextSourceDriver>> | Map<ContextSourceKind, ContextSourceDriver>;
   /** The clock the sync record is stamped with. */
   now?: () => Date;
   /**
@@ -94,7 +100,7 @@ const NOTHING: Omit<ContextSyncJobResult, 'sourceId' | 'outcome'> = {
 export function createContextSyncTask(
   deps: ContextSyncTaskDeps = {},
 ): JobDefinition<ContextSyncJobPayload> {
-  const drivers = deps.drivers ?? ((org: string) => contextDrivers(contextDriverDeps(org)));
+  const drivers = deps.drivers ?? ((org: string) => serverContextDrivers(org));
   const now = deps.now ?? (() => new Date());
 
   return {
@@ -120,7 +126,7 @@ export function createContextSyncTask(
         return { result: { sourceId, outcome: 'paused', ...NOTHING }, notification: null };
       }
 
-      const driver = drivers(org).get(source.kind);
+      const driver = (await drivers(org)).get(source.kind);
       if (!driver) throw new ContextKindUnsupportedError(source.kind);
 
       const previous = await listContextDocuments(org, sourceId);

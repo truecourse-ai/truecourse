@@ -88,15 +88,24 @@ async function getPublic(url: URL, headers: Record<string, string>, signal: Abor
   });
 }
 
-/** Every redirect gets a fresh validated, pinned lookup, including page redirects. */
+/** Every redirect gets a fresh validated, pinned lookup, including page redirects.
+ * An `Authorization` header follows a redirect only while it stays on the origin
+ * it was sent to, as `fetch` does, so a redirect never hands a credential away. */
 export async function fetchPublicSource(url: string, headers: Record<string, string>, signal: AbortSignal): Promise<Response> {
   let target = new URL(url);
+  let sent = headers;
   for (let redirects = 0; ; redirects++) {
-    const response = await getPublic(target, headers, signal);
+    const response = await getPublic(target, sent, signal);
     const location = response.headers.get('location');
     if (![301, 302, 303, 307, 308].includes(response.status) || !location) return response;
     await response.body?.cancel();
     if (redirects >= 5) throw new SourceNetworkPolicyError('Source exceeded the redirect limit.');
-    target = new URL(location, target);
+    const next = new URL(location, target);
+    if (next.origin !== target.origin) {
+      sent = Object.fromEntries(
+        Object.entries(sent).filter(([name]) => name.toLowerCase() !== 'authorization'),
+      );
+    }
+    target = next;
   }
 }

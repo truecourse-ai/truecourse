@@ -74,8 +74,9 @@ is the one the provider reported. Settings › Usage reads it back.
 
 The app sends product analytics to PostHog. The server sends every product
 action: a repository connected or disconnected, a scan, setup, generation or run
-starting and finishing, a context source added, a conflict resolved, a finding
-dismissed, a provider saved, an invite link minted, a workspace created. Each
+starting and finishing, a context source added, a tool connection saved or
+removed, a conflict resolved, a finding dismissed, a provider saved, an invite
+link minted, a workspace created. Each
 carries identifiers and kinds only, never a document, a key, a token or an
 invite URL. It reads `POSTHOG_DISABLED`, `POSTHOG_KEY` and `POSTHOG_HOST` from
 the repo-root `.env`.
@@ -110,4 +111,8 @@ Questions, feedback, or security reports: **Mushegh Gevorgyan**,
 
 ## License
 
-MIT
+**MIT** for everything outside `ee/`. See [LICENSE](LICENSE).
+
+**Enterprise** for `ee/`, which holds the document Connections, the extra
+repository providers and multiple workspaces. Free to read and modify for
+development; production use needs a subscription. See [ee/LICENSE](ee/LICENSE).

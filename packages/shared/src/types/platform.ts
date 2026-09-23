@@ -7,6 +7,8 @@
  * `shared` needs neither express nor react.
  */
 
+import type { Edition, EnterpriseFeature } from './capabilities.js'
+
 /** A user authenticated through the identity provider (WorkOS). */
 export interface AuthUser {
   id: string
@@ -27,6 +29,21 @@ export interface AuthUser {
    * metadata, not the per-org WorkOS role.
    */
   isOperator?: boolean
+}
+
+/**
+ * `GET /api/auth/me`: the session, and what the WORKSPACE behind it may use.
+ *
+ * The entitlements ride here rather than on the public capabilities endpoint
+ * because they are per workspace: the same deployment answers one workspace
+ * `connections` and the next one nothing. `edition` is the one word for the
+ * list, so a caller that only wants to know whether this is the open product
+ * does not have to read the features.
+ */
+export interface AuthMeResponse {
+  user: AuthUser
+  edition: Edition
+  entitlements: EnterpriseFeature[]
 }
 
 /**

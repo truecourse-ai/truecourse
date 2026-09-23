@@ -8,9 +8,9 @@
  * documents it yielded are the Documents view narrowed to it, one link away.
  *
  * The header carries what can be DONE to the source — Sync now, Pause / Resume
- * and, for a site, Remove — beside its status word. Remove is not offered for a
- * repository source: disconnecting its repository drops that repository's links
- * and leaves the source in the workspace.
+ * and Remove — beside its status word. Remove is not offered for a repository
+ * source: disconnecting its repository drops that repository's links and leaves
+ * the source in the workspace.
  *
  * Every word here is the server's: the scope fields show the stored config, the
  * syncs are stored records, a refusal is the server's message in a toast, and a
@@ -21,8 +21,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import type {
+  ConfluenceSourceConfig,
   ContextSourceView,
   ContextSyncRecord,
+  JiraSourceConfig,
   RepositorySourceConfig,
   SiteSourceConfig,
 } from '@truecourse/shared';
@@ -63,6 +65,9 @@ interface ScopeForm {
   include: string;
   exclude: string;
   url: string;
+  projectKey: string;
+  jql: string;
+  spaceKey: string;
 }
 
 /** The globs a pattern field holds, one per line — the shape the route takes. */
@@ -76,16 +81,25 @@ const linesOf = (value: string): string[] =>
 function formOf(source: ContextSourceView): ScopeForm {
   const repo = source.config as Partial<RepositorySourceConfig>;
   const site = source.config as Partial<SiteSourceConfig>;
+  const jira = source.config as Partial<JiraSourceConfig>;
+  const confluence = source.config as Partial<ConfluenceSourceConfig>;
   return {
     branch: typeof repo.branch === 'string' ? repo.branch : '',
     include: (repo.include ?? []).join('\n'),
     exclude: (repo.exclude ?? []).join('\n'),
     url: typeof site.llmsTxtUrl === 'string' ? site.llmsTxtUrl : '',
+    projectKey: typeof jira.projectKey === 'string' ? jira.projectKey : '',
+    jql: typeof jira.jql === 'string' ? jira.jql : '',
+    spaceKey: typeof confluence.spaceKey === 'string' ? confluence.spaceKey : '',
   };
 }
 
 /** The config a save sends: the form, in the shape the route validates. */
 function scopeOf(source: ContextSourceView, form: ScopeForm): Record<string, unknown> {
+  if (source.kind === 'jira') {
+    return { projectKey: form.projectKey.trim(), jql: form.jql.trim() };
+  }
+  if (source.kind === 'confluence') return { spaceKey: form.spaceKey.trim() };
   if (source.kind !== 'repository') return { llmsTxtUrl: form.url.trim() };
   return {
     repoFullName: (source.config as Partial<RepositorySourceConfig>).repoFullName ?? '',
@@ -253,7 +267,7 @@ export default function SourcePage({ sourceId }: { sourceId: string }) {
       >
         {source.status === 'paused' ? 'Resume' : 'Pause'}
       </button>
-      {source.kind === 'site' && (
+      {source.kind !== 'repository' && (
         <button
           type="button"
           className={`${ACTION} text-destructive hover:bg-destructive/10`}
@@ -322,6 +336,44 @@ export default function SourcePage({ sourceId }: { sourceId: string }) {
                   </div>
                 </div>
               </>
+            ) : source.kind === 'jira' ? (
+              <>
+                <div>
+                  <label className={LABEL} htmlFor="scope-project">
+                    Project key
+                  </label>
+                  <input
+                    id="scope-project"
+                    value={shown.projectKey}
+                    onChange={(e) => edit({ projectKey: e.target.value })}
+                    className={`mt-1 ${FIELD}`}
+                  />
+                </div>
+                <div>
+                  <label className={LABEL} htmlFor="scope-jql">
+                    JQL filter
+                  </label>
+                  <input
+                    id="scope-jql"
+                    value={shown.jql}
+                    placeholder="issuetype in standardIssueTypes()"
+                    onChange={(e) => edit({ jql: e.target.value })}
+                    className={`mt-1 font-mono ${FIELD}`}
+                  />
+                </div>
+              </>
+            ) : source.kind === 'confluence' ? (
+              <div>
+                <label className={LABEL} htmlFor="scope-space">
+                  Space key
+                </label>
+                <input
+                  id="scope-space"
+                  value={shown.spaceKey}
+                  onChange={(e) => edit({ spaceKey: e.target.value })}
+                  className={`mt-1 ${FIELD}`}
+                />
+              </div>
             ) : (
               <div>
                 <label className={LABEL} htmlFor="scope-url">

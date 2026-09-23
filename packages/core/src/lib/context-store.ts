@@ -252,6 +252,29 @@ export const markContextChanged = (org: string, at?: string): Promise<void> =>
   active.markChanged(org, at);
 
 /**
+ * Pause every source of these kinds, with the reason on the source, and answer
+ * which ones moved. The DOCUMENTS STAY: what stopped is the reading, so putting
+ * back whatever was taken away — the account, the grant — is a Resume rather
+ * than an add, and the corpus is unchanged meanwhile.
+ *
+ * One already paused is left exactly as it is: its note says why it stopped
+ * the first time, and overwriting that would lose the earlier reason.
+ */
+export async function pauseContextSourcesOfKinds(
+  org: string,
+  kinds: readonly ContextSourceKind[],
+  statusNote: string,
+): Promise<string[]> {
+  const paused: string[] = [];
+  for (const source of await active.listSources(org)) {
+    if (!kinds.includes(source.kind) || source.status === 'paused') continue;
+    await active.updateSource(org, source.id, { status: 'paused', statusNote });
+    paused.push(source.id);
+  }
+  return paused;
+}
+
+/**
  * One document's body by its corpus ref (`context/<sourceId>/<docPath>`), or
  * null when the ref is not a context ref, names no stored document, or the
  * workspace no longer holds its body.
