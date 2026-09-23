@@ -228,6 +228,16 @@ describe('POST /api/context/sources', () => {
     });
   });
 
+  it('stores a source paused and enqueues nothing when told not to sync', async () => {
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'site', config: { llmsTxtUrl: 'https://docs.acme.com/llms.txt' }, repoIds: [], sync: false })
+      .expect(202);
+    expect(res.body.source).toMatchObject({ kind: 'site', status: 'paused' });
+    expect(res.body.jobId).toBeUndefined();
+    expect(syncs).toEqual([]);
+  });
+
   it('links nothing when no repository is named', async () => {
     const res = await addSite().expect(202);
     expect(await store.reposForSource(TEST_ORG, res.body.source.id)).toEqual([]);

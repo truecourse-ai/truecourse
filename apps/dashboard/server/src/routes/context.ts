@@ -3,7 +3,8 @@
  *
  *   GET    /api/context/sources               every source, with its document count and readers,
  *                                             and the KINDS this server can add
- *   POST   /api/context/sources               add one (kind, config, repoIds) and sync it
+ *   POST   /api/context/sources               add one (kind, config, repoIds) and sync it, or
+ *                                             with { sync: false } add it paused
  *   POST   /api/context/sources/preview       what a scope WOULD yield — reads, stores nothing
  *   GET    /api/context/sources/:id           one source and its syncs — the source's page
  *   PATCH  /api/context/sources/:id           { config } — a new scope, and the sync it starts
@@ -939,7 +940,11 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         config?: unknown;
         repoIds?: unknown;
         installationId?: unknown;
+        sync?: unknown;
       };
+      // Added without a sync, a source is stored paused: the sweep and a push
+      // would otherwise sync one that has never synced within the hour.
+      const sync = body.sync !== false;
       const kind = await readKind(org, body);
       const scope = await scopeFor(req, kind, body.config, body.installationId);
       const repoKeys = await readRepoIds(req, body.repoIds);
@@ -957,6 +962,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         kind,
         title: titleFor(scope),
         config: scope.config,
+        ...(sync ? {} : { status: 'paused' as const }),
       });
       // A Repository source is read by the repository it scopes, when Code has
       // connected that repository; a source for one Code has not is read by
@@ -976,14 +982,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
       const who = actorOf(req);
       if (who) captureAction(EVENTS.contextSourceAdded, { ...who, properties: { kind } });
 
-      const outcome = await requireJobs().enqueueContextSync({
-        workspaceOrgId: org,
-        sourceId: id,
-        source: 'add',
-      });
+      const outcome = sync
+        ? await requireJobs().enqueueContextSync({ workspaceOrgId: org, sourceId: id, source: 'add' })
+        : null;
       res.status(202).json({
         source: { ...source, docCount: 0, repositories: links },
-        ...(outcome.status === 'queued' ? { jobId: outcome.jobId } : {}),
+        ...(outcome?.status === 'queued' ? { jobId: outcome.jobId } : {}),
       });
     } catch (e) {
       respond(res, next, e);

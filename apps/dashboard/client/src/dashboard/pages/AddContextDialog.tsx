@@ -30,9 +30,10 @@
  * it is a repository connected in Code, and the source reads it by copying the
  * folder exactly as a run does.
  *
- * Nothing is stored until Add and sync: Check runs the real driver against the
- * real scope and stores nothing, and the add closes on the new source's page,
- * which reads Syncing until its first sync lands.
+ * Nothing is stored until Add or Add and sync: Check runs the real driver
+ * against the real scope and stores nothing, and either add closes on the new
+ * source's page. Add and sync reads Syncing until its first sync lands; Add
+ * stores the source paused, so nothing syncs it until it is resumed.
  */
 
 import { useEffect, useState } from 'react';
@@ -161,7 +162,8 @@ export function AddContextDialog({
   const [checked, setChecked] = useState<ContextSourceCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  /** Which add is in flight: plain Add, or Add and sync. */
+  const [adding, setAdding] = useState<'add' | 'sync' | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -183,7 +185,7 @@ export function AddContextDialog({
     setChecked(null);
     setChecking(false);
     setFailure(null);
-    setAdding(false);
+    setAdding(null);
   }, [open, initialKind]);
 
   // The tool accounts this workspace has connected, read when the dialog opens
@@ -332,11 +334,11 @@ export function AddContextDialog({
       .finally(() => setChecking(false));
   };
 
-  const add = (): void => {
+  const add = (sync: boolean): void => {
     if (!kind) return;
-    setAdding(true);
+    setAdding(sync ? 'sync' : 'add');
     setFailure(null);
-    void addContextSource({ kind, config: config(), repoIds: [], ...account() })
+    void addContextSource({ kind, config: config(), repoIds: [], sync, ...account() })
       .then((res) => {
         onAdded?.();
         onOpenChange(false);
@@ -349,7 +351,7 @@ export function AddContextDialog({
         if (toldToDescribeWorkspace(e, navigate)) return;
         setFailure(e instanceof Error ? e.message : String(e));
       })
-      .finally(() => setAdding(false));
+      .finally(() => setAdding(null));
   };
 
   return (
@@ -694,14 +696,24 @@ export function AddContextDialog({
             </button>
           )}
           {step === 2 && checked && (
-            <button
-              type="button"
-              disabled={adding}
-              onClick={add}
-              className={`${FOOT_BUTTON} bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50`}
-            >
-              {adding ? 'Adding…' : 'Add and sync'}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={adding !== null}
+                onClick={() => add(false)}
+                className={`${FOOT_BUTTON} border border-border text-foreground hover:bg-muted/60 disabled:opacity-50`}
+              >
+                {adding === 'add' ? 'Adding…' : 'Add'}
+              </button>
+              <button
+                type="button"
+                disabled={adding !== null}
+                onClick={() => add(true)}
+                className={`${FOOT_BUTTON} bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50`}
+              >
+                {adding === 'sync' ? 'Adding…' : 'Add and sync'}
+              </button>
+            </>
           )}
         </DialogFooter>
       </DialogContent>

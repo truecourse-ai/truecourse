@@ -962,6 +962,8 @@ export function addContextSource(body: {
   repoIds: string[];
   /** The GitHub installation a repository source syncs through. */
   installationId?: number;
+  /** False adds the source paused, with no sync; it syncs once resumed. */
+  sync?: boolean;
 }): Promise<{ source: ContextSourceView; jobId?: string }> {
   return fetchApi<{ source: ContextSourceView; jobId?: string }>('/api/context/sources', {
     method: 'POST',
