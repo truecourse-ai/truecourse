@@ -594,6 +594,28 @@ describe('Add context', () => {
     );
   });
 
+  it('adds without a sync from Add, beside the primary Add and sync', async () => {
+    const state = serve();
+    renderAt('/context/documents');
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Add context' }));
+    await user.click(await screen.findByRole('button', { name: /Documentation site/ }));
+    await user.type(screen.getByLabelText('llms.txt URL'), 'https://docs.other.com/llms.txt');
+    await user.click(screen.getByRole('button', { name: 'Check' }));
+    await screen.findByText(/docs\.other\.com yields 3 pages/);
+
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => expect(state.calls).toContain('POST /api/context/sources'));
+    expect(state.posts.find((p) => p.path === '/api/context/sources')?.body).toMatchObject({
+      sync: false,
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('address')).toHaveTextContent('/context/sources/site-docs-other'),
+    );
+  });
+
   it('names where you are with a stepper, and says what Check does for THIS kind', async () => {
     serve();
     renderAt('/context/documents');

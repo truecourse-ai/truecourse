@@ -36,6 +36,10 @@ export interface UsageDelta {
   cacheCreateTokens: number;
   calls: number;
   costUsd: number;
+  /** `costUsd` by kind: fresh input and cache writes, output, cache reads. */
+  inputCostUsd: number;
+  outputCostUsd: number;
+  cachedCostUsd: number;
   /** The first call in this flush. */
   startedAt: string;
   /** The last one. */
@@ -78,13 +82,19 @@ export interface UsageTotalsRecord {
   runs: number;
 }
 
-/** One bucket's spend under one job type. */
+/** One bucket's spend under one job type, in the four stored token buckets. */
 export interface UsageSeriesRecord {
   /** The bucket's first day, `YYYY-MM-DD` in the query's zone. */
   at: string;
   jobType: string;
   costUsd: number;
-  tokens: number;
+  inputCostUsd: number;
+  outputCostUsd: number;
+  cachedCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
 }
 
 /** One job's spend, with how the job ended. */
@@ -94,6 +104,11 @@ export interface UsageRunRecord {
   jobType: string;
   repoFullName: string | null;
   costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  /** The four buckets added up. */
   tokens: number;
   calls: number;
   /** The model the run ran on. Every row of a run names the same one; a run a

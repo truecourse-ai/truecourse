@@ -232,6 +232,13 @@
       "when": 1790126458285,
       "tag": "0032_workspace_entitlements",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790192018708,
+      "tag": "0033_usage_cost_by_kind",
+      "breakpoints": true
     }
   ]
 }

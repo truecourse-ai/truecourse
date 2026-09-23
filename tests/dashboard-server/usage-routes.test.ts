@@ -87,6 +87,10 @@ function delta(over: Partial<UsageDelta> = {}): UsageDelta {
     costUsd: 1.5,
     startedAt: minutesAgo(30),
     finishedAt: minutesAgo(20),
+    // A test that names only the total spent it all on input.
+    inputCostUsd: over.costUsd ?? 1.5,
+    outputCostUsd: 0,
+    cachedCostUsd: 0,
     ...over,
   };
 }

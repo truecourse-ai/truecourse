@@ -34,6 +34,7 @@ import type {
   SessionEventBody,
   SessionHandle,
   SessionStatus,
+  TurnCost,
   TurnUsage,
 } from '@truecourse/agent-loop';
 import { log } from '@truecourse/core/lib/logger';
@@ -58,6 +59,8 @@ export interface LlmSpend {
   cacheReadTokens: number;
   cacheCreateTokens: number;
   costUsd: number;
+  /** `costUsd` by kind; all zero on an unpriced turn. */
+  cost: TurnCost;
 }
 
 /** Where a run reports what it spent. Never throws. */
@@ -117,6 +120,15 @@ export interface UsageMeter extends RunMeter {
   close(): Promise<void>;
 }
 
+/** An unpriced turn's split. */
+const NO_COST: TurnCost = { input: 0, output: 0, cached: 0 };
+
+function addCost(into: TurnCost, more: TurnCost): void {
+  into.input += more.input;
+  into.output += more.output;
+  into.cached += more.cached;
+}
+
 /** How long spend sits in memory before it is written. */
 const FLUSH_MS = 5_000;
 
@@ -131,6 +143,7 @@ interface Pending {
   cacheCreateTokens: number;
   calls: number;
   costUsd: number;
+  cost: TurnCost;
   startedAt: string;
   finishedAt: string;
 }
@@ -194,6 +207,7 @@ export function createUsageMeter(
     held.cacheCreateTokens += pending.cacheCreateTokens;
     held.calls += pending.calls;
     held.costUsd += pending.costUsd;
+    addCost(held.cost, pending.cost);
     if (pending.startedAt < held.startedAt) held.startedAt = pending.startedAt;
     if (pending.finishedAt > held.finishedAt) held.finishedAt = pending.finishedAt;
   };
@@ -239,6 +253,9 @@ export function createUsageMeter(
           cacheCreateTokens: pending.cacheCreateTokens,
           calls: pending.calls,
           costUsd: pending.costUsd,
+          inputCostUsd: pending.cost.input,
+          outputCostUsd: pending.cost.output,
+          cachedCostUsd: pending.cost.cached,
           startedAt: pending.startedAt,
           finishedAt: pending.finishedAt,
         });
@@ -287,6 +304,7 @@ export function createUsageMeter(
         cacheCreateTokens: spend.cacheCreateTokens,
         calls: 1,
         costUsd: spend.costUsd,
+        cost: { ...spend.cost },
         startedAt: at,
         finishedAt: at,
       });
@@ -297,6 +315,7 @@ export function createUsageMeter(
       held.cacheCreateTokens += spend.cacheCreateTokens;
       held.calls += 1;
       held.costUsd += spend.costUsd;
+      addCost(held.cost, spend.cost);
       held.finishedAt = at;
       // The model a fallback swapped to is the one this row now names.
       if (spend.model) held.model = spend.model;
@@ -412,6 +431,7 @@ export function meterDriver(
               cacheReadTokens: event.usage.cacheReadTokens,
               cacheCreateTokens: event.usage.cacheCreateTokens,
               costUsd: event.usage.costUsd,
+              cost: event.usage.cost ?? NO_COST,
             });
             // The debit lands on a later flush, so the balance the gate reads is
             // the one the last flush left. A turn taken on credit is the

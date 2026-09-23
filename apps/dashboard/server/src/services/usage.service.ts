@@ -31,12 +31,14 @@ import {
   USAGE_JOB_TYPES,
   USAGE_PERIODS,
   usageJobTypeWord,
+  type UsageAmount,
   type UsageFacet,
   type UsagePeriod,
   type UsagePeriodView,
   type UsageResponse,
   type UsageRunRow,
   type UsageSeriesPoint,
+  type UsageTokenSplit,
   type UsageTotals,
 } from '@truecourse/shared';
 
@@ -287,6 +289,31 @@ export function usageQuery(
   return query;
 }
 
+/** The four stored token buckets, which never overlap. */
+export interface UsageTokenBuckets {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+}
+
+/**
+ * The buckets as the page reads them: a cache write is input (read at full
+ * price on its way into the cache), a cache read is cached, and the hit rate is
+ * the cached share of everything read. No caching reported at all is no rate.
+ */
+export function usageTokenSplit(buckets: UsageTokenBuckets): UsageTokenSplit {
+  const input = buckets.inputTokens + buckets.cacheCreateTokens;
+  const cached = buckets.cacheReadTokens;
+  const caching = buckets.cacheReadTokens + buckets.cacheCreateTokens > 0;
+  return {
+    input,
+    output: buckets.outputTokens,
+    cached,
+    cacheHitRate: caching ? cached / (input + cached) : null,
+  };
+}
+
 /** The period's spend in one line. */
 export async function usageTotals(query: UsageQuery): Promise<UsageTotals> {
   const totals = await readUsageTotals(query);
@@ -298,12 +325,40 @@ export async function usageTotals(query: UsageQuery): Promise<UsageTotals> {
     cacheCreateTokens: totals.cacheCreateTokens,
     tokens:
       totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheCreateTokens,
+    split: usageTokenSplit(totals),
     calls: totals.calls,
     runs: totals.runs,
   };
 }
 
-/** The trend: one point per bucket of the period, each split by job type. */
+/** Two amounts as one, cost kept to the cent's own precision. */
+function addAmount(a: UsageAmount, b: UsageAmount): UsageAmount {
+  return {
+    costUsd: exact(a.costUsd + b.costUsd),
+    costByKind: {
+      input: exact(a.costByKind.input + b.costByKind.input),
+      output: exact(a.costByKind.output + b.costByKind.output),
+      cached: exact(a.costByKind.cached + b.costByKind.cached),
+    },
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cached: a.cached + b.cached,
+  };
+}
+
+const NO_AMOUNT: UsageAmount = {
+  costUsd: 0,
+  costByKind: { input: 0, output: 0, cached: 0 },
+  input: 0,
+  output: 0,
+  cached: 0,
+};
+
+/**
+ * The trend: one point per bucket of the period, each split by job type, and
+ * each carrying every measure the page can plot — cost, and the tokens split
+ * the way the totals and the runs split them.
+ */
 export async function usageSeries(
   query: UsageQuery,
   period: UsagePeriodView,
@@ -312,7 +367,7 @@ export async function usageSeries(
   const points = new Map<string, UsageSeriesPoint>(
     bucketLabels(period, usageTimeZone(query.timeZone)).map((at) => [
       at,
-      { at, costUsd: 0, tokens: 0, byJobType: {} },
+      { at, ...NO_AMOUNT, byJobType: {} },
     ]),
   );
   for (const row of rows) {
@@ -320,13 +375,16 @@ export async function usageSeries(
     // built from, and inventing a point for it would put it out of order.
     const point = points.get(row.at);
     if (!point) continue;
-    point.costUsd = exact(point.costUsd + row.costUsd);
-    point.tokens += row.tokens;
-    const held = point.byJobType[row.jobType];
-    point.byJobType[row.jobType] = {
-      costUsd: exact((held?.costUsd ?? 0) + row.costUsd),
-      tokens: (held?.tokens ?? 0) + row.tokens,
+    const split = usageTokenSplit(row);
+    const amount: UsageAmount = {
+      costUsd: row.costUsd,
+      costByKind: { input: row.inputCostUsd, output: row.outputCostUsd, cached: row.cachedCostUsd },
+      input: split.input,
+      output: split.output,
+      cached: split.cached,
     };
+    Object.assign(point, addAmount(point, amount));
+    point.byJobType[row.jobType] = addAmount(point.byJobType[row.jobType] ?? NO_AMOUNT, amount);
   }
   return [...points.values()];
 }
@@ -349,7 +407,12 @@ export async function usageRuns(
     // says so — it just has nowhere to open.
     repoId: (row.repoFullName && slugs.get(row.repoFullName)) ?? null,
     costUsd: exact(row.costUsd),
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    cacheReadTokens: row.cacheReadTokens,
+    cacheCreateTokens: row.cacheCreateTokens,
     tokens: row.tokens,
+    split: usageTokenSplit(row),
     calls: row.calls,
     model: row.model,
     startedAt: row.startedAt,

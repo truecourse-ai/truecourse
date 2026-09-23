@@ -37,6 +37,7 @@ import {
 } from '@truecourse/agent-loop';
 import { loadSdk } from './sdk-import.js';
 import type {
+  SdkApiUsage,
   SdkAssistantMessage,
   SdkMcpToolResult,
   SdkPartialAssistantMessage,
@@ -209,11 +210,15 @@ async function runClaudeAgentSession(
     });
   }
 
-  // One API assistant turn arrives as SEVERAL SDK assistant messages sharing
-  // `message.id` (one per content block), each repeating the turn's usage —
-  // observed live. Same-id messages merge into ONE buffered turn (one budget
-  // turn, usage counted once), flushed before any non-assistant message and
-  // before a tool handler runs, so ordering stays faithful.
+  // One API call arrives as SEVERAL SDK assistant messages sharing
+  // `message.id` (one per content block, each sent as its block closes), and
+  // every one repeats the usage the call OPENED with: the real input and cache
+  // figures, a handful of output tokens. The call's real output count is on
+  // the `message_delta` stream event, after the last block. Same-id messages
+  // merge into ONE buffered turn — one budget turn, its usage counted once —
+  // emitted when the call's stream stops, with the usage it stopped on. A tool
+  // handler the harness starts while the call is still streaming waits for
+  // that stop, so the turn still precedes its tool's result.
   interface PendingTurn {
     id: string | undefined;
     texts: string[];
@@ -224,6 +229,16 @@ async function runClaudeAgentSession(
     raws: SdkAssistantMessage[];
   }
   let pendingTurn: PendingTurn | undefined;
+  // The streamed call in flight, from its `message_start` to its `message_stop`,
+  // with the usage it has reported so far.
+  let openCall: { id: string | undefined; usage?: TurnUsage } | undefined;
+  // Calls whose turn was emitted: a block of one arriving later records no
+  // usage a second time.
+  const emittedCalls = new Set<string>();
+  const callEndWaiters: Array<() => void> = [];
+  const releaseCallEndWaiters = (): void => {
+    for (const release of callEndWaiters.splice(0)) release();
+  };
   // The turn as it is being written, block by block: prose and thinking as
   // they stream, a tool call from the moment the model starts composing it.
   type ProseBlock = { kind: 'text' | 'thinking'; text: string };
@@ -259,11 +274,14 @@ async function runClaudeAgentSession(
   const flushTurn = (): void => {
     if (!pendingTurn) return;
     const text = pendingTurn.texts.join('\n');
+    const id = pendingTurn.id;
+    const counted = id !== undefined && emittedCalls.has(id);
+    if (id !== undefined) emittedCalls.add(id);
     onEvent({
       type: 'assistant-turn',
       ...(text ? { text } : {}),
       ...(pendingTurn.toolCall ? { toolCall: pendingTurn.toolCall } : {}),
-      usage: pendingTurn.usage,
+      usage: counted ? NO_USAGE : pendingTurn.usage,
       ...(pendingTurn.model ? { model: pendingTurn.model } : {}),
       raw: {
         source: 'claude-agent-sdk.assistant',
@@ -276,10 +294,13 @@ async function runClaudeAgentSession(
     const id = message.message?.id;
     if (!pendingTurn || id === undefined || pendingTurn.id !== id) {
       flushTurn();
+      const ofOpenCall = openCall && id !== undefined && openCall.id === id ? openCall : undefined;
+      const usage = ofOpenCall?.usage ?? turnUsageOf(message.message?.usage);
+      if (ofOpenCall) ofOpenCall.usage = usage;
       pendingTurn = {
         id,
         texts: [],
-        usage: turnUsageOf(message),
+        usage,
         model: message.message?.model,
         raws: [],
       };
@@ -295,19 +316,27 @@ async function runClaudeAgentSession(
     pendingTurn.raws.push(message);
     // Without an id there is nothing to merge on — emit right away. Only
     // id-carrying messages wait for their possible same-id continuation
-    // (flushed by the next message, a tool handler, or session end), which
-    // can defer the budget check by at most one message — recorded honestly.
+    // (flushed when the call's stream stops, by the next message once no call
+    // is open, by a tool handler, or at session end), which defers the budget
+    // check to the end of the call — recorded honestly.
     if (id === undefined) flushTurn();
+  };
+  // What a tool handler runs behind: the end of the call that asked for it,
+  // then that call's turn.
+  const settleTurn = async (): Promise<void> => {
+    if (openCall) await new Promise<void>((release) => callEndWaiters.push(release));
+    flushTurn();
   };
 
   const server = sdk.createSdkMcpServer({
     name: SESSION_MCP_SERVER_NAME,
     version: '1.0.0',
-    tools: def.tools.map((t) => buildMcpTool(sdk, t, onEvent, signal, flushTurn, reportWaiting)),
+    tools: def.tools.map((t) => buildMcpTool(sdk, t, onEvent, signal, settleTurn, reportWaiting)),
   });
 
   const options: SdkQueryOptions = {
-    ...(input.onProgress ? { includePartialMessages: true } : {}),
+    // The stream carries each call's final usage, so it is always on.
+    includePartialMessages: true,
     // -- isolation invariants, hardcoded ------------------------------
     tools: [], // no built-in tools
     disallowedTools: ['ToolSearch'], // deferred tool loading steals the first turn (spike)
@@ -382,21 +411,47 @@ async function runClaudeAgentSession(
   // wrapped, and a result we already hold wins over the trailing throw.
   try {
     for await (const message of query as AsyncIterable<SdkMessage>) {
-      // Partial blocks and tool heartbeats are not turn boundaries. In particular,
-      // partials may arrive BETWEEN same-message-id complete assistant blocks.
-      if (message.type !== 'assistant' && message.type !== 'stream_event' && message.type !== 'tool_progress') flushTurn();
+      // A result ends whatever call was open. Otherwise nothing ends a turn
+      // while its call is still streaming — status chatter lands between its
+      // blocks — and partial blocks and tool heartbeats never do.
+      if (message.type === 'result') openCall = undefined;
+      if (!openCall && message.type !== 'assistant' && message.type !== 'stream_event' && message.type !== 'tool_progress') flushTurn();
+      if (message.type === 'result') releaseCallEndWaiters();
       switch (message.type) {
         case 'stream_event': {
           const partial = message as SdkPartialAssistantMessage;
-          if (partial.parent_tool_use_id !== null || !input.onProgress) break;
+          if (partial.parent_tool_use_id !== null) break;
           const event = partial.event;
           if (event.type === 'message_start') {
             if (pendingTurn && pendingTurn.id !== event.message?.id) flushTurn();
+            // A call that never reached its stop (a failed attempt the harness
+            // retries) is over once the next one starts.
+            releaseCallEndWaiters();
+            openCall = {
+              id: event.message?.id,
+              ...(event.message?.usage ? { usage: turnUsageOf(event.message.usage) } : {}),
+            };
             progressTurnId = event.message?.id;
             progressBlocks.clear();
             turnsSeen += 1;
             break;
           }
+          if (event.type === 'message_delta') {
+            if (openCall) {
+              openCall.usage = withFinalUsage(openCall.usage ?? NO_USAGE, event.usage);
+              if (pendingTurn && pendingTurn.id === openCall.id) pendingTurn.usage = openCall.usage;
+            }
+            break;
+          }
+          if (event.type === 'message_stop') {
+            if (openCall) {
+              openCall = undefined;
+              flushTurn();
+              releaseCallEndWaiters();
+            }
+            break;
+          }
+          if (!input.onProgress) break;
           const turnId = progressTurnId;
           const index = event.index;
           if (!turnId || typeof index !== 'number') break;
@@ -560,7 +615,9 @@ async function runClaudeAgentSession(
       cursorOut(),
     );
   } finally {
+    openCall = undefined;
     flushTurn();
+    releaseCallEndWaiters();
     wiring.queue.end();
   }
   // The stream ended without any result message (interrupt, closed input).
@@ -653,7 +710,7 @@ function buildMcpTool(
   tool: SessionTool,
   onEvent: SessionRunInput['onEvent'],
   signal: AbortSignal,
-  flushTurn: () => void,
+  settleTurn: () => Promise<void>,
   reportWaiting: () => void,
 ): unknown {
   const driverCtx: ToolContext = {
@@ -672,9 +729,10 @@ function buildMcpTool(
   const unwrap = (args: unknown): unknown =>
     root ? args : (args as { input?: unknown } | undefined)?.input;
   return sdk.tool(tool.name, tool.description, shape, async (rawArgs) => {
-    // The tool_use part of the turn has been delivered; its buffered turn
-    // must precede this call's result in the transcript.
-    flushTurn();
+    // The harness starts a tool as soon as its block closes, while the rest
+    // of the call may still be streaming. The turn that asked for it must
+    // precede its result in the transcript, carrying the call's final usage.
+    await settleTurn();
     const args = unwrap(rawArgs);
     try {
       const result = await tool.execute(args, driverCtx);
@@ -722,8 +780,7 @@ function toMcpResult(text: string, isError: boolean): SdkMcpToolResult {
  * dishonest split would be worse than none — pricing can be derived from the
  * recorded tokens downstream.
  */
-function turnUsageOf(message: SdkAssistantMessage): TurnUsage {
-  const usage = message.message?.usage;
+function turnUsageOf(usage: SdkApiUsage | undefined): TurnUsage {
   return {
     inputTokens: usage?.input_tokens ?? 0,
     outputTokens: usage?.output_tokens ?? 0,
@@ -733,6 +790,28 @@ function turnUsageOf(message: SdkAssistantMessage): TurnUsage {
     costSource: 'unpriced',
   };
 }
+
+/** A call's usage once its `message_delta` arrived: every figure it carries is
+ *  cumulative for the call, and a null one leaves the opening figure standing. */
+function withFinalUsage(opening: TurnUsage, delta: SdkApiUsage | undefined): TurnUsage {
+  return {
+    ...opening,
+    inputTokens: delta?.input_tokens ?? opening.inputTokens,
+    outputTokens: delta?.output_tokens ?? opening.outputTokens,
+    cacheReadTokens: delta?.cache_read_input_tokens ?? opening.cacheReadTokens,
+    cacheCreateTokens: delta?.cache_creation_input_tokens ?? opening.cacheCreateTokens,
+  };
+}
+
+/** A later block of a call whose usage is already on record. */
+const NO_USAGE: TurnUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheCreateTokens: 0,
+  costUsd: 0,
+  costSource: 'unpriced',
+};
 
 function mapResultError(result: SdkResultMessage): SessionFailure {
   const detail =

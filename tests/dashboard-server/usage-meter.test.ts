@@ -48,6 +48,7 @@ function fakeDriver(): SessionDriver {
           cacheReadTokens: 1_000,
           cacheCreateTokens: 10,
           costUsd: 0.5,
+          cost: { input: 0.2, output: 0.25, cached: 0.05 },
           costSource: 'model-priced',
         },
         model: 'claude-opus-5-20260101',
@@ -155,6 +156,8 @@ describe('the usage meter', () => {
     // What the RESPONSE said served the turn, not the configured alias.
     expect(worker.model).toBe('claude-opus-5-20260101');
     expect(Number(worker.costUsd)).toBe(1);
+    // The split by kind is added up the same way as the total.
+    expect([worker.inputCostUsd, worker.outputCostUsd, worker.cachedCostUsd].map(Number)).toEqual([0.4, 0.5, 0.1]);
     expect(rows.find((row) => row.subject === 'guard-generate.extract')!.calls).toBe(1);
   });
 

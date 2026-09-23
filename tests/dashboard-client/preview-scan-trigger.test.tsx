@@ -187,6 +187,42 @@ describe('starting a run', () => {
     });
   });
 
+  // An empty balance and a server with no platform key both answer 409 too.
+  // Read as busy, they told a person out of credits to wait for a run that was
+  // never running.
+  it('names an empty balance and a missing platform key, not a busy repository', async () => {
+    serve({
+      contextScan: () =>
+        json({ error: 'credits-exhausted', message: 'This workspace is out of credits.' }, 409),
+    });
+    expect(await startContextScan()).toEqual({
+      kind: 'no-credits',
+      message: 'This workspace is out of credits.',
+    });
+
+    serve({
+      setup: () =>
+        json({ error: 'credits-exhausted', message: 'This workspace is out of credits.' }, 409),
+    });
+    expect(await startGuardSetup('linkwarden')).toEqual({
+      kind: 'no-credits',
+      message: 'This workspace is out of credits.',
+    });
+
+    // Its remedy is a key of the workspace's own, the same as no provider at all.
+    serve({
+      contextScan: () =>
+        json(
+          { error: 'credits-provider-unavailable', message: 'This server has no credits provider configured.' },
+          409,
+        ),
+    });
+    expect(await startContextScan()).toEqual({
+      kind: 'not-configured',
+      message: 'This server has no credits provider configured.',
+    });
+  });
+
   it('starts the workspace Document scan at the workspace address', async () => {
     const calls = serve({ contextScan: () => json({ jobId: 'job_ctx' }, 202) });
     expect(await startContextScan()).toEqual({ kind: 'started' });

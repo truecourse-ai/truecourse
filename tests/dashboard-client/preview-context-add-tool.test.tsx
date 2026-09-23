@@ -223,7 +223,12 @@ describe('adding a Jira source', () => {
       expect(state.calls[1]).toEqual({
         method: 'POST',
         path: '/api/context/sources',
-        body: { kind: 'jira', config: { projectKey: 'ENG', jql: 'labels = spec' }, repoIds: [] },
+        body: {
+          kind: 'jira',
+          config: { projectKey: 'ENG', jql: 'labels = spec' },
+          repoIds: [],
+          sync: true,
+        },
       }),
     );
   });

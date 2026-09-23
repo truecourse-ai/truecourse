@@ -6,7 +6,7 @@
  * modal renders.
  */
 
-import { priceForModel, type PriceTable } from './model-prices.js';
+import { priceForModel, type ModelPrice, type PriceTable } from './model-prices.js';
 
 /** Characters per token — the rough conversion every surface counts with. */
 export const CHARS_PER_TOKEN = 4;
@@ -41,7 +41,7 @@ export interface LlmEstimate {
      * knowable before the call, so the estimate quotes "flows ≤ runnable claims").
      */
     bound?: string;
-    /** Ceiling USD cost for this stage (set only when a price table was supplied). */
+    /** Ceiling USD cost for this stage (set only when its model could be priced). */
     estimatedCostUsd?: number;
     /** Expected USD cost for this stage (set only when {@link expectedCalls} is). */
     expectedCostUsd?: number;
@@ -50,8 +50,10 @@ export interface LlmEstimate {
   subjectLabel?: string;
   /**
    * Ceiling USD cost for the whole run. Prices the high end of every stage's
-   * call range and ignores prompt-caching discounts, so the real bill lands at
-   * or below it. Absent when no price table was available.
+   * call range and every input token at the dearer of the model's fresh-input
+   * and cache-write rates, ignoring cache-read discounts, so the real bill lands
+   * at or below it. Absent when there are no prices (no table has been fetched,
+   * or no stage's model is in it): the estimate then quotes tokens alone.
    */
   estimatedCostUsd?: number;
   /**
@@ -61,7 +63,7 @@ export interface LlmEstimate {
    */
   expectedCostUsd?: number;
   /** Provenance of the prices behind {@link estimatedCostUsd}. */
-  costSource?: 'live' | 'cache' | 'bundled';
+  costSource?: 'live' | 'cache';
   /** True when some stage's model couldn't be priced (cost is a partial total). */
   costPartial?: boolean;
 }
@@ -106,6 +108,11 @@ export function tokensFromChars(...charCounts: number[]): number {
   return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
+/** The dearest rate an input token of this model can be billed at: fresh, or written to the cache. */
+function ceilingInputRate(price: ModelPrice): number {
+  return Math.max(price.input, price.cacheWrite ?? price.input);
+}
+
 function perCallTokens(s: StageCallEstimate): number {
   return s.avgInputTokens + PROMPT_OVERHEAD_TOKENS + s.avgOutputTokens;
 }
@@ -115,10 +122,16 @@ function perCallTokens(s: StageCallEstimate): number {
  * `calls` drives `totalEstimatedTokens`; any stage carrying `minCalls`/`maxCalls`
  * also widens the total's implied range via `callsRange`.
  *
- * When a `prices` table is supplied, each stage also gets a ceiling
- * `estimatedCostUsd` and the total a ceiling `estimatedCostUsd`. Cost is a
- * CEILING: it prices the HIGH end of each stage's call range (`maxCalls ?? calls`)
- * and ignores prompt-caching discounts — so the real bill lands at or below it.
+ * When a `prices` table is supplied, each stage whose model it prices also gets
+ * a ceiling `estimatedCostUsd`, and the total a ceiling `estimatedCostUsd`. With
+ * no table (`null`: none has been fetched) the estimate is tokens alone, never a
+ * made-up cost. Cost is a CEILING: it prices the HIGH end of each stage's call
+ * range (`maxCalls ?? calls`), and — since a forecast cannot know how a run's
+ * input will split between fresh, cache-read and cache-written tokens — every
+ * input token at the DEAREST input-side rate the model publishes (a cache write
+ * costs more than fresh input on Anthropic models), never at the cheap
+ * cache-read rate. So the real bill lands at or below it. This is deliberately
+ * not `costOfCall` (model-prices.ts), which prices a call that ran, bucket by bucket.
  *
  * A stage that carries `expectedCalls` (a realistic point count below its ceiling)
  * also gets an `expectedCostUsd`, and the total gains an `expectedCostUsd` — the
@@ -128,7 +141,7 @@ function perCallTokens(s: StageCallEstimate): number {
 export function estimateStageTokens(
   stages: StageCallEstimate[],
   subjectLabel?: string,
-  prices?: PriceTable,
+  prices?: PriceTable | null,
 ): LlmEstimate {
   let totalCost = 0;
   let totalExpectedCost = 0;
@@ -158,7 +171,7 @@ export function estimateStageTokens(
       if (prices) {
         const price = priceForModel(s.model, prices);
         if (price) {
-          const perCallInput = (s.avgInputTokens + PROMPT_OVERHEAD_TOKENS) * price.input;
+          const perCallInput = (s.avgInputTokens + PROMPT_OVERHEAD_TOKENS) * ceilingInputRate(price);
           const perCallOutput = s.avgOutputTokens * price.output;
           const priceCalls = (n: number) => n * perCallInput + n * perCallOutput;
           const ceilingCalls = s.maxCalls ?? s.calls;

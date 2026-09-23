@@ -40,6 +40,9 @@ import type { Request } from 'express';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
 import {
+  CREDITS_PRICES_UNAVAILABLE,
+  CREDITS_PRICES_UNAVAILABLE_MESSAGE,
+  CREDITS_PROVIDER_UNAVAILABLE,
   LLM_CREDITS_PROVIDER,
   LLM_PROVIDER_KINDS,
   type LlmConfigUpdate,
@@ -54,6 +57,8 @@ import {
 } from '@truecourse/core/services/llm/session-driver';
 import { resolveModel } from '@truecourse/core/config/llm-models';
 import { probeApiConfig, probeClaudeCode } from '@truecourse/core/services/llm/probe';
+import { getModelPrices } from '@truecourse/core/services/llm/model-prices';
+import { priceOfConfig } from '@truecourse/core/services/llm/provider';
 import { meterDriver, type RunMeter, type UsageMeter } from './usage-meter.service.js';
 import { openCreditsAccount } from './credits.service.js';
 import { isLocalMode } from '../mode.js';
@@ -120,7 +125,8 @@ export async function workspaceOnCredits(orgId: string): Promise<boolean> {
  *     which takes the same key as the bearer token the client already sends.
  *   - `TRUECOURSE_CREDITS_PRICE_MODEL` is the list-price model the deployment
  *     named by `TRUECOURSE_CREDITS_MODEL` serves. Without it a deployment name
- *     prices as nothing and a credits workspace is never debited.
+ *     has no price, and a credits run is refused at start rather than run
+ *     without a debit.
  */
 export function platformCreditsConfig(): LlmApiConfig | null {
   const apiKey = process.env.TRUECOURSE_CREDITS_OPENAI_API_KEY?.trim();
@@ -135,6 +141,16 @@ export function platformCreditsConfig(): LlmApiConfig | null {
     ...(baseURL ? { baseURL } : {}),
     ...(priceModel ? { priceModel } : {}),
   };
+}
+
+/**
+ * The model a credits run's calls are charged as: the deployment's list-price
+ * model when the environment names one, else the model itself. Null when this
+ * server holds no credits provider.
+ */
+export function creditsPriceModel(): string | null {
+  const config = platformCreditsConfig();
+  return config ? config.priceModel || config.model : null;
 }
 
 /**
@@ -153,12 +169,26 @@ export function offeredProviderChoices(): LlmProviderChoice[] {
 
 /** The workspace chose credits, and this server holds no platform key to run them on. */
 export class CreditsProviderUnavailableError extends Error {
-  readonly code = 'credits-provider-unavailable';
+  readonly code = CREDITS_PROVIDER_UNAVAILABLE;
   constructor() {
     super(
       'This server has no credits provider configured. Set an API key of your own in Settings → Models.',
     );
     this.name = 'CreditsProviderUnavailableError';
+  }
+}
+
+/**
+ * The workspace spends credits and its model has no price — no price table has
+ * been fetched yet, or the table holds none for the model the platform's calls
+ * are charged as. A run that cannot be priced cannot be charged, so it does not
+ * start.
+ */
+export class CreditsPricesUnavailableError extends Error {
+  readonly code = CREDITS_PRICES_UNAVAILABLE;
+  constructor() {
+    super(CREDITS_PRICES_UNAVAILABLE_MESSAGE);
+    this.name = 'CreditsPricesUnavailableError';
   }
 }
 
@@ -264,7 +294,15 @@ export function probeWorkspaceLlmConfig(config: LlmApiConfig): Promise<void> {
  * The one entry every LLM step starts from: load the asking workspace's
  * provider and prove it answers. Throws {@link LlmNotConfiguredError} or
  * {@link LlmProbeFailedError}; the caller decides what that looks like on its
- * surface (a 409/502, or a failed run record).
+ * surface (a 409/502, or a failed run record). A credits workspace whose model
+ * cannot be priced throws {@link CreditsPricesUnavailableError} before
+ * anything is probed: this is the gate every metered job starts through, the
+ * ones a route never saw (a chained setup → generate → run, the ripple, a
+ * resumed pause) included.
+ *
+ * A workspace on its own key is not gated on prices: its turns are recorded
+ * unpriced until a table has been fetched. The fetch is started here so the
+ * run's first turns can already be priced.
  *
  * A job that must account for what it spends passes its METER: the driver is
  * wrapped so every turn of every session is counted, which is every LLM call
@@ -291,7 +329,12 @@ export async function startWorkspaceLlm(orgId: string, meter?: UsageMeter): Prom
   const credits = selection.kind === 'credits';
   const config = credits ? platformCreditsConfig() : selection.config;
   if (!config) throw new CreditsProviderUnavailableError();
-  if (credits && meter) meter.chargeTo(await openCreditsAccount(orgId));
+  if (credits) {
+    if (!(await priceOfConfig(config))) throw new CreditsPricesUnavailableError();
+    if (meter) meter.chargeTo(await openCreditsAccount(orgId));
+  } else {
+    void getModelPrices();
+  }
   try {
     await backend.probe(config);
   } catch (err) {

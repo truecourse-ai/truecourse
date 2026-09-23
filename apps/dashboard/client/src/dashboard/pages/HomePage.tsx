@@ -54,6 +54,7 @@ import { PageHeader, SectionTitle } from '@/dashboard/ui/bits';
 import { EntityList, type EntityListGroup } from '@/dashboard/ui/entity-list';
 import { StackedArea, type StackedSeries } from '@/dashboard/ui/stacked-area';
 import { CONTEXT_DOC_TONE, StatusWord, type StatusTone } from '@/dashboard/ui/status-word';
+import { SegmentedControl } from '@/dashboard/ui/segmented-control';
 import { useOnboarding } from '@/dashboard/shell/use-onboarding';
 import { documentsHref } from './context-hrefs';
 import { flowsStatusHref } from './flow-hrefs';
@@ -97,7 +98,6 @@ const PERIODS: { key: HomePeriod; label: string }[] = [
   { key: 'all', label: 'All' },
 ];
 
-const CHIP = 'rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors';
 const ROW = 'flex w-full flex-col gap-0.5 px-6 py-2 text-left transition-colors hover:bg-muted/30';
 
 /** The tone a status word wears, in the vocabulary every Context surface uses. */
@@ -368,23 +368,7 @@ function Dashboard({ signal }: { signal: number }) {
               numbersAtRest={false}
               onPickSeries={(status) => navigate(flowsStatusHref(status))}
               controls={
-                <span role="group" aria-label="Period" className="flex items-center gap-1">
-                  {PERIODS.map((p) => (
-                    <button
-                      key={p.key}
-                      type="button"
-                      aria-pressed={period === p.key}
-                      onClick={() => setPeriod(p.key)}
-                      className={`${CHIP} ${
-                        period === p.key
-                          ? 'bg-primary text-primary-foreground ring-1 ring-inset ring-current'
-                          : 'bg-muted text-foreground'
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </span>
+                <SegmentedControl label="Period" options={PERIODS} value={period} onChange={setPeriod} />
               }
             />
           )}

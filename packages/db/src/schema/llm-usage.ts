@@ -18,6 +18,9 @@ import { pgTable, text, timestamp, index, integer, bigint, numeric, uniqueIndex 
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
 
+/** USD, as a decimal so a sum of many small calls does not drift. */
+const usd = (name: string) => numeric(name, { precision: 18, scale: 8 }).notNull().default('0');
+
 /** A token counter: always a whole number, read back as a JS number. */
 const tokens = (name: string) => bigint(name, { mode: 'number' }).notNull().default(0);
 
@@ -46,6 +49,10 @@ export const llmUsage = pgTable(
     calls: integer('calls').notNull().default(0),
     /** USD, as a decimal so a sum of many small calls does not drift. */
     costUsd: numeric('cost_usd', { precision: 18, scale: 8 }).notNull().default('0'),
+    /** `cost_usd` by kind: fresh input and cache writes, output, cache reads. */
+    inputCostUsd: usd('input_cost_usd'),
+    outputCostUsd: usd('output_cost_usd'),
+    cachedCostUsd: usd('cached_cost_usd'),
     startedAt: ts('started_at').notNull(),
     finishedAt: ts('finished_at').notNull(),
   },
