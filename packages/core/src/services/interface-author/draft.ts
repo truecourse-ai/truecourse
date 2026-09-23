@@ -371,7 +371,11 @@ export interface ValidateFragmentInput {
  *     what this screen's earlier sessions established — an omitted kind is
  *     unknown, and nothing returns to a screen the ledger has settled;
  *  6. every one of this screen's existing tasks is accounted for — kept,
- *     amended or retired — exactly once ({@link accountForPrior}).
+ *     amended or retired — exactly once ({@link accountForPrior});
+ *  7. an opener is not a task on its own — a task that leaves the user at a
+ *     dialog or a panel (`to`) is matched by a task performed there (or on a
+ *     place nested in it), in the draft or the catalog, or by an `unresolved`
+ *     line naming that place ({@link unservedOpenedPlaces}).
  */
 export function validateFragment(input: ValidateFragmentInput): FragmentValidation {
   const { derived, authored } = input
@@ -515,6 +519,14 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
     }
   }
 
+  // ---- 7. an opener is not a task on its own --------------------------------
+  const merged = mergeInterfaceCatalogs(derived, candidate)
+  for (const { task, place } of unservedOpenedPlaces(stamped.interfaces, merged?.interfaces ?? [], places, fragment.unresolved ?? [])) {
+    errors.push(
+      `\`${task}\` opens \`${place.id}\` (${place.kind} "${place.title}"), and no task is performed there — read the component it opens and author what a user does in it (including cancelling or closing it) \`at: "${place.id}"\`, or add an \`unresolved\` line naming \`${place.id}\` and why its controls could not be authored`,
+    )
+  }
+
   // ---- 4. a state id names one world, catalog-wide -------------------------
   // The registry is what tasks chain BY: `at-least-one-repository-registered`
   // means the same world at every place, or the chain is a coincidence of
@@ -534,7 +546,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
 
   // ---- the structural half: the merged catalog has to parse ---------------
-  const parsed = InterfacesFileSchema.safeParse(mergeInterfaceCatalogs(derived, candidate))
+  const parsed = InterfacesFileSchema.safeParse(merged)
   if (!parsed.success) {
     for (const issue of parsed.error.issues) {
       errors.push(`${issue.path.join('.') || 'catalog'} — ${issue.message}`)
@@ -542,6 +554,39 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, errors: [], authored: candidate }
+}
+
+/**
+ * The dialogs and panels the draft's tasks open (`to`) that nothing serves: no
+ * task of the merged catalog is performed at the place or at one nested in it,
+ * and no `unresolved` line names it by id or by title. One entry per place, with
+ * the first task that opens it.
+ */
+export function unservedOpenedPlaces(
+  openers: readonly Pick<AuthoredTask, 'id' | 'to'>[],
+  catalog: readonly Pick<Interface, 'at'>[],
+  places: ReadonlyMap<string, InterfaceResource>,
+  unresolved: readonly string[],
+): { task: string; place: InterfaceResource }[] {
+  const served = new Set<string>()
+  for (const task of catalog) {
+    const seen = new Set<string>()
+    for (let id = task.at; id !== undefined && !seen.has(id); id = places.get(id)?.of) {
+      seen.add(id)
+      served.add(id)
+    }
+  }
+  const lines = unresolved.map((line) => line.toLowerCase())
+  const named = (place: InterfaceResource) =>
+    lines.some((line) => line.includes(place.id.toLowerCase()) || line.includes(place.title.toLowerCase()))
+  const unserved = new Map<string, { task: string; place: InterfaceResource }>()
+  for (const task of openers) {
+    const place = task.to ? places.get(task.to) : undefined
+    if (!place || (place.kind !== 'dialog' && place.kind !== 'panel')) continue
+    if (served.has(place.id) || unserved.has(place.id) || named(place)) continue
+    unserved.set(place.id, { task: task.id, place })
+  }
+  return [...unserved.values()]
 }
 
 /**

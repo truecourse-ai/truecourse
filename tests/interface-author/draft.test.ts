@@ -521,3 +521,46 @@ describe("accounting for a screen's existing tasks", () => {
     expect(retired.retired).toEqual([{ id: 'web/a', reason: 'gone' }])
   })
 })
+
+describe('an opener is not a task on its own', () => {
+  const dialog = { id: 'delete-dialog', kind: 'dialog' as const, title: 'Delete link', of: 'root', readables: NO_READABLES }
+  const opener = task({
+    id: 'web/open-delete-link',
+    title: 'Open the delete dialog',
+    steps: [{ kind: 'activate', target: { role: 'button', name: 'Delete' } }],
+    to: 'delete-dialog',
+  })
+  const cancel = task({
+    id: 'web/cancel-delete-link',
+    title: 'Cancel deleting a link',
+    purpose: 'control',
+    at: 'delete-dialog',
+    steps: [{ kind: 'activate', target: { role: 'button', name: 'Cancel' } }],
+  })
+
+  it('refuses a task that opens a dialog nothing is performed in', () => {
+    const result = validate(fragment({ interfaces: [opener], resources: [dialog] }))
+    expect(result.errors).toEqual([
+      expect.stringContaining('`web/open-delete-link` opens `delete-dialog` (dialog "Delete link"), and no task is performed there'),
+    ])
+  })
+
+  it('accepts it with a task at the dialog, or an unresolved line naming it', () => {
+    expect(validate(fragment({ interfaces: [opener, cancel], resources: [dialog] })).errors).toEqual([])
+    expect(
+      validate(fragment({ interfaces: [opener], resources: [dialog], unresolved: ['Delete link: its confirm needs a second link the seed lacks'] })).errors,
+    ).toEqual([])
+  })
+
+  it('counts a task on a place nested in the dialog, and one the catalog already holds', () => {
+    const confirm = { id: 'confirm-panel', kind: 'panel' as const, title: 'Confirmation', of: 'delete-dialog', readables: NO_READABLES }
+    const nested = task({ ...cancel, id: 'web/confirm-delete-link', at: 'confirm-panel', steps: [{ kind: 'activate', target: { role: 'button', name: 'Confirm' } }] })
+    expect(validate(fragment({ interfaces: [opener, nested], resources: [dialog, confirm] })).errors).toEqual([])
+    const authored = validate(fragment({ interfaces: [cancel], resources: [dialog] })).authored!
+    expect(validate(fragment({ interfaces: [opener] }), { authored }).errors).toEqual([])
+  })
+
+  it('leaves a task that moves to a screen alone', () => {
+    expect(validate(fragment({ interfaces: [task({ to: 'repos-repoid' })] })).errors).toEqual([])
+  })
+})

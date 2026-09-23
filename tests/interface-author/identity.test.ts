@@ -32,7 +32,7 @@ function fragment(screenId = 'documents'): AuthoredFragment {
       { id: 'confirmation', kind: 'dialog', title: 'Confirmation', of: 'editor-panel', readables: NO_READABLES },
     ],
     states: [{ id: 'saved', description: 'The changes are saved' }],
-    unresolved: ['A conditional preview could not be established'],
+    unresolved: ['A conditional preview could not be established', 'The Confirmation dialog renders only after a server round trip'],
   }
 }
 
@@ -96,6 +96,7 @@ describe('screen-owned authoring identities', () => {
         { id: 'editor-panel', kind: 'panel', title: 'Editor', readables: { markers: [{ marker: 'Editing' }] } },
         { id: 'note', kind: 'panel', title: 'Note', of: 'editor-panel', readables: NO_READABLES },
       ],
+      unresolved: original.unresolved,
     }
     const scoped = scopeFragmentIds(draft, input)
     expect(scoped.resources![0].id).toBe('editor-panel')
