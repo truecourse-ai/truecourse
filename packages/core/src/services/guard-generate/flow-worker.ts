@@ -44,7 +44,6 @@ import {
   type FlowWorkerTask,
   type WorkerFidelityJudge,
 } from '@truecourse/guard-generator'
-import { promptFingerprint } from '../agent/session-cache.js'
 import {
   LEGACY_FLOW_WORKER_API_PROMPT_FINGERPRINT,
   LEGACY_FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
@@ -142,11 +141,11 @@ with exactly one row per outstanding assigned case:
   "evidence": "the current observed defect", "issueId": "engine-provided issue ID" }.
 Use reasonKind assertion, annotation, preparation, unsupported-capability,
 review-unavailable, or not-attempted. Copy the current engine issueId when provided;
-do not reclassify an assertion defect as unavailable preparation. When a fidelity
-review rejected a case because the runner cannot observe what would prove it, answer
-with that review's issueId and reasonKind unsupported-capability, naming the missing
-capability in evidence. Every failing run records a new issueId, so copy it from the
-latest correction. A stale aggregate failure does not explain a later Cancel
+do not reclassify an assertion defect as unavailable preparation. When the fidelity
+judge rejected a case because the runner cannot observe what would prove it, end
+blocked with that issue's issueId and reasonKind unsupported-capability, naming the
+missing capability in evidence. A failing run of a changed candidate records a new
+issueId, so copy it from the latest correction. A stale aggregate failure does not explain a later Cancel
 rejection. The engine asks once per case for a changed executable candidate before
 you end blocked or retired, within the SAME budget; submit one complete revised
 candidate and preserve every flow obligation.
@@ -179,10 +178,6 @@ export const FLOW_WORKER_CLI_SYSTEM_PROMPT = GENERATE_SYSTEM_PROMPT + WORKER_ADD
 export const FLOW_WORKER_API_SYSTEM_PROMPT = GENERATE_API_SYSTEM_PROMPT + WORKER_ADDENDUM
 export const FLOW_WORKER_WEB_SYSTEM_PROMPT = GENERATE_WEB_SYSTEM_PROMPT + WORKER_ADDENDUM + `\n${AUTHOR_CATALOG_VERSION}: Use search_interfaces to discover setup actions and get_interfaces to fetch their authoritative fields and resource readables. Fetch continuation pages until the action appears in actionCompleteIds before using it. All requested action fields precede optional resource pages; fetch further resource pages only when their evidence is needed for the scenario. The complete flag covers the full resource payload, not action readiness. Summaries are candidates, never proof. Retrieval errors must be resolved before dependent authoring; zero search results do not establish product drift.\nWeb confirmation evidence v1: run_scenario returns observationId for supported failures. Submit it in the expected red with exactly the same YAML bytes and step. Never construct observation objects. The engine confirms typed assertion and page evidence in a fresh run. Copy the canonical expectedReds from the acceptance's final outcome hint when settling; it replaces the temporary ID with recorded evidence. Changed YAML requires another run_scenario.`
 
-/** Exported for the step-20 estimate rework (probe the REAL keys). */
-export const FLOW_WORKER_CLI_PROMPT_FINGERPRINT = promptFingerprint(FLOW_WORKER_CLI_SYSTEM_PROMPT)
-export const FLOW_WORKER_API_PROMPT_FINGERPRINT = promptFingerprint(FLOW_WORKER_API_SYSTEM_PROMPT)
-export const FLOW_WORKER_WEB_PROMPT_FINGERPRINT = promptFingerprint(FLOW_WORKER_WEB_SYSTEM_PROMPT)
 
 /** The per-surface prompt table — cli is also the fallback for a surface with no
  *  arm of its own, exactly the resolution the old ternary made. */
@@ -218,8 +213,8 @@ export function flowWorkerPromptFingerprint(surface: GuardDriverId): string {
 
 /**
  * The task's cache key: `authorCacheKey`'s exact recipe (`workerCacheKey` is
- * that recipe parameterized) with the SESSION prompt fingerprint swapped in.
- * Everything else that decides "does this flow re-author" is unchanged.
+ * that recipe parameterized) with the stage version where the prompt
+ * fingerprint used to be, so a prompt edit re-authors nothing.
  */
 export function flowWorkerCacheKey(task: FlowWorkerTask): string {
   const m = task.cacheMaterial

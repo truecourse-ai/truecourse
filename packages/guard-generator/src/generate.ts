@@ -13,7 +13,7 @@ import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
 import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 import { outcomeCorrection, reconcileRemaining, type RepairIssue } from './worker-repair.js'
-import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
+import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * `guard generate` orchestration — the LLM pipeline that turns spec FLOWS into
@@ -3119,8 +3119,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           }
         }
       }
-      const recordRemainingGaps = (state: WorkerTaskState, supplied?: GuardRemainingObligation[]) => {
-        const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, supplied).current
+      const recordRemainingGaps = (state: WorkerTaskState, outcome?: GuardFlowWorkerOutcome) => {
+        const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, outcome?.remaining, outcome?.kind).current
         for (const row of remainder) state.task.work.gaps.push({ surface: state.task.surface, kind: 'blocked-on', milestones: [row.milestone],
           obligations: [{ milestone: row.milestone, ...(row.caseId ? { caseId: row.caseId } : {}) }],
           blocker: { kind: row.reasonKind === 'preparation' ? 'configuration' : row.reasonKind === 'unsupported-capability' ? 'unsupported-capability' : 'generation' },
@@ -3130,7 +3130,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const progress = taskProgress(state)
         if (outcome.kind === 'settled' && outcome.additionalScenarios !== undefined) return 'One flow accepts one complete test; additionalScenarios is not allowed.'
         if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && progress.outstanding.some(o => o.caseId))
-          return outcomeCorrection(reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining), state.repairsAsked)
+          return outcomeCorrection(reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining, outcome.kind), state.repairsAsked)
         if (outcome.kind === 'blocked' && outcome.perMilestone?.some(m => !progress.outstanding.some(o => o.milestone === m.order)))
           return 'Outcome refused: blockers must identify outstanding milestones assigned to this worker.'
         if (outcome.kind !== 'settled') return undefined
@@ -3254,7 +3254,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             state.fidelityFlags++
             taintFlow(candidate.flow.id, candidate.surface, candidate.scenario.title, verdict.mismatch)
             const finding = fidelityFinding(candidate, verdict.mismatch)
-            rememberRejection(state, candidate, verdict.mismatch)
+            rememberRejection(state, candidate, verdict.mismatch, 'assertion', 'fidelity')
             if (firstFlag && verdict.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
               // The in-loop self-heal (no separate re-author round — the
               // WORKER revises); the ledger bump keeps the budget honest.
@@ -3338,7 +3338,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             scenarioFullFlowDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence ?? [])
           if (defect) {
             state.pendingFidelityFinding = fidelityFinding(candidate, defect)
-            rememberRejection(state, candidate, defect)
+            rememberRejection(state, candidate, defect, 'assertion', verdict.kind === 'flagged' ? 'fidelity' : 'review')
             return { content: `not accepted — the expected failure still needs faithful case assertions: ${defect}`, isError: true }
           }
           if (verdict.kind === 'faithful' && verdict.evidence) caseEvidenceById.set(candidate.scenario.id, verdict.evidence)
@@ -3900,7 +3900,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // fields: the `!`s below stand on the parse the loop already did.
           const outcome = result.outcome
           if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && taskProgress(state).required.some(o => o.caseId))
-            recordRemainingGaps(state, outcome.remaining)
+            recordRemainingGaps(state, outcome)
           // A TAINTED flow whose worker completed a fresh answer (accepted
           // scenario or an honest block) overwrote the poisoned cache entry —
           // its taint clears at run end unless the session re-flagged it

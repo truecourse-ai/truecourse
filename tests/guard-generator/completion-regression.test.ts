@@ -297,7 +297,10 @@ describe('generation cannot finish by shrinking selected coverage', () => {
         const first = task.validateOutcome(blocked())!
         expect(first).toContain('1:case-0')
         const { issueId } = remainingOf(first)[0]
-        // The worker declines to resubmit; its next valid answer stands.
+        // Retiring keeps the engine's classification; the fidelity finding must stay reported.
+        expect(task.validateOutcome({ ...blocked(issueId), kind: 'retired', attempts: 1, lastEvidence: 'Unobservable.' }))
+          .toContain(`must reference current assertion issue ${issueId}`)
+        // The worker declines to resubmit; its next valid blocked answer stands.
         expect(task.validateOutcome(blocked(issueId))).toBeUndefined()
         return { kind: 'outcome', outcome: blocked(issueId) }
       }) })

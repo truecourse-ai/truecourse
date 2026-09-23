@@ -49,11 +49,9 @@ import {
   FIDELITY_SESSION_BUDGET,
   FIDELITY_SESSION_CACHE_NAME,
   FIDELITY_SESSION_KIND,
-  FLOW_WORKER_API_PROMPT_FINGERPRINT,
   FLOW_WORKER_API_SYSTEM_PROMPT,
   FLOW_WORKER_BUDGET,
   FLOW_WORKER_CACHE_NAME,
-  FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
   FLOW_WORKER_STAGE_VERSION,
   flowWorkerLegacyCacheKeys,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
@@ -296,7 +294,6 @@ describe('flowWorkerCacheKey', () => {
     expect(webLegacy).toBe(workerCacheKey(flowWorkerPromptFingerprint('web'), { fingerprint: base.cacheMaterial.flowFingerprint }, 'web',
       base.cacheMaterial.sectionKeys, ['iface-1', 'whole-catalog'], base.cacheMaterial.recipeFingerprint))
     expect(webLegacy).not.toBe(flowWorkerCacheKey(web))
-    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).not.toBe(FLOW_WORKER_API_PROMPT_FINGERPRINT)
   })
 
   it('moves with every behavior-affecting input and with nothing else', () => {

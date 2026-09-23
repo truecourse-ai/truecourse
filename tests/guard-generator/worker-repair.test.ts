@@ -53,21 +53,23 @@ describe('current remaining obligation reconciliation', () => {
     expect(result.current).toMatchObject([{ milestone: 1, issueId: 'first' }, { milestone: 2, reasonKind: 'not-attempted' }])
   })
 
-  it('accepts an unsupported capability only as the answer to a current review finding', () => {
+  it('accepts an unsupported capability only as a blocked answer to a current fidelity flag', () => {
     const one = outstanding.slice(0, 1)
-    const reviewed = new Map([['1:cancel', issue('assertion', 'cancel-2', 'review')]])
+    const flagged = new Map([['1:cancel', issue('assertion', 'cancel-2', 'fidelity')]])
     const answer = [row('cancel', 'unsupported-capability', 'cancel-2')]
-    const result = reconcileRemaining(one, reviewed, answer)
+    const result = reconcileRemaining(one, flagged, answer, 'blocked')
     expect(result.problems).toEqual([])
     expect(result.current).toEqual([{ milestone: 1, caseId: 'cancel', reasonKind: 'unsupported-capability', evidence: 'Worker explanation.', issueId: 'cancel-2' }])
     // Still asked for one repair: the engine's own finding is an assertion.
     expect(result.repairable).toHaveLength(1)
-    expect(reconcileRemaining(one, reviewed, [row('cancel', 'unsupported-capability', 'cancel-1')]).problems).toEqual([
-      '1:cancel must reference current assertion issue cancel-2.',
-    ])
-    expect(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-2', 'execution')]]), answer).problems).toEqual([
-      '1:cancel must reference current assertion issue cancel-2.',
-    ])
+    const refused = '1:cancel must reference current assertion issue cancel-2.'
+    expect(reconcileRemaining(one, flagged, [row('cancel', 'unsupported-capability', 'cancel-1')], 'blocked').problems).toEqual([refused])
+    // A retirement keeps the engine's classification, so the fidelity finding is reported.
+    expect(reconcileRemaining(one, flagged, answer, 'retired').problems).toEqual([refused])
+    expect(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-2', 'execution')]]), answer, 'blocked').problems).toEqual([refused])
+    expect(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-2', 'review')]]), answer, 'blocked').problems).toEqual([refused])
+    expect(reconcileRemaining(one, new Map([['1:cancel', issue('review-unavailable', 'cancel-2', 'review')]]), answer, 'blocked').problems)
+      .toEqual(['1:cancel must reference current review-unavailable issue cancel-2.'])
   })
 })
 
@@ -88,10 +90,10 @@ describe('blocked or retired outcome correction', () => {
 
   it('lets a worker that declines the repair end on its next valid outcome', () => {
     const asked = new Set<string>()
-    const issues = new Map([['1:cancel', issue('assertion', 'cancel-1', 'review')]])
+    const issues = new Map([['1:cancel', issue('assertion', 'cancel-1', 'fidelity')]])
     const answer = [row('cancel', 'unsupported-capability', 'cancel-1')]
-    expect(outcomeCorrection(reconcileRemaining(one, issues, answer), asked)).toContain('Cases to repair: 1:cancel.')
-    expect(outcomeCorrection(reconcileRemaining(one, issues, answer), asked)).toBeUndefined()
+    expect(outcomeCorrection(reconcileRemaining(one, issues, answer, 'blocked'), asked)).toContain('Cases to repair: 1:cancel.')
+    expect(outcomeCorrection(reconcileRemaining(one, issues, answer, 'blocked'), asked)).toBeUndefined()
   })
 
   it('never asks to repair an established external blocker', () => {

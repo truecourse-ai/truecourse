@@ -1,16 +1,19 @@
-import type { GuardObligation, GuardRemainingObligation } from '@truecourse/shared'
+import type { GuardFlowWorkerOutcome, GuardObligation, GuardRemainingObligation } from '@truecourse/shared'
 
-export type RepairIssue = Pick<GuardRemainingObligation, 'reasonKind' | 'evidence' | 'issueId'> & { source?: 'execution' | 'review' }
+/** `source` says what observed the issue: a run, a review check, or the
+ * fidelity judge flagging the scenario as not proving its claim. */
+export type RepairIssue = Pick<GuardRemainingObligation, 'reasonKind' | 'evidence' | 'issueId'> & { source?: 'execution' | 'review' | 'fidelity' }
 export const obligationKey = (o: { milestone: number; caseId?: string }) => `${o.milestone}:${o.caseId ?? ''}`
 
 /** Checks a worker's `remaining` rows against the engine's current issue per
  * outstanding obligation. A row must name the current issue and its kind; the one
- * reclassification allowed is a fidelity-review finding answered as an
+ * reclassification allowed is a blocked outcome answering a fidelity flag as an
  * unsupported capability (the runner cannot observe what would prove the case). */
 export function reconcileRemaining(
   outstanding: readonly GuardObligation[],
   issues: ReadonlyMap<string, RepairIssue>,
   supplied: readonly GuardRemainingObligation[] | undefined,
+  outcomeKind?: GuardFlowWorkerOutcome['kind'],
 ) {
   const problems: string[] = []
   const repairable: GuardRemainingObligation[] = []
@@ -24,7 +27,8 @@ export function reconcileRemaining(
       return row
     }
     const [answer] = rows
-    if (row.issueId && answer.issueId === row.issueId && issue?.source === 'review' && answer.reasonKind === 'unsupported-capability')
+    if (outcomeKind === 'blocked' && issue?.source === 'fidelity' && issue.reasonKind === 'assertion' &&
+      answer.issueId === row.issueId && answer.reasonKind === 'unsupported-capability')
       return { ...row, reasonKind: 'unsupported-capability', evidence: answer.evidence }
     if (row.issueId && (answer.issueId !== row.issueId || answer.reasonKind !== row.reasonKind))
       problems.push(`${obligationKey(row)} must reference current ${row.reasonKind} issue ${row.issueId}.`)
