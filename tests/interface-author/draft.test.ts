@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  accountForPrior,
   AuthoredTaskSchema,
   AuthoredFragmentSchema,
   EMPTY_FRAGMENT,
@@ -475,5 +476,48 @@ describe('folding one checked piece into the draft so far', () => {
       states: [{ id: 'listed-repository-registered', description: 'A repository is registered.' }],
     })
     expect(renamed.states!.map((s) => s.id)).toEqual(['listed-repository-registered'])
+  })
+})
+
+describe("accounting for a screen's existing tasks", () => {
+  const task = (id: string) => ({
+    id, type: 'web' as const, title: id, entry: { method: 'GET', path: '/' },
+    steps: [{ kind: 'navigate' as const, route: '/' }],
+  })
+  const prior = new Set(['web/a', 'web/b', 'web/c'])
+
+  it('lets the fragment overwrite only what it amends or retires', () => {
+    const result = accountForPrior(
+      { interfaces: [task('web/a'), task('web/new')], kept: ['web/b'], retired: [{ id: 'web/c', reason: 'gone' }] },
+      prior,
+    )
+    expect(result).toEqual({ replaceable: new Set(['web/a', 'web/c']), unaccounted: [], errors: [] })
+  })
+
+  it('names the tasks it never mentions', () => {
+    expect(accountForPrior({ interfaces: [], kept: ['web/a'] }, prior).unaccounted).toEqual(['web/b', 'web/c'])
+  })
+
+  it('refuses a decision about a task that is not the screen\'s, and two decisions about one', () => {
+    const { errors } = accountForPrior(
+      { interfaces: [task('web/a')], kept: ['web/a', 'web/elsewhere'], retired: [{ id: 'web/a', reason: 'x' }] },
+      prior,
+    )
+    expect(errors).toEqual([
+      '`web/elsewhere` is not one of this screen\'s existing tasks — only those are kept or retired',
+      '`web/a` is both kept and retired',
+      '`web/a` is both kept and re-sent — re-send it only when it changed',
+      '`web/a` is both retired and re-sent',
+    ])
+  })
+
+  it('takes the latest word on a task across check_draft pieces', () => {
+    const kept = foldAuthoredFragment({ interfaces: [] }, { interfaces: [], kept: ['web/a'] })
+    const amended = foldAuthoredFragment(kept, { interfaces: [task('web/a')] })
+    expect(amended.kept).toBeUndefined()
+    expect(amended.interfaces.map((t) => t.id)).toEqual(['web/a'])
+    const retired = foldAuthoredFragment(amended, { interfaces: [], retired: [{ id: 'web/a', reason: 'gone' }] })
+    expect(retired.interfaces).toEqual([])
+    expect(retired.retired).toEqual([{ id: 'web/a', reason: 'gone' }])
   })
 })

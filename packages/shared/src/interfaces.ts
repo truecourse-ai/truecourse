@@ -1539,16 +1539,25 @@ export const InterfaceAuthoringStatusSchema = z.enum(['authored', 'empty', 'reje
 export type InterfaceAuthoringStatus = z.infer<typeof InterfaceAuthoringStatusSchema>
 
 /**
- * ONE screen's row of the authoring ledger: what its last session settled, and
- * the digest of the inputs it settled over. A screen whose status did not settle
- * (`failed`, `rejected`) is work again only when that digest MOVES — so a dead
- * provider costs one screen one run, not one screen every run forever.
+ * ONE screen's row of the authoring ledger: what its last session settled, the
+ * digest of the inputs it settled over, and the source files it was grounded
+ * on. The screen is work again when that digest MOVES or one of those files
+ * changed — whatever the status, so a dead provider costs one screen one run,
+ * not one screen every run forever, and a settled screen whose source moved is
+ * reconciled rather than left describing code that is gone.
  */
 export const InterfaceAuthoringRecordSchema = z
   .object({
     status: InterfaceAuthoringStatusSchema,
     /** The digest of everything that decides what a session for this screen produces. */
     inputFingerprint: z.string().min(1),
+    /**
+     * The source files the session was grounded on (the place's route module
+     * and the modules it renders), repo-relative, each with a short digest of
+     * its content. Absent on a row written before it was recorded, or for a
+     * screen the analyzer could not ground.
+     */
+    sources: z.record(z.string().min(1), z.string().min(1)).optional(),
   })
   .strict()
 export type InterfaceAuthoringRecord = z.infer<typeof InterfaceAuthoringRecordSchema>

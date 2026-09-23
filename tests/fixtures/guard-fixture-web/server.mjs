@@ -396,6 +396,12 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 404, { error: `no route ${req.method} ${url.pathname}` })
     return
   }
+  // Signing out clears the session cookie, the way an app's own sign-out does.
+  if (url.pathname === '/sign-out') {
+    res.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'session=; Path=/; Max-Age=0' })
+    res.end(page('Signed out', '<h1>Signed out</h1>'))
+    return
+  }
   const html =
     url.pathname === '/'
       ? HOME

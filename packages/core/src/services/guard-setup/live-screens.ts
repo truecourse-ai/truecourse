@@ -7,9 +7,12 @@
  * has nothing to serve), bring the services up, run the seed so the world
  * holds the rows and the principals the tests will reference, boot the web
  * surface, launch a browser and put a seeded credential into it. Every piece
- * is the runner's own (`runSeed`, `startWebSurface`, `launchWebBrowser`,
- * `installWebCredential`), so a screen observed here is the screen a scenario
- * will drive.
+ * is the runner's own (`runSeed`, `startWebSurface`, `launchWebBrowser`), and
+ * so is the world they run in (`observationWorld`): the seed gets the provided
+ * external accounts on top of the default server's env and masks their
+ * secrets, the surface's sandbox gets the accounts and every provided
+ * dependency's registration, so a screen observed here is the screen a
+ * scenario will drive.
  *
  * A world that cannot be stood up is a REASON, never a failure: the step
  * records why the screens were not observed and the sessions author from
@@ -23,6 +26,7 @@ import {
   createSandbox,
   createWebObserver,
   launchWebBrowser,
+  observationWorld,
   preflightBrowser,
   resolveApiServers,
   resolveWebSurface,
@@ -84,7 +88,7 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
   }
   if (surface.build) {
     phase(`building the web surface (\`${surface.build}\`)`, 'web build');
-    const built = await runBuild(repoRoot, surface.build, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
+    const built = await runBuild(repoRoot, surface.build, surface.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
     if (!built.ok) return { ok: false, reason: `the recipe \`web.build\` failed: ${outputTail(built.output)}` };
   }
 
@@ -99,6 +103,7 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
   };
 
   try {
+    const world = observationWorld(repoRoot, recipe.api?.externals);
     const services = servicesController(repoRoot, recipe, signal);
     if (recipe.api?.services) {
       phase(`starting the services (\`${recipe.api.services.up}\`)`, 'services up');
@@ -107,7 +112,8 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
     }
 
     // The seed: the rows the screens list, and the principal the browser is
-    // signed in as. Its env is the default server's, exactly as a run's is.
+    // signed in as. Its env is the default server's with the accounts on top,
+    // exactly as a run's is.
     let credentials = new Map<string, ResolvedCredential>();
     let fixtures = new Map<string, Record<string, unknown>>();
     if (recipe.api?.seed) {
@@ -117,7 +123,8 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
       const seeded = await runSeed({
         repoRoot,
         seed: recipe.api.seed,
-        env: server?.env ?? recipe.env ?? {},
+        env: { ...(server?.env ?? recipe.env ?? {}), ...world.serverEnv },
+        externalSecrets: world.secrets,
         timeoutMs: DEFAULT_BUILD_TIMEOUT_MS,
         ...(signal ? { signal } : {}),
       });
@@ -126,7 +133,12 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
     }
 
     phase(`serving the web surface (\`${surface.serve.join(' ')}\`)`, 'web surface');
-    const sandbox = createSandbox({ recipeEnv: surface.env, repoRoot });
+    const sandbox = createSandbox({
+      recipeEnv: { ...surface.env, ...world.env },
+      repoRoot,
+      ...(recipe.expose ? { expose: recipe.expose } : {}),
+      supplied: world.supplied,
+    });
     teardown.push(async () => sandbox.cleanup());
     const served = await startWebSurface({
       surface,

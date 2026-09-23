@@ -92,10 +92,8 @@ export function placeWorkItem(placeId: string): string {
 
 export interface PlaceBriefingInput {
   place: InterfaceResource
-  /** Ids of the tasks already authored at this place. */
+  /** Ids of the tasks already authored at this place — the ones the session accounts for. */
   existing: readonly string[]
-  /** Explicit re-authoring may replace tasks; enrichment preserves them. */
-  replaceTasks?: boolean
   ownTaskContext?: string
   sourcePack?: string
   /** What the AST pass knows about this place, when it knows anything. */
@@ -144,7 +142,6 @@ export interface PlaceBriefingInput {
 export function placeBriefing({
   place,
   existing,
-  replaceTasks = false,
   ownTaskContext,
   sourcePack,
   context,
@@ -171,9 +168,9 @@ export function placeBriefing({
   if (existing.length > 0) {
     lines.push(
       ``,
-      replaceTasks
-        ? `Re-authoring these tasks: return the complete surviving task list, keeping unchanged ids and steps.`
-        : `Already authored here. Preserve these tasks: do not return or replace them during enrichment.`,
+      `Already authored here. Account for EACH of these tasks: \`kept\` when it stands`,
+      `exactly as it is, re-sent under its own id when its steps changed, \`retired\``,
+      `with the reason when its control is gone. A draft that leaves one out is refused.`,
       ...existing.map((id) => `  ${id}`),
     )
   }
@@ -429,7 +426,7 @@ Use the shared readable and locator schemas supplied in the outcome:
 
 Readable locators use the existing user-visible vocabulary: role/name, label, placeholder, text, title or alt, never CSS, XPath or test ids. Use \`when\` to state source conditions, including permissions, loading, empty states and selected tabs. Readable ids are optional; reuse existing ids and keep new names stable within the owning resource.
 
-Every place you declare states ALL FOUR kinds: \`markers\`, \`elements\`, \`controls\`, \`rows\`. An explicit [] means you established that it has none of that kind, and the write path REFUSES a place that leaves a kind unstated — nothing returns to this screen once your outcome is accepted, so an omitted kind stays unknown forever. Read the place well enough to answer for each kind; where you truly cannot, say what you could not inspect in \`unresolved\` and still state the kind. Never fill arrays just to populate a table, and never mark uninspected content empty. Existing kinds established by an earlier session of this screen are preserved when you omit them; a supplied kind replaces that kind, so include its surviving established facts. Readables alone are a valid outcome with \`interfaces: []\`. They do not require a new task or changed task steps.
+Every place you declare states ALL FOUR kinds: \`markers\`, \`elements\`, \`controls\`, \`rows\`. An explicit [] means you established that it has none of that kind, and the write path REFUSES a place that leaves a kind unstated — nothing returns to this screen once your outcome is accepted until its source changes, so an omitted kind stays unknown. Read the place well enough to answer for each kind; where you truly cannot, say what you could not inspect in \`unresolved\` and still state the kind. Never fill arrays just to populate a table, and never mark uninspected content empty. Existing kinds established by an earlier session of this screen are preserved when you omit them; a supplied kind replaces that kind, so include its surviving established facts. Readables alone are a valid outcome with \`interfaces: []\`. They do not require a new task or changed task steps.
 
 Every fact must come from source you READ (or source already provided in the briefing pack), or from a screen you OBSERVED with \`observe_screen\` when the run offers it. Use the session's read_file/search_repo tools for evidence, and run check_draft on the resource facts as well as the tasks. Without \`observe_screen\` these tools provide source evidence only; do not claim to have inspected runtime state you did not observe.
 
@@ -469,6 +466,7 @@ The catalog follows the CODE regardless: author the task as the source has it, a
 - \`list_interfaces\` — API/CLI summaries, including confirming a known API id. Web duplicate checks use the paged catalog tools.
 - \`observe_screen\` — the RUNNING app's accessibility tree at an address, signed in. Offered only when the run booted the app; the briefing says so. Fill every slot; \`activate\` opens what the tree does not show closed.
 - \`search_repo\` uses real glob paths such as **/*.tsx; pathContains is a literal path filter. Distinguish no matching files from no matching content. \`read_file\` reads one source span; use \`read_files\` for independent known paths or continuations in one bounded request. Complete source units include their branches; inspect explicitly omitted units when needed. The accessible names are in JSX (\`aria-label\`, button text, label elements); when a name is an i18n key, the locale file holds the rendered string.
+- **This place's existing tasks**, when the briefing lists any, are yours to reconcile, not to re-invent. Read each against the source (and the live screen when you have it): list one that still holds exactly in \`kept\` by id (do not re-send it: a kept task stays byte for byte, and every scenario grounded on it with it), re-send one whose steps changed under its SAME id, and put one whose control is gone in \`retired\` with one line saying why. Then author what is new. \`check_draft\` refuses a draft that leaves an existing task unaccounted for.
 - \`check_draft\` — the exact rules the write path enforces, run against a draft. **Run it EARLY and run it SMALL**: as soon as you have read the briefing's module, draft the first task or two and check just those, before you read anything further. A misreading — the wrong address, a target the schema refuses, a task located at another screen — comes back in one turn instead of at the outcome, where a fragment that breaks a rule is dropped whole and the place is left with nothing.
 - **What check_draft accepts, it KEEPS.** The draft is built up across calls: each call carries only the interfaces, states, places, unresolved lines and findings it is about, and the tool checks them against the catalog AND against everything already accepted in this session. **Never resend an interface that was accepted** — send its id again only to CORRECT that entry, in which case the new version replaces it. Every tool result names the ids the draft holds. A state stays in the draft only while one of its tasks references it, so renaming a world is a matter of re-sending the task and the new state together. A single whole-draft call still works; it is simply the largest, most fragile way to send one, and a reply that grows past the model's output limit is lost entirely.
 - When everything you authored has been accepted, finish with outcome: {"draftId":"the exact id the last accepted check returned"}. Do not regenerate its JSON. The engine restores the accepted tasks, states, resources, unresolved and findings from this session and validates them against the current catalog. If corrections are needed, check the corrected pieces and finalize the new id.

@@ -33,7 +33,7 @@ import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
   dependenciesPath,
-  recipeContractFingerprint,
+  authoringRecipeContract,
   screenAuthoringFingerprint,
 } from '@truecourse/guard-runner'
 import {
@@ -1364,7 +1364,7 @@ describe('runGuardSetup — the interfaces step', () => {
         inputFingerprint: screenAuthoringFingerprint({
           derived: DERIVED,
           place: DERIVED.resources!.web[0],
-          recipeContract: recipeContractFingerprint(r),
+          recipeContract: authoringRecipeContract(r),
         }),
       },
     }

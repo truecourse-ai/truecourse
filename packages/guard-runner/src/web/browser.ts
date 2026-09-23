@@ -38,6 +38,19 @@ import type { Browser, BrowserContext, BrowserType, FileChooser, Page } from 'pl
  */
 export const WEB_VIEWPORT = { width: 1280, height: 800 } as const
 
+/**
+ * The context every browser this module opens renders in. The page must render
+ * the same on every machine: scenarios assert rendered clock labels, so the
+ * browser's timezone and locale are pinned to the same UTC/C-locale world the
+ * CLI driver's child env pins (child-env.ts).
+ */
+export const WEB_CONTEXT_OPTIONS = {
+  viewport: { ...WEB_VIEWPORT },
+  deviceScaleFactor: 1,
+  timezoneId: 'UTC',
+  locale: 'en-US',
+} as const
+
 /** The video file every web session leaves in its evidence directory. */
 export const WEB_VIDEO_FILE = 'session.webm'
 
@@ -190,13 +203,7 @@ export async function launchWebBrowser(
   let page: Page
   try {
     context = await browser.newContext({
-      viewport: { ...WEB_VIEWPORT },
-      deviceScaleFactor: 1,
-      // The page must render the same on every machine: scenarios assert rendered
-      // clock labels, so the browser's timezone and locale are pinned to the same
-      // UTC/C-locale world the CLI driver's child env pins (child-env.ts).
-      timezoneId: 'UTC',
-      locale: 'en-US',
+      ...WEB_CONTEXT_OPTIONS,
       ...(opts.videoDir ? { recordVideo: { dir: opts.videoDir, size: { ...WEB_VIEWPORT } } } : {}),
     })
     page = await context.newPage()

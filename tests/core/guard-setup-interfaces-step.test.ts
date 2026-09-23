@@ -25,7 +25,7 @@ import type { GuardSetupInterfacesStepInput } from '@truecourse/guard-generator'
 import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
-  recipeContractFingerprint,
+  authoringRecipeContract,
   screenAuthoringFingerprint,
 } from '@truecourse/guard-runner';
 import type { InterfacesFile, MapperDiagnostic } from '@truecourse/shared';
@@ -96,7 +96,7 @@ function withLedger(r: string, rows: Record<string, 'authored' | 'failed'>): voi
         inputFingerprint: screenAuthoringFingerprint({
           derived: DERIVED,
           place: DERIVED.resources!.web.find((place) => place.id === id)!,
-          recipeContract: recipeContractFingerprint(r),
+          recipeContract: authoringRecipeContract(r),
         }),
       },
     ]),
@@ -148,8 +148,8 @@ function stubContext(): { context: GuardSetupSessionContext; spend: { sessions: 
 /** An authoring thunk answering from a fixed run, recording what it was asked. */
 function authoring(
   run: Partial<InterfacesAuthorRun> = {},
-): { author: InterfacesAuthorFn; calls: { repoRoot: string; replace: boolean; refresh: boolean; live?: LiveScreens }[] } {
-  const calls: { repoRoot: string; replace: boolean; refresh: boolean; live?: LiveScreens }[] = [];
+): { author: InterfacesAuthorFn; calls: Parameters<InterfacesAuthorFn>[0][] } {
+  const calls: Parameters<InterfacesAuthorFn>[0][] = [];
   const author: InterfacesAuthorFn = async (opts) => {
     calls.push(opts);
     return {
@@ -381,8 +381,8 @@ describe('buildInterfacesStep — the authoring half', () => {
   });
 });
 
-// The live screens: stood up for exactly the run that has work, handed to it,
-// and torn down with it — whatever the run made of itself.
+// The live screens: stood up the first time the run asks (a screen whose live
+// fragment is not cached), and torn down with the run — whatever it made of itself.
 describe('the live screens', () => {
   /** A live-screens seam whose observer answers nothing, recording its lifecycle. */
   function liveSeam(open: LiveScreensOpen | 'throw' = 'ok') {
@@ -399,21 +399,34 @@ describe('the live screens', () => {
     return { seam, events, live };
   }
 
-  it('opens the screens once, right before the run, hands them to it, and closes them after', async () => {
+  it('opens the screens the first time the run asks, once, and closes them after the run', async () => {
     const r = repo();
     writeHalves(r);
     const { seam, events, live } = liveSeam();
-    const { author, calls } = authoring();
-    const seen: string[] = [];
+    const { author } = authoring();
+    const handed: (LiveScreens | undefined)[] = [];
     const result = await buildInterfacesStep(stubContext().context, {
-      author: async (opts) => { seen.push(`author:${events.join(',')}`); return author(opts); },
+      author: async (opts) => {
+        handed.push(await opts.openLive?.(), await opts.openLive?.());
+        return author(opts);
+      },
       liveScreens: seam,
     })(stepInput(r));
     expect(result.status).toBe('ok');
-    expect(seen).toEqual(['author:open']);
+    expect(handed).toEqual([live, live]);
     expect(events).toEqual(['open', 'close']);
-    expect(calls[0]?.live).toBe(live);
     expect(result.reason).not.toMatch(/not observed/);
+  });
+
+  it('never stands the world up when the run does not ask — every fragment came from the cache', async () => {
+    const r = repo();
+    writeHalves(r);
+    const { seam, events } = liveSeam();
+    const { author, calls } = authoring();
+    const result = await buildInterfacesStep(stubContext().context, { author, liveScreens: seam })(stepInput(r));
+    expect(result.status).toBe('ok');
+    expect(calls).toHaveLength(1);
+    expect(events).toEqual([]);
   });
 
   it('closes them when the run throws, and still fails the step with the run\'s message', async () => {
@@ -421,7 +434,10 @@ describe('the live screens', () => {
     writeHalves(r);
     const { seam, events } = liveSeam();
     const result = await buildInterfacesStep(stubContext().context, {
-      author: async () => { throw new Error('the provider fell over'); },
+      author: async (opts) => {
+        await opts.openLive?.();
+        throw new Error('the provider fell over');
+      },
       liveScreens: seam,
     })(stepInput(r));
     expect(result.status).toBe('failed');
@@ -433,11 +449,18 @@ describe('the live screens', () => {
     const r = repo();
     writeHalves(r);
     const { seam, events } = liveSeam({ ok: false, reason: 'the recipe declares no `web` block' });
-    const { author, calls } = authoring();
-    const result = await buildInterfacesStep(stubContext().context, { author, liveScreens: seam })(stepInput(r));
+    const { author } = authoring();
+    let handed: LiveScreens | undefined;
+    const result = await buildInterfacesStep(stubContext().context, {
+      author: async (opts) => {
+        handed = await opts.openLive?.();
+        return author(opts);
+      },
+      liveScreens: seam,
+    })(stepInput(r));
     expect(result.status).toBe('ok');
     expect(result.reason).toMatch(/screens not observed live: the recipe declares no `web` block/);
-    expect(calls[0]?.live).toBeUndefined();
+    expect(handed).toBeUndefined();
     expect(events).toEqual(['open']);
   });
 

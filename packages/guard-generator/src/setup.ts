@@ -1349,6 +1349,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         derived: readInterfaceCatalog(repoRoot),
         authored: readAuthoredInterfaceCatalog(repoRoot),
         recipeContract: authoringRecipeContract(repoRoot),
+        repoRoot,
       }).size === 0) {
       pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
       fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')

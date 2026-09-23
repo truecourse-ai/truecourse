@@ -108,6 +108,20 @@ describe('the screen observer', () => {
     expect(await observer.observe({ path: 'notes' })).toMatchObject({ ok: false, reason: expect.stringMatching(/start with/) })
   })
 
+  it('refuses an address that resolves off the served surface', async () => {
+    expect(await observer.observe({ path: '//elsewhere.example/x' })).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/leaves the served surface \(http:\/\/elsewhere\.example\)/),
+    })
+  })
+
+  it('signs every observation in afresh: one that signs out leaves the next one signed in', async () => {
+    const out = await observer.observe({ path: '/sign-out' })
+    expect(out.ok && out.observation.tree).toContain('heading "Signed out"')
+    const next = await observer.observe({ path: '/whoami' })
+    expect(next.ok && next.observation.tree).toContain('cookie: session=abc')
+  }, 30_000)
+
   it('reports a status the address answered with, rather than hiding a broken screen', async () => {
     const result = await observer.observe({ path: '/no-such-screen' })
     expect(result.ok).toBe(true)
@@ -139,4 +153,46 @@ describe('the observation budget', () => {
   it('keeps a short tree whole', () => {
     expect(boundTree('- button "Save"')).toEqual({ tree: '- button "Save"', omittedLines: 0 })
   })
+})
+
+describe('the screen observer with a header credential', () => {
+  let repo: string
+  let sandbox: ReturnType<typeof createSandbox>
+  let server: WebSurfaceHandle
+  let browser: WebBrowserHandle
+
+  beforeAll(async () => {
+    repo = makeTempRepo()
+    sandbox = createSandbox({})
+    const started = await startWebSurface({
+      surface: { serve: ['node', FIXTURE_WEB_SERVER], cwd: 'sandbox', healthPath: '/health', readyTimeoutMs: 20_000, env: {} },
+      repoRoot: repo,
+      sandboxCwd: sandbox.cwd,
+      sandboxEnv: sandbox.env,
+    })
+    if (!started.ok) throw new Error(started.reason)
+    server = started.server
+    const launched = await launchWebBrowser({})
+    if (!launched.ok) throw new Error(launched.reason)
+    browser = launched.browser
+  }, 60_000)
+
+  afterAll(async () => {
+    await browser?.close()
+    await server?.stop()
+    sandbox?.cleanup()
+    rmrf(repo)
+  })
+
+  it('sends the header to the served surface', async () => {
+    const created = await createWebObserver({
+      browser,
+      baseUrl: server.baseUrl,
+      credential: { name: 'apiToken', credential: { header: 'Authorization', value: 'Bearer t0k3n' } },
+    })
+    if (!created.ok) throw new Error(created.reason)
+    const seen = await created.observer.observe({ path: '/whoami' })
+    expect(seen.ok && seen.observation.tree).toContain('authorization: Bearer t0k3n')
+    await created.observer.close()
+  }, 30_000)
 })

@@ -21,6 +21,7 @@
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import { GuardWebLocatorSchema } from '@truecourse/shared'
+import { hasAddressSlot } from '@truecourse/guard-runner'
 import type {
   ObserveScreenResult,
   ScreenObservation,
@@ -148,7 +149,7 @@ export function liveScreenLines(input: {
     } else {
       lines.push(`This place's address was opened and could not be observed: ${input.observation.reason}`)
     }
-  } else if (input.address && /\{[^}]*\}/.test(input.address)) {
+  } else if (input.address && hasAddressSlot(input.address)) {
     lines.push(
       `This place's address carries a slot, so nothing was observed for you: call`,
       `\`observe_screen\` with the slot filled from a seeded fixture below (or an id`,

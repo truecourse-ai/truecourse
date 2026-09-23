@@ -87,13 +87,35 @@ export function recipeContractFingerprint(repoRoot: string, before?: RecipeWriti
 }
 
 /**
- * The recipe contract the web tasks are AUTHORED against: everything before the
- * preparations step, the seed included. Authoring runs after the seed step and
- * opens the app's screens signed in as a seeded principal, so the seed is one of
- * its inputs; the preparations a later step writes are not.
+ * The recipe contract the web tasks are AUTHORED against: the contract before
+ * the seed, plus the part of the seed a screen is observed through — the
+ * credentials it mints (name and header: which one signs the browser in, and
+ * how) and the fixtures it publishes (name and fields: what fills an address
+ * slot). The seed's command, its script and the prose describing a role reach
+ * no screen, so a seed re-drafted with the same principals re-keys nothing.
+ * The preparations a later step writes are not an input either.
  */
 export function authoringRecipeContract(repoRoot: string): string {
-  return recipeContractFingerprint(repoRoot, 'preparations')
+  const raw = readRecipeText(repoRoot)
+  return digest({ contract: recipeContractFingerprint(repoRoot, 'seed'), observedThrough: seedProvisions(raw) })
+}
+
+/** The seed's minted credentials (name → header) and fixtures (name → fields), canonically ordered. */
+function seedProvisions(raw: string | null): unknown {
+  if (raw === null) return null
+  let provides: { credentials?: Record<string, { header?: unknown }>; fixtures?: Record<string, unknown> } | undefined
+  try {
+    provides = (JSON.parse(raw) as { api?: { seed?: { provides?: typeof provides } } })?.api?.seed?.provides
+  } catch {
+    return null
+  }
+  if (!provides || typeof provides !== 'object') return null
+  const sorted = <T>(record: Record<string, T> | undefined): [string, T][] =>
+    Object.entries(record ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  return {
+    credentials: sorted(provides.credentials).map(([name, credential]) => [name, credential?.header ?? null]),
+    fixtures: sorted(provides.fixtures),
+  }
 }
 
 /** The recipe text with every block written by `step` and the steps after it removed. */

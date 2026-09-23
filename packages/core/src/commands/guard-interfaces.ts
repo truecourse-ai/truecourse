@@ -80,7 +80,7 @@ export function readGuardInterfacesAuthorView(repoRoot: string): GuardInterfaces
   const derived = readInterfaceCatalog(repoRoot);
   const authored = readAuthoredInterfaceCatalog(repoRoot);
   return {
-    places: planWorkItems(derived, authored, authoringRecipeContract(repoRoot)).map((item) => ({
+    places: planWorkItems(derived, authored, authoringRecipeContract(repoRoot), repoRoot).map((item) => ({
       id: item.place.id,
       kind: item.place.kind,
       title: item.place.title,
@@ -127,8 +127,8 @@ export interface RunGuardInterfaceAuthorOptions {
   sessionsKey?: string;
   /** Reuse the caller's run and persistence; the caller owns its lifecycle. */
   sessionRun?: Pick<SessionRunStore, 'runId' | 'dir' | 'persistence'>;
-  /** The running app the sessions may observe; the caller stood it up and tears it down. */
-  live?: LiveScreens;
+  /** Stands up the running app the sessions may observe, on a cache miss; the caller tears it down. */
+  openLive?: () => Promise<LiveScreens | undefined>;
   signal?: AbortSignal;
   onProgress?: (event: AuthorProgress) => void;
   onSessionEvent?: (placeId: string, event: SessionEvent) => void;
@@ -221,7 +221,7 @@ export async function runGuardInterfaceAuthoring(
       driver,
       persistence: run.persistence,
       context: context.contexts,
-      ...(opts.live ? { live: opts.live } : {}),
+      ...(opts.openLive ? { openLive: opts.openLive } : {}),
       ...(opts.places ? { places: opts.places } : {}),
       ...(opts.replace !== undefined ? { replace: opts.replace } : {}),
       ...(opts.refresh !== undefined ? { refresh: opts.refresh } : {}),

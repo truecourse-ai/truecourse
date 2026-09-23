@@ -149,20 +149,25 @@ export function extractNextAppRoutes(tree: Tree, filePath: string): RouteRegistr
 // its file's address; nothing in the export names a method. What does is the
 // body: `req.method === 'POST'`, `switch (req.method) { case 'GET': … }`,
 // `['GET', 'HEAD'].includes(req.method)`, or a next-connect router whose chain
-// (`router.get(…).post(…)`) the file default-exports. Every such literal is a
-// method the handler distinguishes, and the union is the operations it serves.
+// `router.get(…).post(…)`) the file default-exports. Every such literal the
+// HANDLER reads — the default export and the same-file declarations it names,
+// never a helper it merely calls — is a method it distinguishes, and the union
+// is the operations it serves.
 // A handler that distinguishes none answers every method — `GET` is emitted
 // for it, since a GET does reach it, rather than a guessed set.
 // ---------------------------------------------------------------------------
 
 const PAGES_API_FILE = /\.(?:tsx|jsx|ts|js|mjs)$/
 
+/** A file under some `pages/api/` directory — the cheap test that gates the filesystem walk. */
+const UNDER_PAGES_API = /(?:^|\/)pages\/api\//
+
 /** Callee names that mint a next-connect style router. */
 const ROUTER_FACTORIES = new Set(['createRouter', 'createEdgeRouter', 'nc', 'nextConnect'])
 
 export function extractNextPagesApiRoutes(tree: Tree, filePath: string): RouteRegistration[] {
   const normalized = path.resolve(filePath).split(path.sep).join('/')
-  if (!PAGES_API_FILE.test(normalized)) return []
+  if (!PAGES_API_FILE.test(normalized) || !UNDER_PAGES_API.test(normalized)) return []
   const router = nextRouterForFile(filePath, 'pages')
   if (!router) return []
   const relative = normalized.slice(router.length + 1).split('/')
@@ -171,24 +176,19 @@ export function extractNextPagesApiRoutes(tree: Tree, filePath: string): RouteRe
   const handler = defaultExport(root)
   if (!handler) return []
 
-  const directories = relative.slice(1, -1)
   const leaf = relative[relative.length - 1]!.replace(PAGES_API_FILE, '')
-  const segmentsOf = (optional: 'parent' | 'catch-all'): string[] | null => {
-    const segments: string[] = []
-    for (const name of [...directories, leaf]) {
-      if (name === leaf && name === 'index') continue
-      const segment = nextDynamicSegment(name, optional)
-      if (segment !== null) segments.push(segment)
-    }
-    return segments
-  }
+  // `index` names its directory's address only as the FILE: `api/index/index.ts`
+  // is `/api/index`.
+  const names = [...relative.slice(1, -1), ...(leaf === 'index' ? [] : [leaf])]
+  const segmentsOf = (optional: 'parent' | 'catch-all'): string[] =>
+    names.flatMap((name) => nextDynamicSegment(name, optional) ?? [])
   const parent = segmentsOf('parent')
   const catchAll = segmentsOf('catch-all')
-  if (!parent || !catchAll) return []
   if (catchAll.some((segment, index) => segment.startsWith('{...') && index !== catchAll.length - 1)) return []
   const paths = [...new Set([canonicalRoutePath(['api', ...parent].join('/')), canonicalRoutePath(['api', ...catchAll].join('/'))])]
 
-  const methods = [...new Set([...comparedMethods(root), ...routerChainMethods(root)])]
+  const scope = handlerScope(root, handler.node)
+  const methods = [...new Set([...scope.flatMap(comparedMethods), ...routerChainMethods(root, scope)])]
   const served = methods.length > 0 ? methods : ['GET']
   return served.flatMap((method) => paths.map((routePath) => ({
     httpMethod: method as RouteRegistration['httpMethod'],
@@ -219,7 +219,58 @@ function defaultExport(root: SyntaxNode): { node: SyntaxNode; name: string } | n
   return null
 }
 
-/** Every HTTP method literal the file compares a `.method` member against. */
+/**
+ * What the handler IS: the default export, and every top-level declaration of
+ * this file the export's EXPRESSION names — `export default withAuth(handler)`
+ * reaches `handler`, `const handler = wrap(inner)` reaches `inner`. A function
+ * body is where naming stops: a helper the handler merely calls is not in it,
+ * because its comparisons are about something else (`res.req.method ===
+ * 'HEAD'` deciding whether to write a body), not about which methods reach
+ * this address.
+ */
+function handlerScope(root: SyntaxNode, exported: SyntaxNode): SyntaxNode[] {
+  const declarations = new Map<string, SyntaxNode>()
+  for (const statement of root.namedChildren) {
+    if (!statement || statement.id === exported.id) continue
+    const declaration = statement.type === 'export_statement' ? statement.childForFieldName('declaration') : statement
+    if (!declaration) continue
+    if (declaration.type === 'function_declaration' || declaration.type === 'generator_function_declaration') {
+      const name = declaration.childForFieldName('name')?.text
+      if (name) declarations.set(name, declaration)
+    } else if (declaration.type === 'lexical_declaration' || declaration.type === 'variable_declaration') {
+      for (const declarator of declaration.namedChildren) {
+        const name = declarator?.childForFieldName('name')
+        if (declarator && name?.type === 'identifier') declarations.set(name.text, declarator)
+      }
+    }
+  }
+  const scope = [exported]
+  const named = new Set<string>()
+  const collect = (node: SyntaxNode | null): void => {
+    if (!node || FUNCTION_NODES.has(node.type)) return
+    if (node.type === 'identifier' && declarations.has(node.text) && !named.has(node.text)) {
+      named.add(node.text)
+      const declaration = declarations.get(node.text)!
+      scope.push(declaration)
+      collect(declaration.childForFieldName('value'))
+    }
+    for (const child of node.namedChildren) collect(child)
+  }
+  collect(exported.childForFieldName('value'))
+  return scope
+}
+
+/** The nodes whose body is code rather than an expression naming a handler. */
+const FUNCTION_NODES = new Set([
+  'function_declaration',
+  'generator_function_declaration',
+  'function_expression',
+  'function',
+  'arrow_function',
+  'method_definition',
+])
+
+/** Every HTTP method literal `root` compares a `.method` member against. */
 function comparedMethods(root: SyntaxNode): string[] {
   const out: string[] = []
   // `(req.method)`, `req.method ?? ''`, `req.method as string` all read the member.
@@ -286,10 +337,11 @@ function comparedMethods(root: SyntaxNode): string[] {
 
 /**
  * The methods a next-connect style router chain registers: `router.get(…)`
- * where `router` is bound in this file to a router factory call. The receiver
- * gate is what keeps an ORM's `.delete({...})` out of the surface.
+ * where `router` is bound in this file to a router factory call and is part
+ * of the handler (`export default router.handler()`). The receiver gate is
+ * what keeps an ORM's `.delete({...})` out of the surface.
  */
-function routerChainMethods(root: SyntaxNode): string[] {
+function routerChainMethods(root: SyntaxNode, scope: readonly SyntaxNode[]): string[] {
   const routers = new Set<string>()
   for (const statement of root.namedChildren) {
     if (!statement) continue
@@ -307,7 +359,13 @@ function routerChainMethods(root: SyntaxNode): string[] {
       if (calleeName && ROUTER_FACTORIES.has(calleeName)) routers.add(name.text)
     }
   }
-  if (routers.size === 0) return []
+  const inScope = new Set<string>()
+  const collect = (node: SyntaxNode): void => {
+    if (node.type === 'identifier' && routers.has(node.text)) inScope.add(node.text)
+    for (const child of node.namedChildren) if (child) collect(child)
+  }
+  for (const node of scope) collect(node)
+  if (inScope.size === 0) return []
   const out: string[] = []
   const chainRoot = (node: SyntaxNode): SyntaxNode => {
     let current = node
@@ -324,7 +382,7 @@ function routerChainMethods(root: SyntaxNode): string[] {
       if (callee?.type === 'member_expression') {
         const method = callee.childForFieldName('property')?.text.toUpperCase()
         const base = chainRoot(callee)
-        if (method && METHODS.has(method) && base.type === 'identifier' && routers.has(base.text)) out.push(method)
+        if (method && METHODS.has(method) && base.type === 'identifier' && inScope.has(base.text)) out.push(method)
       }
     }
     for (const child of node.namedChildren) if (child) walk(child)

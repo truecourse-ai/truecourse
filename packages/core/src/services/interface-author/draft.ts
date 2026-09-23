@@ -129,7 +129,15 @@ export type AuthoredPlace = z.infer<typeof AuthoredPlaceSchema>
  */
 export const AuthoredFragmentSchema = z
   .object({
+    /** New tasks, and this screen's existing tasks AMENDED under their own ids. */
     interfaces: z.array(AuthoredTaskSchema),
+    /**
+     * Ids of this screen's existing tasks that stand exactly as they are. Kept
+     * tasks are not re-sent: the catalog keeps them byte for byte.
+     */
+    kept: z.array(z.string().min(1)).optional(),
+    /** This screen's existing tasks that no longer exist in the source, each with why. */
+    retired: z.array(z.object({ id: z.string().min(1), reason: z.string().min(1) }).strict()).optional(),
     states: z.array(InterfaceStateSchema).optional(),
     resources: z.array(AuthoredPlaceSchema).optional(),
     /** What the reading could not settle, one line each — never a guess. */
@@ -147,14 +155,20 @@ export const EMPTY_FRAGMENT: AuthoredFragment = { interfaces: [] }
  * Lay a freshly checked piece over the draft a session already has accepted.
  * A piece names what it is about and nothing else, so an id it re-sends is a
  * CORRECTION of that entry and an id it omits is left exactly as it was — which
- * is what lets a session fix one locator without resending the catalog.
+ * is what lets a session fix one locator without resending the catalog. The
+ * same goes for a decision about an existing task: the piece's word on an id
+ * (kept, retired, or amended by re-sending it) replaces the draft's earlier one.
  */
 export function foldAuthoredFragment(
   base: AuthoredFragment,
   addition: AuthoredFragment,
 ): AuthoredFragment {
+  const decided = new Set([...(addition.kept ?? []), ...(addition.retired ?? []).map((entry) => entry.id)])
+  const restated = new Set([...decided, ...addition.interfaces.map((task) => task.id)])
   return collapseAuthoredIds({
-    interfaces: [...base.interfaces, ...addition.interfaces],
+    interfaces: [...base.interfaces.filter((task) => !decided.has(task.id)), ...addition.interfaces],
+    kept: [...(base.kept ?? []).filter((id) => !restated.has(id)), ...(addition.kept ?? [])],
+    retired: [...(base.retired ?? []).filter((entry) => !restated.has(entry.id)), ...(addition.retired ?? [])],
     states: [...(base.states ?? []), ...(addition.states ?? [])],
     resources: [...(base.resources ?? []), ...(addition.resources ?? [])],
     unresolved: [...(base.unresolved ?? []), ...(addition.unresolved ?? [])],
@@ -204,8 +218,12 @@ export function collapseAuthoredIds(fragment: AuthoredFragment): AuthoredFragmen
   const lines = (values: readonly string[] | undefined): string[] => [...new Set(values ?? [])]
   const unresolved = lines(fragment.unresolved)
   const findings = lines(fragment.findings)
+  const kept = lines(fragment.kept)
+  const retired = [...new Map((fragment.retired ?? []).map((entry) => [entry.id, entry])).values()]
   return {
     interfaces: [...interfaces.values()],
+    ...(kept.length > 0 ? { kept } : {}),
+    ...(retired.length > 0 ? { retired } : {}),
     ...(states.size > 0 ? { states: [...states.values()] } : {}),
     ...(resources.size > 0 ? { resources: [...resources.values()] } : {}),
     ...(unresolved.length > 0 ? { unresolved } : {}),
@@ -310,12 +328,20 @@ export interface ValidateFragmentInput {
   authored: InterfacesFile | null
   fragment: AuthoredFragment
   /**
-   * Ids the fragment is allowed to REPLACE — the work item's own prior tasks on
-   * a re-author. Anything else that collides is refused: the authored file is
-   * hand-owned work, and overwriting it is the one loss no derivation
-   * can undo.
+   * The work item's own prior tasks — the only ids the fragment may amend or
+   * retire, and the ones it has to ACCOUNT for: each is kept, amended (re-sent
+   * under its id) or retired with a reason. Anything else that collides is
+   * refused: the authored file is hand-owned work, and overwriting it is the
+   * one loss no derivation can undo.
    */
   replaceable?: ReadonlySet<string>
+  /**
+   * Treat a prior task the fragment does not account for as kept rather than
+   * refusing the fragment. A live session is held to the accounting; a cached
+   * fragment written against another catalog is not, and what it never
+   * mentioned stays as it is.
+   */
+  carryUnaccounted?: boolean
   /**
    * The place this session was given. A session authors ONE screen — the tasks
    * performed on it, or on a dialog/panel that sits on it — so a task located
@@ -343,7 +369,9 @@ export interface ValidateFragmentInput {
  *     registry already defines and never redefines it as something else;
  *  5. a place the draft declares answers for all four readable kinds, counting
  *     what this screen's earlier sessions established — an omitted kind is
- *     unknown, and nothing returns to a screen the ledger has settled.
+ *     unknown, and nothing returns to a screen the ledger has settled;
+ *  6. every one of this screen's existing tasks is accounted for — kept,
+ *     amended or retired — exactly once ({@link accountForPrior}).
  */
 export function validateFragment(input: ValidateFragmentInput): FragmentValidation {
   const { derived, authored } = input
@@ -352,8 +380,18 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
     return { ok: false, errors: draft.error.issues.map((issue) => `${issue.path.join('.')} — ${issue.message}`) }
   }
   const fragment = draft.data
-  const replaceable = input.replaceable ?? new Set<string>()
   const errors: string[] = []
+  // ---- 6. every existing task accounted for --------------------------------
+  const accounting = accountForPrior(fragment, input.replaceable ?? new Set<string>())
+  errors.push(...accounting.errors)
+  if (!input.carryUnaccounted && accounting.unaccounted.length > 0) {
+    errors.push(
+      `this screen's existing task(s) ${accounting.unaccounted.map((id) => `\`${id}\``).join(', ')} are not accounted for — list each in \`kept\` when it stands as it is, re-send it under its id when it changed, or put it in \`retired\` with the reason it is gone`,
+    )
+  }
+  // What the fragment may overwrite: its amendments and retirements, never a
+  // task it keeps or (on a carried fragment) never mentioned.
+  const replaceable = accounting.replaceable
   // The places the draft would leave behind — built before the tasks are
   // stamped, because a step's identity resolves against the readables the same
   // fragment declares.
@@ -504,6 +542,35 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, errors: [], authored: candidate }
+}
+
+/**
+ * The fragment's word on each of the screen's existing tasks. An id is KEPT
+ * (listed in `kept`), AMENDED (re-sent in `interfaces` under its own id) or
+ * RETIRED (listed in `retired` with a reason) — one of the three, and only an
+ * id that IS one of them. `replaceable` is what the write may overwrite: the
+ * amended and the retired.
+ */
+export function accountForPrior(
+  fragment: AuthoredFragment,
+  prior: ReadonlySet<string>,
+): { replaceable: Set<string>; unaccounted: string[]; errors: string[] } {
+  const errors: string[] = []
+  const kept = new Set(fragment.kept ?? [])
+  const retired = new Set((fragment.retired ?? []).map((entry) => entry.id))
+  const amended = new Set(fragment.interfaces.map((task) => task.id).filter((id) => prior.has(id)))
+  for (const id of [...kept, ...retired]) {
+    if (!prior.has(id)) errors.push(`\`${id}\` is not one of this screen's existing tasks — only those are kept or retired`)
+  }
+  for (const id of kept) {
+    if (retired.has(id)) errors.push(`\`${id}\` is both kept and retired`)
+    if (amended.has(id)) errors.push(`\`${id}\` is both kept and re-sent — re-send it only when it changed`)
+  }
+  for (const id of retired) {
+    if (amended.has(id)) errors.push(`\`${id}\` is both retired and re-sent`)
+  }
+  const unaccounted = [...prior].filter((id) => !kept.has(id) && !retired.has(id) && !amended.has(id)).sort()
+  return { replaceable: new Set([...prior].filter((id) => retired.has(id) || amended.has(id))), unaccounted, errors }
 }
 
 /**

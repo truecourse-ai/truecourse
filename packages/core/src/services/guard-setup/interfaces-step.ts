@@ -19,12 +19,13 @@
  *
  * 2. AUTHOR. The web-task authoring run — the existing
  *    `guard interfaces author` engine, injected as a thunk so this module
- *    never imports the command layer. The run is handed the LIVE SCREENS when
- *    the step can stand the app up (`liveScreens`, the seam that installs,
- *    builds, seeds and serves it, then signs a browser in): opened right
- *    before the run and closed right after it, whatever the run made of
- *    itself. A world that could not be stood up is a note on the step row —
- *    the sessions author from source alone — never the step's verdict. The engine already decided the step
+ *    never imports the command layer. The run is handed a way to open the
+ *    LIVE SCREENS when the step can stand the app up (`liveScreens`, the seam
+ *    that installs, builds, seeds and serves it, then signs a browser in): the
+ *    run opens it only when a screen's live fragment is not cached, and the
+ *    step closes it right after the run, whatever the run made of itself. A
+ *    world that could not be stood up is a note on the step row — the
+ *    sessions author from source alone — never the step's verdict. The engine already decided the step
  *    should RUN (fingerprint moved, authored file absent, or `--replace`);
  *    what remains here is the cheap zero-work check: when the authoring ledger
  *    has settled every screen (and no replace or refresh was asked), no
@@ -51,6 +52,7 @@ import {
   computeRecipeFingerprint,
   authoringRecipeContract,
   guardInterfacesPath,
+  recipeContractFingerprint,
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
   resolveEntry,
@@ -81,7 +83,14 @@ export interface InterfacesAuthorRun {
   /** Re-authored tasks whose key moved through a reworded label alone. */
   labelRekeys?: number;
   skipped: string[];
-  places: { status: string; placeId?: string; problems?: string[]; fromCache?: boolean }[];
+  places: {
+    status: string;
+    placeId?: string;
+    problems?: string[];
+    fromCache?: boolean;
+    /** The screen's existing tasks its session retired, each with why. */
+    retired?: { id: string; reason: string }[];
+  }[];
   diagnostics: MapperDiagnostic[];
   spent: { turns: number; tokens: number; costUsd: number };
   /** The state reconciliation that closed the run, when anything was authored. */
@@ -93,8 +102,8 @@ export type InterfacesAuthorFn = (opts: {
   replace: boolean;
   /** Re-open the screens whose ledger row says they never settled. */
   refresh: boolean;
-  /** The running app the sessions may observe, when the step stood one up. */
-  live?: LiveScreens;
+  /** Stands up the running app the sessions may observe; called at most once, only on a cache miss. */
+  openLive?: () => Promise<LiveScreens | undefined>;
 }) => Promise<InterfacesAuthorRun>;
 
 /** What the live-screens seam hands back: the observer and its teardown, or why there is none. */
@@ -107,8 +116,9 @@ export interface BuildInterfacesStepOptions {
   author: InterfacesAuthorFn;
   /**
    * Stands the app up for the sessions to observe (production:
-   * `openSetupLiveScreens`). Called once, right before the authoring run, only
-   * when there is work; absent ⇒ the sessions author from source alone.
+   * `openSetupLiveScreens`). Called at most once, by the authoring run, and only
+   * when a screen's live fragment is not cached; absent ⇒ the sessions author
+   * from source alone.
    */
   liveScreens?: (input: GuardSetupInterfacesStepInput) => Promise<LiveScreensOpen>;
   signal?: AbortSignal;
@@ -159,7 +169,7 @@ export function buildInterfacesStep(
     const derived = readInterfaceCatalog(input.repoRoot);
     const authored = readAuthoredInterfaceCatalog(input.repoRoot);
     const stale = new Set(staleAuthoredPlaceDiagnostics(derived, authored).map((d) => d.subject));
-    const planned = planWorkItems(derived, authored, authoringRecipeContract(input.repoRoot));
+    const planned = planWorkItems(derived, authored, authoringRecipeContract(input.repoRoot), input.repoRoot);
     const workable = planned.filter(
       (item) =>
         !stale.has(item.place.id) &&
@@ -188,17 +198,24 @@ export function buildInterfacesStep(
       };
     }
 
-    // The live screens, stood up for exactly the run that has work and torn
-    // down with it. A world that will not come up is a note, and the run
-    // goes ahead on source alone.
-    const opened = opts.liveScreens ? await opts.liveScreens(input) : null;
-    if (opened && !opened.ok) notes.push(`screens not observed live: ${opened.reason}`);
+    // The live screens, stood up the first time the run asks (a screen whose
+    // live fragment is not cached) and torn down with the run. A world that
+    // will not come up is a note, and the run goes ahead on source alone.
+    const liveScreens = opts.liveScreens;
+    let opened: LiveScreensOpen | undefined;
+    const openLive = liveScreens
+      ? async (): Promise<LiveScreens | undefined> => {
+          opened ??= await liveScreens(input);
+          if (!opened.ok) notes.push(`screens not observed live: ${opened.reason}`);
+          return opened.ok ? opened.live : undefined;
+        }
+      : undefined;
     try {
       const run = await opts.author({
         repoRoot: input.repoRoot,
         replace: input.replace,
         refresh: input.refresh,
-        ...(opened?.ok ? { live: opened.live } : {}),
+        ...(openLive ? { openLive } : {}),
       });
       // A screen served from its cached fragment ran no session, so it is
       // neither counted nor noted: the run record would show work nobody did.
@@ -240,6 +257,11 @@ export function buildInterfacesStep(
       // written), so what it could not do is said on the step row, not lost.
       for (const problem of run.reconcile?.problems ?? []) {
         notes.push(`state registry not reconciled: ${problem}`);
+      }
+      // A retired task leaves the catalog, and the scenarios grounded on it are
+      // left exactly as they are: the row says which went, and why.
+      for (const place of run.places) {
+        for (const task of place.retired ?? []) notes.push(`retired ${task.id}: ${task.reason}`);
       }
       return {
         status: allFailed ? 'failed' : 'ok',
@@ -304,7 +326,9 @@ async function runReconcile(
     repoRoot: input.repoRoot,
     diagnostics: disputes,
     entry: resolveEntry(input.repoRoot, [...input.recipe.entry!]),
-    recipeContract: authoringRecipeContract(input.repoRoot),
+    // The cli disputes are settled by running the program, which the seed
+    // never touches: the contract as it stood before the seed.
+    recipeContract: recipeContractFingerprint(input.repoRoot, 'seed'),
     legacyRecipeFingerprint: computeRecipeFingerprint(input.repoRoot),
     driver: async () => {
       acquired = await context.acquire();

@@ -92,7 +92,7 @@ import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { proveSeedFromColdClone } from './seed-cold-proof.js';
-import { servicesController } from './services-lifecycle.js';
+import { outputTail, servicesController } from './services-lifecycle.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
 import { isCreditsExhausted } from '@truecourse/shared';
@@ -1386,7 +1386,7 @@ export function buildSeedSession(
       if (!built.ok) {
         return {
           status: 'failed',
-          reason: `the recipe \`build\` failed${built.timedOut ? ' (timed out)' : ''}: ${tail(built.output)}`,
+          reason: `the recipe \`build\` failed${built.timedOut ? ' (timed out)' : ''}: ${outputTail(built.output)}`,
         };
       }
     }
@@ -1407,7 +1407,7 @@ export function buildSeedSession(
       if (!built.ok) {
         return {
           status: 'failed',
-          reason: `the recipe \`web.build\` failed${built.timedOut ? ' (timed out)' : ''}: ${tail(built.output)}`,
+          reason: `the recipe \`web.build\` failed${built.timedOut ? ' (timed out)' : ''}: ${outputTail(built.output)}`,
         };
       }
     }
@@ -1720,10 +1720,6 @@ async function foldSeedOutcome(
 function clip(text: string): string {
   if (text.length <= MAX_TOOL_OUTPUT_CHARS) return text;
   return `… (${text.length - MAX_TOOL_OUTPUT_CHARS} chars clipped)\n${text.slice(-MAX_TOOL_OUTPUT_CHARS)}`;
-}
-
-function tail(output: string): string {
-  return output.trimEnd().split('\n').slice(-5).join(' / ');
 }
 
 function message(error: unknown): string {

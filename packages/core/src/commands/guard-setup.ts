@@ -284,7 +284,7 @@ export async function guardSetupInProcess(
               },
               driver: acquired.driver,
               transportMode: mode,
-              ...(authorOpts.live ? { live: authorOpts.live } : {}),
+              ...(authorOpts.openLive ? { openLive: authorOpts.openLive } : {}),
               ...(options.signal ? { signal: options.signal } : {}),
               onStatus: (message) => tracker?.detail('interfaces', message),
             });

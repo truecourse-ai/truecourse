@@ -10,19 +10,22 @@
  *
  * THE RULE, per screen:
  *
- *  - a ledger row saying `authored` or `empty` is SETTLED — the session reached
- *    an outcome the write path accepted, and nothing re-opens it but an explicit
- *    re-author;
- *  - a row saying `failed` or `rejected` is work again only when the screen's
- *    input digest MOVED. A provider that died costs that screen one run, not
- *    one run every setup forever, and the setup report names it so a person can
- *    ask for a retry;
+ *  - a ledger row is work again when the screen's input digest MOVED, or one
+ *    of the source files its session was grounded on changed — whatever the
+ *    row's status. A settled screen re-opened this way is RECONCILED against
+ *    the tasks it already has (kept, amended, retired), never re-invented;
+ *  - otherwise it is not: a settled row stays settled, and a `failed` or
+ *    `rejected` one waits for an explicit refresh. A provider that died costs
+ *    that screen one run, not one run every setup forever, and the setup report
+ *    names it so a person can ask for a retry;
  *  - NO row is a screen from before the ledger: it is judged ONCE by the old
  *    inference (it carries a task and every readable kind is established) so an
  *    upgrade re-authors nothing, and the run writes it a row.
  */
 
 import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
 import type {
   Interface,
   InterfaceAuthoringRecord,
@@ -51,7 +54,7 @@ export interface WebScreenAuthoringState {
   record?: InterfaceAuthoringRecord
   /** The digest a session for this screen would run over — its cache key too. */
   inputFingerprint: string
-  /** A session is owed here: no settled row, or a failed one whose inputs moved. */
+  /** A session is owed here: no settled row, or a row whose inputs or sources moved. */
   needsAuthoring: boolean
 }
 
@@ -62,11 +65,17 @@ export interface WebScreenAuthoringInput {
   authored: InterfacesFile | null
   /** The recipe CONTRACT the tasks would be authored against. */
   recipeContract: string
+  /**
+   * The working tree, when the caller has one: a row's recorded source files
+   * are re-read against it. Absent ⇒ only the input digest is compared.
+   */
+  repoRoot?: string
 }
 
 /**
  * Every SCREEN both catalog halves know, in catalog order, with what authoring
- * has settled on it. Pure: it reads no tree and writes nothing.
+ * has settled on it. It writes nothing, and reads the tree only for the source
+ * files a row recorded (when `repoRoot` is given).
  */
 export function webScreenAuthoringStates(
   input: WebScreenAuthoringInput,
@@ -93,7 +102,8 @@ export function webScreenAuthoringStates(
       ...(record ? { record } : {}),
       inputFingerprint,
       needsAuthoring: record
-        ? unsettledAuthoring(record) && record.inputFingerprint !== inputFingerprint
+        ? record.inputFingerprint !== inputFingerprint ||
+          (input.repoRoot !== undefined && sourcesMoved(input.repoRoot, record.sources))
         : // The old inference, for a screen written before the ledger: a screen
           // that carries a task and has every readable kind established is what
           // a settled session leaves behind, so it is not re-bought.
@@ -106,6 +116,33 @@ export function webScreenAuthoringStates(
   })
 }
 
+/** What a file that cannot be read records in place of a digest. */
+const MISSING_SOURCE = 'missing'
+
+/**
+ * Each repo-relative file's content digest, the way a ledger row records the
+ * source a session was grounded on. A file that cannot be read is recorded as
+ * missing, so its reappearance moves the row too.
+ */
+export function sourceDigests(repoRoot: string, files: readonly string[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const file of [...new Set(files)].sort()) {
+    try {
+      out[file] = crypto.createHash('sha256').update(fs.readFileSync(path.join(repoRoot, file))).digest('hex').slice(0, 16)
+    } catch {
+      out[file] = MISSING_SOURCE
+    }
+  }
+  return out
+}
+
+/** Whether any recorded source file reads differently now. No record moves nothing. */
+export function sourcesMoved(repoRoot: string, sources: Readonly<Record<string, string>> | undefined): boolean {
+  if (!sources) return false
+  const now = sourceDigests(repoRoot, Object.keys(sources))
+  return Object.entries(sources).some(([file, digest]) => now[file] !== digest)
+}
+
 /** A row that never reached an accepted outcome — the two retryable words. */
 export function unsettledAuthoring(record: InterfaceAuthoringRecord): boolean {
   return record.status === 'failed' || record.status === 'rejected'
@@ -113,8 +150,8 @@ export function unsettledAuthoring(record: InterfaceAuthoringRecord): boolean {
 
 /**
  * THE PER-SCREEN INPUT DIGEST — what decides whether a session for this screen
- * would produce something else, and therefore both when a failed screen retries
- * and what its cached fragment is keyed on. Four inputs, and the reasons the
+ * would produce something else, and therefore both when a screen is re-opened
+ * and (with its sources) what its cached fragment is keyed on. Four inputs, and the reasons the
  * rest are left out matter as much as the four:
  *
  *  - the STAGE VERSION, so a prompt fix that changes what a session should say
@@ -132,9 +169,9 @@ export function unsettledAuthoring(record: InterfaceAuthoringRecord): boolean {
  * work again forever. The peer-wide context (every screen's address, the state
  * registry) is absent for the neighbouring reason: it moves whenever ANY screen
  * is authored, which would re-key every screen for a change to somebody else.
- * And the screen's SOURCE is absent because it is not what re-opens the step —
- * the step's own key is the derived place set plus the contract — so folding it
- * here would promise a retry no run ever performs.
+ * And the screen's SOURCE is kept beside it rather than in it: the files are
+ * only known once the analyzer grounds the place, so the row records them with
+ * their digests ({@link sourceDigests}) and the check re-reads just those.
  */
 export function screenAuthoringFingerprint(input: {
   derived: InterfacesFile | null

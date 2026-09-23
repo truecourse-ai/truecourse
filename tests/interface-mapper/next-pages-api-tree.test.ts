@@ -24,6 +24,8 @@ describe('Next pages-router api handlers → route registrations', () => {
       'pages/api/export.ts',
       'pages/api/auth/[[...nextauth]].ts',
       'pages/api/_lib/respond.ts',
+      'pages/api/notes.ts',
+      'pages/api/index/index.ts',
       'pages/links.tsx',
     )
     const interfaces = deriveApiInterfacesFromTree(analyses)
@@ -35,11 +37,15 @@ describe('Next pages-router api handlers → route registrations', () => {
       'HEAD /api/export',
       // no discriminator: every method reaches it, GET stands for the operation
       'GET /api/health',
+      // a directory named index is an address like any other; only the file is not
+      'GET /api/index',
       'GET /api/links',
       'POST /api/links',
       'DELETE /api/links/{id}',
       'GET /api/links/{id}',
       'PUT /api/links/{id}',
+      // the same-file helper's HEAD check is not part of the handler
+      'POST /api/notes',
       'GET /api/tags',
       'PATCH /api/tags',
       // the `!== 'POST'` guard names the one method served; prisma's `.delete` is not one

@@ -63,6 +63,7 @@ export {
 } from './session.js'
 export {
   INTERFACE_AUTHOR_CACHE_NAME,
+  fragmentCacheKey,
   authorWebInterfaces,
   defaultAuthorConcurrency,
   planWorkItems,

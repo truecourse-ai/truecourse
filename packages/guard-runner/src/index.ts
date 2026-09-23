@@ -345,6 +345,7 @@ export {
   boundTree,
   MAX_OBSERVATION_BYTES,
 } from './web/observe.js'
+export { hasAddressSlot } from './web/address.js'
 export type {
   CreateWebObserverOptions,
   ObserveScreenResult,
@@ -437,6 +438,8 @@ export {
 export {
   INTERFACE_AUTHOR_STAGE_VERSION,
   screenAuthoringFingerprint,
+  sourceDigests,
+  sourcesMoved,
   unsettledAuthoring,
   webScreenAuthoringStates,
   webScreensNeedingAuthoring,

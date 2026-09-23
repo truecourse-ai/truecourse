@@ -39,6 +39,7 @@ import type { AuthoredFragment } from '../../packages/core/src/services/interfac
 import { InterfacesFileSchema, interfaceFingerprint, type InterfacesFile } from '../../packages/shared/src/index'
 import {
   guardAuthoredInterfacesPath,
+  authoringRecipeContract,
   guardInterfacesPath,
   mergeInterfaceCatalogs,
   readAuthoredInterfaceCatalog,
@@ -900,6 +901,115 @@ describe('re-running', () => {
       expect(readAuthoredFile().authoring!['root'].status).toBe('authored')
     })
 
+    /**
+     * RECONCILE. A settled screen re-opens when what it was authored from
+     * moved — here the source file its row recorded — and its session accounts
+     * for the tasks it already has instead of re-inventing them.
+     */
+    describe('a settled screen whose source moved', () => {
+      const context = new Map([['root', {
+        module: 'src/Home.tsx', renders: [], closure: 1,
+        apiEffects: ['api/post-api-repos'], rpcCalls: [], unjoined: [],
+      }]])
+      const both: Script = async (place) =>
+        ({ kind: 'outcome', value: place === 'root' ? HOME_FRAGMENT : { interfaces: [] } })
+
+      async function settle(): Promise<void> {
+        installMemoryKvCache()
+        const { persistence } = memoryPersistence()
+        await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(both).driver, persistence, context })
+        expect(readAuthoredFile().authoring!['root'].sources).toEqual({ 'src/Home.tsx': expect.any(String) })
+      }
+      afterEach(() => resetKvCacheStore())
+
+      it('stays settled while its source holds', async () => {
+        await settle()
+        const { persistence } = memoryPersistence()
+        const again = await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence, context })
+        expect(again.places).toEqual([])
+      })
+
+      it('re-opens just that screen, past its cached fragment, briefed with its tasks to account for', async () => {
+        await settle()
+        fs.writeFileSync(path.join(repo, 'src', 'Home.tsx'), 'export function Home() { return <main>Repositories</main> }\n')
+        const started: string[] = []
+        let briefing = ''
+        const { persistence } = memoryPersistence()
+        const result = await authorWebInterfaces({
+          repoRoot: repo,
+          driver: scriptedDriver(async (place, input) => {
+            started.push(place)
+            briefing = input.initialMessages.join('\n')
+            return {
+              kind: 'outcome',
+              value: { interfaces: [], retired: [{ id: HOME_TASK.id, reason: 'the add form is gone from Home.tsx' }] },
+            }
+          }).driver,
+          persistence,
+          context,
+        })
+        expect(started).toEqual(['root'])
+        expect(briefing).toContain('Account for EACH of these tasks')
+        expect(briefing).toContain(`  ${HOME_TASK.id}`)
+        expect(result.places[0]).toMatchObject({
+          status: 'authored',
+          retired: [{ id: HOME_TASK.id, reason: 'the add form is gone from Home.tsx' }],
+        })
+        expect(readAuthoredFile().interfaces).toEqual([])
+      })
+
+      it('keeps a task the session says still stands, byte for byte', async () => {
+        await settle()
+        const before = readAuthoredFile().interfaces
+        fs.appendFileSync(path.join(repo, 'src', 'Home.tsx'), '// a comment\n')
+        const { persistence } = memoryPersistence()
+        await authorWebInterfaces({
+          repoRoot: repo,
+          driver: scriptedDriver(async () => ({ kind: 'outcome', value: { interfaces: [], kept: [HOME_TASK.id] } })).driver,
+          persistence,
+          context,
+        })
+        expect(readAuthoredFile().interfaces).toEqual(before)
+      })
+
+      it('refuses an outcome that leaves one of its tasks unaccounted for', async () => {
+        await settle()
+        fs.appendFileSync(path.join(repo, 'src', 'Home.tsx'), '// a comment\n')
+        const { persistence } = memoryPersistence()
+        const result = await authorWebInterfaces({
+          repoRoot: repo,
+          driver: scriptedDriver(async () => ({ kind: 'outcome', value: { interfaces: [] } })).driver,
+          persistence,
+          context,
+        })
+        expect(result.places[0].status).not.toBe('authored')
+        expect(result.places[0].problems.join('\n')).toContain(`\`${HOME_TASK.id}\` are not accounted for`)
+        expect(readAuthoredFile().interfaces.map((task) => task.id)).toEqual([HOME_TASK.id])
+      })
+    })
+
+    it('re-opens a settled screen whose derived place moved', async () => {
+      await firstRun()
+      fs.writeFileSync(
+        guardInterfacesPath(repo),
+        JSON.stringify({
+          ...DERIVED,
+          resources: { web: [DERIVED.resources!.web[0], { ...DERIVED.resources!.web[1], title: 'The repository report' }] },
+        }),
+      )
+      const started: string[] = []
+      const { persistence } = memoryPersistence()
+      await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          started.push(place)
+          return { kind: 'outcome', value: { interfaces: [], kept: ['web/open-rules-panel'] } }
+        }).driver,
+        persistence,
+      })
+      expect(started).toEqual(['repos-repoid'])
+    })
+
     // The upgrade: an authored half written before the ledger. What the old
     // inference calls done is recorded as done, for free, and never re-bought.
     it('writes a row for a screen the old inference calls done, with no session', async () => {
@@ -1324,7 +1434,7 @@ describe('source and task evidence in the initial session', () => {
     const { driver } = scriptedDriver(async (_place, input) => {
       const briefing = input.initialMessages.join('\n')
       expect(briefing).toContain(JSON.stringify(HOME_TASK.steps))
-      expect(briefing).toContain('Replacement: preserve surviving ids and exact steps')
+      expect(briefing).toContain('Reconcile: account for every authored task')
       expect(briefing).toContain('1 complete definitions included, 0 omitted')
       expect(await callTool(input, 'check_draft', { interfaces: [HOME_TASK] })).toContain('Accepted and kept')
       return { kind: 'outcome', value: { interfaces: [HOME_TASK] } }
@@ -1519,7 +1629,7 @@ describe('the places are in the briefing, not a tool', () => {
     let briefing = ''
     const { driver } = scriptedDriver(async (_place, input) => {
       briefing = input.initialMessages.join('\n')
-      return { kind: 'outcome', value: { interfaces: [] } }
+      return { kind: 'outcome', value: { interfaces: [], kept: ['web/open-rules-panel'] } }
     })
     await authorWebInterfaces({
       repoRoot: repo,
@@ -1901,6 +2011,7 @@ describe('readable authoring through storage and the screen read view', () => {
     }`)
     const fragment: AuthoredFragment = {
       interfaces: [],
+      kept: oldTasks.map((task) => task.id),
       resources: [
         { id: 'root', kind: 'screen', title: '/', readables: {
           markers: [], elements: [{ id: 'heading', element: { role: 'heading', name: 'Repositories' } }],
@@ -1921,7 +2032,7 @@ describe('readable authoring through storage and the screen read view', () => {
     }
     const { driver } = scriptedDriver(async (place, input) => {
       expect(place).toBe('root')
-      expect(input.initialMessages.join('\n')).toContain('Preserve these tasks')
+      expect(input.initialMessages.join('\n')).toContain('Account for EACH of these tasks')
       const source = await callTool(input, 'read_file', { path: 'src/Home.tsx' })
       expect(source).toContain('<h1>Repositories</h1>')
       expect(source).toContain('repos.map(repo => <li>{repo.name}</li>)')
@@ -1930,7 +2041,7 @@ describe('readable authoring through storage and the screen read view', () => {
       expect(await callTool(input, 'check_draft', fragment)).toContain('Accepted and kept')
       return { kind: 'outcome', value: fragment }
     })
-    // A named place selects enrichment; replacing existing tasks requires --replace.
+    // A named place is reconciled: its one task stands, and only readables land.
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
     expect(result.places[0].status).toBe('authored')
     expect(result.authored).toBe(0)
@@ -1997,6 +2108,6 @@ describe('readable authoring through storage and the screen read view', () => {
         ? { interfaces: [], resources: [{ ...DERIVED.resources!.web[0], readables }] } : { interfaces: [] } })).driver })
     expect(result.places[0].status).toBe('authored')
     expect(readAuthoredFile().resources!.web[0].readables).toEqual(readables)
-    expect(planWorkItems(DERIVED, readAuthoredFile(), '')[0].needsAuthoring).toBe(false)
+    expect(planWorkItems(DERIVED, readAuthoredFile(), authoringRecipeContract(repo), repo)[0].needsAuthoring).toBe(false)
   })
 })

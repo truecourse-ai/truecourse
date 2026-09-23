@@ -13,18 +13,23 @@
  * everything, the final address included, so a click that navigated is
  * visible as one.
  *
- * Every observation gets its OWN PAGE in the shared context — the cookies a
- * credential installed are the context's, so every page is signed in, while
- * two observations in flight never see each other's state. The pages are
- * closed with the observation; the browser and the server belong to whoever
- * opened them.
+ * Every observation gets its OWN BROWSER CONTEXT, signed in afresh — an
+ * activation that signs out or rotates the session cookie changes that one
+ * observation's jar, never the next one's, and two observations in flight
+ * never see each other's state. The credential reaches the served surface
+ * and nothing else: its cookies are scoped to the surface's origin, any other
+ * header is added only to requests for that origin, and an address that
+ * resolves to another origin is refused before anything is opened. The
+ * contexts are closed with their observation; the browser and the server
+ * belong to whoever opened them.
  */
 
-import type { Page } from 'playwright-core'
+import type { BrowserContext, Page } from 'playwright-core'
 import type { GuardWebLocator } from '@truecourse/shared'
-import { installWebCredential, type WorldCredential } from './credential.js'
+import { hasAddressSlot } from './address.js'
+import { parseCookieHeader, type WorldCredential } from './credential.js'
 import { webLocator, pageAddress } from './executor.js'
-import type { WebBrowserHandle } from './browser.js'
+import { WEB_CONTEXT_OPTIONS, type WebBrowserHandle } from './browser.js'
 
 /** How much of one accessibility tree an observation carries. A tree is
  *  context, and context is the budget; a screen past this is cut at a line
@@ -67,7 +72,7 @@ export interface WebScreenObserver {
   /** The credential the pages are signed in with, by name; absent when anonymous. */
   readonly principal?: string
   observe(request: ScreenObservationRequest): Promise<ObserveScreenResult>
-  /** Close the pages this observer opened. The browser stays the caller's. */
+  /** Close the contexts this observer has open. The browser stays the caller's. */
   close(): Promise<void>
 }
 
@@ -81,49 +86,67 @@ export interface CreateWebObserverOptions {
 
 /**
  * An observer over an already-launched browser and an already-running surface.
- * The credential is installed once, on the browser's context (a `Cookie`
- * header becomes the context's cookies; any other header is set on each page).
+ * A credential that cannot be installed is refused here, once, rather than on
+ * every observation.
  */
 export async function createWebObserver(opts: CreateWebObserverOptions): Promise<
   { ok: true; observer: WebScreenObserver } | { ok: false; reason: string }
 > {
-  const context = opts.browser.page.context()
-  const headers: Record<string, string> = {}
-  if (opts.credential) {
-    const installed = await installWebCredential(
-      opts.browser.page,
-      opts.baseUrl,
-      opts.credential.name,
-      opts.credential.credential,
-      headers,
-    )
-    if (!installed.ok) return { ok: false, reason: installed.reason }
+  const browser = opts.browser.page.context().browser()
+  if (!browser) return { ok: false, reason: 'the browser handle carries no browser to open contexts on' }
+  if (opts.credential && opts.credential.credential.header.toLowerCase() === 'cookie' &&
+    parseCookieHeader(opts.credential.credential.value).length === 0) {
+    return {
+      ok: false,
+      reason: `credential "${opts.credential.name}" is a Cookie header holding no name=value pair — nothing to install`,
+    }
   }
-  const open = new Set<Page>()
+  const open = new Set<BrowserContext>()
   const observer: WebScreenObserver = {
     ...(opts.credential ? { principal: opts.credential.name } : {}),
     async observe(request) {
+      let context: BrowserContext
       let page: Page
       try {
-        page = await context.newPage()
+        context = await browser.newContext(WEB_CONTEXT_OPTIONS)
       } catch (e) {
-        return { ok: false, reason: `the browser could not open a page: ${firstLine(e)}` }
+        return { ok: false, reason: `the browser could not open a context: ${firstLine(e)}` }
       }
-      open.add(page)
+      open.add(context)
       try {
-        if (Object.keys(headers).length > 0) await page.setExtraHTTPHeaders(headers)
+        if (opts.credential) await signIn(context, opts.baseUrl, opts.credential.credential)
+        page = await context.newPage()
         return await observeScreen(page, opts.baseUrl, request)
+      } catch (e) {
+        return { ok: false, reason: `the browser could not open a signed-in page: ${firstLine(e)}` }
       } finally {
-        open.delete(page)
-        await page.close().catch(() => undefined)
+        open.delete(context)
+        await context.close().catch(() => undefined)
       }
     },
     async close() {
-      for (const page of open) await page.close().catch(() => undefined)
+      for (const context of open) await context.close().catch(() => undefined)
       open.clear()
     },
   }
   return { ok: true, observer }
+}
+
+/**
+ * Put the credential into one context for the surface at `baseUrl` only: a
+ * `Cookie` header becomes cookies scoped to its origin, any other header is
+ * added to the requests bound for that origin and to no other.
+ */
+async function signIn(context: BrowserContext, baseUrl: string, credential: WorldCredential): Promise<void> {
+  if (credential.header.toLowerCase() === 'cookie') {
+    await context.addCookies(parseCookieHeader(credential.value).map((cookie) => ({ ...cookie, url: baseUrl })))
+    return
+  }
+  const origin = new URL(baseUrl).origin
+  await context.route(
+    (url) => url.origin === origin,
+    (route) => route.continue({ headers: { ...route.request().headers(), [credential.header]: credential.value } }),
+  )
 }
 
 /** Open `request.path` on `page`, activate what was asked, and read the tree. */
@@ -135,7 +158,7 @@ export async function observeScreen(
   if (!request.path.startsWith('/')) {
     return { ok: false, reason: `the path must start with "/" (got ${JSON.stringify(request.path)})` }
   }
-  if (/\{[^}]*\}/.test(request.path)) {
+  if (hasAddressSlot(request.path)) {
     return {
       ok: false,
       reason: `the path still carries a slot (${request.path}) — fill every {param} with a real value before observing`,
@@ -147,7 +170,13 @@ export async function observeScreen(
     if (message.type() === 'error') problems.push(`console error: ${message.text().split('\n')[0]}`)
   })
 
-  const url = new URL(request.path, baseUrl).toString()
+  // A path like `//elsewhere.example/x` starts with "/" and still leaves the
+  // surface: the address is checked where it resolves, not where it starts.
+  const resolved = new URL(request.path, baseUrl)
+  if (resolved.origin !== new URL(baseUrl).origin) {
+    return { ok: false, reason: `the path ${JSON.stringify(request.path)} leaves the served surface (${resolved.origin})` }
+  }
+  const url = resolved.toString()
   try {
     const response = await page.goto(url, { waitUntil: 'load', timeout: OBSERVE_NAVIGATION_TIMEOUT_MS })
     if (response && response.status() >= 400) problems.push(`the address answered HTTP ${response.status()}`)

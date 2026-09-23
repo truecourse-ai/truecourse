@@ -26,6 +26,7 @@ import {
 } from '../../packages/core/src/services/interface-author/live-screen'
 import { stubDriver, outcome, toolResult } from '../core/spec-scan-session-stub.js'
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 
 const DERIVED: InterfacesFile = {
   version: 2,
@@ -72,12 +73,14 @@ function fakeObserver(principal?: string): { observer: LiveScreenObserver; reque
 let repo: string
 beforeEach(() => {
   installMemorySessionRuns()
+  installMemoryKvCache()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-live-screen-'))
   fs.mkdirSync(path.dirname(guardInterfacesPath(repo)), { recursive: true })
   fs.writeFileSync(guardInterfacesPath(repo), JSON.stringify(DERIVED))
 })
 afterEach(() => {
   resetSessionRuns()
+  resetKvCacheStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -172,7 +175,7 @@ describe('the run', () => {
       await call.emit(toolResult('check_draft'))
       return outcome({ interfaces: [], unresolved: ['nothing to do here'] })
     })
-    const run = await runGuardInterfaceAuthoring({ repoRoot: repo, driver, transportMode: 'api', live })
+    const run = await runGuardInterfaceAuthoring({ repoRoot: repo, driver, transportMode: 'api', openLive: async () => live })
     expect(run.places.map((place) => place.placeId).sort()).toEqual(['links-id', 'root'])
     // The first look: the literal address only. The slotted one is the session's to fill.
     expect(requests).toEqual([{ path: '/' }])
@@ -197,7 +200,7 @@ describe('the run', () => {
       await call.emit(toolResult('check_draft'))
       return outcome({ interfaces: [], unresolved: ['nothing to do here'] })
     })
-    await runGuardInterfaceAuthoring({ repoRoot: repo, driver, transportMode: 'api', live: { observer } })
+    await runGuardInterfaceAuthoring({ repoRoot: repo, driver, transportMode: 'api', openLive: async () => ({ observer }) })
     expect(requests).toEqual([{ path: '/' }, { path: '/links/7' }])
   })
 
@@ -209,5 +212,28 @@ describe('the run', () => {
     })
     await runGuardInterfaceAuthoring({ repoRoot: repo, driver, transportMode: 'api' })
     expect(calls.every((call) => !call.briefing.includes('THE LIVE SCREEN'))).toBe(true)
+  })
+
+  it('keeps a fragment authored from source apart from one authored beside the live screen', async () => {
+    const { observer } = fakeObserver()
+    let opened = 0
+    const openLive = async (): Promise<LiveScreens> => { opened++; return { observer } }
+    const { driver, calls } = stubDriver(async (call) => {
+      await call.emit(toolResult('check_draft'))
+      return outcome({ interfaces: [], unresolved: ['nothing to do here'] })
+    })
+    const author = (withLive: boolean) =>
+      runGuardInterfaceAuthoring({ repoRoot: repo, driver, transportMode: 'api', places: ['root'], ...(withLive ? { openLive } : {}) })
+
+    // From source: a session runs, and the world is never asked for.
+    await author(false)
+    expect([calls.length, opened]).toEqual([1, 0])
+    // The world can come up now: the source fragment is not served, the screen is authored live.
+    await author(true)
+    expect([calls.length, opened]).toEqual([2, 1])
+    // Each run is served its own kind from the cache, and a live hit boots nothing.
+    await author(false)
+    await author(true)
+    expect([calls.length, opened]).toEqual([2, 1])
   })
 })
