@@ -1,14 +1,14 @@
 /**
- * SHARED PLACES — the component modules several screens render and that own a
- * handler become one place each, authored once. Detection is pure: the screens'
- * grounding and a source reader in, the places out.
+ * SHARED PLACES — the component modules several screens render and that own
+ * behavior of their own become one place each, authored once. Detection is
+ * pure: the screens' grounding and a source reader in, the places out.
  */
 
 import { describe, it, expect } from 'vitest'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import {
   detectSharedComponents,
-  ownsHandler,
+  ownsBehavior,
   sharedComponentId,
 } from '../../packages/core/src/services/interface-author/shared-places'
 
@@ -23,8 +23,8 @@ const context = (module: string, renders: string[]): WebPlaceContext => ({
 })
 
 const SOURCES: Record<string, string> = {
-  'components/Sidebar.tsx': 'export function Sidebar() { return <button onClick={() => setOpen(!open)}>Collapse</button> }',
-  'components/LinkCard.tsx': 'export function LinkCard({ link }) { return <div onClick={openLink}>{link.name}</div> }',
+  'components/Sidebar.tsx': 'export function Sidebar() { return <nav><Link href="/links">Links</Link></nav> }',
+  'components/LinkCard.tsx': 'import { openLink } from "../lib/openLink"\nexport function LinkCard({ link }) { return <div onClick={() => openLink(link)}>{link.name}</div> }',
   'components/Button.tsx': 'export function Button({ onClick, ...rest }) { return <button onClick={onClick} {...rest} /> }',
   'components/Header.tsx': 'export function Header() { return <h1>Links</h1> }',
   'components/LinksView.tsx': 'export function LinksView() { return <ul onScroll={() => load()} /> }',
@@ -49,7 +49,7 @@ describe('detecting the shared components', () => {
     ])
   })
 
-  it('never takes a screen’s own route module, and caps the most widely rendered', () => {
+  it('never takes a screen’s own route module', () => {
     const shared = detectSharedComponents({
       contexts: new Map([
         ['a', context('components/Sidebar.tsx', ['components/LinkCard.tsx'])],
@@ -57,18 +57,31 @@ describe('detecting the shared components', () => {
         ['c', context('pages/c.tsx', ['components/Sidebar.tsx', 'components/LinkCard.tsx'])],
       ]),
       readSource,
-      max: 1,
     })
     expect(shared.map((component) => component.module)).toEqual(['components/LinkCard.tsx'])
   })
 
-  it('reads a handler as owned unless it only forwards the one it was given', () => {
-    expect(ownsHandler('<button onClick={() => save()}>')).toBe(true)
-    expect(ownsHandler('<button onClick={handleSave}>')).toBe(true)
-    expect(ownsHandler('<form onSubmit={(e) => { e.preventDefault(); submit({ a: 1 }) }}>')).toBe(true)
-    expect(ownsHandler('<button onClick={onClick} onChange={props.onChange}>')).toBe(false)
-    expect(ownsHandler('<h1>Title</h1>')).toBe(false)
-    expect(ownsHandler(undefined)).toBe(false)
+  it('reads behavior as owned when a handler reaches past props and local state, or a link names its own address', () => {
+    const owns = (source: string) => ownsBehavior('components/X.tsx', source)
+    expect(owns('import { save } from "./api"\nexport function X() { return <button onClick={() => save()}>Save</button> }')).toBe(true)
+    expect(owns('export function X() { const { mutate } = usePinLink(); return <button onClick={() => mutate()}>Pin</button> }')).toBe(true)
+    expect(owns('export function X({ link }) { const router = useRouter(); const open = () => router.push("/links/" + link.id); return <div onClick={open} /> }')).toBe(true)
+    expect(owns('export function X() { return <nav><Link href="/settings/account">Account</Link><a href={`/tags/${1}`}>Tag</a></nav> }')).toBe(true)
+    expect(owns('export function Sidebar() { return <SidebarLink href={`/links/pinned`} title="Pinned" /> }')).toBe(true)
+    expect(owns('export function Nav() { return <NavLink to="/settings">Settings</NavLink> }')).toBe(true)
+    expect(owns('export function SettingsSidebar() { const links = [{ name: "Account", href: "/settings/account" }]; return <SecondarySidebar links={links} /> }')).toBe(true)
+  })
+
+  it('reads a building block as owning nothing: every handler goes to a prop or only flips local state', () => {
+    const owns = (source: string) => ownsBehavior('components/X.tsx', source)
+    expect(owns('export function Button({ onClick, ...rest }) { return <button onClick={onClick} {...rest} /> }')).toBe(false)
+    expect(owns('export default function Modal({ toggleModal, children }) { return <div onClickOutside={toggleModal}><button onClick={() => toggleModal()}>x</button>{children}</div> }')).toBe(false)
+    expect(owns('export const Field = (props) => <input onChange={(e) => props.onChange(e.target.value)} />')).toBe(false)
+    expect(owns('export function Dropdown({ items }) { const [open, setOpen] = useState(false); const toggle = () => setOpen(!open); return <button onClick={toggle}>{items}</button> }')).toBe(false)
+    expect(owns('export function Card({ href, children }) { return <Link href={href}>{children}</Link> }')).toBe(false)
+    expect(owns('export function Title() { return <h1>Title</h1> }')).toBe(false)
+    expect(owns('export default function Modal({ toggleModal }) { const [open, setOpen] = React.useState(true); return <Drawer onClose={() => setOpen(false)}><button onClick={toggleModal as MouseEventHandler}>x</button></Drawer> }')).toBe(false)
+    expect(owns('export default function App() { return <Head><link rel="icon" href="/favicon.png" /></Head> }')).toBe(false)
   })
 
   it('mints a kebab-case id from the module path, stable across runs', () => {

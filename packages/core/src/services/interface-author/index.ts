@@ -95,9 +95,8 @@ export {
 } from './reconcile.js'
 export { registerSharedPlaces, writeAuthoredCatalog, type WriteAuthoredInput } from './write.js'
 export {
-  MAX_SHARED_COMPONENTS,
   detectSharedComponents,
-  ownsHandler,
+  ownsBehavior,
   sharedComponentId,
   type SharedComponent,
 } from './shared-places.js'
