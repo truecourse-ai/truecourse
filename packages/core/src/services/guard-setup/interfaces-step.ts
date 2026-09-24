@@ -205,8 +205,13 @@ export function buildInterfacesStep(
     let opened: LiveScreensOpen | undefined;
     const openLive = liveScreens
       ? async (): Promise<LiveScreens | undefined> => {
-          opened ??= await liveScreens(input);
-          if (!opened.ok) notes.push(`screens not observed live: ${opened.reason}`);
+          if (!opened) {
+            opened = await liveScreens(input);
+            if (!opened.ok) notes.push(`screens not observed live: ${opened.reason}`);
+            for (const [name, reason] of opened.ok ? opened.live.unobservable ?? [] : []) {
+              notes.push(`screens not observed as \`${name}\`: ${reason}`);
+            }
+          }
           return opened.ok ? opened.live : undefined;
         }
       : undefined;

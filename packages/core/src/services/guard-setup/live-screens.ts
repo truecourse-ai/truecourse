@@ -172,11 +172,16 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
     // The principals: one observer per web session the seed minted (a Cookie
     // credential is what a signed-in browser carries; any other header still
     // rides every request when that is all there is), the first the default,
-    // and a signed-out browser beside them.
+    // and a signed-out browser beside them. A credential no browser can carry
+    // costs that principal alone: the others are observed as they would be.
     const principals = new Map<string, LiveScreenObserver>();
+    const unobservable = new Map<string, string>();
     for (const principal of webPrincipals(credentials)) {
       const observer = await createWebObserver({ browser, baseUrl: server.baseUrl, credential: principal });
-      if (!observer.ok) return refuse(observer.reason);
+      if (!observer.ok) {
+        unobservable.set(principal.name, observer.reason);
+        continue;
+      }
       teardown.push(() => observer.observer.close());
       principals.set(principal.name, observer.observer);
     }
@@ -193,6 +198,7 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
         observer: principals.values().next().value ?? anonymous.observer,
         principals,
         ...(descriptions.size > 0 ? { descriptions } : {}),
+        ...(unobservable.size > 0 ? { unobservable } : {}),
         ...(Object.keys(publicFixtures).length > 0 ? { fixtures: publicFixtures } : {}),
       },
       close: closeAll,
@@ -204,8 +210,8 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
 
 /**
  * The credentials a browser can sign in with, the default first: every Cookie
- * credential, the owner of the seeded data (`webSession`) first and the others
- * by name, else the first credential there is.
+ * credential in the order the seed declares them, the owner of the seeded data
+ * (`webSession`) moved to the front, else the first credential there is.
  */
 export function webPrincipals(
   credentials: ReadonlyMap<string, ResolvedCredential>,
@@ -213,7 +219,7 @@ export function webPrincipals(
   const usable = [...credentials].filter(([, credential]) => credential.value.length > 0);
   const cookies = usable.filter(([, credential]) => credential.header.toLowerCase() === 'cookie');
   const rank = (name: string): number => (name === DEFAULT_WEB_PRINCIPAL ? 0 : 1);
-  return (cookies.length > 0 ? [...cookies].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b)) : usable.slice(0, 1))
+  return (cookies.length > 0 ? [...cookies].sort(([a], [b]) => rank(a) - rank(b)) : usable.slice(0, 1))
     .map(([name, credential]) => ({ name, credential }));
 }
 

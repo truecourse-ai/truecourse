@@ -60,6 +60,11 @@ export interface LiveScreens {
    */
   descriptions?: ReadonlyMap<string, string>
   /**
+   * The seeded principals no browser could be signed in as, by name, with why.
+   * A session cannot observe or prove anything as one of them.
+   */
+  unobservable?: ReadonlyMap<string, string>
+  /**
    * The seed's published fixtures, name → declared fields, with every secret-
    * shaped field already removed ({@link publicFixtureFields}). What a session
    * fills `{id}` with.
@@ -262,6 +267,9 @@ export function liveScreenLines(input: {
       `member's view, an admin control) is observed as the principal whose description`,
       `says it sees it.`,
     )
+  }
+  for (const [name, reason] of input.live.unobservable ?? []) {
+    lines.push(`\`${name}\` was seeded, and no browser could be signed in as it (${reason}): nothing can be observed or proven as it.`)
   }
   const observed = input.observation?.ok ? input.observation.observation : undefined
   if (observed && observed.reachedBy === undefined) {

@@ -76,6 +76,30 @@ describe('openSetupLiveScreens', () => {
     await expect(opened.live.observer.observe({ path: '/' })).resolves.toMatchObject({ ok: false })
   }, 90_000)
 
+  it('skips a seeded principal no browser can carry, and observes as the others', async () => {
+    const repo = makeTempRepo()
+    cleanup.push(() => rmrf(repo))
+    const manifest = JSON.stringify({ credentials: { webSession: { value: 'session=seeded' }, brokenWebSession: { value: 'no-pair' } } })
+    const opened = await openSetupLiveScreens({
+      repoRoot: repo,
+      recipe: recipe({
+        env: { SEED_MANIFEST: manifest },
+        api: {
+          serve: ['node', FIXTURE_WEB_SERVER],
+          seed: {
+            command: `node ${FIXTURE_API_SEED}`,
+            provides: { credentials: { webSession: { header: 'Cookie' }, brokenWebSession: { header: 'Cookie' } } },
+          },
+        },
+      }),
+    })
+    expect(opened.ok).toBe(true)
+    if (!opened.ok) return
+    cleanup.push(() => opened.close())
+    expect([...(opened.live.principals?.keys() ?? [])]).toEqual(['webSession', 'anonymous'])
+    expect(opened.live.unobservable?.get('brokenWebSession')).toMatch(/no name=value pair/)
+  }, 90_000)
+
   it('refuses a recipe with no web block without booting anything', async () => {
     const repo = makeTempRepo()
     cleanup.push(() => rmrf(repo))

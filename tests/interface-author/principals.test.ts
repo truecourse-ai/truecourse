@@ -63,7 +63,7 @@ describe('what makes a principal distinct', () => {
 })
 
 describe('the web sessions a browser signs in with', () => {
-  it("takes every Cookie credential, the seed's owner first and the rest by name", () => {
+  it("takes every Cookie credential in the seed's order, its owner first", () => {
     const cookie = (value: string) => ({ header: 'Cookie', value })
     expect(
       webPrincipals(new Map([
@@ -73,7 +73,11 @@ describe('the web sessions a browser signs in with', () => {
         ['webSession', cookie('s=1')],
         ['empty', cookie('')],
       ])).map((principal) => principal.name),
-    ).toEqual(['webSession', 'adminWebSession', 'viewerWebSession'])
+    ).toEqual(['webSession', 'viewerWebSession', 'adminWebSession'])
+    // With no owner named, the default is the first web session the seed declares.
+    expect(
+      webPrincipals(new Map([['viewerWebSession', cookie('v=1')], ['adminWebSession', cookie('a=1')]])).map((p) => p.name),
+    ).toEqual(['viewerWebSession', 'adminWebSession'])
     expect(webPrincipals(new Map([['apiToken', { header: 'Authorization', value: 'Bearer x' }]])).map((p) => p.name)).toEqual(['apiToken'])
   })
 })
