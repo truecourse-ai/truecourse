@@ -791,9 +791,9 @@ lists FIXTURES, that data — principals included — already exists in the serv
 database, and a SIGNED-IN world is reached WITHOUT the login screen: a \`credential\`
 step names one of the CREDENTIALS the user prompt lists (a seeded session cookie, a
 token) and the runner installs it into the browser before the first navigation. A
-catalog task that names a \`principal\` is performed as that principal: sign in with
-the \`credential\` it names, or with NO credential when it is \`anonymous\` (a signed-out
-page sends a signed-in browser away). Fill
+realization that says \`performed as: <name>\` is performed as that principal: sign in
+with the \`credential\` it names; one that says \`signed out\` takes NO credential (a
+signed-out page sends a signed-in browser away). Fill
 the login form only when the flow is ABOUT signing in, or when no credential is
 listed and a fixture carries login fields — every form login spends the app's login
 rate limit, which a run of many scenarios trips. Never block on "credentials" while

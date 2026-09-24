@@ -154,3 +154,17 @@ it('compiles a key press, a hover and an upload to the web driver verbs, verbati
     'upload {"base64":"{{fixture:bookmarks.base64}}","as":"bookmarks.html"}: {"label":"Import file"}',
   ]);
 });
+
+it('says who a task is performed as, and leaves the fingerprint alone', () => {
+  const steps = [{ kind: 'activate' as const, target: { role: 'button', name: 'Invite member' } }];
+  const task = iface({ id: 'web/invite-member', type: 'web', entry: { method: 'GET', path: '/team' }, steps, principal: 'adminWebSession' });
+  const signIn = iface({ id: 'web/sign-in', type: 'web', entry: { method: 'GET', path: '/login' }, steps, principal: 'anonymous' });
+  expect(realizationLines(task, 'web').map((line) => line.split('   (interface')[0])).toEqual([
+    'performed as: adminWebSession',
+    'click: button "Invite member"',
+  ]);
+  expect(realizationLines(signIn, 'web')[0]).toBe('signed out: no credential   (interface web/sign-in)');
+  const { principal: _principal, ...unnamed } = task;
+  expect(realizationLines(iface(unnamed), 'web')).toHaveLength(1);
+  expect(task.fingerprint).toBe(iface(unnamed).fingerprint);
+});

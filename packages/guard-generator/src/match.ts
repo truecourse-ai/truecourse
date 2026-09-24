@@ -23,6 +23,7 @@
 import { createHash } from 'node:crypto'
 import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import {
+  ANONYMOUS_PRINCIPAL,
   GUARD_OBSERVATION_CAPABILITIES,
   isCreditsExhausted,
   verificationCapabilityGap,
@@ -200,9 +201,24 @@ function targetWords(step: InterfaceTargetedStep): string {
  * Steps a driver has no verb for still render (naming the interface step in its own
  * terms) rather than vanishing: a silently thinned realization would read to the
  * author as "this interface does less than it does".
+ *
+ * A task the catalog says is performed as a principal opens with who that is
+ * ({@link principalLine}), so the scenario signs in as it.
  */
 export function realizationLines(iface: Interface, driver: GuardDriverId): string[] {
-  return iface.steps.map((step) => `${driverVerb(step, driver)}   (interface ${iface.id})`)
+  const lines = iface.steps.map((step) => driverVerb(step, driver))
+  return [...(iface.principal ? [principalLine(iface.principal)] : []), ...lines].map(
+    (line) => `${line}   (interface ${iface.id})`,
+  )
+}
+
+/**
+ * Who a task is performed as, when the catalog names it: the credential a
+ * scenario of it signs in with, or none for a task done signed out. Never part
+ * of a fingerprint — who performs a task is not WHICH task it is.
+ */
+function principalLine(principal: string): string {
+  return principal === ANONYMOUS_PRINCIPAL ? 'signed out: no credential' : `performed as: ${principal}`
 }
 
 function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {

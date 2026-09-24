@@ -1341,7 +1341,8 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // A task's `principal` (a credential to sign in with, or none) moves it once more.
     // A library-neutral `css` example replaced an icon-font one.
     // The press and hover verbs, and the press/hover/upload plan translations.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('1bb3475475b70b6e')
+    // The plan's `performed as` / `signed out` lines name a task's principal.
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('60ef35c9d86d1dc8')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {
