@@ -1762,12 +1762,13 @@ export type InterfaceAuthoringStatus = z.infer<typeof InterfaceAuthoringStatusSc
 /**
  * ONE screen's row of the authoring ledger: what its last session settled, the
  * digest of the inputs it settled over, and the source files it was grounded
- * on. The screen is work again when that digest MOVES or one of those files
- * changed — whatever the status, so a dead provider costs one screen one run,
+ * on. The screen is work again when that digest MOVES, one of those files
+ * changed, or a file joined or left the set it is grounded on — whatever the
+ * status, so a dead provider costs one screen one run,
  * not one screen every run forever, and a settled screen whose source moved is
  * reconciled rather than left describing code that is gone.
  */
-export const InterfaceAuthoringRecordSchema = z.preprocess(dropRetiredLedgerKeys, z
+export const InterfaceAuthoringRecordSchema = z
   .object({
     status: InterfaceAuthoringStatusSchema,
     /** The digest of everything that decides what a session for this screen produces. */
@@ -1779,27 +1780,9 @@ export const InterfaceAuthoringRecordSchema = z.preprocess(dropRetiredLedgerKeys
      * screen the analyzer could not ground.
      */
     sources: z.record(z.string().min(1), z.string().min(1)).optional(),
-    /**
-     * Who the live screen was observed as, when it was not the default
-     * principal: a seeded credential's name, or `anonymous`. Written by an
-     * older authoring run, which chose one principal per screen; a session now
-     * chooses per task, so it is read and never written.
-     */
-    principal: z.string().min(1).optional(),
   })
-  .strict())
+  .strict()
 export type InterfaceAuthoringRecord = z.infer<typeof InterfaceAuthoringRecordSchema>
-
-/**
- * A stored ledger row may still carry `stateGaps` (the `unresolved` lines an
- * older authoring kept for the seed); nothing reads it now, so it is dropped on
- * read and the row still parses.
- */
-function dropRetiredLedgerKeys(value: unknown): unknown {
-  if (typeof value !== 'object' || value === null || !('stateGaps' in value)) return value
-  const { stateGaps: _retired, ...rest } = value
-  return rest
-}
 
 /**
  * `.truecourse/guard/interfaces.json` — the last mapping's catalog (gitignored).

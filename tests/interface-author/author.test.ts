@@ -2252,8 +2252,8 @@ describe('a shared component', () => {
 
 /**
  * THE PRINCIPAL OF A SCREEN — the first look observes each literal address as
- * the principal that stays on it, the session observes as that principal, and
- * the ledger row records who it was.
+ * the default principal, and the session decides whom else to observe and act
+ * as from the principals it is briefed with.
  */
 describe('the principal a screen is observed as', () => {
   /** An observer that reaches only the paths `reaches` admits, ending at /dashboard otherwise. */
@@ -2303,8 +2303,6 @@ describe('the principal a screen is observed as', () => {
     expect(briefing).toContain('The default principal was SENT AWAY from this address')
     expect(briefing).toContain('- heading "as webSession"')
     expect(briefing).not.toContain('- heading "as anonymous"')
-    // The engine chose nobody: the row names no principal.
-    expect(readAuthoredFile().authoring?.root?.principal).toBeUndefined()
   })
 
   it('refuses a css proof sent away from an address another principal reaches, naming who does', async () => {
