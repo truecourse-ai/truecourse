@@ -1322,8 +1322,9 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // near 131K chars; named under `definitions` the whole prompt stays bounded.
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"definitions"')
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('#/definitions/webLocator')
-    // The css member, the numeric pick and the named scope grew it ~1.9K past 39K.
-    expect(GENERATE_WEB_SYSTEM_PROMPT.length).toBeLessThan(42_000)
+    // The css member, the numeric pick and the named scope grew it ~1.9K past 39K,
+    // and the press and hover verbs with their plan translations ~1.6K more.
+    expect(GENERATE_WEB_SYSTEM_PROMPT.length).toBeLessThan(45_000)
   })
 
   it('GENERATE_WEB_PROMPT_FINGERPRINT is pinned — and the cli/api pins did not move with the arm', () => {
