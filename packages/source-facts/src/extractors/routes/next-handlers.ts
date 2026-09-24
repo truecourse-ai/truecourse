@@ -470,10 +470,12 @@ function handlerMapMethods(root: SyntaxNode, scope: readonly SyntaxNode[]): stri
 /**
  * Does a method dispatch leave a branch that SERVES every other method? An
  * `else` after a method check that is not itself another check, or a
- * `default:` of a `switch (req.method)`, that does not refuse with a 405.
+ * `default:` of a `switch (req.method)`, that does not refuse with a 405 (by
+ * number, by message, or by a named status or error).
  */
 function hasOpenBranch(root: SyntaxNode): boolean {
-  const refuses = (node: SyntaxNode): boolean => /\b405\b|not allowed/i.test(node.text)
+  // `405`, "not allowed", `METHOD_NOT_ALLOWED`, `MethodNotAllowed(Error)`.
+  const refuses = (node: SyntaxNode): boolean => /\b405\b|not[\s_]?allowed/i.test(node.text)
   const checksMethod = (node: SyntaxNode | null): boolean => !!node && comparedMethods(node).length > 0
   const walk = (node: SyntaxNode): boolean => {
     if (node.type === 'if_statement' && checksMethod(node.childForFieldName('condition'))) {

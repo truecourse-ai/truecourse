@@ -80,6 +80,12 @@ describe('Next pages-router api handlers → route registrations', () => {
     expect(methodsAt('/api/dispatch/else')).toEqual(['DELETE', 'GET', 'PATCH', 'POST', 'PUT'])
   })
 
+  it('reads a fallback that refuses by a named status or error as serving nothing', async () => {
+    const analyses = await analyze('pages/api/dispatch/refused-status.ts', 'pages/api/dispatch/refused-error.ts')
+    const methods = analyses.flatMap((file) => file.routeRegistrations ?? []).map((route) => `${route.httpMethod} ${route.path}`)
+    expect(methods.sort()).toEqual(['GET /api/dispatch/refused-status', 'PATCH /api/dispatch/refused-error'])
+  })
+
   it('names the handler and points at the default export', async () => {
     const [links] = await analyze('pages/api/links/[id].ts')
     const registrations = links.routeRegistrations ?? []
