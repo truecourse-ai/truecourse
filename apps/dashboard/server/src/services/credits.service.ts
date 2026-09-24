@@ -28,7 +28,9 @@ import {
   type CreditStatementRecord,
 } from '@truecourse/core/lib/credits-store';
 import { log } from '@truecourse/core/lib/logger';
+import { priceOfConfig } from '@truecourse/core/services/llm/provider';
 import {
+  CREDITS_PRICES_UNAVAILABLE_MESSAGE,
   creditsOfUsd,
   usageJobTypeWord,
   type CreditsStartCheck,
@@ -284,22 +286,39 @@ export async function resumePausedJob(orgId: string, jobId: string): Promise<str
  * may still be worth starting — it will simply pause part-way — so the answer
  * asks rather than decides. A workspace on its own key is never gated here.
  *
+ * A run that CANNOT BE PRICED is refused too: every turn is debited at its
+ * model's published price, so with no price table fetched yet, or none in it
+ * for the model the platform's calls are charged as, the run would spend
+ * without a debit. `priceModel` is that model (the credits provider's
+ * `priceModel`, else its model); null when this server holds no credits
+ * provider, which is refused as that where the run is started.
+ *
  * `estimateUsd` is the run's CEILING cost when one could be worked out. The
  * hosted estimate reads a repository's working tree, which a route has not
- * cloned, so it is usually absent — and then the only gate is the empty one,
- * which is the gate that matters.
+ * cloned, so it is usually absent — and then the only gates are the empty one
+ * and the price, which are the gates that matter.
  */
 export async function creditsStartCheck(
   orgId: string,
-  estimateUsd?: number,
+  opts: { priceModel: string | null; estimateUsd?: number },
 ): Promise<CreditsStartCheck> {
   const { balance } = await readCreditBalance(orgId);
   if (balance <= 0) {
     captureAction(EVENTS.creditsExhausted, { workspaceId: orgId, properties: { atStart: true } });
     const message = 'This workspace is out of credits. Ask for more before starting a run.';
     await notify(orgId, 'warning', 'Out of credits', message);
-    return { verdict: 'refused', balance, message };
+    return { verdict: 'refused', reason: 'exhausted', balance, message };
   }
+  if (opts.priceModel !== null && !(await priceOfConfig({ model: opts.priceModel }))) {
+    log.warn(`[credits] refused a start for ${orgId}: no price for ${opts.priceModel}`);
+    return {
+      verdict: 'refused',
+      reason: 'prices-unavailable',
+      balance,
+      message: CREDITS_PRICES_UNAVAILABLE_MESSAGE,
+    };
+  }
+  const { estimateUsd } = opts;
   if (estimateUsd === undefined || !Number.isFinite(estimateUsd)) return { verdict: 'ok', balance };
   const estimate = creditsOfUsd(estimateUsd);
   if (estimate <= balance) return { verdict: 'ok', balance, estimate };

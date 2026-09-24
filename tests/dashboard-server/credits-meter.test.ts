@@ -29,6 +29,7 @@ import {
 import { setCreditsNotifier } from '../../apps/dashboard/server/src/services/credits.service';
 import { isCreditsExhausted } from '../../packages/core/src/lib/credits-store';
 import { installCreditsStore, type InstalledCreditsStore } from '../helpers/credits-store';
+import { installModelPrices, TEST_PRICES, uninstallModelPrices } from '../helpers/model-prices';
 
 const ORG = 'org_acme';
 const JOB = 'job_42';
@@ -49,6 +50,8 @@ beforeEach(async () => {
   process.env[KEY] = 'sk-platform-secret';
   process.env[MODEL] = 'gpt-5.6';
   built = null;
+  // A credits run starts only when its model has a price to be charged at.
+  installModelPrices({ 'openai/gpt-5.6': TEST_PRICES['openai/gpt-5.6-sol']! });
   setCreditsNotifier(async () => {});
   // The workspace named credits: the row holds nothing else.
   setWorkspaceLlmConfigStore({
@@ -67,6 +70,7 @@ afterEach(async () => {
   setCreditsNotifier(null);
   resetWorkspaceLlmConfigStore();
   resetWorkspaceLlmBackend();
+  uninstallModelPrices();
   await installed.close();
 });
 
@@ -194,6 +198,43 @@ describe('the platform key', () => {
     delete process.env[KEY];
     installBackend(fakeDriver(1, 0.25));
     await expect(startWorkspaceLlm(ORG, meterFor())).rejects.toThrow(/no credits provider/i);
+  });
+
+  // Every metered job starts here, the ones no route saw included (a chained
+  // setup → generate → run, the ripple, a resumed pause): a run that cannot be
+  // priced cannot be charged, so it never reaches the provider.
+  it('refuses to start a run whose model has no price, before anything is probed', async () => {
+    await grant(1000);
+    uninstallModelPrices();
+    installBackend(fakeDriver(1, 0.25));
+    await expect(startWorkspaceLlm(ORG, meterFor())).rejects.toMatchObject({
+      code: 'credits-prices-unavailable',
+    });
+    expect(built).toBeNull();
+
+    // A table that does not hold the model is no better than none.
+    installModelPrices({ 'openai/gpt-5.6-luna': TEST_PRICES['openai/gpt-5.6-sol']! });
+    await expect(startWorkspaceLlm(ORG, meterFor())).rejects.toMatchObject({
+      code: 'credits-prices-unavailable',
+    });
+    expect(built).toBeNull();
+  });
+
+  it('charges a deployment name as the list-price model it serves', async () => {
+    await grant(1000);
+    process.env[MODEL] = 'gpt-5.6-sol-2';
+    installModelPrices();
+    installBackend(fakeDriver(1, 0.25));
+    // Unmapped, a deployment name has no price, so the run does not start.
+    await expect(startWorkspaceLlm(ORG, meterFor())).rejects.toMatchObject({
+      code: 'credits-prices-unavailable',
+    });
+    process.env.TRUECOURSE_CREDITS_PRICE_MODEL = 'gpt-5.6-sol';
+    try {
+      await expect(startWorkspaceLlm(ORG, meterFor())).resolves.toMatchObject({ mode: 'api' });
+    } finally {
+      delete process.env.TRUECOURSE_CREDITS_PRICE_MODEL;
+    }
   });
 });
 

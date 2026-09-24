@@ -1,8 +1,10 @@
 /**
  * Context routes — the WORKSPACE's documentation sources.
  *
- *   GET    /api/context/sources               every source, with its document count and readers
- *   POST   /api/context/sources               add one (kind, config, repoIds) and sync it
+ *   GET    /api/context/sources               every source, with its document count and readers,
+ *                                             and the KINDS this server can add
+ *   POST   /api/context/sources               add one (kind, config, repoIds) and sync it, or
+ *                                             with { sync: false } add it paused
  *   POST   /api/context/sources/preview       what a scope WOULD yield — reads, stores nothing
  *   GET    /api/context/sources/:id           one source and its syncs — the source's page
  *   PATCH  /api/context/sources/:id           { config } — a new scope, and the sync it starts
@@ -56,11 +58,12 @@ import {
   ContextConfigError,
   ContextKindUnsupportedError,
   filterContextDocumentRows,
-  isImplementedContextKind,
   repositoryConfig,
   repositorySourceId,
   siteConfig,
   siteSourceId,
+  type ContextSourceDriver,
+  type ContextSourceScope,
 } from '@truecourse/core/services/context';
 import {
   InvalidSourceUrlError,
@@ -94,6 +97,7 @@ import {
 } from '@truecourse/core/lib/workspace-profile-store';
 import {
   CreditsProviderUnavailableError,
+  CreditsPricesUnavailableError,
   LlmNotConfiguredError,
   LlmProbeFailedError,
   startWorkspaceLlm,
@@ -117,7 +121,11 @@ import {
 import { requireJobs } from '../jobs/current.js';
 import { refusedWithoutCredits } from './credits.js';
 import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
-import { emitContextChanged, serverContextDrivers } from '../services/context.service.js';
+import {
+  addableContextKinds,
+  emitContextChanged,
+  serverContextDrivers,
+} from '../services/context.service.js';
 import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
 
 /**
@@ -220,24 +228,51 @@ async function listViews(org: string): Promise<ContextSourceView[]> {
   return sources.map((source) => toView(source, docCounts, readers));
 }
 
-/** A validated scope, tagged by the kind it belongs to, so callers narrow. */
+/** A kind whose identity its DRIVER names, because the routes cannot. */
+type DriverNamedKind = Exclude<ContextSourceKind, 'repository' | 'site'>;
+
+/**
+ * A validated scope, tagged by the kind it belongs to, so callers narrow. The
+ * two the open edition names itself carry their own shape; every other kind
+ * arrives with the identity its driver gave it (an Atlassian source is named
+ * after the site its workspace connected, which only the driver can look up).
+ */
 type NormalizedConfig =
   | { kind: 'repository'; config: RepositorySourceConfig }
-  | { kind: 'site'; config: SiteSourceConfig };
+  | { kind: 'site'; config: SiteSourceConfig }
+  | { kind: DriverNamedKind; config: ContextSourceConfig; identity: ContextSourceScope };
 
 /** Validate and normalize the scope a caller supplied for this kind. */
-function normalizeConfig(kind: ContextSourceKind, config: unknown): NormalizedConfig {
+async function normalizeConfig(
+  org: string,
+  kind: ContextSourceKind,
+  config: unknown,
+): Promise<NormalizedConfig> {
   const raw = (config ?? {}) as ContextSourceConfig;
-  return kind === 'repository'
-    ? { kind, config: repositoryConfig(raw) }
-    : { kind: 'site', config: siteConfig(raw) };
+  if (kind === 'repository') return { kind, config: repositoryConfig(raw) };
+  if (kind === 'site') return { kind, config: siteConfig(raw) };
+  const driver = await driverFor(org, kind);
+  if (!driver.scope) throw new ContextKindUnsupportedError(kind);
+  const identity = await driver.scope(raw);
+  return { kind, config: identity.config, identity };
 }
 
 /** A source's title at creation: the origin names it, and the first sync corrects it. */
 function titleFor(scope: NormalizedConfig): string {
-  return scope.kind === 'repository'
-    ? scope.config.repoFullName
-    : new URL(scope.config.llmsTxtUrl).host;
+  if (scope.kind === 'repository') return scope.config.repoFullName;
+  if (scope.kind === 'site') return new URL(scope.config.llmsTxtUrl).host;
+  return scope.identity.title;
+}
+
+/**
+ * The driver this server has for a kind IN THIS WORKSPACE, or a refusal naming
+ * the kind. A kind an edition drives but this workspace is not entitled to has
+ * no driver here, so it reads exactly as a kind nothing can sync.
+ */
+async function driverFor(org: string, kind: ContextSourceKind): Promise<ContextSourceDriver> {
+  const driver = (await serverContextDrivers(org)).get(kind);
+  if (!driver) throw new ContextKindUnsupportedError(kind);
+  return driver;
 }
 
 /** One query parameter's values — `?repo=a&repo=b` and `?repo=a` read alike. */
@@ -282,15 +317,18 @@ async function startWorkspaceScan(org: string, source: 'link'): Promise<string |
   }
 }
 
-/** Read `kind` off a request body, refusing anything that cannot sync. */
-function readKind(body: { kind?: unknown }): ContextSourceKind {
+/**
+ * Read `kind` off a request body, refusing anything this server cannot sync —
+ * which is a question about the DRIVERS it registered at boot, not a constant.
+ */
+async function readKind(org: string, body: { kind?: unknown }): Promise<ContextSourceKind> {
   const kind = typeof body.kind === 'string' ? body.kind.trim() : '';
   if (!(CONTEXT_SOURCE_KINDS as readonly string[]).includes(kind)) {
     throw new ContextConfigError(
       `Unknown source kind ${JSON.stringify(kind)}. Known kinds: ${CONTEXT_SOURCE_KINDS.join(', ')}.`,
     );
   }
-  if (!isImplementedContextKind(kind)) throw new ContextKindUnsupportedError(kind);
+  await driverFor(org, kind as ContextSourceKind);
   return kind as ContextSourceKind;
 }
 
@@ -332,7 +370,10 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     try {
       const org = orgOf(req);
       const [sources, changedAt] = await Promise.all([listViews(org), contextChangedAt(org)]);
-      res.json({ sources, changedAt });
+      // Which kinds can be ADDED is this server's own answer — the drivers it
+      // registered at boot — so the add dialog offers what exists here and
+      // nothing else.
+      res.json({ sources, changedAt, addableKinds: await addableContextKinds(org) });
     } catch (e) {
       respond(res, next, e);
     }
@@ -626,6 +667,10 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
           res.status(409).json({ error: e.code, message: e.message });
           return;
         }
+        if (e instanceof CreditsPricesUnavailableError) {
+          res.status(503).json({ error: e.code, message: e.message });
+          return;
+        }
         if (e instanceof LlmProbeFailedError) {
           await recordFailedWorkspaceScanRun(org, { message: e.message, kind: 'llm-probe' });
           res.status(502).json({ error: e.code, message: e.message });
@@ -793,10 +838,9 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     try {
       const org = orgOf(req);
       const body = (req.body ?? {}) as { kind?: unknown; config?: unknown; installationId?: unknown };
-      const kind = readKind(body);
+      const kind = await readKind(org, body);
       const scope = await scopeFor(req, kind, body.config, body.installationId);
-      const driver = serverContextDrivers(org).get(kind)!;
-      res.json(await driver.check(scope.config));
+      res.json(await (await driverFor(org, kind)).check(scope.config));
     } catch (e) {
       respond(res, next, e);
     }
@@ -869,12 +913,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     rawConfig: unknown,
     installationId: unknown,
   ): Promise<NormalizedConfig> {
-    if (kind !== 'repository') return normalizeConfig(kind, rawConfig);
+    if (kind !== 'repository') return normalizeConfig(orgOf(req), kind, rawConfig);
     const raw = (rawConfig ?? {}) as Partial<RepositorySourceConfig>;
     const repoFullName = typeof raw.repoFullName === 'string' ? raw.repoFullName.trim() : '';
     const resolved = await repositoryAccess(req, repoFullName, installationId);
     const branch = typeof raw.branch === 'string' ? raw.branch.trim() : '';
-    return normalizeConfig('repository', {
+    return normalizeConfig(orgOf(req), 'repository', {
       ...raw,
       ...(resolved.provider === undefined ? {} : { provider: resolved.provider }),
       ...(resolved.path === undefined ? {} : { path: resolved.path }),
@@ -896,8 +940,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         config?: unknown;
         repoIds?: unknown;
         installationId?: unknown;
+        sync?: unknown;
       };
-      const kind = readKind(body);
+      // Added without a sync, a source is stored paused: the sweep and a push
+      // would otherwise sync one that has never synced within the hour.
+      const sync = body.sync !== false;
+      const kind = await readKind(org, body);
       const scope = await scopeFor(req, kind, body.config, body.installationId);
       const repoKeys = await readRepoIds(req, body.repoIds);
 
@@ -905,13 +953,16 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
       const id =
         scope.kind === 'repository'
           ? newRepositorySourceId(existing, scope.config.repoFullName)
-          : newSiteSourceId(existing, scope.config);
+          : scope.kind === 'site'
+            ? newSiteSourceId(existing, scope.config)
+            : newDriverSourceId(existing, scope.identity);
 
       const source = await createContextSource(org, {
         id,
         kind,
         title: titleFor(scope),
         config: scope.config,
+        ...(sync ? {} : { status: 'paused' as const }),
       });
       // A Repository source is read by the repository it scopes, when Code has
       // connected that repository; a source for one Code has not is read by
@@ -931,14 +982,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
       const who = actorOf(req);
       if (who) captureAction(EVENTS.contextSourceAdded, { ...who, properties: { kind } });
 
-      const outcome = await requireJobs().enqueueContextSync({
-        workspaceOrgId: org,
-        sourceId: id,
-        source: 'add',
-      });
+      const outcome = sync
+        ? await requireJobs().enqueueContextSync({ workspaceOrgId: org, sourceId: id, source: 'add' })
+        : null;
       res.status(202).json({
         source: { ...source, docCount: 0, repositories: links },
-        ...(outcome.status === 'queued' ? { jobId: outcome.jobId } : {}),
+        ...(outcome?.status === 'queued' ? { jobId: outcome.jobId } : {}),
       });
     } catch (e) {
       respond(res, next, e);
@@ -977,6 +1026,22 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     return siteSourceId(config.llmsTxtUrl, new Set(existing.map((source) => source.id)));
   }
 
+  /**
+   * The id a driver named, refused when the workspace already holds it: a
+   * project or a space is one source, and adding it twice would be two ledgers
+   * of the same documents.
+   */
+  function newDriverSourceId(existing: ContextSource[], identity: ContextSourceScope): string {
+    const already = existing.find((source) => source.id === identity.sourceId);
+    if (already) {
+      throw createAppError(
+        `${identity.title} is already a source of this workspace ("${already.id}").`,
+        409,
+      );
+    }
+    return identity.sourceId;
+  }
+
   // --- Edit the scope ------------------------------------------------------
 
   /**
@@ -984,9 +1049,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
    * validates one. A repository source keeps the repository it was created for
    * — everything else about its scope (the branch, the patterns) is editable.
    */
-  function editedConfig(source: ContextSource, raw: unknown): NormalizedConfig {
-    if (!isImplementedContextKind(source.kind)) throw new ContextKindUnsupportedError(source.kind);
-    if (source.kind !== 'repository') return normalizeConfig(source.kind, raw);
+  async function editedConfig(
+    org: string,
+    source: ContextSource,
+    raw: unknown,
+  ): Promise<NormalizedConfig> {
+    if (source.kind !== 'repository') return normalizeConfig(org, source.kind, raw);
     const current = source.config as Partial<RepositorySourceConfig>;
     const stored = current.repoFullName ?? '';
     const asked = (raw ?? {}) as Partial<RepositorySourceConfig>;
@@ -998,7 +1066,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     }
     // The repository and how it is read are what the source was created with;
     // an edit replaces the branch and the patterns around them.
-    return normalizeConfig('repository', {
+    return normalizeConfig(org, 'repository', {
       ...asked,
       repoFullName: stored,
       ...(current.provider === undefined ? {} : { provider: current.provider }),
@@ -1028,7 +1096,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         return;
       }
       const body = (req.body ?? {}) as { config?: unknown };
-      const scope = editedConfig(source, body.config);
+      const scope = await editedConfig(org, source, body.config);
       if (scope.kind === 'site') {
         const clash = (await listContextSources(org)).find(
           (other) =>
@@ -1039,6 +1107,19 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         if (clash) {
           throw createAppError(
             `${scope.config.llmsTxtUrl} is already a source of this workspace ("${clash.id}").`,
+            409,
+          );
+        }
+      } else if (scope.kind !== 'repository') {
+        // A scope re-pointed at what another source of this workspace already
+        // reads would be two ledgers of the same documents. The id it WOULD
+        // take is what says so; this source keeps the id it was created with.
+        const clash = (await listContextSources(org)).find(
+          (other) => other.id !== sourceId && other.id === scope.identity.sourceId,
+        );
+        if (clash) {
+          throw createAppError(
+            `${scope.identity.title} is already a source of this workspace ("${clash.id}").`,
             409,
           );
         }

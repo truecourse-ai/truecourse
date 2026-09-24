@@ -51,6 +51,10 @@ describe('evaluateExpect — streams', () => {
     expect(evalExpect({ stdout: { matches: '^\\d+\\.\\d+\\.\\d+' } }, { stdout: '2.4.1\n' })).toBeNull()
     expect(evalExpect({ stdout: { matches: '^\\d+\\.\\d+' } }, { stdout: 'nope' })?.subject).toBe('stdout')
   })
+  it('stdout matches with the matcher\'s flags', () => {
+    expect(evalExpect({ stdout: { matches: 'quota|too many', flags: 'i' } }, { stdout: 'Too Many requests' })).toBeNull()
+    expect(evalExpect({ stdout: { matches: '^b$', flags: 'm' } }, { stdout: 'a\nb\n' })).toBeNull()
+  })
   it('stderr contains', () => {
     expect(evalExpect({ stderr: { contains: 'fatal' } }, { stderr: 'fatal: boom' })).toBeNull()
     expect(evalExpect({ stderr: { contains: 'fatal' } }, { stderr: '' })?.subject).toBe('stderr')
@@ -124,6 +128,10 @@ describe('describeTextMatcher — a matcher as a RECORD says it', () => {
     ).toBe('the page text contains "cost" and matches /total: \\d+/ and carries a number matching /total: (\\d+)/ and is at most 5')
   })
 
+  it('writes a regex with its flags', () => {
+    expect(describeTextMatcher('the page text', { matches: 'quota', flags: 'i' })).toBe('the page text matches /quota/i')
+  })
+
   it('reads as one phrase for the one-member matchers a scenario usually writes', () => {
     expect(describeTextMatcher('the address', { equals: '/notes' })).toBe('the address equals "/notes"')
     expect(describeTextMatcher('the page text', { matches: '^ok$' })).toBe('the page text matches /^ok$/')
@@ -153,6 +161,11 @@ describe('matchTextMatcher — a case-only miss names itself', () => {
   it('a cli stream miss does not mention CSS', () => {
     const m = matchTextMatcher('stdout', 'stdout', { contains: 'api' }, 'API')
     expect(m?.detail.join('\n')).not.toContain('CSS')
+  })
+  it('a case-insensitive regex that misses carries no case note', () => {
+    const m = matchTextMatcher('stdout', 'stdout', { matches: 'worker', flags: 'i' }, 'nothing here')
+    expect(m?.actual).not.toContain('letter case')
+    expect(m?.expected).toContain('/worker/i')
   })
   it('a real content miss carries no case note', () => {
     const m = matchTextMatcher('stdout', 'stdout', { contains: 'api' }, 'nothing here')

@@ -661,9 +661,10 @@ describe('guard-generator prompts', () => {
     // about a CHANGE could previously only be written as an absolute number, which
     // tests the fixture rather than the promise.
     // Re-pinned for case prerequisites, proof grounding, and setup-aware fidelity review.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('dbd51b305804446f')
+    // Re-pinned when regex flags moved into a `flags` field beside `matches`.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('2ea0cbf73ebdb3f6')
     // Moved once with the blast-radius cut: the canonical schema gained `world`.
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('dbd51b305804446f')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('2ea0cbf73ebdb3f6')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -915,10 +916,11 @@ describe('guard-generator prompts', () => {
     // comparand, which is what makes "one fewer seat than before" a verdict instead
     // of an absolute number that only tests the fixture.
     // Re-pinned for case prerequisites, proof grounding, and setup-aware fidelity review.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('19bc81600d20c80e')
+    // Re-pinned when regex flags moved into a `flags` field beside `matches`.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('0af4d66bce51ffd9')
     // Moved once with the blast-radius cut: `world` in the schema + the
     // shared-world/self-mint doctrine block.
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('19bc81600d20c80e')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('0af4d66bce51ffd9')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -1342,7 +1344,8 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // A library-neutral `css` example replaced an icon-font one.
     // The press and hover verbs, and the press/hover/upload plan translations.
     // The plan's `performed as` / `signed out` lines name a task's principal.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('60ef35c9d86d1dc8')
+    // Regex flags moved into a `flags` field beside `matches`.
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('c2501c2312c5c27b')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {

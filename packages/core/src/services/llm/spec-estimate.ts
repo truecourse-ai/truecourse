@@ -396,7 +396,7 @@ const mean = (ns: number[]): number =>
  */
 export async function estimateScanTokens(
   repoRoot: string,
-  prices?: PriceTable,
+  prices?: PriceTable | null,
   opts: { identity?: RepoIdentity | null; sessionModel?: string; only?: ScanStep } = {},
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.sessionModel);
@@ -1155,7 +1155,7 @@ const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
  */
 export async function estimateGuardSetup(
   repoRoot: string,
-  prices?: PriceTable,
+  prices?: PriceTable | null,
   opts: {
     refresh?: boolean;
     replace?: boolean;
@@ -1423,7 +1423,7 @@ export async function estimateGuardSetup(
  */
 export async function estimateGuardTokens(
   repoRoot: string,
-  prices?: PriceTable,
+  prices?: PriceTable | null,
   opts: { sessionModel?: string; only?: GenerateStep } = {},
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.sessionModel);

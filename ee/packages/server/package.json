@@ -20,8 +20,12 @@
   "dependencies": {
     "@truecourse/core": "workspace:*",
     "@truecourse/dashboard-server": "workspace:*",
+    "@truecourse/data-store": "workspace:*",
+    "@truecourse/db": "workspace:*",
     "@truecourse/shared": "workspace:*",
-    "@workos-inc/node": "^7.0.0"
+    "@truecourse/spec-consolidator": "workspace:*",
+    "@workos-inc/node": "^7.0.0",
+    "drizzle-orm": "^0.45.2"
   },
   "peerDependencies": {
     "express": "^4.21.0"

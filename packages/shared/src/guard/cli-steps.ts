@@ -21,6 +21,7 @@ import {
   GuardStreamMatcherSchema,
   describeStreamMatcher,
   matcherPatterns,
+  type StepPattern,
   stepCwd as cwd,
   stepMilestone as milestone,
   stepNote as note,
@@ -748,7 +749,7 @@ export type GuardCliStep = z.infer<typeof GuardCliStepSchema>
 // --- Cross-step passes, the cli driver's half --------------------------
 
 /** Every regex source a cli step carries, with the path that names it. */
-export function cliStepPatterns(step: GuardCliStep): Array<{ where: string; pattern: string }> {
+export function cliStepPatterns(step: GuardCliStep): StepPattern[] {
   // The file steps assert on file state only — no text matcher, no regex.
   if (!isProcessStep(step)) return []
   return [
@@ -760,6 +761,7 @@ export function cliStepPatterns(step: GuardCliStep): Array<{ where: string; patt
     ...Object.entries(step.capture ?? {}).map(([name, c]) => ({
       where: `capture.${name}`,
       pattern: c.pattern,
+      takesFlags: false,
     })),
   ]
 }

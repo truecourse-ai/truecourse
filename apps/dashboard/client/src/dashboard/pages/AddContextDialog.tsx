@@ -5,11 +5,18 @@
  * adding a source never silently changes a corpus.
  *
  * STEP 1 IS THE INSTANCE, the same shape the connect-repository dialog uses:
- * the connected accounts of the tool connectors first (there are none to
- * connect yet, so none render), then the two kinds that need no account — a
- * repository's own markdown, and a documentation site through its llms.txt —
- * the whole row being the button. Connecting a tool is Settings' job, so the
- * list ends with the one link that goes there, in an edition that HAS tools.
+ * the workspace's CONNECTED ACCOUNTS first — one row per SOURCE KIND an account
+ * serves that this server can add, named by the site it reads, so one Atlassian
+ * account offers Jira and Confluence — then the two kinds that need no account,
+ * a repository's own markdown and a documentation site through its llms.txt,
+ * the whole row being the button. Connecting an account is Settings' job, so
+ * the list ends with the one link that goes there, in an edition that HAS
+ * tools.
+ *
+ * WHICH KINDS are offered is the server's answer (`addableKinds`), built from
+ * the drivers it registered at boot: an edition without a tool's driver never
+ * offers it, and a workspace that has not connected the account is sent to
+ * Settings rather than into a scope it cannot read.
  *
  * THE REPOSITORY SCOPE reads the workspace's GitHub accounts and then the
  * repositories one of them can see, not the repositories Code has connected: a
@@ -23,19 +30,23 @@
  * it is a repository connected in Code, and the source reads it by copying the
  * folder exactly as a run does.
  *
- * Nothing is stored until Add and sync: Check runs the real driver against the
- * real scope and stores nothing, and the add closes on the new source's page,
- * which reads Syncing until its first sync lands.
+ * Nothing is stored until Add or Add and sync: Check runs the real driver
+ * against the real scope and stores nothing, and either add closes on the new
+ * source's page. Add and sync reads Syncing until its first sync lands; Add
+ * stores the source paused, so nothing syncs it until it is resumed.
  */
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { GitBranch, Globe } from 'lucide-react';
+import { GitBranch, Globe, Plug } from 'lucide-react';
 import {
   CONTEXT_SOURCE_KIND_LABEL,
+  contextConnectionOf,
   DEFAULT_REPOSITORY_EXCLUDE,
   DEFAULT_REPOSITORY_INCLUDE,
+  type ContextConnectionView,
   type ContextSourceCheck,
+  type ContextSourceKind,
   type ContextSourceView,
   type GithubInstallableRepo,
   type GithubInstallationSummary,
@@ -49,12 +60,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { addContextSource, previewContextSource } from '@/lib/api';
+import { addContextSource, listContextConnections, previewContextSource } from '@/lib/api';
 import { fetchGithubStatus, fetchInstallationRepos } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { toldToDescribeWorkspace } from '@/dashboard/data/workspace-profile';
 import { useServerMode } from '@/contexts/CapabilityContext';
-import { registeredSettingsTabs } from '@/dashboard/shell/registry';
+import { registeredSettingsTabs, registeredSourceKindMark } from '@/dashboard/shell/registry';
 import { Stepper } from '@/dashboard/ui/stepper';
 import { sourceHref } from './context-hrefs';
 
@@ -63,27 +74,36 @@ const FOOT_BUTTON = 'rounded px-3 py-1.5 text-xs font-medium';
 /** The dialog's three steps, named rather than numbered. */
 const STEPS = ['Source', 'Scope'] as const;
 
-type AddableKind = 'repository' | 'site';
+/** A kind this dialog can walk somebody through. The server says which. */
+type AddableKind = ContextSourceKind;
 
 /** What Check does, in the words of the kind it would run against. */
-const CHECK_WORDS: Record<AddableKind, string> = {
+const CHECK_WORDS: Partial<Record<AddableKind, string>> = {
   repository:
     'Check walks the branch with these patterns and counts the files it would keep; nothing is stored yet.',
   site: 'Check reads the llms.txt and counts the pages it lists; nothing is stored yet.',
+  jira: 'Check runs this search and counts the issues it would keep; nothing is stored yet.',
+  confluence: 'Check lists the space and counts the pages it would keep; nothing is stored yet.',
 };
 
 /** What a yield counts, in the same words. */
-const YIELD_NOUN: Record<AddableKind, { one: string; many: string }> = {
+const YIELD_NOUN: Partial<Record<AddableKind, { one: string; many: string }>> = {
   repository: { one: 'file', many: 'files' },
   site: { one: 'page', many: 'pages' },
+  jira: { one: 'issue', many: 'issues' },
+  confluence: { one: 'page', many: 'pages' },
 };
+
+/** The fallback for a kind with no noun of its own. */
+const DOCUMENT_NOUN = { one: 'document', many: 'documents' };
 
 /**
  * The kinds that need no connected account, in the order the dialog offers
- * them. The name of a kind is the shared one ({@link CONTEXT_SOURCE_KIND_LABEL}),
- * so the dialog and the Sources list call the same thing by the same word. The
- * tool kinds are named on Settings › Connections, where they are connected —
- * a section this edition may not have, and then there is nothing to point at.
+ * them, under the tool accounts the workspace HAS connected. The name of a kind
+ * is the shared one ({@link CONTEXT_SOURCE_KIND_LABEL}), so the dialog and the
+ * Sources list call the same thing by the same word. A tool nothing connected
+ * is not a row: it is the link to Settings › Connections — a section this
+ * edition may not have, and then there is nothing to point at.
  */
 const KINDS: { kind: AddableKind; about: string }[] = [
   { kind: 'repository', about: "A repository's own markdown, by path patterns" },
@@ -102,6 +122,7 @@ export function AddContextDialog({
   onOpenChange,
   initialKind = null,
   sources,
+  addableKinds = [],
   onAdded,
 }: {
   open: boolean;
@@ -110,6 +131,8 @@ export function AddContextDialog({
   initialKind?: AddableKind | null;
   /** The workspace's sources, so the dialog can say a repository already has one. */
   sources: ContextSourceView[] | null;
+  /** The kinds the SERVER can add — the drivers it registered at boot. */
+  addableKinds?: ContextSourceKind[];
   /** Re-read the page behind the dialog once the source is stored. */
   onAdded?: () => void;
 }) {
@@ -131,10 +154,16 @@ export function AddContextDialog({
   const [include, setInclude] = useState(DEFAULT_REPOSITORY_INCLUDE.join('\n'));
   const [exclude, setExclude] = useState(DEFAULT_REPOSITORY_EXCLUDE.join('\n'));
   const [url, setUrl] = useState('');
+  const [projectKey, setProjectKey] = useState('');
+  const [jql, setJql] = useState('');
+  const [spaceKey, setSpaceKey] = useState('');
+  /** The workspace's tool accounts; null while they are being read. */
+  const [connections, setConnections] = useState<ContextConnectionView[] | null>(null);
   const [checked, setChecked] = useState<ContextSourceCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  /** Which add is in flight: plain Add, or Add and sync. */
+  const [adding, setAdding] = useState<'add' | 'sync' | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -150,11 +179,35 @@ export function AddContextDialog({
     setInclude(DEFAULT_REPOSITORY_INCLUDE.join('\n'));
     setExclude(DEFAULT_REPOSITORY_EXCLUDE.join('\n'));
     setUrl('');
+    setProjectKey('');
+    setJql('');
+    setSpaceKey('');
     setChecked(null);
     setChecking(false);
     setFailure(null);
-    setAdding(false);
+    setAdding(null);
   }, [open, initialKind]);
+
+  // The tool accounts this workspace has connected, read when the dialog opens
+  // and only where a tool can be added at all: the route belongs to the edition
+  // that has Connections, and the server's `addableKinds` is what says so.
+  const toolKinds = addableKinds.filter((kind) => contextConnectionOf(kind) !== null);
+  useEffect(() => {
+    if (!open || toolKinds.length === 0) return;
+    let live = true;
+    void listContextConnections()
+      .then((answer) => {
+        if (live) setConnections(answer.connections);
+      })
+      .catch(() => {
+        // A workspace whose connections cannot be read has none to offer; the
+        // link to Settings below is still the way in.
+        if (live) setConnections([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [open, toolKinds.length]);
 
   // The accounts a Repository source can read through, read on entering the
   // scope step: a source may read any repository they can reach, connected in
@@ -243,21 +296,31 @@ export function AddContextDialog({
     ? accountRepos !== null && accountRepos.length === 0
     : installations !== null && accounts.length === 0;
 
-  const config = (): Record<string, unknown> =>
-    kind === 'repository'
-      ? {
-          repoFullName: repoScope ?? '',
-          include: linesOf(include),
-          exclude: linesOf(exclude),
-        }
-      : { llmsTxtUrl: url.trim() };
+  const config = (): Record<string, unknown> => {
+    if (kind === 'repository') {
+      return {
+        repoFullName: repoScope ?? '',
+        include: linesOf(include),
+        exclude: linesOf(exclude),
+      };
+    }
+    if (kind === 'jira') return { projectKey: projectKey.trim(), jql: jql.trim() };
+    if (kind === 'confluence') return { spaceKey: spaceKey.trim() };
+    return { llmsTxtUrl: url.trim() };
+  };
 
   /** The account a repository source reads through, sent with every call. */
   const account = (): { installationId?: number } =>
     kind === 'repository' && accountId !== null ? { installationId: accountId } : {};
 
   const scopeReady =
-    kind === 'repository' ? Boolean(repoScope) && !already : url.trim() !== '';
+    kind === 'repository'
+      ? Boolean(repoScope) && !already
+      : kind === 'jira'
+        ? projectKey.trim() !== ''
+        : kind === 'confluence'
+          ? spaceKey.trim() !== ''
+          : url.trim() !== '';
 
   const step: 1 | 2 = !kind ? 1 : 2;
 
@@ -271,11 +334,11 @@ export function AddContextDialog({
       .finally(() => setChecking(false));
   };
 
-  const add = (): void => {
+  const add = (sync: boolean): void => {
     if (!kind) return;
-    setAdding(true);
+    setAdding(sync ? 'sync' : 'add');
     setFailure(null);
-    void addContextSource({ kind, config: config(), repoIds: [], ...account() })
+    void addContextSource({ kind, config: config(), repoIds: [], sync, ...account() })
       .then((res) => {
         onAdded?.();
         onOpenChange(false);
@@ -288,7 +351,7 @@ export function AddContextDialog({
         if (toldToDescribeWorkspace(e, navigate)) return;
         setFailure(e instanceof Error ? e.message : String(e));
       })
-      .finally(() => setAdding(false));
+      .finally(() => setAdding(null));
   };
 
   return (
@@ -303,6 +366,47 @@ export function AddContextDialog({
 
         {step === 1 && (
           <ul className="min-w-0 divide-y divide-border rounded-md border border-border" aria-label="Kinds of source">
+            {(connections ?? [])
+              .filter((connection) => connection.connected)
+              .flatMap((connection) =>
+                connection.kinds
+                  .filter((kind) => addableKinds.includes(kind))
+                  .map((kind) => ({
+                    kind,
+                    baseUrl: connection.baseUrl,
+                    // The kind's own mark when the edition registered one.
+                    mark: registeredSourceKindMark(kind),
+                  })),
+              )
+              .map((tool) => (
+                <li key={tool.kind}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKind(tool.kind);
+                      setChecked(null);
+                      setFailure(null);
+                    }}
+                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                  >
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground">
+                      {tool.mark ? (
+                        <img src={tool.mark} alt="" aria-hidden className="h-5 w-5 object-contain" />
+                      ) : (
+                        <Plug className="h-4 w-4" aria-hidden />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] text-foreground">
+                        {CONTEXT_SOURCE_KIND_LABEL[tool.kind]}
+                      </span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {tool.baseUrl}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
             {KINDS.map((row) => (
               <li key={row.kind}>
                 <button
@@ -337,7 +441,9 @@ export function AddContextDialog({
                   onClick={() => onOpenChange(false)}
                   className="block px-3 py-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
                 >
-                  Connect another tool in Settings
+                  {(connections ?? []).some((connection) => connection.connected)
+                    ? 'Connect another tool in Settings'
+                    : 'Connect a tool in Settings'}
                 </Link>
               </li>
             )}
@@ -469,6 +575,62 @@ export function AddContextDialog({
           </div>
         )}
 
+        {step >= 2 && kind === 'jira' && (
+          <div className="space-y-3">
+            <div>
+              <label className="text-[11px] font-medium text-muted-foreground" htmlFor="ctx-project">
+                Project key
+              </label>
+              <input
+                id="ctx-project"
+                value={projectKey}
+                onChange={(e) => {
+                  setProjectKey(e.target.value);
+                  setChecked(null);
+                }}
+                placeholder="ENG"
+                className="mt-1 w-full rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-muted-foreground" htmlFor="ctx-jql">
+                JQL filter
+              </label>
+              <input
+                id="ctx-jql"
+                value={jql}
+                onChange={(e) => {
+                  setJql(e.target.value);
+                  setChecked(null);
+                }}
+                placeholder="issuetype in standardIssueTypes()"
+                className="mt-1 w-full rounded border border-border bg-background px-2 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Narrows the project. Left blank, every standard issue type is read.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {step >= 2 && kind === 'confluence' && (
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground" htmlFor="ctx-space">
+              Space key
+            </label>
+            <input
+              id="ctx-space"
+              value={spaceKey}
+              onChange={(e) => {
+                setSpaceKey(e.target.value);
+                setChecked(null);
+              }}
+              placeholder="ENG"
+              className="mt-1 w-full rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+        )}
+
         {step >= 2 && kind === 'site' && (
           <div>
             <label className="text-[11px] font-medium text-muted-foreground" htmlFor="ctx-url">
@@ -493,7 +655,9 @@ export function AddContextDialog({
               <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
                 <p className="text-xs text-foreground">
                   {checked.title} yields {checked.count}{' '}
-                  {checked.count === 1 ? YIELD_NOUN[kind].one : YIELD_NOUN[kind].many}
+                  {checked.count === 1
+                    ? (YIELD_NOUN[kind] ?? DOCUMENT_NOUN).one
+                    : (YIELD_NOUN[kind] ?? DOCUMENT_NOUN).many}
                   {checked.titles.length > 0 ? '. The first few:' : '.'}
                 </p>
                 <ul className="mt-1 space-y-0.5">
@@ -532,14 +696,24 @@ export function AddContextDialog({
             </button>
           )}
           {step === 2 && checked && (
-            <button
-              type="button"
-              disabled={adding}
-              onClick={add}
-              className={`${FOOT_BUTTON} bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50`}
-            >
-              {adding ? 'Adding…' : 'Add and sync'}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={adding !== null}
+                onClick={() => add(false)}
+                className={`${FOOT_BUTTON} border border-border text-foreground hover:bg-muted/60 disabled:opacity-50`}
+              >
+                {adding === 'add' ? 'Adding…' : 'Add'}
+              </button>
+              <button
+                type="button"
+                disabled={adding !== null}
+                onClick={() => add(true)}
+                className={`${FOOT_BUTTON} bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50`}
+              >
+                {adding === 'sync' ? 'Adding…' : 'Add and sync'}
+              </button>
+            </>
           )}
         </DialogFooter>
       </DialogContent>

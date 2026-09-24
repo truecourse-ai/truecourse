@@ -32,12 +32,16 @@ export interface SdkUserMessage {
   [k: string]: unknown;
 }
 
-/** Anthropic per-call usage, as carried on an assistant `message.usage`. */
+/**
+ * Anthropic usage: per API call on `message_start` and `message_delta`, and
+ * summed over the session's main-loop calls on a result's `usage`. A
+ * `message_delta` leaves an input figure null when it has nothing new to say.
+ */
 export interface SdkApiUsage {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_read_input_tokens?: number;
-  cache_creation_input_tokens?: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
 }
 
 export type SdkAssistantContentBlock =
@@ -47,10 +51,13 @@ export type SdkAssistantContentBlock =
 
 export interface SdkAssistantMessage {
   type: 'assistant';
-  /** One API assistant turn may arrive as SEVERAL of these sharing
-   *  `message.id` (one per content block), each repeating the usage.
-   *  `model` is the API's own answer for what served the turn — the
-   *  harness resolves aliases (`opus`) and may fall back mid-session. */
+  /** One API assistant turn arrives as SEVERAL of these sharing
+   *  `message.id` (one per content block, each sent as its block closes),
+   *  and every one repeats the usage `message_start` reported: the real
+   *  input and cache figures, but only the handful of output tokens written
+   *  by then. The call's final output arrives later, on the `message_delta`
+   *  stream event. `model` is the API's own answer for what served the turn —
+   *  the harness resolves aliases (`opus`) and may fall back mid-session. */
   message: {
     id?: string;
     model?: string;
@@ -99,7 +106,9 @@ export interface SdkRateLimitEvent {
 /**
  * One frame of the API's own message stream, forwarded verbatim by the SDK
  * (`BetaRawMessageStreamEvent`). The fields named here are the ones the driver
- * reads: a block's own kind at `content_block_start` — `text`, `thinking` or
+ * reads: the call's id and opening usage at `message_start`, its final usage
+ * at `message_delta` (cumulative for the call), its end at `message_stop`, a
+ * block's own kind at `content_block_start` — `text`, `thinking` or
  * `tool_use` with the id and name of the call being composed — and its
  * increments at `content_block_delta` (`text_delta.text`,
  * `thinking_delta.thinking`, `input_json_delta.partial_json`).
@@ -110,7 +119,8 @@ export interface SdkPartialAssistantMessage {
   event: {
     type: string;
     index?: number;
-    message?: { id?: string };
+    message?: { id?: string; usage?: SdkApiUsage };
+    usage?: SdkApiUsage;
     content_block?: { type: string; text?: string; thinking?: string; id?: string; name?: string };
     delta?: { type: string; text?: string; thinking?: string; partial_json?: string };
   };
@@ -129,6 +139,8 @@ export interface SdkResultSuccess {
   subtype: 'success';
   is_error: boolean;
   session_id: string;
+  /** The session's main-loop API calls, summed — every call this driver saw as a turn. */
+  usage?: SdkApiUsage;
   structured_output?: unknown;
   result?: string;
   total_cost_usd?: number;
@@ -145,6 +157,8 @@ export interface SdkResultError {
     | 'error_max_structured_output_retries';
   is_error: boolean;
   session_id: string;
+  /** The session's main-loop API calls, summed — every call this driver saw as a turn. */
+  usage?: SdkApiUsage;
   total_cost_usd?: number;
   errors?: string[];
   [k: string]: unknown;

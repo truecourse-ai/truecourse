@@ -291,3 +291,51 @@ describe('isCarvedOutAgentSkill (exported predicate)', () => {
     expect(isCarvedOutAgentSkill('commit-helper.md', CALCOM)).toBe(false);
   });
 });
+
+/**
+ * A synced issue opens with a metadata block, and every issue of a project
+ * carries the same keys and nearly the same lines in it. Signatures taken from
+ * the whole file made two short tickets look like near-duplicates of each
+ * other, so one was dropped before any session read it.
+ */
+describe('frontmatter is not content', () => {
+  const ticket = (p: string, heading: string, body: string): DocCandidate =>
+    doc(
+      p,
+      [
+        '---',
+        'created: 2026-07-09T20:35:28.661Z',
+        'updated: 2026-08-18T00:02:32.054Z',
+        'status: "To Do"',
+        'status_category: "new"',
+        'status_history:',
+        '  - "2026-08-18T00:02:06.200Z  To Do -> In Progress"',
+        '  - "2026-08-19T00:02:06.200Z  In Progress -> Done"',
+        '---',
+        '',
+        `# ${heading}`,
+        '',
+        body,
+      ].join('\n'),
+    );
+
+  it('keeps two tickets whose metadata blocks match and whose text does not', () => {
+    const view = prefiltered([
+      ticket('KAN-1.md', 'KAN-1: Paginate the expense list', 'The list shows at most five expenses per page.'),
+      ticket('KAN-3.md', 'KAN-3: Convert a receipt', 'The receipt offers EUR, GBP and CAD as estimates.'),
+    ]);
+    expect(view.sessioned).toEqual(['KAN-1.md', 'KAN-3.md']);
+    expect(view.skipped).toEqual([]);
+  });
+
+  it('does not read a ticket as a changelog because its history lists transitions', () => {
+    const view = prefiltered([
+      ticket(
+        'KAN-8.md',
+        'KAN-8: Bump Next.js to 15.5.4',
+        'Routine dependency bump. No behavior change: no page, endpoint or stored field moves.',
+      ),
+    ]);
+    expect(view.sessioned).toEqual(['KAN-8.md']);
+  });
+});

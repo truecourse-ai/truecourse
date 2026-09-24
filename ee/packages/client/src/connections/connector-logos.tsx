@@ -5,6 +5,7 @@
  */
 
 import type { ReactElement } from 'react';
+import atlassian from './logos/atlassian.svg';
 import confluence from './logos/confluence.svg';
 import gdrive from './logos/gdrive.svg';
 import jira from './logos/jira.svg';
@@ -12,9 +13,14 @@ import notion from './logos/notion.svg';
 import onedrive from './logos/onedrive.svg';
 import slack from './logos/slack.svg';
 
-export type ConnectorTool = 'jira' | 'confluence' | 'gdrive' | 'onedrive' | 'notion' | 'slack';
+export type ConnectorTool = 'atlassian' | 'jira' | 'confluence' | 'gdrive' | 'onedrive' | 'notion' | 'slack';
 
-const LOGO: Record<ConnectorTool, string> = { jira, confluence, gdrive, onedrive, notion, slack };
+const LOGO: Record<ConnectorTool, string> = { atlassian, jira, confluence, gdrive, onedrive, notion, slack };
+
+/** A tool's mark as an image URL, for the shell registries that take one. */
+export function connectorLogo(tool: ConnectorTool): string {
+  return LOGO[tool];
+}
 
 export function ConnectorLogo({
   tool,
@@ -23,5 +29,14 @@ export function ConnectorLogo({
   tool: ConnectorTool;
   className?: string;
 }): ReactElement {
-  return <img src={LOGO[tool]} alt="" aria-hidden className={`${className} object-contain`} />;
+  // Decorative: the row names the tool in words. `data-tool` says which mark it is.
+  return (
+    <img
+      src={LOGO[tool]}
+      data-tool={tool}
+      alt=""
+      aria-hidden
+      className={`${className} object-contain`}
+    />
+  );
 }

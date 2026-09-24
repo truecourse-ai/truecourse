@@ -199,7 +199,7 @@ describe("operator mode — the server's own Claude Code", () => {
     expect(res.body).toEqual({
       config: null,
       providers: [...LLM_PROVIDER_KINDS],
-      operator: { provider: 'claude-code', model: 'opus' },
+      operator: { provider: 'claude-code', model: 'claude-opus-5-5' },
     });
   });
 

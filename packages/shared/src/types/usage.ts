@@ -5,7 +5,7 @@
  * way Home is: the server folds every number and names every value, so the page
  * draws what it was told and computes nothing of its own. Three shapes over the
  * same filtered slice — the period's totals, the trend bucketed by day or by
- * week with one line per job type, and the runs that spent it.
+ * week with one band per job type, and the runs that spent it.
  *
  * Cost is a CEILING in USD: every input-side token is priced at the list input
  * rate and prompt-cache discounts are ignored, the same arithmetic the
@@ -53,6 +53,30 @@ export interface UsagePeriodView {
   bucket: UsageBucket;
 }
 
+/**
+ * Tokens as the page reads them: what the model read at full price, what it
+ * wrote, and what it read cheaply out of the prompt cache.
+ *
+ * A cache WRITE is counted as input, not as cached: it is fresh input the model
+ * read at full price (a provider bills it at or above the input rate) on its way
+ * into the cache, so filing it beside the cheap reads would make an expensive run
+ * look cheap. The raw buckets stay on the record for whoever needs them apart.
+ */
+export interface UsageTokenSplit {
+  /** Uncached input plus cache writes. */
+  input: number;
+  output: number;
+  /** Input served from the prompt cache. */
+  cached: number;
+  /**
+   * `cached` over all the input read, `cached / (input + cached)`, from 0 to 1.
+   * Null when the provider reported no prompt caching at all (no cache read and
+   * no cache write), where a zero would say the cache missed rather than that
+   * nothing was cached.
+   */
+  cacheHitRate: number | null;
+}
+
 /** The period's spend in one line. */
 export interface UsageTotals {
   costUsd: number;
@@ -60,26 +84,42 @@ export interface UsageTotals {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreateTokens: number;
-  /** The four buckets added up: the one number the page shows. */
+  /** The four buckets added up. */
   tokens: number;
+  split: UsageTokenSplit;
   calls: number;
   /** Runs that spent anything in the period. */
   runs: number;
 }
 
-/** One job type's share of a bucket. */
+/** A cost split by the same three kinds the tokens are: input, output, cached. */
+export interface UsageCostByKind {
+  /** Uncached input plus cache writes. */
+  input: number;
+  output: number;
+  /** Input served from the prompt cache. */
+  cached: number;
+}
+
+/**
+ * A bucket's spend, one number per thing the trend can plot: its cost, whole
+ * and by kind, and its tokens split the way {@link UsageTokenSplit} splits them.
+ */
 export interface UsageAmount {
   costUsd: number;
-  tokens: number;
+  costByKind: UsageCostByKind;
+  /** Uncached input plus cache writes. */
+  input: number;
+  output: number;
+  /** Input served from the prompt cache. */
+  cached: number;
 }
 
 /** One point of the trend: a day, or the week that starts on it. */
-export interface UsageSeriesPoint {
+export interface UsageSeriesPoint extends UsageAmount {
   /** The bucket's first day, `YYYY-MM-DD` where the reader is. */
   at: string;
-  costUsd: number;
-  tokens: number;
-  /** The same two numbers per job type; a type that spent nothing is absent. */
+  /** The same numbers per job type; a type that spent nothing is absent. */
   byJobType: Record<string, UsageAmount>;
 }
 
@@ -100,7 +140,13 @@ export interface UsageRunRow {
   /** The repository's slug, for the address a row opens. Null with no repository. */
   repoId: string | null;
   costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  /** The four buckets added up. */
   tokens: number;
+  split: UsageTokenSplit;
   calls: number;
   /** The model that did most of the work. */
   model: string;

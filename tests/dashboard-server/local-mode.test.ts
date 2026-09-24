@@ -21,6 +21,11 @@ import { createAuth, LOCAL_ORG_ID } from '../../apps/dashboard/server/src/auth/i
 import { serverMode, isLocalMode } from '../../apps/dashboard/server/src/mode';
 import { MemoryInviteLinkStore } from '../helpers/memory-invite-links';
 import {
+  clearServerFeatures,
+  registerServerFeature,
+} from '../../apps/dashboard/server/src/features';
+import { ENTERPRISE_FEATURES } from '@truecourse/shared';
+import {
   installWorkspaceProfiles,
   resetWorkspaceProfiles,
   type MemoryWorkspaceProfiles,
@@ -160,11 +165,58 @@ describe('the local gate', () => {
     const me = await request(app).get('/api/auth/me').expect(200);
     expect(me.body.user).toMatchObject({ organizationId: LOCAL_ORG_ID, email: '' });
     expect(me.body.user.firstName).toBeTruthy();
+    // No enterprise bundle registered in this suite, so there is nothing for
+    // the one implicit workspace to hold.
+    expect(me.body).toMatchObject({ edition: 'community', entitlements: [] });
 
     // The hosted routes are not there to be called.
     await request(app).get('/api/auth/login').expect(404);
     await request(app).post('/api/auth/logout').expect(404);
     await request(app).post('/api/auth/workspace').send({ name: 'Acme' }).expect(404);
+  });
+
+  // One developer on one machine IS the whole deployment: there is no operator
+  // to grant anything and no console to grant it from, so the implicit
+  // workspace holds whatever the bundle beside the tree carries.
+  it('gives its one implicit workspace everything the edition carries', async () => {
+    process.env.TRUECOURSE_MODE = 'local';
+    registerServerFeature({ name: 'a feature of this test', mount: () => [] });
+    try {
+      const auth = createAuth('local', deps);
+      const app = createApp({
+        serveStatic: false,
+        authVerifier: auth.verify,
+        authRouter: auth.router,
+        repoLinks: null,
+        github: null,
+        jobs: null,
+      });
+      const me = await request(app).get('/api/auth/me').expect(200);
+      expect(me.body.entitlements).toEqual([...ENTERPRISE_FEATURES]);
+      expect(me.body.edition).toBe('enterprise');
+    } finally {
+      clearServerFeatures();
+    }
+  });
+
+  // The operator consoles are not there at all: nobody to grant, nothing to
+  // grant from, and the `/api` catch-all answers them as the routes they aren't.
+  it('mounts no operator console', async () => {
+    process.env.TRUECOURSE_MODE = 'local';
+    const auth = createAuth('local', deps);
+    const app = createApp({
+      serveStatic: false,
+      authVerifier: auth.verify,
+      repoLinks: null,
+      github: null,
+      jobs: null,
+    });
+    const res = await request(app).get('/api/operator/entitlements').expect(404);
+    expect(res.body).toEqual({ error: 'The server has no such route.' });
+    await request(app)
+      .post('/api/operator/entitlements/grant')
+      .send({ workspaceOrgId: LOCAL_ORG_ID, feature: 'connections' })
+      .expect(404);
   });
 
   it('has one member, and no invitations to send', async () => {
@@ -264,7 +316,7 @@ describe('the local workspace saying what its product is', () => {
 });
 
 describe('what the server tells the client about itself', () => {
-  it('reports the mode on the public capabilities endpoint', async () => {
+  it('reports the mode, and only the mode, on the public capabilities endpoint', async () => {
     const app = createApp({
       serveStatic: false,
       authVerifier: null,
@@ -272,8 +324,9 @@ describe('what the server tells the client about itself', () => {
       github: null,
       jobs: null,
     });
-    expect((await request(app).get('/api/capabilities').expect(200)).body).toMatchObject({
-      edition: 'community',
+    // The whole body: what a workspace may use is not a public answer, so
+    // nothing about an edition or a feature list is here to be read.
+    expect((await request(app).get('/api/capabilities').expect(200)).body).toEqual({
       mode: 'hosted',
     });
 

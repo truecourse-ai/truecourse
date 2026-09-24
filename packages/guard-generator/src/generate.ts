@@ -12,8 +12,8 @@ import { completeRealization } from './match.js'
 import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
 import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
-import { reconcileRemaining, type RepairIssue } from './worker-repair.js'
-import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
+import { outcomeCorrection, reconcileRemaining, type RepairIssue } from './worker-repair.js'
+import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * `guard generate` orchestration — the LLM pipeline that turns spec FLOWS into
@@ -122,7 +122,6 @@ import {
   describeOutstandingObligations,
   GUARD_REVIEW_POLICY_VERSION,
   scenarioMilestoneScopeDefect,
-  milestoneRefs,
   coversFlowMilestones,
   verificationCapabilityGap,
   verificationCasePreparation,
@@ -174,6 +173,7 @@ import {
   type GuardUnadjudicatedStage,
   milestoneOrder,
   flowDriversToMatch,
+  regexLiteral,
   scenarioMilestoneProof,
   type Interface,
   type InterfaceResource,
@@ -998,8 +998,9 @@ export interface FlowWorkerTask {
   /** Whether an accepted submission with this sha is in the engine stash — the
    *  reject gate for a `settled` outcome referencing nothing. */
   hasStash(sha: string): boolean
-  /** Live completion validation, shared by the session, fold and cache gates. */
-  validateOutcome(outcome: GuardFlowWorkerOutcome): string | undefined
+  /** Live completion validation, shared by the session, fold and cache gates.
+   *  `wrappingUp` (the session's budget is spent) withholds repair requests. */
+  validateOutcome(outcome: GuardFlowWorkerOutcome, context?: { wrappingUp: boolean }): string | undefined
   stashedReview(sha: string): FlowWorkerReview | undefined
   /** The stashed accepted yaml for the sha — what core writes into the cache
    *  entry beside a settled outcome. Returns undefined (⇒ core writes NO
@@ -2740,8 +2741,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         pendingFidelityFinding?: GuardBirthFinding
         rejectionByObligation: Map<string, string>
         repairIssues: Map<string, RepairIssue>
-        requestedRepairs: Map<string, Map<string, Set<string>>>
-        repairAttempts: Map<string, Set<string>>
+        /** Obligations a correction has already asked to repair (once each). */
+        repairsAsked: Set<string>
             }
       const states = new Map<string, WorkerTaskState>()
       for (const task of runnable) {
@@ -2772,8 +2773,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           fidelityFlags: 0,
           rejectionByObligation: new Map(),
           repairIssues: new Map(),
-          requestedRepairs: new Map(),
-          repairAttempts: new Map(),
+          repairsAsked: new Set(),
         })
       }
 
@@ -2832,7 +2832,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (exampleDefect) return exampleDefect
         const badRe = firstInvalidMatchPattern(raw.steps)
         if (badRe) {
-          return `step ${badRe.step} ${badRe.where}: /${badRe.pattern}/ is not a valid regular expression — ${badRe.error}`
+          return `step ${badRe.step} ${badRe.where}: ${regexLiteral(badRe.pattern, badRe.flags)} is not a valid regular expression — ${badRe.error}`
         }
         return null
       }
@@ -3121,45 +3121,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const proofs = failed?.milestone ? scenarioMilestoneProof([failed]) : scenarioMilestoneProof(candidate.scenario.steps)
         for (const proof of proofs) {
           for (const id of proof.checks ?? ['']) {
-            state.rejectionByObligation.set(`${proof.milestone}:${id}`, reason)
-            state.repairIssues.set(`${proof.milestone}:${id}`, { reasonKind, evidence: reason, issueId, source })
+            const key = `${proof.milestone}:${id}`
+            const fidelityFlagged = source === 'fidelity' || state.repairIssues.get(key)?.fidelityFlagged
+            state.rejectionByObligation.set(key, reason)
+            state.repairIssues.set(key, { reasonKind, evidence: reason, issueId, source, ...(fidelityFlagged ? { fidelityFlagged } : {}) })
           }
         }
+        return issueId
       }
-      const recordRemainingGaps = (state: WorkerTaskState, supplied?: GuardRemainingObligation[]) => {
-        const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, supplied).current
+      // The rejected candidate's issue id, so a blocked answer can cite it without a correction round.
+      const issueLine = (issueId: string) => `issueId for these cases: ${issueId}`
+      const recordRemainingGaps = (state: WorkerTaskState, outcome?: GuardFlowWorkerOutcome) => {
+        const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, outcome?.remaining, outcome?.kind).current
         for (const row of remainder) state.task.work.gaps.push({ surface: state.task.surface, kind: 'blocked-on', milestones: [row.milestone],
           obligations: [{ milestone: row.milestone, ...(row.caseId ? { caseId: row.caseId } : {}) }],
           blocker: { kind: row.reasonKind === 'preparation' ? 'configuration' : row.reasonKind === 'unsupported-capability' ? 'unsupported-capability' : 'generation' },
           reason: `${row.milestone}/${row.caseId ?? 'legacy'}: ${row.reasonKind}: ${row.evidence}` })
       }
-      const validateTaskOutcome = (state: WorkerTaskState, outcome: GuardFlowWorkerOutcome): string | undefined => {
+      const validateTaskOutcome = (state: WorkerTaskState, outcome: GuardFlowWorkerOutcome, wrappingUp = false): string | undefined => {
         const progress = taskProgress(state)
         if (outcome.kind === 'settled' && outcome.additionalScenarios !== undefined) return 'One flow accepts one complete test; additionalScenarios is not allowed.'
-        if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && progress.outstanding.some(o => o.caseId)) {
-          const reconciled = reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining)
-          let requested = state.requestedRepairs.get(reconciled.identity)
-          if (!requested) {
-            requested = new Map(reconciled.repairable.map(row => {
-              const key = `${row.milestone}:${row.caseId ?? ''}`
-              return [key, new Set(state.repairAttempts.get(key) ?? [])]
-            }))
-            state.requestedRepairs.set(reconciled.identity, requested)
-          }
-          const unattempted = reconciled.repairable.filter(row => {
-            const key = `${row.milestone}:${row.caseId ?? ''}`
-            const before = requested!.get(key) ?? new Set<string>()
-            return ![...(state.repairAttempts.get(key) ?? [])].some(candidate => !before.has(candidate))
-          })
-          if (reconciled.problems.length || unattempted.length) {
-            return 'Outcome needs correction: remaining work must follow the current case-specific findings. ' +
-              'Submit a changed executable candidate for each actionable case before retiring; correcting remaining-case prose or resubmitting the same behavior is not a repair attempt. ' +
-              'Preserve the entire flow contract. This correction does not grant more budget.\n' +
-              (unattempted.length ? `Cases still needing a repair submission: ${unattempted.map(row => `${row.milestone}:${row.caseId}`).join(', ')}.\n` : '') +
-              reconciled.problems.join('\n') + '\nCURRENT REMAINING: ' + JSON.stringify(reconciled.current)
-          }
-          return undefined
-        }
+        if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && progress.outstanding.some(o => o.caseId))
+          return outcomeCorrection(reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining, outcome.kind), state.repairsAsked, wrappingUp)
         if (outcome.kind === 'blocked' && outcome.perMilestone?.some(m => !progress.outstanding.some(o => o.milestone === m.order)))
           return 'Outcome refused: blockers must identify outstanding milestones assigned to this worker.'
         if (outcome.kind !== 'settled') return undefined
@@ -3283,7 +3266,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             state.fidelityFlags++
             taintFlow(candidate.flow.id, candidate.surface, candidate.scenario.title, verdict.mismatch)
             const finding = fidelityFinding(candidate, verdict.mismatch)
-            rememberRejection(state, candidate, verdict.mismatch)
+            const issueId = rememberRejection(state, candidate, verdict.mismatch, 'assertion', 'fidelity')
             if (firstFlag && verdict.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
               // The in-loop self-heal (no separate re-author round — the
               // WORKER revises); the ledger bump keeps the budget honest.
@@ -3292,7 +3275,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               return {
                 content:
                   `not accepted — the fidelity judge flagged the scenario (high confidence): ${verdict.mismatch}\n` +
-                  'Revise the scenario so it truly verifies the flagged milestone, then submit again.',
+                  'Revise the scenario so it truly verifies the flagged milestone, then submit again.\n' + issueLine(issueId),
                 isError: true,
               }
             }
@@ -3303,7 +3286,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             return {
               content:
                 `REJECTED — the fidelity judge flagged this candidate${firstFlag ? '' : ' too'} (${verdict.confidence}): ${verdict.mismatch}\n` +
-                'Repair the complete candidate using the current finding; partial candidates cannot be published. Keep each remaining case explicit if preparation or execution prevents completion.',
+                'Repair the complete candidate using the current finding; partial candidates cannot be published. Keep each remaining case explicit if preparation or execution prevents completion.\n' +
+                issueLine(issueId),
               isError: true,
             }
           }
@@ -3363,12 +3347,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             const issue = scenarioFullFlowDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence ?? [])
             if (issue) { rememberRejection(state, candidate, issue, 'annotation'); return { content: `Review evidence is invalid (not a semantic fidelity rejection): ${issue}`, isError: true } }
           }
-          const defect = verdict.kind === 'flagged' ? verdict.mismatch :
-            scenarioFullFlowDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence ?? [])
-          if (defect) {
-            state.pendingFidelityFinding = fidelityFinding(candidate, defect)
-            rememberRejection(state, candidate, defect)
-            return { content: `not accepted — the expected failure still needs faithful case assertions: ${defect}`, isError: true }
+          if (verdict.kind === 'flagged') {
+            state.pendingFidelityFinding = fidelityFinding(candidate, verdict.mismatch)
+            const issueId = rememberRejection(state, candidate, verdict.mismatch, 'assertion', 'fidelity')
+            return { content: `not accepted — the expected failure still needs faithful case assertions: ${verdict.mismatch}\n${issueLine(issueId)}`, isError: true }
           }
           if (verdict.kind === 'faithful' && verdict.evidence) caseEvidenceById.set(candidate.scenario.id, verdict.evidence)
         }
@@ -3576,23 +3558,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             if (state.acceptedSha) id = stash.get(state.acceptedSha)?.candidate.scenario.id ?? id
             const built = buildCandidate(state, parsed.raw, id)
             if ('error' in built) return { content: `the scenario does not build: ${built.error}`, isError: true }
-            for (const proof of scenarioMilestoneProof(built.candidate.scenario.steps)) for (const caseId of proof.checks ?? ['']) {
-              const key = `${proof.milestone}:${caseId}`
-              const attempt = scenarioReviewFingerprint({ setup: built.candidate.scenario.setup ?? null,
-                steps: built.candidate.scenario.steps.filter(step => !step.checks?.length ||
-                  (step.checks.includes(caseId) && milestoneRefs(step.milestone).includes(proof.milestone))),
-                normalize: built.candidate.scenario.normalize ?? [] })
-              const attempts = state.repairAttempts.get(key) ?? new Set<string>()
-              attempts.add(attempt)
-              state.repairAttempts.set(key, attempts)
-            }
             const run = await executeOnce(built.candidate, task)
             if ('report' in run) return run.report
             return settleSubmission(state, built.candidate, run.result, evidence.expectedReds, judge)
           },
           hasStash: (sha) => stash.get(sha)?.candidate.ref === ref,
-          validateOutcome: outcome => {
-            const defect = validateTaskOutcome(state, outcome)
+          validateOutcome: (outcome, context) => {
+            const defect = validateTaskOutcome(state, outcome, context?.wrappingUp)
             if (!defect) observations.clear()
             return defect
           },
@@ -3939,7 +3911,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // fields: the `!`s below stand on the parse the loop already did.
           const outcome = result.outcome
           if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && taskProgress(state).required.some(o => o.caseId))
-            recordRemainingGaps(state, outcome.remaining)
+            recordRemainingGaps(state, outcome)
           // A TAINTED flow whose worker completed a fresh answer (accepted
           // scenario or an honest block) overwrote the poisoned cache entry —
           // its taint clears at run end unless the session re-flagged it

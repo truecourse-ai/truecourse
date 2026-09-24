@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Copy, Loader2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, Loader2 } from 'lucide-react';
 import type { ConflictResolutionLike, CorpusConflict } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
@@ -358,10 +358,33 @@ function ConflictAssessment({
   // A pick-a-side or a dismissal is a ruling the reader can take right here; a
   // fix-doc is homework, so only the former earns the accent.
   const actionable = action !== 'fix-doc';
+  // The assessment is read once and then in the way: a long explanation with a
+  // suggested edit under it can fill the pane, leaving no room for the two
+  // documents the reader has to compare. Folding it is how they get that room
+  // back, and the recommendation rides on the closed header so what was decided
+  // stays legible while it is folded.
+  const [open, setOpen] = useState(true);
+  const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <div data-testid="conflict-assessment" className="mt-2">
-      <div className={LABEL}>Assessment</div>
-      <div className={`rounded border p-3 ${actionable ? 'border-amber-500/60' : 'border-border'}`}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className={`${LABEL} flex items-center gap-1 hover:text-foreground`}
+      >
+        <Chevron className="h-3 w-3" aria-hidden />
+        Assessment
+        {!open && (
+          <span className="ml-1 normal-case tracking-normal text-foreground">
+            {recActionLabel(action, winner)}
+          </span>
+        )}
+      </button>
+      <div
+        hidden={!open}
+        className={`rounded border p-3 ${actionable ? 'border-amber-500/60' : 'border-border'}`}
+      >
         <p className="text-xs leading-relaxed text-foreground">{review.explanation}</p>
         <div className="mt-2.5 border-t border-border pt-2.5">
           <div className={LABEL}>Recommendation</div>

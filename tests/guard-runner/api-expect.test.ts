@@ -39,6 +39,13 @@ describe('evaluateApiExpect', () => {
     expect(m).toMatchObject({ subject: 'headers', actual: 'header x-missing missing' })
   })
 
+  it('applies a matcher\'s flags to the body, a header and a json path', () => {
+    expect(evaluate({ body: { matches: 'BUY MILK', flags: 'i' } })).toBeNull()
+    expect(evaluate({ headers: { 'x-service': { matches: '^TODOS$', flags: 'i' } } })).toBeNull()
+    expect(evaluate({ json: { title: { matches: '^Buy', flags: 'i' } } })).toBeNull()
+    expect(evaluate({ json: { title: { matches: '^Buy' } } })).toMatchObject({ subject: 'json' })
+  })
+
   it('matches the body text with the stream vocabulary', () => {
     expect(evaluate({ body: { contains: 'buy milk' } })).toBeNull()
     const m = evaluate({ body: { matches: '^\\[' } })

@@ -49,11 +49,9 @@ import {
   FIDELITY_SESSION_BUDGET,
   FIDELITY_SESSION_CACHE_NAME,
   FIDELITY_SESSION_KIND,
-  FLOW_WORKER_API_PROMPT_FINGERPRINT,
   FLOW_WORKER_API_SYSTEM_PROMPT,
   FLOW_WORKER_BUDGET,
   FLOW_WORKER_CACHE_NAME,
-  FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
   FLOW_WORKER_STAGE_VERSION,
   flowWorkerLegacyCacheKeys,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
@@ -242,23 +240,11 @@ describe('flowWorkerSessionDef', () => {
     }
   })
 
-  it('holds the cli and api prompt fingerprints bit-for-bit — the corpus-roll tripwire', () => {
-    // These literals are the author-cache keys of every stored cli/api corpus.
-    // A prompt edit that moves one re-authors EVERY such flow; fail here first,
-    // loudly, so the roll is a decision rather than an accident. The web arm was
-    // added with both unchanged; both then moved ONCE, deliberately, with the
-    // blast-radius cut: the canonical scenario schema gained `world` and the
-    // doctrine gained the shared-world/self-mint contract (a stored
-    // delete-account scenario had deleted the seeded principal mid-run).
-    // Moved again for incremental authoring: the addendum gained the edit
-    // contract (`replaces`, `drop_scenario`, multi-scenario settled). Only a
-    // flow that is WORK consults the worker cache, so the roll costs one miss
-    // per re-authoring flow, never a corpus-wide re-author.
-    // Rolled for prerequisite eligibility, proof grounding, and setup-aware fidelity.
-    // Provider control changes the shared scenario schema and API authoring
-    // instructions, so cached drafts must be checked under the new contract.
-    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('15277774880ee40e')
-    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('1ef548ff71971375')
+  it('keys the legacy cache read on the frozen prompt fingerprints, never the live prompt', () => {
+    // A prompt edit must not move the old key: every entry stored before the
+    // prompt left the key is read through it once and re-saved.
+    expect(['cli', 'api', 'web'].map(surface => flowWorkerPromptFingerprint(surface as 'cli' | 'api' | 'web')))
+      .toEqual(['15277774880ee40e', '1ef548ff71971375', 'e3062e1cd80be77a'])
   })
 
   it('routes both tools to the task’s engine closures', async () => {
@@ -308,9 +294,6 @@ describe('flowWorkerCacheKey', () => {
     expect(webLegacy).toBe(workerCacheKey(flowWorkerPromptFingerprint('web'), { fingerprint: base.cacheMaterial.flowFingerprint }, 'web',
       base.cacheMaterial.sectionKeys, ['iface-1', 'whole-catalog'], base.cacheMaterial.recipeFingerprint))
     expect(webLegacy).not.toBe(flowWorkerCacheKey(web))
-    expect(flowWorkerPromptFingerprint('cli')).toBe(FLOW_WORKER_CLI_PROMPT_FINGERPRINT)
-    expect(flowWorkerPromptFingerprint('api')).toBe(FLOW_WORKER_API_PROMPT_FINGERPRINT)
-    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).not.toBe(FLOW_WORKER_API_PROMPT_FINGERPRINT)
   })
 
   it('moves with every behavior-affecting input and with nothing else', () => {

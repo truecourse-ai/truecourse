@@ -600,7 +600,7 @@ function startSession<TOutcome>(
         correction = `Outcome schema needs correction. Repair the terminal object without discarding accepted work. This uses the existing session budget.\n${parsed.error.issues.map(issue => `${issue.path.join('.') || 'outcome'}: ${issue.message}`).join('\n')}`;
       } else {
         try {
-          correction = await def.validateOutcome?.(parsed.data);
+          correction = await def.validateOutcome?.(parsed.data, { wrappingUp: wrapUpTurnsLeft !== undefined });
         } catch (error) {
           return fail({ kind: 'malformed', detail: `outcome validator failed: ${String(error)}`, retryability: 'none' }, result.resumeCursor);
         }

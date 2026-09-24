@@ -70,6 +70,10 @@ export const EVENTS = {
   runFinished: 'run_finished',
   /** A context source was stored (a repository's markdown, a documentation site). */
   contextSourceAdded: 'context_source_added',
+  /** A tool account was connected or re-saved in Settings › Connections. */
+  connectionSaved: 'connection_saved',
+  /** A tool account was removed there, which pauses the sources that read it. */
+  connectionRemoved: 'connection_removed',
   /** A documentation conflict was ruled on: a side picked, or dismissed. */
   conflictResolved: 'conflict_resolved',
   /** A flow or a claim was ruled out of testing. */
@@ -82,6 +86,10 @@ export const EVENTS = {
   workspaceCreated: 'workspace_created',
   /** An operator handed a workspace credits. */
   creditsGranted: 'credits_granted',
+  /** An operator opened one enterprise feature to a workspace. */
+  entitlementGranted: 'entitlement_granted',
+  /** An operator closed one again, which pauses what read through it. */
+  entitlementRevoked: 'entitlement_revoked',
   /** A workspace ran out of credits — mid-run, or at a start it was refused. */
   creditsExhausted: 'credits_exhausted',
   /** A job stopped part-way with nothing wrong. */

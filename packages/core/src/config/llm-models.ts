@@ -14,8 +14,8 @@
  * the primary is overloaded.
  */
 
-/** What operator mode runs on when `TRUECOURSE_MODEL` names nothing. */
-export const DEFAULT_OPERATOR_MODEL = 'opus';
+/** What operator mode runs on when `TRUECOURSE_MODEL` names nothing: an exact id, never an alias, so the Models page says which model it is. */
+export const DEFAULT_OPERATOR_MODEL = 'claude-opus-5-5';
 
 /** The one model operator mode runs every call and every session on. */
 export function resolveModel(): string {

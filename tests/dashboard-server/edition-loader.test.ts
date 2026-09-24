@@ -32,9 +32,9 @@ function repoRootWith(entrySource: string | null): string {
 }
 
 describe('the edition loader', () => {
-  it('registers this checkout\'s enterprise bundle, which is the workspaces feature', async () => {
+  it('registers this checkout\'s enterprise bundle, which is its two features', async () => {
     const features = await registerEditionFeatures();
-    expect(features.map((f) => f.name)).toEqual(['multiple workspaces']);
+    expect(features.map((f) => f.name)).toEqual(['multiple workspaces', 'document connections']);
     expect(registeredServerFeatures().some((f) => f.manyWorkspaces === true)).toBe(true);
   });
 

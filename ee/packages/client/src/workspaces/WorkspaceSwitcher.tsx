@@ -8,6 +8,13 @@
  * there is and offers no way out of it. The list is this component's own read:
  * the shell holds only the workspace the session is in.
  *
+ * The GRANT is what makes another workspace, not what reaches the ones there
+ * already: a person in two is offered both whether or not the one they are in
+ * still holds it, since a switch they cannot make is a room they cannot leave.
+ * So only Create workspace is drawn on the grant, and a person with one
+ * workspace and no grant has nothing to choose between — they get the shell's
+ * own block back, and never a menu that opens onto itself.
+ *
  * Both moves end the same way — the session is in another organization now, so
  * the app starts over at the section root rather than re-reading every page it
  * already drew. A refused switch has nowhere of its own to appear, so it is
@@ -19,7 +26,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronsUpDown, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { WorkspaceSummary } from '@truecourse/shared';
+import { useEntitlement } from '@/auth/AuthContext';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
+import { WorkspaceNameBlock } from '@/dashboard/shell/WorkspaceNameBlock';
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { listWorkspaces, switchWorkspace } from './api';
 
@@ -48,6 +57,7 @@ function useClickOutside(open: boolean, close: () => void) {
 
 export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const { workspace } = useDashboardState();
+  const mayCreate = useEntitlement('workspaces');
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -84,6 +94,11 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
 
   // Nobody is signed in: there is no workspace to name.
   if (!workspace) return null;
+
+  // Nothing to switch to and nothing to make: the shell's own block, which is
+  // what this workspace would have seen had no switcher been registered. The
+  // unread list counts as one, so the block stands until the read says more.
+  if (!mayCreate && workspaces.length < 2) return <WorkspaceNameBlock collapsed={collapsed} />;
 
   return (
     <div ref={ref} className={`relative ${collapsed ? 'flex justify-center px-0 py-1' : 'px-2 py-1'}`}>
@@ -136,17 +151,19 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
               <span className="min-w-0 flex-1 truncate">{w.name}</span>
             </button>
           ))}
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              setCreating(true);
-            }}
-            className="flex w-full items-center gap-2 border-t border-border px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-          >
-            <Plus className="h-3.5 w-3.5 shrink-0" />
-            Create workspace
-          </button>
+          {mayCreate && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setCreating(true);
+              }}
+              className="flex w-full items-center gap-2 border-t border-border px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              Create workspace
+            </button>
+          )}
         </div>
       )}
       <CreateWorkspaceDialog open={creating} onOpenChange={setCreating} />

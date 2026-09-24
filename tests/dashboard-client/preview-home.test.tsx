@@ -303,12 +303,14 @@ describe('Home', () => {
     expect(address()).toBe('/flows?status=blocked');
   });
 
-  it('reads the period the chips ask for', async () => {
+  it('reads the period the picker asks for', async () => {
     const state = serve();
     renderHome();
 
     await waitFor(() => expect(homeCalls(state)).toEqual(['/api/home?period=30d']));
-    await userEvent.click(screen.getByRole('button', { name: '7d' }));
+    const picker = screen.getByRole('radiogroup', { name: 'Period' });
+    expect(within(picker).getByRole('radio', { name: '30d' })).toHaveAttribute('aria-checked', 'true');
+    await userEvent.click(within(picker).getByRole('radio', { name: '7d' }));
 
     await waitFor(() => expect(homeCalls(state)).toContain('/api/home?period=7d'));
   });

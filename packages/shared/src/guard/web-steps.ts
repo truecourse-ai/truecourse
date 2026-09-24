@@ -24,6 +24,7 @@ import {
   GuardStreamMatcherSchema,
   describeStreamMatcher,
   matcherPatterns,
+  type StepPattern,
   stepMilestone as milestone,
   stepNote as note,
   stepTimeoutMs as timeoutMs,
@@ -1146,7 +1147,7 @@ export function isWebExpectStep(step: GuardWebStep): step is GuardWebExpectStep 
 }
 
 /** Every regex source a web step carries, with the path that names it. */
-export function webStepPatterns(step: GuardWebStep): Array<{ where: string; pattern: string }> {
+export function webStepPatterns(step: GuardWebStep): StepPattern[] {
   return [
     ...(step.expect?.text ? matcherPatterns('expect.text', step.expect.text) : []),
     ...(step.expect?.url ? matcherPatterns('expect.url', step.expect.url) : []),
@@ -1158,7 +1159,7 @@ export function webStepPatterns(step: GuardWebStep): Array<{ where: string; patt
     // A capture's slicer is a regex the browser step would otherwise discover was
     // uncompilable only after a sandbox, a build and a browser had been paid for.
     ...Object.entries(step.capture ?? {}).flatMap(([name, spec]) =>
-      spec.number !== undefined ? [{ where: `capture.${name}.number`, pattern: spec.number }] : [],
+      spec.number !== undefined ? [{ where: `capture.${name}.number`, pattern: spec.number, takesFlags: false }] : [],
     ),
   ]
 }

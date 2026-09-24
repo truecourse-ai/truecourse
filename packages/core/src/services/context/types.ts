@@ -71,8 +71,26 @@ export interface ContextDriverOptions {
   onProgress?: (done: number, total: number) => void;
 }
 
+/** A scope as it will be STORED, and the identity a new source of it takes. */
+export interface ContextSourceScope {
+  /** The config, validated and normalized — what the source row carries. */
+  config: ContextSourceConfig;
+  /** The id the source is keyed by: one clean ref segment, unique per workspace. */
+  sourceId: string;
+  /** The title it wears until its first sync corrects it. */
+  title: string;
+}
+
 export interface ContextSourceDriver {
   kind: ContextSourceKind;
+  /**
+   * Validate a scope and say what a NEW source of it is called. Implemented by
+   * a kind whose identity the routes cannot derive alone — an Atlassian source
+   * is named after the SITE its workspace connected, which only the driver can
+   * look up. A kind without it is one the routes name themselves (a repository
+   * by its name, a site by its URL).
+   */
+  scope?(config: ContextSourceConfig): Promise<ContextSourceScope>;
   check(config: ContextSourceConfig, opts?: ContextDriverOptions): Promise<ContextSourceCheck>;
   sync(
     config: ContextSourceConfig,

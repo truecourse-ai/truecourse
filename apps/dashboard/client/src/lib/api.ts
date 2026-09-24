@@ -22,6 +22,7 @@ import type {
 import type { GuardDependenciesView, GuardDependencyPatch } from '@/types/guard-dependencies';
 import type {
   ContextBindingsResponse,
+  ContextConnectionsResponse,
   ContextDocumentsViewResponse,
   ContextSource,
   ContextSourceCheck,
@@ -38,6 +39,9 @@ import type {
   CreditAdjustRequest,
   CreditMovementResponse,
   OperatorCreditsResponse,
+  OperatorEntitlementsResponse,
+  OperatorEntitlementMovementRequest,
+  OperatorEntitlementMovementResponse,
   JobsResponse,
   NotificationsResponse,
   AuthUser,
@@ -136,8 +140,8 @@ export type RepoResponse = {
   isGitRepo?: boolean;
 };
 
-// Capabilities — fetched once at app boot by AppProvider so any component can
-// ask `useCapability('sso')` or `useServerMode()`.
+// How the server runs — fetched once at app boot by AppProvider so any
+// component can ask `useServerMode()`.
 export function getCapabilities(): Promise<CapabilitiesResponse> {
   return fetchApi<CapabilitiesResponse>('/api/capabilities');
 }
@@ -883,6 +887,15 @@ export function listContextSources(): Promise<ContextSourcesResponse> {
   return fetchApi<ContextSourcesResponse>('/api/context/sources');
 }
 
+/**
+ * The tool accounts this workspace has connected. The route exists only where
+ * the Connections feature is mounted, so it is asked only for a kind the server
+ * said it can add — the add dialog's tool rows are exactly the connected ones.
+ */
+export function listContextConnections(): Promise<ContextConnectionsResponse> {
+  return fetchApi<ContextConnectionsResponse>('/api/connections');
+}
+
 /** The rows of the Documents view, composed and folded on the server. */
 export function listContextDocuments(query: {
   area?: string[];
@@ -949,6 +962,8 @@ export function addContextSource(body: {
   repoIds: string[];
   /** The GitHub installation a repository source syncs through. */
   installationId?: number;
+  /** False adds the source paused, with no sync; it syncs once resumed. */
+  sync?: boolean;
 }): Promise<{ source: ContextSourceView; jobId?: string }> {
   return fetchApi<{ source: ContextSourceView; jobId?: string }>('/api/context/sources', {
     method: 'POST',
@@ -1213,6 +1228,34 @@ export function grantCredits(body: CreditGrantRequest): Promise<CreditMovementRe
 
 export function adjustCredits(body: CreditAdjustRequest): Promise<CreditMovementResponse> {
   return fetchApi<CreditMovementResponse>('/api/operator/credits/adjust', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Entitlements: which enterprise features each workspace may use, and the two
+// movements an operator makes. The operator's own addresses, under the credits
+// console's rule: 404 to anyone who is not one.
+// ---------------------------------------------------------------------------
+
+export function fetchOperatorEntitlements(): Promise<OperatorEntitlementsResponse> {
+  return fetchApi<OperatorEntitlementsResponse>('/api/operator/entitlements');
+}
+
+export function grantEntitlement(
+  body: OperatorEntitlementMovementRequest,
+): Promise<OperatorEntitlementMovementResponse> {
+  return fetchApi<OperatorEntitlementMovementResponse>('/api/operator/entitlements/grant', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function revokeEntitlement(
+  body: OperatorEntitlementMovementRequest,
+): Promise<OperatorEntitlementMovementResponse> {
+  return fetchApi<OperatorEntitlementMovementResponse>('/api/operator/entitlements/revoke', {
     method: 'POST',
     body: JSON.stringify(body),
   });

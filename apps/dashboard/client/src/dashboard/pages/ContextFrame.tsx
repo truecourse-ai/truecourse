@@ -25,7 +25,7 @@ import { toast } from 'sonner';
 import { PageHeader, SideMenu } from '@/dashboard/ui/bits';
 import { startContextScan } from '@/dashboard/data/scan';
 import { toastDescribeWorkspace } from '@/dashboard/data/workspace-profile';
-import { toastNoLlmProvider } from '@/dashboard/shell/use-run-trigger';
+import { toastNoLlmProvider, toastOutOfCredits } from '@/dashboard/shell/use-run-trigger';
 import { useWorkspaceRuns } from '@/dashboard/shell/use-workspace-runs';
 import { useContextSources, useContextStaleness } from '@/dashboard/shell/use-context';
 import { AddContextDialog } from './AddContextDialog';
@@ -62,6 +62,12 @@ function ScanButton({ stale, scanning }: { stale: boolean; scanning: boolean }) 
             return;
           case 'probe-failed':
             toast.error(`Provider check failed: ${outcome.message}`);
+            return;
+          case 'prices-unavailable':
+            toast.error('Prices are not available yet', { description: outcome.message });
+            return;
+          case 'no-credits':
+            toastOutOfCredits(navigate, outcome.message);
             return;
           case 'busy':
             toast.error('A document scan is already running');
@@ -101,7 +107,7 @@ export function ContextFrame({
   right?: ReactNode;
   children: ReactNode;
 }) {
-  const { sources, refetch } = useContextSources(signal);
+  const { sources, addableKinds, refetch } = useContextSources(signal);
   const stale = useContextStaleness(signal);
   const { runs } = useWorkspaceRuns([]);
   // Add context opens by address: `?add=repository` is the install's return
@@ -174,6 +180,7 @@ export function ContextFrame({
         }}
         initialKind={addKind}
         sources={sources}
+        addableKinds={addableKinds}
         onAdded={() => void refetch()}
       />
     </div>

@@ -290,7 +290,10 @@ describe('claude agent session driver', () => {
       yield partial({ type: 'message_start', message: { id: 'turn-1' } });
       yield partial({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu-1', name: `mcp__${SESSION_MCP_SERVER_NAME}__probe` } });
       yield assistant([{ type: 'tool_use', id: 'tu-1', name: `mcp__${SESSION_MCP_SERVER_NAME}__probe`, input: { value: 'hi' } }]);
-      await ctx.tools.get('probe')!.handler({ value: 'hi' }, {});
+      // The harness starts the tool as its block closes, before the call's stream stops.
+      const ran = ctx.tools.get('probe')!.handler({ value: 'hi' }, {});
+      yield partial({ type: 'message_stop' });
+      await ran;
       // The next turn, which is what the wait was on.
       yield partial({ type: 'message_start', message: { id: 'turn-2' } });
       yield partial({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'done' } });
@@ -657,6 +660,106 @@ describe('claude agent session driver', () => {
     // The merged turn is flushed BEFORE its own tool's result event.
     const types = events.map((e) => e.type);
     expect(types.indexOf('assistant-turn')).toBeLessThan(types.indexOf('tool-result'));
+  });
+
+  it('records each call at the usage its stream stopped on, and the session at what its result reports', async () => {
+    // The shape of a live session (Agent SDK 0.3.233, 2026-09-22): every block
+    // of a call repeats the usage of `message_start` — three output tokens here
+    // — the harness starts each tool as its block closes, and only
+    // `message_delta` carries the call's real output.
+    const probe = `mcp__${SESSION_MCP_SERVER_NAME}__probe`;
+    const partial = (event: object): SdkMessage => ({ type: 'stream_event', parent_tool_use_id: null, event });
+    const block = (id: string, content: Array<Record<string, unknown>>, usage: Record<string, number>): SdkMessage => ({
+      type: 'assistant',
+      parent_tool_use_id: null,
+      session_id: 'prov-1',
+      message: { id, content: content as never, usage },
+    });
+    const first = { input_tokens: 1421, output_tokens: 3, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const second = { input_tokens: 8, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 6423 };
+    const order: string[] = [];
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      const tool = ctx.tools.get('probe')!;
+      yield partial({ type: 'message_start', message: { id: 'msg-1', usage: first } });
+      yield { type: 'system', subtype: 'thinking_tokens' };
+      yield block('msg-1', [{ type: 'thinking', thinking: 'two notes' }], first);
+      yield block('msg-1', [{ type: 'tool_use', id: 'tu-a', name: probe, input: { value: 'a' } }], first);
+      const a = tool.handler({ value: 'a' }, {});
+      yield block('msg-1', [{ type: 'tool_use', id: 'tu-b', name: probe, input: { value: 'b' } }], first);
+      const b = tool.handler({ value: 'b' }, {});
+      yield partial({ type: 'message_delta', usage: { ...first, output_tokens: 4898 } });
+      order.push('stop');
+      yield partial({ type: 'message_stop' });
+      await Promise.all([a, b]);
+      yield { type: 'user', message: { role: 'user', content: 'results' }, parent_tool_use_id: null };
+      yield partial({ type: 'message_start', message: { id: 'msg-2', usage: second } });
+      yield block('msg-2', [{ type: 'text', text: 'done' }], second);
+      yield partial({ type: 'message_delta', usage: { input_tokens: null, output_tokens: 108, cache_read_input_tokens: null, cache_creation_input_tokens: null } });
+      yield partial({ type: 'message_stop' });
+      yield {
+        ...success({ verdict: 'keep' }),
+        usage: { input_tokens: 1429, output_tokens: 5006, cache_read_input_tokens: 0, cache_creation_input_tokens: 6423 },
+      };
+    });
+    const events: SessionEventBody[] = [];
+    const { handle } = runSession(sdk, {
+      onEvent: (e) => {
+        events.push(e);
+        order.push(e.type);
+      },
+    });
+    expect((await handle.done).kind).toBe('outcome');
+
+    const turns = events.filter((e): e is Extract<SessionEventBody, { type: 'assistant-turn' }> => e.type === 'assistant-turn');
+    // One turn per API call, whatever number of blocks and tools it carried.
+    expect(turns).toHaveLength(2);
+    expect(turns[0]).toMatchObject({
+      toolCall: { name: 'probe', args: { value: 'a' } },
+      usage: { inputTokens: 1421, outputTokens: 4898, cacheReadTokens: 0, cacheCreateTokens: 0 },
+    });
+    expect(turns[1]).toMatchObject({
+      text: 'done',
+      usage: { inputTokens: 8, outputTokens: 108, cacheReadTokens: 0, cacheCreateTokens: 6423 },
+    });
+    // Both tools ran, after the call that asked for them ended and was recorded.
+    expect(order.slice(order.indexOf('stop'))).toEqual(['stop', 'assistant-turn', 'tool-result', 'tool-result', 'assistant-turn']);
+
+    const sum = (key: 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheCreateTokens') =>
+      turns.reduce((total, turn) => total + turn.usage[key], 0);
+    expect({
+      input_tokens: sum('inputTokens'),
+      output_tokens: sum('outputTokens'),
+      cache_read_input_tokens: sum('cacheReadTokens'),
+      cache_creation_input_tokens: sum('cacheCreateTokens'),
+    }).toEqual({ input_tokens: 1429, output_tokens: 5006, cache_read_input_tokens: 0, cache_creation_input_tokens: 6423 });
+  });
+
+  it('never records a call twice when its blocks land on either side of a recorded turn', async () => {
+    const usage = { input_tokens: 2, output_tokens: 8, cache_read_input_tokens: 6232, cache_creation_input_tokens: 6538 };
+    const probe = `mcp__${SESSION_MCP_SERVER_NAME}__probe`;
+    const block = (content: Array<Record<string, unknown>>): SdkMessage => ({
+      type: 'assistant',
+      parent_tool_use_id: null,
+      session_id: 'prov-1',
+      message: { id: 'msg-1', content: content as never, usage },
+    });
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      const tool = ctx.tools.get('probe')!;
+      yield block([{ type: 'tool_use', id: 'tu-a', name: probe, input: { value: 'a' } }]);
+      await tool.handler({ value: 'a' }, {});
+      yield block([{ type: 'tool_use', id: 'tu-b', name: probe, input: { value: 'b' } }]);
+      await tool.handler({ value: 'b' }, {});
+      yield success({ verdict: 'keep' });
+    });
+    const { handle, events } = runSession(sdk);
+    await handle.done;
+    const turns = events.filter((e): e is Extract<SessionEventBody, { type: 'assistant-turn' }> => e.type === 'assistant-turn');
+    expect(turns.map((t) => t.usage.cacheCreateTokens)).toEqual([6538, 0]);
+    expect(turns.map((t) => t.usage.inputTokens)).toEqual([2, 0]);
   });
 
   it('ignores subagent-attributed assistant messages', async () => {

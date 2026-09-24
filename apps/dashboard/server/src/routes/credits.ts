@@ -21,15 +21,17 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
+  CREDITS_EXHAUSTED,
+  CREDITS_PRICES_UNAVAILABLE,
+  CREDITS_PRICES_UNAVAILABLE_MESSAGE,
   usageJobTypeWord,
   type CreditEntryView,
   type CreditsResponse,
   type OperatorCreditsResponse,
 } from '@truecourse/shared';
-import { createAppError } from '@truecourse/core/lib/errors';
 import type { CreditStatementRecord } from '@truecourse/core/lib/credits-store';
 import { readCreditBalance } from '@truecourse/core/lib/credits-store';
-import { log } from '@truecourse/core/lib/logger';
+import { priceOfConfig } from '@truecourse/core/services/llm/provider';
 import {
   adjustWorkspaceCredits,
   creditStatement,
@@ -39,7 +41,16 @@ import {
   pausedRuns,
   resumePausedJob,
 } from '../services/credits.service.js';
-import { orgOf, workspaceOnCredits } from '../services/workspace-llm.service.js';
+import {
+  creditsPriceModel,
+  orgOf,
+  workspaceOnCredits,
+} from '../services/workspace-llm.service.js';
+import { operatorOnly } from '../middleware/operator.js';
+import {
+  resolveWorkspaceName,
+  type WorkspaceNameLookup,
+} from '../services/workspace-name.service.js';
 
 /** One statement line, named in the product's words rather than a job type's id. */
 function toEntry(row: CreditStatementRecord): CreditEntryView {
@@ -68,15 +79,18 @@ function toEntry(row: CreditStatementRecord): CreditEntryView {
  * spending TrueCourse's credits. `true` means the route has answered and must
  * stop.
  *
- * At ZERO there is nothing to spend and the start is refused outright. BELOW
+ * At ZERO there is nothing to spend and the start is refused outright; with
+ * no price for the model the run would be charged as, it could not be debited
+ * and is refused too (503 `credits-prices-unavailable`). BELOW
  * WHAT THE RUN WOULD COST the answer asks instead of deciding: the run may
  * still be worth starting, it will simply pause part-way, and only the person
  * paying can say. A second request carrying `confirmCredits` is that answer.
  *
  * `estimateUsd` is the run's ceiling cost when the caller could work one out.
  * No hosted start route can today: every estimator reads a repository's working
- * tree, and a route has not cloned one — so the gate that fires is the empty
- * one, and a start with money in the balance goes straight through.
+ * tree, and a route has not cloned one — so the gates that fire are the empty
+ * one and the price, and a priced start with money in the balance goes
+ * straight through.
  */
 export async function refusedWithoutCredits(
   req: Request,
@@ -85,10 +99,21 @@ export async function refusedWithoutCredits(
 ): Promise<boolean> {
   const orgId = orgOf(req);
   if (!(await workspaceOnCredits(orgId))) return false;
-  const check = await creditsStartCheck(orgId, opts.estimateUsd);
+  const check = await creditsStartCheck(orgId, {
+    priceModel: creditsPriceModel(),
+    ...(opts.estimateUsd === undefined ? {} : { estimateUsd: opts.estimateUsd }),
+  });
   if (check.verdict === 'ok') return false;
   if (check.verdict === 'refused') {
-    res.status(409).json({ error: 'credits-exhausted', message: check.message, credits: check });
+    // No price is the server's state, not the workspace's: it clears once the
+    // price list has been fetched, so it is answered as unavailable.
+    if (check.reason === 'prices-unavailable') {
+      res
+        .status(503)
+        .json({ error: CREDITS_PRICES_UNAVAILABLE, message: check.message, credits: check });
+      return true;
+    }
+    res.status(409).json({ error: CREDITS_EXHAUSTED, message: check.message, credits: check });
     return true;
   }
   if ((req.body as { confirmCredits?: unknown } | undefined)?.confirmCredits === true) return false;
@@ -136,6 +161,16 @@ export function createCreditsRouter(): Router {
           });
           return;
         }
+        // Carried on with no price, the run would refuse at its start and end
+        // failed; left paused, it can be carried on once the price is there.
+        const priceModel = creditsPriceModel();
+        if (priceModel !== null && !(await priceOfConfig({ model: priceModel }))) {
+          res.status(503).json({
+            error: CREDITS_PRICES_UNAVAILABLE,
+            message: CREDITS_PRICES_UNAVAILABLE_MESSAGE,
+          });
+          return;
+        }
       }
       const jobId = await resumePausedJob(orgId, req.params.jobId as string);
       if (!jobId) {
@@ -158,15 +193,6 @@ const movementSchema = z.object({
   resumePaused: z.boolean().optional(),
 });
 
-/** Not an operator? Then there is no such route. */
-function operatorOnly(req: Request, _res: Response, next: NextFunction): void {
-  if (req.user?.isOperator) {
-    next();
-    return;
-  }
-  next(createAppError('The server has no such route.', 404));
-}
-
 /** What the operator's side is built from beyond the ledger itself. */
 export interface OperatorCreditsRouterOptions {
   /**
@@ -175,42 +201,7 @@ export interface OperatorCreditsRouterOptions {
    * Absent on a server with no identity provider, and then every row is listed
    * by its id.
    */
-  workspaceName?: (organizationId: string) => Promise<string | undefined>;
-}
-
-/**
- * Ids already complained about, so a provider that will not name a workspace
- * costs the log ONE line rather than one per read of the page.
- */
-const unnamed = new Set<string>();
-
-/**
- * A workspace's name, or null. A lookup that fails never fails the page: the
- * operator is reading balances, and a row without a name is still a row. It
- * simply goes back to being an id.
- */
-async function resolveWorkspaceName(
-  lookup: OperatorCreditsRouterOptions['workspaceName'],
-  organizationId: string,
-): Promise<string | null> {
-  if (!lookup) return null;
-  try {
-    const name = await lookup(organizationId);
-    if (name) {
-      unnamed.delete(organizationId);
-      return name;
-    }
-    warnUnnamed(organizationId, 'the identity provider has no name for it');
-  } catch (e) {
-    warnUnnamed(organizationId, (e as Error).message);
-  }
-  return null;
-}
-
-function warnUnnamed(organizationId: string, why: string): void {
-  if (unnamed.has(organizationId)) return;
-  unnamed.add(organizationId);
-  log.warn(`[credits] could not name ${organizationId}: ${why}`);
+  workspaceName?: WorkspaceNameLookup;
 }
 
 export function createOperatorCreditsRouter(

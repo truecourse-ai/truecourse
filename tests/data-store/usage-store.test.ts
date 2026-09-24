@@ -43,6 +43,10 @@ function delta(over: Partial<UsageDelta> = {}): UsageDelta {
     costUsd: 0.25,
     startedAt: '2026-06-10T10:00:00.000Z',
     finishedAt: '2026-06-10T10:01:00.000Z',
+    // A test that names only the total spent it all on input.
+    inputCostUsd: over.costUsd ?? 0.25,
+    outputCostUsd: 0,
+    cachedCostUsd: 0,
     ...over,
   };
 }
@@ -91,6 +95,11 @@ describe('PgUsageStore', () => {
       startedAt: '2026-06-10T09:55:00.000Z',
       finishedAt: '2026-06-10T10:20:00.000Z',
       model: 'claude-opus-5-1',
+      // Each bucket on its own, and the four added up.
+      inputTokens: 105,
+      outputTokens: 11,
+      cacheReadTokens: 1000,
+      cacheCreateTokens: 50,
       tokens: 1166,
       calls: 3,
     });
@@ -142,13 +151,40 @@ describe('PgUsageStore', () => {
         repoFullName: null,
         startedAt: '2026-06-03T08:00:00.000Z',
         costUsd: 4,
+        inputCostUsd: 1,
+        outputCostUsd: 2,
+        cachedCostUsd: 1,
       }),
     );
 
     const days = await store.series(ALL, 'day');
     expect(days).toEqual([
-      { at: '2026-06-01', jobType: 'repo.guard-generate', costUsd: 3, tokens: 2320 },
-      { at: '2026-06-03', jobType: 'context.scan', costUsd: 4, tokens: 1160 },
+      // The four stored buckets per point, never summed into one, and the
+      // cost by kind beside the total.
+      {
+        at: '2026-06-01',
+        jobType: 'repo.guard-generate',
+        costUsd: 3,
+        inputCostUsd: 3,
+        outputCostUsd: 0,
+        cachedCostUsd: 0,
+        inputTokens: 200,
+        outputTokens: 20,
+        cacheReadTokens: 2000,
+        cacheCreateTokens: 100,
+      },
+      {
+        at: '2026-06-03',
+        jobType: 'context.scan',
+        costUsd: 4,
+        inputCostUsd: 1,
+        outputCostUsd: 2,
+        cachedCostUsd: 1,
+        inputTokens: 100,
+        outputTokens: 10,
+        cacheReadTokens: 1000,
+        cacheCreateTokens: 50,
+      },
     ]);
 
     // June 1 2026 is a Monday, so both days fall in the one week bucket.

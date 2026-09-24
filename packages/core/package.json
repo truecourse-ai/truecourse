@@ -129,6 +129,11 @@
       "types": "./dist/lib/credits-store.d.ts",
       "import": "./dist/lib/credits-store.js"
     },
+    "./lib/entitlements-store": {
+      "truecourse-source": "./src/lib/entitlements-store.ts",
+      "types": "./dist/lib/entitlements-store.d.ts",
+      "import": "./dist/lib/entitlements-store.js"
+    },
     "./lib/workspace-profile-store": {
       "truecourse-source": "./src/lib/workspace-profile-store.ts",
       "types": "./dist/lib/workspace-profile-store.d.ts",

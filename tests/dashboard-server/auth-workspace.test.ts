@@ -1,7 +1,16 @@
 import express, { type Express } from 'express';
 import request from 'supertest';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { EnterpriseFeature } from '@truecourse/shared';
+import {
+  resetEntitlementsStore,
+  setEntitlementsStore,
+} from '@truecourse/core/lib/entitlements-store';
 import { createAuthRouter } from '../../apps/dashboard/server/src/auth/workos-auth';
+import {
+  clearServerFeatures,
+  registerServerFeature,
+} from '../../apps/dashboard/server/src/features';
 import { captureWorkspaceCreated } from '../../apps/dashboard/server/src/observability/posthog';
 import {
   TEST_WORKSPACE_DESCRIPTION,
@@ -356,6 +365,53 @@ describe('GET /api/auth/me', () => {
     expect(second.body.user.organizationName).toBe('Org org_me_1');
     // Cached for the life of the process: one lookup, two requests.
     expect(m.calls.getOrg).toEqual(['org_me_1']);
+  });
+
+  // WHAT THIS WORKSPACE MAY USE rides the authenticated answer, because it is
+  // the workspace's fact and not the deployment's. The public capabilities
+  // endpoint no longer carries an edition at all, so there is one source of it.
+  it('carries the edition and the entitlements of the workspace behind the session', async () => {
+    const m = makeWorkos();
+    verify.mockResolvedValue({
+      user: { id: 'user_1', email: 'u@acme.test', organizationId: 'org_me_1' },
+    });
+    // The deployment carries the bundle, and this workspace was granted one of
+    // its features.
+    registerServerFeature({ name: 'a feature of this test', mount: () => [] });
+    setEntitlementsStore({
+      of: async (org) => (org === 'org_me_1' ? (['connections'] as EnterpriseFeature[]) : []),
+      workspaces: async () => [],
+      grant: async () => {
+        throw new Error('not used');
+      },
+      revoke: async () => false,
+    });
+    try {
+      const res = await request(makeApp(m.workos)).get('/api/auth/me').expect(200);
+      expect(res.body.entitlements).toEqual(['connections']);
+      expect(res.body.edition).toBe('enterprise');
+    } finally {
+      clearServerFeatures();
+      resetEntitlementsStore();
+    }
+  });
+
+  // No bundle beside the tree means nothing to be granted, and the store is
+  // never even reached: the open edition answers without a lookup.
+  it('answers community, reading no store, when this deployment carries no bundle', async () => {
+    const m = makeWorkos();
+    verify.mockResolvedValue({
+      user: { id: 'user_1', email: 'u@acme.test', organizationId: 'org_me_1' },
+    });
+    const res = await request(makeApp(m.workos)).get('/api/auth/me').expect(200);
+    expect(res.body).toMatchObject({ edition: 'community', entitlements: [] });
+  });
+
+  it('answers community for a session that is in no workspace yet', async () => {
+    const m = makeWorkos();
+    verify.mockResolvedValue({ user: { id: 'user_1', email: 'u@acme.test' } });
+    const res = await request(makeApp(m.workos)).get('/api/auth/me').expect(200);
+    expect(res.body).toMatchObject({ edition: 'community', entitlements: [] });
   });
 
   it('moves an org-less session into the workspace its user already belongs to', async () => {

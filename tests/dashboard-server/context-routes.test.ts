@@ -34,7 +34,14 @@ import { memoryContextStore, type MemoryContextStore } from '../helpers/memory-c
 import {
   setContextDriverDeps,
   setContextEventPublisher,
+  setFeatureContextDrivers,
 } from '../../apps/dashboard/server/src/services/context.service';
+// Through the package specifier the ROUTES resolve, so the refusal the driver
+// throws is the class they narrow on — the same instance in one process.
+import {
+  ContextConfigError,
+  type ContextSourceDriver,
+} from '@truecourse/core/services/context';
 import { contextDocRef } from '@truecourse/core/lib/context-ref';
 import {
   captureAction,
@@ -163,7 +170,12 @@ describe('POST /api/context/sources for a workspace that has not described itsel
 describe('GET /api/context/sources', () => {
   it('is empty for a workspace with nothing registered', async () => {
     const res = await request(app).get('/api/context/sources').expect(200);
-    expect(res.body).toEqual({ sources: [], changedAt: null });
+    // The kinds are the server's own answer: the open edition drives two.
+    expect(res.body).toEqual({
+      sources: [],
+      changedAt: null,
+      addableKinds: ['repository', 'site'],
+    });
   });
 
   it('lists each source with its document count and its readers', async () => {
@@ -214,6 +226,16 @@ describe('POST /api/context/sources', () => {
       workspaceId: TEST_ORG,
       properties: { kind: 'site' },
     });
+  });
+
+  it('stores a source paused and enqueues nothing when told not to sync', async () => {
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'site', config: { llmsTxtUrl: 'https://docs.acme.com/llms.txt' }, repoIds: [], sync: false })
+      .expect(202);
+    expect(res.body.source).toMatchObject({ kind: 'site', status: 'paused' });
+    expect(res.body.jobId).toBeUndefined();
+    expect(syncs).toEqual([]);
   });
 
   it('links nothing when no repository is named', async () => {
@@ -938,5 +960,146 @@ describe('the repository’s links', () => {
 
   it('is a 404 for a repository this workspace cannot see', async () => {
     await request(app).get('/api/repos/not-a-slug/context/bindings').expect(404);
+  });
+});
+
+/**
+ * A kind no open driver carries: an edition registers one, and every route
+ * treats it as it treats a site — it is offered, checked, added under the id
+ * the DRIVER named, edited and synced, and the open edition (which registered
+ * none) refuses it as unavailable.
+ */
+describe('a kind an edition registered', () => {
+  /** A scripted Jira driver, standing in for the enterprise bundle's. */
+  function jiraDriver(): ContextSourceDriver {
+    return {
+      kind: 'jira',
+      async scope(config) {
+        const projectKey = String((config as { projectKey?: unknown }).projectKey ?? '').trim();
+        if (!projectKey) {
+          throw new ContextConfigError('A Jira source needs the project key it reads.');
+        }
+        return {
+          config: { projectKey: projectKey.toUpperCase() },
+          sourceId: `jira-acme-atlassian-net-${projectKey.toLowerCase()}`,
+          title: `${projectKey.toUpperCase()} (Jira)`,
+        };
+      },
+      async check(config) {
+        return {
+          title: `${String((config as { projectKey: string }).projectKey)} (Jira)`,
+          count: 2,
+          titles: ['ENG-1: Orders', 'ENG-2: Refunds'],
+          skipped: [],
+        };
+      },
+      async sync() {
+        return { documents: [], added: [], changed: [], removed: [], unchanged: [], skipped: [] };
+      },
+    };
+  }
+
+  beforeEach(() => {
+    setFeatureContextDrivers([{ kind: 'jira', driver: () => jiraDriver() }]);
+  });
+
+  afterEach(() => {
+    setFeatureContextDrivers([]);
+  });
+
+  it('is named among the kinds this server can add', async () => {
+    const res = await request(app).get('/api/context/sources').expect(200);
+    expect(res.body.addableKinds).toEqual(['repository', 'site', 'jira']);
+  });
+
+  it('previews through the driver, storing nothing', async () => {
+    const res = await request(app)
+      .post('/api/context/sources/preview')
+      .send({ kind: 'jira', config: { projectKey: 'ENG' } })
+      .expect(200);
+    expect(res.body).toMatchObject({ title: 'ENG (Jira)', count: 2 });
+    expect(await store.listSources(TEST_ORG)).toHaveLength(0);
+  });
+
+  it('is stored under the id the driver named, with its title, and synced', async () => {
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'jira', config: { projectKey: 'ENG' } })
+      .expect(202);
+    expect(res.body.source).toMatchObject({
+      id: 'jira-acme-atlassian-net-eng',
+      kind: 'jira',
+      title: 'ENG (Jira)',
+      config: { projectKey: 'ENG' },
+    });
+    expect(syncs).toEqual([
+      { workspaceOrgId: TEST_ORG, sourceId: 'jira-acme-atlassian-net-eng', source: 'add' },
+    ]);
+    expect(captureAction).toHaveBeenCalledWith(
+      EVENTS.contextSourceAdded,
+      expect.objectContaining({ properties: { kind: 'jira' } }),
+    );
+  });
+
+  it('refuses a second source of the same project', async () => {
+    await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'jira', config: { projectKey: 'ENG' } })
+      .expect(202);
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'jira', config: { projectKey: 'eng' } })
+      .expect(409);
+    expect(res.body.error).toContain('already a source of this workspace');
+  });
+
+  it('refuses a scope the driver will not take', async () => {
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'jira', config: {} })
+      .expect(400);
+    expect(res.body.error).toContain('needs the project key');
+  });
+
+  it('takes a new scope and syncs it', async () => {
+    await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'jira', config: { projectKey: 'ENG' } })
+      .expect(202);
+    syncs.length = 0;
+    const res = await request(app)
+      .patch('/api/context/sources/jira-acme-atlassian-net-eng')
+      .send({ config: { projectKey: 'ENG', jql: 'labels = spec' } })
+      .expect(202);
+    // The id a source was created with is the id it keeps.
+    expect(res.body.source.id).toBe('jira-acme-atlassian-net-eng');
+    expect(syncs).toEqual([
+      { workspaceOrgId: TEST_ORG, sourceId: 'jira-acme-atlassian-net-eng', source: 'manual' },
+    ]);
+  });
+
+  it('refuses re-pointing a scope at what another source already reads', async () => {
+    await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'jira', config: { projectKey: 'ENG' } })
+      .expect(202);
+    await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'jira', config: { projectKey: 'OPS' } })
+      .expect(202);
+    const res = await request(app)
+      .patch('/api/context/sources/jira-acme-atlassian-net-ops')
+      .send({ config: { projectKey: 'ENG' } })
+      .expect(409);
+    expect(res.body.error).toContain('already a source of this workspace');
+  });
+
+  it('is unavailable again the moment nothing registers it', async () => {
+    setFeatureContextDrivers([]);
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'jira', config: { projectKey: 'ENG' } })
+      .expect(400);
+    expect(res.body.error).toContain('not available yet');
   });
 });

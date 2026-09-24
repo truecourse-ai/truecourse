@@ -13,7 +13,7 @@
  */
 
 import type { GuardApiExpect, GuardJsonMatcher, GuardStreamMatcher } from '@truecourse/shared'
-import { describeComparison, describeJsonMatcher } from '@truecourse/shared'
+import { describeComparison, describeJsonMatcher, regexLiteral } from '@truecourse/shared'
 import { validateAgainstSchema } from '@truecourse/shared/openapi'
 import { matchComparison, type ExpectMismatch } from '../expect.js'
 import { lookupJsonPath, JSON_PATH_MISS, captureValueToString } from './vars.js'
@@ -254,7 +254,7 @@ function describeTextExpectation(label: string, matcher: GuardStreamMatcher): st
   const parts: string[] = []
   if (matcher.equals !== undefined) parts.push(`${label} equals ${JSON.stringify(truncate(matcher.equals))}`)
   if (matcher.contains !== undefined) parts.push(`${label} contains ${JSON.stringify(matcher.contains)}`)
-  if (matcher.matches !== undefined) parts.push(`${label} matches /${matcher.matches}/`)
+  if (matcher.matches !== undefined) parts.push(`${label} matches ${regexLiteral(matcher.matches, matcher.flags)}`)
   if (matcher.compare) parts.push(`${label} ${describeComparison(matcher.compare)}`)
   return parts.join(' · ')
 }
@@ -298,15 +298,16 @@ function matchText(
     let re: RegExp | null = null
     let reError = ''
     try {
-      re = new RegExp(matcher.matches)
+      re = new RegExp(matcher.matches, matcher.flags)
     } catch (e) {
       reError = e instanceof Error ? e.message : String(e)
     }
     if (!re || !re.test(value)) {
+      const literal = regexLiteral(matcher.matches, matcher.flags)
       return {
-        expected: `${label} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
+        expected: `${label} matches ${literal}${reError ? ` (invalid regex: ${reError})` : ''}`,
         actual: `${label} was ${JSON.stringify(truncate(value))}`,
-        detail: [`expected ${label} to match /${matcher.matches}/`, `--- actual ${label} ---`, value],
+        detail: [`expected ${label} to match ${literal}`, `--- actual ${label} ---`, value],
       }
     }
   }
@@ -361,7 +362,7 @@ function matchJsonPath(
 
     const text = normalizeText(captureValueToString(value))
     if (matcher.contains !== undefined || matcher.matches !== undefined) {
-      const m = matchText(label, { contains: matcher.contains, matches: matcher.matches }, text)
+      const m = matchText(label, { contains: matcher.contains, matches: matcher.matches, flags: matcher.flags }, text)
       if (m) return { ...m, subject: 'json' }
     }
     // The value at a path is usually already a number, so the comparison reads it

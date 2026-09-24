@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto'
 import type { InterfaceResource, InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
 import {
   describeWebLocator,
+  regexLiteral,
   GuardStreamMatcherSchema,
   GuardWebCapturesSchema,
   GuardWebExpectSchema,
@@ -76,6 +77,10 @@ const SEED_JSON_SCHEMA = jsonSchemaHint(SeedProposalSchema)
 const FIDELITY_JSON_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
 /** The realization-matching verdict JSON Schema, from the runner's Zod source. */
 const MATCH_JSON_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
+
+/** How every authoring prompt states the regex contract a `matches` / log `pattern` follows. */
+const REGEX_RULE =
+  'a regex is JavaScript source with no /delimiters/ and no inline (?i); its flags go in a sibling "flags", any of i, m, s (e.g. "flags": "i")'
 
 function fingerprint(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 16)
@@ -199,7 +204,7 @@ The program is built once from the recipe and invoked per step. Each step's
 the entrypoint in \`run\` — list only the arguments. \`stdin\` is piped in; \`repeat\`
 runs the step N times (each iteration must satisfy \`expect\`). A step asserts on
 \`exit\` (exact code), \`stdout\`/\`stderr\` (one of equals | contains | matches — a
-regex — compared AFTER normalization), and \`files\` (a sandbox-relative path →
+regex — compared AFTER normalization; ${REGEX_RULE}), and \`files\` (a sandbox-relative path →
 exists | absent | equals | contains). Seed inputs declaratively with
 \`setup.files\` (path → content) and \`setup.env\`; there is no shell escape.
 
@@ -367,7 +372,7 @@ steps below are the rest. A \`request\` step carries:
 - \`expect\` asserts on \`status\` (exact code), \`headers\` (name → one of
   equals | contains | matches), \`body\` (the raw text, same matchers, compared
   AFTER normalization), and \`json\` (dotted path → equals — a JSON value compared
-  structurally — | contains | matches | exists | absent).
+  structurally — | contains | matches | exists | absent). In every \`matches\`, ${REGEX_RULE}.
 - \`repeat\` runs the step N times (each iteration must satisfy \`expect\`).
 Steps of one scenario share a COOKIE JAR, like a browser: whatever a step's response
 sets via \`Set-Cookie\` is sent back on every later step of that scenario (and on no
@@ -392,7 +397,7 @@ behavior needs none of them and must not declare any.
   descriptive message" is asserted. The two are exclusive.
 - \`{ "signal": { "name": "SIGTERM" | "SIGINT", "expect": { "exitCode": 0, "withinMs": <n> } } }\`
   — signal the running service. This is the graceful-shutdown claim, whole.
-- \`{ "logs": { "stream": "stdout" | "stderr", "match": "<substring>" | { "pattern": "<regex>" },
+- \`{ "logs": { "stream": "stdout" | "stderr", "match": "<substring>" | { "pattern": "<regex>", "flags"?: "i" },
   "sinceLastStep": true, "count": <n> } }\` — assert on what the service WROTE, per
   line. \`sinceLastStep\` opens the window where the PREVIOUS step BEGAN, so it holds
   everything that step caused — including a line the service flushes after its
@@ -735,7 +740,8 @@ values. No application Refresh button or separate reload interface is needed.
 # What an expectation may assert
 A web \`expect\` waits on, then asserts, one or more of:
 - \`text\` — the page's visible text (or, with \`within\`, one element's), using the
-  same equals | contains | matches vocabulary every stream matcher has;
+  same equals | contains | matches vocabulary every stream matcher has
+  (${REGEX_RULE});
 - \`url\` — the address, origin-stripped (above);
 - \`visible\` — an element (or a list of them) that must be present and visible: the
   plainest form of "the page arrived";
@@ -1845,9 +1851,10 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       lines.push(
         '',
         'CORRECTION — this `matches` value is not a valid regular expression. A "matches"',
-        'is a JS regex SOURCE compiled with new RegExp — it must compile. Fix the pattern,',
+        'is a JS regex SOURCE compiled with new RegExp(matches, flags) — it must compile.',
+        `Fix the pattern (${REGEX_RULE}),`,
         'or use "contains" for a literal substring (or "equals" for the whole value):',
-        `  step ${bad.step}, ${bad.where}: /${bad.pattern}/ — ${bad.error}`,
+        `  step ${bad.step}, ${bad.where}: ${regexLiteral(bad.pattern, bad.flags)} — ${bad.error}`,
       )
     }
     lines.push('Return the COMPLETE scenario again, as one JSON object matching the schema.')
