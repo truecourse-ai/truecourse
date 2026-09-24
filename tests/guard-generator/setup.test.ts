@@ -495,6 +495,7 @@ describe('runGuardSetup — skip when settled', () => {
       'needs',
     ])
     expect(Object.keys(first.steps.find((s) => s.key === 'seed')?.inputComponents ?? {})).toEqual([
+      'stage',
       'recipe.contract',
       'catalog',
       'schema',
@@ -512,6 +513,30 @@ describe('runGuardSetup — skip when settled', () => {
     expect(facts).toContain('recipe | re-opened: needs moved')
     expect(facts.filter((line) => line.startsWith('seed | re-opened'))).toEqual([])
     expect(statuses(second)).toMatchObject({ seed: 'skipped:unchanged' })
+  })
+
+  // A new name on a stored row is filled in, never moved — except the stage
+  // version: a seed row settled under an earlier stage re-opens the step.
+  it('a seed row from an earlier stage re-opens the seed step', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } })
+    const probe = probeStub()
+    const seed = seedSeam()
+    const first = await runAndPersist(r, { probe: probe.probe, seedSession: seed.seam })
+    const { stage: _stage, ...earlier } = first.steps.find((s) => s.key === 'seed')!.inputComponents!
+    writeGuardSetup(r, {
+      ...first,
+      steps: first.steps.map((s) => (s.key === 'seed' ? { ...s, inputComponents: earlier } : s)),
+    })
+    const facts: string[] = []
+    const second = await runAndPersist(r, {
+      probe: probe.probe,
+      seedSession: seed.seam,
+      onStepFact: (step, line) => facts.push(`${step} | ${line}`),
+    })
+    expect(facts).toContain('seed | re-opened: stage moved')
+    expect(statuses(second).seed).not.toBe('skipped:unchanged')
+    expect(statuses(second)).toMatchObject({ recipe: 'skipped:unchanged', catalog: 'skipped:unchanged' })
   })
 
   // The seed's cold-clone proof is where the recipe's `install`/`build` first

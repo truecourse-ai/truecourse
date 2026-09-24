@@ -137,6 +137,7 @@ import { probeApiServers } from './endpoint-probe.js'
 import { deriveExternalsSkeleton } from './externals-skeleton.js'
 import { extendCredentialRegistrations } from './credential-registrations.js'
 import {
+  SEED_STAGE_VERSION,
   readExistingSeedScript,
   seedDraftGate,
   type SeedDraftDatabase,
@@ -580,8 +581,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     const inputComponents = stepInputComponents(repoRoot, row.key, { detectionJson: detectionSnapshot, schemaFiles })
     steps.push({ ...row, ...(Object.keys(inputComponents).length > 0 ? { inputComponents } : {}) })
     const settledRow = settled(row.key)
-    if (settledRow === null || settledRow.inputFingerprint === row.inputFingerprint) return
+    if (settledRow === null) return
     const moved = movedNamedInputs(settledRow.inputComponents, inputComponents)
+    // A stage bump re-opens a step whose fingerprint did not move.
+    if (settledRow.inputFingerprint === row.inputFingerprint && !moved?.includes(STAGE_INPUT)) return
     fact(row.key, moved ? `re-opened: ${moved.join(', ') || 'no named input'} moved` : 're-opened: the settled row names no inputs')
   }
 
@@ -1777,6 +1780,13 @@ export function authFingerprint(repoRoot: string): string {
 }
 
 /**
+ * The named input a step whose session carries a hand-bumped stage version
+ * records it under. Unlike every other name, one missing from a stored row
+ * re-opens the step: that row settled under an earlier stage.
+ */
+const STAGE_INPUT = 'stage'
+
+/**
  * A step's fingerprint inputs BY NAME, off the tree as it stands: what each
  * step fingerprint above folds, one digest per input, so two rows of the same
  * step can be compared input by input. `detect` has no fingerprint and no inputs.
@@ -1807,6 +1817,7 @@ function stepInputComponents(
       }
     case 'seed':
       return {
+        [STAGE_INPUT]: `seed-v${SEED_STAGE_VERSION}`,
         'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'preparations')),
         catalog: digest(dependencyCatalogIdentity(repoRoot)),
         schema: digest(schemaFilesFingerprint(repoRoot, schemaFiles)),
@@ -1877,6 +1888,8 @@ export function settledSteps(
  * current scheme, so changing what a step folds re-opens nothing by itself. A
  * row that predates the names is compared against the step's OLD fingerprint,
  * once — it then settles again with names, and never takes this path twice.
+ * The one exception is a step's {@link STAGE_INPUT}: a row must carry the
+ * stage version the step runs now, or it re-opens.
  */
 export function stepSettled(
   repoRoot: string,
@@ -1887,6 +1900,9 @@ export function stepSettled(
 ): boolean {
   if (!settled) return false
   const current = stepInputComponents(repoRoot, key, observed)
+  // The stage version is never filled in: a row that does not carry the
+  // stage the step runs now settled under an older one.
+  if (STAGE_INPUT in current && settled.inputComponents?.[STAGE_INPUT] !== current[STAGE_INPUT]) return false
   // Names that share nothing with the step's scheme prove nothing about it:
   // such a row is compared like one that has none.
   const stored = settled.inputComponents

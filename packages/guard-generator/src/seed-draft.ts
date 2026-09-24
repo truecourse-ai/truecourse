@@ -41,6 +41,14 @@ import type { RecipeEcosystem } from './recipe-propose.js'
 /** The session-outcome cache of the seed session (name kept from the one-shot). */
 export const SEED_CACHE_NAME = 'guard/seed'
 
+/**
+ * THE SEED STAGE'S VERSION, bumped by hand. A drafted seed that was proved by
+ * execution is not made wrong by a reworded prompt; a prompt change that fixes
+ * WRONG output bumps this in the same commit. It keys the seed session's cache
+ * and is the seed step's `stage` settle input, so a bump re-opens the step.
+ */
+export const SEED_STAGE_VERSION = 5
+
 /** The parsed schema the draft is grounded in — the analyzer's own output. */
 export interface SeedDraftDatabase {
   /** `postgres`, `sqlite`, … */

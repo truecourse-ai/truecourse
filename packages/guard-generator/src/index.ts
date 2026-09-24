@@ -289,6 +289,7 @@ export {
   resolveScriptPath,
   writeSeedArtifacts,
   SEED_CACHE_NAME,
+  SEED_STAGE_VERSION,
   type DraftSeedResult,
   type SeedBlockedFlow,
   type SeedDraftDatabase,

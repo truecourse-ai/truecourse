@@ -62,6 +62,7 @@ import {
 } from '@truecourse/agent-loop';
 import {
   SEED_CACHE_NAME,
+  SEED_STAGE_VERSION,
   SeedProvidesProposalSchema,
   buildSeedUserPrompt,
   connectionEnvVars,
@@ -228,13 +229,6 @@ export const SeedSessionOutcomeSchema = z
   })
   .strict();
 export type SeedSessionOutcome = z.infer<typeof SeedSessionOutcomeSchema>;
-
-/**
- * THE SEED STAGE'S VERSION, bumped by hand. A drafted seed that was proved by
- * execution is not made wrong by a reworded prompt; a prompt change that fixes
- * WRONG output bumps this in the same commit.
- */
-export const SEED_STAGE_VERSION = 5;
 
 /** `sha256(stage version :: the seed step's input fingerprint)` — the step
  *  fingerprint already folds the recipe contract, the catalog's identity and
