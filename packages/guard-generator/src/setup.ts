@@ -67,6 +67,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { promisify } from 'node:util'
+import { discoverDomainFiles, domainFingerprint } from './seed-domain.js'
 import {
   loadRecipe,
   recipePath,
@@ -438,9 +439,6 @@ export interface GuardSetupSeedSessionInput {
   existingScript?: { scriptPath: string; scriptContent: string }
   /** The seed step's PRE-RUN input fingerprint — the session's cache key. */
   fingerprint: string
-  /** The step's fingerprint under its OLD formula, for the key a miss falls
-   *  back to. Delete with the legacy hash. */
-  legacyFingerprint: string
   /**
    * Whether setup was handed a FRESH CHECKOUT — a git repository carrying
    * nothing git ignores beyond what the caller materialized into it. A cloned
@@ -454,6 +452,12 @@ export interface GuardSetupSeedSessionInput {
   /** The live phase line: what is running now, and what to call it when done. */
   onPhase?: (running: string, done: string) => void
 }
+/** A coverage rule the seed could not satisfy, and why. */
+export interface SeedUnmetRule {
+  rule: string
+  reason: string
+}
+
 export type GuardSetupSeedSessionResult =
   | {
       status: 'ok'
@@ -471,6 +475,8 @@ export type GuardSetupSeedSessionResult =
        * letting a reader assume a clone verified it.
        */
       coldProofSkipped?: string
+      /** The coverage rules the seed could not satisfy: notes on the step, never a failure. */
+      unmet?: SeedUnmetRule[]
     }
   | {
       status: 'failed' | 'skipped'
@@ -1272,7 +1278,6 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         }),
         requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,
-        legacyFingerprint: legacySeedStepFingerprint(repoRoot),
         freshCheckout,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
@@ -1310,6 +1315,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       }
       fact('seed', seedOutcomeFact(seedStep, seedRun.fromCache === true))
       if (seedRun.coldProofSkipped) fact('seed', seedRun.coldProofSkipped)
+      for (const unmet of seedRun.unmet ?? []) fact('seed', `coverage not seeded: ${unmet.rule} (${unmet.reason})`)
       for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
       opts.onStepDone?.('seed', seedSummary(seedStep))
     }
@@ -1703,11 +1709,14 @@ function derivedWebPlacePairs(repoRoot: string): string {
  * seed's own block is in it: the row is stamped after the seed wrote, and a
  * seed deleted by hand re-opens the step) plus the catalog's IDENTITY: which
  * classes of starting state exist, never how the catalog session worded them,
- * and never a dependency version the seed does not read.
+ * and never a dependency version the seed does not read; plus the DOMAIN
+ * files (the product's models and migrations), whose change re-seeds.
  */
 export function computeSeedStepFingerprint(repoRoot: string): string {
   return createHash('sha256')
-    .update(`${recipeContractFingerprint(repoRoot, 'preparations')}::${dependencyCatalogIdentity(repoRoot)}`)
+    .update(
+      `${recipeContractFingerprint(repoRoot, 'preparations')}::${dependencyCatalogIdentity(repoRoot)}::${domainFingerprint(discoverDomainFiles(repoRoot))}`,
+    )
     .digest('hex')
 }
 
@@ -1769,6 +1778,7 @@ function stepInputComponents(
       return {
         'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'preparations')),
         catalog: digest(dependencyCatalogIdentity(repoRoot)),
+        domain: digest(domainFingerprint(discoverDomainFiles(repoRoot))),
       }
     case 'preparations':
       return preparationFingerprintComponents(repoRoot)
@@ -2195,8 +2205,6 @@ async function runSeedStep(args: {
   requiredResources: RequiredResource[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
-  /** The same, under the step's OLD formula — the old key's half. */
-  legacyFingerprint: string
   /** Whether the tree setup was handed is a fresh checkout — the cold proof's gate. */
   freshCheckout: boolean
   onPhase: (running: string, done: string) => void
@@ -2207,6 +2215,7 @@ async function runSeedStep(args: {
   recipeDefect?: boolean
   /** The cold-clone proof stood down, in the seam's own words. */
   coldProofSkipped?: string
+  unmet?: SeedUnmetRule[]
 }> {
   const { opts, recipe, database, routes, schemes } = args
   const existing = recipe.api?.seed
@@ -2290,7 +2299,6 @@ async function runSeedStep(args: {
         })()
       : {}),
     fingerprint: args.fingerprint,
-    legacyFingerprint: args.legacyFingerprint,
     freshCheckout: args.freshCheckout,
     onPhase: args.onPhase,
   })
@@ -2312,6 +2320,7 @@ async function runSeedStep(args: {
       ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
       ...(result.fromCache ? { fromCache: true } : {}),
       ...(result.coldProofSkipped ? { coldProofSkipped: result.coldProofSkipped } : {}),
+      ...(result.unmet && result.unmet.length > 0 ? { unmet: result.unmet } : {}),
     }
   }
   return {

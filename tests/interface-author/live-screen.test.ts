@@ -290,6 +290,15 @@ describe('the principal the briefing names', () => {
     }).join('\n')
     expect(text).toContain('NOT SIGNED IN (`anonymous`)')
     expect(text).toContain('The run can also observe as `webSession`, `memberWebSession`')
-    expect(text).toContain('`memberWebSession` is a member who owns nothing')
+    expect(text).toContain('`memberWebSession` is a member of a record the default principal owns')
+    expect(text).not.toContain('emptyWebSession')
+  })
+
+  it("names the seed's empty user as the one to observe empty states as", () => {
+    const own = bare('webSession')
+    const text = liveScreenLines({
+      live: { observer: own, principals: new Map([['webSession', own], ['emptyWebSession', bare('emptyWebSession')]]) },
+    }).join('\n')
+    expect(text).toContain("`emptyWebSession` is a user who owns nothing: observe this place's EMPTY state as it")
   })
 })

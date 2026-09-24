@@ -34,6 +34,7 @@ import {
 import {
   collectProbeCandidates,
   computeSeedStepFingerprint,
+  discoverDomainFiles,
   legacyRecipeStepFingerprint,
   legacySeedStepFingerprint,
   runGuardSetup,
@@ -42,9 +43,9 @@ import {
   type SeedDraftDatabase,
 } from '@truecourse/guard-generator';
 import { FINGERPRINT_INPUTS } from '@truecourse/guard-runner';
-import { seedSessionCacheKey, seedSessionLegacyCacheKey } from '../../packages/core/src/services/guard-setup/index';
 import {
   buildSeedSession,
+  domainLines,
   existingSeedMachinery,
   missingPrincipalSurfaces,
   requiredPrincipalSurfaces,
@@ -307,6 +308,20 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
     expect(recipeOf(r).api?.seed).toEqual({ command: COMMAND, script: TARGET, provides: PROVIDES });
     // The session's scratch directory is gone with the session.
     expect(fs.readdirSync(path.join(r, '.truecourse', '.cache', 'guard', 'seed-drafts'))).toEqual([]);
+  }, 60_000);
+
+  it('returns the coverage rules the session could not satisfy beside the proven seed', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const unmet = [{ rule: 'an org with several bookings', reason: 'bookings are created by a worker this world does not run' }];
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [], unmet });
+    });
+
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result).toMatchObject({ status: 'ok', unmet });
   }, 60_000);
 
   it('proves the fold in a FRESH world — down, up, then the real run', async () => {
@@ -1717,6 +1732,63 @@ describe('requiredPrincipalSurfaces — which surfaces demand a probed principal
   });
 });
 
+describe('seedSessionBriefing — the domain and the coverage world', () => {
+  const worldFor = (r: string, over: Partial<GuardSetupSeedSessionInput> = {}) =>
+    ({
+      input: seedInput(r, over),
+      server: { name: 'default', serve: ['node', 'x'], cwd: 'sandbox', healthPath: '/health', readyTimeoutMs: 1, env: {} },
+      targetPath: TARGET,
+      scratchDir: path.join(r, 'scratch'),
+      knownSchemes: new Set(),
+      secrets: new Map(),
+    }) as never;
+
+  it('carries the model files and their declarations, and the coverage rules with the principals they name', () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const briefing = seedSessionBriefing(worldFor(r, { database: PRINCIPAL_DATABASE }));
+    expect(briefing).toContain('## The domain: what the product can hold');
+    expect(briefing).toContain('- schema.prisma (prisma)');
+    expect(briefing).toContain('model Booking {');
+    expect(briefing).toContain('## Coverage: the world the screens and tests explore');
+    for (const rule of [/RELATIONS at none, one and several/, /Every ENUM or status value/, /BOOLEAN flag both ways/, /both filled and null/, /STATE THE APP PRODUCES/]) {
+      expect(briefing).toMatch(rule);
+    }
+    for (const name of ['`webSession`', '`adminWebSession`', '`memberWebSession`', '`emptyWebSession`']) {
+      expect(briefing).toContain(name);
+    }
+    expect(briefing).toContain('`{script, command, provides, probes, findings, unmet}`');
+  });
+
+  it('counts migrations beside a model file, and lists and excerpts the newest when they are the whole model', () => {
+    const r = fixtureRepo();
+    const migration = (n: number) => `db/migrations/00${n}_step.sql`;
+    for (const n of [1, 2]) {
+      fs.mkdirSync(path.dirname(path.join(r, migration(n))), { recursive: true });
+      fs.writeFileSync(path.join(r, migration(n)), `CREATE TABLE step_${n} (id int);\n`);
+    }
+    const beside = domainLines(r, discoverDomainFiles(r)).join('\n');
+    expect(beside).toContain('- schema.prisma (prisma)');
+    expect(beside).toContain(`- and 2 migration file(s), e.g. ${migration(2)}`);
+    expect(beside).not.toContain('CREATE TABLE step_2');
+
+    fs.rmSync(path.join(r, 'schema.prisma'));
+    const alone = domainLines(r, discoverDomainFiles(r)).join('\n');
+    expect(alone).toContain(`- ${migration(2)} (migration)`);
+    expect(alone).toContain('CREATE TABLE step_2');
+  });
+
+  it('says no model file was found when there is none, and names no web session without a web surface', () => {
+    const r = fixtureRepo();
+    fs.rmSync(path.join(r, 'schema.prisma'));
+    writeRecipe(r);
+    const briefing = seedSessionBriefing(worldFor(r));
+    expect(briefing).toMatch(/No model file was found/);
+    expect(briefing).toMatch(/PRINCIPALS, from the domain's roles and ownership/);
+    expect(briefing).not.toContain('`emptyWebSession`');
+  });
+});
+
 describe('seedSessionBriefing — runnable surfaces and probe candidates', () => {
   const worldFor = (r: string, over: Partial<GuardSetupSeedSessionInput> = {}) =>
     ({
@@ -2019,12 +2091,15 @@ describe('the seed step key', () => {
     expect(computeSeedStepFingerprint(r)).not.toBe(before);
   });
 
-  it('the session key drops the prompt, and the old key stays computable', () => {
+  it('moves with the domain files, and not with a file that declares no model', () => {
     const r = fixtureRepo();
     writeRecipe(r);
-    const current = seedSessionCacheKey(computeSeedStepFingerprint(r));
-    const legacy = seedSessionLegacyCacheKey(legacySeedStepFingerprint(r));
-    expect(current).toMatch(/^[0-9a-f]{64}$/);
-    expect(legacy).not.toBe(current);
+    const before = computeSeedStepFingerprint(r);
+    fs.writeFileSync(path.join(r, 'notes.ts'), 'export const x = 1;\n');
+    expect(computeSeedStepFingerprint(r)).toBe(before);
+    fs.appendFileSync(path.join(r, 'schema.prisma'), '\nenum Status {\n  OPEN\n  CLOSED\n}\n');
+    const moved = computeSeedStepFingerprint(r);
+    expect(moved).not.toBe(before);
+    expect(seedSessionCacheKey(moved)).not.toBe(seedSessionCacheKey(before));
   });
 });

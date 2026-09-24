@@ -56,6 +56,18 @@ describe('the principal a screen asks for', () => {
     expect(principalOrder(live, 'anonymous')).toEqual(['anonymous', 'webSession', 'adminWebSession'])
     expect(principalOrder(live, undefined)).toEqual(['webSession', 'adminWebSession', 'anonymous'])
   })
+
+  it("prefers the seed's principals by name: its admin for an admin page, then admin, member and empty after the default", () => {
+    const own = observer('webSession', (path) => path, [])
+    const names = ['webSession', 'otherSession', 'emptyWebSession', 'superAdminSession', 'memberWebSession', 'adminWebSession', 'anonymous']
+    const live: LiveScreens = { observer: own, principals: new Map(names.map((name) => [name, observer(name, (path) => path, [])])) }
+    expect(principalOrder(live, 'admin')).toEqual([
+      'adminWebSession', 'superAdminSession', 'webSession', 'memberWebSession', 'emptyWebSession', 'otherSession', 'anonymous',
+    ])
+    expect(principalOrder(live, undefined)).toEqual([
+      'webSession', 'adminWebSession', 'memberWebSession', 'emptyWebSession', 'otherSession', 'superAdminSession', 'anonymous',
+    ])
+  })
 })
 
 describe('observing a screen as the principal that stays', () => {
@@ -83,17 +95,19 @@ describe('observing a screen as the principal that stays', () => {
 })
 
 describe('the web sessions a browser signs in with', () => {
-  it('takes every Cookie credential, the primary one first and the admin and member sessions after it', () => {
+  it("takes every Cookie credential, the seed's owner first and its admin, member and empty sessions after any other", () => {
     const cookie = (value: string) => ({ header: 'Cookie', value })
     expect(
       webPrincipals(new Map([
+        ['emptyWebSession', cookie('e=1')],
         ['adminWebSession', cookie('a=1')],
         ['apiToken', { header: 'Authorization', value: 'Bearer x' }],
+        ['teamSession', cookie('t=1')],
         ['webSession', cookie('s=1')],
         ['memberWebSession', cookie('m=1')],
         ['empty', cookie('')],
       ])).map((principal) => principal.name),
-    ).toEqual(['webSession', 'adminWebSession', 'memberWebSession'])
+    ).toEqual(['webSession', 'teamSession', 'adminWebSession', 'memberWebSession', 'emptyWebSession'])
     expect(webPrincipals(new Map([['apiToken', { header: 'Authorization', value: 'Bearer x' }]])).map((p) => p.name)).toEqual(['apiToken'])
   })
 })

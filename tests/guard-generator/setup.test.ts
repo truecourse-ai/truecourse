@@ -498,6 +498,7 @@ describe('runGuardSetup — skip when settled', () => {
     expect(Object.keys(first.steps.find((s) => s.key === 'seed')?.inputComponents ?? {})).toEqual([
       'recipe.contract',
       'catalog',
+      'domain',
     ])
 
     // The app starts talking to a datastore nothing stood up before: the recipe
@@ -743,6 +744,53 @@ describe('runGuardSetup — skip when settled', () => {
     })
     expect(statuses(afterNewNeed).recipe).toBe('ok')
     expect(probe.calls).toBe(2)
+  })
+
+  // The seed builds its world from the product's models, so a model change is
+  // a new world to seed; a file that declares no model is not.
+  it('re-opens the seed step when a domain file changes, and only then', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    fs.mkdirSync(path.join(r, 'prisma'), { recursive: true })
+    fs.writeFileSync(path.join(r, 'prisma/schema.prisma'), 'model Link {\n  id Int @id\n}\n')
+    const seed = seedSeam()
+    await runAndPersist(r, { seedSession: seed.seam })
+    expect(seed.inputs).toHaveLength(1)
+
+    fs.writeFileSync(path.join(r, 'README.md'), '# not a model\n')
+    const unchanged = await runAndPersist(r, { seedSession: seed.seam })
+    expect(statuses(unchanged).seed).toBe('skipped:unchanged')
+
+    fs.writeFileSync(path.join(r, 'prisma/schema.prisma'), 'model Link {\n  id Int @id\n  pinned Boolean @default(false)\n}\n')
+    const facts: string[] = []
+    const moved = await runAndPersist(r, { seedSession: seed.seam, onStepFact: (step, line) => facts.push(`${step} | ${line}`) })
+    expect(seed.inputs).toHaveLength(2)
+    expect(statuses(moved).seed).toBe('ok')
+    expect(facts).toContain('seed | re-opened: domain moved')
+  })
+
+  // A coverage rule the seed could not satisfy is a note on the seed step,
+  // never a failure: the step is ok, and each unmet rule is one fact.
+  it('records each coverage rule the seed did not satisfy as a fact on an ok step', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const facts: string[] = []
+    const { report } = await runGuardSetup(
+      baseOpts(r, {
+        seedSession: seedSeam({
+          status: 'ok',
+          scriptPath: 'scripts/guard-seed.mjs',
+          command: 'node scripts/guard-seed.mjs',
+          unmet: [{ rule: 'preserved formats', reason: 'the archiver runs in a worker the recipe does not start' }],
+        }).seam,
+        onStepFact: (step, line) => {
+          if (step === 'seed') facts.push(line)
+        },
+      }),
+    )
+    expect(report.status).toBe('ok')
+    expect(report.steps.find((step) => step.key === 'seed')?.status).toBe('ok')
+    expect(facts).toContain('coverage not seeded: preserved formats (the archiver runs in a worker the recipe does not start)')
   })
 
   // The post-write fingerprint invariant: a step that WRITES records the tree as

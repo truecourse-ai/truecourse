@@ -35,13 +35,19 @@
  * later `db_query` that SELECTs a token back cannot leak it either.
  *
  * CACHE: author-class. KEEPS the `guard/seed` name; the key is the seed
- * step's own input fingerprint (recipe ∷ dependency catalog) + the prompt
- * fingerprint. The fresh-world PROOF always re-runs on hits — a cached script
- * is a draft to re-prove, never a proof.
+ * step's own input fingerprint (recipe contract ∷ dependency catalog ∷ the
+ * domain files) + the stage version. The fresh-world PROOF always re-runs on
+ * hits — a cached script is a draft to re-prove, never a proof.
+ *
+ * COVERAGE: the seed builds a bounded coverage world from the product's DOMAIN
+ * (its models and migrations, found by `discoverDomainFiles`), not the minimum
+ * the recipe needs: the owner, admin, member and empty principals, relations at
+ * none / one / several, every enum value, visible flags both ways, and the
+ * state the app itself produces made by the app's own path. What it cannot
+ * satisfy comes back as `unmet`, notes on the step and never a failure.
  */
 
 import fs from 'node:fs';
-import { LEGACY_SEED_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -58,11 +64,13 @@ import {
   SeedProvidesProposalSchema,
   buildSeedUserPrompt,
   connectionEnvVars,
+  discoverDomainFiles,
   principalShapedTables,
   suggestedScriptPath,
   toRecipeSeed,
   writeSeedArtifacts,
   type GuardSetupSeedSession,
+  type DomainFile,
   type GuardSetupSeedSessionInput,
   type RecipeEcosystem,
   type SeedProvidesProposal,
@@ -95,6 +103,7 @@ import { proveSeedFromColdClone } from './seed-cold-proof.js';
 import { outputTail, servicesController } from './services-lifecycle.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
+import { SEED_WEB_PRINCIPALS } from '../interface-author/principals.js';
 import { isCreditsExhausted } from '@truecourse/shared';
 
 export const SEED_SESSION_KIND = 'guard-setup.seed';
@@ -213,6 +222,10 @@ export const SeedSessionOutcomeSchema = z
     /** Required (by the fold) for every declared credential; see the probe schema. */
     probes: z.record(z.string(), SeedCredentialProbeSchema).optional(),
     findings: z.array(z.string()),
+    /** Each coverage rule the seed could not satisfy, with why; omitted when every one is met. */
+    unmet: z
+      .array(z.object({ rule: z.string().min(1), reason: z.string().min(1) }).strict())
+      .optional(),
   })
   .strict();
 export type SeedSessionOutcome = z.infer<typeof SeedSessionOutcomeSchema>;
@@ -222,22 +235,14 @@ export type SeedSessionOutcome = z.infer<typeof SeedSessionOutcomeSchema>;
  * execution is not made wrong by a reworded prompt; a prompt change that fixes
  * WRONG output bumps this in the same commit.
  */
-export const SEED_STAGE_VERSION = 2;
+export const SEED_STAGE_VERSION = 3;
 
 /** `sha256(stage version :: the seed step's input fingerprint)` — the step
- *  fingerprint already folds the recipe contract and the catalog's identity. */
+ *  fingerprint already folds the recipe contract, the catalog's identity and
+ *  the domain files. */
 export function seedSessionCacheKey(stepFingerprint: string): string {
   return createHash('sha256')
     .update(`seed-v${SEED_STAGE_VERSION}::${stepFingerprint}`)
-    .digest('hex');
-}
-
-/** {@link seedSessionCacheKey} as it was computed while the prompt was in it —
- *  the key a miss falls back to, over the step's OLD fingerprint. Delete with
- *  the legacy hash. */
-export function seedSessionLegacyCacheKey(legacyStepFingerprint: string): string {
-  return createHash('sha256')
-    .update(`${LEGACY_SEED_SESSION_PROMPT_FINGERPRINT}::${legacyStepFingerprint}`)
     .digest('hex');
 }
 
@@ -394,12 +399,6 @@ export function missingPrincipalSurfaces(
         (r.surface === 'web' ? ' carrying its `login` proof' : ''),
     }));
 }
-
-/** The credential an admin user's web session is published under, when the app has an admin. */
-export const ADMIN_WEB_CREDENTIAL = 'adminWebSession';
-
-/** The credential a non-owner member's web session is published under, when the app shares records. */
-export const MEMBER_WEB_CREDENTIAL = 'memberWebSession';
 
 /** The fixture name a sacrificial principal is published under. */
 export const SACRIFICIAL_FIXTURE = 'sacrificialUser';
@@ -599,6 +598,8 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     ...requiredSurfaceLines(input),
     ...probeCandidateLines(input),
     ...requiredResourceLines(input),
+    ...domainLines(input.repoRoot, discoverDomainFiles(input.repoRoot)),
+    ...coverageLines(requiredPrincipalSurfaces(input).some((r) => r.surface === 'web')),
     '',
     '## The dependency catalog (scenarios/dependencies.json)',
     catalog.dependencies.length === 0
@@ -622,7 +623,7 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     '',
     grounding,
     '',
-    'Work loop: PRINCIPALS FIRST — your first `run_seed_draft` must already mint and probe every principal the "Runnable surfaces" section above requires, with only the rows they need; grow the fixtures in later drafts (a draft omitting a required principal is refused without running, and a budget death only salvages what has verified). Draft EARLY, iterate from real errors. Read only what the briefing above does not already answer, then `check_provides` for the free shape check and `run_seed_draft` to PROVE the draft (idempotence included: run it twice — the second run against the rows the first left behind is the real test). For every credential you mint, the same call must declare `probes` — per credential, an endpoint that REQUIRES it; the engine sends the minted value verbatim and also checks the same request is refused without it. Then produce the outcome `{script, command, provides, probes, findings}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty.',
+    'Work loop: PRINCIPALS FIRST — your first `run_seed_draft` must already mint and probe every principal the "Runnable surfaces" section above requires, with only the rows they need; grow the fixtures in later drafts (a draft omitting a required principal is refused without running, and a budget death only salvages what has verified). Draft EARLY, iterate from real errors. Read only what the briefing above does not already answer, then `check_provides` for the free shape check and `run_seed_draft` to PROVE the draft (idempotence included: run it twice — the second run against the rows the first left behind is the real test). For every credential you mint, the same call must declare `probes` — per credential, an endpoint that REQUIRES it; the engine sends the minted value verbatim and also checks the same request is refused without it. Then grow the coverage world draft by draft, and produce the outcome `{script, command, provides, probes, findings, unmet}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty. `unmet` names each coverage rule the seed does not satisfy, as `{rule, reason}`; omit it when every one is met.',
   ];
   return lines.join('\n');
 }
@@ -653,15 +654,91 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
       lines.push(
         `- **web** — ${r.why}, and the recipe prepares a web surface (\`${(input.recipe.web?.serve ?? []).join(' ')}\`). Mint a principal that can SIGN IN to the web UI:`,
         `  1. create the user with a KNOWN password and publish the login fields as a FIXTURE (e.g. \`webUser\` with \`email\` + \`password\`) — web scenarios fill the login form with \`{{fixture:webUser.email}}\` / \`{{fixture:webUser.password}}\`;`,
-        `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as a credential (\`header: "Cookie"\`);`,
+        `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as the credential \`${SEED_WEB_PRINCIPALS.owner}\` (\`header: "Cookie"\`);`,
         `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page);`,
         `  4. when the login endpoint pairs a body token with a cookie (a CSRF double-submit — the login route compares \`body.csrfToken\` to a cookie a mint route set), add \`"csrf": {"path": "/<the csrf mint route>"}\` to the \`login\` block — the engine GETs it fresh before each login POST, carries its cookies, and injects the token into the body. NEVER publish a csrf token as a fixture: it is minted per exchange, and a static one can never validate.`,
         `  5. also create a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` (same login fields, its own stable email); credential-mutation tests burn it. It needs no credential and no probe, and a draft that omits it is refused without running.`,
-        `  6. the screens are authored and tested as more than one user. When the app has an ADMIN (an instance-admin user id or flag, an admin role, pages only an admin may load), also mint a web session for an admin user, published as the credential \`${ADMIN_WEB_CREDENTIAL}\` (\`header: "Cookie"\`) and probed on a page only an admin may load. When the app shares records between users (members, collaborators, teams), also mint one for a user who is a non-owner MEMBER of a record the primary principal shares and who owns nothing else, published as \`${MEMBER_WEB_CREDENTIAL}\` — member flows (leaving, roles) and empty states are observed as that user. Prove each like the first; skip one the app has no concept of, and say why in a finding.`,
+        `  6. then mint the other principals the "Coverage" section below asks for, each signed in and proven the same way as this one.`,
       );
     }
   }
   return lines;
+}
+
+/** How much of the domain the briefing carries: files listed, and excerpt characters. */
+const DOMAIN_MAX_LISTED = 40;
+const DOMAIN_MAX_FILE_CHARS = 12_000;
+const DOMAIN_MAX_CHARS = 24_000;
+/** How many migrations are excerpted when the migrations are the only model there is: the newest. */
+const DOMAIN_MAX_MIGRATION_EXCERPTS = 3;
+
+/**
+ * The briefing's domain section: the product's model files, listed and
+ * excerpted up to a budget. Migrations beside a model file are only counted
+ * (the model already says what they built); when they are the only model there
+ * is, the newest are listed and excerpted instead. The session reads the rest
+ * with `read_file`.
+ */
+export function domainLines(repoRoot: string, files: readonly DomainFile[]): string[] {
+  const lines = ['', '## The domain: what the product can hold'];
+  if (files.length === 0) {
+    lines.push(
+      "No model file was found (no Prisma schema, ORM model or migration). Read the app's data layer for what it holds before building the coverage world.",
+    );
+    return lines;
+  }
+  const models = files.filter((file) => file.kind !== 'migration');
+  const migrations = files.filter((file) => file.kind === 'migration');
+  const listed = models.length > 0 ? models : migrations.slice(-DOMAIN_MAX_LISTED);
+  const unlisted = models.length > 0 ? models.length - DOMAIN_MAX_LISTED : migrations.length - DOMAIN_MAX_LISTED;
+  lines.push(
+    "These files declare the product's data model. Build the coverage world below from them: its entities, their enums, flags, nullable fields and relations, and its roles. Excerpts are bounded; `read_file` for the rest.",
+    ...listed.slice(0, DOMAIN_MAX_LISTED).map((file) => `- ${file.path} (${file.kind})`),
+    ...(unlisted > 0 ? [`- … ${unlisted} more`] : []),
+    ...(models.length > 0 && migrations.length > 0 ? [`- and ${migrations.length} migration file(s), e.g. ${migrations[migrations.length - 1].path}`] : []),
+  );
+  const excerpted = models.length > 0 ? models : migrations.slice(-DOMAIN_MAX_MIGRATION_EXCERPTS);
+  let budget = DOMAIN_MAX_CHARS;
+  for (const file of excerpted) {
+    if (budget <= 0) break;
+    let content: string;
+    try {
+      content = fs.readFileSync(path.join(repoRoot, file.path), 'utf-8');
+    } catch {
+      continue;
+    }
+    const limit = Math.min(DOMAIN_MAX_FILE_CHARS, budget);
+    const excerpt = content.length > limit ? `${content.slice(0, limit)}\n… (${content.length - limit} more characters: read_file for the rest)` : content;
+    budget -= Math.min(content.length, limit);
+    lines.push(`### ${file.path}`, excerpt);
+  }
+  return lines;
+}
+
+/**
+ * The briefing's coverage section: the rules that turn the domain into a
+ * bounded world (one instance per rule, never the cross product), the
+ * principals each gets, and what counts as unmet. `web` names the web sessions
+ * the principals are published under when the web surface signs people in.
+ */
+export function coverageLines(web: boolean): string[] {
+  const { admin, member, empty } = SEED_WEB_PRINCIPALS;
+  return [
+    '',
+    '## Coverage: the world the screens and tests explore',
+    'Seed more than the minimum the principals need. The interface catalog is authored LIVE against this world right after the seed, and a screen shows only what the world holds. Build it from the domain above, BOUNDED: one instance per rule, never every combination.',
+    `- PRINCIPALS, from the domain's roles and ownership: the OWNER, who owns the seeded data (the web principal above); an ADMIN, when the app has an instance or superuser role (an admin flag or role, an instance-admin id); a MEMBER, who shares a record the owner owns (a collaborator, a member of a team or collection) without owning it; and an EMPTY user, who owns nothing, for empty states.` +
+      (web
+        ? ` Each signs in like the owner: its login fields as a fixture (\`adminUser\`, \`memberUser\`, \`emptyUser\`) and its web session as the credential \`${admin}\`, \`${member}\` or \`${empty}\` (\`header: "Cookie"\`), probed with its own \`login\` block (the admin's on a page only an admin may load).`
+        : ''),
+    '- RELATIONS at none, one and several where a list could look different: several (3 or more) of every entity a user lists, a many-to-many with at least 2 on one side (a record with 2 or more tags), a child under a parent where the model nests (a sub-collection), and a record the owner shares with the member. The empty user is the "none".',
+    '- Every ENUM or status value at least once, and every user-visible BOOLEAN flag both ways (a pinned and an unpinned record, an archived and an active one).',
+    '- Every nullable user-visible field both filled and null, once each (a record with a description and one without, a user with a photo and one without).',
+    '- Skip tables no user sees (audit logs, internal job queues, sessions beyond the principals\'): that is your call.',
+    '- STATE THE APP PRODUCES (the output of a background job, a processed or uploaded file, a generated preview or archive) is produced by triggering the app\'s real path (its route, its job, its worker) and WAITING for it inside the seed, then proven by execution like every fixture. Never by inserting its rows alone. When the app cannot produce it here, it is unmet.',
+    '- Publish the ids and handles scenarios will reference as fixture fields, as for the resources above.',
+    'Name every rule the seed does not satisfy in the outcome\'s `unmet`, one `{rule, reason}` each (a principal the domain has no concept of, a state the app cannot produce here). An unmet rule is a note on the step, never a failure. State held by an external service (payments, an OAuth provider) and feature flags are unmet: they belong to the recipe, not the seed.',
+  ];
 }
 
 /** The briefing's candidate-probe section: confirming a probe is a LOOKUP. */
@@ -1424,7 +1501,6 @@ export function buildSeedSession(
         repoRoot: input.repoRoot,
         cacheName: SEED_CACHE_NAME,
         key: seedSessionCacheKey(input.fingerprint),
-        legacyKeys: [seedSessionLegacyCacheKey(input.legacyFingerprint)],
         schema: SeedSessionOutcomeSchema,
         run: async () => {
           const { driver, persistence } = await context.acquire();
@@ -1524,6 +1600,7 @@ export function buildSeedSession(
         ...(outcome.fromCache ? { fromCache: true } : {}),
         ...(world.salvaged ? { salvaged: true } : {}),
         ...(folded.coldProofSkipped ? { coldProofSkipped: folded.coldProofSkipped } : {}),
+        ...(outcome.output.unmet && outcome.output.unmet.length > 0 ? { unmet: outcome.output.unmet } : {}),
       };
     } catch (error) {
       // An empty balance did not refuse the seed — it refused to buy one. The

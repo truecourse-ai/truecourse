@@ -14,6 +14,21 @@ import { ANONYMOUS_PRINCIPAL } from '@truecourse/shared'
 import type { LiveScreenObserver, LiveScreens, ObserveScreenResult } from './live-screen.js'
 import { principalNames } from './live-screen.js'
 
+/**
+ * The web sessions the seed mints for its coverage world, by the credential
+ * name each is published under: the OWNER who holds the seeded data, the
+ * instance ADMIN, a MEMBER who shares a record the owner owns without owning
+ * it, and an EMPTY user who owns nothing (the one empty states are observed
+ * as). The owner is the default principal; the others exist when the app has
+ * the concept.
+ */
+export const SEED_WEB_PRINCIPALS = {
+  owner: 'webSession',
+  admin: 'adminWebSession',
+  member: 'memberWebSession',
+  empty: 'emptyWebSession',
+} as const
+
 /** Which principal a screen's source or address asks for, when it asks. */
 export type PrincipalHint = 'admin' | 'anonymous'
 
@@ -44,18 +59,27 @@ export function principalHint(address: string | undefined, source: string | unde
 }
 
 /**
- * The principals to try for a screen, in order: the ones its hint names (an
- * admin session by its name, or `anonymous`), then the default, then every other
- * — the signed-out browser last unless it was asked for.
+ * The principals to try for a screen, in order: the ones its hint names (the
+ * seed's admin session first, then any other session named for an admin; or
+ * `anonymous`), then the default, then the seed's admin, member and empty
+ * sessions, then any other — the signed-out browser last unless it was asked for.
  */
 export function principalOrder(live: LiveScreens, hint: PrincipalHint | undefined): string[] {
   const names = principalNames(live)
+  const admins = [
+    ...names.filter((name) => name === SEED_WEB_PRINCIPALS.admin),
+    ...names.filter((name) => name !== SEED_WEB_PRINCIPALS.admin && /admin/i.test(name)),
+  ]
   const hinted =
-    hint === 'anonymous' ? names.filter((name) => name === ANONYMOUS_PRINCIPAL)
-      : hint === 'admin' ? names.filter((name) => /admin/i.test(name))
-        : []
-  const rest = names.filter((name) => !hinted.includes(name))
-  return [...hinted, ...rest.filter((name) => name !== ANONYMOUS_PRINCIPAL), ...rest.filter((name) => name === ANONYMOUS_PRINCIPAL)]
+    hint === 'anonymous' ? names.filter((name) => name === ANONYMOUS_PRINCIPAL) : hint === 'admin' ? admins : []
+  const seeded: string[] = [SEED_WEB_PRINCIPALS.admin, SEED_WEB_PRINCIPALS.member, SEED_WEB_PRINCIPALS.empty]
+  const rank = (name: string): number =>
+    name === live.observer.principal ? -1 : seeded.includes(name) ? seeded.indexOf(name) : seeded.length
+  const rest = names
+    .filter((name) => !hinted.includes(name) && name !== ANONYMOUS_PRINCIPAL)
+    .sort((a, b) => rank(a) - rank(b))
+  const anonymous = names.includes(ANONYMOUS_PRINCIPAL) && !hinted.includes(ANONYMOUS_PRINCIPAL) ? [ANONYMOUS_PRINCIPAL] : []
+  return [...hinted, ...rest, ...anonymous]
 }
 
 /** What observing a screen found: who it was observed as, what they saw, and whether they stayed. */

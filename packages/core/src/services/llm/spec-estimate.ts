@@ -216,7 +216,6 @@ import {
   SEED_SESSION_KIND,
   SeedSessionOutcomeSchema,
   seedSessionCacheKey,
-  seedSessionLegacyCacheKey,
 } from '../guard-setup/index.js';
 import {
   RECONCILE_INTERFACES_BUDGET,
@@ -1217,7 +1216,6 @@ export async function estimateGuardSetup(
             SEED_CACHE_NAME,
             seedSessionCacheKey(computeSeedStepFingerprint(repoRoot)),
             SeedSessionOutcomeSchema,
-            seedSessionLegacyCacheKey(legacySeedStepFingerprint(repoRoot)),
           )
         : null;
     seedMax = cached ? 0 : 1;

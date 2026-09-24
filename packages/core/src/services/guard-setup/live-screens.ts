@@ -40,7 +40,7 @@ import {
 } from '@truecourse/guard-runner';
 import { ANONYMOUS_PRINCIPAL } from '@truecourse/shared';
 import { publicFixtureFields, type LiveScreenObserver, type LiveScreens } from '../interface-author/live-screen.js';
-import { ADMIN_WEB_CREDENTIAL, MEMBER_WEB_CREDENTIAL } from './seed-session.js';
+import { SEED_WEB_PRINCIPALS } from '../interface-author/principals.js';
 import { outputTail, servicesController } from './services-lifecycle.js';
 
 export interface OpenLiveScreensOptions {
@@ -201,15 +201,17 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
 
 /**
  * The credentials a browser can sign in with, the default first: every Cookie
- * credential in the seed's order — the admin and member sessions after the
- * primary one — else the first credential there is.
+ * credential, the seed's owner session (`webSession`) first and its admin,
+ * member and empty sessions after any other, else the first credential there is.
  */
 export function webPrincipals(
   credentials: ReadonlyMap<string, ResolvedCredential>,
 ): { name: string; credential: ResolvedCredential }[] {
   const usable = [...credentials].filter(([, credential]) => credential.value.length > 0);
   const cookies = usable.filter(([, credential]) => credential.header.toLowerCase() === 'cookie');
-  const secondary = (name: string) => (name === ADMIN_WEB_CREDENTIAL || name === MEMBER_WEB_CREDENTIAL ? 1 : 0);
-  return (cookies.length > 0 ? [...cookies].sort(([a], [b]) => secondary(a) - secondary(b)) : usable.slice(0, 1))
+  const secondary: string[] = [SEED_WEB_PRINCIPALS.admin, SEED_WEB_PRINCIPALS.member, SEED_WEB_PRINCIPALS.empty];
+  const rank = (name: string): number =>
+    name === SEED_WEB_PRINCIPALS.owner ? 0 : secondary.includes(name) ? 2 + secondary.indexOf(name) : 1;
+  return (cookies.length > 0 ? [...cookies].sort(([a], [b]) => rank(a) - rank(b)) : usable.slice(0, 1))
     .map(([name, credential]) => ({ name, credential }));
 }

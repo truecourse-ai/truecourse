@@ -71,7 +71,6 @@ export {
   buildSeedSession,
   seedSessionBriefing,
   seedSessionCacheKey,
-  seedSessionLegacyCacheKey,
   seedScriptTargetPath,
   providesWarnings,
   type SeedSessionOutcome,

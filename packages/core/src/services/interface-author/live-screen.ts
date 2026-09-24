@@ -21,6 +21,7 @@
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import { ANONYMOUS_PRINCIPAL, GuardWebLocatorSchema } from '@truecourse/shared'
+import { SEED_WEB_PRINCIPALS } from './principals.js'
 import { boundTree, hasAddressSlot } from '@truecourse/guard-runner'
 import type {
   ObserveScreenResult,
@@ -242,6 +243,18 @@ export function liveScreenLines(input: {
       `A task only another principal can perform (an admin-only control, a member's`,
       `leave action, a signed-out form, an empty state a user with no data sees) carries`,
       `\`principal: "<name>"\`, and is proven as that principal.`,
+      ...(others.includes(SEED_WEB_PRINCIPALS.empty)
+        ? [
+            `\`${SEED_WEB_PRINCIPALS.empty}\` is a user who owns nothing: observe this place's EMPTY state as it (the`,
+            `"nothing here yet" branch and its create-first controls), and author those tasks as it.`,
+          ]
+        : []),
+      ...(others.includes(SEED_WEB_PRINCIPALS.member)
+        ? [
+            `\`${SEED_WEB_PRINCIPALS.member}\` is a member of a record the default principal owns, without owning it:`,
+            `a member's view and actions (leaving, a role it holds) are observed and authored as it.`,
+          ]
+        : []),
     )
   }
   if (input.unreachable) {
