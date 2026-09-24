@@ -2256,18 +2256,3 @@ describe('the principal a screen is observed as', () => {
     expect(task.steps[0]).toMatchObject({ proven: false })
   })
 })
-
-describe('what a screen could not reach in the seeded world', () => {
-  it('is kept on its ledger row for the next seed, and nothing else it left unresolved is', async () => {
-    const { driver } = scriptedDriver(async (place) => ({
-      kind: 'outcome',
-      value: place === 'root'
-        ? { ...HOME_FRAGMENT, unresolved: ['the empty-state Add button renders only when no repository exists; the seed has one', 'the settings icon has no name'] }
-        : REPORT_FRAGMENT,
-    }))
-    await authorWebInterfaces({ repoRoot: repo, driver, persistence: memoryPersistence().persistence })
-    const ledger = readAuthoredFile().authoring!
-    expect(ledger.root.stateGaps).toEqual(['the empty-state Add button renders only when no repository exists; the seed has one'])
-    expect(ledger['repos-repoid'].stateGaps).toBeUndefined()
-  })
-})

@@ -21,7 +21,6 @@
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import { ANONYMOUS_PRINCIPAL, GuardWebLocatorSchema } from '@truecourse/shared'
-import { MEMBER_WEB_CREDENTIAL } from './principals.js'
 import { boundTree, hasAddressSlot } from '@truecourse/guard-runner'
 import type {
   ObserveScreenResult,
@@ -243,12 +242,6 @@ export function liveScreenLines(input: {
       `A task only another principal can perform (an admin-only control, a member's`,
       `leave action, a signed-out form, an empty state a user with no data sees) carries`,
       `\`principal: "<name>"\`, and is proven as that principal.`,
-      ...(others.includes(MEMBER_WEB_CREDENTIAL)
-        ? [
-            `\`${MEMBER_WEB_CREDENTIAL}\` is a member who owns nothing: observe this place's EMPTY state as`,
-            `it (the "no links yet" branch, its create-first buttons) and author those tasks as it.`,
-          ]
-        : []),
     )
   }
   if (input.unreachable) {

@@ -1668,7 +1668,7 @@ export type InterfaceAuthoringStatus = z.infer<typeof InterfaceAuthoringStatusSc
  * not one screen every run forever, and a settled screen whose source moved is
  * reconciled rather than left describing code that is gone.
  */
-export const InterfaceAuthoringRecordSchema = z
+export const InterfaceAuthoringRecordSchema = z.preprocess(dropRetiredLedgerKeys, z
   .object({
     status: InterfaceAuthoringStatusSchema,
     /** The digest of everything that decides what a session for this screen produces. */
@@ -1686,15 +1686,20 @@ export const InterfaceAuthoringRecordSchema = z
      * default reached it, or when nothing was observed.
      */
     principal: z.string().min(1).optional(),
-    /**
-     * The session's `unresolved` lines about a world state the seeded world
-     * lacked ("renders only when a pinned link exists; the seed has none") —
-     * what the next setup's seed is briefed with, so it can seed that state.
-     */
-    stateGaps: z.array(z.string().min(1)).optional(),
   })
-  .strict()
+  .strict())
 export type InterfaceAuthoringRecord = z.infer<typeof InterfaceAuthoringRecordSchema>
+
+/**
+ * A stored ledger row may still carry `stateGaps` (the `unresolved` lines an
+ * older authoring kept for the seed); nothing reads it now, so it is dropped on
+ * read and the row still parses.
+ */
+function dropRetiredLedgerKeys(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || !('stateGaps' in value)) return value
+  const { stateGaps: _retired, ...rest } = value
+  return rest
+}
 
 /**
  * `.truecourse/guard/interfaces.json` — the last mapping's catalog (gitignored).

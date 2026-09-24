@@ -471,8 +471,6 @@ export type GuardSetupSeedSessionResult =
        * letting a reader assume a clone verified it.
        */
       coldProofSkipped?: string
-      /** The screen states the seed was briefed with and did not seed, one line each with why. */
-      unmetNeeds?: string[]
     }
   | {
       status: 'failed' | 'skipped'
@@ -1312,7 +1310,6 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       }
       fact('seed', seedOutcomeFact(seedStep, seedRun.fromCache === true))
       if (seedRun.coldProofSkipped) fact('seed', seedRun.coldProofSkipped)
-      for (const line of seedRun.unmetNeeds ?? []) fact('seed', `screen state not seeded: ${line}`)
       for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
       opts.onStepDone?.('seed', seedSummary(seedStep))
     }
@@ -2210,8 +2207,6 @@ async function runSeedStep(args: {
   recipeDefect?: boolean
   /** The cold-clone proof stood down, in the seam's own words. */
   coldProofSkipped?: string
-  /** The screen states the seed did not seed. */
-  unmetNeeds?: string[]
 }> {
   const { opts, recipe, database, routes, schemes } = args
   const existing = recipe.api?.seed
@@ -2317,7 +2312,6 @@ async function runSeedStep(args: {
       ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
       ...(result.fromCache ? { fromCache: true } : {}),
       ...(result.coldProofSkipped ? { coldProofSkipped: result.coldProofSkipped } : {}),
-      ...(result.unmetNeeds ? { unmetNeeds: result.unmetNeeds } : {}),
     }
   }
   return {

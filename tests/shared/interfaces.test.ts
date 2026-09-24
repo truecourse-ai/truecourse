@@ -18,6 +18,7 @@ import {
   InterfaceRowFactSchema,
   InterfaceRowRoleSchema,
   InterfaceSchema,
+  InterfaceAuthoringRecordSchema,
   InterfaceSequenceSchema,
   InterfaceSlotKindSchema,
   InterfaceStateIdSchema,
@@ -3121,5 +3122,20 @@ describe('a step target beyond role and name', () => {
       { kind: 'markers', index: 1, locator: { css: 'div.modal' }, why: 'no dialog role' },
       { kind: 'controls', index: 0, id: 'pick', locator: { role: 'checkbox', name: 'Pick' } },
     ])
+  })
+})
+
+describe('an authoring ledger row', () => {
+  it('stored with the retired stateGaps still parses, and the field is dropped', () => {
+    const row = InterfaceAuthoringRecordSchema.parse({
+      status: 'authored',
+      inputFingerprint: 'abc',
+      stateGaps: ['the merge renders only when two tags exist'],
+    })
+    expect(row).toEqual({ status: 'authored', inputFingerprint: 'abc' })
+  })
+
+  it('refuses any other unknown field', () => {
+    expect(InterfaceAuthoringRecordSchema.safeParse({ status: 'authored', inputFingerprint: 'abc', extra: 1 }).success).toBe(false)
   })
 })

@@ -93,7 +93,6 @@ import { ownTaskContext, ownTasks } from './catalog-context.js'
 import { observerFor, type LiveScreens, type ObserveScreenResult } from './live-screen.js'
 import { observeAsPrincipal, principalHint, principalOrder, type PrincipalHint } from './principals.js'
 import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem, type SharedPlaceBrief } from './session.js'
-import { stateGaps } from './screen-needs.js'
 import type { SharedComponent } from './shared-places.js'
 import { recordAuthoringLedger, registerSharedPlaces, writeAuthoredCatalog } from './write.js'
 
@@ -395,18 +394,16 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     all.map((item) => [item.place.id, sourceDigests(opts.repoRoot, groundingFiles(opts.context?.get(item.place.id)))]),
   )
   /** A ledger row, with the sources it settled over when the place is grounded. */
-  const ledgerRow = (item: AuthorWorkItem, status: PlaceResult['status'], unresolved: readonly string[] = []): InterfaceAuthoringRecord => {
+  const ledgerRow = (item: AuthorWorkItem, status: PlaceResult['status']): InterfaceAuthoringRecord => {
     const sources = sourcesOf.get(item.place.id)!
     // A place served from the cache took no first look: its row keeps the
     // principal it was last observed as.
     const principal = looks.has(item.place.id) ? looks.get(item.place.id)!.principal : item.record?.principal
-    const gaps = stateGaps(unresolved)
     return {
       status,
       inputFingerprint: item.inputFingerprint,
       ...(Object.keys(sources).length > 0 ? { sources } : {}),
       ...(principal !== undefined ? { principal } : {}),
-      ...(gaps.length > 0 ? { stateGaps: gaps } : {}),
     }
   }
   /** Who each place's session observed as — filled once the first look has run. */
@@ -537,7 +534,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
       }
       const place: PlaceResult = { ...result.place, spent: { turns: 0, tokens: 0, costUsd: 0 }, fromCache: true }
       results.push(place)
-      recordLedger({ [item.place.id]: ledgerRow(item, place.status, place.unresolved) })
+      recordLedger({ [item.place.id]: ledgerRow(item, place.status) })
       opts.onProgress?.({ kind: 'place-done', place })
     }
     return misses
@@ -711,7 +708,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
         // The ledger row, whatever the verdict: a screen that failed is a screen
         // this run REACHED, and recording that is what stops the next run paying
         // for the same failure. The digest is the one the work list planned over.
-        recordLedger({ [item.place.id]: ledgerRow(item, place.status, place.unresolved) })
+        recordLedger({ [item.place.id]: ledgerRow(item, place.status) })
         // The fragment an accepted outcome produced, under this screen's digest:
         // the next run over the same inputs folds it instead of buying it again.
         if (outcome.status === 'completed' && (place.status === 'authored' || place.status === 'empty')) {
