@@ -42,8 +42,9 @@ import {
   InterfaceStateIdSchema,
   InterfaceStateSchema,
   InterfacesFileSchema,
-  isRootPlace,
+  INTERFACE_READABLE_KINDS,
   resolvedInterfaceFingerprint,
+  rootPlaceOf,
   type Interface,
   type InterfaceResource,
   type InterfaceState,
@@ -53,9 +54,6 @@ import { mergeInterfaceCatalogs } from '@truecourse/guard-runner'
 
 /** The surface this pass authors. Web is the only one nothing derives. */
 export const AUTHORED_SURFACE = 'web'
-
-/** What a place has to answer for before the write path accepts it. */
-const READABLE_KINDS = ['markers', 'elements', 'controls', 'rows'] as const
 
 /** `web/<kebab-slug>` — the id shape every authored task is held to. */
 const AUTHORED_ID = /^web\/[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -503,7 +501,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
   if (input.scope) {
     for (const place of stamped.resources) {
-      if (screenFor(place.id, places)?.id !== input.scope.screenId) {
+      if (rootPlaceOf(place.id, places)?.id !== input.scope.screenId) {
         errors.push(`\`${place.id}\` is not a resource of \`${input.scope.screenId}\` — enrich only this screen and its nested places`)
       }
     }
@@ -517,7 +515,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   // shows nothing of this kind" is a reading nobody but the session made.
   for (const place of stamped.resources) {
     const readables = places.get(place.id)?.readables
-    const unstated = READABLE_KINDS.filter((kind) => readables?.[kind] === undefined)
+    const unstated = INTERFACE_READABLE_KINDS.filter((kind) => readables?.[kind] === undefined)
     if (unstated.length > 0) {
       errors.push(
         `\`${place.id}\` leaves ${unstated.map((kind) => `\`${kind}\``).join(', ')} unstated — state each of \`markers\`, \`elements\`, \`controls\` and \`rows\` explicitly, \`[]\` when this place has none of that kind`,
@@ -536,7 +534,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
         `\`${task.id}\` navigates to \`${first.route}\` but its entry is \`${task.entry.path}\` — the entry IS the address the task starts at`,
       )
     }
-    const screen = task.at ? screenFor(task.at, places) : undefined
+    const screen = task.at ? rootPlaceOf(task.at, places) : undefined
     if (screen?.address && screen.address !== task.entry.path) {
       errors.push(
         `\`${task.id}\` is \`at\` a place addressed \`${screen.address}\`, and its entry says \`${task.entry.path}\``,
@@ -711,19 +709,3 @@ function overlay<T extends { id: string }>(base: readonly T[], additions: readon
   return result
 }
 
-/** The root place (a screen, or a shared component) a place sits on, walking the `of` chain up; a root is itself. */
-function screenFor(
-  id: string,
-  places: ReadonlyMap<string, InterfaceResource>,
-): InterfaceResource | undefined {
-  const seen = new Set<string>()
-  let current: string | undefined = id
-  while (current && !seen.has(current)) {
-    seen.add(current)
-    const place: InterfaceResource | undefined = places.get(current)
-    if (!place) return undefined
-    if (isRootPlace(place)) return place
-    current = place.of
-  }
-  return undefined
-}

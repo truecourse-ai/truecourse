@@ -43,6 +43,7 @@ import {
   type InterfaceSequenceNode,
   type InterfaceStep,
   isLabelOnlyRekey,
+  rootPlaceOf,
 } from '@truecourse/shared'
 
 function iface(steps: InterfaceStep[], over: Partial<Interface> = {}): Interface {
@@ -3174,5 +3175,25 @@ describe('an authoring ledger row', () => {
 
   it('refuses any other unknown field', () => {
     expect(InterfaceAuthoringRecordSchema.safeParse({ status: 'authored', inputFingerprint: 'abc', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('the root place a place sits on', () => {
+  const places = new Map([
+    { id: 'links', kind: 'screen' as const, title: '/links' },
+    { id: 'sidebar', kind: 'component' as const, title: 'Sidebar' },
+    { id: 'delete-link', kind: 'dialog' as const, title: 'Delete link', of: 'links-panel' },
+    { id: 'links-panel', kind: 'panel' as const, title: 'Links', of: 'links' },
+    { id: 'orphan', kind: 'dialog' as const, title: 'Orphan', of: 'gone' },
+    { id: 'loop-a', kind: 'dialog' as const, title: 'A', of: 'loop-b' },
+    { id: 'loop-b', kind: 'dialog' as const, title: 'B', of: 'loop-a' },
+  ].map((place) => [place.id, place]))
+  it('walks `of` up to a screen or a component, and a root is its own', () => {
+    expect(rootPlaceOf('delete-link', places)?.id).toBe('links')
+    expect(rootPlaceOf('sidebar', places)?.id).toBe('sidebar')
+  })
+  it('is undefined when the chain breaks or loops', () => {
+    expect(rootPlaceOf('orphan', places)).toBeUndefined()
+    expect(rootPlaceOf('loop-a', places)).toBeUndefined()
   })
 })

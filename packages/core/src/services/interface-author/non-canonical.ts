@@ -15,9 +15,9 @@ import fs from 'node:fs'
 import {
   interfaceStepLocator,
   isNonCanonicalLocator,
-  isRootPlace,
   isTargetedStep,
   readableLocators,
+  rootPlaceOf,
   type GuardWebLocator,
   type InterfaceEntry,
   type InterfaceReadableKind,
@@ -66,7 +66,7 @@ export function nonCanonicalLocators(catalog: InterfacesFile | null): NonCanonic
   const steps = (catalog?.interfaces ?? [])
     .filter((task) => task.type === AUTHORED_SURFACE)
     .flatMap((task) => {
-      const screen = task.at ? screenOf(task.at, places) : screenAt(task.entry, places)
+      const screen = task.at ? rootPlaceOf(task.at, places)?.id : screenAt(task.entry, places)
       return task.steps.flatMap((step, index): NonCanonicalLocator[] => {
         if (!isTargetedStep(step) || step.kind === 'upload') return []
         const locator = interfaceStepLocator(step)
@@ -83,7 +83,7 @@ export function nonCanonicalLocators(catalog: InterfacesFile | null): NonCanonic
       })
     })
   const readables = [...places.values()].flatMap((place) => {
-    const screen = screenOf(place.id, places)
+    const screen = rootPlaceOf(place.id, places)?.id
     return readableLocators(place)
       .filter((readable) => isNonCanonicalLocator(readable.locator))
       .map((readable): NonCanonicalLocator => ({
@@ -111,16 +111,6 @@ export function writeNonCanonicalLocators(repoRoot: string): { path: string; cou
   if (locators.length === 0) fs.rmSync(path, { force: true })
   else atomicWriteJson(path, { locators })
   return { path, count: locators.length }
-}
-
-/** The root place (screen or shared component) a place sits on, walking the `of` chain up; a root is itself. */
-function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): string | undefined {
-  const seen = new Set<string>()
-  for (let place = places.get(id); place && !seen.has(place.id); place = place.of ? places.get(place.of) : undefined) {
-    seen.add(place.id)
-    if (isRootPlace(place)) return place.id
-  }
-  return undefined
 }
 
 /** The screen addressed at a task's entry path, when one is. */

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { isRootPlace, type Interface, type InterfaceResource, type InterfacesFile } from '@truecourse/shared'
+import { isRootPlace, rootPlaceOf, type Interface, type InterfaceResource, type InterfacesFile } from '@truecourse/shared'
 import type { AuthoredFragment } from './draft.js'
 
 export interface ScreenIdentityScope {
@@ -36,22 +36,9 @@ function qualifiedId(id: string, prefix: string, exists: boolean): string {
   return `${prefix}${readable(id, 52)}-${hash(id)}`
 }
 
-function resourceOwner(id: string, resources: ReadonlyMap<string, InterfaceResource>): string | undefined {
-  const seen = new Set<string>()
-  let current: string | undefined = id
-  while (current && !seen.has(current)) {
-    seen.add(current)
-    const resource: InterfaceResource | undefined = resources.get(current)
-    if (!resource) return undefined
-    if (isRootPlace(resource)) return resource.id
-    current = resource.of
-  }
-  return undefined
-}
-
 function taskOwnedBy(task: Interface, scope: ScreenIdentityScope, resources: ReadonlyMap<string, InterfaceResource>): boolean {
   if (task.type !== 'web') return false
-  if (task.at) return resourceOwner(task.at, resources) === scope.screenId
+  if (task.at) return rootPlaceOf(task.at, resources)?.id === scope.screenId
   return scope.address !== undefined && 'path' in task.entry && task.entry.path === scope.address
 }
 
@@ -82,8 +69,8 @@ export function scopeFragmentIds(fragment: AuthoredFragment, input: ScopeFragmen
     if ((resource.kind !== 'panel' && resource.kind !== 'dialog') || !SLUG.test(resource.id)) continue
     const known = resources.get(resource.id)
     if (known && isRootPlace(known)) continue
-    if (resourceOwner(resource.id, proposedResources) !== scope.screenId) continue
-    if (resourceOwner(resource.id, resources) === scope.screenId) continue
+    if (rootPlaceOf(resource.id, proposedResources)?.id !== scope.screenId) continue
+    if (rootPlaceOf(resource.id, resources)?.id === scope.screenId) continue
     resourceIds.set(resource.id, qualifiedId(resource.id, `${prefix}-place-`, resources.has(resource.id)))
   }
   const resourceId = (id: string | undefined): string | undefined => id === undefined ? undefined : resourceIds.get(id) ?? id

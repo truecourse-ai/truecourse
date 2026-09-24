@@ -73,7 +73,7 @@ import type {
   InterfacesFile,
   MapperDiagnostic,
 } from '@truecourse/shared'
-import { isLabelOnlyRekey, isRootPlace } from '@truecourse/shared'
+import { isLabelOnlyRekey, isRootPlace, rootPlaceOf } from '@truecourse/shared'
 import { readCachedSessionOutput, storeCachedSessionOutput } from '../agent/session-cache.js'
 import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
@@ -964,7 +964,7 @@ function placesOn(
   rootId: string,
   places: ReadonlyMap<string, InterfaceResource>,
 ): InterfaceResource[] {
-  return [...places.values()].filter((place) => !isRootPlace(place) && screenOf(place.id, places) === rootId)
+  return [...places.values()].filter((place) => !isRootPlace(place) && rootPlaceOf(place.id, places)?.id === rootId)
 }
 
 function describeFailure(failure: { kind: string } & Record<string, unknown>): string {
@@ -984,17 +984,5 @@ function describeFailure(failure: { kind: string } & Record<string, unknown>): s
   }
 }
 
-/** The root place (screen or component) a place sits on, walking `of` up; a root resolves to itself. */
-function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): string | undefined {
-  const seen = new Set<string>()
-  let current: string | undefined = id
-  while (current && !seen.has(current)) {
-    seen.add(current)
-    const place: InterfaceResource | undefined = places.get(current)
-    if (!place) return undefined
-    if (isRootPlace(place)) return place.id
-    current = place.of
-  }
-  return undefined
-}
+
 

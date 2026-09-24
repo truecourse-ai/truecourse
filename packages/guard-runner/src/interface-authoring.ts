@@ -29,6 +29,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   isRootPlace,
+  rootPlaceOf,
   type Interface,
   type InterfaceAuthoringRecord,
   type InterfaceResource,
@@ -102,7 +103,7 @@ export function webScreenAuthoringStates(
   const located = new Map<string, string[]>()
   for (const task of input.authored?.interfaces ?? []) {
     if (task.type !== AUTHORED_SURFACE) continue
-    const screen = task.at ? screenOf(task.at, places) : screenAt(routeOf(task), screens)
+    const screen = task.at ? rootPlaceOf(task.at, places)?.id : screenAt(routeOf(task), screens)
     if (!screen) continue
     located.set(screen, [...(located.get(screen) ?? []), task.id])
   }
@@ -216,7 +217,7 @@ function fingerprintOf(
 ): string {
   const own = derived.get(place.id) ?? place
   const nested = [...derived.values()]
-    .filter((candidate) => candidate.id !== own.id && screenOf(candidate.id, derived) === own.id)
+    .filter((candidate) => candidate.id !== own.id && rootPlaceOf(candidate.id, derived)?.id === own.id)
     .sort((a, b) => a.id.localeCompare(b.id))
   const material = {
     stage: `interface-author-v${INTERFACE_AUTHOR_STAGE_VERSION}`,
@@ -250,19 +251,6 @@ function derivedPlaceIndex(derived: InterfacesFile | null): Map<string, Interfac
   return new Map((derived?.resources?.[AUTHORED_SURFACE] ?? []).map((place) => [place.id, place]))
 }
 
-/** The root place (screen or component) a place sits on, walking `of` up; a root resolves to itself. */
-function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): string | undefined {
-  const seen = new Set<string>()
-  let current: string | undefined = id
-  while (current && !seen.has(current)) {
-    seen.add(current)
-    const place: InterfaceResource | undefined = places.get(current)
-    if (!place) return undefined
-    if (isRootPlace(place)) return place.id
-    current = place.of
-  }
-  return undefined
-}
 
 /** The route a task starts at — its first navigate step, else its entry. */
 function routeOf(task: Pick<Interface, 'steps' | 'entry'>): string | undefined {

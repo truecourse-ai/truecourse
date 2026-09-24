@@ -16,7 +16,7 @@
  */
 
 import { ANONYMOUS_PRINCIPAL } from '@truecourse/shared'
-import { principalNames, type LiveScreens } from './live-screen.js'
+import { observerFor, principalNames, type LiveScreens } from './live-screen.js'
 
 /** The credential the seed publishes the owner of the seeded data's web session under: the default principal. */
 export const DEFAULT_WEB_PRINCIPAL = 'webSession'
@@ -44,7 +44,7 @@ export async function principalsReaching(live: LiveScreens, path: string): Promi
   const names = principalNames(live)
   const observers = names.length > 0
     ? names.flatMap((name) => {
-        const observer = name === live.observer.principal ? live.observer : live.principals?.get(name)
+        const observer = observerFor(live, name)
         return observer ? [{ name, observer }] : []
       })
     : [{ name: live.observer.principal ?? ANONYMOUS_PRINCIPAL, observer: live.observer }]

@@ -1205,6 +1205,23 @@ export function isRootPlace(place: { kind: InterfaceResourceKind }): boolean {
 }
 
 /**
+ * The root place (a screen or a shared component) the place `id` sits on,
+ * walking its `of` chain up; a root is its own. Undefined when the chain
+ * reaches a place `places` does not hold, or loops.
+ */
+export function rootPlaceOf<P extends { id: string; kind: InterfaceResourceKind; of?: string }>(
+  id: string,
+  places: ReadonlyMap<string, P>,
+): P | undefined {
+  const seen = new Set<string>()
+  for (let place = places.get(id); place && !seen.has(place.id); place = place.of === undefined ? undefined : places.get(place.of)) {
+    seen.add(place.id)
+    if (isRootPlace(place)) return place
+  }
+  return undefined
+}
+
+/**
  * A readable's name — same enforced kebab-case as every id here. Optional on
  * every readable, and referenced by NOTHING yet (see the region header): it
  * exists so a future capture/count vocabulary can point at one fact without a
@@ -1408,7 +1425,7 @@ export const InterfaceResourceSchema = z
     // A readable id is a NAME — one fact per name, across all four kinds, so a
     // future reference can never point at two facts.
     const seen = new Set<string>()
-    for (const kind of ['markers', 'elements', 'controls', 'rows'] as const) {
+    for (const kind of INTERFACE_READABLE_KINDS) {
       resource.readables?.[kind]?.forEach((fact, i) => {
         if (!fact.id) return
         if (seen.has(fact.id)) {
