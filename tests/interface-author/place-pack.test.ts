@@ -10,7 +10,7 @@ let repo: string
 beforeEach(() => { repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-place-source-')) })
 afterEach(() => { fs.rmSync(repo, { recursive: true, force: true }) })
 const write = (file: string, source: string) => fs.writeFileSync(path.join(repo, file), source)
-const context = (module: string, ...renders: string[]): WebPlaceContext => ({ module, renders, closure: renders.length + 1, apiEffects: [], rpcCalls: [], unjoined: [] })
+const context = (module: string, ...renders: string[]): WebPlaceContext => ({ module, renders, closure: renders.length + 1, renderClosure: renders, apiEffects: [], rpcCalls: [], unjoined: [] })
 
 describe('per-screen source', () => {
   it('includes a singleton route and its views, with lossless late controls', () => {

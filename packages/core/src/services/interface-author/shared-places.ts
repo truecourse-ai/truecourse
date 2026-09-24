@@ -6,10 +6,12 @@
  * layout's sidebar, a list's card actions, the search modal are rendered by a
  * dozen screens, and each screen's session reasonably decides they are "the
  * shared layout's", so nobody authors them. Ownership is the gap, and the
- * grounding already holds the answer: a component module rendered by two or more
- * screens, which OWNS an interactive handler (not one that only forwards the
- * `onClick` it was given), is a shared place — kind `component`, an id derived
- * from its module path, authored by one session at a screen that renders it.
+ * grounding already holds the answer: a component module in the RENDER CLOSURE
+ * of two or more screens (however deep, and through the layouts the framework
+ * wraps them in), which OWNS an interactive handler (not one that only forwards
+ * the `onClick` it was given), is a shared place — kind `component`, an id
+ * derived from its module path, authored by one session at a screen that
+ * renders it.
  *
  * Pure: the screens' grounding and a source reader in, the places out, the same
  * input always giving the same places in the same order.
@@ -52,15 +54,15 @@ export interface DetectSharedComponentsInput {
 }
 
 /**
- * The shared components of a set of screens: every rendered module two or more
- * screens list, that is no screen's own route module, and that owns a handler.
- * Most widely rendered first, ties by path.
+ * The shared components of a set of screens: every module in the render
+ * closure of two or more screens, that is no screen's own route module, and
+ * that owns a handler. Most widely rendered first, ties by path.
  */
 export function detectSharedComponents(input: DetectSharedComponentsInput): SharedComponent[] {
   const routeModules = new Set([...input.contexts.values()].map((context) => context.module))
   const renderedBy = new Map<string, string[]>()
   for (const [screen, context] of input.contexts) {
-    for (const module of new Set(context.renders)) {
+    for (const module of new Set(context.renderClosure)) {
       if (routeModules.has(module)) continue
       renderedBy.set(module, [...(renderedBy.get(module) ?? []), screen])
     }

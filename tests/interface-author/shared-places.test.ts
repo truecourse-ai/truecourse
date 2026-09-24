@@ -16,6 +16,7 @@ const context = (module: string, renders: string[]): WebPlaceContext => ({
   module,
   renders,
   closure: renders.length + 1,
+  renderClosure: renders,
   apiEffects: [],
   unjoined: [],
   rpcCalls: [],

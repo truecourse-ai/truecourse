@@ -909,7 +909,7 @@ describe('re-running', () => {
      */
     describe('a settled screen whose source moved', () => {
       const context = new Map([['root', {
-        module: 'src/Home.tsx', renders: [], closure: 1,
+        module: 'src/Home.tsx', renders: [], closure: 1, renderClosure: [],
         apiEffects: ['api/post-api-repos'], rpcCalls: [], unjoined: [],
       }]])
       const both: Script = async (place) =>
@@ -1383,7 +1383,7 @@ describe('a session that skipped `check_draft`', () => {
 
 describe('source and task evidence in the initial session', () => {
   const context = new Map([['root', {
-    module: 'src/Home.tsx', renders: ['src/Form.tsx'], closure: 2,
+    module: 'src/Home.tsx', renders: ['src/Form.tsx'], closure: 2, renderClosure: ['src/Form.tsx'],
     apiEffects: ['api/post-api-repos'], rpcCalls: [], unjoined: [],
   }]])
 
@@ -1527,6 +1527,7 @@ describe('the briefing carries what the AST pass knows', () => {
             module: 'src/Home.tsx',
             renders: ['src/RepoGrid.tsx'],
             closure: 4,
+            renderClosure: ['src/RepoGrid.tsx'],
             apiEffects: ['api/post-api-repos'],
             unjoined: ['GET /v3/insights — no api interface declares it'],
             rpcCalls: ['repo.list'],
@@ -2121,7 +2122,7 @@ describe('readable authoring through storage and the screen read view', () => {
 describe('a shared component', () => {
   const SIDEBAR = { id: 'component-sidebar-1a2b3c4d', module: 'src/Sidebar.tsx', title: 'Sidebar', screens: ['root', 'repos-repoid'] }
   const shared = { components: [SIDEBAR], rendered: new Map([['root', [SIDEBAR.id]], ['repos-repoid', [SIDEBAR.id]]]) }
-  const grounding = (module: string) => ({ module, renders: [], closure: 1, apiEffects: [], unjoined: [], rpcCalls: [] })
+  const grounding = (module: string) => ({ module, renders: [], closure: 1, renderClosure: [], apiEffects: [], unjoined: [], rpcCalls: [] })
   const context = new Map([
     ['root', grounding('src/Home.tsx')],
     ['repos-repoid', grounding('src/Report.tsx')],

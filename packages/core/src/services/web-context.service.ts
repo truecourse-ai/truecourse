@@ -16,7 +16,8 @@
  * with the same pure function over the same tree.
  *
  * It also finds the SHARED PLACES ({@link detectSharedComponents}): the
- * component modules several screens render and that own a handler. Each gets a
+ * component modules several screens render anywhere in their render closure
+ * (their layouts included) and that own a handler. Each gets a
  * grounding of its own (its module and what it renders), and the modules are
  * taken out of every other place's `renders` — a screen is not handed the source
  * of UI another session authors, and it is told which shared places it renders
@@ -130,7 +131,7 @@ export async function deriveWebAuthoringContext(
 
 /**
  * Take every shared module out of every other place's `renders`, and say which
- * shared places each place rendered.
+ * shared places each place renders anywhere in its render closure.
  */
 function separateSharedModules(
   contexts: ReadonlyMap<string, WebPlaceContext>,
@@ -140,7 +141,7 @@ function separateSharedModules(
   const separated = new Map<string, WebPlaceContext>();
   const sharedRendered = new Map<string, string[]>();
   for (const [placeId, context] of contexts) {
-    const rendered = context.renders.flatMap((module) => {
+    const rendered = context.renderClosure.flatMap((module) => {
       const id = byModule.get(module);
       return id !== undefined && id !== placeId ? [id] : [];
     });

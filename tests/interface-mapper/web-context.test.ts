@@ -268,6 +268,67 @@ describe('the component closure (tier 2)', () => {
  * on the other side is refuse-nothing: an edge whose usage the analyzer cannot
  * see stays in.
  */
+describe('the render closure', () => {
+  it('follows the render chain past the named list’s depth: a card rendered through a list is the screen’s', () => {
+    const contexts = derive(
+      { links: place('/collections/{id}', 'pages/collections/[id].tsx') },
+      [
+        file('pages/collections/[id].tsx', { calls: ['Links@3'] }),
+        file('components/Links.tsx', { calls: ['LinkList@3'] }),
+        file('components/LinkList.tsx', { calls: ['LinkRow@3'] }),
+        file('components/LinkRow.tsx', { calls: ['LinkCard@3'] }),
+        file('components/LinkCard.tsx'),
+      ],
+      [
+        edge('pages/collections/[id].tsx -> components/Links.tsx {Links}'),
+        edge('components/Links.tsx -> components/LinkList.tsx {LinkList}'),
+        edge('components/LinkList.tsx -> components/LinkRow.tsx {LinkRow}'),
+        edge('components/LinkRow.tsx -> components/LinkCard.tsx {LinkCard}'),
+      ],
+    )
+    const context = contexts.get('links')!
+    expect(context.renders).not.toContain('components/LinkCard.tsx')
+    expect(context.renderClosure).toEqual([
+      'components/Links.tsx',
+      'components/LinkList.tsx',
+      'components/LinkRow.tsx',
+      'components/LinkCard.tsx',
+    ])
+  })
+
+  it('wraps an app-router page in every layout above it, outermost first, with what they render', () => {
+    const page = (address: string, path: string): WebPlace => ({ ...place(address, path), idiom: 'next-app' })
+    const contexts = derive(
+      { links: page('/links', 'app/(main)/links/page.tsx') },
+      [
+        file('app/layout.tsx'),
+        file('app/(main)/layout.tsx', { calls: ['Sidebar@3'] }),
+        file('app/(main)/links/page.tsx'),
+        file('components/Sidebar.tsx'),
+        file('app/(other)/layout.tsx'),
+      ],
+      [edge('app/(main)/layout.tsx -> components/Sidebar.tsx {Sidebar}')],
+    )
+    expect(contexts.get('links')?.renderClosure).toEqual(['app/layout.tsx', 'app/(main)/layout.tsx', 'components/Sidebar.tsx'])
+    // The named list is the page's own chain: a layout is not the screen's feature.
+    expect(contexts.get('links')?.renders).toEqual([])
+  })
+
+  it("wraps a pages-router page in its pages directory's `_app`", () => {
+    const page = (address: string, path: string): WebPlace => ({ ...place(address, path), idiom: 'next-pages' })
+    const contexts = derive(
+      { tags: page('/tags/{id}', 'apps/web/pages/tags/[id].tsx') },
+      [
+        file('apps/web/pages/_app.tsx', { calls: ['AuthRedirect@3'] }),
+        file('apps/web/pages/tags/[id].tsx'),
+        file('apps/web/layouts/AuthRedirect.tsx'),
+      ],
+      [edge('apps/web/pages/_app.tsx -> apps/web/layouts/AuthRedirect.tsx {AuthRedirect}')],
+    )
+    expect(contexts.get('tags')?.renderClosure).toEqual(['apps/web/pages/_app.tsx', 'apps/web/layouts/AuthRedirect.tsx'])
+  })
+})
+
 describe('render evidence (the `/signin` regression)', () => {
   it('drops a module imported for a CONSTANT, and everything reached only through it', () => {
     const contexts = derive(
