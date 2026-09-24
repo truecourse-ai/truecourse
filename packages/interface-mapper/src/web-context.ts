@@ -61,8 +61,8 @@ export interface WebPlaceContext {
    * EVERY first-party view this place renders, however deep, repo-relative:
    * the render chain from its route module and from the layouts the framework
    * wraps it in (a Next.js app-router `layout`, a pages-router `_app`), the
-   * layouts themselves included. Uncapped (the walk is bounded by
-   * {@link MAX_CLOSURE}): it says which components a place renders, which is
+   * layouts themselves included. Uncapped and unbounded in depth (see
+   * {@link renderGraph}): it says which components a place renders, which is
    * what the shared places are found from, and is never a briefing's list.
    */
   renderClosure: string[]
@@ -124,12 +124,6 @@ export interface DeriveWebPlaceContextsInput {
  */
 const DEPTH = 3
 
-/**
- * How far the RENDER CLOSURE walks: a shared component is found however many
- * views sit between it and the screen (a page → its list → the list's card).
- */
-const RENDER_CLOSURE_DEPTH = 8
-
 /** How many rendered modules the briefing names — the 5–8 that matter, with slack. */
 const MAX_RENDERS = 12
 
@@ -157,6 +151,7 @@ export function deriveWebPlaceContexts(
   const edges = groupEdges(input.dependencies)
   const index = apiOperations(input.apiInterfaces)
   const depth = input.depth ?? DEPTH
+  const graph = renderGraph(analyses, edges)
 
   const contexts = new Map<string, WebPlaceContext>()
   for (const [placeId, seed] of input.seeds) {
@@ -171,7 +166,7 @@ export function deriveWebPlaceContexts(
         relative(input.repoRoot, path),
       ),
       closure: closure.length,
-      renderClosure: renderClosure(module, layouts, analyses, edges).map((path) => relative(input.repoRoot, path)),
+      renderClosure: renderClosure(module, layouts, analyses, edges, graph).map((path) => relative(input.repoRoot, path)),
       ...join(closure, analyses, index),
     })
   }
@@ -449,16 +444,17 @@ function layoutModules(
 const LAYOUT_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js']
 
 /**
- * Every view a place renders, however deep: the render-evidenced views of a
- * deep walk from its route module and from each of its layouts (the layouts
- * themselves first), each named once. Like {@link renderedModules}, a walk
- * whose views all lack evidence keeps them all rather than naming none.
+ * Every view a place renders, however deep: the views of the render chain from
+ * its route module and from each of its layouts (the layouts themselves first),
+ * each named once. Like {@link renderedModules}, a root whose chain names no
+ * view keeps the views of its import walk rather than naming none.
  */
 function renderClosure(
   module: string,
   layouts: readonly string[],
   analyses: ReadonlyMap<string, FileAnalysis>,
   edges: ReadonlyMap<string, readonly ModuleDependency[]>,
+  graph: RenderGraph,
 ): string[] {
   const isView = (file: string): boolean => {
     const analysis = analyses.get(file)
@@ -466,14 +462,76 @@ function renderClosure(
   }
   const named = new Set<string>(layouts.filter(isView))
   for (const root of [...layouts, module]) {
-    const closure = walk(root, { analyses, edges, depth: RENDER_CLOSURE_DEPTH })
-    const rendered = renderReachable(root, closure, analyses, edges)
-    const views = closure.filter((node) => node.hop > 0 && isView(node.path))
-    const evidenced = views.filter((node) => rendered.has(node.path))
-    for (const node of evidenced.length > 0 ? evidenced : views) named.add(node.path)
+    const views = graph.closure(root).filter(isView)
+    const fallback = views.length > 0
+      ? views
+      : walk(root, { analyses, edges, depth: Number.POSITIVE_INFINITY })
+          .filter((node) => node.hop > 0 && isView(node.path))
+          .map((node) => node.path)
+    for (const view of fallback) named.add(view)
   }
   named.delete(module)
   return [...named]
+}
+
+/** One run's render chains, each module's worked out once. */
+interface RenderGraph {
+  /** Every module `root` renders, however deep, nearest first; `root` itself excluded. */
+  closure(root: string): string[]
+}
+
+/**
+ * THE RENDER GRAPH of one derivation: a module renders the modules its
+ * render-evidenced edges reach ({@link renderEvidenced}), a barrel on the way
+ * resolved to the modules behind the names asked of it (the walk's rule). Each
+ * module's successors and each root's closure are computed once and reused, so
+ * a layout every screen sits in is walked once per run, and a closure is
+ * followed to its end: a cycle is entered once, and no depth cuts it short.
+ */
+function renderGraph(
+  analyses: ReadonlyMap<string, FileAnalysis>,
+  edges: ReadonlyMap<string, readonly ModuleDependency[]>,
+): RenderGraph {
+  const successors = new Map<string, string[]>()
+  const closures = new Map<string, string[]>()
+  /** The modules an edge into `target` reaches: itself, or through a barrel, what it re-exports under `names`. */
+  const behind = (target: string, names: readonly string[], seen: Set<string>): string[] => {
+    const analysis = analyses.get(target)
+    if (!analysis || !isBarrel(analysis)) return [target]
+    if (seen.has(target)) return []
+    seen.add(target)
+    return (edges.get(target) ?? [])
+      .filter((edge) => names.length === 0 || edge.importedNames.some((name) => names.includes(name)))
+      .flatMap((edge) => behind(edge.target, edge.importedNames, seen))
+  }
+  const next = (module: string): string[] => {
+    const known = successors.get(module)
+    if (known) return known
+    const analysis = analyses.get(module)
+    const reached = (edges.get(module) ?? [])
+      .filter((edge) => renderEvidenced(analysis, edge))
+      .flatMap((edge) => behind(edge.target, edge.importedNames, new Set()))
+    successors.set(module, reached)
+    return reached
+  }
+  return {
+    closure(root) {
+      const known = closures.get(root)
+      if (known) return known
+      const reached = new Set<string>([root])
+      const queue = [root]
+      for (let i = 0; i < queue.length; i++) {
+        for (const target of next(queue[i])) {
+          if (reached.has(target)) continue
+          reached.add(target)
+          queue.push(target)
+        }
+      }
+      const closure = queue.slice(1)
+      closures.set(root, closure)
+      return closure
+    },
+  }
 }
 
 /** The address's own words — static segments only, short ones dropped as noise. */

@@ -296,6 +296,30 @@ describe('the render closure', () => {
     ])
   })
 
+  it('follows the render chain to its end however deep, through a cycle, and past a barrel by the asked name', () => {
+    const chain = Array.from({ length: 12 }, (_, i) => `components/Level${i}.tsx`)
+    const contexts = derive(
+      { root: place('/', 'page.tsx') },
+      [
+        file('page.tsx', { calls: ['Level0@3'] }),
+        ...chain.map((module, i) => file(module, { calls: [i < chain.length - 1 ? `Level${i + 1}@3` : 'Level0@3', 'Button@4'] })),
+        file('ui/index.ts', { reexports: ['Button', 'Table'] }),
+        file('ui/button.tsx'),
+        file('ui/table.tsx'),
+      ],
+      [
+        edge('page.tsx -> components/Level0.tsx {Level0}'),
+        ...chain.slice(1).map((module, i) => edge(`${chain[i]} -> ${module} {Level${i + 1}}`)),
+        // The last level renders the first again: the cycle is entered once.
+        edge(`${chain[chain.length - 1]} -> ${chain[0]} {Level0}`),
+        edge(`${chain[chain.length - 1]} -> ui/index.ts {Button}`),
+        edge('ui/index.ts -> ui/button.tsx {Button}'),
+        edge('ui/index.ts -> ui/table.tsx {Table}'),
+      ],
+    )
+    expect(contexts.get('root')?.renderClosure).toEqual([...chain, 'ui/button.tsx'])
+  })
+
   it('wraps an app-router page in every layout above it, outermost first, with what they render', () => {
     const page = (address: string, path: string): WebPlace => ({ ...place(address, path), idiom: 'next-app' })
     const contexts = derive(
