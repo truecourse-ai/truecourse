@@ -79,6 +79,18 @@ export const RelationInfoSchema = z.object({
 export type RelationInfo = z.infer<typeof RelationInfoSchema>
 
 // ---------------------------------------------------------------------------
+// Enum Info
+// ---------------------------------------------------------------------------
+
+/** A named set of values a column may hold, declared by the schema (a Prisma `enum`). */
+export const EnumInfoSchema = z.object({
+  name: z.string(),
+  values: z.array(z.string()),
+})
+
+export type EnumInfo = z.infer<typeof EnumInfoSchema>
+
+// ---------------------------------------------------------------------------
 // Database Info (detected database instance)
 // ---------------------------------------------------------------------------
 
@@ -89,6 +101,10 @@ export const DatabaseInfoSchema = z.object({
   connectionEnvVar: z.string().optional(),
   tables: z.array(TableInfoSchema),
   relations: z.array(RelationInfoSchema),
+  /** The enums the schema declares; a column typed by one names it as its `type`. */
+  enums: z.array(EnumInfoSchema).optional(),
+  /** The files the schema parsers read the tables from, repo-relative and sorted. */
+  schemaFiles: z.array(z.string()).optional(),
   connectedServices: z.array(z.string()),
 })
 

@@ -299,7 +299,13 @@ export const GuardSetupReportSchema = z
         externalServices: z.array(DetectedExternalServiceSchema),
         /** The datastore family + driver, when one was detected. */
         database: z
-          .object({ type: z.string(), driver: z.string(), tables: z.number().int().nonnegative() })
+          .object({
+            type: z.string(),
+            driver: z.string(),
+            tables: z.number().int().nonnegative(),
+            /** The files the schema parsers read, repo-relative: the seed step's keys fold them. */
+            schemaFiles: z.array(z.string()).optional(),
+          })
           .strict()
           .nullable(),
         datastoreUrls: z.array(DatastoreUrlRefSchema),

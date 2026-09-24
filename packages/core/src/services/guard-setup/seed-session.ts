@@ -36,11 +36,11 @@
  *
  * CACHE: author-class. KEEPS the `guard/seed` name; the key is the seed
  * step's own input fingerprint (recipe contract ∷ dependency catalog ∷ the
- * domain files) + the stage version. The fresh-world PROOF always re-runs on
+ * schema files the parsers read) + the stage version. The fresh-world PROOF always re-runs on
  * hits — a cached script is a draft to re-prove, never a proof.
  *
  * COVERAGE: the seed builds a bounded coverage world from the product's DOMAIN
- * (its models and migrations, found by `discoverDomainFiles`), not the minimum
+ * (the schema the source-facts parsers read, and the files they read it from), not the minimum
  * the recipe needs: the owner, admin, member and empty principals, relations at
  * none / one / several, every enum value, visible flags both ways, and the
  * state the app itself produces made by the app's own path. What it cannot
@@ -64,13 +64,11 @@ import {
   SeedProvidesProposalSchema,
   buildSeedUserPrompt,
   connectionEnvVars,
-  discoverDomainFiles,
   principalShapedTables,
   suggestedScriptPath,
   toRecipeSeed,
   writeSeedArtifacts,
   type GuardSetupSeedSession,
-  type DomainFile,
   type GuardSetupSeedSessionInput,
   type RecipeEcosystem,
   type SeedProvidesProposal,
@@ -239,7 +237,7 @@ export const SEED_STAGE_VERSION = 3;
 
 /** `sha256(stage version :: the seed step's input fingerprint)` — the step
  *  fingerprint already folds the recipe contract, the catalog's identity and
- *  the domain files. */
+ *  the schema files the parsers read. */
 export function seedSessionCacheKey(stepFingerprint: string): string {
   return createHash('sha256')
     .update(`seed-v${SEED_STAGE_VERSION}::${stepFingerprint}`)
@@ -577,6 +575,8 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     databaseType: input.database.type,
     tables: input.database.tables,
     relations: input.database.relations,
+    ...(input.database.enums ? { enums: input.database.enums } : {}),
+    ...(input.database.schemaFiles ? { schemaFiles: input.database.schemaFiles } : {}),
     connectionEnv: connectionEnvVars(input.recipe),
     appImports: input.database.appImports,
     blocked: [],
@@ -598,7 +598,6 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     ...requiredSurfaceLines(input),
     ...probeCandidateLines(input),
     ...requiredResourceLines(input),
-    ...domainLines(input.repoRoot, discoverDomainFiles(input.repoRoot)),
     ...coverageLines(requiredPrincipalSurfaces(input).some((r) => r.surface === 'web')),
     '',
     '## The dependency catalog (scenarios/dependencies.json)',
@@ -665,56 +664,6 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
   return lines;
 }
 
-/** How much of the domain the briefing carries: files listed, and excerpt characters. */
-const DOMAIN_MAX_LISTED = 40;
-const DOMAIN_MAX_FILE_CHARS = 12_000;
-const DOMAIN_MAX_CHARS = 24_000;
-/** How many migrations are excerpted when the migrations are the only model there is: the newest. */
-const DOMAIN_MAX_MIGRATION_EXCERPTS = 3;
-
-/**
- * The briefing's domain section: the product's model files, listed and
- * excerpted up to a budget. Migrations beside a model file are only counted
- * (the model already says what they built); when they are the only model there
- * is, the newest are listed and excerpted instead. The session reads the rest
- * with `read_file`.
- */
-export function domainLines(repoRoot: string, files: readonly DomainFile[]): string[] {
-  const lines = ['', '## The domain: what the product can hold'];
-  if (files.length === 0) {
-    lines.push(
-      "No model file was found (no Prisma schema, ORM model or migration). Read the app's data layer for what it holds before building the coverage world.",
-    );
-    return lines;
-  }
-  const models = files.filter((file) => file.kind !== 'migration');
-  const migrations = files.filter((file) => file.kind === 'migration');
-  const listed = models.length > 0 ? models : migrations.slice(-DOMAIN_MAX_LISTED);
-  const unlisted = models.length > 0 ? models.length - DOMAIN_MAX_LISTED : migrations.length - DOMAIN_MAX_LISTED;
-  lines.push(
-    "These files declare the product's data model. Build the coverage world below from them: its entities, their enums, flags, nullable fields and relations, and its roles. Excerpts are bounded; `read_file` for the rest.",
-    ...listed.slice(0, DOMAIN_MAX_LISTED).map((file) => `- ${file.path} (${file.kind})`),
-    ...(unlisted > 0 ? [`- … ${unlisted} more`] : []),
-    ...(models.length > 0 && migrations.length > 0 ? [`- and ${migrations.length} migration file(s), e.g. ${migrations[migrations.length - 1].path}`] : []),
-  );
-  const excerpted = models.length > 0 ? models : migrations.slice(-DOMAIN_MAX_MIGRATION_EXCERPTS);
-  let budget = DOMAIN_MAX_CHARS;
-  for (const file of excerpted) {
-    if (budget <= 0) break;
-    let content: string;
-    try {
-      content = fs.readFileSync(path.join(repoRoot, file.path), 'utf-8');
-    } catch {
-      continue;
-    }
-    const limit = Math.min(DOMAIN_MAX_FILE_CHARS, budget);
-    const excerpt = content.length > limit ? `${content.slice(0, limit)}\n… (${content.length - limit} more characters: read_file for the rest)` : content;
-    budget -= Math.min(content.length, limit);
-    lines.push(`### ${file.path}`, excerpt);
-  }
-  return lines;
-}
-
 /**
  * The briefing's coverage section: the rules that turn the domain into a
  * bounded world (one instance per rule, never the cross product), the
@@ -726,8 +675,8 @@ export function coverageLines(web: boolean): string[] {
   return [
     '',
     '## Coverage: the world the screens and tests explore',
-    'Seed more than the minimum the principals need. The interface catalog is authored LIVE against this world right after the seed, and a screen shows only what the world holds. Build it from the domain above, BOUNDED: one instance per rule, never every combination.',
-    `- PRINCIPALS, from the domain's roles and ownership: the OWNER, who owns the seeded data (the web principal above); an ADMIN, when the app has an instance or superuser role (an admin flag or role, an instance-admin id); a MEMBER, who shares a record the owner owns (a collaborator, a member of a team or collection) without owning it; and an EMPTY user, who owns nothing, for empty states.` +
+    'Seed more than the minimum the principals need. The interface catalog is authored LIVE against this world right after the seed, and a screen shows only what the world holds. Build it from the domain: the SCHEMA below (its tables, enums, relations) and the schema files it names, BOUNDED: one instance per rule, never every combination.',
+    `- PRINCIPALS, from the schema's roles and ownership: the OWNER, who owns the seeded data (the web principal above); an ADMIN, when the app has an instance or superuser role (an admin flag or role, an instance-admin id); a MEMBER, who shares a record the owner owns (a collaborator, a member of a team or collection) without owning it; and an EMPTY user, who owns nothing, for empty states.` +
       (web
         ? ` Each signs in like the owner: its login fields as a fixture (\`adminUser\`, \`memberUser\`, \`emptyUser\`) and its web session as the credential \`${admin}\`, \`${member}\` or \`${empty}\` (\`header: "Cookie"\`), probed with its own \`login\` block (the admin's on a page only an admin may load).`
         : ''),

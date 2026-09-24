@@ -67,7 +67,6 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { promisify } from 'node:util'
-import { discoverDomainFiles, domainFingerprint } from './seed-domain.js'
 import {
   loadRecipe,
   recipePath,
@@ -567,10 +566,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const settled = settledSteps(repoRoot, opts.refresh === true)
   /** The detection snapshot, once the detect step has read it: a catalog input. */
   let detectionSnapshot = ''
+  /** The files the schema parsers read, once the detect step has read them: a seed input. */
+  let schemaFiles: readonly string[] = []
   /** Whether a step's settled row still holds — its named inputs when it has
    *  them, else its old fingerprint one last time. */
   const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
-    stepSettled(repoRoot, key, settled(key), legacyFingerprint, detectionSnapshot)
+    stepSettled(repoRoot, key, settled(key), legacyFingerprint, { detectionJson: detectionSnapshot, schemaFiles })
   /**
    * Record a step's row with its inputs BY NAME, read off the tree as the row
    * is recorded, which is the state its fingerprint was computed over. A step
@@ -578,7 +579,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
    * refresh re-opens every step on request, so it names none.
    */
   const pushStep = (row: GuardSetupTaxonomyStep): void => {
-    const inputComponents = stepInputComponents(repoRoot, row.key, detectionSnapshot)
+    const inputComponents = stepInputComponents(repoRoot, row.key, { detectionJson: detectionSnapshot, schemaFiles })
     steps.push({ ...row, ...(Object.keys(inputComponents).length > 0 ? { inputComponents } : {}) })
     const settledRow = settled(row.key)
     if (settledRow === null || settledRow.inputFingerprint === row.inputFingerprint) return
@@ -674,6 +675,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       datastoreUrls: mapped.datastoreUrls,
     }
     detectionSnapshot = canonicalDetectionJson(mapped.externalServices, mapped.database, mapped.datastoreUrls)
+    schemaFiles = mapped.database?.schemaFiles ?? []
     return { world, inputFingerprint: recipeStepFingerprint(needsFingerprint(recipeNeeds(world))) }
   }
 
@@ -1017,6 +1019,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const datastoreUrls = mapped.datastoreUrls
   const detectionSnapshotJson = canonicalDetectionJson(detectedExternals, database, datastoreUrls)
   detectionSnapshot = detectionSnapshotJson
+  schemaFiles = database?.schemaFiles ?? []
   pushStep({ key: 'detect', status: 'ok', inputFingerprint: '' })
   for (const service of detectedExternals) fact('detect', detectedServiceFact(service))
   if (database) {
@@ -1035,9 +1038,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   )
   soFar.detection = {
     externalServices: detectedExternals,
-    database: database
-      ? { type: database.type, driver: database.driver, tables: database.tables.length }
-      : null,
+    database: database ? detectedDatabaseRow(database) : null,
     datastoreUrls,
   }
   settleSpine()
@@ -1223,7 +1224,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const current = reloadRecipe(repoRoot) ?? recipe
 
   // ---- Step 4: the one seed — data AND auth. SOFT. -------------------------
-  const seedFpOf = (): string => computeSeedStepFingerprint(repoRoot)
+  const seedFpOf = (): string => computeSeedStepFingerprint(repoRoot, schemaFiles)
   let seedStep: GuardSetupSeedStep | undefined
   /** A recipe defect the seed's cold-clone proof surfaced: the run fails on it. */
   let recipeFailure: string | undefined
@@ -1518,9 +1519,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         : {}),
       detection: {
         externalServices: detectedExternals,
-        database: database
-          ? { type: database.type, driver: database.driver, tables: database.tables.length }
-          : null,
+        database: database ? detectedDatabaseRow(database) : null,
         datastoreUrls,
       },
     },
@@ -1709,15 +1708,49 @@ function derivedWebPlacePairs(repoRoot: string): string {
  * seed's own block is in it: the row is stamped after the seed wrote, and a
  * seed deleted by hand re-opens the step) plus the catalog's IDENTITY: which
  * classes of starting state exist, never how the catalog session worded them,
- * and never a dependency version the seed does not read; plus the DOMAIN
- * files (the product's models and migrations), whose change re-seeds.
+ * and never a dependency version the seed does not read; plus the SCHEMA
+ * files the parsers read the product's data model from (`schemaFiles`, from
+ * the detection), whose change re-seeds.
  */
-export function computeSeedStepFingerprint(repoRoot: string): string {
+export function computeSeedStepFingerprint(repoRoot: string, schemaFiles: readonly string[]): string {
   return createHash('sha256')
     .update(
-      `${recipeContractFingerprint(repoRoot, 'preparations')}::${dependencyCatalogIdentity(repoRoot)}::${domainFingerprint(discoverDomainFiles(repoRoot))}`,
+      `${recipeContractFingerprint(repoRoot, 'preparations')}::${dependencyCatalogIdentity(repoRoot)}::${schemaFilesFingerprint(repoRoot, schemaFiles)}`,
     )
     .digest('hex')
+}
+
+/** One digest over the schema files' paths and contents, as they stand in the tree. */
+export function schemaFilesFingerprint(repoRoot: string, schemaFiles: readonly string[]): string {
+  const hash = createHash('sha256').update('schema')
+  for (const file of [...schemaFiles].sort()) {
+    let content: Buffer | string
+    try {
+      content = fs.readFileSync(path.join(repoRoot, file))
+    } catch {
+      content = '\0missing'
+    }
+    hash.update(`\n${file}\t${createHash('sha256').update(content).digest('hex')}`)
+  }
+  return hash.digest('hex')
+}
+
+/**
+ * The schema files the last setup's detection recorded: what the pre-flight
+ * estimate folds into the seed's keys, since it runs no analysis pass of its own.
+ */
+export function recordedSchemaFiles(repoRoot: string): string[] {
+  return readGuardSetup(repoRoot)?.detection?.database?.schemaFiles ?? []
+}
+
+/** The detection snapshot's datastore row, as the setup report records it. */
+function detectedDatabaseRow(database: SeedDraftDatabase): NonNullable<NonNullable<GuardSetupReport['detection']>['database']> {
+  return {
+    type: database.type,
+    driver: database.driver,
+    tables: database.tables.length,
+    ...(database.schemaFiles && database.schemaFiles.length > 0 ? { schemaFiles: database.schemaFiles } : {}),
+  }
 }
 
 /** {@link computeSeedStepFingerprint} as it was computed before the slices —
@@ -1753,7 +1786,7 @@ export function authFingerprint(repoRoot: string): string {
 function stepInputComponents(
   repoRoot: string,
   key: GuardSetupTaxonomyKey,
-  detectionJson: string,
+  { detectionJson = '', schemaFiles = [] }: StepObservations,
 ): Record<string, string> {
   const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex').slice(0, 16)
   switch (key) {
@@ -1778,7 +1811,7 @@ function stepInputComponents(
       return {
         'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'preparations')),
         catalog: digest(dependencyCatalogIdentity(repoRoot)),
-        domain: digest(domainFingerprint(discoverDomainFiles(repoRoot))),
+        schema: digest(schemaFilesFingerprint(repoRoot, schemaFiles)),
       }
     case 'preparations':
       return preparationFingerprintComponents(repoRoot)
@@ -1793,6 +1826,16 @@ function stepInputComponents(
  * never settles, whatever it carries beside the fingerprint.
  */
 const UNSETTLEABLE_FINGERPRINT = 'authoring-unavailable'
+
+/**
+ * What a run observed that some steps' inputs are computed from: the detection
+ * snapshot (the recipe's needs, the catalog) and the schema files the parsers
+ * read (the seed). A caller that has not observed them passes nothing.
+ */
+export interface StepObservations {
+  detectionJson?: string
+  schemaFiles?: readonly string[]
+}
 
 /** A settled step row, as the next run's gate reads it. */
 export interface SettledStepRow {
@@ -1842,10 +1885,10 @@ export function stepSettled(
   key: GuardSetupTaxonomyKey,
   settled: SettledStepRow | null,
   legacyFingerprint: string,
-  detectionJson = '',
+  observed: StepObservations = {},
 ): boolean {
   if (!settled) return false
-  const current = stepInputComponents(repoRoot, key, detectionJson)
+  const current = stepInputComponents(repoRoot, key, observed)
   // Names that share nothing with the step's scheme prove nothing about it:
   // such a row is compared like one that has none.
   const stored = settled.inputComponents

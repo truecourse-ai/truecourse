@@ -34,7 +34,6 @@ import {
 import {
   collectProbeCandidates,
   computeSeedStepFingerprint,
-  discoverDomainFiles,
   legacyRecipeStepFingerprint,
   legacySeedStepFingerprint,
   runGuardSetup,
@@ -45,7 +44,6 @@ import {
 import { FINGERPRINT_INPUTS } from '@truecourse/guard-runner';
 import {
   buildSeedSession,
-  domainLines,
   existingSeedMachinery,
   missingPrincipalSurfaces,
   requiredPrincipalSurfaces,
@@ -1743,49 +1741,42 @@ describe('seedSessionBriefing — the domain and the coverage world', () => {
       secrets: new Map(),
     }) as never;
 
-  it('carries the model files and their declarations, and the coverage rules with the principals they name', () => {
+  const DOMAIN_DATABASE: SeedDraftDatabase = {
+    ...PRINCIPAL_DATABASE,
+    tables: [
+      ...PRINCIPAL_DATABASE.tables,
+      { name: 'Booking', columns: [{ name: 'id', type: 'Int', isPrimaryKey: true }, { name: 'status', type: 'BookingStatus' }] },
+    ],
+    enums: [{ name: 'BookingStatus', values: ['OPEN', 'CLOSED'] }],
+    schemaFiles: ['schema.prisma'],
+  };
+
+  it("is grounded in the parsed schema: its tables, its enums and the files it was read from, with the coverage rules", () => {
     const r = fixtureRepo();
     writeRecipe(r, {}, webBlock(r));
-    const briefing = seedSessionBriefing(worldFor(r, { database: PRINCIPAL_DATABASE }));
-    expect(briefing).toContain('## The domain: what the product can hold');
-    expect(briefing).toContain('- schema.prisma (prisma)');
-    expect(briefing).toContain('model Booking {');
+    const briefing = seedSessionBriefing(worldFor(r, { database: DOMAIN_DATABASE }));
+    expect(briefing).toContain('read from: schema.prisma');
+    expect(briefing).toContain('    - status: BookingStatus');
+    expect(briefing).toContain('ENUMS (a column typed by one takes exactly these values):\n  BookingStatus: OPEN, CLOSED');
     expect(briefing).toContain('## Coverage: the world the screens and tests explore');
     for (const rule of [/RELATIONS at none, one and several/, /Every ENUM or status value/, /BOOLEAN flag both ways/, /both filled and null/, /STATE THE APP PRODUCES/]) {
       expect(briefing).toMatch(rule);
     }
-    for (const name of ['`webSession`', '`adminWebSession`', '`memberWebSession`', '`emptyWebSession`']) {
-      expect(briefing).toContain(name);
-    }
     expect(briefing).toContain('`{script, command, provides, probes, findings, unmet}`');
+    // The model is no longer found by a walk of its own: nothing but the parsed schema is quoted.
+    expect(briefing).not.toContain('## The domain: what the product can hold');
   });
 
-  it('counts migrations beside a model file, and lists and excerpts the newest when they are the whole model', () => {
+  it('names the remaining tables only once the schema is past its column budget', () => {
     const r = fixtureRepo();
-    const migration = (n: number) => `db/migrations/00${n}_step.sql`;
-    for (const n of [1, 2]) {
-      fs.mkdirSync(path.dirname(path.join(r, migration(n))), { recursive: true });
-      fs.writeFileSync(path.join(r, migration(n)), `CREATE TABLE step_${n} (id int);\n`);
-    }
-    const beside = domainLines(r, discoverDomainFiles(r)).join('\n');
-    expect(beside).toContain('- schema.prisma (prisma)');
-    expect(beside).toContain(`- and 2 migration file(s), e.g. ${migration(2)}`);
-    expect(beside).not.toContain('CREATE TABLE step_2');
-
-    fs.rmSync(path.join(r, 'schema.prisma'));
-    const alone = domainLines(r, discoverDomainFiles(r)).join('\n');
-    expect(alone).toContain(`- ${migration(2)} (migration)`);
-    expect(alone).toContain('CREATE TABLE step_2');
-  });
-
-  it('says no model file was found when there is none, and names no web session without a web surface', () => {
-    const r = fixtureRepo();
-    fs.rmSync(path.join(r, 'schema.prisma'));
     writeRecipe(r);
-    const briefing = seedSessionBriefing(worldFor(r));
-    expect(briefing).toMatch(/No model file was found/);
-    expect(briefing).toMatch(/PRINCIPALS, from the domain's roles and ownership/);
-    expect(briefing).not.toContain('`emptyWebSession`');
+    const wide = Array.from({ length: 40 }, (_, i) => ({
+      name: `T${i}`,
+      columns: Array.from({ length: 20 }, (_, c) => ({ name: `c${c}`, type: 'String' })),
+    }));
+    const briefing = seedSessionBriefing(worldFor(r, { database: { ...DATABASE, tables: wide } }));
+    expect(briefing).toContain('    - c19: String');
+    expect(briefing).toMatch(/… 10 more table\(s\), columns not listed: T30, T31/);
   });
 });
 
@@ -2078,27 +2069,27 @@ describe('the seed step key', () => {
   it('follows the recipe contract and the catalog identity, not a dependency bump', () => {
     const r = fixtureRepo();
     writeRecipe(r);
-    const before = computeSeedStepFingerprint(r);
+    const before = computeSeedStepFingerprint(r, []);
 
     // A dependency bump moves the recipe fingerprint, so it moves the OLD key.
     // The step reads neither the manifests nor a dependency version.
     fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }));
-    expect(computeSeedStepFingerprint(r)).toBe(before);
+    expect(computeSeedStepFingerprint(r, [])).toBe(before);
     expect(legacySeedStepFingerprint(r)).not.toBe(before);
 
     // A recipe edit is the contract moving, and the step re-opens on it.
     writeRecipe(r, { readyTimeoutMs: 9000 });
-    expect(computeSeedStepFingerprint(r)).not.toBe(before);
+    expect(computeSeedStepFingerprint(r, [])).not.toBe(before);
   });
 
-  it('moves with the domain files, and not with a file that declares no model', () => {
+  it('moves with a schema file the parsers read, and not with any other file', () => {
     const r = fixtureRepo();
     writeRecipe(r);
-    const before = computeSeedStepFingerprint(r);
+    const before = computeSeedStepFingerprint(r, ['schema.prisma']);
     fs.writeFileSync(path.join(r, 'notes.ts'), 'export const x = 1;\n');
-    expect(computeSeedStepFingerprint(r)).toBe(before);
+    expect(computeSeedStepFingerprint(r, ['schema.prisma'])).toBe(before);
     fs.appendFileSync(path.join(r, 'schema.prisma'), '\nenum Status {\n  OPEN\n  CLOSED\n}\n');
-    const moved = computeSeedStepFingerprint(r);
+    const moved = computeSeedStepFingerprint(r, ['schema.prisma']);
     expect(moved).not.toBe(before);
     expect(seedSessionCacheKey(moved)).not.toBe(seedSessionCacheKey(before));
   });

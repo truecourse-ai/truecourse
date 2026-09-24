@@ -2221,6 +2221,10 @@ export interface SeedDraftInput {
   tables: SeedSchemaTable[]
   /** Foreign-key relations, as the schema parsers derived them. */
   relations: { sourceTable: string; targetTable: string; foreignKeyColumn: string }[]
+  /** The enums the schema declares, with their values. */
+  enums?: { name: string; values: string[] }[]
+  /** The files the schema was parsed from, repo-relative: the session reads them for what the parse leaves out. */
+  schemaFiles?: string[]
   /** Env vars the recipe declares that name a database connection (the app's own). */
   connectionEnv: string[]
   /** How the app's own files import its client — real import lines from the tree. */
@@ -2288,6 +2292,9 @@ export interface SeedRetryContext {
   failure: string
 }
 
+/** How many columns the seed briefing's schema lists before it names the remaining tables only. */
+const SEED_SCHEMA_MAX_COLUMNS = 600
+
 export function buildSeedUserPrompt(input: SeedDraftInput): string {
   const lines = [
     `Ecosystem: ${input.ecosystem}`,
@@ -2304,7 +2311,16 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
     '',
     'SCHEMA (parsed from this repository):',
   ]
-  for (const table of input.tables) {
+  if (input.schemaFiles && input.schemaFiles.length > 0) {
+    lines.push(`  read from: ${input.schemaFiles.join(', ')} (read_file them for what the parse leaves out: comments, attributes, indexes)`)
+  }
+  let columnsLeft = SEED_SCHEMA_MAX_COLUMNS
+  const tablesShown = input.tables.filter((table) => {
+    if (columnsLeft <= 0) return false
+    columnsLeft -= Math.max(1, table.columns.length)
+    return true
+  })
+  for (const table of tablesShown) {
     lines.push(`  ${table.name}`)
     for (const c of table.columns) {
       const flags = [
@@ -2318,6 +2334,14 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
       ].filter(Boolean)
       lines.push(`    - ${c.name}: ${c.type}${flags.length ? ` [${flags.join(', ')}]` : ''}`)
     }
+  }
+  if (tablesShown.length < input.tables.length) {
+    const rest = input.tables.slice(tablesShown.length).map((table) => table.name)
+    lines.push(`  … ${rest.length} more table(s), columns not listed: ${rest.join(', ')}`)
+  }
+  if (input.enums && input.enums.length > 0) {
+    lines.push('', 'ENUMS (a column typed by one takes exactly these values):')
+    for (const declared of input.enums) lines.push(`  ${declared.name}: ${declared.values.join(', ')}`)
   }
   if (input.relations.length > 0) {
     lines.push('', 'RELATIONS:')

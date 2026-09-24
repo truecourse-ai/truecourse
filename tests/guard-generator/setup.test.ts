@@ -498,7 +498,7 @@ describe('runGuardSetup — skip when settled', () => {
     expect(Object.keys(first.steps.find((s) => s.key === 'seed')?.inputComponents ?? {})).toEqual([
       'recipe.contract',
       'catalog',
-      'domain',
+      'schema',
     ])
 
     // The app starts talking to a datastore nothing stood up before: the recipe
@@ -746,27 +746,29 @@ describe('runGuardSetup — skip when settled', () => {
     expect(probe.calls).toBe(2)
   })
 
-  // The seed builds its world from the product's models, so a model change is
-  // a new world to seed; a file that declares no model is not.
-  it('re-opens the seed step when a domain file changes, and only then', async () => {
+  // The seed builds its world from the schema the parsers read, so a change to
+  // a file they read it from is a new world to seed; any other file is not.
+  it('re-opens the seed step when a schema file the parsers read changes, and only then', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
     fs.mkdirSync(path.join(r, 'prisma'), { recursive: true })
     fs.writeFileSync(path.join(r, 'prisma/schema.prisma'), 'model Link {\n  id Int @id\n}\n')
+    const mapped = interfaces({ database: { ...DATABASE, schemaFiles: ['prisma/schema.prisma'] } })
     const seed = seedSeam()
-    await runAndPersist(r, { seedSession: seed.seam })
+    await runAndPersist(r, { interfaces: mapped, seedSession: seed.seam })
     expect(seed.inputs).toHaveLength(1)
 
-    fs.writeFileSync(path.join(r, 'README.md'), '# not a model\n')
-    const unchanged = await runAndPersist(r, { seedSession: seed.seam })
+    fs.writeFileSync(path.join(r, 'README.md'), '# not a schema\n')
+    const unchanged = await runAndPersist(r, { interfaces: mapped, seedSession: seed.seam })
     expect(statuses(unchanged).seed).toBe('skipped:unchanged')
 
     fs.writeFileSync(path.join(r, 'prisma/schema.prisma'), 'model Link {\n  id Int @id\n  pinned Boolean @default(false)\n}\n')
     const facts: string[] = []
-    const moved = await runAndPersist(r, { seedSession: seed.seam, onStepFact: (step, line) => facts.push(`${step} | ${line}`) })
+    const moved = await runAndPersist(r, { interfaces: mapped, seedSession: seed.seam, onStepFact: (step, line) => facts.push(`${step} | ${line}`) })
     expect(seed.inputs).toHaveLength(2)
     expect(statuses(moved).seed).toBe('ok')
-    expect(facts).toContain('seed | re-opened: domain moved')
+    expect(facts).toContain('seed | re-opened: schema moved')
+    expect(moved.detection?.database?.schemaFiles).toEqual(['prisma/schema.prisma'])
   })
 
   // A coverage rule the seed could not satisfy is a note on the seed step,

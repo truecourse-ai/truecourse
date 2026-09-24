@@ -306,6 +306,9 @@ export {
   interfacesFingerprint,
   legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  recordedSchemaFiles,
+  schemaFilesFingerprint,
+  type StepObservations,
   legacySeedStepFingerprint,
   authFingerprint,
   settledSteps,
@@ -525,7 +528,6 @@ export {
   apiCompositionDefect,
 } from './validate.js'
 export { apiAuthEvidence, probeCandidatesFromInterfaces, requiredResources } from './seed-evidence.js'
-export { discoverDomainFiles, domainFingerprint, type DomainFile, type DomainFileKind } from './seed-domain.js'
 export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
 
 export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'

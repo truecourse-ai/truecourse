@@ -103,6 +103,7 @@ import {
   interfacesFingerprint,
   legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  recordedSchemaFiles,
   legacySeedStepFingerprint,
   authFingerprint,
   collectWorkDocs,
@@ -1174,7 +1175,7 @@ export async function estimateGuardSetup(
   const settled = settledSteps(repoRoot, refresh);
   /** The run's own gate, step by step: named inputs when the row has them. */
   const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
-    stepSettled(repoRoot, key, settled(key), legacyFingerprint);
+    stepSettled(repoRoot, key, settled(key), legacyFingerprint, { schemaFiles: recordedSchemaFiles(repoRoot) });
 
   // ---- recipe repair: loop only on the failure path -------------------------
   // Zero whenever a recipe exists (discovery reuses it) or the settled proposal
@@ -1214,7 +1215,7 @@ export async function estimateGuardSetup(
         ? await probeSessionCache(
             repoRoot,
             SEED_CACHE_NAME,
-            seedSessionCacheKey(computeSeedStepFingerprint(repoRoot)),
+            seedSessionCacheKey(computeSeedStepFingerprint(repoRoot, recordedSchemaFiles(repoRoot))),
             SeedSessionOutcomeSchema,
           )
         : null;
