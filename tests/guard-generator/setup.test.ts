@@ -38,7 +38,6 @@ import {
 } from '@truecourse/guard-runner'
 import {
   runGuardSetup,
-  detectRoleColumns,
   needsFingerprint,
   recipeNeeds,
   recipeStepFingerprint,
@@ -1025,8 +1024,10 @@ describe('runGuardSetup — the happy path', () => {
   }, 120_000)
 
   // The grounding is what makes the ONE-artifact draft possible: the schema says
-  // what is creatable, the routes say what must be reachable, the specs the roles.
-  it('brief the seed seam with the schema, the routes, the roles and the specs', async () => {
+  // what is creatable, the routes say what must be reachable, the specs the
+  // kinds of user. Which principals to mint is the session's call, never a list
+  // the engine derives.
+  it('brief the seed seam with the schema, the routes and the specs', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
     const seed = seedSeam()
@@ -1037,7 +1038,7 @@ describe('runGuardSetup — the happy path', () => {
     expect(input.database.driver).toBe('prisma')
     expect(input.database.tables.map((t) => t.name)).toEqual(['User', 'Org'])
     expect(input.routes).toContainEqual({ method: 'GET', path: '/orgs' })
-    expect(input.roles.map((role) => role.name).sort()).toEqual(['member', 'owner'])
+    expect(input).not.toHaveProperty('roles')
     expect(input.specExcerpts[0]).toMatchObject({ doc: DOC })
     expect(input.specExcerpts[0].text).toMatch(/org owner/)
     expect(input.replaceExisting).toBe(false)
@@ -1524,56 +1525,6 @@ describe('runGuardSetup — the interfaces step', () => {
 
     expect(seam.inputs[0].diagnostics).toEqual([diagnostic])
     expect(seam.inputs[0].interfaces).toHaveLength(1)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// detectRoleColumns — the deterministic grounding the seed briefing carries
-// ---------------------------------------------------------------------------
-
-describe('detectRoleColumns', () => {
-  it('reads the enumerated values of a role column on a principal-shaped table', () => {
-    expect(detectRoleColumns(DATABASE)).toEqual([
-      { name: 'owner', source: 'User.role' },
-      { name: 'member', source: 'User.role' },
-    ])
-  })
-
-  // A schema with no role column yields one principal — the honest default, not a
-  // degradation, and certainly not an invented hierarchy.
-  it('reports none when no principal table carries a role column', () => {
-    expect(
-      detectRoleColumns({
-        ...DATABASE,
-        tables: [{ name: 'Org', columns: [{ name: 'id', type: 'Int', isPrimaryKey: true }] }],
-      }),
-    ).toEqual([])
-  })
-
-  it('ignores a role-shaped column on a table that is not a principal', () => {
-    expect(
-      detectRoleColumns({
-        ...DATABASE,
-        tables: [{ name: 'Widget', columns: [{ name: 'kind', type: "enum('a','b')" }] }],
-      }),
-    ).toEqual([])
-  })
-
-  it('falls back to a defaulted role column when the type is not enumerated', () => {
-    expect(
-      detectRoleColumns({
-        ...DATABASE,
-        tables: [
-          {
-            name: 'User',
-            columns: [
-              { name: 'email', type: 'String' },
-              { name: 'role', type: 'String', defaultValue: "'member'" },
-            ],
-          },
-        ],
-      }),
-    ).toEqual([{ name: 'member', source: 'User.role' }])
   })
 })
 

@@ -281,7 +281,6 @@ export {
 
 export {
   seedDraftGate,
-  detectRoleColumns,
   principalShapedTables,
   readExistingSeedScript,
   connectionEnvVars,

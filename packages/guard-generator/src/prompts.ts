@@ -2168,12 +2168,12 @@ ${SEED_JSON_SCHEMA}
   words ("org owner", "regular member") and, when the API declares OpenAPI security
   schemes, a "satisfies" naming the scheme this credential fulfills.
 
-# Principals — one per role
-- Mint ONE PRINCIPAL PER ROLE the app actually distinguishes. The ROLES section below
-  lists the roles the schema and the specification agree on; create one account for
-  each, with the role stored the way the schema stores it, and declare one credential
-  per account. When no role is listed, one principal is the right answer — do not
-  invent a hierarchy the app does not have.
+# Principals — one per kind of user
+- Mint ONE PRINCIPAL PER KIND OF USER the app actually distinguishes, decided from the
+  schema and the auth guards in its source; create one account for each, stored the
+  way the schema stores it, and declare one credential per account. When the app
+  distinguishes no kinds, one principal is the right answer — do not invent a
+  hierarchy the app does not have.
 - Mint the SECRET the way the APP would: call its own token/session issuance if the
   script can import it, otherwise sign the token with the same secret and algorithm
   the app verifies with (read from the same environment variable the app reads).
@@ -2264,13 +2264,6 @@ export interface SeedDraftInput {
    * a mandate rather than a question.
    */
   apiAuthEvidence?: { kind: string; detail: string }[]
-  /**
-   * The roles the app distinguishes — one principal is minted per entry. Derived
-   * deterministically from the schema (a role-shaped column and its enumerated
-   * values) and, where the specs name them, from the spec language. Empty ⇒ one
-   * principal, which is the honest default.
-   */
-  roles?: { name: string; source: string }[]
   /** Short excerpts of the curated specs, for the ROLE/PRINCIPAL language only. */
   specExcerpts?: { doc: string; text: string }[]
   /** The repo's ecosystem, so the script lands in the right language. */
@@ -2388,16 +2381,6 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
       'AUTHENTICATION: the specification declares no OpenAPI security scheme. Read the',
       'route surface and the schema to decide whether a principal is needed at all, and',
       'omit "satisfies" — there is nothing for it to name.',
-    )
-  }
-  if (input.roles && input.roles.length > 0) {
-    lines.push('', 'ROLES — mint ONE PRINCIPAL PER ENTRY:')
-    for (const r of input.roles) lines.push(`  ${r.name}  (${r.source})`)
-  } else {
-    lines.push(
-      '',
-      'ROLES: none were detected. Mint ONE principal unless the specification excerpts',
-      'below clearly distinguish more — do not invent a hierarchy the app does not have.',
     )
   }
   if (input.specExcerpts && input.specExcerpts.length > 0) {

@@ -137,7 +137,6 @@ import { probeApiServers } from './endpoint-probe.js'
 import { deriveExternalsSkeleton } from './externals-skeleton.js'
 import { extendCredentialRegistrations } from './credential-registrations.js'
 import {
-  detectRoleColumns,
   readExistingSeedScript,
   seedDraftGate,
   type SeedDraftDatabase,
@@ -428,7 +427,6 @@ export interface GuardSetupSeedSessionInput {
    * first (`requiredResources`) — the rows a test must already have.
    */
   requiredResources?: RequiredResource[]
-  roles: { name: string; source: string }[]
   specExcerpts: { doc: string; text: string }[]
   /** The repo's ecosystem — decides the drafted script's language/extension. */
   ecosystem: string
@@ -2331,7 +2329,6 @@ async function runSeedStep(args: {
     probeCandidates: args.probeCandidates,
     apiAuthEvidence: args.apiAuthEvidence,
     requiredResources: args.requiredResources,
-    roles: detectRoleColumns(database),
     specExcerpts: readSpecExcerpts(opts.repoRoot),
     ecosystem: detectEcosystems(opts.repoRoot)[0] ?? 'js',
     replaceExisting,

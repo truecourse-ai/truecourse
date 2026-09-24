@@ -184,7 +184,6 @@ function seedInput(r: string, over: Partial<GuardSetupSeedSessionInput> = {}): G
     routes: [{ method: 'GET', path: '/orgs' }],
     securitySchemes: [],
     probeCandidates: [],
-    roles: [],
     specExcerpts: [],
     ecosystem: 'js',
     replaceExisting: false,
@@ -972,7 +971,7 @@ describe('buildSeedSession — every authenticating surface must get a probed pr
       return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
     });
 
-    // No security schemes, no roles, no login table: nothing requires a principal.
+    // No security schemes, no login table: nothing requires a principal.
     const result = await seedSession(harness(stub.driver).context)(seedInput(r));
     expect(result).toMatchObject({ status: 'ok', fixtures: ['org'] });
   }, 60_000);
@@ -1581,7 +1580,7 @@ describe('the seed session definition', () => {
         credentials: { owner: { header: 'Authorization', satisfies: 'nope' } },
         fixtures: { org: ['id'] },
       },
-      { securitySchemes: [{ name: 'bearerAuth', summary: 'JWT' }], roles: [{ name: 'admin', source: 'User.role' }] },
+      { securitySchemes: [{ name: 'bearerAuth', summary: 'JWT' }] },
     );
 
     expect(warnings.join('\n')).toMatch(/not a declared security scheme/);
@@ -1671,7 +1670,7 @@ describe('requiredPrincipalSurfaces — which surfaces demand a probed principal
     // No web block ⇒ no web requirement, whatever the schema says.
     writeRecipe(r);
     expect(requiredPrincipalSurfaces(seedInput(r, { database: PRINCIPAL_DATABASE }))).toEqual([]);
-    // A web block over a schema with no login table (and no schemes/roles)
+    // A web block over a schema with no login table (and no schemes)
     // requires nothing — a public site stays seedable with fixtures alone.
     writeRecipe(r, {}, webBlock(r));
     expect(requiredPrincipalSurfaces(seedInput(r))).toEqual([]);
@@ -1779,6 +1778,19 @@ describe('seedSessionBriefing — the domain and the coverage world', () => {
     for (const fixed of ['adminWebSession', 'memberWebSession', 'emptyWebSession']) expect(briefing).not.toContain(fixed);
   });
 
+  it('states a role enum as a schema fact, never as a list of principals to mint', () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const database = {
+      ...DOMAIN_DATABASE,
+      tables: [...DOMAIN_DATABASE.tables, { name: 'Member', columns: [{ name: 'email', type: 'String' }, { name: 'role', type: 'MemberRole' }] }],
+      enums: [...DOMAIN_DATABASE.enums, { name: 'MemberRole', values: ['ADMIN', 'MEMBER'] }],
+    };
+    const briefing = seedSessionBriefing(worldFor(r, { database }));
+    expect(briefing).toContain('  MemberRole: ADMIN, MEMBER');
+    expect(briefing).not.toMatch(/\bROLES\b|ONE PRINCIPAL PER/);
+  });
+
   it('accepts described principals, and warns about a web session with no description', () => {
     const described = SeedProvidesProposalSchema.parse({
       credentials: {
@@ -1786,7 +1798,7 @@ describe('seedSessionBriefing — the domain and the coverage world', () => {
         auditorWebSession: { header: 'Cookie', description: 'read-only auditor: sees every booking, changes none' },
       },
     });
-    const input = { securitySchemes: [], roles: [], requiredResources: [] };
+    const input = { securitySchemes: [], requiredResources: [] };
     expect(providesWarnings(described, input).filter((line) => line.includes('description'))).toEqual([]);
     const bare = SeedProvidesProposalSchema.parse({ credentials: { webSession: { header: 'Cookie' } } });
     expect(providesWarnings(bare, input)).toContainEqual(expect.stringContaining('credential "webSession" is a web session with no `description`'));

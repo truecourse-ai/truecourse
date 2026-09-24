@@ -10,7 +10,7 @@
  *
  *  - the GATE (`seedDraftGate`) — the cheap refusals, applied identically by
  *    the engine's seed step and by anything that wants to predict it;
- *  - the GROUNDING readers (`detectRoleColumns`, `connectionEnvVars`,
+ *  - the GROUNDING readers (`principalShapedTables`, `connectionEnvVars`,
  *    `readExistingSeedScript`, `suggestedScriptPath`) — the deterministic
  *    inputs the briefing states;
  *  - the WRITE PATH (`toRecipeSeed`, `resolveScriptPath`,
@@ -155,36 +155,6 @@ export function readExistingSeedScript(
   }
 }
 
-/**
- * Role-shaped columns of the parsed schema — the deterministic half of "one
- * principal per role". A column named `role`/`roles`/`type`/`kind` on a
- * PRINCIPAL-SHAPED table (one that also carries an email/username/password column)
- * is what an app uses to distinguish who is acting; its declared enum, enumerated
- * type or default value carries the role NAMES when the parser captured them.
- *
- * Deliberately narrow: it may only ever report roles it can SEE. A schema with no
- * such column yields none, and the draft mints one principal — which is the honest
- * default, not a degradation.
- */
-export function detectRoleColumns(database: SeedDraftDatabase): { name: string; source: string }[] {
-  const out: { name: string; source: string }[] = []
-  const seen = new Set<string>()
-  for (const table of database.tables) {
-    if (!isPrincipalShaped(table)) continue
-    for (const column of table.columns) {
-      if (!/^(roles?|type|kind)$/i.test(column.name)) continue
-      const source = `${table.name}.${column.name}`
-      const declared = database.enums?.find((candidate) => candidate.name === column.type)?.values
-      for (const value of declared ?? enumeratedValues(column.type, column.defaultValue)) {
-        if (seen.has(value)) continue
-        seen.add(value)
-        out.push({ name: value, source })
-      }
-    }
-  }
-  return out
-}
-
 /** Column names that mark a table as holding login principals. */
 const PRINCIPAL_COLUMNS = ['email', 'username', 'password', 'password_hash', 'passwordhash']
 
@@ -202,19 +172,6 @@ function isPrincipalShaped(table: SeedDraftDatabase['tables'][number]): boolean 
  */
 export function principalShapedTables(database: SeedDraftDatabase): string[] {
   return database.tables.filter(isPrincipalShaped).map((t) => t.name)
-}
-
-/** The literal values an enum-ish column type (or its default) names, if any. */
-function enumeratedValues(type: string, defaultValue: string | undefined): string[] {
-  const values = new Set<string>()
-  // `enum('admin','user')`, `ENUM("owner", "member")`, `role_enum` variants — the
-  // quoted literals are the only thing read, so an unparsed type contributes nothing.
-  for (const match of type.matchAll(/['"]([A-Za-z][A-Za-z0-9_-]*)['"]/g)) values.add(match[1])
-  if (values.size === 0 && defaultValue) {
-    const literal = /^['"]?([A-Za-z][A-Za-z0-9_-]*)['"]?$/.exec(defaultValue.trim())
-    if (literal) values.add(literal[1])
-  }
-  return [...values]
 }
 
 /** Env vars the recipe itself declares that look like a datastore connection —
