@@ -666,6 +666,7 @@ const PROVIDER_LABEL: Record<LlmProviderChoice, string> = {
   openai: 'OpenAI',
   bedrock: 'AWS Bedrock',
   copilot: 'GitHub Copilot',
+  google: 'Google Gemini',
   truecourse: 'TrueCourse credits',
 };
 
@@ -674,6 +675,7 @@ const MODEL_PLACEHOLDER: Record<LlmProviderChoice, string> = {
   openai: 'gpt-5.6',
   bedrock: 'anthropic.claude-opus-5',
   copilot: 'gpt-5.6',
+  google: 'gemini-2.5-pro',
   truecourse: '',
 };
 

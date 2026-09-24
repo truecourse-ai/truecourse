@@ -48,7 +48,7 @@ const STORED: LlmProviderConfigView = {
   updatedAt: '2026-08-30T09:00:00.000Z',
 };
 
-const PROVIDERS = ['anthropic', 'openai', 'bedrock', 'copilot'] as const;
+const PROVIDERS = ['anthropic', 'openai', 'bedrock', 'copilot', 'google'] as const;
 
 interface Patch {
   body: Record<string, unknown>;
@@ -158,6 +158,27 @@ describe('the Models tab', () => {
       model: 'anthropic.claude-opus-5',
       apiKey: 'shh',
       region: 'us-east-1',
+    });
+  });
+
+  it('sends the key and the base URL when google is picked', async () => {
+    const patches = serve(null);
+    renderModels();
+    const user = userEvent.setup();
+
+    await user.selectOptions(await screen.findByLabelText('Provider'), 'google');
+    expect(screen.getByRole('option', { name: 'Google Gemini' })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Model'), 'gemini-2.5-pro');
+    await user.type(screen.getByLabelText('API key'), 'AIza-key');
+    await user.type(screen.getByLabelText('Custom base URL'), 'https://gateway.example.com/v1beta');
+    await user.click(screen.getByRole('button', { name: 'Test & save' }));
+
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0].body).toEqual({
+      provider: 'google',
+      model: 'gemini-2.5-pro',
+      apiKey: 'AIza-key',
+      baseURL: 'https://gateway.example.com/v1beta',
     });
   });
 

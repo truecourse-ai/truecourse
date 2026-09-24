@@ -160,6 +160,19 @@ describe('PATCH /api/llm/config', () => {
     expect(probe).not.toHaveBeenCalled();
   });
 
+  it('probes and saves a google block with its key and base URL', async () => {
+    const google = {
+      provider: 'google',
+      model: 'gemini-2.5-pro',
+      apiKey: 'AIza-key1234',
+      baseURL: 'https://gateway.example.com/v1beta',
+    };
+    await request(app).patch('/api/llm/config').send(google).expect(200);
+
+    expect(probe.mock.calls[0][0]).toEqual(google);
+    expect(await store.getConfig(TEST_ORG)).toMatchObject(google);
+  });
+
   it('rejects an unknown provider', async () => {
     await request(app)
       .patch('/api/llm/config')
