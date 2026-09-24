@@ -82,6 +82,17 @@ describe('detecting the shared components', () => {
     expect(owns('export function Title() { return <h1>Title</h1> }')).toBe(false)
     expect(owns('export default function Modal({ toggleModal }) { const [open, setOpen] = React.useState(true); return <Drawer onClose={() => setOpen(false)}><button onClick={toggleModal as MouseEventHandler}>x</button></Drawer> }')).toBe(false)
     expect(owns('export default function App() { return <Head><link rel="icon" href="/favicon.png" /></Head> }')).toBe(false)
+    // A local-state flip a hook wraps is still a local-state flip.
+    expect(owns('export function Menu() { const [open, setOpen] = useState(false); const show = useCallback(() => setOpen(true), []); return <button onClick={show}>Menu</button> }')).toBe(false)
+    expect(owns('export function Menu() { const [open, setOpen] = useState(false); const hide = useMemo(() => () => setOpen(false), []); return <button onClick={hide}>x</button> }')).toBe(false)
+    // A value named `to` that is no address.
+    expect(owns('export function Range() { const range = { from: "Monday", to: "Friday" }; return <Days range={range} /> }')).toBe(false)
+    // Clicking its own hidden input opens the file picker: its own UI.
+    expect(owns('export function Picker() { const inputRef = useRef(null); return <><input ref={inputRef} type="file" hidden /><button onClick={() => inputRef.current.click()}>Choose</button></> }')).toBe(false)
+  })
+
+  it('follows a hook-wrapped handler into what it does', () => {
+    expect(ownsBehavior('components/X.tsx', 'import { save } from "./api"\nexport function X() { const onSave = useCallback(() => save(), []); return <button onClick={onSave}>Save</button> }')).toBe(true)
   })
 
   it('mints a kebab-case id from the module path, stable across runs', () => {

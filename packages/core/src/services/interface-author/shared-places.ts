@@ -47,6 +47,15 @@ const ADDRESS_ATTRIBUTES = new Set(['href', 'to'])
 /** The hooks whose second binding only changes the component's own UI state. */
 const LOCAL_STATE_HOOKS = new Set(['useState', 'useReducer'])
 
+/** The calls whose result is a handle on the component's own element: what it does through one stays its own UI. */
+const LOCAL_REF_CALLS = new Set(['useRef', 'createRef'])
+
+/** The hooks that wrap a function the component declares: the function they are handed is the helper. */
+const FUNCTION_WRAPPING_HOOKS = new Set(['useCallback', 'useMemo'])
+
+/** How an address starts: a path from the root or relative to the page, a URL, a mail link. */
+const ADDRESS_PREFIXES = ['/', './', '../', 'http://', 'https://', 'mailto:']
+
 /** How many local helpers deep a handler is followed. */
 const MAX_HELPER_DEPTH = 3
 
@@ -116,8 +125,9 @@ export function ownsBehavior(module: string, source: string | undefined): boolea
 
 /**
  * The names a component was handed or holds as local UI state: its parameters
- * (destructured props, a `props` object, a rest binding) and the setter a
- * `useState`/`useReducer` returns.
+ * (destructured props, a `props` object, a rest binding), the setter a
+ * `useState`/`useReducer` returns, and a ref (`useRef`/`createRef`) to one of
+ * its own elements.
  */
 function handedNames(file: ts.SourceFile): Set<string> {
   const names = new Set<string>()
@@ -137,29 +147,46 @@ function handedNames(file: ts.SourceFile): Set<string> {
       const setter = node.name.elements[1]
       if (setter && !ts.isOmittedExpression(setter)) addBinding(setter.name)
     }
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer &&
+      ts.isCallExpression(node.initializer) &&
+      LOCAL_REF_CALLS.has(calleeName(node.initializer.expression))
+    ) {
+      addBinding(node.name)
+    }
     ts.forEachChild(node, visit)
   }
   visit(file)
   return names
 }
 
-/** The component's own named functions (`const handleDelete = () => …`, `function toggle() {…}`), by name. */
+/**
+ * The component's own named functions, by name: `const handleDelete = () => …`,
+ * `function toggle() {…}`, and one a hook wraps (`const toggle =
+ * useCallback(() => …, [])`, a `useMemo` factory).
+ */
 function localFunctions(file: ts.SourceFile): Map<string, ts.Node> {
   const functions = new Map<string, ts.Node>()
   const visit = (node: ts.Node): void => {
     if (ts.isFunctionDeclaration(node) && node.name && node.body) functions.set(node.name.text, node.body)
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.initializer &&
-      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
-    ) {
-      functions.set(node.name.text, node.initializer.body)
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      const declared = wrappedFunction(node.initializer)
+      if (declared) functions.set(node.name.text, declared.body)
     }
     ts.forEachChild(node, visit)
   }
   visit(file)
   return functions
+}
+
+/** The function an initializer declares: itself, or the one a `useCallback`/`useMemo` is handed. */
+function wrappedFunction(initializer: ts.Expression): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  const expression = unwrapped(initializer)
+  if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) return expression
+  if (!ts.isCallExpression(expression) || !FUNCTION_WRAPPING_HOOKS.has(calleeName(expression.expression))) return undefined
+  const [handed] = expression.arguments
+  return handed && (ts.isArrowFunction(handed) || ts.isFunctionExpression(handed)) ? handed : undefined
 }
 
 /** A callee's own name: `useState` for both `useState(…)` and `React.useState(…)`; empty for any other callee. */
@@ -230,9 +257,18 @@ function isNavigation(attribute: ts.JsxAttribute): boolean {
   return tag === 'a' || !/^[a-z]/.test(tag)
 }
 
-/** A literal address: `"/settings"`, `` `/tags/${id}` ``. */
+/**
+ * A literal that reads as an address: `"/settings"`, `` `/tags/${id}` ``,
+ * `"https://…"`, `"mailto:…"`. A literal that does not start like one
+ * (`{ to: "Friday" }`) is some other value named `to`.
+ */
 function isAddressLiteral(expression: ts.Expression): boolean {
-  return ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression) || ts.isTemplateExpression(expression)
+  const text = ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)
+    ? expression.text
+    : ts.isTemplateExpression(expression)
+      ? expression.head.text
+      : undefined
+  return text !== undefined && ADDRESS_PREFIXES.some((prefix) => text.startsWith(prefix))
 }
 
 /** Does an `href` name an address of the component's own, rather than one it was handed? */
