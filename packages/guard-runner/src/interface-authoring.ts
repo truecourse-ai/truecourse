@@ -46,7 +46,7 @@ const AUTHORED_SURFACE = 'web'
  * bumps this in the same commit, which re-opens every screen and re-keys every
  * cached fragment.
  */
-export const INTERFACE_AUTHOR_STAGE_VERSION = 5
+export const INTERFACE_AUTHOR_STAGE_VERSION = 6
 
 /**
  * One screen — or one shared component, the other place authoring owes a

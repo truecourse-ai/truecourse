@@ -115,7 +115,7 @@ const REPORT_FRAGMENT: AuthoredFragment = {
     },
   ],
   resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid', readables: NO_READABLES }],
-  unresolved: ['the Rules dialog lists rules only once a scan ran'],
+  unresolved: ['"the Rules dialog" lists rules only once a scan ran'],
 }
 
 beforeEach(() => {

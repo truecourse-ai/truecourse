@@ -547,9 +547,37 @@ describe('an opener is not a task on its own', () => {
 
   it('accepts it with a task at the dialog, or an unresolved line naming it', () => {
     expect(validate(fragment({ interfaces: [opener, cancel], resources: [dialog] })).errors).toEqual([])
-    expect(
-      validate(fragment({ interfaces: [opener], resources: [dialog], unresolved: ['Delete link: its confirm needs a second link the seed lacks'] })).errors,
-    ).toEqual([])
+    for (const line of ['"Delete link": its confirm needs a second link the seed lacks', '`delete-dialog` needs a second link the seed lacks']) {
+      expect(validate(fragment({ interfaces: [opener], resources: [dialog], unresolved: [line] })).errors, line).toEqual([])
+    }
+  })
+
+  it('is not served by a line that only mentions the title’s words, or a longer id', () => {
+    for (const line of ['Delete link: its confirm needs a second link', 'the delete link button has no name', '`delete-dialog-2` is unreachable']) {
+      expect(validate(fragment({ interfaces: [opener], resources: [dialog], unresolved: [line] })).errors, line).toHaveLength(1)
+    }
+  })
+
+  it('leaves a screen’s opener of a shared component’s dialog to the component’s session', () => {
+    const sidebar = 'component-sidebar-1a2b3c4d'
+    const authored: InterfacesFile = {
+      version: 2,
+      generatedAt: '',
+      recipeFingerprint: '',
+      interfaces: [],
+      resources: {
+        web: [
+          { id: sidebar, kind: 'component', title: 'Sidebar' },
+          { id: 'account-menu', kind: 'dialog', title: 'Account menu', of: sidebar, readables: NO_READABLES },
+        ],
+      },
+    }
+    const openMenu = task({ ...opener, id: 'web/open-account-menu', to: 'account-menu' })
+    expect(validate(fragment({ interfaces: [openMenu] }), { authored, scope: { screenId: 'root', address: '/' } }).errors).toEqual([])
+    const fromComponent = task({ ...openMenu, at: sidebar })
+    expect(validate(fragment({ interfaces: [fromComponent] }), { authored, scope: { screenId: sidebar, address: '/' } }).errors).toEqual([
+      expect.stringContaining('opens `account-menu` (dialog "Account menu"), and no task is performed there'),
+    ])
   })
 
   it('counts a task on a place nested in the dialog, and one the catalog already holds', () => {

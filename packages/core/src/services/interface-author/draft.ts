@@ -396,7 +396,9 @@ export interface ValidateFragmentInput {
  *  7. an opener is not a task on its own — a task that leaves the user at a
  *     dialog or a panel (`to`) is matched by a task performed there (or on a
  *     place nested in it), in the draft or the catalog, or by an `unresolved`
- *     line naming that place ({@link unservedOpenedPlaces}).
+ *     line naming that place ({@link unservedOpenedPlaces}). A screen's task
+ *     that opens a shared component's dialog is exempt: the component's
+ *     session serves it.
  */
 export function validateFragment(input: ValidateFragmentInput): FragmentValidation {
   const { derived, authored } = input
@@ -556,7 +558,8 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
 
   // ---- 7. an opener is not a task on its own --------------------------------
   const merged = mergeInterfaceCatalogs(derived, candidate)
-  for (const { task, place } of unservedOpenedPlaces(stamped.interfaces, merged?.interfaces ?? [], places, fragment.unresolved ?? [])) {
+  const screenScope = input.scope !== undefined && places.get(input.scope.screenId)?.kind === 'screen'
+  for (const { task, place } of unservedOpenedPlaces(stamped.interfaces, merged?.interfaces ?? [], places, { unresolved: fragment.unresolved ?? [], screenScope })) {
     errors.push(
       `\`${task}\` opens \`${place.id}\` (${place.kind} "${place.title}"), and no task is performed there — read the component it opens and author what a user does in it (including cancelling or closing it) \`at: "${place.id}"\`, or add an \`unresolved\` line naming \`${place.id}\` and why its controls could not be authored`,
     )
@@ -594,14 +597,15 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
 /**
  * The dialogs and panels the draft's tasks open (`to`) that nothing serves: no
  * task of the merged catalog is performed at the place or at one nested in it,
- * and no `unresolved` line names it by id or by title. One entry per place, with
- * the first task that opens it.
+ * and no `unresolved` line names it ({@link namesPlace}). In a screen's scope a
+ * place that sits on a shared component is the component session's to serve,
+ * never the screen's. One entry per place, with the first task that opens it.
  */
 export function unservedOpenedPlaces(
   openers: readonly Pick<AuthoredTask, 'id' | 'to'>[],
   catalog: readonly Pick<Interface, 'at'>[],
   places: ReadonlyMap<string, InterfaceResource>,
-  unresolved: readonly string[],
+  opts: { unresolved: readonly string[]; screenScope: boolean },
 ): { task: string; place: InterfaceResource }[] {
   const served = new Set<string>()
   for (const task of catalog) {
@@ -611,17 +615,31 @@ export function unservedOpenedPlaces(
       served.add(id)
     }
   }
-  const lines = unresolved.map((line) => line.toLowerCase())
-  const named = (place: InterfaceResource) =>
-    lines.some((line) => line.includes(place.id.toLowerCase()) || line.includes(place.title.toLowerCase()))
   const unserved = new Map<string, { task: string; place: InterfaceResource }>()
   for (const task of openers) {
     const place = task.to ? places.get(task.to) : undefined
     if (!place || (place.kind !== 'dialog' && place.kind !== 'panel')) continue
-    if (served.has(place.id) || unserved.has(place.id) || named(place)) continue
+    if (opts.screenScope && rootPlaceOf(place.id, places)?.kind === 'component') continue
+    if (served.has(place.id) || unserved.has(place.id) || opts.unresolved.some((line) => namesPlace(line, place))) continue
     unserved.set(place.id, { task: task.id, place })
   }
   return [...unserved.values()]
+}
+
+/** The quote marks a title is named between: straight, backticked and typographic. */
+const QUOTE_PAIRS: readonly (readonly [string, string])[] = [['"', '"'], ["'", "'"], ['`', '`'], ['“', '”'], ['‘', '’']]
+
+/**
+ * Does an `unresolved` line name this place? By its id as a whole word (not
+ * inside a longer id), or by its whole title in quotes — a title such as
+ * "Delete" is a word a line says about anything, so only the quoted phrase
+ * names the place.
+ */
+export function namesPlace(line: string, place: Pick<InterfaceResource, 'id' | 'title'>): boolean {
+  const lower = line.toLowerCase()
+  if (lower.split(/[^a-z0-9-]+/).includes(place.id)) return true
+  const title = place.title.toLowerCase()
+  return QUOTE_PAIRS.some(([open, close]) => lower.includes(`${open}${title}${close}`))
 }
 
 /**

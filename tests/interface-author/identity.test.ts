@@ -32,7 +32,7 @@ function fragment(screenId = 'documents'): AuthoredFragment {
       { id: 'confirmation', kind: 'dialog', title: 'Confirmation', of: 'editor-panel', readables: NO_READABLES },
     ],
     states: [{ id: 'saved', description: 'The changes are saved' }],
-    unresolved: ['A conditional preview could not be established', 'The Confirmation dialog renders only after a server round trip'],
+    unresolved: ['A conditional preview could not be established', 'The "Confirmation" dialog renders only after a server round trip'],
   }
 }
 
