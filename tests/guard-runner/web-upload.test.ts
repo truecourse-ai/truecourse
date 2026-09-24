@@ -209,6 +209,27 @@ describe('the upload verb', () => {
   )
 
   it(
+    'hands a file to a HIDDEN input through the visible label that opens it',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          { driver: 'web', navigate: '/upload' },
+          {
+            driver: 'web',
+            upload: { text: 'Import file', exact: true },
+            file: { text: 'url\nhttps://example.test\n', as: 'links.csv' },
+            expect: { text: { contains: 'import: links.csv' } },
+          },
+        ],
+        'web.upload-label.cli.1',
+      )
+      expect(result.outcome).toBe('pass')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
     'hands BASE64 bytes through unmangled — a real PNG arrives byte for byte',
     async () => {
       // A 1×1 PNG: binary, with a signature the page reports back as hex. Anything

@@ -152,6 +152,20 @@ describe('the screen observer', () => {
     })
   }, 60_000)
 
+  it('hovers and presses keys before it looks, and probes after the same actions', async () => {
+    const plain = await observer.observe({ path: '/pointer' })
+    expect(plain.ok && plain.observation.tree).not.toContain('button "Delete"')
+    const hovered = await observer.observe({ path: '/pointer', activate: [{ hover: { role: 'row', name: 'Inbox' } }] })
+    expect(hovered.ok && hovered.observation.tree).toContain('button "Delete"')
+    expect(hovered.ok && hovered.observation.activated).toEqual(['hovering row "Inbox" → now at /pointer'])
+    const closed = await observer.observe({ path: '/pointer', activate: [{ role: 'button', name: 'Options' }, { press: 'Escape' }] })
+    expect(closed.ok && closed.observation.tree).not.toContain('menuitem "Rename"')
+    expect(await observer.probe({
+      path: '/pointer',
+      steps: [{ hover: { role: 'row', name: 'Inbox' } }, { resolve: { role: 'button', name: 'Delete' } }],
+    })).toEqual({ ok: true, readings: [{ matches: 1, visible: true }] })
+  }, 60_000)
+
   it('reports a status the address answered with, rather than hiding a broken screen', async () => {
     const result = await observer.observe({ path: '/no-such-screen' })
     expect(result.ok).toBe(true)

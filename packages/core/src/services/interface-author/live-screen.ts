@@ -20,7 +20,7 @@
 
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
-import { ANONYMOUS_PRINCIPAL, GuardWebLocatorSchema } from '@truecourse/shared'
+import { ANONYMOUS_PRINCIPAL, GuardWebKeySchema, GuardWebLocatorSchema } from '@truecourse/shared'
 import { boundTree, hasAddressSlot } from '@truecourse/guard-runner'
 import type {
   ObserveScreenResult,
@@ -118,7 +118,7 @@ export function observeScreenTool(live: LiveScreens): SessionTool {
   return defineSessionTool({
     name: 'observe_screen',
     description:
-      'Open an address of the RUNNING app in the signed-in browser and return its accessibility tree — every control with the role and accessible name a step target may use — and, for every control the tree shows with no name or only an icon glyph, its tag, attributes, icon, region and a candidate css selector with its match count. Fill every {param} slot with a real value first (the briefing lists the seeded fixtures). `activate` clicks up to 5 targets in order BEFORE the tree is read, which is how a menu, a dialog or a tab panel is opened for reading; never activate anything that submits, deletes or signs out.' +
+      'Open an address of the RUNNING app in the signed-in browser and return its accessibility tree — every control with the role and accessible name a step target may use — and, for every control the tree shows with no name or only an icon glyph, its tag, attributes, icon, region and a candidate css selector with its match count. Fill every {param} slot with a real value first (the briefing lists the seeded fixtures). `activate` takes up to 5 actions in order BEFORE the tree is read — clicks, key presses, hovers — which is how a menu, a dialog or a tab panel is opened for reading, or a control shown only on hover revealed; never activate anything that submits, deletes or signs out.' +
       (names.length > 1
         ? ` \`principal\` opens it as another principal instead of this session's (${names.map((name) => `\`${name}\``).join(', ')}; \`anonymous\` is signed out).`
         : ''),
@@ -129,10 +129,16 @@ export function observeScreenTool(live: LiveScreens): SessionTool {
       .object({
         path: z.string().min(1).max(2000).describe('The address to open, path and query, every slot filled: `/repos/42/settings`.'),
         activate: z
-          .array(GuardWebLocatorSchema)
+          .array(
+            z.union([
+              z.object({ press: GuardWebKeySchema, on: GuardWebLocatorSchema.optional() }).strict(),
+              z.object({ hover: GuardWebLocatorSchema }).strict(),
+              GuardWebLocatorSchema,
+            ]),
+          )
           .max(MAX_ACTIVATIONS)
           .optional()
-          .describe('Targets to click before reading, in order — the same locator shape a step uses.'),
+          .describe('What to do before reading, in order: a target to click (the same locator shape a step uses), `{"press": "<key>", "on": <locator>}` (on whatever has focus without `on`), or `{"hover": <locator>}`.'),
         principal: z.string().min(1).optional().describe('Observe as this principal instead of the session\'s own.'),
       })
       .strict(),

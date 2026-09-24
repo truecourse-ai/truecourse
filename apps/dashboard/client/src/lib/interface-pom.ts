@@ -83,7 +83,7 @@ import type {
   InterfaceResource,
   InterfaceStep,
 } from '@truecourse/shared';
-import { describeInterfaceTarget, describeWebLocator, webLocatorHandle } from '@truecourse/shared';
+import { describeInterfaceTarget, describeWebLocator, isTargetedStep, webLocatorHandle } from '@truecourse/shared';
 
 // ---------------------------------------------------------------------------
 // Selection ids. A place id is AREA-SCOPED (web's `violations-list` and an api
@@ -175,7 +175,7 @@ function placeholders(text: string): string[] {
 export function webArgs(steps: readonly InterfaceStep[]): string[] {
   const args: string[] = [];
   for (const step of steps) {
-    if (step.kind !== 'activate' && step.kind !== 'input') continue;
+    if (!isTargetedStep(step)) continue;
     const names = placeholders(webLocatorHandle(step.target).value ?? '');
     if (names.length > 0) args.push(...names);
     else if (step.kind === 'input') args.push('text');
@@ -191,13 +191,14 @@ export function webName(id: string): string {
 
 /**
  * WHAT the step acts on, in the vocabulary that step kind uses — a route for a
- * navigate, the element's own name for the two web kinds, the operation or the
+ * navigate, the element's own name for the web kinds (a press adds its key), the operation or the
  * argv for the two that never reach a web task. One definition, so a sequence
  * list, a locator chain and a search all say the same words about one step.
  */
 export function stepTargetText(step: InterfaceStep): string {
   if (step.kind === 'navigate') return step.route;
-  if (step.kind === 'input' || step.kind === 'activate') return describeInterfaceTarget(step.target);
+  if (step.kind === 'press') return step.target ? `${step.key} on ${describeInterfaceTarget(step.target)}` : step.key;
+  if (isTargetedStep(step)) return describeInterfaceTarget(step.target);
   if (step.kind === 'request') return `${step.method} ${step.path}`;
   return step.command.join(' ');
 }
@@ -217,7 +218,7 @@ export function stepTargetText(step: InterfaceStep): string {
  */
 export function taskLocatorChain(steps: readonly InterfaceStep[]): string | undefined {
   const targets = steps
-    .filter((step) => step.kind === 'activate' || step.kind === 'input')
+    .filter(isTargetedStep)
     .map(stepTargetText);
   return targets.length > 0 ? targets.join(' → ') : undefined;
 }

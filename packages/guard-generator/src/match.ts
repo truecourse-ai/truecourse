@@ -38,8 +38,7 @@ import {
   type GuardFlow,
   type GuardWebScope,
   type Interface,
-  type InterfaceActivateStep,
-  type InterfaceInputStep,
+  type InterfaceTargetedStep,
   type InterfaceStep,
 } from '@truecourse/shared'
 import { RealizationMatchSchema, type RealizationStep, type RealizationGap, type RealizationMatch } from './schemas.js'
@@ -165,6 +164,10 @@ function stepSummary(step: InterfaceStep): string {
       return `request: ${step.method.toUpperCase()} ${step.path}`
     case 'navigate':
       return `navigate: ${step.route}`
+    case 'press':
+      return `press ${step.key}${step.target ? `: ${targetWords({ ...step, target: step.target })}` : ''}`
+    case 'upload':
+      return `upload ${JSON.stringify(step.file)}: ${targetWords(step)}`
     default:
       return `${step.kind}${step.kind === 'input' && step.mode ? ` (${step.mode})` : ''}: ${targetWords(step)}`
   }
@@ -176,7 +179,7 @@ function stepSummary(step: InterfaceStep): string {
  * any other handle, a `pick` or a `css` is the scenario locator itself, as JSON, so
  * it is copied rather than translated.
  */
-function targetWords(step: InterfaceInputStep | InterfaceActivateStep): string {
+function targetWords(step: InterfaceTargetedStep): string {
   const locator = interfaceStepLocator(step)
   const named = (scope: GuardWebScope): boolean => 'role' in scope && scope.name !== undefined && scope.pick === undefined
   if (!named(step.target) || (step.within && !named(step.within))) return JSON.stringify(locator)
@@ -218,6 +221,13 @@ function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
       return `navigate: ${step.route}`
     case 'input':
       return `${step.mode === 'select' ? 'select' : 'fill'}: ${targetWords(step)}`
+    case 'press':
+      return `press: ${step.key}${step.target ? ` on ${targetWords({ ...step, target: step.target })}` : ''}`
+    case 'hover':
+      return `hover: ${targetWords(step)}`
+    case 'upload':
+      // The file goes verbatim: it is the step's `file`, fixture reference and all.
+      return `upload: ${JSON.stringify(step.file)} to ${targetWords(step)}`
     default:
       return `click: ${targetWords(step)}`
   }

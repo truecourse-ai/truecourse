@@ -37,7 +37,7 @@
  */
 
 import type { BrowserContext, Page } from 'playwright-core'
-import { describeInterfaceTarget, type GuardWebLocator } from '@truecourse/shared'
+import { describeInterfaceTarget, type GuardWebKey, type GuardWebLocator } from '@truecourse/shared'
 import { hasAddressSlot } from './address.js'
 import { parseCookieHeader, type WorldCredential } from './credential.js'
 import { webLocator, webLocatorMatches, pageAddress } from './executor.js'
@@ -54,11 +54,29 @@ export const MAX_OBSERVATION_BYTES = 24_000
 export const OBSERVE_ACTIVATE_TIMEOUT_MS = 5_000
 export const OBSERVE_SETTLE_TIMEOUT_MS = 3_000
 
+/**
+ * One thing an observation does before it looks: click a control (a bare
+ * locator), press a key (on an element, or on whatever has focus), or hover an
+ * element.
+ */
+export type ObserveActivation = GuardWebLocator | ObserveKeyPress | ObserveHover
+
+/** A key pressed on `on`, focused first, or on whatever the page has focused. */
+export interface ObserveKeyPress {
+  press: GuardWebKey
+  on?: GuardWebLocator
+}
+
+/** The pointer moved over an element and left there. */
+export interface ObserveHover {
+  hover: GuardWebLocator
+}
+
 export interface ScreenObservationRequest {
   /** The address to open, path and query, as the routing declares it with every slot filled. */
   path: string
-  /** Controls to activate before looking, in order — a menu to open, a tab to select. */
-  activate?: readonly GuardWebLocator[]
+  /** What to do before looking, in order — a menu to open, a tab to select, a key to press, a row to hover. */
+  activate?: readonly ObserveActivation[]
 }
 
 export interface ScreenObservation {
@@ -95,6 +113,8 @@ export type ObserveScreenResult =
  */
 export type LocatorProbeStep =
   | { activate: GuardWebLocator }
+  | ObserveKeyPress
+  | ObserveHover
   | { fill: GuardWebLocator; value: string }
   | { select: GuardWebLocator; option: string }
   | { navigate: string }
@@ -295,20 +315,45 @@ async function probeStep(
       return { reason: `resolving ${describeLocator(locator)} on ${pageAddress(page)} failed: ${firstLine(e)}` }
     }
   }
-  const [verb, target] =
-    'activate' in step ? ['activating', step.activate] as const
-      : 'fill' in step ? ['filling', step.fill] as const
-        : ['selecting in', step.select] as const
+  if ('activate' in step || 'press' in step || 'hover' in step) {
+    const failed = await act(page, 'activate' in step ? step.activate : step)
+    return failed ? { reason: failed } : undefined
+  }
+  const [verb, target] = 'fill' in step ? ['filling', step.fill] as const : ['selecting in', step.select] as const
   const locator = webLocator(page, target)
   try {
-    if ('activate' in step) await locator.click({ timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
-    else if ('fill' in step) await locator.fill(step.value, { timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
+    if ('fill' in step) await locator.fill(step.value, { timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
     else await locator.selectOption({ label: step.option }, { timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
   } catch (e) {
     return { reason: `${verb} ${describeLocator(target)} on ${pageAddress(page)} failed: ${firstLine(e)}` }
   }
   await settlePage(page)
   return undefined
+}
+
+/** Click, press or hover as `action` says, then settle; returns why it failed, if it did. */
+async function act(page: Page, action: ObserveActivation): Promise<string | undefined> {
+  try {
+    if ('press' in action) {
+      if (action.on) await webLocator(page, action.on).press(action.press, { timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
+      else await page.keyboard.press(action.press)
+    } else if ('hover' in action) {
+      await webLocator(page, action.hover).hover({ timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
+    } else {
+      await webLocator(page, action).click({ timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
+    }
+  } catch (e) {
+    return `${describeAction(action)} on ${pageAddress(page)} failed: ${firstLine(e)}`
+  }
+  await settlePage(page)
+  return undefined
+}
+
+/** `activating button "More"` / `pressing Escape` / `pressing Enter on textbox "Search"` / `hovering row "Inbox"`. */
+function describeAction(action: ObserveActivation): string {
+  if ('press' in action) return `pressing ${action.press}${action.on ? ` on ${describeLocator(action.on)}` : ''}`
+  if ('hover' in action) return `hovering ${describeLocator(action.hover)}`
+  return `activating ${describeLocator(action)}`
 }
 
 /** The shared half of an observation and a probe: open the address, then activate. */
@@ -345,20 +390,12 @@ async function openAndActivate(
     problems.push(unreachedLine(request.path, opened.sentTo))
     return { ok: true, activated, problems }
   }
-  for (const target of request.activate ?? []) {
-    const locator = webLocator(page, target)
-    const label = describeLocator(target)
-    try {
-      await locator.click({ timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
-    } catch (e) {
-      return {
-        ok: false,
-        reason: `activating ${label} on ${pageAddress(page)} failed: ${firstLine(e)}` +
-          (activated.length > 0 ? ` (after: ${activated.join('; ')})` : ''),
-      }
+  for (const action of request.activate ?? []) {
+    const failed = await act(page, action)
+    if (failed) {
+      return { ok: false, reason: failed + (activated.length > 0 ? ` (after: ${activated.join('; ')})` : '') }
     }
-    await settlePage(page)
-    activated.push(`${label} → now at ${pageAddress(page)}`)
+    activated.push(`${'press' in action || 'hover' in action ? describeAction(action) : describeLocator(action)} → now at ${pageAddress(page)}`)
   }
   return { ok: true, activated, problems, reachedBy: opened.by }
 }

@@ -1856,7 +1856,7 @@ describe('sessions run in a pool, the fold does not', () => {
     ])
 
     function pack(module: string, renders: string[]) {
-      return { module, renders, closure: renders.length + 1, apiEffects: [], unjoined: [], rpcCalls: [] }
+      return { module, renders, closure: renders.length + 1, renderClosure: renders, apiEffects: [], unjoined: [], rpcCalls: [] }
     }
 
     beforeEach(() => {

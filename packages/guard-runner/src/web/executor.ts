@@ -30,7 +30,9 @@ import {
   isWebFillStep,
   isWebSelectStep,
   isWebHistoryStep,
+  isWebHoverStep,
   isWebNavigateStep,
+  isWebPressStep,
   isWebUploadStep,
   webStateAssertions,
   webVisibleTargets,
@@ -1076,6 +1078,18 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
           )
         }
       }
+    } else if (isWebPressStep(step)) {
+      if (!step.on) {
+        await page.keyboard.press(step.press)
+      } else {
+        const target = await awaitTarget(page, step.on, `to press ${step.press} on`, deadline, opts.signal)
+        if ('mismatch' in target) mismatch = target.mismatch
+        else await target.locator.press(step.press, { timeout: Math.max(1, deadline - Date.now()) })
+      }
+    } else if (isWebHoverStep(step)) {
+      const target = await awaitTarget(page, step.hover, 'to hover', deadline, opts.signal)
+      if ('mismatch' in target) mismatch = target.mismatch
+      else await target.locator.hover({ timeout: Math.max(1, deadline - Date.now()) })
     } else if (isWebHistoryStep(step)) {
       // The RETURN VALUE is deliberately ignored. A same-document traversal — every
       // Back in a single-page app — completes without a navigation response, and

@@ -34,8 +34,11 @@ import {
   InterfaceResourceIdSchema,
   InterfaceResourceSchema,
   InterfaceActivateStepSchema,
+  InterfaceHoverStepSchema,
   InterfaceInputStepSchema,
   InterfaceNavigateStepSchema,
+  InterfacePressStepSchema,
+  InterfaceUploadStepSchema,
   InterfaceStateIdSchema,
   InterfaceStateSchema,
   InterfacesFileSchema,
@@ -58,8 +61,8 @@ const READABLE_KINDS = ['markers', 'elements', 'controls', 'rows'] as const
 const AUTHORED_ID = /^web\/[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 /**
- * The steps a web task is made of — the three web members of the shared step
- * vocabulary. `invoke` and `request` are the cli and api members: a web task
+ * The steps a web task is made of — the web members of the shared step
+ * vocabulary: navigate, input, activate, press, hover and upload. `invoke` and `request` are the cli and api members: a web task
  * that wanted one would be describing another surface's interface, and the
  * closed union says so at parse time rather than in a review comment. It also
  * keeps the outcome schema a driver renders down to what a web task can be,
@@ -69,6 +72,9 @@ export const AuthoredWebStepSchema = z.discriminatedUnion('kind', [
   InterfaceNavigateStepSchema,
   InterfaceInputStepSchema,
   InterfaceActivateStepSchema,
+  InterfacePressStepSchema,
+  InterfaceHoverStepSchema,
+  InterfaceUploadStepSchema,
 ])
 export type AuthoredWebStep = z.infer<typeof AuthoredWebStepSchema>
 

@@ -37,7 +37,7 @@
 
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
-import { interfaceStepLocator, isNonCanonicalLocator, type InterfacesFile } from '@truecourse/shared'
+import { interfaceStepLocator, isNonCanonicalLocator, isTargetedStep, type InterfacesFile } from '@truecourse/shared'
 import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js'
 import { liveAuthorCatalog } from './catalog-context.js'
 import {
@@ -275,7 +275,7 @@ function withoutProvenWords(piece: AuthoredFragment): AuthoredFragment {
     interfaces: piece.interfaces.map((task) => ({
       ...task,
       steps: task.steps.map((step) => {
-        if (step.kind === 'navigate') return step
+        if (step.kind === 'navigate' || step.kind === 'upload' || !('proven' in step)) return step
         const { proven: _sessionWord, ...rest } = step
         return rest
       }),
@@ -292,7 +292,7 @@ function stampUnproven(piece: AuthoredFragment, ids: ReadonlySet<string>): Autho
         ? {
             ...task,
             steps: task.steps.map((step) =>
-              step.kind !== 'navigate' && isNonCanonicalLocator(interfaceStepLocator(step)) ? { ...step, proven: false as const } : step,
+              isTargetedStep(step) && step.kind !== 'upload' && isNonCanonicalLocator(interfaceStepLocator(step)) ? { ...step, proven: false as const } : step,
             ),
           }
         : task,

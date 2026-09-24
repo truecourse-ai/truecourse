@@ -29,8 +29,10 @@
 
 import { z } from 'zod'
 import {
+  GuardWebKeySchema,
   GuardWebLocatorSchema,
   describeWebLocator,
+  isTargetedStep,
   readableLocators,
   interfaceStepLocator,
   isNonCanonicalLocator,
@@ -48,6 +50,8 @@ const MAX_PROOF_STEPS = 10
 /** One action a session lists to bring the page to a task's controls. */
 const ProofActionSchema = z.union([
   z.object({ activate: GuardWebLocatorSchema }).strict(),
+  z.object({ press: GuardWebKeySchema, on: GuardWebLocatorSchema.optional() }).strict(),
+  z.object({ hover: GuardWebLocatorSchema }).strict(),
   z.object({ fill: GuardWebLocatorSchema, value: z.string().max(2000) }).strict(),
   z.object({ select: GuardWebLocatorSchema, option: z.string().min(1).max(500) }).strict(),
 ])
@@ -107,7 +111,7 @@ function owesProof(locator: GuardWebLocator): boolean {
 
 function owedSteps(task: AuthoredTask): OwedStep[] {
   return task.steps.flatMap((step, index) => {
-    if (step.kind !== 'input' && step.kind !== 'activate') return []
+    if (!isTargetedStep(step)) return []
     const locator = interfaceStepLocator(step)
     return owesProof(locator) ? [{ step: index, locator }] : []
   })
@@ -296,7 +300,10 @@ function replayWalk(plan: ProofPlan, task: AuthoredTask, owed: readonly OwedStep
       blocked = undefined
       continue
     }
-    if (step.kind !== 'input' && step.kind !== 'activate') continue
+    if (!isTargetedStep(step)) {
+      if (step.kind === 'press' && !blocked && i !== last) blocked = cannotReplay(task, PRESS_BLOCKS)
+      continue
+    }
     const locator = interfaceStepLocator(step)
     const target = byStep.get(i)
     if (target && blocked) plan.refused.push({ target, problem: blocked })
@@ -306,7 +313,13 @@ function replayWalk(plan: ProofPlan, task: AuthoredTask, owed: readonly OwedStep
     }
     if (blocked || i === last) continue
     if (step.kind === 'input') blocked = cannotReplay(task, 'an input step comes before it, and an interface step carries no value to type')
-    else if (task.endState) blocked = cannotReplay(task, `the task changes the world (endState \`${task.endState}\`), so its steps are not replayed on the shared seed`)
+    else if (step.kind === 'upload') blocked = cannotReplay(task, 'an upload comes before it, and a proof hands no file')
+    else if (step.kind === 'press') blocked = cannotReplay(task, PRESS_BLOCKS)
+    else if (step.kind === 'hover') {
+      // A hover changes nothing: it is replayed whatever the task leaves behind.
+      plan.steps.push({ hover: locator })
+      after.push(`hovering ${describeWebLocator(locator)}`)
+    } else if (task.endState) blocked = cannotReplay(task, `the task changes the world (endState \`${task.endState}\`), so its steps are not replayed on the shared seed`)
     else {
       plan.steps.push({ activate: locator })
       after.push(describeWebLocator(locator))
@@ -314,6 +327,9 @@ function replayWalk(plan: ProofPlan, task: AuthoredTask, owed: readonly OwedStep
   }
   return plan
 }
+
+/** Why a key press ends a replay: a key may submit what it is pressed in. */
+const PRESS_BLOCKS = 'a key press comes before it, and a key may submit what it is pressed in'
 
 /**
  * Walk the session's listed actions in place of the task's steps. An owed step
@@ -328,8 +344,9 @@ function listedWalk(plan: ProofPlan, owed: readonly OwedStep[], actions: readonl
     plan.resolves.push({ target, at: pageState(plan.path, after) })
   }
   for (const action of actions) {
-    const acted = webLocatorKey(actionLocator(action))
-    for (const target of pending.filter((t) => webLocatorKey(t.locator) === acted)) {
+    const on = actionLocator(action)
+    const acted = on ? webLocatorKey(on) : undefined
+    for (const target of pending.filter((t) => acted !== undefined && webLocatorKey(t.locator) === acted)) {
       resolve(target)
       pending.splice(pending.indexOf(target), 1)
     }
@@ -340,12 +357,18 @@ function listedWalk(plan: ProofPlan, owed: readonly OwedStep[], actions: readonl
   return plan
 }
 
-function actionLocator(action: ProofAction): GuardWebLocator {
-  return 'activate' in action ? action.activate : 'fill' in action ? action.fill : action.select
+/** The element an action acts on; none for a key pressed on whatever has focus. */
+function actionLocator(action: ProofAction): GuardWebLocator | undefined {
+  if ('activate' in action) return action.activate
+  if ('press' in action) return action.on
+  if ('hover' in action) return action.hover
+  return 'fill' in action ? action.fill : action.select
 }
 
 function describeAction(action: ProofAction): string {
   if ('activate' in action) return describeWebLocator(action.activate)
+  if ('press' in action) return `pressing ${action.press}${action.on ? ` on ${describeWebLocator(action.on)}` : ''}`
+  if ('hover' in action) return `hovering ${describeWebLocator(action.hover)}`
   if ('fill' in action) return `filling ${describeWebLocator(action.fill)}`
   return `choosing ${JSON.stringify(action.option)} in ${describeWebLocator(action.select)}`
 }
@@ -356,7 +379,7 @@ function pageState(path: string, after: readonly string[]): string {
 }
 
 function cannotReplay(task: AuthoredTask, reason: string): string {
-  return `${reason} — pass \`proof: {"${task.id}": {"steps": [...]}}\` listing, in order, the actions that bring the page to it (\`{"activate": <locator>}\`, \`{"fill": <locator>, "value": "<text>"}\`, \`{"select": <locator>, "option": "<label>"}\`), and never a control that submits, deletes, cancels or signs out`
+  return `${reason} — pass \`proof: {"${task.id}": {"steps": [...]}}\` listing, in order, the actions that bring the page to it (\`{"activate": <locator>}\`, \`{"fill": <locator>, "value": "<text>"}\`, \`{"select": <locator>, "option": "<label>"}\`, \`{"press": "<key>", "on": <locator>}\`, \`{"hover": <locator>}\`), and never a control that submits, deletes, cancels or signs out`
 }
 
 /** What is wrong with what the locator resolved to, or nothing when it held. */

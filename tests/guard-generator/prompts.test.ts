@@ -1339,7 +1339,8 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // The non-canonical `css` member and the positional `pick` change it again.
     // A task's `principal` (a credential to sign in with, or none) moves it once more.
     // A library-neutral `css` example replaced an icon-font one.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('2471b7adcefe1f9e')
+    // The press and hover verbs, and the press/hover/upload plan translations.
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('1bb3475475b70b6e')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {

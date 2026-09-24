@@ -90,7 +90,8 @@
  *                   Each click writes what it did into paragraph `#status`.
  *   GET /upload   → heading "Upload"; the surface the `upload` verb needs — a
  *                   visible labelled file input, a hidden one behind a button (the
- *                   react-dropzone shape), an `accept=".pdf"` one that refuses
+ *                   react-dropzone shape), a hidden one its visible label opens
+ *                   ("Import file"), an `accept=".pdf"` one that refuses
  *                   anything else in the app's own words, and a button that opens
  *                   no chooser at all. Every picked file is reported back with the
  *                   name, the size, the type and its first bytes.
@@ -99,6 +100,9 @@
  *   GET /guarded  → a page whose script sends a DIRECT load back to /; only a
  *                   visit through the link in /'s menu stays (heading "Guarded").
  *   GET /nowhere  → always redirects to /, and nothing links to it.
+ *   GET /pointer  → heading "Pointer"; row "Inbox" whose button "Delete" shows
+ *                   only while the pointer is over the row, and button "Options"
+ *                   opening menu "Actions", which Escape closes.
  *
  * The JSON surface — the SAME state the pages render, read as structured data, which
  * is what a `request` step is for: drive the UI, then ask the app what actually
@@ -337,6 +341,8 @@ const UPLOAD = page(
 <input id="hidden-file" type="file" style="display:none"></p>
 <p><label for="pdf-file">PDF only</label>
 <input id="pdf-file" type="file" accept=".pdf"></p>
+<p><label for="import-file">Import file</label>
+<input id="import-file" type="file" hidden></p>
 <p><button type="button" id="inert">Not an upload</button></p>
 <p id="picked">nothing picked yet</p>
 <script>
@@ -365,6 +371,7 @@ function report(source, input) {
 document.getElementById('visible-file').onchange = function () { report('visible', this) }
 document.getElementById('hidden-file').onchange = function () { report('hidden', this) }
 document.getElementById('pdf-file').onchange = function () { report('pdf', this) }
+document.getElementById('import-file').onchange = function () { report('import', this) }
 document.getElementById('pick').onclick = function () { document.getElementById('hidden-file').click() }
 // Found, clickable, and behind it nothing asks for a file.
 document.getElementById('inert').onclick = function () {
@@ -473,6 +480,18 @@ const GUARDED = page(
 <script>if (!sessionStorage.getItem('via-link')) location.replace('/')</script>`,
 )
 
+const POINTER = page(
+  'Pointer',
+  `<h1>Pointer</h1>
+<style>.row .delete { display: none } .row:hover .delete { display: inline }</style>
+<div class="row" role="row" aria-label="Inbox"><span>Inbox</span> <button class="delete" type="button">Delete</button></div>
+<button type="button" onclick="document.getElementById('actions').hidden = false">Options</button>
+<div id="actions" role="menu" aria-label="Actions" hidden><button role="menuitem" type="button">Rename</button></div>
+<script>document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape') document.getElementById('actions').hidden = true
+})</script>`,
+)
+
 let flakyLoads = 0
 
 const server = http.createServer(async (req, res) => {
@@ -503,7 +522,9 @@ const server = http.createServer(async (req, res) => {
       ? page('Flaky', '<h1>Flaky</h1>')
       : url.pathname === '/guarded'
         ? GUARDED
-        : url.pathname === '/'
+        : url.pathname === '/pointer'
+          ? POINTER
+          : url.pathname === '/'
       ? HOME
       : url.pathname === '/notes'
         ? notesPage(url)

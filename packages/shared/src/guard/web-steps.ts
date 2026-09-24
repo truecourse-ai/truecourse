@@ -703,6 +703,55 @@ export const GuardWebClickStepSchema = z
   .strict()
 
 /**
+ * THE KEYS a step may press: the small, named set a user's claim is ever about —
+ * submitting with Enter, dismissing with Escape, moving focus with Tab, moving
+ * through a list or a menu with the arrows. A key outside it is refused rather
+ * than passed to the browser, so a typo is a schema error, not a keystroke.
+ */
+export const GUARD_WEB_KEYS = ['Enter', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'] as const
+export const GuardWebKeySchema = z.enum(GUARD_WEB_KEYS)
+export type GuardWebKey = z.infer<typeof GuardWebKeySchema>
+
+/**
+ * Press one key — on the element `on` names (focused first, the way a user
+ * clicks into a search box before pressing Enter), or on whatever the page has
+ * focused when `on` is absent (Escape closing the open menu). The claim it
+ * states is one only the keyboard makes: a search that submits on Enter, a menu
+ * that closes on Escape.
+ */
+export const GuardWebPressStepSchema = z
+  .object({
+    driver: webDriver,
+    press: GuardWebKeySchema,
+    on: GuardWebLocatorSchema.optional(),
+    expect: GuardWebExpectSchema.optional(),
+    capture,
+    timeoutMs,
+    note,
+    milestone,
+    checks: stepChecks,
+  })
+  .strict()
+
+/**
+ * Move the pointer over an element and leave it there — what reveals a control
+ * a page shows only on hover (a row's delete button). The revealed control is
+ * then clicked by the next step, whose own wait finds it.
+ */
+export const GuardWebHoverStepSchema = z
+  .object({
+    driver: webDriver,
+    hover: GuardWebLocatorSchema,
+    expect: GuardWebExpectSchema.optional(),
+    capture,
+    timeoutMs,
+    note,
+    milestone,
+    checks: stepChecks,
+  })
+  .strict()
+
+/**
  * Type a value into an input, addressed by its LABEL (a labelled input's
  * accessible name is its label, so `{ role: textbox, name: "Title" }` is how a user
  * would describe it). The value carries the same `${…}` tokens every other authored
@@ -965,15 +1014,16 @@ export const GuardWebCredentialStepSchema = z
 
 /**
  * ONE web step — one action, or one assertion, taken by a real browser against the
- * web surface the sandbox serves. The verbs are closed at eight: navigate, click,
- * fill, select, upload, history, credential, expect. There is deliberately no hover, no scroll, no
- * keyboard: each would be a promise about how the page is OPERATED rather than what
- * it PROMISES, and the vocabulary grows only when a real claim cannot be stated
- * without it — which is exactly what `history` was (2026-08-11: "Back and Forward
- * move through the views" had no verb, and rode as a re-navigation that proved a
- * different sentence) and what `upload` is (2026-08-14: a document app's central
- * promise is "you can put a file into it", and no combination of click and fill
- * states it — a file chooser is not a text field).
+ * web surface the sandbox serves. The verbs are closed at ten: navigate, click,
+ * fill, select, upload, press, hover, history, credential, expect. There is
+ * deliberately no scroll, no drag and no free typing of keys: each would be a
+ * promise about how the page is OPERATED rather than what it PROMISES, and the
+ * vocabulary grows only when a real claim cannot be stated without it — which is
+ * what `history` was ("Back and Forward move through the views" rode as a
+ * re-navigation that proved a different sentence), what `upload` is (a file
+ * chooser is not a text field), and what `press` and `hover` are (a search that
+ * submits on Enter, a menu that closes on Escape, a delete button a row shows only
+ * under the pointer).
  */
 export type GuardWebRole = (typeof GUARD_WEB_ROLES)[number]
 export type GuardWebCapture = z.infer<typeof GuardWebCaptureSchema>
@@ -987,6 +1037,8 @@ export type GuardWebClickStep = z.infer<typeof GuardWebClickStepSchema>
 export type GuardWebSelectStep = z.infer<typeof GuardWebSelectStepSchema>
 export type GuardWebFillStep = z.infer<typeof GuardWebFillStepSchema>
 export type GuardWebUploadStep = z.infer<typeof GuardWebUploadStepSchema>
+export type GuardWebPressStep = z.infer<typeof GuardWebPressStepSchema>
+export type GuardWebHoverStep = z.infer<typeof GuardWebHoverStepSchema>
 export type GuardWebHistoryStep = z.infer<typeof GuardWebHistoryStepSchema>
 export type GuardWebCredentialStep = z.infer<typeof GuardWebCredentialStepSchema>
 export type GuardWebExpectStep = z.infer<typeof GuardWebExpectStepSchema>
@@ -1000,6 +1052,8 @@ export type GuardWebStep =
   | GuardWebFillStep
   | GuardWebSelectStep
   | GuardWebUploadStep
+  | GuardWebPressStep
+  | GuardWebHoverStep
   | GuardWebHistoryStep
   | GuardWebCredentialStep
   | GuardWebExpectStep
@@ -1010,6 +1064,8 @@ export const GuardWebStepSchema: z.ZodType<GuardWebStep, z.ZodTypeDef, unknown> 
   GuardWebFillStepSchema,
   GuardWebSelectStepSchema,
   GuardWebUploadStepSchema,
+  GuardWebPressStepSchema,
+  GuardWebHoverStepSchema,
   GuardWebHistoryStepSchema,
   GuardWebCredentialStepSchema,
   GuardWebExpectStepSchema,
@@ -1046,6 +1102,16 @@ export function isWebSelectStep(step: GuardWebStep): step is GuardWebSelectStep 
 /** True when the web step hands a file to a control a user would operate. */
 export function isWebUploadStep(step: GuardWebStep): step is GuardWebUploadStep {
   return 'upload' in step
+}
+
+/** True when the web step presses a key. */
+export function isWebPressStep(step: GuardWebStep): step is GuardWebPressStep {
+  return 'press' in step
+}
+
+/** True when the web step moves the pointer over an element. */
+export function isWebHoverStep(step: GuardWebStep): step is GuardWebHoverStep {
+  return 'hover' in step
 }
 
 /** True when the web step presses the browser's Back or Forward. */
@@ -1235,6 +1301,8 @@ export function describeWebCommand(step: GuardWebStep): string {
   if (isWebUploadStep(step)) {
     return `upload “${webFileName(step.file)}” to ${describeWebLocator(step.upload)}`
   }
+  if (isWebPressStep(step)) return `press ${step.press}${step.on ? ` on ${describeWebLocator(step.on)}` : ''}`
+  if (isWebHoverStep(step)) return `hover ${describeWebLocator(step.hover)}`
   if (isWebHistoryStep(step)) return `go ${step.history}`
   // The NAME only — the value is a secret the runner holds.
   if (isWebCredentialStep(step)) return `sign in as ${step.credential}`

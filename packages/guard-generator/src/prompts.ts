@@ -661,10 +661,13 @@ exclusion half is weak and will be flagged.
 A web step is one of: \`navigate\` (go to a surface-relative path), \`click\`
 (activate an element), \`fill\` (type a \`value\` into an editable input; empty clears it),
 \`select\` (choose an \`option\` by visible label in a native HTML select),
-\`upload\` (hand a \`file\` to the control a user would operate), \`history\` (the
-browser's own \`back\`/\`forward\` — the claim "Back returns you" is about the
-BROWSER, never re-navigation), and \`expect\` (assert on the page without acting).
-There is deliberately no hover, no scroll, no keyboard — and no sleep verb, ever:
+\`upload\` (hand a \`file\` to the control a user would operate), \`press\` (one
+key — Enter, Escape, Tab or an arrow — \`on\` an element, or on whatever has focus),
+\`hover\` (move the pointer over an element, to reveal a control shown only on
+hover), \`history\` (the browser's own \`back\`/\`forward\` — the claim "Back returns
+you" is about the BROWSER, never re-navigation), and \`expect\` (assert on the page
+without acting). There is deliberately no scroll, no drag, no free typing of keys
+beyond \`fill\` — and no sleep verb, ever:
 every expectation WAITS on observable state, bounded by \`timeoutMs\`, so "the page
 catches up" is expressed by asserting what it must show, never by waiting a
 duration.
@@ -710,6 +713,13 @@ the step's locator, \`css\`, \`within\` and \`pick\` included, so
 \`{ "driver": "web", "click": { "role": "button", "name": "Add Repository" } }\`, and
 \`fill: textbox "Repository path"\` becomes
 \`{ "driver": "web", "fill": { "role": "textbox", "name": "Repository path" }, "value": "…" }\`.
+The other plan verbs compile as directly: \`press: Enter on searchbox "Search"\`
+becomes \`{ "driver": "web", "press": "Enter", "on": { "role": "searchbox", "name": "Search" } }\`
+(\`press: Escape\` alone has no \`on\`), \`hover: row "Inbox"\` becomes
+\`{ "driver": "web", "hover": { "role": "row", "name": "Inbox" } }\`, and
+\`upload: {"text":"url","as":"links.csv"} to label "Import file"\` becomes
+\`{ "driver": "web", "upload": { "label": "Import file" }, "file": { "text": "url", "as": "links.csv" } }\`
+— the file copied verbatim, fixture reference and all.
 
 # Addresses are SURFACE-RELATIVE
 A \`navigate\` path starts with \`/\` and never carries an origin — the sandbox

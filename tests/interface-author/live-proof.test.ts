@@ -178,6 +178,26 @@ describe('where a proof opens', () => {
     ])
   })
 
+  it('replays a hover before the control it reveals, and stops at a key press', async () => {
+    const { observer, probes } = probingObserver({ matches: 1, visible: true })
+    const row = { css: 'li.row' }
+    const trash = { css: 'li.row button.delete' }
+    const hovering = {
+      ...linksTask([
+        { kind: 'hover', target: row, why: 'the row has no role' },
+        { kind: 'activate', target: trash, why: 'the delete button shows only on hover' },
+      ]),
+      id: 'web/delete-row',
+    }
+    expect((await checkDraft(observer)({ interfaces: [hovering] })).isError).toBeUndefined()
+    expect(probes).toEqual([{ path: '/links', steps: [{ resolve: row }, { hover: row }, { resolve: trash }] }])
+
+    const pressing = { ...linksTask([{ kind: 'press', key: 'Enter' }, { kind: 'activate', target: trash, why: 'icon only' }]), id: 'web/after-enter' }
+    const refused = await checkDraft(observer)({ interfaces: [pressing] })
+    expect(refused.isError).toBe(true)
+    expect(refused.content).toContain('a key press comes before it')
+  })
+
   it('never replays the clicks of a task that changes the world', async () => {
     const { observer, probes } = probingObserver({ scopeMatches: 1, matches: 1, visible: true })
     const renaming = { ...tagTask, endState: 'tag-renamed' }

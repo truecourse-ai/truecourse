@@ -26,6 +26,8 @@ import { GuardDriverIdSchema } from './guard/drivers.js'
 import {
   GUARD_WEB_ROLES,
   GUARD_WEB_STATES,
+  GuardWebFileSchema,
+  GuardWebKeySchema,
   GuardWebLocatorSchema,
   GuardWebScopeSchema,
   isNonCanonicalLocator,
@@ -41,6 +43,9 @@ export const InterfaceStepKindSchema = z.enum([
   'navigate',
   'input',
   'activate',
+  'press',
+  'hover',
+  'upload',
 ])
 export type InterfaceStepKind = z.infer<typeof InterfaceStepKindSchema>
 
@@ -186,26 +191,94 @@ export const InterfaceActivateStepSchema = z
   })
   .strict()
 
+/**
+ * Press one key — Enter, Escape, Tab or an arrow — on the target (focused
+ * first), or on whatever the page has focused when there is none: a search that
+ * submits on Enter, a menu that closes on Escape. The key is part of which task
+ * it is.
+ */
+export const InterfacePressStepSchema = z
+  .object({
+    kind: z.literal('press'),
+    key: GuardWebKeySchema,
+    target: InterfaceTargetSchema.optional(),
+    within: namedScope().optional(),
+    label: z.string().optional(),
+    why,
+    proven,
+  })
+  .strict()
+
+/** Move the pointer over the target and leave it there — what reveals a control shown only on hover. */
+export const InterfaceHoverStepSchema = z
+  .object({
+    kind: z.literal('hover'),
+    target: InterfaceTargetSchema,
+    within: namedScope().optional(),
+    label: z.string().optional(),
+    why,
+    proven,
+  })
+  .strict()
+
+/**
+ * Hand a file to the control a user operates to pick one — the web driver's
+ * `upload` verb, and its file model: `base64` (a seeded binary, named as
+ * `{{fixture:<name>.<field>}}`), `text` (bytes a reader can read, a CSV to
+ * import), or `path` (a file the scenario's own world holds), with `as` naming
+ * it. Like that verb, its target is never `css`: the hidden file input behind a
+ * styled button is not what a user operates. The file is data, not which task
+ * this is, so it is never fingerprinted.
+ */
+export const InterfaceUploadStepSchema = z
+  .object({
+    kind: z.literal('upload'),
+    target: InterfaceTargetSchema,
+    within: namedScope().optional(),
+    file: GuardWebFileSchema,
+    label: z.string().optional(),
+  })
+  .strict()
+
 export const InterfaceStepSchema = z.discriminatedUnion('kind', [
   InterfaceInvokeStepSchema,
   InterfaceRequestStepSchema,
   InterfaceNavigateStepSchema,
   InterfaceInputStepSchema,
   InterfaceActivateStepSchema,
+  InterfacePressStepSchema,
+  InterfaceHoverStepSchema,
+  InterfaceUploadStepSchema,
 ])
 export type InterfaceInvokeStep = z.infer<typeof InterfaceInvokeStepSchema>
 export type InterfaceRequestStep = z.infer<typeof InterfaceRequestStepSchema>
 export type InterfaceNavigateStep = z.infer<typeof InterfaceNavigateStepSchema>
 export type InterfaceInputStep = z.infer<typeof InterfaceInputStepSchema>
 export type InterfaceActivateStep = z.infer<typeof InterfaceActivateStepSchema>
+export type InterfacePressStep = z.infer<typeof InterfacePressStepSchema>
+export type InterfaceHoverStep = z.infer<typeof InterfaceHoverStepSchema>
+export type InterfaceUploadStep = z.infer<typeof InterfaceUploadStepSchema>
 export type InterfaceStep = z.infer<typeof InterfaceStepSchema>
+
+/** A web step that acts on an element: every interaction kind, and a press that names where. */
+export type InterfaceTargetedStep =
+  | InterfaceInputStep
+  | InterfaceActivateStep
+  | InterfaceHoverStep
+  | InterfaceUploadStep
+  | (InterfacePressStep & { target: InterfaceTarget })
+
+/** Does this step act on an element it names? */
+export function isTargetedStep(step: InterfaceStep): step is InterfaceTargetedStep {
+  return 'target' in step && step.target !== undefined
+}
 
 /**
  * The one scenario locator a targeted step compiles to: its target, scoped by its
  * `within`. What the runner resolves, what a live proof resolves, and what decides
  * whether the step is non-canonical ({@link isNonCanonicalLocator}).
  */
-export function interfaceStepLocator(step: InterfaceInputStep | InterfaceActivateStep): GuardWebLocator {
+export function interfaceStepLocator(step: InterfaceTargetedStep): GuardWebLocator {
   return step.within ? { ...step.target, within: step.within } : step.target
 }
 
@@ -1916,7 +1989,24 @@ export const InterfacesFileSchema = InterfacesFileShapeSchema
       // carries `css` anywhere says why no accessible handle reaches its element,
       // which is what the non-canonical record reports.
       iface.steps.forEach((step, s) => {
-        if (step.kind !== 'input' && step.kind !== 'activate') return
+        if (step.kind === 'press' && step.within !== undefined && step.target === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['interfaces', i, 'steps', s, 'target'],
+            message: 'a press scoped `within` an element names the element it presses on — give it a `target`',
+          })
+        }
+        if (!isTargetedStep(step)) return
+        if (step.kind === 'upload') {
+          if (isNonCanonicalLocator(interfaceStepLocator(step))) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['interfaces', i, 'steps', s, 'target'],
+              message: 'an upload names the control a user operates to pick a file (its label, its button) — never a `css` locator',
+            })
+          }
+          return
+        }
         if (step.why === undefined && isNonCanonicalLocator(interfaceStepLocator(step))) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -1989,6 +2079,13 @@ function stepIdentity(step: InterfaceStep): string {
       return [step.kind, normalizeToken(step.method).toUpperCase(), normalizeToken(step.path)].join('\u0000')
     case 'navigate':
       return [step.kind, normalizeToken(step.route)].join('\u0000')
+    case 'press':
+      return [
+        step.kind,
+        step.key,
+        ...(step.target ? targetIdentity(step.target) : []),
+        ...(step.within ? ['within', ...scopeIdentity(step.within)] : []),
+      ].join('\u0000')
     default:
       return [
         step.kind,
@@ -2133,7 +2230,7 @@ function resolvedStepIdentity(
   step: InterfaceStep,
   place: Pick<InterfaceResource, 'id' | 'readables'> | undefined,
 ): string | undefined {
-  if (!place || !('target' in step) || step.within) return undefined
+  if (!place || !isTargetedStep(step) || step.within) return undefined
   const target = step.target
   if (!('role' in target) || target.pick !== undefined) return undefined
   const named = [...(place.readables?.controls ?? []).map((fact) => ({ id: fact.id, locator: fact.control })),
@@ -2145,6 +2242,7 @@ function resolvedStepIdentity(
   if (matches.length !== 1) return undefined
   return [
     step.kind,
+    ...(step.kind === 'press' ? [step.key] : []),
     'resolved',
     place.id,
     matches[0].id,
@@ -2183,7 +2281,7 @@ export function isLabelOnlyRekey(
     interfaceFingerprint({
       ...iface,
       steps: iface.steps.map((step) =>
-        'target' in step
+        isTargetedStep(step)
           ? {
               ...step,
               target: unnamed(step.target),

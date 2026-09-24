@@ -21,7 +21,9 @@ import {
   isWebClickStep,
   isWebFillStep,
   isWebSelectStep,
+  isWebHoverStep,
   isWebNavigateStep,
+  isWebPressStep,
   isWebUploadStep,
   webLocatorValueKey,
 } from '@truecourse/shared'
@@ -177,6 +179,10 @@ export function resolveWebStep(step: GuardWebStep, tok: Tok): GuardWebStep {
   if (isWebSelectStep(step)) {
     return { ...step, select: resolveLocator(step.select, tok), option: tok(step.option), ...expect, ...capture }
   }
+  if (isWebPressStep(step)) {
+    return { ...step, ...(step.on ? { on: resolveLocator(step.on, tok) } : {}), ...expect, ...capture }
+  }
+  if (isWebHoverStep(step)) return { ...step, hover: resolveLocator(step.hover, tok), ...expect, ...capture }
   if (isWebUploadStep(step)) {
     return {
       ...step,

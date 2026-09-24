@@ -16,6 +16,7 @@ import {
   interfaceStepLocator,
   isNonCanonicalLocator,
   isRootPlace,
+  isTargetedStep,
   readableLocators,
   type GuardWebLocator,
   type InterfaceEntry,
@@ -65,7 +66,7 @@ export function nonCanonicalLocators(catalog: InterfacesFile | null): NonCanonic
     .flatMap((task) => {
       const screen = task.at ? screenOf(task.at, places) : screenAt(task.entry, places)
       return task.steps.flatMap((step, index): NonCanonicalLocator[] => {
-        if (step.kind !== 'input' && step.kind !== 'activate') return []
+        if (!isTargetedStep(step) || step.kind === 'upload') return []
         const locator = interfaceStepLocator(step)
         if (!isNonCanonicalLocator(locator)) return []
         return [{

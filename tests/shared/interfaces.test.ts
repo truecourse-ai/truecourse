@@ -84,8 +84,8 @@ const EMPTY_CATALOG = {
 } satisfies InterfacesFile
 
 describe('interface schemas', () => {
-  it('the step vocabulary is the closed five-kind set', () => {
-    expect(InterfaceStepKindSchema.options).toEqual(['invoke', 'request', 'navigate', 'input', 'activate'])
+  it('the step vocabulary is the closed eight-kind set', () => {
+    expect(InterfaceStepKindSchema.options).toEqual(['invoke', 'request', 'navigate', 'input', 'activate', 'press', 'hover', 'upload'])
   })
 
   it('parses every step kind', () => {
@@ -3085,6 +3085,38 @@ describe('a step target beyond role and name', () => {
     }
     // A position alone is canonical and needs no reason.
     expect(InterfacesFileSchema.safeParse(catalogWith([{ kind: 'activate', target: { title: 'More', pick: 2 } }])).success).toBe(true)
+  })
+
+  it('takes a key press, a hover and an upload as web steps, with a named key only', () => {
+    expect(InterfaceStepSchema.safeParse({ kind: 'press', key: 'Enter', target: { role: 'searchbox', name: 'Search' } }).success).toBe(true)
+    expect(InterfaceStepSchema.safeParse({ kind: 'press', key: 'Escape' }).success).toBe(true)
+    expect(InterfaceStepSchema.safeParse({ kind: 'press', key: 'PageDown' }).success).toBe(false)
+    expect(InterfaceStepSchema.safeParse({ kind: 'hover', target: { role: 'row', name: 'Inbox' } }).success).toBe(true)
+    expect(InterfaceStepSchema.safeParse({ kind: 'upload', target: { label: 'Import file' }, file: { text: 'url', as: 'links.csv' } }).success).toBe(true)
+    // An upload names its file the way the web driver's verb does: one byte source, a name.
+    expect(InterfaceStepSchema.safeParse({ kind: 'upload', target: { label: 'Import file' }, file: { text: 'url' } }).success).toBe(false)
+  })
+
+  it('refuses an upload through css, and a press scoped within an element it does not name', () => {
+    const upload = InterfacesFileSchema.safeParse(catalogWith([
+      { kind: 'upload', target: { css: 'input[type=file]' }, file: { text: 'x', as: 'x.csv' } },
+    ]))
+    expect(!upload.success && upload.error.issues[0].message).toContain('never a `css` locator')
+    const press = InterfacesFileSchema.safeParse(catalogWith([{ kind: 'press', key: 'Enter', within: { role: 'dialog', name: 'Search' } }]))
+    expect(!press.success && press.error.issues[0].message).toContain('give it a `target`')
+    // A css press or hover says why, like an activate.
+    const hover = InterfacesFileSchema.safeParse(catalogWith([{ kind: 'hover', target: { css: 'li.row' } }]))
+    expect(!hover.success && hover.error.issues.map((i) => i.path.join('.'))).toContain('interfaces.0.steps.0.why')
+  })
+
+  it('tells presses apart by their key, and never by an upload’s file', () => {
+    const print = (steps: unknown[]) => fingerprintOf(steps.map((step) => InterfaceStepSchema.parse(step)))
+    const on = { role: 'searchbox', name: 'Search' }
+    expect(print([{ kind: 'press', key: 'Enter', target: on }])).not.toBe(print([{ kind: 'press', key: 'Escape', target: on }]))
+    expect(print([{ kind: 'press', key: 'Escape' }])).not.toBe(print([{ kind: 'press', key: 'Enter' }]))
+    expect(print([{ kind: 'hover', target: on }])).not.toBe(print([{ kind: 'activate', target: on }]))
+    const upload = (text: string) => ({ kind: 'upload', target: { label: 'Import file' }, file: { text, as: 'links.csv' } })
+    expect(print([upload('a')])).toBe(print([upload('b')]))
   })
 
   it('refuses a role handle with no name, as a target or as a scope', () => {
