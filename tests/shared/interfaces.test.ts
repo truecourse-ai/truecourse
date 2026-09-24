@@ -3135,6 +3135,11 @@ describe('an authoring ledger row', () => {
     expect(row).toEqual({ status: 'authored', inputFingerprint: 'abc' })
   })
 
+  it('stored with the principal an older run observed it as still parses', () => {
+    expect(InterfaceAuthoringRecordSchema.parse({ status: 'authored', inputFingerprint: 'abc', principal: 'adminWebSession' }))
+      .toEqual({ status: 'authored', inputFingerprint: 'abc', principal: 'adminWebSession' })
+  })
+
   it('refuses any other unknown field', () => {
     expect(InterfaceAuthoringRecordSchema.safeParse({ status: 'authored', inputFingerprint: 'abc', extra: 1 }).success).toBe(false)
   })

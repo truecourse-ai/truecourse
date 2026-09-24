@@ -21,7 +21,6 @@
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import { ANONYMOUS_PRINCIPAL, GuardWebLocatorSchema } from '@truecourse/shared'
-import { SEED_WEB_PRINCIPALS } from './principals.js'
 import { boundTree, hasAddressSlot } from '@truecourse/guard-runner'
 import type {
   ObserveScreenResult,
@@ -54,6 +53,12 @@ export interface LiveScreens {
    * observer is one of them. Absent on a run that stood up one observer only.
    */
   principals?: ReadonlyMap<string, LiveScreenObserver>
+  /**
+   * What makes each seeded principal distinct, by name, in the seed's own words
+   * (its credential's `description`): what a session chooses whom to observe
+   * and act as by.
+   */
+  descriptions?: ReadonlyMap<string, string>
   /**
    * The seed's published fixtures, name → declared fields, with every secret-
    * shaped field already removed ({@link publicFixtureFields}). What a session
@@ -90,6 +95,14 @@ export function publicFixtureFields(
 export function observerFor(live: LiveScreens, principal: string | undefined): LiveScreenObserver | undefined {
   if (principal === undefined || principal === live.observer.principal) return live.observer
   return live.principals?.get(principal)
+}
+
+/** What the signed-out browser is, as the briefing describes it. */
+export const ANONYMOUS_DESCRIPTION = 'a browser signed in as nobody: what a signed-out visitor sees'
+
+/** A principal's description: the seed's for a seeded one, the fixed one for `anonymous`. */
+export function principalDescription(live: LiveScreens, name: string): string | undefined {
+  return name === ANONYMOUS_PRINCIPAL ? ANONYMOUS_DESCRIPTION : live.descriptions?.get(name)
 }
 
 /** The principals a session may name, the default first. */
@@ -209,9 +222,10 @@ function describeContainer(container: UnnamedContainer): string {
 }
 
 /**
- * The briefing's live block: what the observer saw at this place's address
- * (or why it saw nothing), whose principal it is signed in as, and the seeded
- * rows a session may fill a slot with.
+ * The briefing's live block: who the run can observe and act as and what makes
+ * each distinct, what the default principal saw at this place's address (or
+ * why it saw nothing, or where it was sent), and the seeded rows a session may
+ * fill a slot with.
  */
 export function liveScreenLines(input: {
   live: LiveScreens
@@ -219,53 +233,41 @@ export function liveScreenLines(input: {
   address?: string
   /** The observation taken at the address before the session started, when the address had no slot. */
   observation?: ObserveScreenResult
-  /**
-   * Set when no principal the run can sign in as stays at this address — every
-   * one of them was sent elsewhere — so what the session authors comes from
-   * source, and a `css` locator is accepted unproven.
-   */
-  unreachable?: true
 }): string[] {
   const own = input.live.observer.principal
-  const others = principalNames(input.live).filter((name) => name !== own)
+  const names = principalNames(input.live)
   const lines = [
     ``,
     `THE LIVE SCREEN. The app is running, and a browser is open on it` +
-      (own === ANONYMOUS_PRINCIPAL && others.length > 0
-        ? ` NOT SIGNED IN (\`anonymous\`): this screen is the one a signed-out user sees, and a signed-in session is sent away from it.`
-        : own && own !== ANONYMOUS_PRINCIPAL
-          ? ` signed in as the seeded principal \`${own}\`.`
-          : ` with no principal signed in (the seed minted no web credential).`),
+      (own && own !== ANONYMOUS_PRINCIPAL
+        ? ` signed in as the default principal \`${own}\`.`
+        : ` with no principal signed in (the seed minted no web credential).`),
   ]
-  if (others.length > 0) {
+  if (names.length > 1) {
     lines.push(
-      `The run can also observe as ${others.map((name) => `\`${name}\``).join(', ')} (\`observe_screen\` with \`principal\`).`,
-      `A task only another principal can perform (an admin-only control, a member's`,
-      `leave action, a signed-out form, an empty state a user with no data sees) carries`,
-      `\`principal: "<name>"\`, and is proven as that principal.`,
-      ...(others.includes(SEED_WEB_PRINCIPALS.empty)
-        ? [
-            `\`${SEED_WEB_PRINCIPALS.empty}\` is a user who owns nothing: observe this place's EMPTY state as it (the`,
-            `"nothing here yet" branch and its create-first controls), and author those tasks as it.`,
-          ]
-        : []),
-      ...(others.includes(SEED_WEB_PRINCIPALS.member)
-        ? [
-            `\`${SEED_WEB_PRINCIPALS.member}\` is a member of a record the default principal owns, without owning it:`,
-            `a member's view and actions (leaving, a role it holds) are observed and authored as it.`,
-          ]
-        : []),
+      `The principals the run can observe and act as, and what makes each distinct:`,
+      ...names.map((name) => `  \`${name}\` — ${principalDescription(input.live, name) ?? 'no description was given'}`),
+      `WHOSE SCREEN THIS IS, and whose each task is, is your call: decide from its source`,
+      `(its guards and redirects, the data it lists, the controls only some users get)`,
+      `and these descriptions. Observe a state as the principal who sees it`,
+      `(\`observe_screen\` with \`principal\`), and give every task another principal`,
+      `performs \`principal: "<name>"\` — its live proof runs as that principal, and a`,
+      `scenario of it signs in as it. A state only some users see (an empty list, a`,
+      `member's view, an admin control) is observed as the principal whose description`,
+      `says it sees it.`,
     )
   }
-  if (input.unreachable) {
+  const observed = input.observation?.ok ? input.observation.observation : undefined
+  if (observed && observed.reachedBy === undefined) {
     lines.push(
-      `NO PRINCIPAL REACHES THIS ADDRESS: every one the run can sign in as was sent`,
-      `elsewhere (the observation below shows where). Author from source; a \`css\``,
-      `locator written from source is accepted here UNPROVEN (with its \`why\`), and`,
-      `recorded as unproven.`,
+      `The default principal was SENT AWAY from this address (the browser ended at`,
+      `${observed.address}): this screen is not the default principal's. Observe it as the`,
+      `principal whose description says it may open it, and author its tasks as that one.`,
+      `What the default principal was shown instead (NOT this screen):`,
+      ``,
+      renderObservation(observed),
     )
-  }
-  if (input.observation) {
+  } else if (input.observation) {
     if (input.observation.ok) {
       lines.push(
         `What it renders at this place's address, as an assistive reader sees it — the`,

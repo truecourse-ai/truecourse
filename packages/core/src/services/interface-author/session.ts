@@ -56,8 +56,6 @@ export interface AuthorSessionInput {
   scope?: { screenId: string; address?: string }
   /** The running app, when the run booted one — the session may observe screens. */
   live?: LiveScreens
-  /** No principal the run can sign in as stays at this place's address. */
-  unreachable?: true
 }
 
 export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef<AuthoredFragment> {
@@ -122,11 +120,11 @@ export interface PlaceBriefingInput {
   /** The dialogs and panels that sit on THIS place — what `of` already names. */
   nested: readonly InterfaceResource[]
   /**
-   * The running app, when the run booted one: the observer's principal and
-   * fixtures, and what it saw at this place's address before the session
+   * The running app, when the run booted one: the principals and fixtures, and
+   * what the default principal saw at this place's address before the session
    * started (taken only for an address with no slot).
    */
-  live?: { screens: LiveScreens; observation?: ObserveScreenResult; unreachable?: true }
+  live?: { screens: LiveScreens; observation?: ObserveScreenResult }
 }
 
 /**
@@ -218,7 +216,6 @@ export function placeBriefing({
         live: live.screens,
         ...(address ? { address } : {}),
         ...(live.observation ? { observation: live.observation } : {}),
-        ...(live.unreachable ? { unreachable: true as const } : {}),
       }),
     )
   }
@@ -478,7 +475,7 @@ Each task carries:
 - \`at\` — the place the task is performed at: this place, or a dialog or panel on it. **The briefing lists both** — the places already on this one, and every screen the catalog knows.
 - \`to\` — the place it leaves the user at, ONLY when it moves them. A task that acts in place carries \`at\` alone.
 - \`startingState\` / \`endState\` — ids from the state registry: the world the task assumes, and the world it leaves. **The briefing lists the registry — reuse an id from it before you mint one**, and mint only when no id there names that world. **A task that CHANGES the world states its \`endState\`** — anything that creates, edits, deletes, enables, invites or cancels leaves a world different from the one it found, and that difference is what a scenario asserts. Omit \`endState\` only for a task that leaves the data exactly as it was (a navigation, a filter, a read).
-- \`principal\` — WHO performs the task, only when it is not the session's own principal: the name of another principal the briefing lists (an admin-only control, a member's leave action, an empty state a user with no data sees), or \`"anonymous"\` for a task done signed out (a login, a sign-up, a password reset form). Its live proof runs as that principal, and a scenario of the task starts from that session. Omit it for a task the session's own principal performs.
+- \`principal\` — WHO performs the task, only when it is not the default principal: the name of another principal the briefing lists, chosen by its description (the user the task's control or state belongs to), or \`"anonymous"\` for a task done signed out (a login, a sign-up, a password reset form). Its live proof runs as that principal, and a scenario of the task starts from that session. Omit it for a task the default principal performs.
 - \`apiEffects\` — the ids of the api interfaces the task's steps call. **The briefing already states them**: the requests this screen's own modules make, joined to the catalog by path. Use those ids, add one only if you READ the call yourself, and when the briefing joined nothing, omit the field — do not go looking for an id with \`list_interfaces\` guesses. \`[]\` means the task reaches no server at all, which is a stronger claim than omitting. Never guess.
 
 # The rules that are checked
@@ -520,7 +517,7 @@ UI that several screens render — a layout's sidebar and top bar, a list's card
 
 # The live screen
 
-When the briefing carries THE LIVE SCREEN, the app is running and a browser is signed in as the principal this screen is observed as — the one that stays on its address (an admin for an admin page, nobody for a sign-in page); the briefing names it and any other principal \`observe_screen\` can take (\`principal\`). The briefing already holds the accessibility tree of this place's address (for an address with no slot); \`observe_screen\` opens any address again, with the slots filled from the seeded fixtures the briefing lists, and may \`activate\` up to five targets first — the way to read a dialog, a menu or a tab panel that only exists once opened. Read the tree and the source TOGETHER: the tree gives every control its real role and name and shows which of them are rendered in this state, and the observation lists every control the tree shows with no name — with its attributes, its icon, its region and a candidate css selector with its match count; the source gives what each control does (its handler, the request it makes, the state it leaves), which no tree can say. A control in the tree with no handler you could read goes in \`unresolved\` with its name; a handler in the source whose control is in no tree you observed goes there too, naming the state you could not reach. Never activate a control that submits a form, deletes, cancels or signs out: the world is the seed's and the tests will need it intact.
+When the briefing carries THE LIVE SCREEN, the app is running and a browser is signed in as the default principal; the briefing lists every principal the run can observe and act as, with what makes each distinct, and says when the default principal was sent away from this address. WHOSE screen and whose task it is, is yours to decide from the source and those descriptions: observe as that principal (\`observe_screen\` with \`principal\`) and name it on the tasks it performs. When no principal reaches an address at all, \`check_draft\` says so by accepting a \`css\` written from source there UNPROVEN; when some other principal reaches it, the refusal names which. The briefing already holds the accessibility tree of this place's address (for an address with no slot); \`observe_screen\` opens any address again, with the slots filled from the seeded fixtures the briefing lists, and may \`activate\` up to five targets first — the way to read a dialog, a menu or a tab panel that only exists once opened. Read the tree and the source TOGETHER: the tree gives every control its real role and name and shows which of them are rendered in this state, and the observation lists every control the tree shows with no name — with its attributes, its icon, its region and a candidate css selector with its match count; the source gives what each control does (its handler, the request it makes, the state it leaves), which no tree can say. A control in the tree with no handler you could read goes in \`unresolved\` with its name; a handler in the source whose control is in no tree you observed goes there too, naming the state you could not reach. Never activate a control that submits a form, deletes, cancels or signs out: the world is the seed's and the tests will need it intact.
 
 # Findings — what the repository says that the source does not do
 

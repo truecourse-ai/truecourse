@@ -124,7 +124,8 @@ export interface LocatorReading {
  */
 export type LocatorProbeResult =
   | { ok: true; readings: LocatorReading[] }
-  | { ok: false; reason: string; readings?: LocatorReading[] }
+  /** `unreached` when the walk's address (or one it navigated to) was never reached: every load was sent elsewhere. */
+  | { ok: false; reason: string; readings?: LocatorReading[]; unreached?: true }
 
 export interface WebScreenObserver {
   /** The credential the pages are signed in with, by name; absent when anonymous. */
@@ -256,28 +257,30 @@ export async function probeLocator(
 ): Promise<LocatorProbeResult> {
   const opened = await openAndActivate(page, baseUrl, { path: request.path })
   if (!opened.ok) return opened
-  if (!opened.reachedBy) return { ok: false, reason: opened.problems[opened.problems.length - 1] ?? `${request.path} could not be reached` }
+  if (!opened.reachedBy) {
+    return { ok: false, reason: opened.problems[opened.problems.length - 1] ?? `${request.path} could not be reached`, unreached: true }
+  }
   const readings: LocatorReading[] = []
   for (const step of request.steps) {
     const failed = await probeStep(page, baseUrl, step, readings)
-    if (failed) return { ok: false, reason: failed, readings }
+    if (failed) return { ok: false, reason: failed.reason, readings, ...(failed.unreached ? { unreached: true as const } : {}) }
   }
   return { ok: true, readings }
 }
 
-/** Run one step of a probe's walk, pushing its reading; returns why it failed, if it did. */
+/** Run one step of a probe's walk, pushing its reading; returns why it failed, if it did, and whether an address was never reached. */
 async function probeStep(
   page: Page,
   baseUrl: string,
   step: LocatorProbeStep,
   readings: LocatorReading[],
-): Promise<string | undefined> {
+): Promise<{ reason: string; unreached?: true } | undefined> {
   if ('navigate' in step) {
     const url = surfaceUrl(step.navigate, baseUrl)
-    if (!url.ok) return url.reason
+    if (!url.ok) return { reason: url.reason }
     const opened = await openPage(page, url.url, baseUrl)
-    if (!opened.ok) return opened.reason
-    return opened.reached ? undefined : unreachedLine(step.navigate, opened.sentTo)
+    if (!opened.ok) return { reason: opened.reason }
+    return opened.reached ? undefined : { reason: unreachedLine(step.navigate, opened.sentTo), unreached: true }
   }
   if ('resolve' in step) {
     const { resolve: locator } = step
@@ -289,7 +292,7 @@ async function probeStep(
       readings.push({ ...(scopeMatches !== undefined ? { scopeMatches } : {}), matches, visible })
       return undefined
     } catch (e) {
-      return `resolving ${describeLocator(locator)} on ${pageAddress(page)} failed: ${firstLine(e)}`
+      return { reason: `resolving ${describeLocator(locator)} on ${pageAddress(page)} failed: ${firstLine(e)}` }
     }
   }
   const [verb, target] =
@@ -302,7 +305,7 @@ async function probeStep(
     else if ('fill' in step) await locator.fill(step.value, { timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
     else await locator.selectOption({ label: step.option }, { timeout: OBSERVE_ACTIVATE_TIMEOUT_MS })
   } catch (e) {
-    return `${verb} ${describeLocator(target)} on ${pageAddress(page)} failed: ${firstLine(e)}`
+    return { reason: `${verb} ${describeLocator(target)} on ${pageAddress(page)} failed: ${firstLine(e)}` }
   }
   await settlePage(page)
   return undefined

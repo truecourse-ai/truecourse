@@ -335,31 +335,47 @@ describe('a css readable', () => {
 })
 
 describe('a screen no principal reaches', () => {
-  function checkUnreached(observer: LiveScreenObserver, unreachable: boolean) {
+  /** An observer every page sends away, remembering every request. */
+  function sentAwayObserver(principal?: string): { observer: LiveScreenObserver; probes: LocatorProbeRequest[] } {
+    const probes: LocatorProbeRequest[] = []
+    return {
+      probes,
+      observer: {
+        ...(principal ? { principal } : {}),
+        async observe() {
+          return { ok: false, reason: 'not used' }
+        },
+        async probe(request) {
+          probes.push(request)
+          return { ok: false, reason: `${request.path} could not be reached`, unreached: true }
+        },
+        async close() {},
+      },
+    }
+  }
+
+  it('accepts a css step written from source, stamped unproven, once every principal is sent away', async () => {
+    const { observer, probes } = sentAwayObserver('webSession')
+    const anonymous = sentAwayObserver('anonymous')
     const tools = buildAuthorTools({
       repoRoot: '/nowhere',
       derived: DERIVED,
       authored: null,
       replaceable: new Set(),
-      live: { observer },
-      ...(unreachable ? { unreachable: true as const } : {}),
+      live: { observer, principals: new Map([['webSession', observer], ['anonymous', anonymous.observer]]) },
     })
-    const tool = tools.find((t) => t.name === 'check_draft')!
-    return (args: unknown) => tool.execute(args, toolContext)
-  }
-
-  it('accepts a css step written from source, stamped unproven, and proves nothing', async () => {
-    const { observer, probes } = probingObserver({ matches: 0, visible: false })
-    const result = await checkUnreached(observer, true)({ interfaces: [linksTask([sortStep])] })
+    const result = await tools.find((t) => t.name === 'check_draft')!.execute({ interfaces: [linksTask([sortStep])] }, toolContext)
     expect(result.isError, String(result.content)).toBeFalsy()
-    expect(probes).toEqual([])
+    // The task's own proof, then every principal asked whether it reaches the address.
+    expect(probes.map((probe) => probe.steps.length)).toEqual([1, 0])
+    expect(anonymous.probes).toHaveLength(1)
     const draft = (result.artifact as { fragment: { interfaces: { steps: { proven?: false }[] }[] } }).fragment
     expect(draft.interfaces[0].steps[0].proven).toBe(false)
   })
 
   it('is the only place a css step goes unproven: a session’s own `proven: false` is dropped and the proof runs', async () => {
     const { observer, probes } = probingObserver({ matches: 0, visible: false })
-    const result = await checkUnreached(observer, false)({ interfaces: [linksTask([{ ...sortStep, proven: false }])] })
+    const result = await checkDraft(observer)({ interfaces: [linksTask([{ ...sortStep, proven: false }])] })
     expect(result.isError).toBe(true)
     expect(result.content).toContain('matches nothing')
     expect(probes).toHaveLength(1)

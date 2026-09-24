@@ -2212,47 +2212,91 @@ describe('a shared component', () => {
  * the ledger row records who it was.
  */
 describe('the principal a screen is observed as', () => {
-  const observerAs = (principal: string, endsAt: (path: string) => string) => ({
+  /** An observer that reaches only the paths `reaches` admits, ending at /dashboard otherwise. */
+  const observerAs = (principal: string, reaches: (path: string) => boolean) => ({
     principal,
     async observe({ path }: { path: string }) {
-      return { ok: true as const, observation: { path, address: endsAt(path), title: '', tree: `- heading "as ${principal}"`, omittedLines: 0, activated: [], problems: [] } }
+      const reached = reaches(path)
+      return {
+        ok: true as const,
+        observation: {
+          path,
+          address: reached ? path : '/dashboard',
+          title: '',
+          tree: `- heading "as ${principal}"`,
+          omittedLines: 0,
+          activated: [],
+          problems: [],
+          ...(reached ? { reachedBy: 'load' as const } : {}),
+        },
+      }
     },
-    async probe() {
-      return { ok: true as const, readings: [] }
+    async probe({ path }: { path: string }) {
+      return reaches(path)
+        ? { ok: true as const, readings: [{ matches: 1, visible: true }] }
+        : { ok: false as const, reason: `${path} could not be reached`, unreached: true as const }
     },
     async close() {},
   })
 
-  it('is the first principal that stays on its address, recorded on its row and named in its briefing', async () => {
-    const member = observerAs('webSession', () => '/dashboard')
-    const anonymous = observerAs('anonymous', (path) => path)
+  it('takes the first look as the default principal only, and briefs the session with who else it can be', async () => {
+    const owner = observerAs('webSession', () => false)
+    const anonymous = observerAs('anonymous', () => true)
     const { driver, seen } = scriptedDriver(async () => ({ kind: 'outcome', value: { interfaces: [] } }))
     await authorWebInterfaces({
       repoRoot: repo,
       driver,
       persistence: memoryPersistence().persistence,
-      openLive: async () => ({ observer: member, principals: new Map([['webSession', member], ['anonymous', anonymous]]) }),
+      openLive: async () => ({
+        observer: owner,
+        principals: new Map([['webSession', owner], ['anonymous', anonymous]]),
+        descriptions: new Map([['webSession', 'owns the seeded repositories']]),
+      }),
     })
-    const root = seen.find((input) => placeOf(input) === 'root')!
-    expect(root.initialMessages.at(-1)).toContain('NOT SIGNED IN (`anonymous`)')
-    expect(root.initialMessages.at(-1)).toContain('- heading "as anonymous"')
-    expect(readAuthoredFile().authoring?.root?.principal).toBe('anonymous')
-    // A slotted address is observed by its own session, as the default.
-    expect(readAuthoredFile().authoring?.['repos-repoid']?.principal).toBeUndefined()
+    const briefing = seen.find((input) => placeOf(input) === 'root')!.initialMessages.at(-1)!
+    expect(briefing).toContain('signed in as the default principal `webSession`')
+    expect(briefing).toContain('  `webSession` — owns the seeded repositories')
+    expect(briefing).toContain('The default principal was SENT AWAY from this address')
+    expect(briefing).toContain('- heading "as webSession"')
+    expect(briefing).not.toContain('- heading "as anonymous"')
+    // The engine chose nobody: the row names no principal.
+    expect(readAuthoredFile().authoring?.root?.principal).toBeUndefined()
   })
 
-  it('says so when no principal stays, and accepts css from source there', async () => {
-    const member = observerAs('webSession', () => '/dashboard')
-    const { driver, seen } = scriptedDriver(async (place, input) => {
+  it('refuses a css proof sent away from an address another principal reaches, naming who does', async () => {
+    const owner = observerAs('webSession', () => false)
+    const admin = observerAs('instanceAdminWebSession', () => true)
+    const task = { ...HOME_TASK, endState: undefined, steps: [{ kind: 'activate', target: { css: 'main button:has(svg[data-icon="plus"])' }, why: 'icon-only add button, no aria-label' }] }
+    const { driver } = scriptedDriver(async (place, input) => {
+      if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
+      const refused = await callTool(input, 'check_draft', { interfaces: [task] })
+      expect(refused).toContain('is never reached as `webSession`, and is reached as `instanceAdminWebSession`')
+      const checked = await callTool(input, 'check_draft', { interfaces: [{ ...task, principal: 'instanceAdminWebSession' }] })
+      expect(checked).toContain('Accepted and kept')
+      return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+    })
+    await authorWebInterfaces({
+      repoRoot: repo,
+      driver,
+      persistence: memoryPersistence().persistence,
+      openLive: async () => ({ observer: owner, principals: new Map([['webSession', owner], ['instanceAdminWebSession', admin]]) }),
+    })
+    const [authored] = readAuthoredFile().interfaces
+    expect(authored.principal).toBe('instanceAdminWebSession')
+    expect(authored.steps[0]).not.toHaveProperty('proven')
+  })
+
+  it('accepts css from source, stamped unproven, where no principal reaches the address', async () => {
+    const owner = observerAs('webSession', () => false)
+    const { driver } = scriptedDriver(async (place, input) => {
       if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
       const checked = await callTool(input, 'check_draft', {
-        interfaces: [{ ...HOME_TASK, endState: undefined, steps: [{ kind: 'activate', target: { css: 'main button:has(i.bi-plus)' }, why: 'icon-only add button, no aria-label' }] }],
+        interfaces: [{ ...HOME_TASK, endState: undefined, steps: [{ kind: 'activate', target: { css: 'main button:has(svg[data-icon="plus"])' }, why: 'icon-only add button, no aria-label' }] }],
       })
       expect(checked).toContain('Accepted and kept')
       return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
     })
-    await authorWebInterfaces({ repoRoot: repo, driver, persistence: memoryPersistence().persistence, openLive: async () => ({ observer: member }) })
-    expect(seen.find((input) => placeOf(input) === 'root')!.initialMessages.at(-1)).toContain('NO PRINCIPAL REACHES THIS ADDRESS')
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence: memoryPersistence().persistence, openLive: async () => ({ observer: owner }) })
     const [task] = readAuthoredFile().interfaces
     expect(task.steps[0]).toMatchObject({ proven: false })
   })

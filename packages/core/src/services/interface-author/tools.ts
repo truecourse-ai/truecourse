@@ -53,6 +53,7 @@ import { checkedDraftEvidence } from './checked-draft.js'
 import { scopeFragmentIds } from './identity.js'
 import { observeScreenTool, observerFor, principalNames, type LiveScreens } from './live-screen.js'
 import { LiveProofReachSchema, proveLocators, proveReadables, type LiveProofReach } from './live-proof.js'
+import { principalsReaching } from './principals.js'
 
 /** How many catalog entries one `list_interfaces` call hands back — a tool
  *  result is context, and context is the budget. */
@@ -70,12 +71,6 @@ export interface AuthorToolsInput {
   scope?: { screenId: string; address?: string }
   /** The running app, when the run booted one — adds `observe_screen`. */
   live?: LiveScreens
-  /**
-   * No principal the run can sign in as stays at this place's address: a `css`
-   * locator written from source is accepted there UNPROVEN, stamped
-   * `proven: false`, instead of refused.
-   */
-  unreachable?: true
 }
 
 export function buildAuthorTools(input: AuthorToolsInput): SessionTool[] {
@@ -194,6 +189,14 @@ function interfacesTool(input: AuthorToolsInput): SessionTool {
 function checkDraftTool(input: AuthorToolsInput): SessionTool {
   let accepted: AuthoredFragment = EMPTY_FRAGMENT
   let reach: LiveProofReach = {}
+  // Which principals reach an address, asked once per address a proof was sent away from.
+  const reachingByPath = new Map<string, Promise<string[]>>()
+  const reaching = (path: string): Promise<string[]> => {
+    if (!input.live) return Promise.resolve([])
+    const known = reachingByPath.get(path) ?? principalsReaching(input.live, path)
+    reachingByPath.set(path, known)
+    return known
+  }
   return defineSessionTool({
     name: 'check_draft',
     description:
@@ -203,7 +206,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
     destructive: false,
     inputSchema: AuthoredFragmentSchema.extend({ proof: LiveProofReachSchema.optional() }),
     async execute({ proof, ...sent }) {
-      const piece = stampProof(sent, input.live !== undefined && input.unreachable === true)
+      const piece = withoutProvenWords(sent)
       const unknownPrincipals = input.live ? unknownPrincipalProblems(piece.interfaces, input.live) : []
       if (unknownPrincipals.length > 0) {
         return {
@@ -229,31 +232,32 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
         }
       }
       const proven = { ...reach, ...proof }
-      // On a screen no principal reaches there is nothing to prove on: the css
-      // it carries was stamped unproven above.
-      const unproven = input.unreachable && input.live
-        ? []
-        : [
-            ...(await proveLocators(piece.interfaces, input.live, proven)),
-            ...(await proveReadables(piece.resources ?? [], input.live, proven, input.scope?.address)),
-          ]
-      if (unproven.length > 0) {
+      const tasks = await proveLocators(piece.interfaces, input.live, proven, reaching)
+      const problems = [
+        ...tasks.problems,
+        ...(await proveReadables(piece.resources ?? [], input.live, proven, input.scope?.address, reaching)),
+      ]
+      if (problems.length > 0) {
         return {
-          content: `${unproven.length} locator(s) did not hold on the live screen — nothing in this call was accepted, and the draft still holds ${
+          content: `${problems.length} locator(s) did not hold on the live screen — nothing in this call was accepted, and the draft still holds ${
             accepted.interfaces.length
-          } task(s):\n- ${unproven.join('\n- ')}`,
+          } task(s):\n- ${problems.join('\n- ')}`,
           isError: true,
         }
       }
       reach = proven
-      accepted = fragment
-      const artifact = checkedDraftEvidence(fragment)
+      // A task whose address no principal reaches had nothing to be proven on:
+      // its css, written from source, is kept and stamped unproven.
+      accepted = tasks.unproven.size > 0
+        ? collapseAuthoredIds(scopeFragmentIds(foldAuthoredFragment(accepted, stampUnproven(piece, tasks.unproven)), input))
+        : fragment
+      const artifact = checkedDraftEvidence(accepted)
       return {
         content: [
-          `Accepted and kept. The draft now holds ${fragment.interfaces.length} task(s), ${
-            fragment.states?.length ?? 0
-          } state(s), ${fragment.resources?.length ?? 0} place(s).`,
-          ...draftIds(fragment),
+          `Accepted and kept. The draft now holds ${accepted.interfaces.length} task(s), ${
+            accepted.states?.length ?? 0
+          } state(s), ${accepted.resources?.length ?? 0} place(s).`,
+          ...draftIds(accepted),
           `Do not send any of them again except to correct one. To finish, call outcome with ${JSON.stringify(
             { draftId: artifact.draftId },
           )} — do not repeat the draft. Final acceptance checks the current catalog again.`,
@@ -264,12 +268,8 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
   })
 }
 
-/**
- * The piece as the draft keeps it: `proven` is the check's word, never the
- * session's, so any the session wrote is dropped — and on a screen no principal
- * reaches, every step whose locator carries `css` is stamped `proven: false`.
- */
-function stampProof(piece: AuthoredFragment, unreachable: boolean): AuthoredFragment {
+/** The piece with every `proven` the session wrote dropped: it is the check's word, never the session's. */
+function withoutProvenWords(piece: AuthoredFragment): AuthoredFragment {
   return {
     ...piece,
     interfaces: piece.interfaces.map((task) => ({
@@ -277,9 +277,26 @@ function stampProof(piece: AuthoredFragment, unreachable: boolean): AuthoredFrag
       steps: task.steps.map((step) => {
         if (step.kind === 'navigate') return step
         const { proven: _sessionWord, ...rest } = step
-        return unreachable && isNonCanonicalLocator(interfaceStepLocator(rest)) ? { ...rest, proven: false as const } : rest
+        return rest
       }),
     })),
+  }
+}
+
+/** Every `css` step of the tasks `ids` names, stamped `proven: false`. */
+function stampUnproven(piece: AuthoredFragment, ids: ReadonlySet<string>): AuthoredFragment {
+  return {
+    ...piece,
+    interfaces: piece.interfaces.map((task) =>
+      ids.has(task.id)
+        ? {
+            ...task,
+            steps: task.steps.map((step) =>
+              step.kind !== 'navigate' && isNonCanonicalLocator(interfaceStepLocator(step)) ? { ...step, proven: false as const } : step,
+            ),
+          }
+        : task,
+    ),
   }
 }
 

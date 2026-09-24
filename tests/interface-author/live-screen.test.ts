@@ -62,6 +62,7 @@ function fakeObserver(principal?: string): { observer: LiveScreenObserver; reque
           omittedLines: 0,
           activated: opened,
           problems: [],
+          reachedBy: 'load',
         },
       }
     },
@@ -94,11 +95,12 @@ describe('the briefing block', () => {
     const { observer } = fakeObserver('webSession')
     const observation: ObserveScreenResult = {
       ok: true,
-      observation: { path: '/', address: '/', title: 'Home', tree: '- button "Add link"', omittedLines: 0, activated: [], problems: [] },
+      observation: { path: '/', address: '/', title: 'Home', tree: '- button "Add link"', omittedLines: 0, activated: [], problems: [], reachedBy: 'load' },
     }
     const text = liveScreenLines({ live: { observer }, address: '/', observation }).join('\n')
     expect(text).toContain('THE LIVE SCREEN')
-    expect(text).toContain('signed in as the seeded principal `webSession`')
+    expect(text).toContain('signed in as the default principal `webSession`')
+    expect(text).not.toContain('SENT AWAY')
     expect(text).toContain('Observed / — title "Home"')
     expect(text).toContain('- button "Add link"')
     expect(text).toContain('observe_screen')
@@ -207,7 +209,7 @@ describe('the run', () => {
     expect(requests).toEqual([{ path: '/' }])
     const rootBriefing = calls.find((call) => call.briefing.includes('place    root'))!.briefing
     expect(rootBriefing).toContain('THE LIVE SCREEN')
-    expect(rootBriefing).toContain('signed in as the seeded principal `webSession`')
+    expect(rootBriefing).toContain('signed in as the default principal `webSession`')
     expect(rootBriefing).toContain('- button "Add link"')
     const slottedBriefing = calls.find((call) => call.briefing.includes('place    links-id'))!.briefing
     expect(slottedBriefing).toContain('carries a slot')
@@ -283,22 +285,34 @@ describe('the principal the briefing names', () => {
     expect(text).not.toContain('NOT SIGNED IN')
   })
 
-  it('says a screen is observed signed out when other principals exist, and names them', () => {
-    const anonymous = bare('anonymous')
-    const text = liveScreenLines({
-      live: { observer: anonymous, principals: new Map([['webSession', bare('webSession')], ['memberWebSession', bare('memberWebSession')], ['anonymous', anonymous]]) },
-    }).join('\n')
-    expect(text).toContain('NOT SIGNED IN (`anonymous`)')
-    expect(text).toContain('The run can also observe as `webSession`, `memberWebSession`')
-    expect(text).toContain('`memberWebSession` is a member of a record the default principal owns')
-    expect(text).not.toContain('emptyWebSession')
-  })
-
-  it("names the seed's empty user as the one to observe empty states as", () => {
+  it('lists every principal with what makes it distinct, and leaves the choice to the session', () => {
     const own = bare('webSession')
     const text = liveScreenLines({
-      live: { observer: own, principals: new Map([['webSession', own], ['emptyWebSession', bare('emptyWebSession')]]) },
+      live: {
+        observer: own,
+        principals: new Map([['webSession', own], ['viewerWebSession', bare('viewerWebSession')], ['anonymous', bare('anonymous')]]),
+        descriptions: new Map([['webSession', 'owns every seeded record'], ['viewerWebSession', 'a read-only member of the shared team']]),
+      },
     }).join('\n')
-    expect(text).toContain("`emptyWebSession` is a user who owns nothing: observe this place's EMPTY state as it")
+    expect(text).toContain('signed in as the default principal `webSession`')
+    expect(text).toContain('  `webSession` — owns every seeded record')
+    expect(text).toContain('  `viewerWebSession` — a read-only member of the shared team')
+    expect(text).toMatch(/  `anonymous` — a browser signed in as nobody/)
+    expect(text).toContain('WHOSE SCREEN THIS IS, and whose each task is, is your call')
+  })
+
+  it('says when the default principal was sent away, and shows what it was shown instead', () => {
+    const own = bare('webSession')
+    const text = liveScreenLines({
+      live: { observer: own, principals: new Map([['webSession', own], ['anonymous', bare('anonymous')]]) },
+      address: '/admin',
+      observation: {
+        ok: true,
+        observation: { path: '/admin', address: '/dashboard', title: 'Dashboard', tree: '- heading "Dashboard"', omittedLines: 0, activated: [], problems: [] },
+      },
+    }).join('\n')
+    expect(text).toContain('The default principal was SENT AWAY from this address (the browser ended at')
+    expect(text).toContain('What the default principal was shown instead (NOT this screen):')
+    expect(text).not.toContain("What it renders at this place's address")
   })
 })

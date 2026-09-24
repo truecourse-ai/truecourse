@@ -41,7 +41,8 @@
  *
  * COVERAGE: the seed builds a bounded coverage world from the product's DOMAIN
  * (the schema the source-facts parsers read, and the files they read it from), not the minimum
- * the recipe needs: the owner, admin, member and empty principals, relations at
+ * the recipe needs: one principal per kind of user the product has (the seed
+ * decides which, each described by what makes it distinct), relations at
  * none / one / several, every enum value, visible flags both ways, and the
  * state the app itself produces made by the app's own path. What it cannot
  * satisfy comes back as `unmet`, notes on the step and never a failure.
@@ -101,7 +102,7 @@ import { proveSeedFromColdClone } from './seed-cold-proof.js';
 import { outputTail, servicesController } from './services-lifecycle.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
-import { SEED_WEB_PRINCIPALS } from '../interface-author/principals.js';
+import { DEFAULT_WEB_PRINCIPAL } from '../interface-author/principals.js';
 import { isCreditsExhausted } from '@truecourse/shared';
 
 export const SEED_SESSION_KIND = 'guard-setup.seed';
@@ -233,7 +234,7 @@ export type SeedSessionOutcome = z.infer<typeof SeedSessionOutcomeSchema>;
  * execution is not made wrong by a reworded prompt; a prompt change that fixes
  * WRONG output bumps this in the same commit.
  */
-export const SEED_STAGE_VERSION = 3;
+export const SEED_STAGE_VERSION = 4;
 
 /** `sha256(stage version :: the seed step's input fingerprint)` — the step
  *  fingerprint already folds the recipe contract, the catalog's identity and
@@ -290,6 +291,11 @@ export function providesWarnings(
     if (cred.satisfies !== undefined && !known.has(cred.satisfies)) {
       warnings.push(
         `credential "${name}" satisfies "${cred.satisfies}", which is not a declared security scheme — the write path DROPS an unknown \`satisfies\` (declared: ${[...known].join(', ') || '(none)'})`,
+      );
+    }
+    if (cred.header.toLowerCase() === 'cookie' && !cred.description) {
+      warnings.push(
+        `credential "${name}" is a web session with no \`description\` — say who this user is and what makes it distinct: authoring chooses whom to observe and act as from it`,
       );
     }
     if (cred.header.toLowerCase() === 'authorization') {
@@ -653,7 +659,7 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
       lines.push(
         `- **web** — ${r.why}, and the recipe prepares a web surface (\`${(input.recipe.web?.serve ?? []).join(' ')}\`). Mint a principal that can SIGN IN to the web UI:`,
         `  1. create the user with a KNOWN password and publish the login fields as a FIXTURE (e.g. \`webUser\` with \`email\` + \`password\`) — web scenarios fill the login form with \`{{fixture:webUser.email}}\` / \`{{fixture:webUser.password}}\`;`,
-        `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as the credential \`${SEED_WEB_PRINCIPALS.owner}\` (\`header: "Cookie"\`);`,
+        `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as the credential \`${DEFAULT_WEB_PRINCIPAL}\` (\`header: "Cookie"\`), with a \`description\` as the Coverage section asks;`,
         `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page);`,
         `  4. when the login endpoint pairs a body token with a cookie (a CSRF double-submit — the login route compares \`body.csrfToken\` to a cookie a mint route set), add \`"csrf": {"path": "/<the csrf mint route>"}\` to the \`login\` block — the engine GETs it fresh before each login POST, carries its cookies, and injects the token into the body. NEVER publish a csrf token as a fixture: it is minted per exchange, and a static one can never validate.`,
         `  5. also create a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` (same login fields, its own stable email); credential-mutation tests burn it. It needs no credential and no probe, and a draft that omits it is refused without running.`,
@@ -667,20 +673,20 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
 /**
  * The briefing's coverage section: the rules that turn the domain into a
  * bounded world (one instance per rule, never the cross product), the
- * principals each gets, and what counts as unmet. `web` names the web sessions
- * the principals are published under when the web surface signs people in.
+ * principals the seed derives from it, and what counts as unmet. `web` says
+ * the principals sign in to the web surface, as web sessions.
  */
 export function coverageLines(web: boolean): string[] {
-  const { admin, member, empty } = SEED_WEB_PRINCIPALS;
   return [
     '',
     '## Coverage: the world the screens and tests explore',
     'Seed more than the minimum the principals need. The interface catalog is authored LIVE against this world right after the seed, and a screen shows only what the world holds. Build it from the domain: the SCHEMA below (its tables, enums, relations) and the schema files it names, BOUNDED: one instance per rule, never every combination.',
-    `- PRINCIPALS, from the schema's roles and ownership: the OWNER, who owns the seeded data (the web principal above); an ADMIN, when the app has an instance or superuser role (an admin flag or role, an instance-admin id); a MEMBER, who shares a record the owner owns (a collaborator, a member of a team or collection) without owning it; and an EMPTY user, who owns nothing, for empty states.` +
+    `- PRINCIPALS: decide which KINDS OF USER this product has, from the schema (role and permission columns, ownership and membership tables, subscription, verification and sign-in-method state) and from the auth guards in its source (read the middleware, the route guards and the page-level redirects that decide who may see or do what). Mint ONE principal per distinct kind that changes what a user can see or do, and no two of the same kind; a user who owns nothing is a kind when the app shows it something different (its empty states). The owner of the seeded data is the principal above, \`${DEFAULT_WEB_PRINCIPAL}\`.` +
       (web
-        ? ` Each signs in like the owner: its login fields as a fixture (\`adminUser\`, \`memberUser\`, \`emptyUser\`) and its web session as the credential \`${admin}\`, \`${member}\` or \`${empty}\` (\`header: "Cookie"\`), probed with its own \`login\` block (the admin's on a page only an admin may load).`
-        : ''),
-    '- RELATIONS at none, one and several where a list could look different: several (3 or more) of every entity a user lists, a many-to-many with at least 2 on one side (a record with 2 or more tags), a child under a parent where the model nests (a sub-collection), and a record the owner shares with the member. The empty user is the "none".',
+        ? ` Each other one signs in like it: its login fields as a fixture and its web session as a credential named for its kind (\`<kind>WebSession\`, \`header: "Cookie"\`), probed with its own \`login\` block on a page that kind may load.`
+        : '') +
+      ` EVERY principal's credential carries \`description\`: one line saying who this user is and what makes it distinct from the others (its role, what it owns or shares, its state), in the app's own terms — the interface authoring that follows chooses whom to observe each screen as, and whom each task runs as, from these descriptions alone.`,
+    '- RELATIONS at none, one and several where a list could look different: several (3 or more) of every entity a user lists, a many-to-many with at least 2 on one side (a record with 2 or more tags), a child under a parent where the model nests (a sub-collection), and a record one principal shares with another where the app shares records. A user who owns nothing is the "none".',
     '- Every ENUM or status value at least once, and every user-visible BOOLEAN flag both ways (a pinned and an unpinned record, an archived and an active one).',
     '- Every nullable user-visible field both filled and null, once each (a record with a description and one without, a user with a photo and one without).',
     '- Skip tables no user sees (audit logs, internal job queues, sessions beyond the principals\'): that is your call.',

@@ -1502,9 +1502,9 @@ export const InterfaceSchema = z
     to: InterfaceResourceIdSchema.optional(),
     /**
      * WHO performs a web task, when it is not the world's default signed-in
-     * principal: the NAME of a seeded credential (`adminWebSession`), or
-     * {@link ANONYMOUS_PRINCIPAL} for a task done signed out (a login form, a
-     * password reset). A scenario of the task starts from that session — a
+     * principal: the NAME of a seeded credential, chosen by the authoring
+     * session from its description, or {@link ANONYMOUS_PRINCIPAL} for a task
+     * done signed out (a login form, a password reset). A scenario of the task starts from that session — a
      * `credential` step naming it, or no credential at all. Absent ⇒ the default
      * principal. Never fingerprinted: who performs a task is not WHICH task it is.
      */
@@ -1682,8 +1682,9 @@ export const InterfaceAuthoringRecordSchema = z.preprocess(dropRetiredLedgerKeys
     sources: z.record(z.string().min(1), z.string().min(1)).optional(),
     /**
      * Who the live screen was observed as, when it was not the default
-     * principal: a seeded credential's name, or `anonymous`. Absent when the
-     * default reached it, or when nothing was observed.
+     * principal: a seeded credential's name, or `anonymous`. Written by an
+     * older authoring run, which chose one principal per screen; a session now
+     * chooses per task, so it is read and never written.
      */
     principal: z.string().min(1).optional(),
   })

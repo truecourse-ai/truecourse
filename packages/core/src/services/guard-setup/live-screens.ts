@@ -7,7 +7,8 @@
  * has nothing to serve), bring the services up, run the seed so the world
  * holds the rows and the principals the tests will reference, boot the web
  * surface, launch a browser and put a seeded credential into it — one browser
- * context per web session the seed minted, and one signed out. Every piece
+ * context per web session the seed minted, each described in the seed's own
+ * words, and one signed out. Every piece
  * is the runner's own (`runSeed`, `startWebSurface`, `launchWebBrowser`), and
  * so is the world they run in (`observationWorld`): the seed gets the provided
  * external accounts on top of the default server's env and masks their
@@ -40,7 +41,7 @@ import {
 } from '@truecourse/guard-runner';
 import { ANONYMOUS_PRINCIPAL } from '@truecourse/shared';
 import { publicFixtureFields, type LiveScreenObserver, type LiveScreens } from '../interface-author/live-screen.js';
-import { SEED_WEB_PRINCIPALS } from '../interface-author/principals.js';
+import { DEFAULT_WEB_PRINCIPAL } from '../interface-author/principals.js';
 import { outputTail, servicesController } from './services-lifecycle.js';
 
 export interface OpenLiveScreensOptions {
@@ -185,11 +186,13 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
     principals.set(ANONYMOUS_PRINCIPAL, anonymous.observer);
 
     const publicFixtures = publicFixtureFields(fixtures);
+    const descriptions = principalDescriptions(recipe);
     return {
       ok: true,
       live: {
         observer: principals.values().next().value ?? anonymous.observer,
         principals,
+        ...(descriptions.size > 0 ? { descriptions } : {}),
         ...(Object.keys(publicFixtures).length > 0 ? { fixtures: publicFixtures } : {}),
       },
       close: closeAll,
@@ -201,17 +204,24 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
 
 /**
  * The credentials a browser can sign in with, the default first: every Cookie
- * credential, the seed's owner session (`webSession`) first and its admin,
- * member and empty sessions after any other, else the first credential there is.
+ * credential, the owner of the seeded data (`webSession`) first and the others
+ * by name, else the first credential there is.
  */
 export function webPrincipals(
   credentials: ReadonlyMap<string, ResolvedCredential>,
 ): { name: string; credential: ResolvedCredential }[] {
   const usable = [...credentials].filter(([, credential]) => credential.value.length > 0);
   const cookies = usable.filter(([, credential]) => credential.header.toLowerCase() === 'cookie');
-  const secondary: string[] = [SEED_WEB_PRINCIPALS.admin, SEED_WEB_PRINCIPALS.member, SEED_WEB_PRINCIPALS.empty];
-  const rank = (name: string): number =>
-    name === SEED_WEB_PRINCIPALS.owner ? 0 : secondary.includes(name) ? 2 + secondary.indexOf(name) : 1;
-  return (cookies.length > 0 ? [...cookies].sort(([a], [b]) => rank(a) - rank(b)) : usable.slice(0, 1))
+  const rank = (name: string): number => (name === DEFAULT_WEB_PRINCIPAL ? 0 : 1);
+  return (cookies.length > 0 ? [...cookies].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b)) : usable.slice(0, 1))
     .map(([name, credential]) => ({ name, credential }));
+}
+
+/** What the seed says makes each principal it mints distinct: its credentials' descriptions, by name. */
+function principalDescriptions(recipe: Recipe): Map<string, string> {
+  return new Map(
+    Object.entries(recipe.api?.seed?.provides.credentials ?? {}).flatMap(([name, credential]) =>
+      credential.description ? [[name, credential.description] as const] : [],
+    ),
+  );
 }

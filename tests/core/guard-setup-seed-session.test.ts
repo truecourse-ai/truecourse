@@ -40,6 +40,7 @@ import {
   type GuardSetupOptions,
   type GuardSetupSeedSessionInput,
   type SeedDraftDatabase,
+  SeedProvidesProposalSchema,
 } from '@truecourse/guard-generator';
 import { FINGERPRINT_INPUTS } from '@truecourse/guard-runner';
 import {
@@ -1765,6 +1766,30 @@ describe('seedSessionBriefing — the domain and the coverage world', () => {
     expect(briefing).toContain('`{script, command, provides, probes, findings, unmet}`');
     // The model is no longer found by a walk of its own: nothing but the parsed schema is quoted.
     expect(briefing).not.toContain('## The domain: what the product can hold');
+  });
+
+  it('asks the seed to decide the kinds of user and describe each, naming no fixed set but the owner', () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const briefing = seedSessionBriefing(worldFor(r, { database: DOMAIN_DATABASE }));
+    expect(briefing).toMatch(/PRINCIPALS: decide which KINDS OF USER this product has/);
+    expect(briefing).toMatch(/auth guards in its source/);
+    expect(briefing).toMatch(/EVERY principal's credential carries `description`/);
+    expect(briefing).toContain('`webSession`');
+    for (const fixed of ['adminWebSession', 'memberWebSession', 'emptyWebSession']) expect(briefing).not.toContain(fixed);
+  });
+
+  it('accepts described principals, and warns about a web session with no description', () => {
+    const described = SeedProvidesProposalSchema.parse({
+      credentials: {
+        webSession: { header: 'Cookie', description: 'owns every seeded booking' },
+        auditorWebSession: { header: 'Cookie', description: 'read-only auditor: sees every booking, changes none' },
+      },
+    });
+    const input = { securitySchemes: [], roles: [], requiredResources: [] };
+    expect(providesWarnings(described, input).filter((line) => line.includes('description'))).toEqual([]);
+    const bare = SeedProvidesProposalSchema.parse({ credentials: { webSession: { header: 'Cookie' } } });
+    expect(providesWarnings(bare, input)).toContainEqual(expect.stringContaining('credential "webSession" is a web session with no `description`'));
   });
 
   it('names the remaining tables only once the schema is past its column budget', () => {
