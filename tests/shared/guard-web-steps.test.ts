@@ -65,6 +65,12 @@ describe('web step schema', () => {
     expect(isWebStep(navigate as GuardSandboxStep)).toBe(true)
   })
 
+  it('a key press and a hover are actions, never assert-only steps', () => {
+    const press = GuardWebStepSchema.parse({ driver: 'web', press: 'Escape', expect: { text: { contains: 'Closed' } } })
+    const hover = GuardWebStepSchema.parse({ driver: 'web', hover: { role: 'row', name: 'Invoice 7' } })
+    expect([isWebExpectStep(press), isWebExpectStep(hover)]).toEqual([false, false])
+  })
+
   it('`credential` names a world credential the browser starts as — the name, never a value', () => {
     const step = GuardWebStepSchema.parse({ driver: 'web', credential: 'webSession', milestone: 1 })
     expect(isWebCredentialStep(step)).toBe(true)

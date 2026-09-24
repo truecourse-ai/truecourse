@@ -1138,6 +1138,8 @@ export function isWebExpectStep(step: GuardWebStep): step is GuardWebExpectStep 
     !isWebFillStep(step) &&
     !isWebSelectStep(step) &&
     !isWebUploadStep(step) &&
+    !isWebPressStep(step) &&
+    !isWebHoverStep(step) &&
     !isWebHistoryStep(step) &&
     !isWebCredentialStep(step)
   )
