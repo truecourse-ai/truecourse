@@ -50,6 +50,9 @@ export type OpenPageResult =
  */
 export async function openPage(page: Page, url: string, baseUrl: string): Promise<OpenPageResult> {
   const target = new URL(url)
+  if (target.origin !== new URL(baseUrl).origin) {
+    return { ok: false, reason: `${url} is not on the served surface ${new URL(baseUrl).origin}` }
+  }
   let status: number | undefined
   let sentTo = ''
   for (let attempt = 0; attempt <= OPEN_PAGE_RETRIES; attempt++) {
@@ -70,11 +73,15 @@ export async function openPage(page: Page, url: string, baseUrl: string): Promis
 }
 
 /**
- * Did the browser end on the page `target` names? The path is compared (a
- * trailing slash aside), and the query too when the target has one.
+ * Did the browser end on the page `target` names? `target` is an address on the
+ * served surface, so the page has to be on that origin: a path matched on some
+ * other host (an identity provider, an external link) is not the address. The
+ * path is compared (a trailing slash aside), and the query too when the target
+ * has one.
  */
 export function samePage(ended: string, target: URL): boolean {
-  const at = new URL(ended)
+  const at = URL.parse(ended)
+  if (!at || at.origin !== target.origin) return false
   if (trimSlash(at.pathname) !== trimSlash(target.pathname)) return false
   return target.search === '' || at.search === target.search
 }
@@ -115,7 +122,7 @@ async function navigateThroughUi(page: Page, target: URL, start: string): Promis
   return false
 }
 
-/** Click the first visible link whose `href` resolves to `target`, and say whether the browser ended there. */
+/** Click the first visible link whose `href` resolves to `target` on its own origin, and say whether the browser ended there. */
 async function followLink(page: Page, target: URL): Promise<boolean> {
   const links = page.locator('a[href]')
   const count = await links.count().catch(() => 0)

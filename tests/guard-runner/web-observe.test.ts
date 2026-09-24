@@ -16,6 +16,7 @@ import {
   createWebObserver,
   launchWebBrowser,
   MAX_OBSERVATION_BYTES,
+  samePage,
   startWebSurface,
   type WebBrowserHandle,
   type WebScreenObserver,
@@ -350,4 +351,14 @@ describe('the screen observer with a header credential', () => {
     expect(seen.ok && seen.observation.tree).toContain('authorization: none')
     await created.observer.close()
   }, 30_000)
+})
+
+describe('the page a load or a link ended on', () => {
+  const target = new URL('http://127.0.0.1:4100/settings?tab=team')
+  it('is the address only on the served surface’s own origin', () => {
+    expect(samePage('http://127.0.0.1:4100/settings/?tab=team', target)).toBe(true)
+    expect(samePage('https://id.example.com/settings?tab=team', target)).toBe(false)
+    expect(samePage('http://127.0.0.1:4101/settings?tab=team', target)).toBe(false)
+    expect(samePage('http://127.0.0.1:4100/settings?tab=billing', target)).toBe(false)
+  })
 })
