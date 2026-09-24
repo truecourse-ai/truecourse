@@ -147,15 +147,28 @@ export function extractNextAppRoutes(tree: Tree, filePath: string): RouteRegistr
 //
 // A pages-router handler is ONE default export that answers every method at
 // its file's address; nothing in the export names a method. What does is the
-// body: `req.method === 'POST'`, `switch (req.method) { case 'GET': … }`,
-// `['GET', 'HEAD'].includes(req.method)`, or a next-connect router whose chain
-// `router.get(…).post(…)`) the file default-exports. Every such literal the
+// body: `req.method === 'POST'` in an `if`/`else if` chain, `switch
+// (req.method) { case 'GET': … }`, `['GET', 'HEAD'].includes(req.method)`, a
+// map of handlers keyed by method (`handlers[req.method]`, or an object of
+// method keys handed to a wrapper), or a next-connect router whose chain
+// (`router.get(…).post(…)`) the file default-exports. Every such method the
 // HANDLER reads — the default export and the same-file declarations it names,
 // never a helper it merely calls — is a method it distinguishes, and the union
 // is the operations it serves.
-// A handler that distinguishes none answers every method — `GET` is emitted
-// for it, since a GET does reach it, rather than a guessed set.
+// An OPTIONS or HEAD check alone establishes nothing: it is a preflight or a
+// body-less shortcut in front of the real dispatch. A handler that establishes
+// no other method answers every method, and so does one whose method check has
+// an `else` (or a `default`) that serves rather than refusing with a 405: those
+// are given the CONVENTIONAL set, the methods an App Router route file exports
+// as handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`; Next.js answers `HEAD`
+// and `OPTIONS` itself).
 // ---------------------------------------------------------------------------
+
+/** What a handler that dispatches on no method (or leaves some branch open) is taken to serve. */
+const CONVENTIONAL_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+
+/** Methods whose check alone never restricts what a handler serves. */
+const GUARD_METHODS = new Set(['OPTIONS', 'HEAD'])
 
 const PAGES_API_FILE = /\.(?:tsx|jsx|ts|js|mjs)$/
 
@@ -188,8 +201,13 @@ export function extractNextPagesApiRoutes(tree: Tree, filePath: string): RouteRe
   const paths = [...new Set([canonicalRoutePath(['api', ...parent].join('/')), canonicalRoutePath(['api', ...catchAll].join('/'))])]
 
   const scope = handlerScope(root, handler.node)
-  const methods = [...new Set([...scope.flatMap(comparedMethods), ...routerChainMethods(root, scope)])]
-  const served = methods.length > 0 ? methods : ['GET']
+  const methods = [
+    ...new Set([...scope.flatMap(comparedMethods), ...routerChainMethods(root, scope), ...handlerMapMethods(root, scope)]),
+  ]
+  const established = methods.some((method) => !GUARD_METHODS.has(method))
+  const served = established
+    ? [...new Set([...methods, ...(scope.some(hasOpenBranch) ? CONVENTIONAL_METHODS : [])])]
+    : CONVENTIONAL_METHODS
   return served.flatMap((method) => paths.map((routePath) => ({
     httpMethod: method as RouteRegistration['httpMethod'],
     path: routePath,
@@ -270,31 +288,46 @@ const FUNCTION_NODES = new Set([
   'method_definition',
 ])
 
+/**
+ * The expression under the wrappers that leave its value the method's:
+ * `(req.method)`, `req.method ?? ''`, `req.method as string`,
+ * `req.method!.toUpperCase()`.
+ */
+function unwrapMethodRead(node: SyntaxNode | null): SyntaxNode | null {
+  let current = node
+  while (current) {
+    if (['parenthesized_expression', 'as_expression', 'satisfies_expression', 'non_null_expression'].includes(current.type)) {
+      current = current.namedChild(0)
+    } else if (current.type === 'binary_expression' && ['??', '||'].includes(current.childForFieldName('operator')?.text ?? '')) {
+      current = current.childForFieldName('left')
+    } else if (
+      current.type === 'call_expression' &&
+      current.childForFieldName('function')?.type === 'member_expression' &&
+      ['toUpperCase', 'toLowerCase'].includes(current.childForFieldName('function')?.childForFieldName('property')?.text ?? '')
+    ) {
+      current = current.childForFieldName('function')!.childForFieldName('object')
+    } else {
+      return current
+    }
+  }
+  return null
+}
+
+/** Does this expression read a request's `.method`? */
+function isMethodMember(node: SyntaxNode | null): boolean {
+  const member = unwrapMethodRead(node)
+  return member?.type === 'member_expression' && member.childForFieldName('property')?.text === 'method'
+}
+
+/** The HTTP method a string literal names, upper-cased, or null. */
+function literalMethod(node: SyntaxNode | null): string | null {
+  const text = node ? stringLiteral(node) : null
+  return text && METHODS.has(text.toUpperCase()) ? text.toUpperCase() : null
+}
+
 /** Every HTTP method literal `root` compares a `.method` member against. */
 function comparedMethods(root: SyntaxNode): string[] {
   const out: string[] = []
-  // `(req.method)`, `req.method ?? ''`, `req.method as string` all read the member.
-  const unwrap = (node: SyntaxNode | null): SyntaxNode | null => {
-    let current = node
-    while (current) {
-      if (['parenthesized_expression', 'as_expression', 'satisfies_expression', 'non_null_expression'].includes(current.type)) {
-        current = current.namedChild(0)
-      } else if (current.type === 'binary_expression' && ['??', '||'].includes(current.childForFieldName('operator')?.text ?? '')) {
-        current = current.childForFieldName('left')
-      } else {
-        return current
-      }
-    }
-    return null
-  }
-  const isMethodMember = (node: SyntaxNode | null): boolean => {
-    const member = unwrap(node)
-    return member?.type === 'member_expression' && member.childForFieldName('property')?.text === 'method'
-  }
-  const literalMethod = (node: SyntaxNode | null): string | null => {
-    const text = node ? stringLiteral(node) : null
-    return text && METHODS.has(text.toUpperCase()) ? text.toUpperCase() : null
-  }
   const walk = (node: SyntaxNode): void => {
     if (node.type === 'binary_expression') {
       const left = node.childForFieldName('left')
@@ -389,4 +422,70 @@ function routerChainMethods(root: SyntaxNode, scope: readonly SyntaxNode[]): str
   }
   walk(root)
   return out
+}
+
+/**
+ * The methods a map of handlers keyed by method serves: an object literal
+ * indexed by the request's method (`handlers[req.method]`, the object inline
+ * or bound in this file), or an object whose every key is an upper-case method
+ * (`withMethods({ GET: list, POST: create })`) anywhere in the handler.
+ */
+function handlerMapMethods(root: SyntaxNode, scope: readonly SyntaxNode[]): string[] {
+  const objects = new Map<string, SyntaxNode>()
+  for (const statement of root.namedChildren) {
+    const declaration = statement?.type === 'export_statement' ? statement.childForFieldName('declaration') : statement
+    if (declaration?.type !== 'lexical_declaration' && declaration?.type !== 'variable_declaration') continue
+    for (const declarator of declaration.namedChildren) {
+      const name = declarator?.childForFieldName('name')
+      const value = unwrapMethodRead(declarator?.childForFieldName('value') ?? null)
+      if (name?.type === 'identifier' && value?.type === 'object') objects.set(name.text, value)
+    }
+  }
+  const keyMethods = (object: SyntaxNode, anyCase: boolean): string[] =>
+    object.namedChildren.flatMap((pair) => {
+      if (pair?.type !== 'pair' && pair?.type !== 'method_definition') return []
+      const key = pair.childForFieldName(pair.type === 'pair' ? 'key' : 'name')
+      const text = key ? (stringLiteral(key) ?? key.text) : ''
+      return METHODS.has(text.toUpperCase()) && (anyCase || text === text.toUpperCase()) ? [text.toUpperCase()] : []
+    })
+  const out: string[] = []
+  const walk = (node: SyntaxNode): void => {
+    if (node.type === 'subscript_expression' && isMethodMember(node.childForFieldName('index'))) {
+      const object = unwrapMethodRead(node.childForFieldName('object'))
+      const map = object?.type === 'identifier' ? objects.get(object.text) : object?.type === 'object' ? object : undefined
+      if (map) out.push(...keyMethods(map, true))
+    }
+    if (node.type === 'object') {
+      const methods = keyMethods(node, false)
+      if (methods.length > 0 && methods.length === node.namedChildren.filter((child) => child?.type !== 'comment').length) {
+        out.push(...methods)
+      }
+    }
+    for (const child of node.namedChildren) if (child) walk(child)
+  }
+  for (const node of scope) walk(node)
+  return out
+}
+
+/**
+ * Does a method dispatch leave a branch that SERVES every other method? An
+ * `else` after a method check that is not itself another check, or a
+ * `default:` of a `switch (req.method)`, that does not refuse with a 405.
+ */
+function hasOpenBranch(root: SyntaxNode): boolean {
+  const refuses = (node: SyntaxNode): boolean => /\b405\b|not allowed/i.test(node.text)
+  const checksMethod = (node: SyntaxNode | null): boolean => !!node && comparedMethods(node).length > 0
+  const walk = (node: SyntaxNode): boolean => {
+    if (node.type === 'if_statement' && checksMethod(node.childForFieldName('condition'))) {
+      const alternative = node.childForFieldName('alternative')
+      const branch = alternative?.namedChildren.find((child) => child !== null) ?? null
+      if (branch && branch.type !== 'if_statement' && !refuses(branch)) return true
+    }
+    if (node.type === 'switch_statement' && isMethodMember(node.childForFieldName('value'))) {
+      const fallback = node.childForFieldName('body')?.namedChildren.find((clause) => clause?.type === 'switch_default')
+      if (fallback && !refuses(fallback)) return true
+    }
+    return node.namedChildren.some((child) => child !== null && walk(child))
+  }
+  return walk(root)
 }
