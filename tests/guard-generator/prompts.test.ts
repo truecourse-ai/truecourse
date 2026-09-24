@@ -1293,7 +1293,7 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('NO XPath, NO test ids, and NO CSS selector of your own')
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"pick"')
     // A plan target that is already a JSON locator (css, pick, any handle) is copied verbatim.
-    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('`{ "driver": "web", "click": { "css": "main button:has(i.bi-sort)" } }`')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('`{ "driver": "web", "click": { "css": "button[data-testid=\"sort\"]" } }`')
     // The translation rule — realization lines become locators, one worked example.
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('click: button "Add Repository"')
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"click": { "role": "button", "name": "Add Repository" }')
@@ -1338,7 +1338,8 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // Verified preparation profiles also change the browser authoring schema.
     // The non-canonical `css` member and the positional `pick` change it again.
     // A task's `principal` (a credential to sign in with, or none) moves it once more.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('f3756f61dcc654a8')
+    // A library-neutral `css` example replaced an icon-font one.
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('2471b7adcefe1f9e')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {

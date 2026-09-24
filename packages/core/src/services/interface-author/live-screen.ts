@@ -181,7 +181,7 @@ export function renderObservation(observation: ScreenObservation): string {
   return lines.join('\n')
 }
 
-/** `button · data-action="sort" · icon i.bi-sort · in main · css `main button:has(i.bi-sort)` (2 matches, this is #1)` */
+/** `button · data-action="sort" · icon svg.icon-sort · in main · css `main button:has(svg.icon-sort)` (2 matches, this is #1)` */
 function describeUnnamedControl(control: UnnamedControl): string {
   const matches = control.matches === 1
     ? '1 match'

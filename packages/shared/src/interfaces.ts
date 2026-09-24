@@ -133,7 +133,7 @@ export const InterfaceTargetSchema = z.preprocess(
 export type InterfaceTarget = GuardWebScope
 
 /** A target in the words a person reads it in — `button "Add expense"`, `title "More"`,
- *  `css "main button:has(i.bi-sort)"`. The one rendering, shared by the prompts, the
+ *  `css "main button:has(svg[data-icon=\"sort\"])"`. The one rendering, shared by the prompts, the
  *  catalog views and the error messages. */
 export function describeInterfaceTarget(target: InterfaceTarget): string {
   const { kind, value } = webLocatorHandle(target)

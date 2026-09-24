@@ -122,6 +122,36 @@ describe('the screen observer', () => {
     expect(next.ok && next.observation.tree).toContain('cookie: session=abc')
   }, 30_000)
 
+  it('reaches a page that sent the first load away by loading it again', async () => {
+    const result = await observer.observe({ path: '/flaky' })
+    expect(result.ok && result.observation).toMatchObject({ address: '/flaky', reachedBy: 'retry' })
+    expect(result.ok && result.observation.tree).toContain('heading "Flaky"')
+  }, 60_000)
+
+  it('reaches a page no direct load stays on through a link in a menu of the start page', async () => {
+    const result = await observer.observe({ path: '/guarded' })
+    expect(result.ok && result.observation).toMatchObject({ address: '/guarded', reachedBy: 'navigation' })
+    expect(result.ok && result.observation.tree).toContain('heading "Guarded"')
+    // The live proof opens its page the same way.
+    expect(await observer.probe({ path: '/guarded', steps: [{ resolve: { role: 'heading', name: 'Guarded' } }] }))
+      .toEqual({ ok: true, readings: [{ matches: 1, visible: true }] })
+  }, 60_000)
+
+  it('says an address no load and no link reaches is unreached, and activates nothing there', async () => {
+    const result = await observer.observe({ path: '/nowhere', activate: [{ role: 'button', name: 'Reveal' }] })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.observation.reachedBy).toBeUndefined()
+    expect(result.observation.activated).toEqual([])
+    expect(result.observation.problems).toContain(
+      "/nowhere could not be reached: every load was sent to /, and no link in the app's UI leads to it",
+    )
+    expect(await observer.probe({ path: '/nowhere', steps: [{ resolve: { role: 'button', name: 'Reveal' } }] })).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/\/nowhere could not be reached/),
+    })
+  }, 60_000)
+
   it('reports a status the address answered with, rather than hiding a broken screen', async () => {
     const result = await observer.observe({ path: '/no-such-screen' })
     expect(result.ok).toBe(true)

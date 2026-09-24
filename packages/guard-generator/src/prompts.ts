@@ -703,8 +703,8 @@ closed to the handles a USER perceives:
   \`blockedOn\`.
 The realization plan writes a target either as a JSON locator — copy it verbatim as
 the step's locator, \`css\`, \`within\` and \`pick\` included, so
-\`click: {"css":"main button:has(i.bi-sort)"}\` becomes
-\`{ "driver": "web", "click": { "css": "main button:has(i.bi-sort)" } }\` — or as
+\`click: {"css":"button[data-testid=\"sort\"]"}\` becomes
+\`{ "driver": "web", "click": { "css": "button[data-testid=\"sort\"]" } }\` — or as
 \`<role> "<name>"\`. Translate those directly:
 \`click: button "Add Repository"\` becomes
 \`{ "driver": "web", "click": { "role": "button", "name": "Add Repository" } }\`, and

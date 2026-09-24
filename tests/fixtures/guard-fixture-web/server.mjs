@@ -14,6 +14,7 @@
  *   GET /health   → 200 text/plain "ok" (the readiness probe)
  *   GET /         → heading "Guard Web Fixture"
  *                   link "Notes" → /notes
+ *                   button "Menu" → reveals the menu item link "Guarded" → /guarded
  *                   button "Reveal" → replaces the status paragraph's text with
  *                                     "the secret is out" (no navigation)
  *                   textbox "Title" + button "Save" → /notes?title=<value>
@@ -93,6 +94,11 @@
  *                   anything else in the app's own words, and a button that opens
  *                   no chooser at all. Every picked file is reported back with the
  *                   name, the size, the type and its first bytes.
+ *   GET /flaky    → redirects to / on its FIRST load only, then serves heading
+ *                   "Flaky" — a guard that loses a race on a fresh load.
+ *   GET /guarded  → a page whose script sends a DIRECT load back to /; only a
+ *                   visit through the link in /'s menu stays (heading "Guarded").
+ *   GET /nowhere  → always redirects to /, and nothing links to it.
  *
  * The JSON surface — the SAME state the pages render, read as structured data, which
  * is what a `request` step is for: drive the UI, then ask the app what actually
@@ -147,6 +153,11 @@ const HOME = page(
 <p id="status">nothing revealed yet</p>
 <button type="button" onclick="document.getElementById('status').textContent = 'the secret is out'">Reveal</button>
 <p><a href="/notes">Notes</a></p>
+<button type="button" aria-haspopup="menu" aria-expanded="false"
+  onclick="document.getElementById('menu').hidden = false; this.setAttribute('aria-expanded', 'true')">Menu</button>
+<div id="menu" role="menu" hidden>
+  <a role="menuitem" href="/guarded" onclick="sessionStorage.setItem('via-link', '1')">Guarded</a>
+</div>
 <form onsubmit="event.preventDefault(); location.href = '/notes?title=' + encodeURIComponent(document.getElementById('title').value)">
   <label for="title">Title</label>
   <input id="title" name="title" type="text">
@@ -455,6 +466,15 @@ function whoamiPage(req) {
   )
 }
 
+// A direct load of /guarded is sent back to /; a visit through the hub's menu link is not.
+const GUARDED = page(
+  'Guarded',
+  `<h1>Guarded</h1>
+<script>if (!sessionStorage.getItem('via-link')) location.replace('/')</script>`,
+)
+
+let flakyLoads = 0
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
   if (url.pathname === '/health') {
@@ -473,8 +493,17 @@ const server = http.createServer(async (req, res) => {
     res.end(page('Signed out', '<h1>Signed out</h1>'))
     return
   }
+  if (url.pathname === '/nowhere' || (url.pathname === '/flaky' && flakyLoads++ === 0)) {
+    res.writeHead(302, { location: '/' })
+    res.end()
+    return
+  }
   const html =
-    url.pathname === '/'
+    url.pathname === '/flaky'
+      ? page('Flaky', '<h1>Flaky</h1>')
+      : url.pathname === '/guarded'
+        ? GUARDED
+        : url.pathname === '/'
       ? HOME
       : url.pathname === '/notes'
         ? notesPage(url)

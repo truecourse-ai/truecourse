@@ -43,7 +43,7 @@ export interface UnnamedControl {
   /** `title`, `role`, `aria-*`, `data-*` and `href`, as the element carries them, each
    *  value cut at {@link MAX_ATTRIBUTE_CHARS} characters. */
   attributes: Record<string, string>
-  /** The icon the control draws, as `<tag>.<class>` — `i.bi-chevron-expand`. */
+  /** The icon the control draws, as `<tag>.<class>` — `svg.icon-chevron`, `span.material-icons`. */
   icon?: string
   /** The private-use code points its name consists of, when it has any — `U+E0A1`. */
   glyph?: string

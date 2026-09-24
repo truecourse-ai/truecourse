@@ -348,6 +348,7 @@ export {
 } from './web/observe.js'
 export { MAX_UNNAMED_CONTROLS, type UnnamedContainer, type UnnamedControl } from './web/unnamed-controls.js'
 export { addressFillsTemplate, hasAddressSlot } from './web/address.js'
+export { openPage, samePage, OPEN_PAGE_RETRIES, type OpenPageResult, type PageReachedBy } from './web/open-page.js'
 export type {
   CreateWebObserverOptions,
   LocatorProbeRequest,

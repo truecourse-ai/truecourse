@@ -43,14 +43,14 @@ import { parseCookieHeader, type WorldCredential } from './credential.js'
 import { webLocator, webLocatorMatches, pageAddress } from './executor.js'
 import { WEB_CONTEXT_OPTIONS, type WebBrowserHandle } from './browser.js'
 import { readUnnamedElements, type UnnamedContainer, type UnnamedControl } from './unnamed-controls.js'
+import { openPage, settlePage, type PageReachedBy } from './open-page.js'
 
 /** How much of one accessibility tree an observation carries. A tree is
  *  context, and context is the budget; a screen past this is cut at a line
  *  and the cut is counted. */
 export const MAX_OBSERVATION_BYTES = 24_000
 
-/** How long one navigation, one activation and one settle may each take. */
-export const OBSERVE_NAVIGATION_TIMEOUT_MS = 30_000
+/** How long one activation and one read of the tree may each take. */
 export const OBSERVE_ACTIVATE_TIMEOUT_MS = 5_000
 export const OBSERVE_SETTLE_TIMEOUT_MS = 3_000
 
@@ -66,6 +66,8 @@ export interface ScreenObservation {
   path: string
   /** Where the page ended up — the same address unless something redirected or navigated. */
   address: string
+  /** How the address was reached ({@link openPage}); absent when no load and no link in the UI reached it. */
+  reachedBy?: PageReachedBy
   title: string
   /** The accessibility tree, one node per line, as far as the byte budget allows. */
   tree: string
@@ -229,6 +231,7 @@ export async function observeScreen(
     observation: {
       path: request.path,
       address: pageAddress(page),
+      ...(opened.reachedBy ? { reachedBy: opened.reachedBy } : {}),
       title: await page.title().catch(() => ''),
       tree: bounded.tree,
       omittedLines: bounded.omittedLines,
@@ -253,6 +256,7 @@ export async function probeLocator(
 ): Promise<LocatorProbeResult> {
   const opened = await openAndActivate(page, baseUrl, { path: request.path })
   if (!opened.ok) return opened
+  if (!opened.reachedBy) return { ok: false, reason: opened.problems[opened.problems.length - 1] ?? `${request.path} could not be reached` }
   const readings: LocatorReading[] = []
   for (const step of request.steps) {
     const failed = await probeStep(page, baseUrl, step, readings)
@@ -271,13 +275,9 @@ async function probeStep(
   if ('navigate' in step) {
     const url = surfaceUrl(step.navigate, baseUrl)
     if (!url.ok) return url.reason
-    try {
-      await page.goto(url.url, { waitUntil: 'load', timeout: OBSERVE_NAVIGATION_TIMEOUT_MS })
-    } catch (e) {
-      return `opening ${step.navigate} failed: ${firstLine(e)}`
-    }
-    await settle(page)
-    return undefined
+    const opened = await openPage(page, url.url, baseUrl)
+    if (!opened.ok) return opened.reason
+    return opened.reached ? undefined : unreachedLine(step.navigate, opened.sentTo)
   }
   if ('resolve' in step) {
     const { resolve: locator } = step
@@ -304,7 +304,7 @@ async function probeStep(
   } catch (e) {
     return `${verb} ${describeLocator(target)} on ${pageAddress(page)} failed: ${firstLine(e)}`
   }
-  await settle(page)
+  await settlePage(page)
   return undefined
 }
 
@@ -313,7 +313,9 @@ async function openAndActivate(
   page: Page,
   baseUrl: string,
   request: ScreenObservationRequest,
-): Promise<{ ok: true; activated: string[]; problems: string[] } | { ok: false; reason: string }> {
+): Promise<
+  { ok: true; activated: string[]; problems: string[]; reachedBy?: PageReachedBy } | { ok: false; reason: string }
+> {
   if (!request.path.startsWith('/')) {
     return { ok: false, reason: `the path must start with "/" (got ${JSON.stringify(request.path)})` }
   }
@@ -331,15 +333,15 @@ async function openAndActivate(
 
   const resolved = surfaceUrl(request.path, baseUrl)
   if (!resolved.ok) return resolved
-  try {
-    const response = await page.goto(resolved.url, { waitUntil: 'load', timeout: OBSERVE_NAVIGATION_TIMEOUT_MS })
-    if (response && response.status() >= 400) problems.push(`the address answered HTTP ${response.status()}`)
-  } catch (e) {
-    return { ok: false, reason: `opening ${request.path} failed: ${firstLine(e)}` }
-  }
-  await settle(page)
-
+  const opened = await openPage(page, resolved.url, baseUrl)
+  if (!opened.ok) return opened
+  if (opened.status !== undefined && opened.status >= 400) problems.push(`the address answered HTTP ${opened.status}`)
   const activated: string[] = []
+  if (!opened.reached) {
+    // Activating controls on a page the browser was sent to would act on another screen.
+    problems.push(unreachedLine(request.path, opened.sentTo))
+    return { ok: true, activated, problems }
+  }
   for (const target of request.activate ?? []) {
     const locator = webLocator(page, target)
     const label = describeLocator(target)
@@ -352,10 +354,15 @@ async function openAndActivate(
           (activated.length > 0 ? ` (after: ${activated.join('; ')})` : ''),
       }
     }
-    await settle(page)
+    await settlePage(page)
     activated.push(`${label} → now at ${pageAddress(page)}`)
   }
-  return { ok: true, activated, problems }
+  return { ok: true, activated, problems, reachedBy: opened.by }
+}
+
+/** The line an address no load and no link reached is reported with. */
+function unreachedLine(path: string, sentTo: string): string {
+  return `${path} could not be reached: every load was sent to ${sentTo}, and no link in the app's UI leads to it`
 }
 
 /**
@@ -369,11 +376,6 @@ function surfaceUrl(path: string, baseUrl: string): { ok: true; url: string } | 
     return { ok: false, reason: `the path ${JSON.stringify(path)} leaves the served surface (${resolved.origin})` }
   }
   return { ok: true, url: resolved.toString() }
-}
-
-/** Wait for the network to go quiet, briefly — a screen that never does is still a screen. */
-async function settle(page: Page): Promise<void> {
-  await page.waitForLoadState('networkidle', { timeout: OBSERVE_SETTLE_TIMEOUT_MS }).catch(() => undefined)
 }
 
 /** The tree (or any list of lines) cut at a line boundary inside a byte budget, with the rest counted. */
