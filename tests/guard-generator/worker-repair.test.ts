@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { GuardObligation, GuardRemainingObligation } from '@truecourse/shared'
-import { obligationKey, reconcileRemaining, type RepairIssue } from '../../packages/guard-generator/src/worker-repair'
+import { obligationKey, outcomeCorrection, reconcileRemaining, type RepairIssue } from '../../packages/guard-generator/src/worker-repair'
 
 const outstanding: GuardObligation[] = [
   { milestone: 1, caseId: 'cancel', claim: 'A valid draft is not saved when Cancel closes the dialog.' },
   { milestone: 1, caseId: 'total', claim: 'The controlled ledger total is exact.' },
 ]
-const issue = (reasonKind: RepairIssue['reasonKind'], issueId: string): RepairIssue => ({ reasonKind, issueId, evidence: 'Current engine observation.' })
+// As the engine records it: a fidelity flag marks the case, and the mark
+// survives a later issue from another source.
+const issue = (reasonKind: RepairIssue['reasonKind'], issueId: string, source?: RepairIssue['source'],
+  fidelityFlagged = source === 'fidelity'): RepairIssue =>
+  ({ reasonKind, issueId, evidence: 'Current engine observation.', ...(source ? { source } : {}), ...(fidelityFlagged ? { fidelityFlagged } : {}) })
 const row = (caseId: string, reasonKind: GuardRemainingObligation['reasonKind'], issueId?: string): GuardRemainingObligation => ({
   milestone: 1, caseId, reasonKind, evidence: 'Worker explanation.', ...(issueId ? { issueId } : {}),
 })
@@ -36,19 +40,6 @@ describe('current remaining obligation reconciliation', () => {
     ])
   })
 
-  it('keeps no-progress identity stable when the worker rephrases or omits dispositions', () => {
-    const issues = new Map([['1:cancel', issue('assertion', 'cancel-2')]])
-    const supplied = [row('cancel', 'assertion', 'cancel-2'), row('total', 'not-attempted')]
-    const first = reconcileRemaining(outstanding, issues, supplied)
-    const second = reconcileRemaining(outstanding, issues, supplied.map(r => ({ ...r, evidence: 'A completely rewritten explanation.' })))
-    expect(second.identity).toBe(first.identity)
-    expect(reconcileRemaining(outstanding, issues, undefined).identity).toBe(first.identity)
-    expect(reconcileRemaining(outstanding, new Map([['1:cancel', { ...issue('assertion', 'cancel-2'), evidence: 'Re-rendered engine feedback.' }]]), supplied).identity).toBe(first.identity)
-    // Only new engine evidence or accepted coverage earns a new correction state.
-    expect(reconcileRemaining(outstanding, new Map([['1:cancel', issue('assertion', 'cancel-3')]]), supplied).identity).not.toBe(first.identity)
-    expect(reconcileRemaining(outstanding.slice(1), issues, supplied.slice(1)).identity).not.toBe(first.identity)
-  })
-
   it('separates repairable assertions, annotations and untouched work from established external blockers', () => {
     const kinds: RepairIssue['reasonKind'][] = ['assertion', 'annotation', 'preparation', 'unsupported-capability', 'review-unavailable', 'not-attempted']
     const obligations = kinds.map((kind, index) => ({ milestone: index + 1, caseId: kind, claim: kind }))
@@ -63,5 +54,63 @@ describe('current remaining obligation reconciliation', () => {
     const result = reconcileRemaining(obligations, new Map([['1:same', issue('annotation', 'first')]]), [row('same', 'annotation', 'first')])
     expect(result.problems).toEqual(['2:same needs exactly one current remaining disposition.'])
     expect(result.current).toMatchObject([{ milestone: 1, issueId: 'first' }, { milestone: 2, reasonKind: 'not-attempted' }])
+  })
+
+  it('accepts an unsupported capability only as a blocked answer to an assertion on a fidelity-flagged case', () => {
+    const one = outstanding.slice(0, 1)
+    const flagged = new Map([['1:cancel', issue('assertion', 'cancel-2', 'fidelity')]])
+    const answer = [row('cancel', 'unsupported-capability', 'cancel-2')]
+    const result = reconcileRemaining(one, flagged, answer, 'blocked')
+    expect(result.problems).toEqual([])
+    expect(result.current).toEqual([{ milestone: 1, caseId: 'cancel', reasonKind: 'unsupported-capability', evidence: 'Worker explanation.', issueId: 'cancel-2' }])
+    // Still asked for one repair: the engine's own finding is an assertion.
+    expect(result.repairable).toHaveLength(1)
+    const refused = '1:cancel must reference current assertion issue cancel-2.'
+    expect(reconcileRemaining(one, flagged, [row('cancel', 'unsupported-capability', 'cancel-1')], 'blocked').problems).toEqual([refused])
+    // A retirement keeps the engine's classification, so the fidelity finding is reported.
+    expect(reconcileRemaining(one, flagged, answer, 'retired').problems).toEqual([refused])
+    expect(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-2', 'execution')]]), answer, 'blocked').problems).toEqual([refused])
+    expect(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-2', 'review')]]), answer, 'blocked').problems).toEqual([refused])
+    // A failing repair run replaces the flag's issue, but the case stays flagged.
+    expect(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-2', 'execution', true)]]), answer, 'blocked').problems).toEqual([])
+    expect(reconcileRemaining(one, new Map([['1:cancel', issue('review-unavailable', 'cancel-2', 'review')]]), answer, 'blocked').problems)
+      .toEqual(['1:cancel must reference current review-unavailable issue cancel-2.'])
+  })
+})
+
+describe('blocked or retired outcome correction', () => {
+  const one = outstanding.slice(0, 1)
+
+  it('asks for a repair once per case, even when each failing attempt records a new issue', () => {
+    const asked = new Set<string>()
+    const first = outcomeCorrection(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-1')]]), [row('cancel', 'assertion', 'cancel-1')]), asked)
+    expect(first).toContain('Cases to repair: 1:cancel.')
+    // The repair attempt failed and recorded cancel-2; the worker still quotes cancel-1.
+    const issues = new Map([['1:cancel', issue('assertion', 'cancel-2')]])
+    const stale = outcomeCorrection(reconcileRemaining(one, issues, [row('cancel', 'assertion', 'cancel-1')]), asked)
+    expect(stale).toContain('1:cancel must reference current assertion issue cancel-2.')
+    expect(stale).not.toContain('Cases to repair')
+    expect(outcomeCorrection(reconcileRemaining(one, issues, [row('cancel', 'assertion', 'cancel-2')]), asked)).toBeUndefined()
+  })
+
+  it('lets a worker that declines the repair end on its next valid outcome', () => {
+    const asked = new Set<string>()
+    const issues = new Map([['1:cancel', issue('assertion', 'cancel-1', 'fidelity')]])
+    const answer = [row('cancel', 'unsupported-capability', 'cancel-1')]
+    expect(outcomeCorrection(reconcileRemaining(one, issues, answer, 'blocked'), asked)).toContain('Cases to repair: 1:cancel.')
+    expect(outcomeCorrection(reconcileRemaining(one, issues, answer, 'blocked'), asked)).toBeUndefined()
+  })
+
+  it('asks for no repair once the session is wrapping up', () => {
+    const asked = new Set<string>()
+    const issues = new Map([['1:cancel', issue('assertion', 'cancel-1')]])
+    expect(outcomeCorrection(reconcileRemaining(one, issues, [row('cancel', 'assertion', 'cancel-1')]), asked, true)).toBeUndefined()
+    expect(outcomeCorrection(reconcileRemaining(one, issues, [row('cancel', 'assertion', 'cancel-0')]), asked, true))
+      .toContain('1:cancel must reference current assertion issue cancel-1.')
+  })
+
+  it('never asks to repair an established external blocker', () => {
+    const issues = new Map([['1:cancel', issue('preparation', 'cancel-1')]])
+    expect(outcomeCorrection(reconcileRemaining(one, issues, [row('cancel', 'preparation', 'cancel-1')]), new Set())).toBeUndefined()
   })
 })

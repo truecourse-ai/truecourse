@@ -268,9 +268,12 @@ describe('generation cannot finish by shrinking selected coverage', () => {
         const refusal = await task.submitScenario(yamlFor([0,1]), [], async () => ({ kind: 'flagged', confidence: 'low', mismatch: 'Required baseline is not established.' }))
         expect(refusal.isError).toBe(true)
         const stale = { kind: 'retired' as const, attempts: 2, lastEvidence: 'Old explanation.' }
-        expect(task.validateOutcome(stale)).toContain('Required baseline')
+        expect(task.validateOutcome(stale)).toContain('Cases to repair: 1:case-0, 1:case-1.')
         await task.submitScenario(yamlFor([0,1]), [], async () => ({ kind: 'flagged', confidence: 'low', mismatch: 'Required baseline is not established.' }))
-        expect(task.validateOutcome(stale)).toContain('repair submission')
+        // Asked once: the refusal now names only the missing remaining rows.
+        const second = task.validateOutcome(stale)
+        expect(second).toContain('needs exactly one current remaining disposition')
+        expect(second).not.toContain('Cases to repair')
         const partial = await task.submitScenario(yamlFor([1]), [], judge)
         expect(acceptedSha(partial)).toBeNull()
         const repaired = yamlFor([0,1]).replace('contains: case-0', 'matches: case-0')
@@ -279,6 +282,31 @@ describe('generation cannot finish by shrinking selected coverage', () => {
         return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }
       }) })
     expect(readManifest(repoRoot)!.flows[0].scenarios).toHaveLength(1)
+  })
+
+  it('ends blocked when the worker answers a review finding with a capability the runner lacks', async () => {
+    const repoRoot = seed()
+    const single = extractSessionBy({ version: [{ claim: cases[0].claim, verification: { ...verification, cases: [cases[0]] } }] })
+    await runGenerate({ repoRoot, extractSession: single, flowsAreaSession: flowOfAllSession('Unobservable claim'),
+      flowWorkerSession: flowWorkerSessionOf(async task => {
+        const mismatch = 'Rendered output does not prove the value is absent from every response.'
+        await task.submitScenario(yamlFor([0]), [], async () => ({ kind: 'flagged', confidence: 'medium', mismatch }))
+        const remainingOf = (correction: string) => JSON.parse(correction.split('CURRENT REMAINING: ')[1]) as { issueId: string }[]
+        const blocked = (issueId?: string) => ({ kind: 'blocked' as const, perMilestone: [{ order: 1, capability: 'response interception' }],
+          remaining: [{ milestone: 1, caseId: 'case-0', reasonKind: 'unsupported-capability' as const, evidence: 'The runner cannot read responses.', ...(issueId ? { issueId } : {}) }] })
+        const first = task.validateOutcome(blocked())!
+        expect(first).toContain('1:case-0')
+        const { issueId } = remainingOf(first)[0]
+        // Retiring keeps the engine's classification; the fidelity finding must stay reported.
+        expect(task.validateOutcome({ ...blocked(issueId), kind: 'retired', attempts: 1, lastEvidence: 'Unobservable.' }))
+          .toContain(`must reference current assertion issue ${issueId}`)
+        // The worker declines to resubmit; its next valid blocked answer stands.
+        expect(task.validateOutcome(blocked(issueId))).toBeUndefined()
+        return { kind: 'outcome', outcome: blocked(issueId) }
+      }) })
+    const entry = readManifest(repoRoot)!.flows[0]
+    expect(entry.gaps[0]).toMatchObject({ blocker: { kind: 'unsupported-capability' } })
+    expect(entry.gaps[0].reason).toContain('The runner cannot read responses.')
   })
 
   it('repairs invalid review annotations without producing a semantic fidelity finding', async () => {
