@@ -997,8 +997,9 @@ export interface FlowWorkerTask {
   /** Whether an accepted submission with this sha is in the engine stash — the
    *  reject gate for a `settled` outcome referencing nothing. */
   hasStash(sha: string): boolean
-  /** Live completion validation, shared by the session, fold and cache gates. */
-  validateOutcome(outcome: GuardFlowWorkerOutcome): string | undefined
+  /** Live completion validation, shared by the session, fold and cache gates.
+   *  `wrappingUp` (the session's budget is spent) withholds repair requests. */
+  validateOutcome(outcome: GuardFlowWorkerOutcome, context?: { wrappingUp: boolean }): string | undefined
   stashedReview(sha: string): FlowWorkerReview | undefined
   /** The stashed accepted yaml for the sha — what core writes into the cache
    *  entry beside a settled outcome. Returns undefined (⇒ core writes NO
@@ -3114,11 +3115,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const proofs = failed?.milestone ? scenarioMilestoneProof([failed]) : scenarioMilestoneProof(candidate.scenario.steps)
         for (const proof of proofs) {
           for (const id of proof.checks ?? ['']) {
-            state.rejectionByObligation.set(`${proof.milestone}:${id}`, reason)
-            state.repairIssues.set(`${proof.milestone}:${id}`, { reasonKind, evidence: reason, issueId, source })
+            const key = `${proof.milestone}:${id}`
+            const fidelityFlagged = source === 'fidelity' || state.repairIssues.get(key)?.fidelityFlagged
+            state.rejectionByObligation.set(key, reason)
+            state.repairIssues.set(key, { reasonKind, evidence: reason, issueId, source, ...(fidelityFlagged ? { fidelityFlagged } : {}) })
           }
         }
+        return issueId
       }
+      // The rejected candidate's issue id, so a blocked answer can cite it without a correction round.
+      const issueLine = (issueId: string) => `issueId for these cases: ${issueId}`
       const recordRemainingGaps = (state: WorkerTaskState, outcome?: GuardFlowWorkerOutcome) => {
         const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, outcome?.remaining, outcome?.kind).current
         for (const row of remainder) state.task.work.gaps.push({ surface: state.task.surface, kind: 'blocked-on', milestones: [row.milestone],
@@ -3126,11 +3132,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           blocker: { kind: row.reasonKind === 'preparation' ? 'configuration' : row.reasonKind === 'unsupported-capability' ? 'unsupported-capability' : 'generation' },
           reason: `${row.milestone}/${row.caseId ?? 'legacy'}: ${row.reasonKind}: ${row.evidence}` })
       }
-      const validateTaskOutcome = (state: WorkerTaskState, outcome: GuardFlowWorkerOutcome): string | undefined => {
+      const validateTaskOutcome = (state: WorkerTaskState, outcome: GuardFlowWorkerOutcome, wrappingUp = false): string | undefined => {
         const progress = taskProgress(state)
         if (outcome.kind === 'settled' && outcome.additionalScenarios !== undefined) return 'One flow accepts one complete test; additionalScenarios is not allowed.'
         if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && progress.outstanding.some(o => o.caseId))
-          return outcomeCorrection(reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining, outcome.kind), state.repairsAsked)
+          return outcomeCorrection(reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining, outcome.kind), state.repairsAsked, wrappingUp)
         if (outcome.kind === 'blocked' && outcome.perMilestone?.some(m => !progress.outstanding.some(o => o.milestone === m.order)))
           return 'Outcome refused: blockers must identify outstanding milestones assigned to this worker.'
         if (outcome.kind !== 'settled') return undefined
@@ -3254,7 +3260,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             state.fidelityFlags++
             taintFlow(candidate.flow.id, candidate.surface, candidate.scenario.title, verdict.mismatch)
             const finding = fidelityFinding(candidate, verdict.mismatch)
-            rememberRejection(state, candidate, verdict.mismatch, 'assertion', 'fidelity')
+            const issueId = rememberRejection(state, candidate, verdict.mismatch, 'assertion', 'fidelity')
             if (firstFlag && verdict.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
               // The in-loop self-heal (no separate re-author round — the
               // WORKER revises); the ledger bump keeps the budget honest.
@@ -3263,7 +3269,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               return {
                 content:
                   `not accepted — the fidelity judge flagged the scenario (high confidence): ${verdict.mismatch}\n` +
-                  'Revise the scenario so it truly verifies the flagged milestone, then submit again.',
+                  'Revise the scenario so it truly verifies the flagged milestone, then submit again.\n' + issueLine(issueId),
                 isError: true,
               }
             }
@@ -3274,7 +3280,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             return {
               content:
                 `REJECTED — the fidelity judge flagged this candidate${firstFlag ? '' : ' too'} (${verdict.confidence}): ${verdict.mismatch}\n` +
-                'Repair the complete candidate using the current finding; partial candidates cannot be published. Keep each remaining case explicit if preparation or execution prevents completion.',
+                'Repair the complete candidate using the current finding; partial candidates cannot be published. Keep each remaining case explicit if preparation or execution prevents completion.\n' +
+                issueLine(issueId),
               isError: true,
             }
           }
@@ -3334,12 +3341,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             const issue = scenarioFullFlowDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence ?? [])
             if (issue) { rememberRejection(state, candidate, issue, 'annotation'); return { content: `Review evidence is invalid (not a semantic fidelity rejection): ${issue}`, isError: true } }
           }
-          const defect = verdict.kind === 'flagged' ? verdict.mismatch :
-            scenarioFullFlowDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence ?? [])
-          if (defect) {
-            state.pendingFidelityFinding = fidelityFinding(candidate, defect)
-            rememberRejection(state, candidate, defect, 'assertion', verdict.kind === 'flagged' ? 'fidelity' : 'review')
-            return { content: `not accepted — the expected failure still needs faithful case assertions: ${defect}`, isError: true }
+          if (verdict.kind === 'flagged') {
+            state.pendingFidelityFinding = fidelityFinding(candidate, verdict.mismatch)
+            const issueId = rememberRejection(state, candidate, verdict.mismatch, 'assertion', 'fidelity')
+            return { content: `not accepted — the expected failure still needs faithful case assertions: ${verdict.mismatch}\n${issueLine(issueId)}`, isError: true }
           }
           if (verdict.kind === 'faithful' && verdict.evidence) caseEvidenceById.set(candidate.scenario.id, verdict.evidence)
         }
@@ -3552,8 +3557,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             return settleSubmission(state, built.candidate, run.result, evidence.expectedReds, judge)
           },
           hasStash: (sha) => stash.get(sha)?.candidate.ref === ref,
-          validateOutcome: outcome => {
-            const defect = validateTaskOutcome(state, outcome)
+          validateOutcome: (outcome, context) => {
+            const defect = validateTaskOutcome(state, outcome, context?.wrappingUp)
             if (!defect) observations.clear()
             return defect
           },

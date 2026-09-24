@@ -109,8 +109,9 @@ export interface SessionDef<TOutcome = unknown> {
   /** Opt-in bounded repair of malformed terminal objects, under the same budget. */
   outcomeSchemaRepairs?: number;
   /** Validate live task state before accepting a schema-valid terminal outcome.
-   * A rejection resumes the same transcript under the existing cumulative budget. */
-  validateOutcome?(outcome: TOutcome): string | undefined | Promise<string | undefined>;
+   * A rejection resumes the same transcript under the existing cumulative budget;
+   * `wrappingUp` says the budget is spent and only the wrap-up turns remain. */
+  validateOutcome?(outcome: TOutcome, context: { wrappingUp: boolean }): string | undefined | Promise<string | undefined>;
   budget: SessionBudget;
   /** May wait on user input. Non-interactive runs never block. */
   interactive?: boolean;

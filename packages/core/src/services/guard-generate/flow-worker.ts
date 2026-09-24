@@ -52,9 +52,9 @@ import {
 
 export const FLOW_WORKER_SESSION_KIND = 'guard-generate.flow-worker'
 
-/** Cache name KEPT from the one-shot author stage (`guard/generate`) — the
- *  session keys swap in their own prompt fingerprint, so the two generations
- *  never collide (see {@link flowWorkerCacheKey}). */
+/** Cache name shared with the one-shot author stage (`guard/generate`); the
+ *  session keys fold the stage version instead of a prompt fingerprint, so the
+ *  two never collide (see {@link flowWorkerCacheKey}). */
 export const FLOW_WORKER_CACHE_NAME = 'guard/generate'
 
 /** The three numbers: the loop is draft → run → revise → submit, and a
@@ -145,7 +145,7 @@ do not reclassify an assertion defect as unavailable preparation. When the fidel
 judge rejected a case because the runner cannot observe what would prove it, end
 blocked with that issue's issueId and reasonKind unsupported-capability, naming the
 missing capability in evidence. A failing run of a changed candidate records a new
-issueId, so copy it from the latest correction. A stale aggregate failure does not explain a later Cancel
+issueId, so copy it from the latest rejection or correction. A stale aggregate failure does not explain a later Cancel
 rejection. The engine asks once per case for a changed executable candidate before
 you end blocked or retired, within the SAME budget; submit one complete revised
 candidate and preserve every flow obligation.
@@ -205,16 +205,16 @@ export function flowWorkerSystemPrompt(surface: GuardDriverId): string {
   return SYSTEM_PROMPT_BY_SURFACE[surface] ?? FLOW_WORKER_CLI_SYSTEM_PROMPT
 }
 
-/** The prompt fingerprint a surface's worker cache keys folded before the
- *  prompt left the key, frozen so the old key stays readable after a prompt edit. */
+/** The frozen prompt fingerprint a surface's legacy worker cache keys fold,
+ *  so entries under those keys stay readable whatever the live prompt says. */
 export function flowWorkerPromptFingerprint(surface: GuardDriverId): string {
   return LEGACY_PROMPT_FINGERPRINT_BY_SURFACE[surface] ?? LEGACY_FLOW_WORKER_CLI_PROMPT_FINGERPRINT
 }
 
 /**
  * The task's cache key: `authorCacheKey`'s exact recipe (`workerCacheKey` is
- * that recipe parameterized) with the stage version where the prompt
- * fingerprint used to be, so a prompt edit re-authors nothing.
+ * that recipe parameterized) with the stage version in the prompt's slot, so a
+ * prompt edit re-authors nothing.
  */
 export function flowWorkerCacheKey(task: FlowWorkerTask): string {
   const m = task.cacheMaterial
@@ -391,7 +391,7 @@ export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<
     systemPrompt: flowWorkerSystemPrompt(task.surface),
     tools: [...catalogTools(task), runScenarioTool(task), submitScenarioTool(task, input.judgeWith), dropScenarioTool(task)],
     outcomeSchema: GuardFlowWorkerOutcomeSchema,
-    validateOutcome: outcome => task.validateOutcome(outcome),
+    validateOutcome: (outcome, context) => task.validateOutcome(outcome, context),
     outcomeSchemaRepairs: 2,
     budget: FLOW_WORKER_BUDGET,
     // The structural half of "run before you conclude": an

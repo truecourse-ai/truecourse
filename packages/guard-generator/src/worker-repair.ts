@@ -1,14 +1,20 @@
 import type { GuardFlowWorkerOutcome, GuardObligation, GuardRemainingObligation } from '@truecourse/shared'
 
 /** `source` says what observed the issue: a run, a review check, or the
- * fidelity judge flagging the scenario as not proving its claim. */
-export type RepairIssue = Pick<GuardRemainingObligation, 'reasonKind' | 'evidence' | 'issueId'> & { source?: 'execution' | 'review' | 'fidelity' }
+ * fidelity judge flagging the scenario as not proving its claim.
+ * `fidelityFlagged` says the judge flagged the case earlier in the session,
+ * so a later failing run does not erase that the runner may not observe it. */
+export type RepairIssue = Pick<GuardRemainingObligation, 'reasonKind' | 'evidence' | 'issueId'> & {
+  source?: 'execution' | 'review' | 'fidelity'
+  fidelityFlagged?: boolean
+}
 export const obligationKey = (o: { milestone: number; caseId?: string }) => `${o.milestone}:${o.caseId ?? ''}`
 
 /** Checks a worker's `remaining` rows against the engine's current issue per
  * outstanding obligation. A row must name the current issue and its kind; the one
- * reclassification allowed is a blocked outcome answering a fidelity flag as an
- * unsupported capability (the runner cannot observe what would prove the case). */
+ * reclassification allowed is a blocked outcome answering an assertion issue on a
+ * fidelity-flagged case as an unsupported capability (the runner cannot observe
+ * what would prove the case). */
 export function reconcileRemaining(
   outstanding: readonly GuardObligation[],
   issues: ReadonlyMap<string, RepairIssue>,
@@ -27,7 +33,7 @@ export function reconcileRemaining(
       return row
     }
     const [answer] = rows
-    if (outcomeKind === 'blocked' && issue?.source === 'fidelity' && issue.reasonKind === 'assertion' &&
+    if (outcomeKind === 'blocked' && issue?.fidelityFlagged && issue.reasonKind === 'assertion' &&
       answer.issueId === row.issueId && answer.reasonKind === 'unsupported-capability')
       return { ...row, reasonKind: 'unsupported-capability', evidence: answer.evidence }
     if (row.issueId && (answer.issueId !== row.issueId || answer.reasonKind !== row.reasonKind))
@@ -44,12 +50,14 @@ export function reconcileRemaining(
 /** The correction a blocked or retired outcome draws, or undefined when it stands.
  * Each repairable case is asked for one changed candidate once per session
  * (`asked` records the ask): every failing run records a fresh issue, so a
- * demand re-armed by new evidence would never let the worker stop. */
+ * demand re-armed by new evidence would never let the worker stop. Nothing is
+ * asked while `wrappingUp`: the turns left cannot fit a repair and an outcome. */
 export function outcomeCorrection(
   reconciled: ReturnType<typeof reconcileRemaining>,
   asked: Set<string>,
+  wrappingUp = false,
 ): string | undefined {
-  const unasked = reconciled.repairable.filter(row => !asked.has(obligationKey(row)))
+  const unasked = wrappingUp ? [] : reconciled.repairable.filter(row => !asked.has(obligationKey(row)))
   if (!reconciled.problems.length && !unasked.length) return undefined
   for (const row of unasked) asked.add(obligationKey(row))
   return 'Outcome needs correction: remaining work must follow the current case-specific findings. ' +
@@ -64,6 +72,6 @@ export function outcomeCorrection(
 
 function currentIssue(issue: RepairIssue | undefined) {
   if (!issue) return { reasonKind: 'not-attempted' as const, evidence: 'No accepted proof or execution finding for this obligation.' }
-  const { source, ...publicIssue } = issue
+  const { source, fidelityFlagged, ...publicIssue } = issue
   return publicIssue
 }

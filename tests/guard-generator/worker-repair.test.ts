@@ -6,8 +6,11 @@ const outstanding: GuardObligation[] = [
   { milestone: 1, caseId: 'cancel', claim: 'A valid draft is not saved when Cancel closes the dialog.' },
   { milestone: 1, caseId: 'total', claim: 'The controlled ledger total is exact.' },
 ]
-const issue = (reasonKind: RepairIssue['reasonKind'], issueId: string, source?: RepairIssue['source']): RepairIssue =>
-  ({ reasonKind, issueId, evidence: 'Current engine observation.', ...(source ? { source } : {}) })
+// As the engine records it: a fidelity flag marks the case, and the mark
+// survives a later issue from another source.
+const issue = (reasonKind: RepairIssue['reasonKind'], issueId: string, source?: RepairIssue['source'],
+  fidelityFlagged = source === 'fidelity'): RepairIssue =>
+  ({ reasonKind, issueId, evidence: 'Current engine observation.', ...(source ? { source } : {}), ...(fidelityFlagged ? { fidelityFlagged } : {}) })
 const row = (caseId: string, reasonKind: GuardRemainingObligation['reasonKind'], issueId?: string): GuardRemainingObligation => ({
   milestone: 1, caseId, reasonKind, evidence: 'Worker explanation.', ...(issueId ? { issueId } : {}),
 })
@@ -53,7 +56,7 @@ describe('current remaining obligation reconciliation', () => {
     expect(result.current).toMatchObject([{ milestone: 1, issueId: 'first' }, { milestone: 2, reasonKind: 'not-attempted' }])
   })
 
-  it('accepts an unsupported capability only as a blocked answer to a current fidelity flag', () => {
+  it('accepts an unsupported capability only as a blocked answer to an assertion on a fidelity-flagged case', () => {
     const one = outstanding.slice(0, 1)
     const flagged = new Map([['1:cancel', issue('assertion', 'cancel-2', 'fidelity')]])
     const answer = [row('cancel', 'unsupported-capability', 'cancel-2')]
@@ -68,6 +71,8 @@ describe('current remaining obligation reconciliation', () => {
     expect(reconcileRemaining(one, flagged, answer, 'retired').problems).toEqual([refused])
     expect(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-2', 'execution')]]), answer, 'blocked').problems).toEqual([refused])
     expect(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-2', 'review')]]), answer, 'blocked').problems).toEqual([refused])
+    // A failing repair run replaces the flag's issue, but the case stays flagged.
+    expect(reconcileRemaining(one, new Map([['1:cancel', issue('assertion', 'cancel-2', 'execution', true)]]), answer, 'blocked').problems).toEqual([])
     expect(reconcileRemaining(one, new Map([['1:cancel', issue('review-unavailable', 'cancel-2', 'review')]]), answer, 'blocked').problems)
       .toEqual(['1:cancel must reference current review-unavailable issue cancel-2.'])
   })
@@ -94,6 +99,14 @@ describe('blocked or retired outcome correction', () => {
     const answer = [row('cancel', 'unsupported-capability', 'cancel-1')]
     expect(outcomeCorrection(reconcileRemaining(one, issues, answer, 'blocked'), asked)).toContain('Cases to repair: 1:cancel.')
     expect(outcomeCorrection(reconcileRemaining(one, issues, answer, 'blocked'), asked)).toBeUndefined()
+  })
+
+  it('asks for no repair once the session is wrapping up', () => {
+    const asked = new Set<string>()
+    const issues = new Map([['1:cancel', issue('assertion', 'cancel-1')]])
+    expect(outcomeCorrection(reconcileRemaining(one, issues, [row('cancel', 'assertion', 'cancel-1')]), asked, true)).toBeUndefined()
+    expect(outcomeCorrection(reconcileRemaining(one, issues, [row('cancel', 'assertion', 'cancel-0')]), asked, true))
+      .toContain('1:cancel must reference current assertion issue cancel-1.')
   })
 
   it('never asks to repair an established external blocker', () => {
