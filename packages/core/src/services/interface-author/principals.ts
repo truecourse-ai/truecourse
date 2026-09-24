@@ -22,6 +22,20 @@ import { principalNames, type LiveScreens } from './live-screen.js'
 export const DEFAULT_WEB_PRINCIPAL = 'webSession'
 
 /**
+ * The credentials a browser signs in with, the default first: every Cookie
+ * credential in the order given (the seed's), the owner of the seeded data
+ * ({@link DEFAULT_WEB_PRINCIPAL}) moved to the front, else the first
+ * credential there is.
+ */
+export function webSessionCredentials<T extends { header: string }>(
+  credentials: readonly (readonly [string, T])[],
+): (readonly [string, T])[] {
+  const cookies = credentials.filter(([, credential]) => credential.header.toLowerCase() === 'cookie')
+  const rank = (name: string): number => (name === DEFAULT_WEB_PRINCIPAL ? 0 : 1)
+  return cookies.length > 0 ? [...cookies].sort(([a], [b]) => rank(a) - rank(b)) : credentials.slice(0, 1)
+}
+
+/**
  * The principals that reach `path`, the default first: each opens it with no
  * step to take, and one whose browser ended elsewhere after every attempt does
  * not reach it.

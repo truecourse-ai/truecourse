@@ -41,7 +41,7 @@ import {
 } from '@truecourse/guard-runner';
 import { ANONYMOUS_PRINCIPAL } from '@truecourse/shared';
 import { publicFixtureFields, type LiveScreenObserver, type LiveScreens } from '../interface-author/live-screen.js';
-import { DEFAULT_WEB_PRINCIPAL } from '../interface-author/principals.js';
+import { webSessionCredentials } from '../interface-author/principals.js';
 import { outputTail, servicesController } from './services-lifecycle.js';
 
 export interface OpenLiveScreensOptions {
@@ -208,19 +208,12 @@ export async function openSetupLiveScreens(opts: OpenLiveScreensOptions): Promis
   }
 }
 
-/**
- * The credentials a browser can sign in with, the default first: every Cookie
- * credential in the order the seed declares them, the owner of the seeded data
- * (`webSession`) moved to the front, else the first credential there is.
- */
+/** The minted credentials a browser can sign in with, the default first ({@link webSessionCredentials}). */
 export function webPrincipals(
   credentials: ReadonlyMap<string, ResolvedCredential>,
 ): { name: string; credential: ResolvedCredential }[] {
   const usable = [...credentials].filter(([, credential]) => credential.value.length > 0);
-  const cookies = usable.filter(([, credential]) => credential.header.toLowerCase() === 'cookie');
-  const rank = (name: string): number => (name === DEFAULT_WEB_PRINCIPAL ? 0 : 1);
-  return (cookies.length > 0 ? [...cookies].sort(([a], [b]) => rank(a) - rank(b)) : usable.slice(0, 1))
-    .map(([name, credential]) => ({ name, credential }));
+  return webSessionCredentials(usable).map(([name, credential]) => ({ name, credential }));
 }
 
 /** What the seed says makes each principal it mints distinct: its credentials' descriptions, by name. */

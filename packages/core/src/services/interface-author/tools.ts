@@ -38,6 +38,7 @@
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import {
+  ANONYMOUS_PRINCIPAL,
   interfaceStepLocator,
   isNonCanonicalLocator,
   isTargetedStep,
@@ -59,9 +60,10 @@ import {
 } from './draft.js'
 import { checkedDraftEvidence } from './checked-draft.js'
 import { scopeFragmentIds } from './identity.js'
-import { observeScreenTool, observerFor, principalNames, type LiveScreens } from './live-screen.js'
+import { observeScreenTool, principalNames, type LiveScreens } from './live-screen.js'
 import { LiveProofReachSchema, proveLocators, proveReadables, type LiveProofReach } from './live-proof.js'
-import { principalsReaching } from './principals.js'
+import { principalsReaching, webSessionCredentials } from './principals.js'
+import { loadRecipe, recipePath } from '@truecourse/guard-runner'
 
 /** How many catalog entries one `list_interfaces` call hands back — a tool
  *  result is context, and context is the budget. */
@@ -217,7 +219,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
     inputSchema: AuthoredFragmentSchema.extend({ proof: LiveProofReachSchema.optional() }),
     async execute({ proof, ...sent }) {
       const piece = withoutProvenWords(sent)
-      const unknownPrincipals = input.live ? unknownPrincipalProblems(piece.interfaces, input.live) : []
+      const unknownPrincipals = unknownPrincipalProblems(piece.interfaces, input)
       if (unknownPrincipals.length > 0) {
         return {
           content: `${unknownPrincipals.length} problem(s) — nothing in this call was accepted, and the draft still holds ${accepted.interfaces.length} task(s):\n- ${unknownPrincipals.join('\n- ')}`,
@@ -339,14 +341,25 @@ function withReadablesProven(place: InterfaceResource, unproven: boolean): Inter
   }
 }
 
-/** A task that names a principal the run cannot sign in as. */
-function unknownPrincipalProblems(tasks: readonly AuthoredTask[], live: LiveScreens): string[] {
-  const names = principalNames(live)
+/**
+ * A task that names a principal it cannot be performed as: with a live world,
+ * one the run cannot observe as; without one, one the recipe's seed declares
+ * no web session for (or `anonymous`).
+ */
+function unknownPrincipalProblems(tasks: readonly AuthoredTask[], input: Pick<AuthorToolsInput, 'repoRoot' | 'live'>): string[] {
+  if (tasks.every((task) => task.principal === undefined)) return []
+  const names = input.live ? principalNames(input.live) : declaredPrincipalNames(input.repoRoot)
   return tasks.flatMap((task) =>
-    task.principal !== undefined && !observerFor(live, task.principal)
-      ? [`\`${task.id}\` names principal \`${task.principal}\`, which the run cannot observe as — use one of ${names.map((name) => `\`${name}\``).join(', ')}, or omit it for this session's own`]
-      : [],
+    task.principal === undefined || names.includes(task.principal)
+      ? []
+      : [`\`${task.id}\` names principal \`${task.principal}\`, which ${input.live ? 'the run cannot observe as' : 'the seed declares no web session for'} — use one of ${names.map((name) => `\`${name}\``).join(', ')}, or omit it for this session's own`],
   )
+}
+
+/** Whom a task may be performed as when no browser is open: the web sessions the recipe's seed declares, and `anonymous`. */
+function declaredPrincipalNames(repoRoot: string): string[] {
+  const declared = Object.entries(loadRecipe(repoRoot, recipePath(repoRoot))?.recipe.api?.seed?.provides.credentials ?? {})
+  return [...webSessionCredentials(declared).map(([name]) => name), ANONYMOUS_PRINCIPAL]
 }
 
 /** How many of the accepted task ids the tool result names before it counts the

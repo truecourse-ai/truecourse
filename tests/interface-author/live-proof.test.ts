@@ -7,6 +7,10 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { recipePath } from '@truecourse/guard-runner'
 import type { InterfacesFile } from '../../packages/shared/src/index'
 import { buildAuthorTools } from '../../packages/core/src/services/interface-author/tools'
 import type { LiveScreenObserver } from '../../packages/core/src/services/interface-author/live-screen'
@@ -478,6 +482,35 @@ describe('a task performed by another principal', () => {
     const result = await checkAs({ webSession: own, anonymous: signedOut }, own)({ interfaces: [{ ...linksTask([sortStep]), principal: 'anonymous' }] })
     expect(result.isError).toBe(true)
     expect(result.content).toContain('is never reached as `anonymous`, and is reached as `webSession`')
+  })
+
+  it('is refused, with no live world, when the seed declares no web session by that name', async () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-principal-'))
+    try {
+      fs.mkdirSync(path.dirname(recipePath(repo)), { recursive: true })
+      fs.writeFileSync(recipePath(repo), JSON.stringify({
+        build: 'true',
+        entry: ['node', '-e', ''],
+        api: {
+          serve: ['node', 'server.mjs'],
+          seed: {
+            command: 'node seed.mjs',
+            provides: { credentials: { adminWebSession: { header: 'Cookie' }, webSession: { header: 'Cookie' }, apiToken: { header: 'Authorization' } } },
+          },
+        },
+      }))
+      const tools = buildAuthorTools({ repoRoot: repo, derived: DERIVED, authored: null, replaceable: new Set() })
+      const check = (args: unknown) => tools.find((t) => t.name === 'check_draft')!.execute(args, toolContext)
+      const task = { ...linksTask([{ kind: 'activate', target: { role: 'button', name: 'Sort' } }]), principal: 'rootSession' }
+      const refused = await check({ interfaces: [task] })
+      expect(refused.isError).toBe(true)
+      expect(refused.content).toContain('names principal `rootSession`, which the seed declares no web session for — use one of `webSession`, `adminWebSession`, `anonymous`')
+      for (const principal of ['adminWebSession', 'anonymous']) {
+        expect((await check({ interfaces: [{ ...task, principal }] })).isError, principal).toBeFalsy()
+      }
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true })
+    }
   })
 
   it('is refused when it names a principal the run cannot observe as', async () => {
