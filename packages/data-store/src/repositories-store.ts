@@ -28,6 +28,7 @@ function toRecord(r: Row): RepositoryRecord {
     slug: r.slug,
     defaultBranch: r.defaultBranch,
     defaultBranchSha: r.defaultBranchSha,
+    mainChainSha: r.mainChainSha,
     location: r.location,
     blocking: r.blocking,
     enabled: r.enabled,
@@ -80,6 +81,7 @@ export class PgRepositoryStore implements RepositoryStore {
           // A reconnect starts afresh: the last push the old connection saw
           // says nothing about the branch now.
           defaultBranchSha: null,
+          mainChainSha: null,
           location: rec.location ?? null,
           blocking: rec.blocking,
           enabled: rec.enabled,
@@ -101,6 +103,13 @@ export class PgRepositoryStore implements RepositoryStore {
     await this.db
       .update(repositories)
       .set({ defaultBranchSha: commitSha })
+      .where(eq(repositories.repoFullName, repoFullName));
+  }
+
+  async recordMainChainSha(repoFullName: string, commitSha: string): Promise<void> {
+    await this.db
+      .update(repositories)
+      .set({ mainChainSha: commitSha })
       .where(eq(repositories.repoFullName, repoFullName));
   }
 

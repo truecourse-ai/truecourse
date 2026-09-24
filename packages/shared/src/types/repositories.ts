@@ -44,6 +44,12 @@ export interface RepositoryRecord {
    * the server saw; a local folder has none.
    */
   defaultBranchSha?: string | null
+  /**
+   * The commit the newest main chain was started at. The repository OWES a
+   * chain while `defaultBranchSha` differs from it: a push landed that no
+   * chain has been started for yet.
+   */
+  mainChainSha?: string | null
   /** Where the provider finds it when the name is not enough: a local folder's absolute path. */
   location?: string | null
   /**
@@ -75,6 +81,8 @@ export interface RepositoryStore {
   unlinkRepo(repoFullName: string): Promise<void>
   /** The provider reported a push to the default branch: remember its commit. */
   recordDefaultBranchSha(repoFullName: string, commitSha: string): Promise<void>
+  /** A main chain was started at this commit: the push it serves is no longer owed. */
+  recordMainChainSha(repoFullName: string, commitSha: string): Promise<void>
   getRepo(repoFullName: string): Promise<RepositoryRecord | null>
   listReposForWorkspace(workspaceOrgId: string): Promise<RepositoryRecord[]>
   /** Every repository connected through one provider account (uninstall cleanup). */

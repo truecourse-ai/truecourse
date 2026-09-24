@@ -73,6 +73,14 @@ describe('the pushed commit', () => {
     await store.linkRepo(githubRepo('acme/api'));
     expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBeNull();
   });
+
+  it('remembers the commit a main chain started at, and a re-link forgets it too', async () => {
+    await store.linkRepo(githubRepo('acme/api'));
+    await store.recordMainChainSha('acme/api', 'sha-1');
+    expect((await store.getRepo('acme/api'))?.mainChainSha).toBe('sha-1');
+    await store.linkRepo(githubRepo('acme/api'));
+    expect((await store.getRepo('acme/api'))?.mainChainSha).toBeNull();
+  });
 });
 
 describe('PgRepositoryStore', () => {

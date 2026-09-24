@@ -24,16 +24,20 @@
  * restart and holds across replicas; `context.sync` and `context.scan` name no
  * queue and keep running beside a heavy job.
  *
- * AND A PUSH TO THE DEFAULT BRANCH RUNS THE MAIN CHAIN, COALESCED. The chain
- * is setup → generate → run, pinned to ONE commit: the pushed one, which the
- * repository row remembers (`defaultBranchSha`, written by the webhook before
- * the chain starts). At most one chain runs and one waits per repository: a
- * push that lands while any heavy job of the repository is active starts
- * nothing; when a chain ends — the run settles, or an earlier link stops
- * short — the mount compares the row's commit with the one the chain was
- * pinned to and starts one more chain if they differ. Three pushes during a
- * chain cost one follow-up, and a chain that fails at its own commit is not
- * started again: only a newer push starts one.
+ * AND A PUSH TO THE DEFAULT BRANCH RUNS THE MAIN CHAIN, AFTER ITS CONTEXT,
+ * COALESCED. The chain is setup → generate → run, pinned to ONE commit: the
+ * pushed one, which the repository row remembers (`defaultBranchSha`, written
+ * by the webhook). The row also remembers the commit the newest chain was
+ * started at (`mainChainSha`), and a repository OWES a chain while the two
+ * differ. The push itself starts only the sync of the repository's own
+ * documentation; whoever settles last serves what is owed: the sync, when it
+ * changed no document and no scan is in flight, else the scan, once no
+ * follow-up scan is queued behind it. So generate always reads the corpus the
+ * push's documents produced. At most one chain runs per repository: while any
+ * heavy job of it is active nothing starts, and when a chain ends — the run
+ * settles, or an earlier link stops short — whatever is owed by then starts
+ * once. Three pushes during a chain cost one follow-up, and a chain that fails
+ * at its own commit is not started again: only a newer push starts one.
  */
 
 import {
@@ -110,9 +114,11 @@ export interface JobsMount extends Jobs {
   enqueueGuardGenerate(request: GuardGenerateJobRequest): Promise<EnqueueResult>;
   enqueueGuardRun(request: GuardRunJobRequest): Promise<EnqueueResult>;
   /**
-   * A push to the default branch: run the main chain at its tip, unless a
-   * heavy job of the repository is already active — then `busy`, and the
-   * chain that is running follows up on its own when it ends.
+   * Run the main chain at the pushed commit now, unless a heavy job of the
+   * repository is already active — then `busy`, and the chain that is running
+   * follows up on its own when it ends. A push reaches it through its sync
+   * (see the header); the webhook calls it directly only for a repository
+   * with no documentation source to sync.
    */
   startMainChain(request: MainChainRequest): Promise<EnqueueResult>;
   /**
@@ -260,36 +266,58 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     // chain's own payload, whose row id must not carry into the new chain.
     const { repoId, repoFullName, workspaceOrgId } = request;
     const pushed = (await opts.repos?.getRepo(repoFullName))?.defaultBranchSha ?? null;
-    return enqueueGuardSetup({
+    const outcome = await enqueueGuardSetup({
       repoId,
       repoFullName,
       workspaceOrgId,
       source: 'push',
       ...(pushed ? { commitSha: pushed } : {}),
     });
+    if (outcome.status === 'queued' && pushed) await opts.repos?.recordMainChainSha(repoFullName, pushed);
+    return outcome;
+  };
+
+  /**
+   * Start the main chain for each of these repositories that owes one — a
+   * push landed that no chain was started for — unless the workspace's scan
+   * is queued or running: the chain reads the corpus, so it waits for that
+   * scan, whose settle serves what is owed then. `why` names the caller for
+   * the log. Never throws.
+   */
+  const serveOwedChains = async (
+    workspaceOrgId: string,
+    repoFullNames: readonly string[],
+    why: string,
+  ): Promise<void> => {
+    if (!opts.repos || repoFullNames.length === 0) return;
+    try {
+      if (await jobs.jobStore.getActiveByKey(workspaceOrgId, contextScanJobKey())) return;
+      for (const repoFullName of repoFullNames) {
+        const link = await opts.repos.getRepo(repoFullName);
+        if (!link?.enabled || link.workspaceOrgId !== workspaceOrgId) continue;
+        if (!link.defaultBranchSha || link.defaultBranchSha === link.mainChainSha) continue;
+        const outcome = await startMainChain({ repoId: link.slug, repoFullName, workspaceOrgId });
+        log.info(
+          `[jobs] ${repoFullName} owes a chain at ${link.defaultBranchSha.slice(0, 8)} (${why}) — ${outcome.status}`,
+        );
+      }
+    } catch (err) {
+      log.warn(`[jobs] could not start the owed chains of ${workspaceOrgId}: ${(err as Error).message}`);
+    }
   };
 
   /**
    * A chain ended at `commitSha`, its commit (null when it never got to
-   * clone). If the default branch has moved past it since — the webhook
-   * recorded a newer push — and nothing of the repository is active, run the
-   * chain once more, at the newer commit. A chain that failed at its own
-   * commit starts nothing, and one with no commit to compare starts nothing
-   * either.
+   * clone). Whatever push landed since and is still owed starts one more
+   * chain, at the newest commit. A chain that failed at its own commit owes
+   * nothing, so it is not started again.
    */
   const onChainEnd = async (request: OnboardingJobRequest, commitSha: string | null): Promise<void> => {
-    const target = commitSha;
-    if (!opts.repos || !target) return;
-    try {
-      const link = await opts.repos.getRepo(request.repoFullName);
-      if (!link?.enabled || !link.defaultBranchSha || link.defaultBranchSha === target) return;
-      const outcome = await startMainChain(request);
-      log.info(
-        `[jobs] ${request.repoFullName} moved to ${link.defaultBranchSha.slice(0, 8)} while its chain ran at ${target.slice(0, 8)} — follow-up chain ${outcome.status}`,
-      );
-    } catch (err) {
-      log.warn(`[jobs] could not follow up on ${request.repoFullName}'s chain: ${(err as Error).message}`);
-    }
+    await serveOwedChains(
+      request.workspaceOrgId,
+      [request.repoFullName],
+      `its chain ended at ${commitSha?.slice(0, 8) ?? 'no commit'}`,
+    );
   };
 
   // A context source is not a repository: nothing about it is visible in the
@@ -425,12 +453,27 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
           );
         }
       },
+      // A push's documentation is read; its chain starts here unless the scan
+      // it chained (or one already in flight) is still to settle.
+      continueMainChain: async (request) => {
+        const repo = await repositoryOfSource(request.workspaceOrgId, request.sourceId);
+        if (!repo) return;
+        await serveOwedChains(request.workspaceOrgId, [repo.repoFullName], 'its documentation is synced');
+      },
     }),
     createContextScanTask({
       ...opts.contextScan,
       ripple: rippleDeps,
       rescan: async (request) => {
         await enqueueContextScan(request);
+      },
+      serveOwedChains: async (workspaceOrgId) => {
+        const repos = (await opts.repos?.listReposForWorkspace(workspaceOrgId)) ?? [];
+        await serveOwedChains(
+          workspaceOrgId,
+          repos.map((repo) => repo.repoFullName),
+          'the document scan settled',
+        );
       },
     }),
   ];

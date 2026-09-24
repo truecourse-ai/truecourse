@@ -112,6 +112,11 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
     if (repo) this.repos.set(repoFullName, { ...repo, defaultBranchSha: commitSha });
   }
 
+  async recordMainChainSha(repoFullName: string, commitSha: string): Promise<void> {
+    const repo = this.repos.get(repoFullName);
+    if (repo) this.repos.set(repoFullName, { ...repo, mainChainSha: commitSha });
+  }
+
   async getRepo(repoFullName: string): Promise<RepositoryRecord | null> {
     return this.repos.get(repoFullName) ?? null;
   }

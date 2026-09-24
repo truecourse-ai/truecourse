@@ -392,14 +392,19 @@ const pushWebhook = (app: Express, repoFullName: string) => {
 };
 
 describe('a push to the default branch', () => {
-  it('syncs a connected repository’s source', async () => {
+  it('syncs a connected repository’s source, and leaves the main chain to that sync', async () => {
     const started: Array<[string, string, string]> = [];
+    const chains: string[] = [];
     const app = buildApp({
       contextSync: async (orgId, sourceId, source) => {
         started.push([orgId, sourceId, source]);
         return 'queued';
       },
       startSetup: async () => 'queued',
+      startMainChain: async (trigger) => {
+        chains.push(trigger.repoFullName);
+        return 'queued';
+      },
     });
     await linkRepo(app).expect(201);
     // The source is Context's, made there: connecting makes none.
@@ -419,6 +424,27 @@ describe('a push to the default branch', () => {
     await pushWebhook(app, REPO).expect(202);
     await waitFor(() => started.length > 0);
     expect(started).toEqual([[ORG, 'repo-acme-widgets', 'push']]);
+    // The chain reads the corpus the sync (and its scan) produce, so the push
+    // does not start it beside them.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(chains).toEqual([]);
+  });
+
+  it('starts the main chain itself for a connected repository with no source to sync', async () => {
+    const chains: string[] = [];
+    const app = buildApp({
+      contextSync: async () => 'queued',
+      startSetup: async () => 'queued',
+      startMainChain: async (trigger) => {
+        chains.push(trigger.repoFullName);
+        return 'queued';
+      },
+    });
+    await linkRepo(app).expect(201);
+
+    await pushWebhook(app, REPO).expect(202);
+    await waitFor(() => chains.length > 0);
+    expect(chains).toEqual([REPO]);
   });
 
   // A source may read a repository Code never connected. The push still tells

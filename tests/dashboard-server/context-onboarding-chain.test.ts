@@ -66,6 +66,7 @@ import { setContextEventPublisher } from '../../apps/dashboard/server/src/servic
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
 import { memoryContextStore } from '../helpers/memory-context-store';
 import { memorySpecStore } from '../helpers/memory-spec-store';
+import { MemoryInstallationStore } from '../github-app/memory-store';
 import type { WorkspaceLlm } from '../../apps/dashboard/server/src/services/workspace-llm.service';
 
 /** A repository (and its source) of its own per test — one database serves all. */
@@ -79,6 +80,8 @@ let db: Db;
 let ORG: string;
 let orgCounter = 0;
 let context: ContextStore;
+/** The connected repositories: where a push's commit, and the chain owed for it, are kept. */
+let repos: MemoryInstallationStore;
 let jobs: JobsMount;
 /** Bodies waiting to run, oldest first — the queue this worker is. */
 let pending: (() => Promise<void>)[];
@@ -86,6 +89,8 @@ let pending: (() => Promise<void>)[];
 let failures: string[];
 /** Every graphile enqueue, in order — what "was it chained" reads. */
 let enqueued: string[];
+/** The payload of each enqueue, beside its name. */
+let payloads: Array<{ name: string; payload: unknown }>;
 let home: string;
 
 const testLlm = {
@@ -117,6 +122,7 @@ function fakeWorker(): StartWorker<Record<string, unknown>> {
     return {
       addJob: async (name: string, payload: unknown) => {
         enqueued.push(name);
+        payloads.push({ name, payload });
         const handler = handlers.get(name);
         if (!handler) return;
         pending.push(() => handler(payload, {}));
@@ -220,6 +226,7 @@ function mount(documents: ContextDriverDocument[]): JobsMount {
     db,
     connectionString: 'postgres://unused',
     hub,
+    repos,
     startWorker: fakeWorker(),
     contextSync: { drivers: () => new Map([['repository', repositoryDriver(documents)]]) },
     contextScan: {
@@ -289,6 +296,7 @@ beforeEach(async () => {
   pending = [];
   failures = [];
   enqueued = [];
+  payloads = [];
   setGuardStore(new PgGuardStore(db));
   installMemorySessionRuns();
   installMemoryGuardOverlays();
@@ -309,6 +317,18 @@ beforeEach(async () => {
     getProjectByPath: async (_org, repoPath) => (repoPath === REPO ? entry : null),
   };
   setRegistryStore(registry);
+  repos = new MemoryInstallationStore();
+  await repos.linkRepo({
+    repoFullName: REPO,
+    provider: 'github',
+    accountId: '11',
+    workspaceOrgId: ORG,
+    defaultBranch: 'main',
+    blocking: true,
+    enabled: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
 });
 
 afterEach(async () => {
@@ -381,5 +401,62 @@ describe('connecting a repository with markdown', () => {
     // read no document chains nothing — so the two never both start it.
     expect(enqueued.filter((t) => t === 'repo.guard-generate')).toHaveLength(1);
     expect(await jobsOfType('repo.guard-generate')).toHaveLength(1);
+  });
+});
+
+/**
+ * A PUSH runs its links in one line — sync, the scan when a document changed,
+ * then setup → generate → run at the pushed commit — so generate reads the
+ * corpus the push's own documents produced. The webhook records the commit and
+ * starts only the sync; the chain it owes is started by whichever settles last.
+ */
+describe('a push to the default branch', () => {
+  const push = (): Promise<unknown> =>
+    jobs.enqueueContextSync({ workspaceOrgId: ORG, sourceId: SOURCE, source: 'push' });
+
+  it('scans the documents it changed first, then runs the chain at the pushed commit', async () => {
+    await repos.recordDefaultBranchSha(REPO, 'sha-pushed');
+    jobs = mount([doc('docs/one.md', '# One\n')]);
+    await jobs.start();
+
+    await push();
+    await drain();
+
+    expect(failures).toEqual([]);
+    expect(enqueued.slice(0, 3)).toEqual(['context.sync', 'context.scan', 'repo.guard-setup']);
+    expect(payloads.find((p) => p.name === 'repo.guard-setup')?.payload).toMatchObject({
+      source: 'push',
+      commitSha: 'sha-pushed',
+    });
+    // The scan's ripple found the chain already started: one generate, the chain's.
+    expect(enqueued.filter((t) => t === 'repo.guard-generate')).toHaveLength(1);
+    expect((await repos.getRepo(REPO))?.mainChainSha).toBe('sha-pushed');
+  });
+
+  it('runs the chain straight after a sync that changed no document', async () => {
+    await repos.recordDefaultBranchSha(REPO, 'sha-pushed');
+    jobs = mount([]);
+    await jobs.start();
+
+    await push();
+    await drain();
+
+    expect(enqueued).toEqual(['context.sync', 'repo.guard-setup']);
+    expect(payloads.find((p) => p.name === 'repo.guard-setup')?.payload).toMatchObject({
+      source: 'push',
+      commitSha: 'sha-pushed',
+    });
+  });
+
+  it('starts no chain from a sync when no push is owed one', async () => {
+    await repos.recordDefaultBranchSha(REPO, 'sha-pushed');
+    await repos.recordMainChainSha(REPO, 'sha-pushed');
+    jobs = mount([]);
+    await jobs.start();
+
+    await jobs.enqueueContextSync({ workspaceOrgId: ORG, sourceId: SOURCE, source: 'manual' });
+    await drain();
+
+    expect(enqueued).toEqual(['context.sync']);
   });
 });

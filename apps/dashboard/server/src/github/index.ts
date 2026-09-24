@@ -104,9 +104,10 @@ export interface GithubConnectionOverrides {
    */
   startSetup?: SetupStart;
   /**
-   * A push to a connected repository's default branch runs the main chain at
-   * the pushed commit. Boot passes the mount's `startMainChain`; without one a
-   * push only re-reads the repository's documentation.
+   * Run the main chain at the pushed commit, for a push to a connected
+   * repository with no documentation sync to wait for (a push that syncs is
+   * carried on by the sync). Boot passes the mount's `startMainChain`; without
+   * one a push only re-reads the repository's documentation.
    */
   startMainChain?: MainChainStart;
   /** The pull requests, and what their events start. Without them pull request events are ignored. */
@@ -219,9 +220,9 @@ export function createGithubConnection(
   /**
    * A push to the default branch is what re-reads a repository's own
    * documentation: its Repository source syncs, and the workspace corpus goes
-   * stale from there.
+   * stale from there. Answers whether a sync is in flight.
    */
-  const syncSourceAfterPush = (workspaceOrgId: string, repoFullName: string): void =>
+  const syncSourceAfterPush = (workspaceOrgId: string, repoFullName: string): Promise<boolean> =>
     syncRepositorySource(workspaceOrgId, repoFullName, contextSync);
 
   const webhook = createWebhookRouter({
@@ -229,16 +230,17 @@ export function createGithubConnection(
     store,
     repos,
     // A connected repository's push: its documentation is re-read, and the
-    // main chain runs at the pushed commit.
+    // main chain runs at the pushed commit once that sync (and the scan it
+    // chains) has settled — the sync carries it on. With no sync in flight
+    // there is nothing to wait for, so the chain starts here.
     onBaseline: (trigger) => {
-      syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
-      void overrides.startMainChain?.(trigger)
-        .then((outcome) => {
-          if (outcome !== 'queued') log.info(`[github] ${trigger.repoFullName} pushed — main chain ${outcome}`);
-        })
-        .catch((err: unknown) => {
-          log.error(`[github] could not start ${trigger.repoFullName}'s main chain: ${(err as Error).message}`);
-        });
+      void (async () => {
+        if (await syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName)) return;
+        const outcome = await overrides.startMainChain?.(trigger);
+        if (outcome && outcome !== 'queued') log.info(`[github] ${trigger.repoFullName} pushed — main chain ${outcome}`);
+      })().catch((err: unknown) => {
+        log.error(`[github] could not start ${trigger.repoFullName}'s main chain: ${(err as Error).message}`);
+      });
     },
     // A push to a repository this installation reaches that Code has NOT
     // connected. It has no baseline and no repository page, but one workspace
@@ -246,7 +248,7 @@ export function createGithubConnection(
     sourceWorkspaceOf: async (repoFullName) =>
       contextStoreInstalled() ? repositorySourceWorkspace(repoFullName) : null,
     onSourcePush: (trigger) => {
-      syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
+      void syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
     },
     // A pull request's events: its check starts, is held, or is cancelled.
     ...(overrides.pulls ? { pulls: overrides.pulls } : {}),
