@@ -114,6 +114,7 @@ export function interpolateApiExpect(
   // here so the comparison compares numbers and the failure quotes them.
   const comparison = (c: GuardComparison): GuardComparison => mapComparisonStrings(c, one)
   const stream = (m: GuardStreamMatcher): GuardStreamMatcher => ({
+    ...m,
     ...(m.equals !== undefined ? { equals: one(m.equals) } : {}),
     ...(m.contains !== undefined ? { contains: one(m.contains) } : {}),
     ...(m.matches !== undefined ? { matches: one(m.matches) } : {}),

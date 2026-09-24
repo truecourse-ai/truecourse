@@ -1,4 +1,4 @@
-import type { GuardFailureObservation } from '@truecourse/shared'
+import { describeLogMatch, type GuardFailureObservation } from '@truecourse/shared'
 /**
  * Run one api scenario end-to-end: seed a sandbox, boot the recipe's server IN
  * that sandbox (fresh state + fresh port per scenario — the api analog of the
@@ -280,16 +280,11 @@ function apiExcerpts(
   return out
 }
 
-/** `“x”` / `/x/` — how a log matcher reads in a failure message. */
-function logMatchLabel(m: GuardLogMatch): string {
-  return typeof m === 'string' ? `“${m}”` : `/${m.pattern}/`
-}
-
 /** The lines of a log window that match — substring or regex, per LINE. */
 function matchingLogLines(window: string, match: GuardLogMatch): string[] {
   const lines = window.split('\n').filter((l) => l.length > 0)
   if (typeof match === 'string') return lines.filter((l) => l.includes(match))
-  const re = new RegExp(match.pattern)
+  const re = new RegExp(match.pattern, match.flags)
   return lines.filter((l) => re.test(l))
 }
 
@@ -696,8 +691,8 @@ export async function runApiScenario(
           const scope = step.logs.sinceLastStep ? ' since the previous step' : ''
           return fail(
             step.logs.count === undefined
-              ? `a ${stream} line matching ${logMatchLabel(match)}${scope}`
-              : `exactly ${step.logs.count} ${stream} line(s) matching ${logMatchLabel(match)}${scope}`,
+              ? `a ${stream} line matching ${describeLogMatch(match)}${scope}`
+              : `exactly ${step.logs.count} ${stream} line(s) matching ${describeLogMatch(match)}${scope}`,
             `${matches.length} line(s) matched`,
             [`--- ${stream}${scope} ---`, window.slice(-STEP_OUTPUT_LIMIT)],
           )

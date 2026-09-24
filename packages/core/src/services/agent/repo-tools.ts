@@ -12,7 +12,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import { Minimatch } from 'minimatch'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
-import { DOC_DISCOVERY_SKIP_DIRS } from '@truecourse/shared'
+import { DOC_DISCOVERY_SKIP_DIRS, hasInlineFlagGroup } from '@truecourse/shared'
 import { MAX_SOURCE_FILE_BYTES, MAX_SOURCE_RESULT_BYTES, readHint, readSource, resolveSourcePath, sourceLines, sourceView } from './source-view.js'
 
 const MAX_READ_LINES = 400
@@ -145,7 +145,8 @@ export function searchTool(repoRoot: string): SessionTool {
     destructive: false,
     inputSchema: z
       .object({
-        query: z.string().min(1).describe('JavaScript regular expression, case-sensitive.'),
+        query: z.string().min(1).describe('JavaScript regular expression source, without /delimiters/ or inline flag groups like (?i).'),
+        ignoreCase: z.boolean().optional().describe('Match regardless of letter case. Omitted = case-sensitive.'),
         glob: z
           .string()
           .min(1)
@@ -157,9 +158,12 @@ export function searchTool(repoRoot: string): SessionTool {
     async execute(args) {
       let pattern: RegExp
       try {
-        pattern = new RegExp(args.query)
+        pattern = new RegExp(args.query, args.ignoreCase ? 'i' : '')
       } catch (error) {
-        return { content: `\`${args.query}\` is not a valid regular expression: ${message(error)}`, isError: true }
+        return {
+          content: `\`${args.query}\` is not a valid regular expression: ${message(error)}${hasInlineFlagGroup(args.query) ? ' — JavaScript has no inline flag groups like (?i); drop it and set ignoreCase' : ''}`,
+          isError: true,
+        }
       }
       const hits: string[] = []
       const glob = args.glob ? new Minimatch(args.glob.replace(/^\.\//, ''), { matchBase: true, nonegate: true, nocomment: true }) : undefined

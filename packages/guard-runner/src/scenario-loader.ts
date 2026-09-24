@@ -12,6 +12,7 @@ import yaml from 'js-yaml'
 import {
   GuardScenarioSchema,
   firstInvalidMatchPattern,
+  regexLiteral,
   guardExecutionSteps,
   type GuardScenario,
 } from '@truecourse/shared'
@@ -123,7 +124,7 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
     if (badRe) {
       errors.push({
         file: rel,
-        message: `step ${badRe.step} ${badRe.where} /${badRe.pattern}/ is not a valid regular expression: ${badRe.error}`,
+        message: `step ${badRe.step} ${badRe.where} ${regexLiteral(badRe.pattern, badRe.flags)} is not a valid regular expression: ${badRe.error}`,
       })
       continue
     }
