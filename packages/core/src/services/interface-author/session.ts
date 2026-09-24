@@ -27,7 +27,7 @@ import { screenIdentityGuidance } from './identity.js'
 import type { InterfaceResource, InterfaceState, InterfacesFile } from '@truecourse/shared'
 import { AuthoredFragmentSchema, type AuthoredFragment } from './draft.js'
 import { liveScreenLines, type LiveScreens, type ObserveScreenResult } from './live-screen.js'
-import { buildAuthorTools } from './tools.js'
+import { buildAuthorTools, type AuthorToolsInput } from './tools.js'
 
 export const INTERFACE_AUTHOR_SESSION_KIND = 'guard-interfaces.web-tasks'
 
@@ -46,17 +46,8 @@ export const INTERFACE_AUTHOR_BUDGET: SessionBudget = {
   tokenCeiling: 150_000,
 }
 
-export interface AuthorSessionInput {
-  repoRoot: string
-  derived: InterfacesFile | null
-  authored: InterfacesFile | null
-  /** Ids of the prior authored tasks at this place — the ones a re-author may replace. */
-  replaceable: ReadonlySet<string>
-  /** The place this session authors — every task it hands back is located there. */
-  scope?: { screenId: string; address?: string }
-  /** The running app, when the run booted one — the session may observe screens. */
-  live?: LiveScreens
-}
+/** What a session is built over — exactly what its tools read. */
+export type AuthorSessionInput = AuthorToolsInput
 
 export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef<AuthoredFragment> {
   return {

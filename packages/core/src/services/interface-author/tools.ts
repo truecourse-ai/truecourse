@@ -69,6 +69,8 @@ export interface AuthorToolsInput {
   replaceable: ReadonlySet<string>
   /** The place this session authors — `check_draft` holds the draft to it. */
   scope?: { screenId: string; address?: string }
+  /** Other places' tasks this session's draft may twin (see {@link validateFragment}'s `yielding`). */
+  yielding?: ReadonlySet<string>
   /** The running app, when the run booted one — adds `observe_screen`. */
   live?: LiveScreens
 }
@@ -222,6 +224,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
         fragment,
         replaceable: input.replaceable,
         ...(input.scope ? { scope: input.scope } : {}),
+        ...(input.yielding ? { yielding: input.yielding } : {}),
       })
       if (!result.ok) {
         return {

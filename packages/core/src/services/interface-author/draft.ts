@@ -362,6 +362,14 @@ export interface ValidateFragmentInput {
    * hand-run check).
    */
   scope?: { screenId: string; address?: string }
+  /**
+   * Existing tasks of OTHER places whose sessions reconcile them later in the
+   * same run: the screens that render a shared component this session authors.
+   * A task of the draft with the same fingerprint as one of them is not refused
+   * — the component is where that task lives now — and the screen's session is
+   * the one held to retiring or amending its copy (a KEPT twin is refused).
+   */
+  yielding?: ReadonlySet<string>
 }
 
 /**
@@ -373,7 +381,10 @@ export interface ValidateFragmentInput {
  *
  *  1. an id names one thing — no collision with a derived or authored entry;
  *  2. a fingerprint names one thing — the same task authored twice is one task,
- *     and its second copy would double every scenario grounded on it;
+ *     and its second copy would double every scenario grounded on it. That
+ *     holds for a task the draft KEEPS too: an existing task of this screen
+ *     whose twin now lives elsewhere (a shared component took it over) has to
+ *     be retired or amended;
  *  3. a task is REACHABLE and says where it happens — `at`, or a first
  *     `navigate` step, and when both the address and the place are known they
  *     have to agree;
@@ -434,16 +445,15 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   // A web entry is indexed under its STORED key and under the key it would be
   // stamped with now: the two differ for every task authored before its place
   // declared its readables, and a duplicate must be caught under either.
+  const existing = [...(derived?.interfaces ?? []), ...(authored?.interfaces ?? [])]
+  const keysOf = (iface: Interface): string[] =>
+    iface.type === AUTHORED_SURFACE
+      ? [iface.fingerprint, resolvedInterfaceFingerprint(iface, iface.at ? drafted.get(iface.at) : undefined)]
+      : [iface.fingerprint]
   const twins = new Map<string, string>()
-  for (const iface of [...(derived?.interfaces ?? []), ...(authored?.interfaces ?? [])]) {
-    if (replaceable.has(iface.id)) continue
-    twins.set(iface.fingerprint, iface.id)
-    if (iface.type === AUTHORED_SURFACE) {
-      twins.set(
-        resolvedInterfaceFingerprint(iface, iface.at ? drafted.get(iface.at) : undefined),
-        iface.id,
-      )
-    }
+  for (const iface of existing) {
+    if (replaceable.has(iface.id) || input.yielding?.has(iface.id)) continue
+    for (const key of keysOf(iface)) twins.set(key, iface.id)
   }
   for (const task of stamped.interfaces) {
     const twin = twins.get(task.fingerprint)
@@ -453,6 +463,21 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
       )
     }
     twins.set(task.fingerprint, task.id)
+  }
+  const prior = input.replaceable ?? new Set<string>()
+  const elsewhere = new Map<string, string>()
+  for (const iface of existing) {
+    if (prior.has(iface.id)) continue
+    for (const key of keysOf(iface)) elsewhere.set(key, iface.id)
+  }
+  for (const iface of existing) {
+    if (!prior.has(iface.id) || replaceable.has(iface.id)) continue
+    const twin = keysOf(iface).map((key) => elsewhere.get(key)).find((id) => id !== undefined && id !== iface.id)
+    if (twin) {
+      errors.push(
+        `\`${iface.id}\` is kept, and it is the same task as \`${twin}\` — same entry, same steps. Retire it (or amend it) so one invocable thing is one entry.`,
+      )
+    }
   }
 
   // ---- 3. reachable, and located where it says -----------------------------

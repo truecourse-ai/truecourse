@@ -11,8 +11,9 @@
  * THE RULE, per screen:
  *
  *  - a ledger row is work again when the screen's input digest MOVED, or one
- *    of the source files its session was grounded on changed — whatever the
- *    row's status. A settled screen re-opened this way is RECONCILED against
+ *    of the source files its session was grounded on changed, or (when the
+ *    caller knows the current grounding) a file joined or left that set —
+ *    whatever the row's status. A settled screen re-opened this way is RECONCILED against
  *    the tasks it already has (kept, amended, retired), never re-invented;
  *  - otherwise it is not: a settled row stays settled, and a `failed` or
  *    `rejected` one waits for an explicit refresh. A provider that died costs
@@ -74,6 +75,16 @@ export interface WebScreenAuthoringInput {
    * are re-read against it. Absent ⇒ only the input digest is compared.
    */
   repoRoot?: string
+  /**
+   * The files each place is grounded on NOW (its route module and what it
+   * renders), when the caller derived them. With it (and `repoRoot`), a row is
+   * work again when the file SET it recorded differs from this one — a module
+   * moved into or out of the place's grounding, as when a component becomes
+   * shared and leaves every screen that rendered it — or a digest moved. A place
+   * the map does not name is grounded on nothing. Without it, only the files the
+   * row recorded are re-read.
+   */
+  grounding?: ReadonlyMap<string, readonly string[]>
 }
 
 /**
@@ -109,7 +120,8 @@ export function webScreenAuthoringStates(
       inputFingerprint,
       needsAuthoring: record
         ? record.inputFingerprint !== inputFingerprint ||
-          (input.repoRoot !== undefined && sourcesMoved(input.repoRoot, record.sources))
+          (input.repoRoot !== undefined &&
+            sourcesMoved(input.repoRoot, record.sources, input.grounding && (input.grounding.get(place.id) ?? [])))
         : // The old inference, for a screen written before the ledger: a screen
           // that carries a task and has every readable kind established is what
           // a settled session leaves behind, so it is not re-bought.
@@ -142,11 +154,21 @@ export function sourceDigests(repoRoot: string, files: readonly string[]): Recor
   return out
 }
 
-/** Whether any recorded source file reads differently now. No record moves nothing. */
-export function sourcesMoved(repoRoot: string, sources: Readonly<Record<string, string>> | undefined): boolean {
-  if (!sources) return false
-  const now = sourceDigests(repoRoot, Object.keys(sources))
-  return Object.entries(sources).some(([file, digest]) => now[file] !== digest)
+/**
+ * Whether a row's grounding moved: with `current` (the files the place is
+ * grounded on now), whether that set of files and their digests differs from
+ * the recorded one; without it, whether any recorded file reads differently
+ * now. No record against no current file moves nothing.
+ */
+export function sourcesMoved(
+  repoRoot: string,
+  sources: Readonly<Record<string, string>> | undefined,
+  current?: readonly string[],
+): boolean {
+  const recorded = sources ?? {}
+  const now = sourceDigests(repoRoot, current ?? Object.keys(recorded))
+  const files = Object.keys(now)
+  return files.length !== Object.keys(recorded).length || files.some((file) => recorded[file] !== now[file])
 }
 
 /** A row that never reached an accepted outcome — the two retryable words. */

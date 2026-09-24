@@ -2195,6 +2195,50 @@ describe('a shared component', () => {
     expect(third.seen.map(placeOf)).toEqual([SIDEBAR.id])
   })
 
+  it('re-opens a screen whose rendered component became shared, and moves the screen’s copy of its task to it', async () => {
+    // Before: the sidebar is part of Home's own grounding, and its task is Home's.
+    const unshared = new Map([['root', { ...grounding('src/Home.tsx'), renders: [SIDEBAR.module] }]])
+    const ownCopy = { ...COLLAPSE, id: 'web/collapse-sidebar-on-home', at: 'root' }
+    await authorWebInterfaces({
+      repoRoot: repo,
+      persistence: memoryPersistence().persistence,
+      context: unshared,
+      driver: scriptedDriver(async (place, input) => {
+        if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
+        const checked = await callTool(input, 'check_draft', { interfaces: [ownCopy] })
+        return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+      }).driver,
+    })
+    const [homeCopy] = readAuthoredFile().interfaces.map((task) => task.id)
+
+
+    // After: a second screen renders it, so it is shared and leaves Home's
+    // grounding. No file Home recorded changed, and Home re-opens all the same.
+    const refusals: string[] = []
+    const next = scriptedDriver(async (place, input) => {
+      if (place !== 'root') return script(place, input)
+      refusals.push(await callTool(input, 'check_draft', { interfaces: [], kept: [homeCopy] }))
+      const checked = await callTool(input, 'check_draft', {
+        interfaces: [],
+        retired: [{ id: homeCopy, reason: 'the sidebar is a shared place now' }],
+      })
+      return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+    })
+    const result = await authorWebInterfaces({
+      repoRoot: repo,
+      driver: next.driver,
+      persistence: memoryPersistence().persistence,
+      context: new Map([['root', grounding('src/Home.tsx')], [SIDEBAR.id, grounding(SIDEBAR.module)]]),
+      shared: { components: [SIDEBAR], rendered: new Map([['root', [SIDEBAR.id]]]) },
+    })
+    expect(next.seen.map(placeOf)).toEqual([SIDEBAR.id, 'root'])
+    // The component's first draft twins Home's copy, and is accepted: Home re-opens in this run.
+    expect(result.places.find((place) => place.placeId === SIDEBAR.id)!.status).toBe('authored')
+    // Home may not keep its twin of the component's task.
+    expect(refusals[0]).toContain(`\`${homeCopy}\` is kept, and it is the same task as`)
+    expect(readAuthoredFile().interfaces.map((task) => task.type === 'web' && task.at)).toEqual([SIDEBAR.id])
+  })
+
   it('earns no session once the grounding no longer finds it shared', async () => {
     await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
     fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return null }\n')

@@ -285,15 +285,23 @@ export interface AuthorWorkItem {
  * Whether a screen is WORK is the ledger's answer ({@link webScreenAuthoringStates}),
  * which is why the recipe contract is a parameter: it is one of the inputs each
  * screen's row settled over. With the working tree, a row whose recorded source
- * files changed is work too.
+ * files changed is work too, and with the current grounding, so is a row whose
+ * set of grounding files is not the one it recorded.
  */
 export function planWorkItems(
   derived: InterfacesFile | null,
   authored: InterfacesFile | null,
   recipeContract: string,
   repoRoot?: string,
+  grounding?: ReadonlyMap<string, readonly string[]>,
 ): AuthorWorkItem[] {
-  return webScreenAuthoringStates({ derived, authored, recipeContract, ...(repoRoot ? { repoRoot } : {}) }).map((state) => ({
+  return webScreenAuthoringStates({
+    derived,
+    authored,
+    recipeContract,
+    ...(repoRoot ? { repoRoot } : {}),
+    ...(grounding ? { grounding } : {}),
+  }).map((state) => ({
     place: state.place,
     existing: state.tasks,
     needsAuthoring: state.needsAuthoring,
@@ -335,7 +343,12 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   })
   if (registered) authored = registered.file
 
-  const all = planWorkItems(derived, authored, recipeContract, opts.repoRoot)
+  // The grounding as the context pass found it NOW, when it found any: a pass
+  // that could not run leaves every row to be judged by the files it recorded.
+  const grounding = opts.context && opts.context.size > 0
+    ? new Map([...opts.context].map(([placeId, context]) => [placeId, groundingFiles(context)]))
+    : undefined
+  const all = planWorkItems(derived, authored, recipeContract, opts.repoRoot, grounding)
 
   // THE STALE-PLACE RULE — a WORK-LIST rule, never a merge rule.
   // An authored screen the derivation no longer produces (in a repo whose
@@ -429,6 +442,20 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     return { screenId: item.place.id, ...(address ? { address } : {}) }
   }
 
+  // The screens this run re-opens, once the cache has served what it can: a
+  // shared component authored before them may take over a task one of them
+  // renders it with, and that screen's session retires or amends its copy.
+  let reopening: readonly AuthorWorkItem[] = []
+  /** The existing tasks a component's draft may twin: those of the re-opening screens that render it. */
+  const yieldingTo = (item: AuthorWorkItem): ReadonlySet<string> =>
+    new Set(
+      item.place.kind === 'component'
+        ? reopening
+            .filter((screen) => opts.shared?.rendered.get(screen.place.id)?.includes(item.place.id))
+            .flatMap((screen) => screen.existing)
+        : [],
+    )
+
   const results: PlaceResult[] = []
   const prepared = new Map<string, PreparedPlace['place']>()
   const spent = { turns: 0, tokens: 0, costUsd: 0 }
@@ -473,7 +500,16 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     briefedWith: InterfacesFile | null,
     carryUnaccounted: boolean,
   ): PreparedPlace => {
-    const result = preparePlace({ item, scope: scopeOf(item), fragment, derived, authored, briefedWith, carryUnaccounted })
+    const result = preparePlace({
+      item,
+      scope: scopeOf(item),
+      fragment,
+      derived,
+      authored,
+      briefedWith,
+      carryUnaccounted,
+      yielding: yieldingTo(item),
+    })
     if (result.candidate) {
       const before = new Map((authored?.interfaces ?? []).map((task) => [task.id, task]))
       for (const task of result.candidate.interfaces) {
@@ -537,6 +573,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const liveMisses = opts.openLive ? await serveCached(work, true) : [...work]
   const live = liveMisses.length > 0 ? await opts.openLive?.() : undefined
   const pending = live ? liveMisses : await serveCached(liveMisses, false)
+  reopening = pending.filter((item) => item.place.kind !== 'component')
 
   // THE FIRST LOOK, before any session starts: every pending screen whose
   // address has no slot is opened once, as the default principal, so its tree
@@ -610,6 +647,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
             get authored() { return authored },
             replaceable,
             scope: scopeOf(item),
+            yielding: yieldingTo(item),
             ...(live ? { live } : {}),
           }),
           validateOutcome(fragment) {
@@ -784,6 +822,8 @@ interface PrepareInput {
   briefedWith: InterfacesFile | null
   /** Keep an existing task the fragment never mentions instead of refusing it (a cached fragment). */
   carryUnaccounted: boolean
+  /** Other places' tasks the fragment may twin, their screens reconciling later in the run. */
+  yielding: ReadonlySet<string>
 }
 
 interface PreparedPlace {
@@ -826,6 +866,7 @@ function preparePlace(input: PrepareInput): PreparedPlace {
     replaceable: prior,
     carryUnaccounted: input.carryUnaccounted,
     scope: input.scope,
+    yielding: input.yielding,
   })
   if (!validation.ok) {
     // The loop returns these errors to the session before accepting its output.
