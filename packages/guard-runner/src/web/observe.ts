@@ -144,8 +144,8 @@ export interface LocatorReading {
  */
 export type LocatorProbeResult =
   | { ok: true; readings: LocatorReading[] }
-  /** `unreached` when the walk's address (or one it navigated to) was never reached: every load was sent elsewhere. */
-  | { ok: false; reason: string; readings?: LocatorReading[]; unreached?: true }
+  /** `unreached` names the address the walk never reached (its own, or one it navigated to): every load was sent elsewhere. */
+  | { ok: false; reason: string; readings?: LocatorReading[]; unreached?: string }
 
 export interface WebScreenObserver {
   /** The credential the pages are signed in with, by name; absent when anonymous. */
@@ -278,29 +278,29 @@ export async function probeLocator(
   const opened = await openAndActivate(page, baseUrl, { path: request.path })
   if (!opened.ok) return opened
   if (!opened.reachedBy) {
-    return { ok: false, reason: opened.problems[opened.problems.length - 1] ?? `${request.path} could not be reached`, unreached: true }
+    return { ok: false, reason: opened.problems[opened.problems.length - 1] ?? `${request.path} could not be reached`, unreached: request.path }
   }
   const readings: LocatorReading[] = []
   for (const step of request.steps) {
     const failed = await probeStep(page, baseUrl, step, readings)
-    if (failed) return { ok: false, reason: failed.reason, readings, ...(failed.unreached ? { unreached: true as const } : {}) }
+    if (failed) return { ok: false, reason: failed.reason, readings, ...(failed.unreached ? { unreached: failed.unreached } : {}) }
   }
   return { ok: true, readings }
 }
 
-/** Run one step of a probe's walk, pushing its reading; returns why it failed, if it did, and whether an address was never reached. */
+/** Run one step of a probe's walk, pushing its reading; returns why it failed, if it did, and the address it never reached. */
 async function probeStep(
   page: Page,
   baseUrl: string,
   step: LocatorProbeStep,
   readings: LocatorReading[],
-): Promise<{ reason: string; unreached?: true } | undefined> {
+): Promise<{ reason: string; unreached?: string } | undefined> {
   if ('navigate' in step) {
     const url = surfaceUrl(step.navigate, baseUrl)
     if (!url.ok) return { reason: url.reason }
     const opened = await openPage(page, url.url, baseUrl)
     if (!opened.ok) return { reason: opened.reason }
-    return opened.reached ? undefined : { reason: unreachedLine(step.navigate, opened.sentTo), unreached: true }
+    return opened.reached ? undefined : { reason: unreachedLine(step.navigate, opened.sentTo), unreached: step.navigate }
   }
   if ('resolve' in step) {
     const { resolve: locator } = step

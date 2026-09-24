@@ -105,6 +105,19 @@ describe('the record', () => {
     ])
   })
 
+  it('marks a readable no browser vouched for as unproven', () => {
+    const place = {
+      id: 'links',
+      kind: 'screen' as const,
+      title: '/links',
+      address: '/links',
+      readables: { rows: [{ within: { css: 'main .cards' }, item: 'generic' as const, template: '<title>', slots: [{ name: 'title', kind: 'text' as const }], why: 'plain divs', proven: false as const }] },
+    }
+    expect(nonCanonicalLocators({ ...DERIVED, resources: { web: [place] } })).toEqual([
+      { kind: 'readable', screen: 'links', place: 'links', readable: 'rows', index: 1, locator: { css: 'main .cards' }, why: 'plain divs', proven: false },
+    ])
+  })
+
   it('finds the screen of a task located by its entry address alone', () => {
     const located = { ...RENAME, at: undefined, entry: { method: 'GET', path: '/links' } }
     expect(nonCanonicalLocators({ ...DERIVED, interfaces: [located] }).map((row) => row.screen)).toEqual(['links', 'links'])

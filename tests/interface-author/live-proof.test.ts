@@ -367,7 +367,7 @@ describe('a screen no principal reaches', () => {
         },
         async probe(request) {
           probes.push(request)
-          return { ok: false, reason: `${request.path} could not be reached`, unreached: true }
+          return { ok: false, reason: `${request.path} could not be reached`, unreached: request.path }
         },
         async close() {},
       },
@@ -391,6 +391,28 @@ describe('a screen no principal reaches', () => {
     expect(anonymous.probes).toHaveLength(1)
     const draft = (result.artifact as { fragment: { interfaces: { steps: { proven?: false }[] }[] } }).fragment
     expect(draft.interfaces[0].steps[0].proven).toBe(false)
+  })
+
+  it('accepts a css readable written from source, stamped unproven, once every principal is sent away', async () => {
+    const { observer } = sentAwayObserver('webSession')
+    const tools = buildAuthorTools({
+      repoRoot: '/nowhere',
+      derived: DERIVED,
+      authored: null,
+      replaceable: new Set(),
+      scope: { screenId: 'links', address: '/links' },
+      live: { observer, principals: new Map([['webSession', observer], ['anonymous', sentAwayObserver().observer]]) },
+    })
+    const cards = { within: { css: 'main .cards' }, item: 'generic', template: '<title>', slots: [{ name: 'title', kind: 'text' }], why: 'plain divs, no list role' }
+    const marker = { marker: 'Links' }
+    const result = await tools.find((t) => t.name === 'check_draft')!.execute({
+      interfaces: [],
+      resources: [{ id: 'links', kind: 'screen', title: '/links', address: '/links', readables: { markers: [marker], elements: [], controls: [], rows: [cards] } }],
+    }, toolContext)
+    expect(result.isError, String(result.content)).toBeFalsy()
+    const draft = (result.artifact as { fragment: { resources: { readables: { markers: object[]; rows: { proven?: false }[] } }[] } }).fragment
+    expect(draft.resources[0].readables.rows[0].proven).toBe(false)
+    expect(draft.resources[0].readables.markers[0]).toEqual(marker)
   })
 
   it('is the only place a css step goes unproven: a session’s own `proven: false` is dropped and the proof runs', async () => {
@@ -423,6 +445,39 @@ describe('a task performed by another principal', () => {
     expect(result.isError, String(result.content)).toBeFalsy()
     expect(admin.probes).toHaveLength(1)
     expect(own.probes).toHaveLength(0)
+  })
+
+  /** An observer that reaches only the addresses `reaches` admits, on its first load and on every navigate of a walk. */
+  function routedObserver(principal: string | undefined, reaches: (path: string) => boolean): LiveScreenObserver {
+    return {
+      ...(principal ? { principal } : {}),
+      async observe() {
+        return { ok: false, reason: 'not used' }
+      },
+      async probe(request) {
+        const away = [request.path, ...request.steps.flatMap((step) => ('navigate' in step ? [step.navigate] : []))].find((path) => !reaches(path))
+        if (away) return { ok: false, reason: `${away} could not be reached`, unreached: away }
+        return { ok: true, readings: request.steps.filter((step) => 'resolve' in step).map(() => ({ matches: 1, visible: true })) }
+      },
+      async close() {},
+    }
+  }
+
+  it('asks who reaches the address a walk was sent away from, not the address it opened', async () => {
+    const own = routedObserver('webSession', (path) => path !== '/settings')
+    const admin = routedObserver('adminWebSession', () => true)
+    const check = checkAs({ webSession: own, adminWebSession: admin }, own)
+    const result = await check({ interfaces: [linksTask([{ kind: 'navigate', route: '/links' }, { kind: 'navigate', route: '/settings' }, sortStep])] })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('`/settings` is never reached as `webSession`, and is reached as `adminWebSession`')
+  })
+
+  it('names a signed-out browser as `anonymous` when it is the one sent away', async () => {
+    const own = routedObserver('webSession', () => true)
+    const signedOut = routedObserver(undefined, () => false)
+    const result = await checkAs({ webSession: own, anonymous: signedOut }, own)({ interfaces: [{ ...linksTask([sortStep]), principal: 'anonymous' }] })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('is never reached as `anonymous`, and is reached as `webSession`')
   })
 
   it('is refused when it names a principal the run cannot observe as', async () => {

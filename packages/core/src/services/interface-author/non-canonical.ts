@@ -53,6 +53,8 @@ export type NonCanonicalLocator =
       id?: string
       locator: GuardWebLocator
       why: string
+      /** Set when no browser vouched for the selector: it was written from source on a screen no principal reaches. */
+      proven?: false
     }
 
 /**
@@ -93,6 +95,7 @@ export function nonCanonicalLocators(catalog: InterfacesFile | null): NonCanonic
         ...(readable.id ? { id: readable.id } : {}),
         locator: readable.locator,
         why: readable.why ?? '',
+        ...(readable.proven === false ? { proven: false as const } : {}),
       }))
   })
   return [...steps, ...readables]

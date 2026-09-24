@@ -151,10 +151,11 @@ export function describeInterfaceTarget(target: InterfaceTarget): string {
 export const ANONYMOUS_PRINCIPAL = 'anonymous'
 
 /**
- * Set on a NON-CANONICAL step whose locator could not be proven live, because no
- * principal the run can sign in as reaches its screen: the selector was written
- * from source. Stamped by the authoring check, never by a session, and listed in
- * the non-canonical record so a reader knows which selectors no browser vouched for.
+ * Set on a NON-CANONICAL step or readable whose locator could not be proven
+ * live, because no principal the run can sign in as reaches its screen: the
+ * selector was written from source. Stamped by the authoring check, never by a
+ * session, and listed in the non-canonical record so a reader knows which
+ * selectors no browser vouched for.
  */
 const proven = z.literal(false).optional()
 
@@ -1239,6 +1240,7 @@ export const InterfaceMarkerReadableSchema = z
     /** The one condition it appears under. */
     when: z.string().min(1).optional(),
     why: readableWhy,
+    proven,
   })
   .strict()
 export type InterfaceMarkerReadable = z.infer<typeof InterfaceMarkerReadableSchema>
@@ -1258,6 +1260,7 @@ export const InterfaceElementReadableSchema = z
     element: GuardWebLocatorSchema,
     when: z.string().min(1).optional(),
     why: readableWhy,
+    proven,
   })
   .strict()
 export type InterfaceElementReadable = z.infer<typeof InterfaceElementReadableSchema>
@@ -1282,6 +1285,7 @@ export const InterfaceControlReadableSchema = z
     states: z.array(z.enum(GUARD_WEB_STATES)).min(1),
     when: z.string().min(1).optional(),
     why: readableWhy,
+    proven,
   })
   .strict()
   .refine((fact) => new Set(fact.states).size === fact.states.length, {
@@ -1319,6 +1323,7 @@ export const InterfaceRowsReadableSchema = z
     /** The one condition the items appear under. */
     when: z.string().min(1).optional(),
     why: readableWhy,
+    proven,
   })
   .strict()
   .superRefine(rowGrammarIssues)
@@ -1444,6 +1449,8 @@ export interface InterfaceReadableLocator {
   id?: string
   locator: GuardWebLocator
   why?: string
+  /** Set when no browser vouched for its `css` ({@link proven}). */
+  proven?: false
 }
 
 /**
@@ -1453,8 +1460,10 @@ export interface InterfaceReadableLocator {
  */
 export function readableLocators(place: { readables?: InterfaceReadables }): InterfaceReadableLocator[] {
   const readables = place.readables
-  const entry = (kind: InterfaceReadableKind, index: number, fact: { id?: string; why?: string }, locator: GuardWebLocator | undefined): InterfaceReadableLocator[] =>
-    locator ? [{ kind, index, ...(fact.id ? { id: fact.id } : {}), locator, ...(fact.why ? { why: fact.why } : {}) }] : []
+  const entry = (kind: InterfaceReadableKind, index: number, fact: { id?: string; why?: string; proven?: false }, locator: GuardWebLocator | undefined): InterfaceReadableLocator[] =>
+    locator
+      ? [{ kind, index, ...(fact.id ? { id: fact.id } : {}), locator, ...(fact.why ? { why: fact.why } : {}), ...(fact.proven === false ? { proven: false as const } : {}) }]
+      : []
   return [
     ...(readables?.markers ?? []).flatMap((fact, i) => entry('markers', i, fact, fact.within)),
     ...(readables?.elements ?? []).flatMap((fact, i) => entry('elements', i, fact, fact.element)),

@@ -2278,7 +2278,7 @@ describe('the principal a screen is observed as', () => {
     async probe({ path }: { path: string }) {
       return reaches(path)
         ? { ok: true as const, readings: [{ matches: 1, visible: true }] }
-        : { ok: false as const, reason: `${path} could not be reached`, unreached: true as const }
+        : { ok: false as const, reason: `${path} could not be reached`, unreached: path }
     },
     async close() {},
   })

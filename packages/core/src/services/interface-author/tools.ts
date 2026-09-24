@@ -37,7 +37,15 @@
 
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
-import { interfaceStepLocator, isNonCanonicalLocator, isTargetedStep, type InterfacesFile } from '@truecourse/shared'
+import {
+  interfaceStepLocator,
+  isNonCanonicalLocator,
+  isTargetedStep,
+  readableLocators,
+  type InterfaceReadableKind,
+  type InterfaceResource,
+  type InterfacesFile,
+} from '@truecourse/shared'
 import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js'
 import { liveAuthorCatalog } from './catalog-context.js'
 import {
@@ -236,10 +244,8 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
       }
       const proven = { ...reach, ...proof }
       const tasks = await proveLocators(piece.interfaces, input.live, proven, reaching)
-      const problems = [
-        ...tasks.problems,
-        ...(await proveReadables(piece.resources ?? [], input.live, proven, input.scope?.address, reaching)),
-      ]
+      const readables = await proveReadables(piece.resources ?? [], input.live, proven, input.scope?.address, reaching)
+      const problems = [...tasks.problems, ...readables.problems]
       if (problems.length > 0) {
         return {
           content: `${problems.length} locator(s) did not hold on the live screen — nothing in this call was accepted, and the draft still holds ${
@@ -249,10 +255,10 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
         }
       }
       reach = proven
-      // A task whose address no principal reaches had nothing to be proven on:
-      // its css, written from source, is kept and stamped unproven.
-      accepted = tasks.unproven.size > 0
-        ? collapseAuthoredIds(scopeFragmentIds(foldAuthoredFragment(accepted, stampUnproven(piece, tasks.unproven)), input))
+      // A task or a place whose address no principal reaches had nothing to be
+      // proven on: its css, written from source, is kept and stamped unproven.
+      accepted = tasks.unproven.size > 0 || readables.unproven.size > 0
+        ? collapseAuthoredIds(scopeFragmentIds(foldAuthoredFragment(accepted, stampUnproven(piece, tasks.unproven, readables.unproven)), input))
         : fragment
       const artifact = checkedDraftEvidence(accepted)
       return {
@@ -283,15 +289,16 @@ function withoutProvenWords(piece: AuthoredFragment): AuthoredFragment {
         return rest
       }),
     })),
+    ...(piece.resources ? { resources: piece.resources.map((place) => withReadablesProven(place, false)) } : {}),
   }
 }
 
-/** Every `css` step of the tasks `ids` names, stamped `proven: false`. */
-function stampUnproven(piece: AuthoredFragment, ids: ReadonlySet<string>): AuthoredFragment {
+/** Every `css` step of the tasks `tasks` names, and every `css` readable of the places `places` names, stamped `proven: false`. */
+function stampUnproven(piece: AuthoredFragment, tasks: ReadonlySet<string>, places: ReadonlySet<string>): AuthoredFragment {
   return {
     ...piece,
     interfaces: piece.interfaces.map((task) =>
-      ids.has(task.id)
+      tasks.has(task.id)
         ? {
             ...task,
             steps: task.steps.map((step) =>
@@ -300,6 +307,35 @@ function stampUnproven(piece: AuthoredFragment, ids: ReadonlySet<string>): Autho
           }
         : task,
     ),
+    ...(piece.resources
+      ? { resources: piece.resources.map((place) => (places.has(place.id) ? withReadablesProven(place, true) : place)) }
+      : {}),
+  }
+}
+
+/**
+ * A place with its readables' `proven` words replaced: every `css` fact stamped
+ * `false` when `unproven`, and every word dropped otherwise.
+ */
+function withReadablesProven(place: InterfaceResource, unproven: boolean): InterfaceResource {
+  const { readables } = place
+  if (!readables) return place
+  const css = new Set(
+    readableLocators(place)
+      .filter((readable) => isNonCanonicalLocator(readable.locator))
+      .map((readable) => `${readable.kind}/${readable.index}`),
+  )
+  const word = (kind: InterfaceReadableKind, index: number) =>
+    unproven && css.has(`${kind}/${index}`) ? { proven: false as const } : {}
+  return {
+    ...place,
+    readables: {
+      ...readables,
+      ...(readables.markers ? { markers: readables.markers.map(({ proven: _, ...fact }, i) => ({ ...fact, ...word('markers', i) })) } : {}),
+      ...(readables.elements ? { elements: readables.elements.map(({ proven: _, ...fact }, i) => ({ ...fact, ...word('elements', i) })) } : {}),
+      ...(readables.controls ? { controls: readables.controls.map(({ proven: _, ...fact }, i) => ({ ...fact, ...word('controls', i) })) } : {}),
+      ...(readables.rows ? { rows: readables.rows.map(({ proven: _, ...fact }, i) => ({ ...fact, ...word('rows', i) })) } : {}),
+    },
   }
 }
 

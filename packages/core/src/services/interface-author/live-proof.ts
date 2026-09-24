@@ -23,12 +23,14 @@
  * A task is proven as its own principal, a place's readables as the principal
  * its `proof` entry names (the default otherwise). A walk whose address that
  * principal never reaches asks which principals do: when some do, the problem
- * names them; when none does, there is nothing to prove on, and the task's
- * `css` is accepted UNPROVEN (its steps stamped `proven: false` by the caller).
+ * names them; when none does, there is nothing to prove on, and the task's (or
+ * the place's) `css` is accepted UNPROVEN (stamped `proven: false` by the
+ * caller).
  */
 
 import { z } from 'zod'
 import {
+  ANONYMOUS_PRINCIPAL,
   GuardWebKeySchema,
   GuardWebLocatorSchema,
   describeWebLocator,
@@ -42,7 +44,7 @@ import {
 } from '@truecourse/shared'
 import { addressFillsTemplate, hasAddressSlot, type LocatorProbeStep, type LocatorReading } from '@truecourse/guard-runner'
 import type { AuthoredTask } from './draft.js'
-import { observerFor, type LiveScreens } from './live-screen.js'
+import { observerFor, type LiveScreenObserver, type LiveScreens } from './live-screen.js'
 
 /** How many actions a proof may be told to take. */
 const MAX_PROOF_STEPS = 10
@@ -148,9 +150,9 @@ export async function proveLocators(
     const observer = observerFor(live, task.principal) ?? live.observer
     const probed = await observer.probe({ path: plan.path, steps: plan.steps })
     if (!probed.ok && probed.unreached) {
-      const reachers = await reaching(plan.path)
+      const reachers = await reaching(probed.unreached)
       if (reachers.length === 0) unproven.add(task.id)
-      else problems.push(sentAway(`\`${task.id}\``, plan.path, observer.principal, reachers, `give the task \`principal: "<name>"\` for the one that performs it`))
+      else problems.push(sentAway(`\`${task.id}\``, probed.unreached, principalOf(observer), reachers, `give the task \`principal: "<name>"\` for the one that performs it`))
       continue
     }
     plan.resolves.forEach(({ target, at }, i) => {
@@ -167,15 +169,21 @@ export async function proveLocators(
 }
 
 /** The problem of a proof whose principal was sent away from an address others reach. */
-function sentAway(what: string, path: string, principal: string | undefined, reachers: readonly string[], fix: string): string {
-  return `${what} could not be proven: \`${path}\` is never reached as \`${principal ?? 'the default principal'}\`, and is reached as ${reachers.map((name) => `\`${name}\``).join(', ')} — ${fix}`
+function sentAway(what: string, path: string, principal: string, reachers: readonly string[], fix: string): string {
+  return `${what} could not be proven: \`${path}\` is never reached as \`${principal}\`, and is reached as ${reachers.map((name) => `\`${name}\``).join(', ')} — ${fix}`
+}
+
+/** The principal an observer is signed in as, by name: a browser with no credential is `anonymous`. */
+function principalOf(observer: LiveScreenObserver): string {
+  return observer.principal ?? ANONYMOUS_PRINCIPAL
 }
 
 /**
  * Prove every readable locator of `places` that owes a proof, on `live` when the
  * run has it, at `address` — the screen the session authors — as the principal
- * the place's `proof` entry names. Returns one line per problem; an empty list
- * means every one held, or that no principal reaches the address.
+ * the place's `proof` entry names. Empty problems mean every one held; the
+ * places whose address no principal reaches are `unproven`, their `css`
+ * readables accepted as written from source.
  */
 export async function proveReadables(
   places: readonly InterfaceResource[],
@@ -183,8 +191,9 @@ export async function proveReadables(
   reach: LiveProofReach,
   address: string | undefined,
   reaching: PrincipalsReaching,
-): Promise<string[]> {
+): Promise<LiveProofResult> {
   const problems: string[] = []
+  const unproven = new Set<string>()
   for (const place of places) {
     const owed = readableLocators(place).filter((readable) => owesProof(readable.locator))
     if (owed.length === 0) continue
@@ -225,10 +234,9 @@ export async function proveReadables(
       steps: [...actions, ...owed.map((readable) => ({ resolve: readable.locator }))],
     })
     if (!probed.ok && probed.unreached) {
-      const reachers = await reaching(path)
-      if (reachers.length > 0) {
-        problems.push(sentAway(`\`${place.id}\`'s readables`, path, observer.principal, reachers, `pass \`proof: {"${place.id}": {"principal": "<name>"}}\` for the one that sees them`))
-      }
+      const reachers = await reaching(probed.unreached)
+      if (reachers.length === 0) unproven.add(place.id)
+      else problems.push(sentAway(`\`${place.id}\`'s readables`, probed.unreached, principalOf(observer), reachers, `pass \`proof: {"${place.id}": {"principal": "<name>"}}\` for the one that sees them`))
       continue
     }
     owed.forEach((readable, i) => {
@@ -249,7 +257,7 @@ export async function proveReadables(
       }
     })
   }
-  return problems
+  return { problems, unproven }
 }
 
 /**

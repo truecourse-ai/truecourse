@@ -19,7 +19,7 @@ function observer(principal: string | undefined, reaches: (path: string) => bool
     },
     async probe({ path }): Promise<LocatorProbeResult> {
       seen.push(`${principal ?? 'nobody'} ${path}`)
-      return reaches(path) ? { ok: true, readings: [] } : { ok: false, reason: `${path} could not be reached`, unreached: true }
+      return reaches(path) ? { ok: true, readings: [] } : { ok: false, reason: `${path} could not be reached`, unreached: path }
     },
     async close() {},
   }
