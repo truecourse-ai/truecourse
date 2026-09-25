@@ -575,6 +575,54 @@ describe('the pull request check', () => {
     expect(await jobTypes()).toEqual(['repo.pr-check']);
   });
 
+  it('annotates the side of a conflict the pull request changed, when both are the repository’s own', async () => {
+    await storeBase();
+    await context.createSource(ORG, {
+      id: SOURCE,
+      kind: 'repository',
+      title: REPO,
+      config: { repoFullName: REPO, installationId: 5, include: ['docs/**'], exclude: [], branch: 'main' },
+    });
+    changedFiles = ['docs/orgs.md'];
+    const other = `context/${SOURCE}/docs/other.md`;
+    const orgs = `context/${SOURCE}/docs/orgs.md`;
+    engines.scan = async () =>
+      ({
+        corpus: {
+          version: 3,
+          generatedAt: '',
+          docs: [other, orgs].map((ref) => ({ ref, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE })),
+          areas: [
+            {
+              id: 'p/c',
+              product: 'p',
+              concern: 'c',
+              docRefs: [other, orgs],
+              // The unchanged document is the conflict's first side.
+              overlaps: [
+                {
+                  docs: [other, orgs],
+                  note: 'one org vs many',
+                  sections: [
+                    { doc: other, heading: 'Limits', quote: 'Only one org.' },
+                    { doc: orgs, heading: 'Orgs', quote: 'An org can be created.' },
+                  ],
+                  areas: [],
+                },
+              ],
+            },
+          ],
+          skippedDocs: [],
+        },
+      }) as never;
+
+    const settled = await check();
+    expect(settled.report?.conflictsCreated).toMatchObject([{ docs: [orgs, other], path: 'docs/orgs.md', line: 1 }]);
+    expect((lastGithubUpdate()!.output as { annotations: { path: string }[] }).annotations.map((a) => a.path)).toEqual([
+      'docs/orgs.md',
+    ]);
+  });
+
   it('skips the scan when the head changed nothing in the source’s scope', async () => {
     await storeBase();
     await context.createSource(ORG, {

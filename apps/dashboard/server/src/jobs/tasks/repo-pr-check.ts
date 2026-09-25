@@ -237,7 +237,7 @@ export function createRepoPullRequestCheckTask(
           const repos = await workspaceRepositories(workspaceOrgId);
           const report = emptyReport({
             specHalf: spec.half,
-            conflictsCreated: created.map((c) => reportConflict(c, spec.source, spec.documents, repos)),
+            conflictsCreated: created.map((c) => reportConflict(c, spec, repos)),
             repositoriesAffected: spec.corpus
               ? repos
                   .filter((r) => r.repoFullName !== repoFullName && sliceChanged(defaultCorpus, spec.corpus!, r.sourceIds))
@@ -390,7 +390,8 @@ interface HeadScan {
   source: { id: string; config: RepositorySourceConfig } | null;
   /** The head's documents of that source, by path. */
   documents: Map<string, string>;
-  changed: number;
+  /** The documents of that source the pull request changed, by path at the head. */
+  changed: Set<string>;
 }
 
 /**
@@ -412,7 +413,7 @@ async function scanHead(input: {
     sourceId: string,
   ) => Promise<{ corpus: CuratedCorpus }>;
 }): Promise<HeadScan> {
-  const none: HeadScan = { half: 'not-a-source', corpus: null, source: null, documents: new Map(), changed: 0 };
+  const none: HeadScan = { half: 'not-a-source', corpus: null, source: null, documents: new Map(), changed: new Set() };
   const source = await repositoryContextSource(input.workspaceOrgId, input.pr.repoFullName);
   if (!source) return none;
   const config = source.config as RepositorySourceConfig;
@@ -429,15 +430,19 @@ async function scanHead(input: {
     pull_number: input.pr.number,
     per_page: 100,
   });
-  const changed = files.filter(
-    (f) =>
-      headPaths.has(f.filename) ||
-      ledgerPaths.has(f.filename) ||
-      (f.previous_filename !== undefined && ledgerPaths.has(f.previous_filename)),
-  ).length;
+  const changed = new Set(
+    files
+      .filter(
+        (f) =>
+          headPaths.has(f.filename) ||
+          ledgerPaths.has(f.filename) ||
+          (f.previous_filename !== undefined && ledgerPaths.has(f.previous_filename)),
+      )
+      .map((f) => f.filename),
+  );
   const bodies = new Map(documents.map((d) => [d.docPath, d.body]));
   const sourceOf = { id: source.id, config };
-  if (changed === 0) return { ...none, half: 'no-documents-changed', source: sourceOf, documents: bodies };
+  if (changed.size === 0) return { ...none, half: 'no-documents-changed', source: sourceOf, documents: bodies };
 
   const { corpus } = await input.run(documents, source.id);
   return { half: 'ran', corpus, source: sourceOf, documents: bodies, changed };
@@ -446,20 +451,22 @@ async function scanHead(input: {
 /**
  * One created conflict as the report carries it: the doc pair with each
  * side's section anchors — this repository's own document first when one
- * side is one, with its path and its heading's line at the head — and the
- * repositories whose slices read either side.
+ * side is one (the one the pull request changed, when both are), with its
+ * path and its heading's line at the head, which is where the check's
+ * annotation goes — and the repositories whose slices read either side.
  */
 function reportConflict(
   conflict: CorpusConflict,
-  source: HeadScan['source'],
-  documents: ReadonlyMap<string, string>,
+  scan: Pick<HeadScan, 'source' | 'documents' | 'changed'>,
   repos: readonly { repoFullName: string; sourceIds: string[] }[],
 ): PullRequestCheckReport['conflictsCreated'][number] {
+  const { source, documents } = scan;
   const headings = (doc: string): string[] =>
     (conflict.sections ?? []).filter((s) => s.doc === doc && s.heading !== null).map((s) => s.heading!);
-  const own = [conflict.a, conflict.b]
+  const ownSides = [conflict.a, conflict.b]
     .map((doc) => ({ doc, parsed: parseContextDocRef(doc) }))
-    .find(({ parsed }) => parsed !== null && source !== null && parsed.sourceId === source.id);
+    .filter(({ parsed }) => parsed !== null && source !== null && parsed.sourceId === source.id);
+  const own = ownSides.find(({ parsed }) => scan.changed.has(parsed!.docPath)) ?? ownSides[0];
   const docs: [string, string] =
     own?.doc === conflict.b ? [conflict.b, conflict.a] : [conflict.a, conflict.b];
   const path = own?.parsed?.docPath ?? null;
