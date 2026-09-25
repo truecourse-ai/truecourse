@@ -44,6 +44,9 @@ export const RunStatusSchema = z.enum([
   'failed',
   'interrupted',
   'paused',
+  // Stopped on purpose (a newer commit superseded it, a pull request closed, a
+  // repository disconnected); `interrupted` is the process dying under it.
+  'cancelled',
 ]);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 

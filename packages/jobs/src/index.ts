@@ -318,9 +318,11 @@ export {
 export {
   cancelLocalJob,
   isJobRunningLocally,
+  JobCancelled,
   registerJob,
   startWorker,
   stepBridge,
+  wasCancelled,
   type JobHelperSignals,
   type JobTask,
   type StartWorker,

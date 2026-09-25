@@ -100,6 +100,23 @@ export function registerJob<M>(
 }
 
 /**
+ * The reason a job's signal carries when someone CANCELLED it (a supersede, a
+ * close, a disconnect, a user's stop), as opposed to the process shutting down
+ * under it. A body that records how it ended reads it through {@link wasCancelled}.
+ */
+export class JobCancelled extends Error {
+  constructor() {
+    super('the job was cancelled');
+    this.name = 'JobCancelled';
+  }
+}
+
+/** Whether `signal` was aborted by a cancel, rather than by the process shutting down. */
+export function wasCancelled(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true && signal.reason instanceof JobCancelled;
+}
+
+/**
  * Stop a job running in THIS process and wait for it to unwind. Returns false
  * when the job isn't running here (another replica has it, or it never started)
  * — the caller decides what that means. The wait is bounded: a body that
@@ -108,7 +125,7 @@ export function registerJob<M>(
 export async function cancelLocalJob(jobId: string, timeoutMs = 30_000): Promise<boolean> {
   const entry = localRuns.get(jobId);
   if (!entry) return false;
-  entry.controller.abort();
+  entry.controller.abort(new JobCancelled());
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, timeoutMs);

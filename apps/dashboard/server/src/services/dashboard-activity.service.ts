@@ -8,7 +8,7 @@ import {
 } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
 import { isCreditsExhausted } from '@truecourse/core/lib/credits-store';
-import type { JobContext } from '@truecourse/jobs';
+import { wasCancelled, type JobContext } from '@truecourse/jobs';
 import { mirrorTracker, type OnboardingJobPayload } from '../jobs/tasks/onboarding.js';
 import type { StepTracker } from '@truecourse/core/progress';
 
@@ -50,14 +50,14 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
     tracker.start('clone');
     const result = await execute(run, tracker);
     credits?.assertCredits();
-    run.finish(ctx.signal?.aborted ? 'interrupted' : run.record().error ? 'failed' : 'completed');
+    run.finish(ctx.signal?.aborted ? stopped(ctx.signal) : run.record().error ? 'failed' : 'completed');
     await run.flush?.();
     return result;
   } catch (thrown) {
     const error = reasonFor(thrown, credits);
     const paused = isCreditsExhausted(error);
     const message = error instanceof Error ? error.message : String(error);
-    run.finish(paused ? 'paused' : ctx.signal?.aborted ? 'interrupted' : 'failed', {
+    run.finish(paused ? 'paused' : ctx.signal?.aborted ? stopped(ctx.signal) : 'failed', {
       error: { message, ...(paused ? { kind: 'credits' } : {}) },
     });
     await run.flush?.();
@@ -97,4 +97,9 @@ function reasonFor(thrown: unknown, credits: CreditsGate | undefined): unknown {
   } catch (exhausted) {
     return exhausted;
   }
+}
+
+/** How a run whose signal was aborted ended: cancelled on purpose, or cut off by the process shutting down. */
+function stopped(signal: AbortSignal): 'cancelled' | 'interrupted' {
+  return wasCancelled(signal) ? 'cancelled' : 'interrupted';
 }

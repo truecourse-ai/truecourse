@@ -693,6 +693,9 @@ describe('the pull request check', () => {
     await drain();
     expect(await new JobStore(db).listActive(ORG)).toEqual([]);
     expect(await jobTypes()).toEqual(['repo.pr-check', 'repo.guard-setup']);
+    // Stopped on purpose, which its record says: not the process dying under it.
+    const [stopped] = await listStoredSessionRuns(REPO, 'guard-setup');
+    expect(stopped?.status).toBe('cancelled');
   });
 
   it('a pull request’s running setup does not refuse the main chain a push starts', async () => {
