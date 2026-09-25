@@ -7,7 +7,9 @@
  * distinct (the seed's own description of it), reads the screen's source, and
  * names the principal it observes as (`observe_screen`) and the one each task
  * runs as (`principal` on the task). The engine chooses nothing: every screen's
- * first look is taken as the DEFAULT principal, the owner of the seeded data.
+ * first look is taken as the DEFAULT principal, the owner of the seeded data,
+ * and a task the session leaves unnamed is recorded as that principal, the one
+ * its proof ran as.
  *
  * The one fact the engine settles itself is whether an address is reachable at
  * all: a proof sent away from its address asks every principal, each opening

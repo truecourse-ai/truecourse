@@ -513,6 +513,28 @@ describe('a task performed by another principal', () => {
     }
   })
 
+  // The session omits the principal for the default one; the engine records
+  // whom the task was proven as, so generation signs in as that principal.
+  it('is recorded as the default principal when the task names none', async () => {
+    const own = routedObserver('webSession', () => true)
+    const check = checkAs({ webSession: own, anonymous: routedObserver(undefined, () => true) }, own)
+    const result = await check({ interfaces: [linksTask([sortStep]), { ...linksTask([{ ...sortStep, target: { css: 'main a.sign-in' } }]), id: 'web/sort-signed-out', principal: 'anonymous' }] })
+    expect(result.isError, String(result.content)).toBeFalsy()
+    const tasks = (result.artifact as { fragment: { interfaces: { id: string; principal?: string }[] } }).fragment.interfaces
+    expect(tasks.map((task) => [task.id, task.principal])).toEqual([
+      ['web/sort-links', 'webSession'],
+      ['web/sort-signed-out', 'anonymous'],
+    ])
+  })
+
+  it('stays unnamed when the run could sign in as nobody', async () => {
+    const signedOut = routedObserver('anonymous', () => true)
+    const result = await checkAs({ anonymous: signedOut }, signedOut)({ interfaces: [linksTask([sortStep])] })
+    expect(result.isError, String(result.content)).toBeFalsy()
+    const [task] = (result.artifact as { fragment: { interfaces: { principal?: string }[] } }).fragment.interfaces
+    expect(task?.principal).toBeUndefined()
+  })
+
   it('is refused when it names a principal the run cannot observe as', async () => {
     const own = probingObserver({ matches: 1, visible: true })
     const result = await checkAs({ anonymous: own.observer }, own.observer)({ interfaces: [{ ...linksTask([sortStep]), principal: 'rootSession' }] })

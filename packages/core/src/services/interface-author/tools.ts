@@ -51,6 +51,7 @@ import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js'
 import { liveAuthorCatalog } from './catalog-context.js'
 import {
   AuthoredFragmentSchema,
+  AuthoredTaskSchema,
   EMPTY_FRAGMENT,
   collapseAuthoredIds,
   foldAuthoredFragment,
@@ -218,7 +219,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
     destructive: false,
     inputSchema: AuthoredFragmentSchema.extend({ proof: LiveProofReachSchema.optional() }),
     async execute({ proof, ...sent }) {
-      const piece = withoutProvenWords(sent)
+      const piece = withObservedPrincipal(withoutProvenWords(sent), input.live)
       const unknownPrincipals = unknownPrincipalProblems(piece.interfaces, input)
       if (unknownPrincipals.length > 0) {
         return {
@@ -277,6 +278,23 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
       }
     },
   })
+}
+
+/**
+ * The piece with every task that names no principal recorded as the one the
+ * run observes and proves as by default, when that is a seeded principal: the
+ * session omits it for the default, and generation signs a scenario in as
+ * whoever the catalog names. A run that could sign in as nobody names no one.
+ */
+function withObservedPrincipal(piece: AuthoredFragment, live: LiveScreens | undefined): AuthoredFragment {
+  const own = live?.observer.principal
+  if (own === undefined || own === ANONYMOUS_PRINCIPAL) return piece
+  // Parsed back so the key sits where the schema puts it: a checked draft's id
+  // is a digest of its JSON, and the outcome resolves it from the parsed copy.
+  return {
+    ...piece,
+    interfaces: piece.interfaces.map((task) => (task.principal === undefined ? AuthoredTaskSchema.parse({ ...task, principal: own }) : task)),
+  }
 }
 
 /** The piece with every `proven` the session wrote dropped: it is the check's word, never the session's. */

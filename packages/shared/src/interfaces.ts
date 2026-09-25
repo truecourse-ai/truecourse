@@ -1604,8 +1604,9 @@ export const InterfaceSchema = z
      * principal: the NAME of a seeded credential, chosen by the authoring
      * session from its description, or {@link ANONYMOUS_PRINCIPAL} for a task
      * done signed out (a login form, a password reset). A scenario of the task starts from that session — a
-     * `credential` step naming it, or no credential at all. Absent ⇒ the default
-     * principal. Never fingerprinted: who performs a task is not WHICH task it is.
+     * `credential` step naming it, or no credential at all. A task authored
+     * beside a live world always names one (the default principal's name when
+     * the session named none); absent ⇒ the default principal. Never fingerprinted: who performs a task is not WHICH task it is.
      */
     principal: z.string().min(1).optional(),
     /**

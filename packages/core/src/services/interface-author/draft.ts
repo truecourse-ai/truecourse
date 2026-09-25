@@ -101,8 +101,9 @@ export const AuthoredTaskSchema = z
     at: InterfaceResourceIdSchema.optional(),
     to: InterfaceResourceIdSchema.optional(),
     /**
-     * Who performs it, when not the default principal: a seeded credential's
-     * name, or `anonymous` for a task done signed out.
+     * Who performs it: a seeded credential's name, or `anonymous` for a task
+     * done signed out. The session omits it for the default principal, and
+     * `check_draft` records the default's name in its place on a live world.
      */
     principal: z.string().min(1).optional(),
     /** Api interface ids this task's steps reach, `[]` when it reaches none. */

@@ -2341,5 +2341,6 @@ describe('the principal a screen is observed as', () => {
     await authorWebInterfaces({ repoRoot: repo, driver, persistence: memoryPersistence().persistence, openLive: async () => ({ observer: owner }) })
     const [task] = readAuthoredFile().interfaces
     expect(task.steps[0]).toMatchObject({ proven: false })
+    expect(task.principal).toBe('webSession')
   })
 })
