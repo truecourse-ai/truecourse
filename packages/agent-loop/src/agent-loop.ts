@@ -94,6 +94,14 @@ export interface AgentLoopInput<TOutcome> {
    */
   stallTimeoutMs?: number;
   timeoutMs?: number;
+  /**
+   * A THIRD clock, for sessions whose tools run for minutes: the model may go
+   * this long without a journal event (a finished turn, a tool call's result,
+   * a retry) while no tool is running. It pauses while a tool executes and is
+   * re-armed when the tool returns, so a long build never trips it, and a
+   * turn that thinks without end does. Its stop is recorded like the others.
+   */
+  turnTimeoutMs?: number;
   /** Clock + id mint, injectable for tests. */
   now?: () => string;
   mintSessionId?: () => string;
@@ -271,10 +279,16 @@ function startSession<TOutcome>(
   let ceilingTimer: ReturnType<typeof setTimeout> | undefined;
   let rearmStall: () => void = () => {};
   const disarmStall = (): void => clearTimeout(stallTimer);
+  // The turn clock (see `turnTimeoutMs`): armed while the model, not a tool, holds the session.
+  let turnTimer: ReturnType<typeof setTimeout> | undefined;
+  let toolsRunning = 0;
+  let rearmTurn: () => void = () => {};
+  const disarmTurn = (): void => clearTimeout(turnTimer);
 
   const track = (body: SessionEventBody & { raw?: RawPayload }): void => {
     append(body);
     rearmStall();
+    if (toolsRunning === 0) rearmTurn();
     switch (body.type) {
       case 'assistant-turn': {
         turns += 1;
@@ -403,6 +417,16 @@ function startSession<TOutcome>(
       const ceilingMs = input.timeoutMs;
       ceilingTimer = setTimeout(() => stopFor(`timed out after ${ceilingMs}ms`), ceilingMs);
     }
+    const turnMs = input.turnTimeoutMs;
+    if (turnMs) {
+      rearmTurn = () => {
+        clearTimeout(turnTimer);
+        turnTimer = setTimeout(
+          () => stopFor(`a turn ran ${turnMs}ms without finishing or calling a tool`),
+          turnMs,
+        );
+      };
+    }
 
     // The shell validates args against each tool's input schema before its
     // `execute` runs, in either driver, and owns the ToolContext (drivers
@@ -467,7 +491,15 @@ function startSession<TOutcome>(
       async execute(args) {
         const parsed = tool.inputSchema.safeParse(args);
         if (!parsed.success) throw new SessionToolArgsError(tool.name, parsed.error.message);
-        return tool.execute(parsed.data, toolCtx);
+        // A tool holds the session, not the model: the turn clock waits for it.
+        toolsRunning += 1;
+        disarmTurn();
+        try {
+          return await tool.execute(parsed.data, toolCtx);
+        } finally {
+          toolsRunning -= 1;
+          if (toolsRunning === 0) rearmTurn();
+        }
       },
     });
 
@@ -482,6 +514,7 @@ function startSession<TOutcome>(
     ): Promise<DriverResult> => {
       try {
         rearmStall();
+        rearmTurn();
         handle = driver.runSession({
           def: wrappedDef,
           initialMessages,
@@ -510,6 +543,7 @@ function startSession<TOutcome>(
         return { kind: 'failure', failure };
       } finally {
         disarmStall();
+        disarmTurn();
       }
     };
 
@@ -684,6 +718,7 @@ function startSession<TOutcome>(
   return {
     outcome: outcome.finally(() => {
       disarmStall();
+      disarmTurn();
       clearTimeout(ceilingTimer);
       persistence.flush?.();
     }),
