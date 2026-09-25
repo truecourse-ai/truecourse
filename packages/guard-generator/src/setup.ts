@@ -1291,6 +1291,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
           database,
           docs: corpusDocTexts(repoRoot),
           securitySchemes: schemes,
+          externals: Object.entries(current.api?.externals ?? {}).map(([name, external]) => ({
+            name,
+            envs: [external.baseUrlEnv, ...Object.keys(external.env ?? {})],
+          })),
         }),
         requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,

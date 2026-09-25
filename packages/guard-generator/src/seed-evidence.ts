@@ -42,6 +42,30 @@ const TOKEN_TABLE = /(api|access|auth|personal|bearer)[-_ ]?(token|key)s?$|^(api
 /** Doc text that describes an API credential header. */
 const AUTH_DOC = /authorization:\s*bearer|bearer\s+(token|<)|x-api-key|api[ -]?keys?\b|api[ -]?tokens?\b|personal access token/i
 
+/** A third party the app calls, as the recipe declares it: its name and the env vars it is configured by. */
+export interface DeclaredExternal {
+  name: string
+  envs: readonly string[]
+}
+
+/**
+ * Whether a doc describes a credential for the app's OWN api: an
+ * {@link AUTH_DOC} match in a markdown section (heading to heading) that names
+ * none of the app's declared externals. A section that does name one is
+ * describing how the app authenticates to that third party — "calls the
+ * provider with `Authorization: Bearer <key>`" — which is no evidence that the
+ * app's own api asks its callers for a credential.
+ */
+function describesOwnApiAuth(text: string, externals: readonly DeclaredExternal[]): boolean {
+  const namesExternal = (section: string): boolean =>
+    externals.some(
+      (e) => section.toLowerCase().includes(e.name.toLowerCase()) || e.envs.some((env) => section.includes(env)),
+    )
+  return text
+    .split(/^(?=#{1,6}\s)/m)
+    .some((section) => AUTH_DOC.test(section) && !namesExternal(section))
+}
+
 /** The api operations of a catalog — every non-RPC interface rooted at a method + path. */
 function apiOperations(interfaces: readonly Interface[]): { iface: Interface; method: string; path: string }[] {
   const out: { iface: Interface; method: string; path: string }[] = []
@@ -76,6 +100,8 @@ export function apiAuthEvidence(args: {
   /** Corpus docs as text — the same excerpts the briefing carries, or fuller. */
   docs: readonly { doc: string; text: string }[]
   securitySchemes: readonly { name: string }[]
+  /** The third parties the app calls; a doc section about one describes outbound auth, not the app's. */
+  externals?: readonly DeclaredExternal[]
 }): ApiAuthEvidence[] {
   const out: ApiAuthEvidence[] = []
   if (args.securitySchemes.length > 0) {
@@ -104,7 +130,7 @@ export function apiAuthEvidence(args: {
   if (tokenTables.length > 0) {
     out.push({ kind: 'token-table', detail: `the schema holds API credential table(s): ${tokenTables.join(', ')}` })
   }
-  const authDocs = args.docs.filter((d) => AUTH_DOC.test(d.text)).map((d) => d.doc)
+  const authDocs = args.docs.filter((d) => describesOwnApiAuth(d.text, args.externals ?? [])).map((d) => d.doc)
   if (authDocs.length > 0) {
     out.push({
       kind: 'doc',
