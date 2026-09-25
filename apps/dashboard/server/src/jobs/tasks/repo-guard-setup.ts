@@ -317,7 +317,12 @@ export function createRepoGuardSetupTask(
       const pr = ctx.payload.pullRequest;
       if (pr) {
         const port = deps.pullRequests;
-        if (!port || !(await checkIsOpen(port, pr))) return;
+        // A check already settled (superseded, closed) is not this link's to
+        // settle; its chain may still have ended here.
+        if (!port || !(await checkIsOpen(port, pr))) {
+          if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, target);
+          return;
+        }
         const chained = await chainGenerate(ctx.payload, outcome, result, target);
         if (chained === 'chained') return;
         const link = runId ? checkLinks.record(port.appUrl, runId) : null;
@@ -335,6 +340,9 @@ export function createRepoGuardSetupTask(
         } else if (outcome === 'succeeded') {
           await settleLinkCheck(port, pr, { reason: 'clean', report: { codeHalf: 'not-run' } }, link);
         }
+        // The pull request's chain ended here, and it held the lane: whatever
+        // the default branch was left owing starts now, as after a main chain.
+        if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, target);
         return;
       }
       if ((await chainGenerate(ctx.payload, outcome, result, target)) !== 'chained' && chainEnded(outcome)) {

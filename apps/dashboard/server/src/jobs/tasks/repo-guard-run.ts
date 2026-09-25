@@ -296,7 +296,12 @@ export function createRepoGuardRunTask(
       const pr = ctx.payload.pullRequest;
       if (pr) {
         const port = deps.pullRequests;
-        if (!port || !(await checkIsOpen(port, pr))) return;
+        // A check already settled (superseded, closed) is not this link's to
+        // settle; its chain may still have ended here.
+        if (!port || !(await checkIsOpen(port, pr))) {
+          if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, ctx.payload.commitSha ?? commitSha);
+          return;
+        }
         const slug = ctx.payload.repoId;
         const link = decided?.guardRunId
           ? checkLinks.run(port.appUrl, slug, decided.guardRunId)
@@ -305,6 +310,8 @@ export function createRepoGuardRunTask(
         if (decided) await settleLinkCheck(port, pr, decided, link);
         else if (outcome === 'paused') await settleLinkCheck(port, pr, { reason: 'credits' }, link);
         else if (outcome === 'failed') await settleLinkCheck(port, pr, { reason: 'error', report: { codeHalf: 'ran' } }, link);
+        // The pull request's chain ended here: whatever the default branch was left owing starts now.
+        if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, ctx.payload.commitSha ?? commitSha);
         return;
       }
       if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, ctx.payload.commitSha ?? commitSha);

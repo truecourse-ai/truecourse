@@ -717,6 +717,19 @@ describe('the pull request check', () => {
     await drain();
   });
 
+  it('the end of a pull request’s chain starts the main chain the default branch owes', async () => {
+    await storeBase();
+    // A push the main chain has not served yet: the pushed commit and no chain started at it.
+    await repos.recordDefaultBranchSha(REPO, 'main-2');
+    await check();
+
+    const mainSetups = (await db.select().from(schema.jobs)).filter(
+      (j) => j.type === 'repo.guard-setup' && !(j.payload as { pullRequest?: unknown } | null)?.pullRequest,
+    );
+    expect(mainSetups.map((j) => (j.payload as { commitSha?: string }).commitSha)).toEqual(['main-2']);
+    expect((await repos.getRepo(REPO))?.mainChainSha).toBe('main-2');
+  });
+
   it('a disconnect settles every check of the repository, the one still waiting in the lane included', async () => {
     await storeBase();
     let release!: () => void;
