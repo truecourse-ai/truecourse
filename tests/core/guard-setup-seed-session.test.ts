@@ -1767,6 +1767,18 @@ describe('seedSessionBriefing — the domain and the coverage world', () => {
     expect(briefing).not.toContain('## The domain: what the product can hold');
   });
 
+  // The seed runs after the services are up and before any server boots, in
+  // a run and in this session alike: state the app produces is reached
+  // through the app's own code, never through a route nobody is serving.
+  it('asks for state the app produces through its own code, never a route, since no server runs', () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const briefing = seedSessionBriefing(worldFor(r, { database: DOMAIN_DATABASE }));
+    const rule = briefing.split('\n').find((line) => line.includes('STATE THE APP PRODUCES'));
+    expect(rule).toMatch(/no server of the app is running/);
+    expect(rule).not.toMatch(/by triggering the app's real path \(its route/);
+  });
+
   it('asks the seed to decide the kinds of user and describe each, naming no fixed set but the owner', () => {
     const r = fixtureRepo();
     writeRecipe(r, {}, webBlock(r));

@@ -47,7 +47,7 @@ export const SEED_CACHE_NAME = 'guard/seed'
  * WRONG output bumps this in the same commit. It keys the seed session's cache
  * and is the seed step's `stage` settle input, so a bump re-opens the step.
  */
-export const SEED_STAGE_VERSION = 5
+export const SEED_STAGE_VERSION = 6
 
 /** The parsed schema the draft is grounded in — the analyzer's own output. */
 export interface SeedDraftDatabase {
