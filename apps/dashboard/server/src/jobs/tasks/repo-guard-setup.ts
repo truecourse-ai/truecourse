@@ -307,6 +307,7 @@ export function createRepoGuardSetupTask(
         workspaceOrgId,
         source: 'chain',
         ...(commitSha ? { commitSha } : {}),
+        ...(payload.recovery ? { recovery: true } : {}),
       });
       return true;
     } catch (err) {

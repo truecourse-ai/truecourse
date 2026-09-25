@@ -31,6 +31,13 @@ export interface OnboardingJobRequest {
    */
   commitSha?: string;
   /**
+   * This chain restarts one a server restart interrupted. Carried into the
+   * generate and the run it chains, so if a restart interrupts it too, boot
+   * does not restart it a second time: a chain that keeps dying with the
+   * process would otherwise restart it for ever.
+   */
+  recovery?: true;
+  /**
    * The user id of the person whose request enqueued it. Unset when nobody
    * asked directly: a chain, a webhook, the scheduler.
    */

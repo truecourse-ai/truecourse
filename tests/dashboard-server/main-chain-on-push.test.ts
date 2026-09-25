@@ -6,7 +6,8 @@
  * not whatever the branch's tip is by then; a push that lands while a heavy
  * job of the repository is active starts nothing; and when that chain ends
  * the mount runs exactly ONE more chain for every push that landed meanwhile,
- * stopping once the branch's newest commit is the one a chain worked on.
+ * stopping once the branch's newest commit is the one a chain worked on. And a
+ * chain a server restart killed is restarted by the next boot, exactly once.
  *
  * The queue is real (PGlite + the harness), graphile is faked with its one
  * rule (a named queue runs one job at a time) and every heavy body is frozen
@@ -54,6 +55,8 @@ let home: string;
 /** The one tree every clone of a test is, so every clone resolves the same commit. */
 let tree: { dir: string; head: string };
 let running: Promise<void>[];
+/** Every enqueue the worker was handed, with its payload. */
+let added: Array<{ task: string; payload: Record<string, unknown> }>;
 
 const testLlm = {
   mode: 'api',
@@ -133,6 +136,7 @@ const laneWorker: StartWorker<Record<string, unknown>> = async ({ rt, tasks }) =
   const lanes = new Map<string, Promise<void>>();
   return {
     addJob: async (task: string, payload: unknown, spec: { queueName?: string } = {}) => {
+      added.push({ task, payload: payload as Record<string, unknown> });
       const handler = handlers.get(task)!;
       const start = (): Promise<void> => handler(payload, {}).catch(() => undefined);
       if (!spec.queueName) {
@@ -211,6 +215,7 @@ beforeEach(async () => {
   ORG = `org_push_${counter}`;
   REPO = `acme/widgets-${counter}`;
   running = [];
+  added = [];
   acquisitions = [];
   tree = oneCommitRepo();
   repos = new MemoryInstallationStore();
@@ -335,5 +340,82 @@ describe('a push to the default branch', () => {
     await jobs.enqueueGuardRun({ ...request(), source: 'chain', commitSha: 'deadbeef' });
     await bodyStarted(1);
     expect(acquisitions[0]!.via).toMatchObject({ commitSha: 'deadbeef' });
+  });
+});
+
+/**
+ * A restart kills whatever chain was running, and a killed chain never ends:
+ * the push it served is owed again and boot restarts it, ONCE. The dead
+ * process is played by a row left `running` with the link's request as its
+ * payload, which is exactly what the next boot's reap finds.
+ */
+describe('a chain a server restart interrupted', () => {
+  async function orphanedGenerate(payload: Record<string, unknown>): Promise<void> {
+    const store = new JobStore(db);
+    const row = await store.create({
+      org: ORG,
+      type: 'repo.guard-generate',
+      key: `repo.guard-generate:${REPO}`,
+      payload: { ...request(), source: 'chain', ...payload },
+    });
+    await store.markRunning(row.id);
+  }
+
+  async function restart(): Promise<void> {
+    await jobs.stop();
+    jobs = mount();
+    await jobs.start();
+  }
+
+  it('is owed again, and the next boot restarts it at its commit', async () => {
+    await repos.recordDefaultBranchSha(REPO, 'sha-1');
+    await repos.recordMainChainSha(REPO, 'sha-1');
+    await orphanedGenerate({ commitSha: 'sha-1' });
+
+    await restart();
+    await bodyStarted(1);
+    expect(acquisitions[0]!.via).toMatchObject({ commitSha: 'sha-1' });
+    expect(await rowsOfType('repo.guard-setup')).toHaveLength(1);
+    expect((await repos.getRepo(REPO))?.mainChainSha).toBe('sha-1');
+  });
+
+  it('is not restarted a second time when it was itself the restart', async () => {
+    await repos.recordDefaultBranchSha(REPO, 'sha-1');
+    await repos.recordMainChainSha(REPO, 'sha-1');
+    await orphanedGenerate({ commitSha: 'sha-1', recovery: true });
+
+    await restart();
+    await settle(50);
+    expect(acquisitions).toEqual([]);
+    expect(await rowsOfType('repo.guard-setup')).toEqual([]);
+    expect((await repos.getRepo(REPO))?.mainChainSha).toBe('sha-1');
+  });
+
+  it('leaves alone a push whose own chain started after it', async () => {
+    await repos.recordDefaultBranchSha(REPO, 'sha-2');
+    await repos.recordMainChainSha(REPO, 'sha-2');
+    await orphanedGenerate({ commitSha: 'sha-1' });
+
+    await restart();
+    await settle(50);
+    expect(await rowsOfType('repo.guard-setup')).toEqual([]);
+    expect((await repos.getRepo(REPO))?.mainChainSha).toBe('sha-2');
+  });
+
+  it('carries the restart mark down the chain it restarted', async () => {
+    await repos.recordDefaultBranchSha(REPO, 'sha-1');
+    await repos.recordMainChainSha(REPO, 'sha-1');
+    await orphanedGenerate({ commitSha: 'sha-1' });
+
+    await restart();
+    await bodyStarted(1);
+    acquisitions[0]!.release();
+    // The generate the restarted setup chains is the restart too: killed
+    // again, it is not restarted.
+    await bodyStarted(2);
+    expect(added.map((a) => [a.task, a.payload.recovery])).toEqual([
+      ['repo.guard-setup', true],
+      ['repo.guard-generate', true],
+    ]);
   });
 });

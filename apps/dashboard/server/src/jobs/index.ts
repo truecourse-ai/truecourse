@@ -37,7 +37,10 @@
  * heavy job of it is active nothing starts, and when a chain ends — the run
  * settles, or an earlier link stops short — whatever is owed by then starts
  * once. Three pushes during a chain cost one follow-up, and a chain that fails
- * at its own commit is not started again: only a newer push starts one.
+ * at its own commit is not started again: only a newer push starts one. A
+ * chain a server restart killed never ended, so boot makes its push owed again
+ * and restarts it — once: a restarted chain the next restart kills stays down
+ * until the next push, so a chain that takes the process with it cannot loop.
  */
 
 import {
@@ -162,7 +165,7 @@ export interface JobsMount extends Jobs {
 }
 
 /** The repository a push moved, as the webhook names it. */
-export type MainChainRequest = Pick<OnboardingJobRequest, 'repoId' | 'repoFullName' | 'workspaceOrgId'>;
+export type MainChainRequest = Pick<OnboardingJobRequest, 'repoId' | 'repoFullName' | 'workspaceOrgId' | 'recovery'>;
 
 export interface LinksChangedRequest {
   workspaceOrgId: string;
@@ -264,7 +267,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     // on and what it is compared against when it ends are the same commit by
     // construction. A fresh request from the three facts alone: never a
     // chain's own payload, whose row id must not carry into the new chain.
-    const { repoId, repoFullName, workspaceOrgId } = request;
+    const { repoId, repoFullName, workspaceOrgId, recovery } = request;
     const pushed = (await opts.repos?.getRepo(repoFullName))?.defaultBranchSha ?? null;
     const outcome = await enqueueGuardSetup({
       repoId,
@@ -272,6 +275,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
       workspaceOrgId,
       source: 'push',
       ...(pushed ? { commitSha: pushed } : {}),
+      ...(recovery ? { recovery } : {}),
     });
     if (outcome.status === 'queued' && pushed) await opts.repos?.recordMainChainSha(repoFullName, pushed);
     return outcome;
@@ -282,12 +286,13 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
    * push landed that no chain was started for — unless the workspace's scan
    * is queued or running: the chain reads the corpus, so it waits for that
    * scan, whose settle serves what is owed then. `why` names the caller for
-   * the log. Never throws.
+   * the log, and `extra` rides on each chain's request. Never throws.
    */
   const serveOwedChains = async (
     workspaceOrgId: string,
     repoFullNames: readonly string[],
     why: string,
+    extra: Pick<MainChainRequest, 'recovery'> = {},
   ): Promise<void> => {
     if (!opts.repos || repoFullNames.length === 0) return;
     try {
@@ -296,7 +301,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
         const link = await opts.repos.getRepo(repoFullName);
         if (!link?.enabled || link.workspaceOrgId !== workspaceOrgId) continue;
         if (!link.defaultBranchSha || link.defaultBranchSha === link.mainChainSha) continue;
-        const outcome = await startMainChain({ repoId: link.slug, repoFullName, workspaceOrgId });
+        const outcome = await startMainChain({ repoId: link.slug, repoFullName, workspaceOrgId, ...extra });
         log.info(
           `[jobs] ${repoFullName} owes a chain at ${link.defaultBranchSha.slice(0, 8)} (${why}) — ${outcome.status}`,
         );
@@ -478,17 +483,30 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     }),
   ];
 
+  // The chains a restart killed, owed again by the reap and restarted once the
+  // worker is up: the reap runs before it, when nothing can be enqueued yet.
+  const interruptedChains: OnboardingJobRequest[] = [];
+
   jobs = createJobs({
     db: opts.db,
     connectionString: opts.connectionString,
     tasks,
-    // A check whose job died with the process: its row and GitHub's check
-    // would otherwise say "running" for ever.
     onReaped: async (reaped) => {
       for (const job of reaped) {
-        if (job.type !== REPO_PR_CHECK_TASK || !opts.pullRequestCheck?.onStopped) continue;
-        const { repoFullName, number } = job.payload as Pick<PullRequestCheckJobRequest, 'repoFullName' | 'number'>;
-        await opts.pullRequestCheck.onStopped(repoFullName, number, 'error');
+        // A check whose job died with the process: its row and GitHub's check
+        // would otherwise say "running" for ever.
+        if (job.type === REPO_PR_CHECK_TASK && opts.pullRequestCheck?.onStopped) {
+          const { repoFullName, number } = job.payload as Pick<PullRequestCheckJobRequest, 'repoFullName' | 'number'>;
+          await opts.pullRequestCheck.onStopped(repoFullName, number, 'error');
+        }
+        // A link of a chain never ended, so the push it served is owed again,
+        // unless this chain was itself the restart of one.
+        if (MAIN_CHAIN_TASKS.includes(job.type) && opts.repos) {
+          const request = job.payload as OnboardingJobRequest | null;
+          if (!request?.commitSha || request.recovery) continue;
+          await opts.repos.forgetMainChainSha(request.repoFullName, request.commitSha);
+          interruptedChains.push(request);
+        }
       }
     },
     // The start and the finish of every job someone asked for, from the two
@@ -570,7 +588,21 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     return job.id;
   };
 
+  const startJobs = jobs.start.bind(jobs);
+  const start = async (): Promise<void> => {
+    await startJobs();
+    for (const request of interruptedChains.splice(0)) {
+      await serveOwedChains(
+        request.workspaceOrgId,
+        [request.repoFullName],
+        'a restart interrupted its chain',
+        { recovery: true },
+      );
+    }
+  };
+
   return Object.assign(jobs, {
+    start,
     enqueueGuardSetup,
     enqueueGuardGenerate,
     enqueueGuardRun,

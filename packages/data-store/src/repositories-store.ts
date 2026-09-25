@@ -113,6 +113,13 @@ export class PgRepositoryStore implements RepositoryStore {
       .where(eq(repositories.repoFullName, repoFullName));
   }
 
+  async forgetMainChainSha(repoFullName: string, commitSha: string): Promise<void> {
+    await this.db
+      .update(repositories)
+      .set({ mainChainSha: null })
+      .where(and(eq(repositories.repoFullName, repoFullName), eq(repositories.mainChainSha, commitSha)));
+  }
+
   async getRepo(repoFullName: string): Promise<RepositoryRecord | null> {
     const rows = await this.db
       .select()

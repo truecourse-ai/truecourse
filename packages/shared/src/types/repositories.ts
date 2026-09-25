@@ -83,6 +83,12 @@ export interface RepositoryStore {
   recordDefaultBranchSha(repoFullName: string, commitSha: string): Promise<void>
   /** A main chain was started at this commit: the push it serves is no longer owed. */
   recordMainChainSha(repoFullName: string, commitSha: string): Promise<void>
+  /**
+   * The chain started at this commit never finished (a restart killed it): the
+   * push it served is owed again. A no-op when a newer chain's commit is
+   * recorded by now.
+   */
+  forgetMainChainSha(repoFullName: string, commitSha: string): Promise<void>
   getRepo(repoFullName: string): Promise<RepositoryRecord | null>
   listReposForWorkspace(workspaceOrgId: string): Promise<RepositoryRecord[]>
   /** Every repository connected through one provider account (uninstall cleanup). */
