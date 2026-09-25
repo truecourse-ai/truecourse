@@ -205,7 +205,7 @@ export async function startServer(): Promise<void> {
     ? createPullRequestChecks({
         jobs: {
           enqueuePullRequestCheck: (request) => jobs.enqueuePullRequestCheck(request),
-          cancelPullRequestJobs: (orgId, repoFullName, number) => jobs.cancelPullRequestJobs(orgId, repoFullName, number),
+          cancelCheckJob: (orgId, jobId) => jobs.cancelCheckJob(orgId, jobId),
         },
         pulls,
         repos: repoLinks,

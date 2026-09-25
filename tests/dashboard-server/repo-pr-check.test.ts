@@ -687,7 +687,7 @@ describe('the pull request check', () => {
 
     await pulls.settleCheck(row.id, { conclusion: 'neutral', reason: 'superseded' });
     // A cancel waits for the body it stops; the held engine lets it go.
-    const cancelling = jobs.cancelPullRequestJobs(ORG, REPO, 7);
+    const cancelling = jobs.cancelCheckJob(ORG, setup!.id);
     await settle(20);
     release();
     await cancelling;
@@ -697,6 +697,35 @@ describe('the pull request check', () => {
     // Stopped on purpose, which its record says: not the process dying under it.
     const [stopped] = await listStoredSessionRuns(REPO, 'guard-setup');
     expect(stopped?.status).toBe('cancelled');
+  });
+
+  it('a slow supersede does not stop the newer attempt queued behind it', async () => {
+    await storeBase();
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let setups = 0;
+    engines.setup = async () => {
+      // The first attempt's setup holds until released; the newer one's does not.
+      if ((setups += 1) === 1) await held;
+      return { report: { ranAt: '', status: 'ok', reason: '', steps: [] }, reportPath: '', sessionsRunDirs: [] } as never;
+    };
+    await pulls.savePullRequest(pr());
+    const request = { repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG, source: 'pull-request', number: 7, headSha: HEAD, installationId: 5 } as const;
+    const first = await pulls.createCheck({ repoFullName: REPO, number: 7, headSha: HEAD });
+    await jobs.enqueuePullRequestCheck({ ...request, checkId: first.id });
+    await settle(80);
+    const running = (await pulls.getCheck(first.id))!.jobId!;
+
+    await pulls.settleCheck(first.id, { conclusion: 'neutral', reason: 'superseded' });
+    const cancelling = jobs.cancelCheckJob(ORG, running);
+    // The newer attempt lands while the running link is still unwinding.
+    const second = await pulls.createCheck({ repoFullName: REPO, number: 7, headSha: HEAD });
+    expect(await jobs.enqueuePullRequestCheck({ ...request, checkId: second.id })).toMatchObject({ status: 'queued' });
+    release();
+    await cancelling;
+    await drain();
+    expect((await pulls.getCheck(second.id))?.status).toBe('settled');
+    expect((await pulls.getCheck(second.id))?.reason).not.toBe('cancelled');
   });
 
   it('a pull request’s running setup does not refuse the main chain a push starts', async () => {

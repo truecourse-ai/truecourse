@@ -68,8 +68,8 @@ const checks = () =>
         jobIds += 1;
         return { status: 'queued', jobId: `job_${jobIds}` };
       },
-      cancelPullRequestJobs: async (_org, repoFullName, number) => {
-        cancelled.push(`${repoFullName}#${number}`);
+      cancelCheckJob: async (_org, jobId) => {
+        cancelled.push(jobId);
       },
     },
   });
@@ -131,7 +131,7 @@ describe('a head to check', () => {
     const [first, second] = pulls.checks;
     expect(first).toMatchObject({ headSha: 'head-1', status: 'settled', conclusion: 'neutral', reason: 'superseded' });
     expect(second).toMatchObject({ headSha: 'head-2', status: 'queued', attempt: 1 });
-    expect(cancelled).toEqual(['acme/api#7']);
+    expect(cancelled).toEqual(['job_1']);
     const updates = github.filter((c) => c.method === 'update');
     expect(updates).toHaveLength(1);
     expect(updates[0]!.params).toMatchObject({ check_run_id: 901, status: 'completed', conclusion: 'neutral' });
@@ -175,7 +175,7 @@ describe('a supersede', () => {
           return { status: 'queued', jobId: `job_${jobIds}` };
         },
         // A running link that takes its time to unwind.
-        cancelPullRequestJobs: () => new Promise<void>(() => { stopped = true; }),
+        cancelCheckJob: () => new Promise<void>(() => { stopped = true; }),
       },
     });
     await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
@@ -210,7 +210,7 @@ describe('a draft', () => {
     await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
     await service.onPullRequest({ pr: pr({ draft: true }), installationId: 5, effect: 'draft' });
     expect(pulls.checks.map((c) => c.reason)).toEqual(['superseded', 'draft']);
-    expect(cancelled).toEqual(['acme/api#7']);
+    expect(cancelled).toEqual(['job_1']);
   });
 });
 
@@ -220,7 +220,7 @@ describe('a close', () => {
     await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
     await service.onPullRequest({ pr: pr({ state: 'merged' }), installationId: 5, effect: 'close' });
     expect(pulls.checks.map((c) => [c.status, c.reason])).toEqual([['settled', 'cancelled']]);
-    expect(cancelled).toEqual(['acme/api#7']);
+    expect(cancelled).toEqual(['job_1']);
     await service.onPullRequest({ pr: pr({ state: 'merged' }), installationId: 5, effect: 'close' });
     expect(pulls.checks).toHaveLength(1);
   });
@@ -260,7 +260,7 @@ describe('a conflict resolved', () => {
           enqueued.push(request);
           return { status: 'queued', jobId: 'job_docs' };
         },
-        cancelPullRequestJobs: async () => {},
+        cancelCheckJob: async () => {},
       },
     });
     await pulls.savePullRequest(pr({ repoFullName: 'acme/docs', headRepoFullName: 'acme/docs', number: 3, headSha: 'head-3' }));
@@ -291,7 +291,7 @@ describe('a repository whose checks are off', () => {
     await pulls.savePullRequest(pr({ headSha: 'head-2' }));
     await service.onPullRequest({ pr: pr({ headSha: 'head-2' }), installationId: 5, effect: 'check' });
     expect(pulls.checks.map((c) => [c.headSha, c.status, c.reason])).toEqual([['head-1', 'settled', 'superseded']]);
-    expect(cancelled).toEqual(['acme/api#7']);
+    expect(cancelled).toEqual(['job_1']);
     expect(enqueued).toHaveLength(1);
   });
 

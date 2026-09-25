@@ -56,7 +56,7 @@ import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
 import type { Db } from '@truecourse/db';
 import type { PausedJob } from '@truecourse/data-store';
-import type { RepositoryStore } from '@truecourse/shared';
+import { isActiveJob, type RepositoryStore } from '@truecourse/shared';
 import {
   createRepoGuardSetupTask,
   REPO_GUARD_SETUP_TASK,
@@ -156,8 +156,8 @@ export interface JobsMount extends Jobs {
    * settle — the caller must refuse the disconnect.
    */
   cancelRepoJobs(repoFullName: string, orgId: string): Promise<'stopped' | 'not-here'>;
-  /** Stop every job of one pull request's check, its chain's links included. */
-  cancelPullRequestJobs(orgId: string, repoFullName: string, number: number): Promise<void>;
+  /** Stop the job a pull request's check names: its coordinator, or the link of its chain now running. */
+  cancelCheckJob(orgId: string, jobId: string): Promise<void>;
   /**
    * Carry a paused job on: the SAME row goes back to `queued` and the queue is
    * handed the payload it paused with — the enqueue request it was created
@@ -592,16 +592,14 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   };
 
   /**
-   * Stop every job of one pull request's check: its coordinator and whichever
-   * links of its chain are queued or running. The check's row is settled by
-   * the caller first, so a link that still starts finds it settled and does
-   * nothing.
+   * Stop the one job a pull request's check names. Never by the pull request's
+   * keys: a newer attempt's jobs hold those same keys by the time a slow cancel
+   * gets to them. The caller settles the check's row first, so a link the
+   * stopped job still chains finds it settled and does nothing.
    */
-  const cancelPullRequestJobs = async (orgId: string, repoFullName: string, number: number): Promise<void> => {
-    for (const task of HEAVY_TASKS) {
-      const job = await jobs.jobStore.getActiveByKey(orgId, pullRequestJobKey(task, repoFullName, number));
-      if (job) await jobs.cancel(job.id);
-    }
+  const cancelCheckJob = async (orgId: string, jobId: string): Promise<void> => {
+    const job = await jobs.jobStore.get(jobId, orgId);
+    if (job && isActiveJob(job.status)) await jobs.cancel(job.id);
   };
 
   /**
@@ -672,7 +670,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     enqueueContextScan,
     startForLinks,
     cancelRepoJobs,
-    cancelPullRequestJobs,
+    cancelCheckJob,
     resumePaused,
   });
 }

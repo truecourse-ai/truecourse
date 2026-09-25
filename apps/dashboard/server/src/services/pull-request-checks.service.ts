@@ -40,7 +40,7 @@ import {
 import type { EnqueueResult, JobsMount } from '../jobs/index.js';
 
 export interface PullRequestChecksDeps {
-  jobs: Pick<JobsMount, 'enqueuePullRequestCheck' | 'cancelPullRequestJobs'>;
+  jobs: Pick<JobsMount, 'enqueuePullRequestCheck' | 'cancelCheckJob'>;
   pulls: PullRequestStore;
   repos: RepositoryStore;
   octokitFor: (installationId: number) => OctokitClient;
@@ -155,8 +155,8 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     // mid-way can take a while), and the next attempt waits behind it in the
     // workspace's lane anyway, so nothing that follows needs it gone first.
     const workspaceOrgId = pr?.workspaceOrgId;
-    if (workspaceOrgId) {
-      void deps.jobs.cancelPullRequestJobs(workspaceOrgId, repoFullName, number).catch((err: unknown) => {
+    if (workspaceOrgId && active.jobId) {
+      void deps.jobs.cancelCheckJob(workspaceOrgId, active.jobId).catch((err: unknown) => {
         log.warn(`[checks] could not stop the jobs of ${repoFullName}#${number}: ${(err as Error).message}`);
       });
     }
