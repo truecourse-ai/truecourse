@@ -177,6 +177,17 @@ async function standingOrganization(
   return (await resolveIsMember(workos, userId, claimed)) ? claimed : null;
 }
 
+/**
+ * The same standing-membership question, for a session that is not a cookie
+ * (an MCP bearer token): it shares this module's cache, so a removal this
+ * process made refuses both at once.
+ */
+export function createMembershipCheck(
+  workos: WorkOS,
+): (userId: string, organizationId: string) => Promise<boolean> {
+  return (userId, organizationId) => resolveIsMember(workos, userId, organizationId);
+}
+
 /** This process ended the membership: the next request is refused, not the next lookup. */
 export function forgetMembership(userId: string, organizationId: string): void {
   membershipCache.set(membershipKey(userId, organizationId), { member: false, at: Date.now() });

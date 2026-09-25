@@ -30,6 +30,8 @@ import type { JobsMount } from './jobs/index.js';
 import type { ServerRouterMount } from './features.js';
 import { setCurrentJobs } from './jobs/current.js';
 import type { AuthVerifier } from '@truecourse/shared';
+import type { McpAuth } from './auth/mcp.js';
+import { createMcpRouter } from './mcp/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -106,6 +108,12 @@ export interface CreateAppOptions {
    * which is what they fall back to.
    */
   workspaceNames?: (organizationId: string) => Promise<string | undefined>;
+  /**
+   * How a request to `/mcp` becomes a session (`auth/mcp.ts`). REQUIRED for the
+   * same reason as `authVerifier`. `null` is a hosted server whose MCP sign-in
+   * is not configured: `/mcp` then answers 503 naming what to set.
+   */
+  mcpAuth: McpAuth | null;
 }
 
 export function createApp(opts: CreateAppOptions): express.Express {
@@ -156,6 +164,18 @@ export function createApp(opts: CreateAppOptions): express.Express {
       timestamp: new Date().toISOString(),
     });
   });
+
+  // The MCP server for developers. A client carries a bearer token, not the
+  // session cookie, so `/mcp` sits outside `/api` behind its own gate; the tools
+  // below it scope repositories exactly as the project-scoped routes do.
+  app.use(
+    createMcpRouter({
+      auth: opts.mcpAuth ?? null,
+      repoLinks: opts.repoLinks ?? null,
+      github: opts.github?.access ?? null,
+      checks: opts.pulls?.checks ?? null,
+    }),
+  );
 
   // GitHub posts webhooks with no session — the HMAC signature over the raw
   // body is its authentication — so the receiver mounts above the gate. When

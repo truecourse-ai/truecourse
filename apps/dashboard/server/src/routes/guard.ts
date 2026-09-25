@@ -70,9 +70,7 @@ import {
   guardExternalSetupIndexForView,
   type GuardEvidenceLocator,
 } from '@truecourse/core/commands/guard-read';
-import { readGuardDependenciesView } from '@truecourse/core/commands/guard-dependencies';
-import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
-import { hostedDependenciesView } from './guard-dependencies-hosted.js';
+import { readRepoDependencies } from '../services/guard-dependencies.service.js';
 import { readGuardSetup } from '@truecourse/core/commands/guard-setup';
 import { readBundleGuardSetup } from '@truecourse/core/services/guard-setup/bundle';
 import {
@@ -642,11 +640,7 @@ router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFun
 router.get('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    res.json(
-      await withGuardReadTree(repo.path, refOf(req), (tree) =>
-        hostedDependenciesView(tree, readGuardDependenciesView(tree, { env: {}, hostless: true })),
-      ),
-    );
+    res.json(await readRepoDependencies(repo.path, refOf(req)));
   } catch (e) {
     next(e);
   }

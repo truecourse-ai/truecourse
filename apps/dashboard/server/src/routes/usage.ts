@@ -36,7 +36,7 @@ export function createUsageRouter(deps: UsageRouterDeps = {}): Router {
   async function visibleRepos(req: Request): Promise<RegistryEntry[]> {
     const visible: RegistryEntry[] = [];
     for (const entry of await readRegistry(orgOf(req))) {
-      if (await isVisibleTo(deps.repoLinks, req, entry)) visible.push(entry);
+      if (await isVisibleTo(deps.repoLinks, orgOf(req), entry)) visible.push(entry);
     }
     return visible;
   }

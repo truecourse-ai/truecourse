@@ -47,7 +47,7 @@ import type { PullRequestChecks } from '../services/pull-request-checks.service.
 import { getDb } from '../db.js';
 import { createRunClone } from '../services/run-clone.service.js';
 import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tree.service.js';
-import type { ContextGithubAccess } from '../routes/context.js';
+import type { ContextGithubAccess } from '../services/context-sources.service.js';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
 import {
   rekeyRepositorySources,
