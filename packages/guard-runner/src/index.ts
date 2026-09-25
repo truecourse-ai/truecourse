@@ -448,6 +448,7 @@ export {
 export {
   INTERFACE_AUTHOR_STAGE_VERSION,
   authoringViewsMoved,
+  liveWorldInputs,
   canObserveLiveScreens,
   screenAuthoringFingerprint,
   sourceDigests,

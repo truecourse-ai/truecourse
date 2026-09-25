@@ -1880,6 +1880,15 @@ const InterfacesFileShapeSchema = z
      * row's sources moved. Only `interfaces.authored.json` carries it.
      */
     authoringViews: z.record(z.string().min(1), z.string().min(1)).optional(),
+    /**
+     * THE LIVE WORLD the last authoring run tried to stand up and could not
+     * (install, build, seed or boot failed), with a digest of the whole recipe
+     * and the scripts it names as they stood then. While they stand there, a
+     * screen authored from source alone is not work for a live look: the same
+     * recipe would fail the same way. Cleared once a world comes up. Only
+     * `interfaces.authored.json` carries it.
+     */
+    liveUnavailable: z.object({ recipe: z.string().min(1) }).strict().optional(),
   })
   .strict()
 

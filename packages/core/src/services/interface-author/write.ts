@@ -70,12 +70,17 @@ export interface RecordAuthoringLedgerInput {
   rows: Readonly<Record<string, InterfaceAuthoringRecord>>
   /** The views the context pass read, replacing the recorded ones. */
   views?: Readonly<Record<string, string>>
+  /**
+   * The live world this run tried to stand up: the recipe digest it failed
+   * under, or `null` when it came up (which clears a recorded failure).
+   */
+  liveUnavailable?: { recipe: string } | null
   now?: () => string
 }
 
 /**
  * Record what authoring settled on one or more screens (and, when given, the
- * views the run's context pass read). Laid over the existing
+ * views the run's context pass read, and whether its live world came up). Laid over the existing
  * ledger by id and written through the same validated path the fragments take,
  * so a row lands whether or not the session that produced it wrote a task — a
  * screen whose session failed has nothing else to leave behind, and the row IS
@@ -90,13 +95,16 @@ export function recordAuthoringLedger(
     recipeFingerprint: '',
     interfaces: [],
   }
+  const { liveUnavailable: _recorded, ...rest } = base
+  const liveUnavailable = input.liveUnavailable === undefined ? base.liveUnavailable : input.liveUnavailable
   return writeAuthoredCatalog({
     repoRoot: input.repoRoot,
     derived: input.derived,
     candidate: {
-      ...base,
+      ...rest,
       authoring: { ...base.authoring, ...input.rows },
       ...(input.views ? { authoringViews: { ...input.views } } : {}),
+      ...(liveUnavailable ? { liveUnavailable } : {}),
     },
     ...(input.now ? { now: input.now } : {}),
   })

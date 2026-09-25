@@ -61,6 +61,7 @@ import {
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
   authoringRecipeContract,
+  liveWorldInputs,
   sourceDigests,
   staleAuthoredPlaceDiagnostics,
   unsettledAuthoring,
@@ -185,8 +186,10 @@ export interface AuthorRunOptions {
    * the cache boots nothing. What it hands back gives every session
    * `observe_screen`, and a screen whose address has no slot is observed once
    * before its session starts so the tree rides the briefing. Absent, or
-   * `undefined` back ⇒ the sessions author from source alone. The caller tears
-   * the world down after the run.
+   * `undefined` back ⇒ the sessions author from source alone, and the failure
+   * is recorded with the recipe it failed under, so a screen owed only a live
+   * look is not work again until that recipe moves. The caller tears the world
+   * down after the run.
    */
   openLive?: () => Promise<LiveScreens | undefined>
   signal?: AbortSignal
@@ -473,13 +476,18 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   let path: string | undefined
 
   /** Lay rows over the ledger and keep the in-memory catalog in step. */
-  const recordLedger = (rows: Readonly<Record<string, InterfaceAuthoringRecord>>, views?: Record<string, string>): void => {
+  const recordLedger = (
+    rows: Readonly<Record<string, InterfaceAuthoringRecord>>,
+    views?: Record<string, string>,
+    liveUnavailable?: { recipe: string } | null,
+  ): void => {
     const written = recordAuthoringLedger({
       repoRoot: opts.repoRoot,
       authored,
       derived,
       rows,
       ...(views ? { views } : {}),
+      ...(liveUnavailable !== undefined ? { liveUnavailable } : {}),
       ...(opts.now ? { now: opts.now } : {}),
     })
     authored = written.file
@@ -599,6 +607,12 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   }
   const liveMisses = opts.openLive ? await serveCached(work, true) : [...work]
   const live = liveMisses.length > 0 ? await opts.openLive?.() : undefined
+  // Whether the world came up is recorded with the recipe it was stood up
+  // from: one that failed is not stood up again until that recipe moves.
+  if (opts.openLive && liveMisses.length > 0) {
+    if (!live) recordLedger({}, undefined, { recipe: liveWorldInputs(opts.repoRoot) })
+    else if (authored?.liveUnavailable) recordLedger({}, undefined, null)
+  }
   // A screen owed only a live look is left as it stands when none came up.
   const lookless = live ? [] : liveMisses.filter((item) => item.awaitsLiveLook)
   skipped.push(...lookless.map((item) => item.place.id))

@@ -703,6 +703,7 @@ export function candidateAuthored(
     // after the outcome is known.
     ...(authored?.authoring ? { authoring: authored.authoring } : {}),
     ...(authored?.authoringViews ? { authoringViews: authored.authoringViews } : {}),
+    ...(authored?.liveUnavailable ? { liveUnavailable: authored.liveUnavailable } : {}),
   }
 }
 

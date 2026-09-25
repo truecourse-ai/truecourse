@@ -42,6 +42,7 @@ import {
   guardAuthoredInterfacesPath,
   authoringRecipeContract,
   guardInterfacesPath,
+  recipePath,
   mergeInterfaceCatalogs,
   readAuthoredInterfaceCatalog,
   staleAuthoredPlaceDiagnostics,
@@ -1055,6 +1056,39 @@ describe('re-running', () => {
         expect(opened).toBe(1)
         expect(result.places).toEqual([])
         expect(readAuthoredFile().authoring).toEqual(before)
+      })
+
+      // A world that would not come up is not stood up again every run: the
+      // failure is recorded with the recipe it failed under, and only a recipe
+      // that moved (here the seed's command, which no screen's inputs fold)
+      // makes the live look work again.
+      it('owes no live look again until the recipe the world failed under moves', async () => {
+        const recipeFile = recipePath(repo)
+        const writeRecipe = (command: string): void => {
+          fs.mkdirSync(path.dirname(recipeFile), { recursive: true })
+          fs.writeFileSync(recipeFile, JSON.stringify({ api: { seed: { command, provides: {} } } }))
+        }
+        writeRecipe('node seed.mjs')
+        await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(both).driver, persistence: memoryPersistence().persistence })
+        let opened = 0
+        const failing = async (): Promise<undefined> => {
+          opened++
+          return undefined
+        }
+        await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence: memoryPersistence().persistence, openLive: failing })
+        await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence: memoryPersistence().persistence, openLive: failing })
+        expect(opened).toBe(1)
+        const owed = (): number =>
+          webScreensNeedingAuthoring({
+            derived: DERIVED,
+            authored: readAuthoredFile(),
+            recipeContract: authoringRecipeContract(repo),
+            repoRoot: repo,
+            liveAvailable: true,
+          }).size
+        expect(owed()).toBe(0)
+        writeRecipe('node seed-fixed.mjs')
+        expect(owed()).toBe(2)
       })
     })
 

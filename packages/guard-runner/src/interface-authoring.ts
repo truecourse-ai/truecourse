@@ -18,7 +18,9 @@
  *  - a row authored from source alone (`sourceOnly`) is work again for a
  *    caller that can look at the screen live, and for no other: a run that
  *    still cannot leaves it where it is rather than paying for the same
- *    source-only answer again;
+ *    source-only answer again. A live world a run tried to stand up and could
+ *    not is recorded with the recipe it failed under (`liveUnavailable`), and
+ *    until that recipe moves ({@link liveWorldFailed}) no caller can look;
  *  - otherwise it is not: a settled row stays settled, and a `failed` or
  *    `rejected` one waits for an explicit refresh. A provider that died costs
  *    that screen one run, not one run every setup forever, and the setup report
@@ -43,6 +45,7 @@ import {
   type InterfacesFile,
 } from '@truecourse/shared'
 import { resolveWebSurface, type Recipe } from './recipe.js'
+import { recipeContractFingerprint } from './recipe-slices.js'
 import { staleAuthoredPlaceDiagnostics, webScreensNeedingReadables } from './store.js'
 import { preflightBrowser } from './web/browser.js'
 
@@ -133,6 +136,8 @@ export function webScreenAuthoringStates(
   const unestablished = webScreensNeedingReadables(input.derived, input.authored)
   const ledger = input.authored?.authoring ?? {}
   const derivedPlaces = derivedPlaceIndex(input.derived)
+  const canLook =
+    input.liveAvailable === true && !(input.repoRoot !== undefined && liveWorldFailed(input.repoRoot, input.authored))
 
   return roots.map((place) => {
     const record = ledger[place.id]
@@ -149,7 +154,7 @@ export function webScreenAuthoringStates(
           !input.authored?.resources?.[AUTHORED_SURFACE]?.some(
             (candidate) => candidate.id === place.id && candidate.readables,
           ))
-    const awaitsLiveLook = !moved && input.liveAvailable === true && record?.sourceOnly === true
+    const awaitsLiveLook = !moved && canLook && record?.sourceOnly === true
     return {
       place,
       tasks: located.get(place.id) ?? [],
@@ -215,6 +220,24 @@ export function authoringViewsMoved(repoRoot: string, authored: InterfacesFile |
  */
 export async function canObserveLiveScreens(recipe: Recipe | null | undefined): Promise<boolean> {
   return recipe != null && resolveWebSurface(recipe) !== null && (await preflightBrowser()).ok
+}
+
+/**
+ * What decides whether a live world that would not come up would come up now:
+ * the whole recipe contract (install, build, services, the seed and the
+ * preparations) and the scripts it names. The app's own source is not folded:
+ * a world that fails on it is retried once the recipe moves or on a refresh.
+ */
+export function liveWorldInputs(repoRoot: string): string {
+  return recipeContractFingerprint(repoRoot)
+}
+
+/**
+ * Whether the last authoring run's live world failed under the recipe as it
+ * stands now (`liveUnavailable`): standing it up again would fail the same way.
+ */
+export function liveWorldFailed(repoRoot: string, authored: InterfacesFile | null): boolean {
+  return authored?.liveUnavailable !== undefined && authored.liveUnavailable.recipe === liveWorldInputs(repoRoot)
 }
 
 /** A row that never reached an accepted outcome — the two retryable words. */
