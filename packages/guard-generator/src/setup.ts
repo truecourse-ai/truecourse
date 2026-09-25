@@ -50,9 +50,11 @@
  * (`skipped`/`unchanged`). That spine is written at every step boundary, not
  * only when the run ends, so a run that stops part-way — an empty balance, a
  * killed process — is carried on from what it reached rather than paying for
- * those steps again. `refresh` forces every step; refreshing the SEED
- * additionally needs `confirmSeedReplace` to answer true, and a caller that cannot
- * ask answers false — a hand-edited seed script is never clobbered by an option.
+ * those steps again. `refresh` forces every step. A seed the engine drafted and
+ * nobody has edited since is re-drafted whenever its step re-opens; replacing
+ * any OTHER seed needs `refresh` and `confirmSeedReplace` to answer true, and a
+ * caller that cannot ask answers false — a hand-edited seed script is never
+ * clobbered by an option.
  *
  * SINGLE-STEP MODE (`only`): run one LLM-bearing
  * step in isolation — prior steps replay from what they left on disk (never a
@@ -235,10 +237,11 @@ export interface GuardSetupOptions {
    */
   only?: GuardSetupOnlyStep
   /**
-   * Asked ONCE, and only when a refresh would REPLACE an existing `api.seed`. A
-   * seed script is a human-reviewed artifact of the repo's setup bundle:
-   * `refresh` alone is not consent, and a caller that cannot ask answers false,
-   * so an option can never clobber a hand-edited script.
+   * Asked ONCE, and only when a refresh would REPLACE an existing `api.seed`
+   * the engine did not draft (or that was edited since). A seed script is a
+   * human-reviewed artifact of the repo's setup bundle: `refresh` alone is not
+   * consent, and a caller that cannot ask answers false, so an option can
+   * never clobber a hand-edited script.
    */
   confirmSeedReplace?: () => Promise<boolean>
   signal?: AbortSignal
@@ -1226,6 +1229,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 
   // ---- Step 4: the one seed — data AND auth. SOFT. -------------------------
   const seedFpOf = (): string => computeSeedStepFingerprint(repoRoot, schemaFiles)
+  const priorDrafted = priorReport?.steps.find((row) => row.key === 'seed')?.draftedSeed
+  /** The seed row's `draftedSeed`: this run's draft, or the prior one while the seed still matches it. */
+  const draftedSeedOf = (drafted: boolean): { draftedSeed?: string } => {
+    const now = seedDigest(repoRoot, reloadRecipe(repoRoot) ?? current)
+    return now !== null && (drafted || now === priorDrafted) ? { draftedSeed: now } : {}
+  }
   let seedStep: GuardSetupSeedStep | undefined
   /** A recipe defect the seed's cold-clone proof surfaced: the run fails on it. */
   let recipeFailure: string | undefined
@@ -1250,7 +1259,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             ...declaredNames(existingSeed),
           }
         : { status: 'skipped', reason: 'unchanged since the last run, which drafted no seed either' }
-      pushStep({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
+      pushStep({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre, ...draftedSeedOf(false) })
       fact(
         'seed',
         existingSeed
@@ -1280,6 +1289,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         }),
         requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,
+        engineDrafted: priorDrafted !== undefined && priorDrafted === seedDigest(repoRoot, current),
         freshCheckout,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
@@ -1292,6 +1302,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         // fingerprint folds, so the settled value is the tree it left behind.
         inputFingerprint: seedFpOf(),
         ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
+        ...draftedSeedOf(seedStep.outcome === 'drafted'),
       })
       // The cold-clone proof is the one place the recipe's `install`/`build`
       // run in a tree that did not grow across the session's attempts. When
@@ -2262,6 +2273,8 @@ async function runSeedStep(args: {
   requiredResources: RequiredResource[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
+  /** The existing seed is the one the engine last drafted, unedited since. */
+  engineDrafted: boolean
   /** Whether the tree setup was handed is a fresh checkout — the cold proof's gate. */
   freshCheckout: boolean
   onPhase: (running: string, done: string) => void
@@ -2277,9 +2290,11 @@ async function runSeedStep(args: {
   const { opts, recipe, database, routes, schemes } = args
   const existing = recipe.api?.seed
 
-  // Idempotence: a repo that already has a seed and did not ask for a refresh is
-  // REPORTED, not re-drafted. That is the whole "bare setup no-ops" contract.
-  if (existing && !opts.refresh) {
+  // Idempotence: a repo that already has a seed of its own and did not ask for
+  // a refresh is REPORTED, not re-drafted. That is the whole "bare setup
+  // no-ops" contract. A seed the engine drafted is the engine's: the step
+  // re-opened because an input it was drafted from moved, so it is drafted again.
+  if (existing && !opts.refresh && !args.engineDrafted) {
     return {
       step: {
         status: 'ok',
@@ -2295,7 +2310,7 @@ async function runSeedStep(args: {
   if (existing) {
     // `refresh` is not consent to overwrite a hand-edited script; the caller is
     // asked, and a caller that cannot ask answers false.
-    replaceExisting = (await opts.confirmSeedReplace?.()) ?? false
+    replaceExisting = args.engineDrafted || ((await opts.confirmSeedReplace?.()) ?? false)
     if (!replaceExisting) {
       return {
         step: {
@@ -2384,6 +2399,17 @@ async function runSeedStep(args: {
     ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
     ...(result.recipeDefect ? { recipeDefect: true } : {}),
   }
+}
+
+/**
+ * A digest of the `api.seed` block and the script it names, as they stand now:
+ * what the seed row's `draftedSeed` records. Null when no seed is declared.
+ */
+function seedDigest(repoRoot: string, recipe: Recipe): string | null {
+  const seed = recipe.api?.seed
+  if (!seed) return null
+  const script = readExistingSeedScript(repoRoot, recipe)?.scriptContent ?? ''
+  return createHash('sha256').update(JSON.stringify(seed)).update('\0').update(script).digest('hex').slice(0, 16)
 }
 
 /** The fixture/credential names a seed declares, sorted, omitted when empty. */

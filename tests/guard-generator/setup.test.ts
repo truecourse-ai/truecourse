@@ -206,9 +206,11 @@ function seedSeam(
   }
 }
 
-/** A seed seam that really WRITES its artifacts — the post-write fingerprint case. */
-function writingSeedSeam(): GuardSetupSeedSession {
+/** A seed seam that really WRITES its artifacts — the post-write fingerprint
+ *  case — recording each briefing it was handed in `inputs` when given one. */
+function writingSeedSeam(inputs: GuardSetupSeedSessionInput[] = []): GuardSetupSeedSession {
   return async (input) => {
+    inputs.push(input)
     const scriptPath = 'scripts/guard-seed.mjs'
     fs.mkdirSync(path.join(input.repoRoot, 'scripts'), { recursive: true })
     fs.writeFileSync(path.join(input.repoRoot, scriptPath), '// drafted\n')
@@ -515,28 +517,70 @@ describe('runGuardSetup — skip when settled', () => {
     expect(statuses(second)).toMatchObject({ seed: 'skipped:unchanged' })
   })
 
-  // A new name on a stored row is filled in, never moved — except the stage
-  // version: a seed row settled under an earlier stage re-opens the step.
-  it('a seed row from an earlier stage re-opens the seed step', async () => {
-    const r = fixtureRepo()
-    writeRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } })
-    const probe = probeStub()
-    const seed = seedSeam()
-    const first = await runAndPersist(r, { probe: probe.probe, seedSession: seed.seam })
-    const { stage: _stage, ...earlier } = first.steps.find((s) => s.key === 'seed')!.inputComponents!
+  /** Rewrite the stored seed row as one settled under an earlier stage. */
+  function asEarlierStage(r: string, report: Awaited<ReturnType<typeof runGuardSetup>>['report']): void {
+    const { stage: _stage, ...earlier } = report.steps.find((s) => s.key === 'seed')!.inputComponents!
     writeGuardSetup(r, {
-      ...first,
-      steps: first.steps.map((s) => (s.key === 'seed' ? { ...s, inputComponents: earlier } : s)),
+      ...report,
+      steps: report.steps.map((s) => (s.key === 'seed' ? { ...s, inputComponents: earlier } : s)),
     })
+  }
+
+  // A new name on a stored row is filled in, never moved — except the stage
+  // version: a seed row settled under an earlier stage re-opens the step, and a
+  // seed the engine drafted, untouched since, is drafted again without asking.
+  it('a seed row from an earlier stage re-opens the seed step and re-drafts the seed it drafted', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const probe = probeStub()
+    const inputs: GuardSetupSeedSessionInput[] = []
+    const first = await runAndPersist(r, { probe: probe.probe, seedSession: writingSeedSeam(inputs) })
+    expect(first.seed?.outcome).toBe('drafted')
+    asEarlierStage(r, first)
     const facts: string[] = []
     const second = await runAndPersist(r, {
       probe: probe.probe,
-      seedSession: seed.seam,
+      seedSession: writingSeedSeam(inputs),
+      confirmSeedReplace: async () => {
+        throw new Error('a seed the engine drafted is replaced without asking')
+      },
       onStepFact: (step, line) => facts.push(`${step} | ${line}`),
     })
     expect(facts).toContain('seed | re-opened: stage moved')
-    expect(statuses(second).seed).not.toBe('skipped:unchanged')
-    expect(statuses(second)).toMatchObject({ recipe: 'skipped:unchanged', catalog: 'skipped:unchanged' })
+    expect(inputs).toHaveLength(2)
+    expect(inputs[1]?.replaceExisting).toBe(true)
+    expect(second.seed?.outcome).toBe('drafted')
+    expect(statuses(second)).toMatchObject({ recipe: 'skipped:unchanged', catalog: 'skipped:unchanged', seed: 'ok' })
+  })
+
+  // Someone edited the drafted script: it is theirs now, and a re-opened step
+  // leaves it alone unless they consent.
+  it('a drafted seed edited by hand is not re-drafted when the step re-opens', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const inputs: GuardSetupSeedSessionInput[] = []
+    const first = await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    fs.writeFileSync(path.join(r, 'scripts/guard-seed.mjs'), '// mine now\n')
+    asEarlierStage(r, first)
+    const second = await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    expect(inputs).toHaveLength(1)
+    expect(second.seed).toMatchObject({ status: 'ok', outcome: 'exists' })
+    // Still the user's on the run after: the carried row does not adopt it.
+    asEarlierStage(r, second)
+    await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    expect(inputs).toHaveLength(1)
+  })
+
+  // A seed written by hand was never the engine's to replace.
+  it('a hand-written seed is not re-drafted when the step re-opens', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } })
+    const seed = seedSeam()
+    const first = await runAndPersist(r, { seedSession: seed.seam })
+    asEarlierStage(r, first)
+    const second = await runAndPersist(r, { seedSession: seed.seam })
+    expect(seed.inputs).toHaveLength(0)
+    expect(second.seed).toMatchObject({ status: 'ok', outcome: 'exists', command: 'node mine.mjs' })
   })
 
   // The seed's cold-clone proof is where the recipe's `install`/`build` first

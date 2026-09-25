@@ -132,6 +132,13 @@ export const GuardSetupTaxonomyStepSchema = z
      * inputs move or somebody asks for a refresh.
      */
     failedScreens: z.array(GuardSetupFailedScreenSchema).optional(),
+    /**
+     * SEED step only: a digest of the `api.seed` block and its script as the
+     * engine last drafted them, carried while they still match. A seed that
+     * still matches is the engine's to re-draft when the step re-opens; one
+     * that does not was edited by hand, and replacing it needs consent.
+     */
+    draftedSeed: z.string().optional(),
   })
   .strict()
   .superRefine((step, ctx) => {
