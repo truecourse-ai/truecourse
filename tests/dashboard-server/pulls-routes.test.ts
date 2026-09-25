@@ -70,11 +70,12 @@ const report = (over: Partial<PullRequestCheckReport> = {}): PullRequestCheckRep
   repositoriesAffected: [],
   run: {
     runId: 'run-1',
-    counts: { newFailures: 1, preExisting: 2, fixed: 3, newlyBlocked: 0, added: 0, retired: 0 },
+    counts: { newFailures: 1, preExisting: 2, fixed: 3, newlyBlocked: 0, newlyCovered: 0, added: 0, retired: 0 },
     newFailures: [{ id: 'f1', title: 'Login', scenarioIds: ['s1'] }],
     preExisting: [],
     fixed: [],
     newlyBlocked: [],
+    newlyCovered: [],
   },
   specHalf: 'no-documents-changed',
   codeHalf: 'ran',

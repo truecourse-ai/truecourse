@@ -133,6 +133,8 @@ export const PullRequestCheckReportSchema = z.object({
         preExisting: z.number().int().nonnegative(),
         fixed: z.number().int().nonnegative(),
         newlyBlocked: z.number().int().nonnegative(),
+        /** A report stored before flows that gained coverage were counted reads as none. */
+        newlyCovered: z.number().int().nonnegative().default(0),
         added: z.number().int().nonnegative(),
         retired: z.number().int().nonnegative(),
       }),
@@ -145,6 +147,8 @@ export const PullRequestCheckReportSchema = z.object({
       preExisting: z.array(FlowRefSchema),
       fixed: z.array(FlowRefSchema),
       newlyBlocked: z.array(FlowRefSchema.extend({ why: z.string() })),
+      /** Flows that could not run or had no scenario at the base and pass at the head. */
+      newlyCovered: z.array(FlowRefSchema).default([]),
     })
     .nullable(),
   specHalf: z.enum(['ran', 'no-documents-changed', 'not-a-source']),

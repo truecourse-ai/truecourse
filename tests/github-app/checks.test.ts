@@ -39,11 +39,12 @@ const report = (over: Partial<PullRequestCheckReport> = {}): PullRequestCheckRep
   repositoriesAffected: [],
   run: {
     runId: 'run-1',
-    counts: { newFailures: 1, preExisting: 2, fixed: 0, newlyBlocked: 0, added: 0, retired: 0 },
+    counts: { newFailures: 1, preExisting: 2, fixed: 0, newlyBlocked: 0, newlyCovered: 0, added: 0, retired: 0 },
     newFailures: [{ id: 'f1', title: 'Checkout completes', scenarioIds: ['s1'], label: 'bug' }],
     preExisting: [{ id: 'f2', title: 'Login' }, { id: 'f3', title: 'Logout' }],
     fixed: [],
     newlyBlocked: [],
+    newlyCovered: [],
   },
   specHalf: 'no-documents-changed',
   codeHalf: 'ran',
@@ -156,11 +157,12 @@ describe('renderCheckOutput', () => {
       report({
         run: {
           runId: 'r',
-          counts: { newFailures: 0, preExisting: 3000, fixed: 0, newlyBlocked: 0, added: 0, retired: 0 },
+          counts: { newFailures: 0, preExisting: 3000, fixed: 0, newlyBlocked: 0, newlyCovered: 0, added: 0, retired: 0 },
           newFailures: [],
           preExisting: Array.from({ length: 3000 }, (_, i) => ({ id: `f${i}`, title: 'x'.repeat(40) })),
           fixed: [],
           newlyBlocked: [],
+          newlyCovered: [],
         },
       }),
       'https://app/agent/run-1',
@@ -175,6 +177,20 @@ describe('renderCheckOutput', () => {
       summary: 'Drafts are not checked. Mark the pull request ready for review and it will be.',
     });
     expect(renderCheckOutput('no-base', null, 'https://app/agent/r').summary).toContain('Rebase onto a newer');
+  });
+
+  it('lists the flows the head newly covers', () => {
+    const run = {
+      runId: 'r',
+      counts: { newFailures: 0, preExisting: 0, fixed: 0, newlyBlocked: 0, newlyCovered: 1, added: 0, retired: 0 },
+      newFailures: [],
+      preExisting: [],
+      fixed: [],
+      newlyBlocked: [],
+      newlyCovered: [{ id: 'key', title: 'The API key stays on the server' }],
+    };
+    const out = renderCheckOutput('clean', report({ run, codeHalf: 'ran' }), null);
+    expect(out.summary).toContain('### Newly covered\n\n- The API key stays on the server');
   });
 
   it('names the commit to rebase onto when there is no base', () => {

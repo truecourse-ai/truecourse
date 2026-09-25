@@ -212,6 +212,7 @@ export async function compareWithBase(input: {
       preExisting: of('pre-existing').length,
       fixed: of('fixed').length,
       newlyBlocked: of('newly-blocked').length,
+      newlyCovered: of('newly-covered').length,
       added: of('added').length,
       retired: of('retired').length,
     },
@@ -222,6 +223,7 @@ export async function compareWithBase(input: {
       ...f,
       why: link.fork ? 'the registered instances are not provided to a fork' : 'could not run at the head',
     })),
+    newlyCovered: of('newly-covered'),
   };
   const baseManifest = await readManifest(repoFullName, { commitSha: link.baseCommit });
   const moved = baseManifest

@@ -28,7 +28,10 @@ describe('compareFlows', () => {
     ['succeeded', 'blocked', 'newly-blocked'],
     ['blocked', 'blocked', 'unchanged'],
     ['succeeded', 'succeeded', 'unchanged'],
-    ['never-run', 'succeeded', 'unchanged'],
+    // Coverage the head gained: a flow that could not run, or had no scenario, now passes.
+    ['never-run', 'succeeded', 'newly-covered'],
+    ['blocked', 'succeeded', 'newly-covered'],
+    ['not-testable', 'succeeded', 'unchanged'],
     [null, 'succeeded', 'added'],
     [null, 'blocked', 'added'],
     ['succeeded', null, 'retired'],

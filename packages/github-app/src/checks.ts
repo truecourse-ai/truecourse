@@ -234,6 +234,7 @@ function sections(report: PullRequestCheckReport): string[] {
     list('Pre-existing failures', report.run.preExisting);
     list('Fixed', report.run.fixed);
     list('Could not run at the head', report.run.newlyBlocked.map((f) => ({ title: `${f.title}: ${f.why}` })));
+    list('Newly covered', report.run.newlyCovered);
     out.push(`## The run\n\n${lines.length > 0 ? lines.join('\n\n') : 'Every flow held.'}`);
   }
   return out;

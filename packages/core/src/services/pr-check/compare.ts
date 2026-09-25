@@ -26,6 +26,8 @@ export type FlowDeltaKind =
   | 'fixed'
   /** Held at the base, could not run at the head. Reported, never a failure: a fork always has these. */
   | 'newly-blocked'
+  /** Could not run or had no scenario at the base, PASSES at the head: coverage the head gained. */
+  | 'newly-covered'
   /** A flow the head has and the base did not, and it does not fail. */
   | 'added'
   /** A flow the base had and the head does not. */
@@ -58,6 +60,7 @@ function deltaKind(
   if (base === null) return 'added';
   if (base === 'failed') return head === 'succeeded' ? 'fixed' : 'unchanged';
   if (base === 'succeeded' && head === 'blocked') return 'newly-blocked';
+  if (head === 'succeeded' && (base === 'blocked' || base === 'never-run')) return 'newly-covered';
   return 'unchanged';
 }
 
