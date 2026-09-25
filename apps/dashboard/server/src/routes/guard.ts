@@ -4,9 +4,10 @@
  * current state only. Thin adapters over the `@truecourse/core` guard drivers.
  *
  *   GET /:id/guard/status        composed status summary (coverage / last run / last generate)
- *   GET /:id/guard/latest        the last run's per-scenario results (+ failure/evidence + runFlows)
+ *   GET /:id/guard/latest        the last run's per-scenario results (+ failure/evidence + runFlows);
+ *                                ?outcome= narrows the tests
  *   GET /:id/guard/history       the baseline run trend (?all=1: every stored run, not just the trend)
- *   GET /:id/guard/runs/:runId   one past run snapshot (+ runFlows)
+ *   GET /:id/guard/runs/:runId   one past run snapshot (+ runFlows); ?outcome= narrows the tests
  *   GET /:id/guard/report        the last `guard generate` report
  *   GET /:id/guard/coverage      per-section coverage join for ?doc=<path> (over the live doc)
  *   GET /:id/guard/flows         the flow inventory + recipe card (the Flows tab); ?status= narrows
@@ -41,7 +42,9 @@ import {
   GUARD_COVERAGE_PLAIN_ORDER,
   GUARD_VISUAL_CONTENT_TYPE,
   GuardClaimCoverageSchema,
+  GuardOutcomeSchema,
   type GuardClaimCoverage,
+  type GuardOutcome,
   type GuardCoveragePlainStatus,
 } from '@truecourse/shared';
 import {
@@ -96,10 +99,20 @@ import { refOf } from './route-params.js';
 
 const router: Router = Router();
 
-/** One query parameter's values — `?x=a&x=b` and `?x=a` read alike. */
+/** One query parameter's values — `?x=a&x=b`, `?x=a,b` and `?x=a` read alike. */
 function queryList(raw: unknown): string[] {
   if (raw === undefined) return [];
-  return (Array.isArray(raw) ? raw : [raw]).map((v) => String(v).trim()).filter(Boolean);
+  return (Array.isArray(raw) ? raw : [raw])
+    .flatMap((v) => String(v).split(','))
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+/** `?outcome=` as run outcomes, the ones that are not dropped. */
+function outcomesOf(raw: unknown): GuardOutcome[] {
+  return queryList(raw).filter((o): o is GuardOutcome =>
+    (GuardOutcomeSchema.options as readonly string[]).includes(o),
+  );
 }
 
 /** `?status=` as coverage words, the ones that are not dropped. */
@@ -150,7 +163,7 @@ router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFu
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const ref = refOf(req);
     if (!ref) {
-      const latest = await readRepoRun(repo.path);
+      const latest = await readRepoRun(repo.path, undefined, { outcome: outcomesOf(req.query.outcome) });
       res.json({ ...latest, runFlows: await readGuardRunFlows(repo.path, latest) });
       return;
     }
@@ -181,7 +194,9 @@ router.get('/:id/guard/history', async (req: Request, res: Response, next: NextF
 router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    const run = await readRepoRun(repo.path, req.params.runId as string);
+    const run = await readRepoRun(repo.path, req.params.runId as string, {
+      outcome: outcomesOf(req.query.outcome),
+    });
     res.json({ ...run, runFlows: await readGuardRunFlows(repo.path, run, refOf(req)) });
   } catch (e) {
     next(e);

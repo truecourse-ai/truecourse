@@ -32,11 +32,13 @@ export function FlowPage({ repo, flowId }: { repo: Repo; flowId: string }) {
   useGuardTabJump(repo.id);
   const navigate = useNavigate();
   const reloadKey = useGuardRefresh(repo, ['guard-generate', 'guard-run']);
-  const flows = useGuardFlows(repo.id, true, reloadKey);
+  const decisions = useGuardDecisions(repo.id, true, reloadKey);
+  // A flow ruling changes what the flow reads say (`dismissed`), so they re-read on it.
+  const flowsKey = reloadKey + decisions.flowRevision;
+  const flows = useGuardFlows(repo.id, true, flowsKey);
   const interfaces = useGuardInterfaces(repo.id, true, reloadKey);
   const claims = useGuardClaims(repo.id, true, reloadKey);
   const tests = useGuardScenarios(repo.id, true, reloadKey);
-  const decisions = useGuardDecisions(repo.id, true, reloadKey);
   const urlTabs = useGuardFlowTabs(repo.id);
   const { openSpecSection, openGuardInterface, openGuardExternals } = useGuardView();
 
@@ -82,7 +84,7 @@ export function FlowPage({ repo, flowId }: { repo: Repo; flowId: string }) {
           tabs={tabs}
           interfaces={interfaces.view?.interfaces ?? null}
           binds={binds}
-          reloadKey={reloadKey}
+          reloadKey={flowsKey}
           decisions={decisions}
           onOpenSpec={openSpecSection}
           onOpenInterface={openGuardInterface}

@@ -523,6 +523,27 @@ describe('write tools', () => {
     const flow = await ok(client, 'get_flow', { repo: fixture.project.slug, flowId: 'task-lifecycle' });
     expect(flow.steps[0]).toMatchObject({ claim: 'Creating a task prints its id', doc: DOC });
 
+    // An outcome filter narrows the tests; the summary stays the whole run's.
+    const blocked = await ok(client, 'get_run', { repo: fixture.project.slug, outcome: ['blocked'] });
+    expect(blocked).toMatchObject({ tests: [], summary: { total: 1, fail: 1 } });
+    const failed = await ok(client, 'get_run', { repo: fixture.project.slug, outcome: ['fail', 'error'] });
+    expect(failed.tests.map((t: { testId: string }) => t.testId)).toEqual(['s1']);
+    const latestUrl = `/api/repos/${fixture.project.slug}/guard/latest`;
+    expect((await request(app).get(`${latestUrl}?outcome=pass,blocked`).expect(200)).body.scenarios).toEqual([]);
+    expect(
+      (await request(app).get(`${latestUrl}?outcome=pass&outcome=fail`).expect(200)).body.scenarios.map(
+        (s: { id: string }) => s.id,
+      ),
+    ).toEqual(['s1']);
+    // The same run, addressed by its id: the stored snapshot the history lists.
+    const snapshot = path.join(fixture.repoPath, '.truecourse', 'guard', 'runs', 'run-1.json');
+    fs.mkdirSync(path.dirname(snapshot), { recursive: true });
+    fs.copyFileSync(path.join(fixture.repoPath, '.truecourse', 'guard', 'LATEST.json'), snapshot);
+    expect((await request(app).get(`/api/repos/${fixture.project.slug}/guard/runs/run-1?outcome=blocked`).expect(200)).body).toMatchObject({
+      scenarios: [],
+      summary: { fail: 1 },
+    });
+
     const { failures } = await ok(client, 'get_failures', { repo: fixture.project.slug });
     expect(failures).toEqual([
       expect.objectContaining({ testId: 's1', failure: expect.objectContaining({ expected: 'exit 0' }) }),
@@ -605,9 +626,24 @@ describe('write tools', () => {
     expect((await decisions()).body.dismissedFlows).toEqual([
       { flowId: 'task-lifecycle', dismissedAt: expect.any(String), note: 'not a user path' },
     ]);
+    // The flow reads carry the mark, for the dashboard and the tools alike.
+    const flowUrl = `/api/repos/${fixture.project.slug}/guard/flows`;
+    expect((await request(app).get(`${flowUrl}/task-lifecycle`).expect(200)).body).toMatchObject({
+      dismissed: true,
+      dismissalNote: 'not a user path',
+    });
+    expect((await request(app).get(flowUrl).expect(200)).body.flows[0]).toMatchObject({ dismissed: true });
+    expect(await ok(client, 'get_flow', { repo: fixture.project.slug, flowId: 'task-lifecycle' })).toMatchObject({
+      dismissed: true,
+      dismissalNote: 'not a user path',
+    });
+    expect((await ok(client, 'list_flows', { repo: fixture.project.slug })).flows[0]).toMatchObject({
+      dismissed: true,
+    });
 
     await ok(client, 'set_flow_dismissed', { repo: fixture.project.slug, flowId: 'task-lifecycle', dismissed: false });
     expect((await decisions()).body.dismissedFlows).toEqual([]);
+    expect((await request(app).get(`${flowUrl}/task-lifecycle`).expect(200)).body.dismissed).toBe(false);
 
     // A flow the repository lacks is refused by the service, as the route refuses it.
     const missing = await call(client, 'set_flow_dismissed', {

@@ -26,6 +26,7 @@ import {
   type GuardFlowDetail,
   type GuardFlowsView,
   type GuardLatest,
+  type GuardOutcome,
   type GuardScenarioResult,
 } from '@truecourse/shared';
 
@@ -50,16 +51,23 @@ export async function readRepoFlow(repoPath: string, flowId: string, ref?: strin
   return detail;
 }
 
-/** The run `runId` names, or the latest one; a 404 when there is none. */
-export async function readRepoRun(repoPath: string, runId?: string): Promise<GuardLatest> {
-  if (runId) {
-    const run = await readGuardRun(repoPath, runId);
-    if (!run) throw createAppError('Guard run not found.', 404);
-    return run;
+/**
+ * The run `runId` names, or the latest one; a 404 when there is none. With
+ * `outcome`, only the tests with one of those outcomes — `blocked` answers the
+ * tests held back, each with its `blockedOn`. The summary stays the whole run's.
+ */
+export async function readRepoRun(
+  repoPath: string,
+  runId?: string,
+  filter: { outcome?: readonly GuardOutcome[] } = {},
+): Promise<GuardLatest> {
+  const run = runId ? await readGuardRun(repoPath, runId) : await readGuardRunForView(repoPath);
+  if (!run) {
+    throw createAppError(runId ? 'Guard run not found.' : 'No guard run has been recorded yet.', 404);
   }
-  const latest = await readGuardRunForView(repoPath);
-  if (!latest) throw createAppError('No guard run has been recorded yet.', 404);
-  return latest;
+  const outcome = filter.outcome ?? [];
+  if (outcome.length === 0) return run;
+  return { ...run, scenarios: run.scenarios.filter((s) => outcome.includes(s.outcome)) };
 }
 
 /** One failed test of a run, with the evidence of what it did. */
