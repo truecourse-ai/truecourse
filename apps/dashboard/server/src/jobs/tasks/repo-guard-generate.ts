@@ -24,6 +24,11 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  * had no prior set to fall back on produced NOTHING to run, so it ends the
  * chain with a warning naming the reason rather than handing the run an empty
  * scenario set to fail on.
+ *
+ * A generate that carries a pull request is its check's second link: it starts
+ * from the scenario set stored at the pull request's base, over the bundle the
+ * head's setup stored, writes under the pull request's scope, and settles the
+ * check when the chain ends here.
  */
 
 import { log } from '@truecourse/core/lib/logger';
@@ -44,8 +49,16 @@ import { loadScenarios } from '@truecourse/guard-runner';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
+import { pullRequestScope, pullRequestWorkspaceScope } from '@truecourse/shared';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { readGuardGenerateResume } from '../guard-generate-resume.js';
+import {
+  checkIsOpen,
+  checkLinks,
+  linkStarted,
+  settleLinkCheck,
+  type PullRequestCheckPort,
+} from '../pr-check-chain.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
 import {
   markWorldStateUnknown,
@@ -53,7 +66,15 @@ import {
   persistGeneratedGuard,
   readGeneratedReport,
 } from '../materialize-guard.js';
-import { chainEnded, firstLine, workTreeVia, type ChainEnd, type OnboardingJobRequest } from './onboarding.js';
+import {
+  chainEnded,
+  firstLine,
+  nextLinkRequest,
+  runPullRequestStamp,
+  workTreeVia,
+  type ChainEnd,
+  type OnboardingJobRequest,
+} from './onboarding.js';
 
 export const REPO_GUARD_GENERATE_TASK = 'repo.guard-generate';
 
@@ -98,6 +119,8 @@ export interface RepoGuardGenerateTaskDeps {
   onChainEnd?: ChainEnd;
   startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runGenerate?: typeof guardGenerateInProcess;
+  /** The pull request checks a generate carrying one reports to. Without it such a generate does nothing. */
+  pullRequests?: PullRequestCheckPort;
 }
 
 export function createRepoGuardGenerateTask(
@@ -120,6 +143,11 @@ export function createRepoGuardGenerateTask(
     traceMeta: (payload) => ({ repoFullName: payload.repoFullName }),
 
     async run(ctx) {
+      const pr = ctx.payload.pullRequest;
+      // A check a newer head superseded, or a closed pull request's: nothing to do.
+      if (pr && !(deps.pullRequests && (await checkIsOpen(deps.pullRequests, pr)))) {
+        return { result: { repoFullName: ctx.payload.repoFullName, status: 'check-settled' }, notification: null };
+      }
       const meter = createUsageMeter({
         workspaceOrgId: ctx.payload.workspaceOrgId,
         repoFullName: ctx.payload.repoFullName,
@@ -143,27 +171,43 @@ export function createRepoGuardGenerateTask(
           // generate that pauses is carried on IN this record, replaying what
           // it had already authored out of it.
           ctx.resumeWith({ carryOnRunId: activityRun.runId, resumeRunId: activityRun.runId });
+          if (pr && deps.pullRequests) {
+            const live = await linkStarted(
+              deps.pullRequests,
+              pr,
+              ctx.jobId,
+              checkLinks.record(deps.pullRequests.appUrl, activityRun.runId),
+              `Generating flows for #${pr.number} at ${(ctx.payload.commitSha ?? '').slice(0, 8)}.`,
+            );
+            if (!live) return { result: { repoFullName, status: 'check-settled' }, notification: null };
+          }
           await ctx.notify({
             level: 'started',
             title: 'Flow generation started',
-            data: { repoFullName, runId: activityRun.runId },
+            data: { repoFullName, runId: activityRun.runId, ...(pr ? { pullRequest: pr.number } : {}) },
           });
           const llm = await startLlm(ctx.payload.workspaceOrgId, meter);
 
           await ctx.phase('clone');
           const tree = await acquireWorkTree(repoFullName, workTreeVia(ctx.payload));
           try {
-            const commitSha = await resolveCommitSha(tree.dir);
+            // A pull request's link works the head it was handed, which the clone checked out.
+            const commitSha = pr && ctx.payload.commitSha ? ctx.payload.commitSha : await resolveCommitSha(tree.dir);
             commits.set(ctx.jobId, commitSha);
             if (resume) assertGuardGenerateResumeCommit(resume, commitSha);
             activityRun.setGitRef?.(commitSha);
             activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
-            const ref = { repoKey: repoFullName, commitSha };
+            const ref = { repoKey: repoFullName, commitSha, ...(pr ? { scope: pullRequestScope(pr.number) } : {}) };
             // Generate needs documents, which setup does not: a repository that
             // reads none is never rippled here (the scan's ripple skips an empty
             // slice), so reaching this is somebody pressing Generate on a
             // repository linked to nothing — which is a refusal with a reason.
-            const slice = await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
+            const slice = await materializeStoredSpec(
+              ref,
+              tree.dir,
+              ctx.payload.workspaceOrgId,
+              pr ? { scope: pullRequestWorkspaceScope(repoFullName, pr.number) } : {},
+            );
             if (slice.documents === 0) {
               throw new Error(
                 slice.hasWorkspaceCorpus
@@ -172,7 +216,12 @@ export function createRepoGuardGenerateTask(
               );
             }
             activityTracker.fact('clone', 'the stored spec corpus and decisions written into the clone');
-            const baseline = await materializeStoredGuardState(repoFullName, tree.dir);
+            // A pull request starts from its base's set, so what it changed is what moves.
+            const baseline = await materializeStoredGuardState(
+              repoFullName,
+              tree.dir,
+              pr ? { commitSha: pr.baseCommit } : {},
+            );
             activityTracker.fact(
               'clone',
               baseline
@@ -181,7 +230,8 @@ export function createRepoGuardGenerateTask(
             );
             // Setup's bundle goes in LAST: its recipe and catalogs are the current
             // truth, whatever the scenario set was generated against.
-            const bundle = await loadGuardSetupBundle(repoFullName);
+            // A pull request's is the one its head's setup stored.
+            const bundle = await loadGuardSetupBundle(repoFullName, pr ? { scope: ref.scope } : undefined);
             if (!bundle) {
               throw new Error(
                 `${repoFullName} has not been set up yet — run guard setup before generating scenarios.`,
@@ -191,8 +241,8 @@ export function createRepoGuardGenerateTask(
             markWorldStateUnknown(tree.dir);
             activityTracker.fact('clone', `the newest setup bundle written into the clone: ${Object.keys(bundle).join(', ')}`);
             // The registered instances beside it: what a supplied dependency is
-            // provided with decides which sections generate can author.
-            if (await materializeGuardOverlays(repoFullName, tree.dir)) {
+            // provided with decides which sections generate can author. Never a fork's.
+            if (!pr?.fork && (await materializeGuardOverlays(repoFullName, tree.dir))) {
               activityTracker.fact('clone', 'the registered instances written into the clone');
             }
             activityTracker.done('clone');
@@ -334,7 +384,7 @@ export function createRepoGuardGenerateTask(
           } finally {
             tree.dispose();
           }
-        }, meter);
+        }, meter, runPullRequestStamp(ctx.payload));
       } finally {
         // However the generate ended, what it spent up to that point is written.
         await meter.close();
@@ -352,6 +402,7 @@ export function createRepoGuardGenerateTask(
     },
 
     async onSettled(ctx, outcome, result) {
+      const runId = runIds.get(ctx.jobId);
       runIds.delete(ctx.jobId);
       const commitSha = commits.get(ctx.jobId) ?? null;
       commits.delete(ctx.jobId);
@@ -361,16 +412,35 @@ export function createRepoGuardGenerateTask(
       // The chain's commit: the one this job was pinned to, else the one it
       // cloned. Carried into the run, and reported when the chain ends.
       const target = ctx.payload.commitSha ?? commitSha;
-      if (!(await chainRun(ctx.payload, outcome, result, target)) && chainEnded(outcome)) {
+      const pr = ctx.payload.pullRequest;
+      if (pr) {
+        const port = deps.pullRequests;
+        if (!port || !(await checkIsOpen(port, pr))) return;
+        const chained = await chainRun(ctx.payload, outcome, result, target);
+        if (chained === 'chained') return;
+        const link = runId ? checkLinks.record(port.appUrl, runId) : null;
+        const status = (result as Partial<GuardGenerateJobResult> | undefined)?.status;
+        // A cancel was settled by whoever cancelled.
+        if (outcome === 'paused') await settleLinkCheck(port, pr, { reason: 'credits' }, link);
+        else if (outcome === 'succeeded' && status === 'open-conflicts') {
+          // Conflicts the head did not create still block generation, as on main.
+          await settleLinkCheck(port, pr, { reason: 'conflict', conclusion: 'neutral', report: { codeHalf: 'stopped-by-conflict' } }, link);
+        } else if (outcome !== 'cancelled') {
+          await settleLinkCheck(port, pr, { reason: 'error', report: { codeHalf: 'ran' } }, link);
+        }
+        return;
+      }
+      if ((await chainRun(ctx.payload, outcome, result, target)) !== 'chained' && chainEnded(outcome)) {
         await deps.onChainEnd?.(ctx.payload, target);
       }
     },
   };
 
   /**
-   * Chain the run a finished generate owes, and say whether one was asked for.
-   * Only a generate that left a scenario set has anything to run: a blocked
-   * corpus and a generate that settled no flow end the chain here (their
+   * Chain the run a finished generate owes: `chained`, `ended` when there is
+   * nothing to run, or `failed-to-chain` when the enqueue itself failed. Only a
+   * generate that left a scenario set has anything to run: a blocked corpus
+   * and a generate that settled no flow end the chain here (their
    * notifications already say why), and so does a failure or a cancel. An
    * unchanged set still runs — the code under it may have moved, and the
    * baseline run is what says so.
@@ -380,30 +450,20 @@ export function createRepoGuardGenerateTask(
     outcome: string,
     result: unknown,
     commitSha: string | null,
-  ): Promise<boolean> {
-    if (outcome !== 'succeeded') return false;
-    if ((result as { status?: string } | undefined)?.status !== 'ok') return false;
+  ): Promise<'chained' | 'ended' | 'failed-to-chain'> {
+    if (outcome !== 'succeeded') return 'ended';
+    if ((result as { status?: string } | undefined)?.status !== 'ok') return 'ended';
     try {
-      // A fresh request, not this job's payload: the chained job gets its own
-      // row id from the enqueue, never generate's. Pinned to the chain's
-      // commit, so the run works the tree the scenarios were authored on.
-      const { repoId, repoFullName, workspaceOrgId } = payload;
-      await deps.chainGuardRun({
-        repoId,
-        repoFullName,
-        workspaceOrgId,
-        source: 'chain',
-        ...(commitSha ? { commitSha } : {}),
-        ...(payload.recovery ? { recovery: true } : {}),
-      });
-      return true;
+      // Pinned to the chain's commit, so the run works the tree the scenarios were authored on.
+      await deps.chainGuardRun(nextLinkRequest(payload, commitSha));
+      return 'chained';
     } catch (err) {
       // A chain that cannot be enqueued is not this generate's failure: the
       // scenarios are stored, and the run can be started by hand.
       log.warn(
         `[jobs] could not chain the baseline run for ${payload.repoFullName}: ${(err as Error).message}`,
       );
-      return false;
+      return 'failed-to-chain';
     }
   }
 }

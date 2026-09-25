@@ -38,6 +38,13 @@ export interface OnboardingJobRequest {
    */
   recovery?: true;
   /**
+   * The pull request this chain checks. Carried down every link like the
+   * commit: each works the head (`commitSha`) through the pull request's
+   * installation, reads its own scope before the base's stored state, stores
+   * under the pull request's scope, and the chain's end settles the check.
+   */
+  pullRequest?: PullRequestLink;
+  /**
    * The user id of the person whose request enqueued it. Unset when nobody
    * asked directly: a chain, a webhook, the scheduler.
    */
@@ -51,14 +58,67 @@ export interface OnboardingJobRequest {
   carryOnRunId?: string;
 }
 
+/** What a chain checking a pull request carries down its links. */
+export interface PullRequestLink {
+  number: number;
+  /** The `pull_request_checks` row the chain's end settles. */
+  checkId: string;
+  /** The installation the head is cloned through. */
+  installationId: number;
+  /** The head's branch, which the clone checks the head out under. */
+  headRef: string;
+  /** The default-branch commit whose stored state the check starts from and is compared with. */
+  baseCommit: string;
+  /** A fork's code runs without the workspace's registered instances. */
+  fork: boolean;
+}
+
 export type OnboardingJobPayload = OnboardingJobRequest & JobPayload;
+
+/** The pull request a link's run record is stamped with, which the Agent page reads it by. */
+export function runPullRequestStamp(
+  payload: OnboardingJobRequest,
+): { pullRequest?: { repoFullName: string; number: number; headSha: string; checkId: string } } {
+  const pr = payload.pullRequest;
+  return pr && payload.commitSha
+    ? { pullRequest: { repoFullName: payload.repoFullName, number: pr.number, headSha: payload.commitSha, checkId: pr.checkId } }
+    : {};
+}
+
+/**
+ * The next link's request: a fresh one, never this job's payload (the chained
+ * job gets its own row id from the enqueue), pinned to the chain's commit and
+ * carrying the restart mark and the pull request down the chain.
+ */
+export function nextLinkRequest(payload: OnboardingJobRequest, commitSha: string | null): OnboardingJobRequest {
+  const { repoId, repoFullName, workspaceOrgId, recovery, pullRequest } = payload;
+  return {
+    repoId,
+    repoFullName,
+    workspaceOrgId,
+    source: 'chain',
+    ...(commitSha ? { commitSha } : {}),
+    ...(recovery ? { recovery } : {}),
+    ...(pullRequest ? { pullRequest } : {}),
+  };
+}
 
 /**
  * Where a job's work tree comes from: the commit its request pinned, or the
  * default branch's tip when it pinned none (a repository's own provider, as
- * every onboarding job clones).
+ * every onboarding job clones). A pull request's links fetch its head.
  */
 export function workTreeVia(payload: OnboardingJobRequest): WorkTreeVia | undefined {
+  // A pull request's head is fetched through its installation and checked out
+  // under its own branch name.
+  if (payload.pullRequest && payload.commitSha) {
+    return {
+      workspaceOrgId: payload.workspaceOrgId,
+      installationId: payload.pullRequest.installationId,
+      commitSha: payload.commitSha,
+      defaultBranch: payload.pullRequest.headRef,
+    };
+  }
   return payload.commitSha
     ? { workspaceOrgId: payload.workspaceOrgId, commitSha: payload.commitSha }
     : undefined;

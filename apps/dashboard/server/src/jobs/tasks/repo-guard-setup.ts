@@ -14,6 +14,12 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  * for twice.
  *
  * A setup whose recipe gate held chains straight into `repo.guard-generate`.
+ *
+ * A setup that carries a pull request is the first link of that pull request's
+ * check: it works the head, starts from the pull request's newest bundle (else
+ * the base's), stores under the pull request's scope, and settles the check
+ * when the chain ends here — a setup the head cannot pass is the pull
+ * request's failure (`build-failed`).
  */
 
 import { log } from '@truecourse/core/lib/logger';
@@ -36,10 +42,26 @@ import {
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
+import { pullRequestScope, pullRequestWorkspaceScope } from '@truecourse/shared';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { markWorldStateUnknown } from '../materialize-guard.js';
 import { materializeStoredSpec, storedSliceSize } from '../materialize-spec.js';
-import { chainEnded, firstLine, workTreeVia, type ChainEnd, type OnboardingJobRequest } from './onboarding.js';
+import {
+  checkIsOpen,
+  checkLinks,
+  linkStarted,
+  settleLinkCheck,
+  type PullRequestCheckPort,
+} from '../pr-check-chain.js';
+import {
+  chainEnded,
+  firstLine,
+  nextLinkRequest,
+  runPullRequestStamp,
+  workTreeVia,
+  type ChainEnd,
+  type OnboardingJobRequest,
+} from './onboarding.js';
 
 export const REPO_GUARD_SETUP_TASK = 'repo.guard-setup';
 
@@ -63,6 +85,8 @@ export interface RepoGuardSetupTaskDeps {
   runSetup?: typeof guardSetupInProcess;
   /** How many documents the repository reads right now (the store, not the clone). */
   sliceDocuments?: typeof storedSliceSize;
+  /** The pull request checks a setup carrying one reports to. Without it such a setup does nothing. */
+  pullRequests?: PullRequestCheckPort;
 }
 
 export function createRepoGuardSetupTask(
@@ -77,6 +101,8 @@ export function createRepoGuardSetupTask(
   const runIds = new Map<string, string>();
   /** The commit each job cloned, for the settle hook. Same lifetime as `runIds`. */
   const commits = new Map<string, string>();
+  /** Jobs whose setup the head could not pass, as opposed to one that broke. Same lifetime. */
+  const refused = new Set<string>();
 
   return {
     type: REPO_GUARD_SETUP_TASK,
@@ -86,6 +112,11 @@ export function createRepoGuardSetupTask(
     traceMeta: (payload) => ({ repoFullName: payload.repoFullName }),
 
     async run(ctx) {
+      const pr = ctx.payload.pullRequest;
+      // A check a newer head superseded, or a closed pull request's: nothing to do.
+      if (pr && !(deps.pullRequests && (await checkIsOpen(deps.pullRequests, pr)))) {
+        return { result: { repoFullName: ctx.payload.repoFullName, status: 'check-settled' }, notification: null };
+      }
       const meter = createUsageMeter({
         workspaceOrgId: ctx.payload.workspaceOrgId,
         repoFullName: ctx.payload.repoFullName,
@@ -102,26 +133,42 @@ export function createRepoGuardSetupTask(
           // conversation beside it, and setup's own step spine — stored in the
           // bundle however this run ends — is what it skips from.
           ctx.resumeWith({ carryOnRunId: activityRun.runId });
+          if (pr && deps.pullRequests) {
+            const live = await linkStarted(
+              deps.pullRequests,
+              pr,
+              ctx.jobId,
+              checkLinks.record(deps.pullRequests.appUrl, activityRun.runId),
+              `Setting up #${pr.number} at ${(ctx.payload.commitSha ?? '').slice(0, 8)}.`,
+            );
+            if (!live) return { result: { repoFullName, status: 'check-settled' }, notification: null };
+          }
           await ctx.notify({
             level: 'started',
             title: 'Flow setup started',
-            data: { repoFullName, runId: activityRun.runId },
+            data: { repoFullName, runId: activityRun.runId, ...(pr ? { pullRequest: pr.number } : {}) },
           });
           const llm = await startLlm(ctx.payload.workspaceOrgId, meter);
 
           await ctx.phase('clone');
           const tree = await acquireWorkTree(repoFullName, workTreeVia(ctx.payload));
           try {
-            const commitSha = await resolveCommitSha(tree.dir);
+            // A pull request's link works the head it was handed, which the clone checked out.
+            const commitSha = pr && ctx.payload.commitSha ? ctx.payload.commitSha : await resolveCommitSha(tree.dir);
             commits.set(ctx.jobId, commitSha);
             activityRun.setGitRef?.(commitSha);
             activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
-            const ref = { repoKey: repoFullName, commitSha };
+            const ref = { repoKey: repoFullName, commitSha, ...(pr ? { scope: pullRequestScope(pr.number) } : {}) };
             // Setup runs with or without documents: the recipe, its dependencies
             // and the interface catalog are derived from the CODE. A repository
             // that reads nothing gets an empty corpus in its clone and is set up
             // exactly the same; what it does NOT get is a generate (below).
-            const slice = await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
+            const slice = await materializeStoredSpec(
+              ref,
+              tree.dir,
+              ctx.payload.workspaceOrgId,
+              pr ? { scope: pullRequestWorkspaceScope(repoFullName, pr.number) } : {},
+            );
             activityTracker.fact(
               'clone',
               slice.documents > 0
@@ -131,8 +178,12 @@ export function createRepoGuardSetupTask(
                   : 'the workspace has no corpus yet: an empty corpus written into the clone',
             );
             // The NEWEST bundle, not this commit's: what carries the settle spine
-            // forward is the last setup that ran, whatever commit it ran on.
-            const stored = await loadGuardSetupBundle(repoFullName);
+            // forward is the last setup that ran, whatever commit it ran on. A
+            // pull request's own newest, else the one stored at its base.
+            const stored = pr
+              ? ((await loadGuardSetupBundle(repoFullName, { scope: ref.scope })) ??
+                (await loadGuardSetupBundle(repoFullName, { commitSha: pr.baseCommit })))
+              : await loadGuardSetupBundle(repoFullName);
             if (stored) {
               materializeGuardSetupBundle(tree.dir, stored);
               activityTracker.fact('clone', `the newest setup bundle written into the clone: ${Object.keys(stored).join(', ')}`);
@@ -142,7 +193,9 @@ export function createRepoGuardSetupTask(
             // The registered instances go in beside it, as the two gitignored files
             // the engine reads them from. The bundle collected below never carries
             // them: a secret enters only through the dashboard, never out of a clone.
-            if (await materializeGuardOverlays(repoFullName, tree.dir)) {
+            // A fork runs without them: its code is nobody's yet, and the
+            // workspace's secrets stay in the workspace.
+            if (!pr?.fork && (await materializeGuardOverlays(repoFullName, tree.dir))) {
               activityTracker.fact('clone', 'the registered instances written into the clone');
             }
             // The recipe's compose project is the repository's, shared by every
@@ -186,7 +239,7 @@ export function createRepoGuardSetupTask(
                 // queue serializes per workspace, so their jobs run side by side on
                 // this host: the project has to separate them or one job's reset
                 // wipes the other's live datastore.
-                composeKey: `${ctx.payload.workspaceOrgId}/${repoFullName}`,
+                composeKey: `${ctx.payload.workspaceOrgId}/${repoFullName}${pr ? `#${pr.number}` : ''}`,
                 sessionRun: activityRun,
                 eagerRun: true,
                 tracker: activityTracker,
@@ -203,7 +256,10 @@ export function createRepoGuardSetupTask(
             // The bundle is preserved above whatever happened, so a refused
             // setup keeps its work; fail the job so its status agrees with
             // Activity and it cannot chain into generation.
-            if (report.status !== 'ok') throw new Error(report.reason || 'Setup did not complete');
+            if (report.status !== 'ok') {
+              refused.add(ctx.jobId);
+              throw new Error(report.reason || 'Setup did not complete');
+            }
             const reason = firstLine(report.reason);
             // What the repository reads as of NOW, not as of the clone: on a
             // connect the first Document scan runs beside this job, so the
@@ -229,7 +285,7 @@ export function createRepoGuardSetupTask(
           } finally {
             tree.dispose();
           }
-        }, meter);
+        }, meter, runPullRequestStamp(ctx.payload));
       } finally {
         // However setup ended, what it spent up to that point is written.
         await meter.close();
@@ -247,36 +303,62 @@ export function createRepoGuardSetupTask(
     },
 
     async onSettled(ctx, outcome, result) {
+      const runId = runIds.get(ctx.jobId);
       runIds.delete(ctx.jobId);
       const commitSha = commits.get(ctx.jobId) ?? null;
       commits.delete(ctx.jobId);
+      const wasRefused = refused.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however setup ended.
       await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-setup');
       // The chain's commit: the one this job was pinned to, else the one it
       // cloned. Carried into the next link, and reported when the chain ends.
       const target = ctx.payload.commitSha ?? commitSha;
-      if (!(await chainGenerate(ctx.payload, outcome, result, target)) && chainEnded(outcome)) {
+      const pr = ctx.payload.pullRequest;
+      if (pr) {
+        const port = deps.pullRequests;
+        if (!port || !(await checkIsOpen(port, pr))) return;
+        const chained = await chainGenerate(ctx.payload, outcome, result, target);
+        if (chained === 'chained') return;
+        const link = runId ? checkLinks.record(port.appUrl, runId) : null;
+        if (chained === 'failed-to-chain') {
+          await settleLinkCheck(port, pr, { reason: 'error', report: { codeHalf: 'ran' } }, link);
+          return;
+        }
+        // A setup that ended the chain: the head could not pass it, it broke,
+        // or it has nothing to generate from. A cancel was settled by
+        // whoever cancelled.
+        if (outcome === 'failed') {
+          await settleLinkCheck(port, pr, { reason: wasRefused ? 'build-failed' : 'error', report: { codeHalf: 'ran' } }, link);
+        } else if (outcome === 'paused') {
+          await settleLinkCheck(port, pr, { reason: 'credits' }, link);
+        } else if (outcome === 'succeeded') {
+          await settleLinkCheck(port, pr, { reason: 'clean', report: { codeHalf: 'not-run' } }, link);
+        }
+        return;
+      }
+      if ((await chainGenerate(ctx.payload, outcome, result, target)) !== 'chained' && chainEnded(outcome)) {
         await deps.onChainEnd?.(ctx.payload, target);
       }
     },
   };
 
   /**
-   * Chain the generate a finished setup owes, and say whether one was asked
-   * for. Only a setup whose recipe gate held has anything to generate
-   * against: a refused setup ends the chain here, and its notification
-   * already says why.
+   * Chain the generate a finished setup owes: `chained`, `ended` when there is
+   * nothing to generate (a refused setup, a repository that reads nothing), or
+   * `failed-to-chain` when the enqueue itself failed. Only a setup whose recipe
+   * gate held has anything to generate against: a refused setup ends the chain
+   * here, and its notification already says why.
    */
   async function chainGenerate(
     payload: GuardSetupJobPayload,
     outcome: string,
     result: unknown,
     commitSha: string | null,
-  ): Promise<boolean> {
-    if (outcome !== 'succeeded') return false;
+  ): Promise<'chained' | 'ended' | 'failed-to-chain'> {
+    if (outcome !== 'succeeded') return 'ended';
     const settled = result as { status?: string; documents?: number } | undefined;
-    if (settled?.status !== 'ok') return false;
+    if (settled?.status !== 'ok') return 'ended';
     // And only a repository that actually READS something has anything to
     // generate FROM. A repository linked to no source with documents is set
     // up and stops here — a generate would fail for want of a spec it was
@@ -294,29 +376,19 @@ export function createRepoGuardSetupTask(
       log.info(
         `[jobs] ${payload.repoFullName} is set up but reads no documents — scenario generation not chained`,
       );
-      return false;
+      return 'ended';
     }
     try {
-      // A fresh request, not this job's payload: the chained job gets its own
-      // row id from the enqueue, never setup's. It is pinned to the chain's
-      // commit, so the chain works one tree from end to end.
-      const { repoId, repoFullName, workspaceOrgId } = payload;
-      await deps.chainGuardGenerate({
-        repoId,
-        repoFullName,
-        workspaceOrgId,
-        source: 'chain',
-        ...(commitSha ? { commitSha } : {}),
-        ...(payload.recovery ? { recovery: true } : {}),
-      });
-      return true;
+      // Pinned to the chain's commit, so the chain works one tree from end to end.
+      await deps.chainGuardGenerate(nextLinkRequest(payload, commitSha));
+      return 'chained';
     } catch (err) {
       // A chain that cannot be enqueued is not this setup's failure: setup
       // already succeeded, and generate can be started by hand.
       log.warn(
         `[jobs] could not chain scenario generation for ${payload.repoFullName}: ${(err as Error).message}`,
       );
-      return false;
+      return 'failed-to-chain';
     }
   }
 }

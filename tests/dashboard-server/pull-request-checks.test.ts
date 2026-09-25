@@ -16,6 +16,7 @@ import { MemoryInstallationStore } from '../github-app/memory-store';
 let pulls: MemoryPullRequestStore;
 let repos: MemoryInstallationStore;
 let enqueued: PullRequestCheckJobRequest[];
+/** The pull requests whose check jobs a supersede stopped, as `repo#n`. */
 let cancelled: string[];
 let github: { method: string; params: Record<string, unknown> }[];
 let refuseCreate: boolean;
@@ -67,9 +68,8 @@ const checks = () =>
         jobIds += 1;
         return { status: 'queued', jobId: `job_${jobIds}` };
       },
-      cancel: async (jobId) => {
-        cancelled.push(jobId);
-        return 'cancelled';
+      cancelPullRequestJobs: async (_org, repoFullName, number) => {
+        cancelled.push(`${repoFullName}#${number}`);
       },
     },
   });
@@ -129,7 +129,7 @@ describe('a head to check', () => {
     const [first, second] = pulls.checks;
     expect(first).toMatchObject({ headSha: 'head-1', status: 'settled', conclusion: 'neutral', reason: 'superseded' });
     expect(second).toMatchObject({ headSha: 'head-2', status: 'queued', attempt: 1 });
-    expect(cancelled).toEqual(['job_1']);
+    expect(cancelled).toEqual(['acme/api#7']);
     const updates = github.filter((c) => c.method === 'update');
     expect(updates).toHaveLength(1);
     expect(updates[0]!.params).toMatchObject({ check_run_id: 901, status: 'completed', conclusion: 'neutral' });
@@ -178,7 +178,7 @@ describe('a draft', () => {
     await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
     await service.onPullRequest({ pr: pr({ draft: true }), installationId: 5, effect: 'draft' });
     expect(pulls.checks.map((c) => c.reason)).toEqual(['superseded', 'draft']);
-    expect(cancelled).toEqual(['job_1']);
+    expect(cancelled).toEqual(['acme/api#7']);
   });
 });
 
@@ -188,7 +188,7 @@ describe('a close', () => {
     await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
     await service.onPullRequest({ pr: pr({ state: 'merged' }), installationId: 5, effect: 'close' });
     expect(pulls.checks.map((c) => [c.status, c.reason])).toEqual([['settled', 'cancelled']]);
-    expect(cancelled).toEqual(['job_1']);
+    expect(cancelled).toEqual(['acme/api#7']);
     await service.onPullRequest({ pr: pr({ state: 'merged' }), installationId: 5, effect: 'close' });
     expect(pulls.checks).toHaveLength(1);
   });
@@ -228,7 +228,7 @@ describe('a conflict resolved', () => {
           enqueued.push(request);
           return { status: 'queued', jobId: 'job_docs' };
         },
-        cancel: async () => 'cancelled',
+        cancelPullRequestJobs: async () => {},
       },
     });
     await pulls.savePullRequest(pr({ repoFullName: 'acme/docs', headRepoFullName: 'acme/docs', number: 3, headSha: 'head-3' }));

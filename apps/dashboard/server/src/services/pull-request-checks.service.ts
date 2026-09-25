@@ -36,7 +36,7 @@ import {
 import type { EnqueueResult, JobsMount } from '../jobs/index.js';
 
 export interface PullRequestChecksDeps {
-  jobs: Pick<JobsMount, 'enqueuePullRequestCheck' | 'cancel'>;
+  jobs: Pick<JobsMount, 'enqueuePullRequestCheck' | 'cancelPullRequestJobs'>;
   pulls: PullRequestStore;
   repos: RepositoryStore;
   octokitFor: (installationId: number) => OctokitClient;
@@ -142,10 +142,12 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     if (!active) return;
     const pr = await deps.pulls.getPullRequest(repoFullName, number);
     const installationId = pr ? await installationFor(pr) : null;
-    // The row first, so the job's own settle finds it settled and leaves it.
+    // The row first, so the jobs' own settles find it settled and leave it,
+    // and a link of its chain still queued does nothing when it starts.
     if (installationId !== null) await settle(deps.octokitFor(installationId), active, reason);
     else await deps.pulls.settleCheck(active.id, { conclusion: 'neutral', reason });
-    if (active.jobId) await deps.jobs.cancel(active.jobId);
+    const workspaceOrgId = pr?.workspaceOrgId;
+    if (workspaceOrgId) await deps.jobs.cancelPullRequestJobs(workspaceOrgId, repoFullName, number);
   };
 
   const start: PullRequestChecks['start'] = async (pr, given) => {

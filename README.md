@@ -84,9 +84,11 @@ new failures, a conflict the pull request would create, a head that does not
 build, or clean. The base is
 the state stored at the pull request's merge-base commit; a pull request whose
 merge-base predates the repository's stored state is skipped as `no-base` until
-it is rebased. The check's report is in the GitHub check; its progress and
-transcripts are its run on the Agent page, and the pull request is a column on
-Code › Runs, Agent and Context.
+it is rebased. The check runs the repository's own Flow setup, Flow generation
+and run at the head, each with its record on the Agent page, and its report is
+in the GitHub check, which links to the run it settled on (or to the setup or
+generation it stopped in, or to Context's conflicts). The pull request is a
+column on Code › Runs, Agent and Context.
 
 A self-hosted App needs two more permissions than connecting alone — **Pull
 requests: read**, which delivers the events and reads the changed files, and

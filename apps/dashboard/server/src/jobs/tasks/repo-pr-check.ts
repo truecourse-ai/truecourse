@@ -1,86 +1,48 @@
 /**
- * `repo.pr-check` — one pull request's check, as one job: the whole pipeline
- * at the head commit, judged against what is stored for the commit the pull
- * request branched from, in one clone, one lane slot and one conversation.
+ * `repo.pr-check` — the head of one pull request's check. It opens the check
+ * and decides whether the head's code is checked at all; the checking itself
+ * is the repository's own chain (setup → generate → run), carrying the pull
+ * request, and that chain's end settles the check (see `../pr-check-chain.ts`).
  *
- * The check has two halves. The SPEC half runs when the repository is a
- * context source and the head changed a document in that source's scope: the
- * workspace scan runs once more with that source's documents taken from the
- * head, and what it produces is the pull request's corpus, stored under the
- * pull request's scope and never promoted. The CODE half — setup, generation,
- * the run — executes at the head against that corpus, starting from the base
- * commit's stored setup bundle and scenario set, and every version it writes
- * lands under the pull request's scope too.
+ * What this job does, in order: fetch the head; find the base (the exact
+ * merge-base, and the scenario set, setup bundle and run stored there — with
+ * none of them the check settles `no-base`); and, when the repository is a
+ * context source and the head changed a document in that source's scope, scan
+ * the head's documents into the pull request's corpus, stored under the pull
+ * request's scope and never promoted. A conflict the head creates, or one open
+ * in the repository's slice, stops the check here, linked to Context's
+ * conflicts filtered to the pull request, as an open conflict stops a generate
+ * on main. Otherwise the report's first half (the base, the scan, the
+ * conflicts) goes on the check's row and the setup is enqueued.
  *
- * What the check reports, in this order: the conflicts the head creates
- * against the rest of the workspace, the sections it moved with the flows
- * bound to them, the other repositories the merge would move, and the run
- * compared with the base's — new failures, pre-existing ones, fixed ones. A
- * new failure or a created conflict concludes failure; a head that cannot
- * be brought up (a setup step, the cold proof, the run's world) concludes
- * failure too, since a pull request that breaks the boot is the pull
- * request's failure. Everything that produced no comparison is neutral.
- *
- * Every exit settles the check's row and moves the check posted on GitHub,
- * when one could be posted. A cancelled check is neutral and stores what it
- * had stored; a check the balance stopped pauses, and its resume is a new
- * attempt on the same head.
+ * A check the balance stopped pauses, and its resume is a new attempt on the
+ * same head. A cancelled check is neutral.
  */
 
 import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
 import { workspaceContextScanInProcess } from '@truecourse/core/commands/context-scan';
-import { guardSetupInProcess, GUARD_SETUP_STEPS } from '@truecourse/core/commands/guard-setup';
-import {
-  buildGuardReport,
-  guardGenerateInProcess,
-  guardRunInProcess,
-  GUARD_GENERATE_STEPS,
-  GUARD_RUN_STEPS,
-} from '@truecourse/core/commands/guard-in-process';
-import { readGuardRunFlowSummary, readGuardRunFlowSummaryFromTree } from '@truecourse/core/commands/guard-read';
 import {
   listGuardVersions,
   loadGuardSetupBundle,
-  readGuardResult,
-  readGuardRunCoverage,
   readGuardRunForCommit,
   readManifest,
-  saveGuardSetupBundle,
 } from '@truecourse/core/lib/guard-store';
-import { materializeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
 import { contextBindings, listContextDocuments } from '@truecourse/core/lib/context-store';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { log } from '@truecourse/core/lib/logger';
 import { parseContextDocRef } from '@truecourse/core/lib/context-ref';
 import { repositoryDocumentsIn, sliceCorpus } from '@truecourse/core/services/context';
-import {
-  collectGuardSetupBundle,
-  materializeGuardSetupBundle,
-} from '@truecourse/core/services/guard-setup/bundle';
-import { compareFlows, conflictsCreated, sectionsMoved } from '@truecourse/core/services/pr-check/compare';
-import { guardVisualJudgeEnabled } from '@truecourse/core/services/llm/guard-visual-judge';
-import { createCheck, renderCheckOutput, updateCheck, type OctokitClient } from '@truecourse/github-app';
-import {
-  isWorldBootFailure,
-  readGuardFlowsCorpus,
-  readManifest as readTreeManifest,
-  runFailureMessage,
-  type RunGuardResult,
-} from '@truecourse/guard-runner';
+import { conflictsCreated } from '@truecourse/core/services/pr-check/compare';
+import { createCheck, renderCheckOutput, type OctokitClient } from '@truecourse/github-app';
 import {
   isForkPullRequest,
   openConflicts,
-  pullRequestScope,
   pullRequestWorkspaceScope,
   type CorpusConflict,
-  type GuardLatest,
-  type GuardManifest,
-  type GuardRunFlowSummary,
   type PullRequestCheckConclusion,
   type PullRequestCheckReason,
-  type PullRequestCheckRecord,
   type PullRequestCheckReport,
   type PullRequestStore,
   type RepositorySourceConfig,
@@ -89,32 +51,21 @@ import {
 } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import type { JobDefinition, JobOutcomeStatus, JobPayload } from '@truecourse/jobs';
-import { dashboardActivity } from '../../services/dashboard-activity.service.js';
 import { repositoryContextSource } from '../../services/context-lifecycle.service.js';
 import { workspaceRepositories } from '../../services/context-scan.service.js';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { createUsageMeter, withCredits, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { sliceChanged } from '../context-ripple.js';
-import { materializeStoredSpec } from '../materialize-spec.js';
-import {
-  markWorldStateUnknown,
-  materializeStoredGuardState,
-  persistGeneratedGuard,
-  persistGuardRun,
-} from '../materialize-guard.js';
+import { checkLinks, postCheck, settleCheck, type CheckOutcome, type PullRequestCheckPort } from '../pr-check-chain.js';
 import { firstLine, pipelineTracker, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_PR_CHECK_TASK = 'repo.pr-check';
 
-/** The check's own phases, after the clone the activity helper puts first. */
+/** The check's own phases, after the clone. */
 export const PR_CHECK_STEPS = [
   { key: 'base', label: 'Finding the base' },
   { key: 'scan', label: 'Scanning changed documents' },
-  { key: 'setup', label: 'Setting up' },
-  { key: 'generate', label: 'Generating scenarios' },
-  { key: 'run', label: 'Running scenarios' },
-  { key: 'compare', label: 'Comparing with the base' },
 ] as const;
 
 export interface PullRequestCheckJobRequest extends OnboardingJobRequest {
@@ -132,46 +83,23 @@ export type PullRequestCheckJobPayload = PullRequestCheckJobRequest & JobPayload
 export const pullRequestCheckJobKey = (repoFullName: string, number: number): string =>
   `${REPO_PR_CHECK_TASK}:${repoFullName}#${number}`;
 
-/** The engines and stores the body drives — production wires the real ones. */
-export interface RepoPullRequestCheckTaskDeps {
-  pulls: PullRequestStore;
+/** The stores, the engine and the enqueue the body drives — production wires the real ones. */
+export interface RepoPullRequestCheckTaskDeps extends PullRequestCheckPort {
   repos: RepositoryStore;
-  /** An installation-scoped GitHub client. */
-  octokitFor: (installationId: number) => OctokitClient;
-  /** Where the product is served, for the check's details link. */
-  appUrl: string;
+  /** Start the check's chain: the repository's setup, carrying the pull request. */
+  chainGuardSetup?: (request: OnboardingJobRequest) => Promise<{ status: 'queued' | 'busy' }>;
   startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runScan?: typeof workspaceContextScanInProcess;
-  runSetup?: typeof guardSetupInProcess;
-  runGenerate?: typeof guardGenerateInProcess;
-  runGuard?: typeof guardRunInProcess;
 }
 
-/** What the job row records about a check that settled. */
+/** What the job row records about a check it settled, or handed to its chain. */
 export interface PullRequestCheckJobResult {
   repoFullName: string;
   number: number;
   checkId: string;
-  reason: PullRequestCheckReason;
-  conclusion: PullRequestCheckConclusion;
-}
-
-/** The base's stored state at the merge-base commit, all four or nothing. */
-interface StoredBase {
-  commit: string;
-  manifest: GuardManifest;
-  bundle: Record<string, string>;
-  run: GuardLatest;
-}
-
-/** A settled outcome the body decided, carrying what the row and the check record. */
-class CheckSettled {
-  constructor(
-    readonly reason: PullRequestCheckReason,
-    readonly conclusion: PullRequestCheckConclusion,
-    readonly report: PullRequestCheckReport,
-    readonly guardRunId: string | null = null,
-  ) {}
+  /** Absent when the chain carries the check on. */
+  reason?: PullRequestCheckReason;
+  conclusion?: PullRequestCheckConclusion;
 }
 
 export function createRepoPullRequestCheckTask(
@@ -179,50 +107,8 @@ export function createRepoPullRequestCheckTask(
 ): JobDefinition<PullRequestCheckJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runScan = deps.runScan ?? workspaceContextScanInProcess;
-  const runSetup = deps.runSetup ?? guardSetupInProcess;
-  const runGenerate = deps.runGenerate ?? guardGenerateInProcess;
-  const runGuard = deps.runGuard ?? guardRunInProcess;
   /** The check row each job works on: its payload's, or the new attempt a resume made. */
   const checks = new Map<string, string>();
-
-  /**
-   * Settle the row and move GitHub's check; the last word on every exit. A
-   * row a webhook settled meanwhile (a newer head superseded this check) is
-   * left as it is, and GitHub is not told twice.
-   */
-  async function settle(
-    check: PullRequestCheckRecord,
-    octokit: OctokitClient,
-    outcome: CheckSettled,
-    detailsUrl: string | null,
-  ): Promise<PullRequestCheckJobResult> {
-    const settled = await deps.pulls.settleCheck(check.id, {
-      conclusion: outcome.conclusion,
-      reason: outcome.reason,
-      report: outcome.report,
-      mergeBaseSha: outcome.report.base.mergeBase,
-      baseCommitSha: outcome.report.base.commit,
-      guardRunId: outcome.guardRunId,
-    });
-    if (settled) {
-      await postCheck(octokit, check, {
-        status: 'completed',
-        reason: outcome.reason,
-        conclusion: outcome.conclusion,
-        ...(detailsUrl ? { detailsUrl } : {}),
-        output: renderCheckOutput(outcome.reason, outcome.report, detailsUrl),
-      });
-    } else {
-      log.info(`[jobs] check ${check.id} of ${check.repoFullName}#${check.number} was settled before its job could: ${outcome.reason} not recorded`);
-    }
-    return {
-      repoFullName: check.repoFullName,
-      number: check.number,
-      checkId: check.id,
-      reason: outcome.reason,
-      conclusion: outcome.conclusion,
-    };
-  }
 
   return {
     type: REPO_PR_CHECK_TASK,
@@ -250,323 +136,150 @@ export function createRepoPullRequestCheckTask(
         check = (await deps.pulls.updateCheck(check.id, { githubCheckRunId })) ?? check;
       }
       checks.set(ctx.jobId, check.id);
-      const meter = createUsageMeter({
-        workspaceOrgId,
-        repoFullName,
-        jobType: REPO_PR_CHECK_TASK,
-        jobId: ctx.jobId,
-      });
+      const opened = check;
+      const meter = createUsageMeter({ workspaceOrgId, repoFullName, jobType: REPO_PR_CHECK_TASK, jobId: ctx.jobId });
       const fork = isForkPullRequest(pr);
-      const scope = pullRequestScope(number);
       const workspaceScope = pullRequestWorkspaceScope(repoFullName, number);
-      let detailsUrl: string | null = null;
+      const decide = async (outcome: CheckOutcome, detailsUrl: string | null) => {
+        await settleCheck(deps, opened, installationId, outcome, detailsUrl);
+        const result: Required<PullRequestCheckJobResult> = {
+          repoFullName,
+          number,
+          checkId: opened.id,
+          reason: outcome.reason,
+          conclusion: outcome.conclusion ?? CHECK_CONCLUSION_OF_REASON[outcome.reason],
+        };
+        return { result, notification: notificationFor(result) };
+      };
 
       try {
-        return await dashboardActivity(
-          ctx,
-          'pr-check',
-          PR_CHECK_STEPS,
-          async (activityRun, activityTracker) => {
-            meter.setRunId(activityRun.runId);
-            // A resume carries this conversation on, on a new attempt.
-            ctx.resumeWith({ carryOnRunId: activityRun.runId });
-            detailsUrl = `${deps.appUrl}/agent/${activityRun.runId}`;
-            await deps.pulls.updateCheck(check.id, {
-              status: 'running',
-              jobId: ctx.jobId,
-              startedAt: new Date().toISOString(),
-            });
-            await postCheck(octokit, check, {
-              status: 'in_progress',
-              detailsUrl,
-              output: { title: 'Checking', summary: `Checking ${headSha.slice(0, 8)} against its base.` },
-            });
-            await ctx.notify({
-              level: 'started',
-              title: `Checking #${number}`,
-              data: { repoFullName, runId: activityRun.runId, pullRequest: number },
-            });
-            const llm = await startLlm(workspaceOrgId, meter);
-            const driver = llm.driver();
-            const provenance = { producedByRun: activityRun.runId, model: driver.attribution.model };
-            const decide = (outcome: CheckSettled): Promise<PullRequestCheckJobResult> =>
-              settle(check, octokit, outcome, detailsUrl);
+        await deps.pulls.updateCheck(opened.id, { status: 'running', jobId: ctx.jobId, startedAt: new Date().toISOString() });
+        await postCheck(octokit, opened, {
+          status: 'in_progress',
+          output: { title: 'Checking', summary: `Checking ${headSha.slice(0, 8)} against its base.` },
+        });
 
-            // Through the installation the check reads GitHub with, so a
-            // repository only a context source reads clones too, and the
-            // head is checked out under its own branch name.
-            await ctx.phase('clone');
-            const tree = await acquireWorkTree(repoFullName, {
-              workspaceOrgId,
-              installationId,
-              commitSha: headSha,
-              defaultBranch: pr.headRef,
-            });
-            try {
-              activityRun.setGitRef?.(headSha);
-              activityTracker.fact('clone', `fetched ${repoFullName}#${number} at ${headSha.slice(0, 8)}`);
-              activityTracker.done('clone');
+        // Through the installation the check reads GitHub with, so a
+        // repository only a context source reads clones too, and the head is
+        // checked out under its own branch name.
+        await ctx.phase('clone');
+        const tree = await acquireWorkTree(repoFullName, {
+          workspaceOrgId,
+          installationId,
+          commitSha: headSha,
+          defaultBranch: pr.headRef,
+        });
+        try {
+          // The base: the exact merge-base, and everything stored there.
+          await ctx.phase('base');
+          const mergeBase = await resolveMergeBase(octokit, repoFullName, pr.baseRef, headSha);
+          const link = await deps.repos.getRepo(repoFullName);
+          const connected = link?.enabled === true;
+          const base = connected && (await hasStoredBase(repoFullName, mergeBase)) ? mergeBase : null;
+          const emptyReport = (parts: Partial<PullRequestCheckReport> = {}): PullRequestCheckReport => ({
+            base: { mergeBase, commit: base, nearestWithBase: null },
+            fork,
+            conflictsCreated: [],
+            sectionsMoved: [],
+            repositoriesAffected: [],
+            run: null,
+            specHalf: 'not-a-source',
+            codeHalf: 'not-run',
+            ...parts,
+          });
+          await deps.pulls.updateCheck(opened.id, { mergeBaseSha: mergeBase, baseCommitSha: base });
+          if (connected && !base) {
+            return await decide(
+              {
+                reason: 'no-base',
+                report: emptyReport({
+                  base: { mergeBase, commit: null, nearestWithBase: await nearestCommitWithBase(repoFullName) },
+                }),
+              },
+              null,
+            );
+          }
 
-              // The base: the exact merge-base, and everything stored there.
-              await ctx.phase('base');
-              const mergeBase = await resolveMergeBase(octokit, repoFullName, pr.baseRef, headSha);
-              const link = await deps.repos.getRepo(repoFullName);
-              const connected = link?.enabled === true;
-              const base = connected ? await storedBase(repoFullName, mergeBase) : null;
-              activityTracker.fact(
-                'base',
-                base
-                  ? `the base is ${mergeBase.slice(0, 8)}: its scenario set, setup bundle and run are stored`
-                  : connected
-                    ? `nothing is stored at the merge-base ${mergeBase.slice(0, 8)}`
-                    : `the repository is not connected in Code: the documents alone are checked`,
-              );
-              const emptyReport = (parts: Partial<PullRequestCheckReport> = {}): PullRequestCheckReport => ({
-                base: { mergeBase, commit: base?.commit ?? null, nearestWithBase: null },
-                fork,
-                conflictsCreated: [],
-                sectionsMoved: [],
-                repositoriesAffected: [],
-                run: null,
-                specHalf: 'not-a-source',
-                codeHalf: 'not-run',
-                ...parts,
-              });
-              if (connected && !base) {
-                return decide(
-                  new CheckSettled(
-                    'no-base',
-                    'neutral',
-                    emptyReport({
-                      base: { mergeBase, commit: null, nearestWithBase: await nearestCommitWithBase(repoFullName) },
-                    }),
-                  ),
-                );
-              }
-              activityTracker.done('base');
-
-              // The spec half: the head's documents, when it changed any in scope.
-              await ctx.phase('scan');
-              const spec = await scanHead({
-                octokit,
-                tree: tree.dir,
-                pr: { repoFullName, number, headSha, baseRef: pr.baseRef, checkId: check.id },
-                workspaceOrgId,
-                defaultBranch: link?.defaultBranch ?? null,
-                workspaceScope,
-                run: (documents, sourceId) =>
-                  withCredits(meter, () =>
-                    runScan({
-                      workspaceOrgId,
-                      driver,
-                      transportMode: llm.mode,
-                      tracker: pipelineTracker(ctx, 'scan', CURATE_STEPS),
-                      pullRequest: {
-                        repoFullName,
-                        number,
-                        headSha,
-                        checkId: check.id,
-                        scope: workspaceScope,
-                        sourceId,
-                        documents,
-                      },
-                      ...(ctx.signal ? { signal: ctx.signal } : {}),
-                    }),
-                  ),
-              });
-              activityTracker.fact(
-                'scan',
-                spec.half === 'ran'
-                  ? `${spec.changed} changed document${spec.changed === 1 ? '' : 's'} scanned into the pull request's corpus`
-                  : spec.half === 'no-documents-changed'
-                    ? 'no document in the source’s scope changed: the workspace corpus stands'
-                    : 'the repository is no context source: nothing to scan',
-              );
-              activityTracker.done('scan');
-
-              // The conflicts: created against the workspace, and open in this
-              // repository's slice, which stops the code half as it does on main.
-              const defaultCorpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId }, 'corpus');
-              const decisions = await getWorkspaceDecisions(workspaceOrgId);
-              const corpus = spec.corpus ?? defaultCorpus;
-              const created = spec.corpus
-                ? conflictsCreated(defaultCorpus, openConflicts(spec.corpus, decisions), decisions)
-                : [];
-              const sourceIds = await contextBindings(workspaceOrgId, repoFullName);
-              const slice = corpus ? sliceCorpus(corpus, sourceIds) : null;
-              const sliceOpen = slice ? openConflicts(slice, decisions) : [];
-              const repos = await workspaceRepositories(workspaceOrgId);
-              const report = emptyReport({
-                specHalf: spec.half,
-                conflictsCreated: created.map((c) =>
-                  reportConflict(c, spec.source, spec.documents, repos),
-                ),
-                repositoriesAffected: spec.corpus
-                  ? repos
-                      .filter((r) => r.repoFullName !== repoFullName && sliceChanged(defaultCorpus, spec.corpus!, r.sourceIds))
-                      .map((r) => ({ repoFullName: r.repoFullName, slug: r.repoId }))
-                  : [],
-              });
-              const conflictOutcome = (codeHalf: PullRequestCheckReport['codeHalf']): CheckSettled =>
-                new CheckSettled(
-                  created.length > 0 ? 'conflict' : 'clean',
-                  created.length > 0 ? 'failure' : 'success',
-                  { ...report, codeHalf },
-                );
-              // A supersede that landed during the scan: nothing more is worth doing.
-              if (ctx.signal?.aborted) return { notification: null };
-              if (!connected || !base) return decide(conflictOutcome('not-connected'));
-              if (sliceOpen.length > 0) {
-                activityTracker.fact(
-                  'scan',
-                  `${sliceOpen.length} open conflict${sliceOpen.length === 1 ? '' : 's'} in the repository's slice: the code is not checked`,
-                );
-                // Open conflicts the pull request did not create still block
-                // generation, but are not its failure.
-                return decide(
-                  created.length > 0
-                    ? conflictOutcome('stopped-by-conflict')
-                    : new CheckSettled('conflict', 'neutral', { ...report, codeHalf: 'stopped-by-conflict' }),
-                );
-              }
-
-              // The code half. The head's corpus, the base's scenario set and
-              // bundle go in; every version the engines write comes out under
-              // the pull request's scope.
-              await ctx.phase('setup');
-              const ref = { repoKey: repoFullName, commitSha: headSha, scope };
-              await materializeStoredSpec(ref, tree.dir, workspaceOrgId, { scope: workspaceScope });
-              await materializeStoredGuardState(repoFullName, tree.dir, { commitSha: base.commit });
-              materializeGuardSetupBundle(tree.dir, base.bundle);
-              // A fork runs without the registered instances: its code is
-              // nobody's yet, and the workspace's secrets stay in the workspace.
-              if (!fork) await materializeGuardOverlays(repoFullName, tree.dir);
-              markWorldStateUnknown(tree.dir);
-              let setupReport: Awaited<ReturnType<typeof runSetup>>['report'];
-              try {
-                ({ report: setupReport } = await runSetup(tree.dir, {
-                  driver,
+          // The spec half: the head's documents, when it changed any in scope.
+          await ctx.phase('scan');
+          const spec = await scanHead({
+            octokit,
+            tree: tree.dir,
+            pr: { repoFullName, number, baseRef: pr.baseRef },
+            workspaceOrgId,
+            defaultBranch: link?.defaultBranch ?? null,
+            run: async (documents, sourceId) => {
+              const llm = await startLlm(workspaceOrgId, meter);
+              return withCredits(meter, () =>
+                runScan({
+                  workspaceOrgId,
+                  driver: llm.driver(),
                   transportMode: llm.mode,
-                  sessionsKey: repoFullName,
-                  composeKey: `${workspaceOrgId}/${repoFullName}#${number}`,
-                  sessionRun: activityRun,
-                  eagerRun: true,
-                  tracker: pipelineTracker(ctx, 'setup', GUARD_SETUP_STEPS),
-                  ...(ctx.signal ? { signal: ctx.signal } : {}),
-                }));
-              } finally {
-                // Whatever setup settled at the head is kept under the pull
-                // request's scope, so a rerun on the same head skips it.
-                const files = collectGuardSetupBundle(tree.dir);
-                if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files, provenance);
-              }
-              if (ctx.signal?.aborted) return { notification: null };
-              if (setupReport.status !== 'ok') {
-                activityTracker.error('setup', firstLine(setupReport.reason) || 'setup did not complete');
-                return decide(new CheckSettled('build-failed', 'failure', { ...report, codeHalf: 'ran' }));
-              }
-              activityTracker.done('setup');
-
-              await ctx.phase('generate');
-              const { guard } = await runGenerate(tree.dir, {
-                driver,
-                transportMode: llm.mode,
-                attribution: driver.attribution,
-                sessionsKey: repoFullName,
-                sessionRun: activityRun,
-                tracker: pipelineTracker(ctx, 'generate', GUARD_GENERATE_STEPS),
-                requireExistingRecipe: true,
-                ...(ctx.signal ? { signal: ctx.signal } : {}),
-              });
-              if (ctx.signal?.aborted) return { notification: null };
-              meter.assertCredits();
-              if (guard.status !== 'ok') throw new Error(guard.reason ?? `guard generate ended ${guard.status}.`);
-              await persistGeneratedGuard(ref, tree.dir, buildGuardReport(guard, new Date().toISOString()), provenance);
-              activityTracker.done('generate');
-
-              await ctx.phase('run');
-              const result = await withCredits(meter, () =>
-                runGuard(tree.dir, {
-                  tracker: pipelineTracker(ctx, 'run', GUARD_RUN_STEPS),
-                  ...(guardVisualJudgeEnabled()
-                    ? { judgeDriver: driver, transportMode: llm.mode, sessionsKey: repoFullName }
-                    : {}),
+                  tracker: pipelineTracker(ctx, 'scan', CURATE_STEPS),
+                  pullRequest: { repoFullName, number, headSha, checkId: opened.id, scope: workspaceScope, sourceId, documents },
                   ...(ctx.signal ? { signal: ctx.signal } : {}),
                 }),
               );
-              if (ctx.signal?.aborted) return { notification: null };
-              if (result.status !== 'ok') {
-                if (!buildFailed(result)) throw new Error(runFailureMessage(result));
-                activityTracker.error('run', runFailureMessage(result));
-                return decide(new CheckSettled('build-failed', 'failure', { ...report, codeHalf: 'ran' }));
-              }
-              const latest: GuardLatest = {
-                ...result.latest,
-                run: { ...result.latest.run, pullRequest: number },
-              };
-              if (worldNeverBooted(latest)) {
-                activityTracker.error('run', 'the world never came up at the head');
-                return decide(new CheckSettled('build-failed', 'failure', { ...report, codeHalf: 'ran' }));
-              }
-              const headFlows = readGuardRunFlowSummaryFromTree(tree.dir, latest) ?? {};
-              await persistGuardRun(ref, tree.dir, latest, { provenance, coverage: { sections: {}, flows: headFlows } });
-              activityTracker.done('run');
+            },
+          });
+          // A supersede that landed during the scan: nothing more is worth doing.
+          if (ctx.signal?.aborted) return { notification: null };
 
-              await ctx.phase('compare');
-              const baseFlows = await baseFlowSummary(repoFullName, base.run);
-              const deltas = compareFlows(baseFlows, headFlows);
-              const titles = flowTitles(tree.dir);
-              const of = (kind: (typeof deltas)[number]['kind']) =>
-                deltas.filter((d) => d.kind === kind).map((d) => ({ id: d.flowId, title: titles.get(d.flowId) ?? d.flowId }));
-              const scenarioIds = scenarioIdsByFlow(readTreeManifest(tree.dir));
-              const newFailures = of('new-failure').map((f) => ({ ...f, scenarioIds: scenarioIds.get(f.id) ?? [] }));
-              const runReport: NonNullable<PullRequestCheckReport['run']> = {
-                runId: latest.run.runId,
-                counts: {
-                  newFailures: newFailures.length,
-                  preExisting: of('pre-existing').length,
-                  fixed: of('fixed').length,
-                  newlyBlocked: of('newly-blocked').length,
-                  added: of('added').length,
-                  retired: of('retired').length,
-                },
-                newFailures,
-                preExisting: of('pre-existing'),
-                fixed: of('fixed'),
-                newlyBlocked: of('newly-blocked').map((f) => ({
-                  ...f,
-                  why: fork ? 'the registered instances are not provided to a fork' : 'could not run at the head',
-                })),
-              };
-              const moved = sectionsMoved(base.manifest, readTreeManifest(tree.dir)).map((s) => ({
-                doc: s.doc,
-                anchor: s.anchor,
-                flows: s.flowIds.map((id) => ({ id, title: titles.get(id) ?? id })),
-              }));
-              activityTracker.fact(
-                'compare',
-                `${newFailures.length} new failure${newFailures.length === 1 ? '' : 's'}, ${runReport.counts.preExisting} pre-existing, ${runReport.counts.fixed} fixed`,
-              );
-              const reason: PullRequestCheckReason =
-                newFailures.length > 0 ? 'new-failures' : created.length > 0 ? 'conflict' : 'clean';
-              return decide(
-                new CheckSettled(
-                  reason,
-                  CHECK_CONCLUSION_OF_REASON[reason],
-                  { ...report, sectionsMoved: moved, run: runReport, codeHalf: 'ran' },
-                  latest.run.runId,
-                ),
-              );
-            } finally {
-              tree.dispose();
-            }
-          },
-          meter,
-          { pullRequest: { repoFullName, number, headSha, checkId: check.id } },
-        ).then((result) => ({
-          result,
-          notification: 'reason' in (result ?? {}) ? notificationFor(result as PullRequestCheckJobResult) : null,
-        }));
+          // The conflicts: created against the workspace, and open in this
+          // repository's slice, which stops the code half as it does on main.
+          const defaultCorpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId }, 'corpus');
+          const decisions = await getWorkspaceDecisions(workspaceOrgId);
+          const corpus = spec.corpus ?? defaultCorpus;
+          const created = spec.corpus ? conflictsCreated(defaultCorpus, openConflicts(spec.corpus, decisions), decisions) : [];
+          const sourceIds = await contextBindings(workspaceOrgId, repoFullName);
+          const slice = corpus ? sliceCorpus(corpus, sourceIds) : null;
+          const sliceOpen = slice ? openConflicts(slice, decisions) : [];
+          const repos = await workspaceRepositories(workspaceOrgId);
+          const report = emptyReport({
+            specHalf: spec.half,
+            conflictsCreated: created.map((c) => reportConflict(c, spec.source, spec.documents, repos)),
+            repositoriesAffected: spec.corpus
+              ? repos
+                  .filter((r) => r.repoFullName !== repoFullName && sliceChanged(defaultCorpus, spec.corpus!, r.sourceIds))
+                  .map((r) => ({ repoFullName: r.repoFullName, slug: r.repoId }))
+              : [],
+          });
+          const conflictsUrl = checkLinks.conflicts(deps.appUrl, repoFullName, number);
+          const specOutcome = (codeHalf: PullRequestCheckReport['codeHalf']): CheckOutcome => ({
+            reason: created.length > 0 ? 'conflict' : 'clean',
+            report: { ...report, codeHalf },
+          });
+          if (!connected || !base) return await decide(specOutcome('not-connected'), created.length > 0 ? conflictsUrl : null);
+          if (sliceOpen.length > 0) {
+            // Open conflicts the pull request did not create still block
+            // generation, but are not its failure.
+            return await decide(
+              created.length > 0
+                ? specOutcome('stopped-by-conflict')
+                : { reason: 'conflict', conclusion: 'neutral', report: { ...report, codeHalf: 'stopped-by-conflict' } },
+              conflictsUrl,
+            );
+          }
+
+          // The code half is the repository's own chain, carrying the check.
+          await deps.pulls.updateCheck(opened.id, { report });
+          const started = await deps.chainGuardSetup?.({
+            repoId: ctx.payload.repoId,
+            repoFullName,
+            workspaceOrgId,
+            source: 'pull-request',
+            commitSha: headSha,
+            pullRequest: { number, checkId: opened.id, installationId, headRef: pr.headRef, baseCommit: base, fork },
+          });
+          if (started?.status !== 'queued') {
+            log.warn(`[jobs] ${repoFullName}#${number} at ${headSha.slice(0, 8)} could not start its chain: ${started?.status ?? 'no chain'}`);
+            return await decide({ reason: 'error', report }, null);
+          }
+          const result: PullRequestCheckJobResult = { repoFullName, number, checkId: opened.id };
+          return { result, notification: null };
+        } finally {
+          tree.dispose();
+        }
       } finally {
         await meter.close();
       }
@@ -583,9 +296,9 @@ export function createRepoPullRequestCheckTask(
       const checkId = checks.get(ctx.jobId) ?? ctx.payload.checkId;
       checks.delete(ctx.jobId);
       await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-run');
-      // A check the body did not settle itself — a failure that is not the
-      // pull request's, a cancel, an empty balance — is settled here with the
-      // one word for it, and GitHub's check is moved with it.
+      // A check the body did not settle or hand over — a failure that is not
+      // the pull request's, a cancel, an empty balance — is settled here with
+      // the one word for it, and GitHub's check is moved with it.
       const reason = unsettledReason(outcome);
       if (!reason) return;
       try {
@@ -620,27 +333,13 @@ function unsettledReason(outcome: JobOutcomeStatus): PullRequestCheckReason | nu
   }
 }
 
-function notificationFor(result: PullRequestCheckJobResult) {
+function notificationFor(result: Required<PullRequestCheckJobResult>) {
   const title = `#${result.number}: ${result.reason.replace(/-/g, ' ')}`;
   return {
     level: result.conclusion === 'failure' ? ('warning' as const) : ('success' as const),
     title,
     data: { repoFullName: result.repoFullName, pullRequest: result.number, checkId: result.checkId },
   };
-}
-
-/** Move GitHub's check, when one was posted. A GitHub that refuses is logged, never the check's failure. */
-async function postCheck(
-  octokit: OctokitClient,
-  check: PullRequestCheckRecord,
-  input: Parameters<typeof updateCheck>[3],
-): Promise<void> {
-  if (check.githubCheckRunId === null) return;
-  try {
-    await updateCheck(octokit, check.repoFullName, check.githubCheckRunId, input);
-  } catch (err) {
-    log.warn(`[jobs] could not update GitHub's check for ${check.repoFullName}#${check.number}: ${(err as Error).message}`);
-  }
 }
 
 async function resolveMergeBase(
@@ -658,15 +357,15 @@ async function resolveMergeBase(
   return data.merge_base_commit.sha;
 }
 
-/** Everything a check starts from, stored at the merge-base in the default scope, or null. */
-async function storedBase(repoFullName: string, commit: string): Promise<StoredBase | null> {
+/** Whether everything a check starts from is stored at `commit` in the default scope. */
+async function hasStoredBase(repoFullName: string, commit: string): Promise<boolean> {
   const at = { commitSha: commit };
   const [manifest, bundle, run] = await Promise.all([
     readManifest(repoFullName, at),
     loadGuardSetupBundle(repoFullName, at),
     readGuardRunForCommit(repoFullName, commit),
   ]);
-  return manifest && bundle && run ? { commit, manifest, bundle, run } : null;
+  return manifest !== null && bundle !== null && run !== null;
 }
 
 /** The newest default-branch commit that has everything a check starts from. */
@@ -675,40 +374,9 @@ async function nearestCommitWithBase(repoFullName: string): Promise<string | nul
   for (const version of await listGuardVersions(repoFullName, 'scenarios', { limit: 20 })) {
     if (seen.has(version.commitSha)) continue;
     seen.add(version.commitSha);
-    if (await storedBase(repoFullName, version.commitSha)) return version.commitSha;
+    if (await hasStoredBase(repoFullName, version.commitSha)) return version.commitSha;
   }
   return null;
-}
-
-/** The base run's flows as stored beside it, else derived from its snapshot. */
-async function baseFlowSummary(repoFullName: string, run: GuardLatest): Promise<GuardRunFlowSummary> {
-  const stored = (await readGuardRunCoverage(repoFullName)).find((r) => r.runId === run.run.runId)?.flows;
-  if (stored && Object.keys(stored).length > 0) return stored;
-  return (await readGuardRunFlowSummary(repoFullName, run)) ?? {};
-}
-
-/** A run that could not start: the head does not build, seed or boot. */
-function buildFailed(result: Exclude<RunGuardResult, { status: 'ok' }>): boolean {
-  return (
-    result.status === 'build-failed' ||
-    result.status === 'entry-preflight-failed' ||
-    result.status === 'seed-failed'
-  );
-}
-
-/** Every scenario met a world that never came up, and none ran at all. */
-function worldNeverBooted(latest: GuardLatest): boolean {
-  if (latest.scenarios.length === 0) return false;
-  const ran = latest.scenarios.some((s) => s.outcome === 'pass' || s.outcome === 'fail');
-  return !ran && latest.scenarios.some(isWorldBootFailure);
-}
-
-function flowTitles(treeDir: string): Map<string, string> {
-  return new Map((readGuardFlowsCorpus(treeDir)?.flows ?? []).map((f) => [f.id, f.title]));
-}
-
-function scenarioIdsByFlow(manifest: GuardManifest | null): Map<string, string[]> {
-  return new Map((manifest?.flows ?? []).map((f) => [f.flowId, f.scenarios.map((s) => s.id)]));
 }
 
 // ---------------------------------------------------------------------------
@@ -736,10 +404,9 @@ interface HeadScan {
 async function scanHead(input: {
   octokit: OctokitClient;
   tree: string;
-  pr: { repoFullName: string; number: number; headSha: string; baseRef: string; checkId: string };
+  pr: { repoFullName: string; number: number; baseRef: string };
   workspaceOrgId: string;
   defaultBranch: string | null;
-  workspaceScope: string;
   run: (
     documents: Array<{ docPath: string; body: string }>,
     sourceId: string,

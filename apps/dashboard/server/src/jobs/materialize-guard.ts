@@ -76,16 +76,16 @@ function writeFile(file: string, body: string): void {
 
 /**
  * Put the repo's stored guard state into `treeDir`: the CURRENT scenario set
- * and report of the default branch (the newest version of each), or — with
- * `commitSha` — the newest stored at that exact commit, which is what a pull
- * request check starts from. Returns the commit the set came from, or `null`
- * when there is none: a first generate starts from nothing, which is fine,
- * and a check with no base stops.
+ * and report of `scope` (the default branch's unless named; the newest version
+ * of each), or — with `commitSha` — the newest stored at that exact commit,
+ * which is what a pull request's generate starts from. Returns the commit the
+ * set came from, or `null` when there is none: a first generate starts from
+ * nothing, which is fine, and a run with no set stops.
  */
 export async function materializeStoredGuardState(
   repoKey: string,
   treeDir: string,
-  opts: { commitSha?: string } = {},
+  opts: { commitSha?: string; scope?: string } = {},
 ): Promise<string | null> {
   // The dashboard dismisses into the store; the generator reads the clone's
   // `scenarios/decisions.json`. Without this, every dismissed claim is
@@ -95,7 +95,7 @@ export async function materializeStoredGuardState(
     writeFile(guardDecisionsPath(treeDir), JSON.stringify(decisions, null, 2) + '\n');
   }
 
-  const baseline = opts.commitSha ?? (await readGuardBaselineCommit(repoKey));
+  const baseline = opts.commitSha ?? (await readGuardBaselineCommit(repoKey, opts.scope));
   if (!baseline) return null;
 
   // Unpinned: the newest version of each, whatever commit it was written at —
@@ -104,7 +104,7 @@ export async function materializeStoredGuardState(
   // scope's newest report is its pair, or the blocked report of a generate
   // that stored no set, carried forward. Pinned: the newest at that commit,
   // and nothing when it holds no set.
-  const at = opts.commitSha ? { commitSha: opts.commitSha } : {};
+  const at = { ...(opts.scope ? { scope: opts.scope } : {}), ...(opts.commitSha ? { commitSha: opts.commitSha } : {}) };
   const manifest = await readManifest(repoKey, at);
   if (opts.commitSha && !manifest) return null;
   if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
