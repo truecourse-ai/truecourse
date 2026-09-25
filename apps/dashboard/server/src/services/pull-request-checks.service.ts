@@ -151,8 +151,15 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     // and a link of its chain still queued does nothing when it starts.
     if (installationId !== null) await settle(deps.octokitFor(installationId), active, reason);
     else await deps.pulls.settleCheck(active.id, { conclusion: 'neutral', reason });
+    // Stopped without waiting: a running link unwinds in its own time (a build
+    // mid-way can take a while), and the next attempt waits behind it in the
+    // workspace's lane anyway, so nothing that follows needs it gone first.
     const workspaceOrgId = pr?.workspaceOrgId;
-    if (workspaceOrgId) await deps.jobs.cancelPullRequestJobs(workspaceOrgId, repoFullName, number);
+    if (workspaceOrgId) {
+      void deps.jobs.cancelPullRequestJobs(workspaceOrgId, repoFullName, number).catch((err: unknown) => {
+        log.warn(`[checks] could not stop the jobs of ${repoFullName}#${number}: ${(err as Error).message}`);
+      });
+    }
   };
 
   const start: PullRequestChecks['start'] = async (pr, given) => {

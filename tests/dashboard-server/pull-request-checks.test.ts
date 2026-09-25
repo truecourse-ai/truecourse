@@ -161,6 +161,36 @@ describe('a head to check', () => {
   });
 });
 
+describe('a supersede', () => {
+  it('does not wait for the jobs it stops before the next attempt starts', async () => {
+    let stopped = false;
+    const service = createPullRequestChecks({
+      pulls,
+      repos,
+      octokitFor: () => octokit,
+      jobs: {
+        enqueuePullRequestCheck: async (request) => {
+          enqueued.push(request);
+          jobIds += 1;
+          return { status: 'queued', jobId: `job_${jobIds}` };
+        },
+        // A running link that takes its time to unwind.
+        cancelPullRequestJobs: () => new Promise<void>(() => { stopped = true; }),
+      },
+    });
+    await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
+    await pulls.savePullRequest(pr({ headSha: 'head-2' }));
+    await service.onPullRequest({ pr: pr({ headSha: 'head-2' }), installationId: 5, effect: 'check' });
+
+    expect(stopped).toBe(true);
+    expect(pulls.checks.map((c) => [c.headSha, c.status])).toEqual([
+      ['head-1', 'settled'],
+      ['head-2', 'queued'],
+    ]);
+    expect(enqueued).toHaveLength(2);
+  });
+});
+
 describe('a draft', () => {
   it('is held: a check settled at once, saying it is checked when ready', async () => {
     await checks().onPullRequest({ pr: pr({ draft: true }), installationId: 5, effect: 'draft' });
