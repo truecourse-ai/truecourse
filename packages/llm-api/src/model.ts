@@ -1,12 +1,14 @@
 /**
  * Build a Vercel AI SDK language model for a provider config + model id.
- * Anthropic / OpenAI / Bedrock are first-class; GitHub Copilot rides the
- * OpenAI-compatible provider pointed at the Copilot endpoint.
+ * Anthropic / OpenAI / Bedrock / Google (the Gemini API) are first-class;
+ * GitHub Copilot rides the OpenAI-compatible provider pointed at the Copilot
+ * endpoint.
  */
 
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
 import type { ProviderConfig } from './types.js';
@@ -43,6 +45,12 @@ export function buildModel(cfg: ProviderConfig, modelId: string): LanguageModel 
         name: COPILOT_PROVIDER_NAME,
         baseURL: cfg.baseURL ?? COPILOT_BASE_URL,
         apiKey: cfg.apiKey,
+        headers: cfg.headers,
+      })(modelId);
+    case 'google':
+      return createGoogleGenerativeAI({
+        apiKey: cfg.apiKey,
+        baseURL: cfg.baseURL,
         headers: cfg.headers,
       })(modelId);
   }

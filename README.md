@@ -15,6 +15,10 @@
   <a href="https://discord.gg/TanxB63arz"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
+<p align="center">
+  <img src="assets/truecourse-how-it-works.gif" alt="How TrueCourse works" width="100%" />
+</p>
+
 TrueCourse reads the documentation a team already writes (PRDs, ADRs, READMEs,
 a documentation site) and turns it into tests that run.
 

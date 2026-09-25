@@ -11,7 +11,8 @@ export interface ProviderConfig {
   provider: LlmProviderKind;
   /**
    * Provider-specific model id, e.g. `claude-3-7-sonnet-latest` (anthropic),
-   * `gpt-4o` (openai), `anthropic.claude-3-7-sonnet-20250219-v1:0` (bedrock).
+   * `gpt-4o` (openai), `anthropic.claude-3-7-sonnet-20250219-v1:0` (bedrock),
+   * `gemini-2.5-pro` (google).
    */
   model: string;
   /** Optional secondary model, tried only if the primary call errors. */
@@ -23,7 +24,7 @@ export interface ProviderConfig {
    * config's own model is mapped; a fallback call prices under its own id.
    */
   priceModel?: string;
-  /** API key — anthropic / openai / copilot. */
+  /** API key — anthropic / openai / copilot / google. */
   apiKey?: string;
   /**
    * Custom base URL. Required for Copilot is defaulted; can also point at a

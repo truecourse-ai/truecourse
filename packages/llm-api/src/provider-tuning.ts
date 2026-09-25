@@ -16,8 +16,8 @@
  * `@ai-sdk/openai@3` (`promptCacheKey`, `parallelToolCalls` — on both the
  * chat and the responses options; `store` on the responses options, which is
  * the model `createOpenAI()` builds),
- * `@ai-sdk/amazon-bedrock@4` (`cachePoint`, `additionalModelRequestFields`)
- * and `@ai-sdk/openai-compatible@2`.
+ * `@ai-sdk/amazon-bedrock@4` (`cachePoint`, `additionalModelRequestFields`),
+ * `@ai-sdk/google@3` and `@ai-sdk/openai-compatible@2`.
  */
 
 import type { ModelMessage } from 'ai';
@@ -136,11 +136,22 @@ const BEDROCK: ProviderTuning = {
       : {},
 };
 
+/**
+ * The Gemini API caches a repeated prefix IMPLICITLY and takes neither a
+ * breakpoint nor a key, and its tool config has no parallel-call switch — so
+ * there is nothing to send. A turn that calls more than one tool is run in
+ * full by the driver, like any provider that does not honor the ask.
+ */
+const GOOGLE: ProviderTuning = {
+  callOptions: () => ({}),
+};
+
 const TUNING: Record<LlmProviderKind, ProviderTuning> = {
   anthropic: ANTHROPIC,
   openai: OPENAI,
   copilot: COPILOT,
   bedrock: BEDROCK,
+  google: GOOGLE,
 };
 
 export function providerTuningFor(provider: LlmProviderKind): ProviderTuning {
