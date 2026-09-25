@@ -36,6 +36,7 @@ import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree
 import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays'
 import { buildScreens, screenShowRows } from '../../apps/dashboard/client/src/lib/interface-pom'
 import type { AuthoredFragment } from '../../packages/core/src/services/interface-author/draft'
+import type { LiveScreens } from '../../packages/core/src/services/interface-author/live-screen'
 import { InterfacesFileSchema, interfaceFingerprint, type InterfacesFile } from '../../packages/shared/src/index'
 import {
   guardAuthoredInterfacesPath,
@@ -986,6 +987,72 @@ describe('re-running', () => {
         expect(result.places[0].status).not.toBe('authored')
         expect(result.places[0].problems.join('\n')).toContain(`\`${HOME_TASK.id}\` are not accounted for`)
         expect(readAuthoredFile().interfaces.map((task) => task.id)).toEqual([HOME_TASK.id])
+      })
+    })
+
+    /**
+     * A screen authored with no live screen to look at (no browser, no web
+     * surface up) is settled only for runs that cannot look either: the first
+     * run that can re-opens it, and one that still cannot leaves it be.
+     */
+    describe('a screen authored from source alone', () => {
+      const both: Script = async (place) =>
+        ({ kind: 'outcome', value: place === 'root' ? HOME_FRAGMENT : { interfaces: [] } })
+      /** A live world whose one observer reaches every address and sees an empty page. */
+      const world = (): LiveScreens => ({
+        observer: {
+          principal: 'webSession',
+          async observe({ path }: { path: string }) {
+            return {
+              ok: true as const,
+              observation: { path, address: path, title: '', tree: '- main', omittedLines: 0, activated: [], problems: [], reachedBy: 'load' as const },
+            }
+          },
+          async probe() {
+            return { ok: true as const, readings: [] }
+          },
+          async close() {},
+        },
+      })
+
+      it('is recorded as such, and re-opened by the first run that can look at it live', async () => {
+        await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(both).driver, persistence: memoryPersistence().persistence })
+        expect(Object.values(readAuthoredFile().authoring ?? {}).map((row) => row.sourceOnly)).toEqual([true, true])
+
+        const started: string[] = []
+        const live = await authorWebInterfaces({
+          repoRoot: repo,
+          driver: scriptedDriver(async (place) => {
+            started.push(place)
+            return { kind: 'outcome', value: place === 'root' ? { interfaces: [], kept: [HOME_TASK.id] } : { interfaces: [] } }
+          }).driver,
+          persistence: memoryPersistence().persistence,
+          openLive: async () => world(),
+        })
+        expect(started.sort()).toEqual(['repos-repoid', 'root'])
+        expect(live.places.map((place) => place.status)).toEqual(['authored', 'empty'])
+        expect(Object.values(readAuthoredFile().authoring ?? {}).map((row) => row.sourceOnly)).toEqual([undefined, undefined])
+
+        const again = await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence: memoryPersistence().persistence, openLive: async () => world() })
+        expect(again.places).toEqual([])
+      })
+
+      it('is left settled by a run whose live world does not come up', async () => {
+        await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(both).driver, persistence: memoryPersistence().persistence })
+        const before = readAuthoredFile().authoring
+        let opened = 0
+        const result = await authorWebInterfaces({
+          repoRoot: repo,
+          driver: refuses,
+          persistence: memoryPersistence().persistence,
+          openLive: async () => {
+            opened++
+            return undefined
+          },
+        })
+        expect(opened).toBe(1)
+        expect(result.places).toEqual([])
+        expect(readAuthoredFile().authoring).toEqual(before)
       })
     })
 
@@ -2110,7 +2177,7 @@ describe('readable authoring through storage and the screen read view', () => {
         ? { interfaces: [], resources: [{ ...DERIVED.resources!.web[0], readables }] } : { interfaces: [] } })).driver })
     expect(result.places[0].status).toBe('authored')
     expect(readAuthoredFile().resources!.web[0].readables).toEqual(readables)
-    expect(planWorkItems(DERIVED, readAuthoredFile(), authoringRecipeContract(repo), repo)[0].needsAuthoring).toBe(false)
+    expect(planWorkItems(DERIVED, readAuthoredFile(), authoringRecipeContract(repo), { repoRoot: repo })[0].needsAuthoring).toBe(false)
   })
 })
 

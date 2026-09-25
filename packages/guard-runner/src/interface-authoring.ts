@@ -15,6 +15,10 @@
  *    caller knows the current grounding) a file joined or left that set —
  *    whatever the row's status. A settled screen re-opened this way is RECONCILED against
  *    the tasks it already has (kept, amended, retired), never re-invented;
+ *  - a row authored from source alone (`sourceOnly`) is work again for a
+ *    caller that can look at the screen live, and for no other: a run that
+ *    still cannot leaves it where it is rather than paying for the same
+ *    source-only answer again;
  *  - otherwise it is not: a settled row stays settled, and a `failed` or
  *    `rejected` one waits for an explicit refresh. A provider that died costs
  *    that screen one run, not one run every setup forever, and the setup report
@@ -35,7 +39,9 @@ import {
   type InterfaceResource,
   type InterfacesFile,
 } from '@truecourse/shared'
+import { resolveWebSurface, type Recipe } from './recipe.js'
 import { staleAuthoredPlaceDiagnostics, webScreensNeedingReadables } from './store.js'
+import { preflightBrowser } from './web/browser.js'
 
 /** The surface authoring writes — the one nothing derives. */
 const AUTHORED_SURFACE = 'web'
@@ -60,8 +66,16 @@ export interface WebScreenAuthoringState {
   record?: InterfaceAuthoringRecord
   /** The digest a session for this screen would run over — its cache key too. */
   inputFingerprint: string
-  /** A session is owed here: no settled row, or a row whose inputs or sources moved. */
+  /**
+   * A session is owed here: no settled row, a row whose inputs or sources
+   * moved, or a source-only row the caller can now look at live.
+   */
   needsAuthoring: boolean
+  /**
+   * The ONLY reason a session is owed is a live look at a row authored from
+   * source alone: a run whose live world does not come up owes nothing here.
+   */
+  awaitsLiveLook: boolean
 }
 
 export interface WebScreenAuthoringInput {
@@ -86,6 +100,12 @@ export interface WebScreenAuthoringInput {
    * row recorded are re-read.
    */
   grounding?: ReadonlyMap<string, readonly string[]>
+  /**
+   * Whether the caller can stand the app up for the sessions to look at
+   * ({@link canObserveLiveScreens}). With it, a row authored from source
+   * alone is work again.
+   */
+  liveAvailable?: boolean
 }
 
 /**
@@ -114,23 +134,26 @@ export function webScreenAuthoringStates(
   return roots.map((place) => {
     const record = ledger[place.id]
     const inputFingerprint = fingerprintOf(derivedPlaces, place, input.recipeContract)
+    const moved = record
+      ? record.inputFingerprint !== inputFingerprint ||
+        (input.repoRoot !== undefined &&
+          sourcesMoved(input.repoRoot, record.sources, input.grounding && (input.grounding.get(place.id) ?? [])))
+      : // The old inference, for a screen written before the ledger: a screen
+        // that carries a task and has every readable kind established is what
+        // a settled session leaves behind, so it is not re-bought.
+        unestablished.has(place.id) ||
+        (!located.has(place.id) &&
+          !input.authored?.resources?.[AUTHORED_SURFACE]?.some(
+            (candidate) => candidate.id === place.id && candidate.readables,
+          ))
+    const awaitsLiveLook = !moved && input.liveAvailable === true && record?.sourceOnly === true
     return {
       place,
       tasks: located.get(place.id) ?? [],
       ...(record ? { record } : {}),
       inputFingerprint,
-      needsAuthoring: record
-        ? record.inputFingerprint !== inputFingerprint ||
-          (input.repoRoot !== undefined &&
-            sourcesMoved(input.repoRoot, record.sources, input.grounding && (input.grounding.get(place.id) ?? [])))
-        : // The old inference, for a screen written before the ledger: a screen
-          // that carries a task and has every readable kind established is what
-          // a settled session leaves behind, so it is not re-bought.
-          unestablished.has(place.id) ||
-          (!located.has(place.id) &&
-            !input.authored?.resources?.[AUTHORED_SURFACE]?.some(
-              (candidate) => candidate.id === place.id && candidate.readables,
-            )),
+      needsAuthoring: moved || awaitsLiveLook,
+      awaitsLiveLook,
     }
   })
 }
@@ -170,6 +193,16 @@ export function sourcesMoved(
   const now = sourceDigests(repoRoot, current ?? Object.keys(recorded))
   const files = Object.keys(now)
   return files.length !== Object.keys(recorded).length || files.some((file) => recorded[file] !== now[file])
+}
+
+/**
+ * Whether a run can look at this recipe's screens live: it declares a web
+ * surface to serve and the browser is installed. The cheap half of what
+ * standing the app up needs, and the half that decides whether a row
+ * authored from source alone is worth re-opening.
+ */
+export async function canObserveLiveScreens(recipe: Recipe | null | undefined): Promise<boolean> {
+  return recipe != null && resolveWebSurface(recipe) !== null && (await preflightBrowser()).ok
 }
 
 /** A row that never reached an accepted outcome — the two retryable words. */

@@ -49,6 +49,7 @@ import type {
   GuardSetupInterfacesStepResult,
 } from '@truecourse/guard-generator';
 import {
+  canObserveLiveScreens,
   computeRecipeFingerprint,
   authoringRecipeContract,
   guardInterfacesPath,
@@ -169,7 +170,12 @@ export function buildInterfacesStep(
     const derived = readInterfaceCatalog(input.repoRoot);
     const authored = readAuthoredInterfaceCatalog(input.repoRoot);
     const stale = new Set(staleAuthoredPlaceDiagnostics(derived, authored).map((d) => d.subject));
-    const planned = planWorkItems(derived, authored, authoringRecipeContract(input.repoRoot), input.repoRoot);
+    // A screen authored from source alone is work once the step can look at it live.
+    const liveAvailable = opts.liveScreens !== undefined && (await canObserveLiveScreens(input.recipe));
+    const planned = planWorkItems(derived, authored, authoringRecipeContract(input.repoRoot), {
+      repoRoot: input.repoRoot,
+      liveAvailable,
+    });
     const workable = planned.filter(
       (item) =>
         !stale.has(item.place.id) &&

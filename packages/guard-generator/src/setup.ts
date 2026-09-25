@@ -92,6 +92,7 @@ import {
   readInterfaceCatalog,
   readAuthoredInterfaceCatalog,
   webScreensNeedingAuthoring,
+  canObserveLiveScreens,
   resolveSeedScript,
   FINGERPRINT_INPUTS,
   RecipeSchema,
@@ -1369,6 +1370,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         authored: readAuthoredInterfaceCatalog(repoRoot),
         recipeContract: authoringRecipeContract(repoRoot),
         repoRoot,
+        // A screen authored from source alone is work once the step can look at it live.
+        liveAvailable: opts.authorInterfaces !== undefined && (await canObserveLiveScreens(reloadRecipe(repoRoot) ?? recipe)),
       }).size === 0) {
       pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
       fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')

@@ -65,6 +65,7 @@ import {
   staleAuthoredPlaceDiagnostics,
   unsettledAuthoring,
   webScreenAuthoringStates,
+  type WebScreenAuthoringInput,
 } from '@truecourse/guard-runner'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import type {
@@ -270,6 +271,8 @@ export interface AuthorWorkItem {
   existing: string[]
   /** Tasks or readable facts still need a source reading. */
   needsAuthoring: boolean
+  /** Work only for a run whose live world comes up: the row was authored from source alone. */
+  awaitsLiveLook: boolean
   /** What the ledger says authoring settled here, when it says anything. */
   record?: InterfaceAuthoringRecord
   /** The digest this screen's session runs over — its ledger row and cache key. */
@@ -286,25 +289,20 @@ export interface AuthorWorkItem {
  * which is why the recipe contract is a parameter: it is one of the inputs each
  * screen's row settled over. With the working tree, a row whose recorded source
  * files changed is work too, and with the current grounding, so is a row whose
- * set of grounding files is not the one it recorded.
+ * set of grounding files is not the one it recorded; when the caller can look
+ * at the screens live, so is a row authored from source alone.
  */
 export function planWorkItems(
   derived: InterfacesFile | null,
   authored: InterfacesFile | null,
   recipeContract: string,
-  repoRoot?: string,
-  grounding?: ReadonlyMap<string, readonly string[]>,
+  opts: Pick<WebScreenAuthoringInput, 'repoRoot' | 'grounding' | 'liveAvailable'> = {},
 ): AuthorWorkItem[] {
-  return webScreenAuthoringStates({
-    derived,
-    authored,
-    recipeContract,
-    ...(repoRoot ? { repoRoot } : {}),
-    ...(grounding ? { grounding } : {}),
-  }).map((state) => ({
+  return webScreenAuthoringStates({ derived, authored, recipeContract, ...opts }).map((state) => ({
     place: state.place,
     existing: state.tasks,
     needsAuthoring: state.needsAuthoring,
+    awaitsLiveLook: state.awaitsLiveLook,
     ...(state.record ? { record: state.record } : {}),
     inputFingerprint: state.inputFingerprint,
   }))
@@ -348,7 +346,13 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const grounding = opts.context && opts.context.size > 0
     ? new Map([...opts.context].map(([placeId, context]) => [placeId, groundingFiles(context)]))
     : undefined
-  const all = planWorkItems(derived, authored, recipeContract, opts.repoRoot, grounding)
+  // A run that may stand the app up re-opens the screens authored from source
+  // alone; if the world then does not come up, they are left as they are.
+  const all = planWorkItems(derived, authored, recipeContract, {
+    repoRoot: opts.repoRoot,
+    ...(grounding ? { grounding } : {}),
+    liveAvailable: opts.openLive !== undefined,
+  })
 
   // THE STALE-PLACE RULE — a WORK-LIST rule, never a merge rule.
   // An authored screen the derivation no longer produces (in a repo whose
@@ -405,13 +409,18 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const sourcesOf = new Map(
     all.map((item) => [item.place.id, sourceDigests(opts.repoRoot, groundingFiles(opts.context?.get(item.place.id)))]),
   )
-  /** A ledger row, with the sources it settled over when the place is grounded. */
-  const ledgerRow = (item: AuthorWorkItem, status: PlaceResult['status']): InterfaceAuthoringRecord => {
+  /**
+   * A ledger row, with the sources it settled over when the place is grounded.
+   * A screen that SETTLED with no live look says so; one that never settled
+   * waits for a refresh either way.
+   */
+  const ledgerRow = (item: AuthorWorkItem, status: PlaceResult['status'], sourceOnly: boolean): InterfaceAuthoringRecord => {
     const sources = sourcesOf.get(item.place.id)!
     return {
       status,
       inputFingerprint: item.inputFingerprint,
       ...(Object.keys(sources).length > 0 ? { sources } : {}),
+      ...(sourceOnly && (status === 'authored' || status === 'empty') ? { sourceOnly: true as const } : {}),
     }
   }
   /** What each place's first look saw — filled once it has run. */
@@ -483,7 +492,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const migrated = Object.fromEntries(
     all
       .filter((item) => item.record === undefined && !item.needsAuthoring && !stale.has(item.place.id))
-      .map((item) => [item.place.id, ledgerRow(item, 'authored')]),
+      .map((item) => [item.place.id, ledgerRow(item, 'authored', false)]),
   )
   if (Object.keys(migrated).length > 0) recordLedger(migrated)
 
@@ -565,14 +574,17 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
       }
       const place: PlaceResult = { ...result.place, spent: { turns: 0, tokens: 0, costUsd: 0 }, fromCache: true }
       results.push(place)
-      recordLedger({ [item.place.id]: ledgerRow(item, place.status) })
+      recordLedger({ [item.place.id]: ledgerRow(item, place.status, !live) })
       opts.onProgress?.({ kind: 'place-done', place })
     }
     return misses
   }
   const liveMisses = opts.openLive ? await serveCached(work, true) : [...work]
   const live = liveMisses.length > 0 ? await opts.openLive?.() : undefined
-  const pending = live ? liveMisses : await serveCached(liveMisses, false)
+  // A screen owed only a live look is left as it stands when none came up.
+  const lookless = live ? [] : liveMisses.filter((item) => item.awaitsLiveLook)
+  skipped.push(...lookless.map((item) => item.place.id))
+  const pending = live ? liveMisses : await serveCached(liveMisses.filter((item) => !item.awaitsLiveLook), false)
   reopening = pending.filter((item) => item.place.kind !== 'component')
 
   // THE FIRST LOOK, before any session starts: every pending screen whose
@@ -729,7 +741,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
         // The ledger row, whatever the verdict: a screen that failed is a screen
         // this run REACHED, and recording that is what stops the next run paying
         // for the same failure. The digest is the one the work list planned over.
-        recordLedger({ [item.place.id]: ledgerRow(item, place.status) })
+        recordLedger({ [item.place.id]: ledgerRow(item, place.status, live === undefined) })
         // The fragment an accepted outcome produced, under this screen's digest:
         // the next run over the same inputs folds it instead of buying it again.
         if (outcome.status === 'completed' && (place.status === 'authored' || place.status === 'empty')) {

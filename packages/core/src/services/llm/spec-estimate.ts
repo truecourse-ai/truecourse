@@ -196,6 +196,7 @@ import {
   sourceDigests,
   unsettledAuthoring,
   webScreensNeedingAuthoring,
+  canObserveLiveScreens,
   readInterfaceCatalog,
   readMergedInterfaceCatalog,
   readManifest as readGuardManifest,
@@ -1233,6 +1234,9 @@ export async function estimateGuardSetup(
   const derivedCatalog = readInterfaceCatalog(repoRoot);
   const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
   const interfaceRecipeContract = authoringRecipeContract(repoRoot);
+  // Whether the run can look at the screens live: it then re-opens the ones
+  // authored from source alone, and reads the live fragment first.
+  const liveAvailable = await canObserveLiveScreens(recipe);
   const interfacesSettled =
     !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
     webScreensNeedingAuthoring({
@@ -1240,18 +1244,19 @@ export async function estimateGuardSetup(
       authored: authoredCatalog,
       recipeContract: interfaceRecipeContract,
       repoRoot,
+      liveAvailable,
     }).size === 0;
   const staleAuthoredIds = new Set(
     staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
   );
-  const planned = planWorkItems(derivedCatalog, authoredCatalog, interfaceRecipeContract, repoRoot).filter(
+  const planned = planWorkItems(derivedCatalog, authoredCatalog, interfaceRecipeContract, { repoRoot, liveAvailable }).filter(
     (item) => !staleAuthoredIds.has(item.place.id),
   );
   const authorable = planned.filter((item) => replace || item.needsAuthoring);
   // A screen whose fragment is cached costs nothing, exactly as the run reads
   // it — an explicit re-author reads no cache, so every screen is priced. A
-  // recipe that serves a web surface is authored beside the live screen, so
-  // the live fragment is the one the run would find. The sources are the ones
+  // run that can look at the screens live authors beside them, so the live
+  // fragment is the one it would find. The sources are the ones
   // the screen's row recorded; a screen with none is keyed on what the run's
   // analyzer grounds it on, which this estimate cannot know, so it is priced.
   const authorCached = await Promise.all(
@@ -1264,7 +1269,7 @@ export async function estimateGuardSetup(
             fragmentCacheKey(
               item.inputFingerprint,
               item.record?.sources ? sourceDigests(repoRoot, Object.keys(item.record.sources)) : {},
-              recipe?.web !== undefined,
+              liveAvailable,
             ),
             AuthoredFragmentSchema,
           ),

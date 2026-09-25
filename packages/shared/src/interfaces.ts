@@ -1767,7 +1767,9 @@ export type InterfaceAuthoringStatus = z.infer<typeof InterfaceAuthoringStatusSc
  * changed, or a file joined or left the set it is grounded on — whatever the
  * status, so a dead provider costs one screen one run,
  * not one screen every run forever, and a settled screen whose source moved is
- * reconciled rather than left describing code that is gone.
+ * reconciled rather than left describing code that is gone. A row settled
+ * from source alone is work again, too, for a run that can look at the
+ * screen live.
  */
 export const InterfaceAuthoringRecordSchema = z
   .object({
@@ -1781,6 +1783,11 @@ export const InterfaceAuthoringRecordSchema = z
      * screen the analyzer could not ground.
      */
     sources: z.record(z.string().min(1), z.string().min(1)).optional(),
+    /**
+     * The screen settled (`authored` or `empty`) with no live screen to look
+     * at (no browser, or the app would not come up): from source alone.
+     */
+    sourceOnly: z.literal(true).optional(),
   })
   .strict()
 export type InterfaceAuthoringRecord = z.infer<typeof InterfaceAuthoringRecordSchema>

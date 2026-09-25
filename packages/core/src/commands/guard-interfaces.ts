@@ -81,7 +81,7 @@ export function readGuardInterfacesAuthorView(repoRoot: string): GuardInterfaces
   const derived = readInterfaceCatalog(repoRoot);
   const authored = readAuthoredInterfaceCatalog(repoRoot);
   return {
-    places: planWorkItems(derived, authored, authoringRecipeContract(repoRoot), repoRoot).map((item) => ({
+    places: planWorkItems(derived, authored, authoringRecipeContract(repoRoot), { repoRoot }).map((item) => ({
       id: item.place.id,
       kind: item.place.kind,
       title: item.place.title,
