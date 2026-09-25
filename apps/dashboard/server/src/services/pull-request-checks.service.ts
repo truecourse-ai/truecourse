@@ -171,7 +171,12 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
       return { status: 'stale' };
     }
     await supersede(pr.repoFullName, pr.number, 'superseded');
-    if (!link?.checkPullRequests) return { status: 'disabled' };
+    if (!link?.checkPullRequests) {
+      log.info(
+        `[checks] ${pr.repoFullName}#${pr.number} at ${pr.headSha.slice(0, 8)} not checked: ${link ? 'checks are off for this repository' : 'the repository is not connected in Code'}`,
+      );
+      return { status: 'disabled' };
+    }
     const octokit = deps.octokitFor(installationId);
     let check = await deps.pulls.createCheck({ repoFullName: pr.repoFullName, number: pr.number, headSha: pr.headSha });
     const githubCheckRunId = await postQueued(octokit, check);
@@ -202,7 +207,13 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
   /** A draft's check: settled at once, saying so. Nothing is posted for a repository whose checks are off. */
   async function hold(pr: PullRequestRecord, installationId: number): Promise<void> {
     await supersede(pr.repoFullName, pr.number, 'superseded');
-    if (!(await deps.repos.getRepo(pr.repoFullName))?.checkPullRequests) return;
+    const link = await deps.repos.getRepo(pr.repoFullName);
+    if (!link?.checkPullRequests) {
+      log.info(
+        `[checks] ${pr.repoFullName}#${pr.number} draft not held: ${link ? 'checks are off for this repository' : 'the repository is not connected in Code'}`,
+      );
+      return;
+    }
     const octokit = deps.octokitFor(installationId);
     let check = await deps.pulls.createCheck({ repoFullName: pr.repoFullName, number: pr.number, headSha: pr.headSha });
     const githubCheckRunId = await postQueued(octokit, check);
