@@ -61,6 +61,28 @@ function folder(name: string, path: string, over: Partial<RepositoryLink> = {}):
   };
 }
 
+describe('the pushed commit', () => {
+  it('is remembered per repository, and forgotten by a re-link', async () => {
+    await store.linkRepo(githubRepo('acme/api'));
+    expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBeNull();
+    await store.recordDefaultBranchSha('acme/api', 'sha-1');
+    expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBe('sha-1');
+    // A repository nobody connected records nothing, quietly.
+    await store.recordDefaultBranchSha('acme/other', 'sha-2');
+    expect(await store.getRepo('acme/other')).toBeNull();
+    await store.linkRepo(githubRepo('acme/api'));
+    expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBeNull();
+  });
+
+  it('remembers the commit a main chain started at, and a re-link forgets it too', async () => {
+    await store.linkRepo(githubRepo('acme/api'));
+    await store.recordMainChainSha('acme/api', 'sha-1');
+    expect((await store.getRepo('acme/api'))?.mainChainSha).toBe('sha-1');
+    await store.linkRepo(githubRepo('acme/api'));
+    expect((await store.getRepo('acme/api'))?.mainChainSha).toBeNull();
+  });
+});
+
 describe('PgRepositoryStore', () => {
   it('round-trips a connected repository, including notify_emails and blocking', async () => {
     await store.linkRepo(githubRepo('acme/api', { notifyEmails: ['a@x.com'], blocking: false }));

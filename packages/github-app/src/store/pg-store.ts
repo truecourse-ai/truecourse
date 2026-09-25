@@ -40,6 +40,7 @@ function toInstallation(r: InstallationRow, workspaceOrgIds: string[]): Installa
     installationId: Number(r.accountId),
     accountLogin: r.accountLogin,
     accountType: r.accountType,
+    permissions: r.permissions ?? null,
     workspaceOrgIds,
     createdAt: toIso(r.createdAt),
     updatedAt: toIso(r.updatedAt),
@@ -97,6 +98,7 @@ export class PostgresInstallationStore implements InstallationStore {
         accountId: String(rec.installationId),
         accountLogin: rec.accountLogin,
         accountType: rec.accountType,
+        permissions: rec.permissions ?? null,
         createdAt: rec.createdAt,
         updatedAt: rec.updatedAt,
       })
@@ -105,6 +107,7 @@ export class PostgresInstallationStore implements InstallationStore {
         set: {
           accountLogin: sql`coalesce(nullif(excluded.account_login, ''), ${providerAccounts.accountLogin})`,
           accountType: sql`coalesce(nullif(excluded.account_type, ''), ${providerAccounts.accountType})`,
+          permissions: sql`coalesce(excluded.permissions, ${providerAccounts.permissions})`,
           updatedAt: sql`excluded.updated_at`,
         },
       });

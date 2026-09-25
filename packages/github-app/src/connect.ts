@@ -93,12 +93,14 @@ function toInstallationSummary(
 ): GithubInstallationSummary {
   const selection = 'repositorySelection' in r ? r.repositorySelection : undefined;
   const workspaces = 'workspaceOrgIds' in r ? r.workspaceOrgIds.length : undefined;
+  const permissions = 'permissions' in r ? r.permissions : null;
   return {
     installationId: r.installationId,
     accountLogin: r.accountLogin,
     accountType: r.accountType,
     ...(selection ? { repositorySelection: selection } : {}),
     ...(workspaces === undefined ? {} : { workspaces }),
+    ...(permissions ? { postsChecks: permissions.checks === 'write' } : {}),
   };
 }
 

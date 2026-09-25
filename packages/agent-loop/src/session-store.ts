@@ -27,6 +27,9 @@ export const SessionCommandSchema = z.enum([
   // A scenario run. Deterministic apart from ONE opt-in annotation: the visual
   // verdict on a failing web step. A run that asks for none creates no record.
   'guard-run',
+  // A pull request's check: setup, generation and the run at the head, in one
+  // conversation, judged against what is stored for the base.
+  'pr-check',
 ]);
 export type SessionCommand = z.infer<typeof SessionCommandSchema>;
 
@@ -126,6 +129,21 @@ const RunRecordFieldsSchema = z.object({
    * cleanly, or one written before the field existed, has none.
    */
   error: RunErrorSchema.optional(),
+  /**
+   * The pull request this run judged, when it did: a check's run, or the
+   * scan a check ran over the head's documents. The Agent page's column and
+   * filter read it; absent on every other run.
+   */
+  pullRequest: z
+    .object({
+      /** The repository the pull request is of: a check's scan is a WORKSPACE run and names no repository of its own. */
+      repoFullName: z.string(),
+      number: z.number().int().positive(),
+      headSha: z.string(),
+      /** The check the run belongs to; the scan a check ran carries it too. */
+      checkId: z.string().optional(),
+    })
+    .optional(),
   sessions: z.array(SessionIndexEntrySchema),
 });
 

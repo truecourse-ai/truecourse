@@ -11,13 +11,14 @@
 
 import type { ServerMode } from '@truecourse/shared';
 import { registeredRepositoryProviders, type RepositoryProvider } from '@/dashboard/shell/registry';
+import type { Repo } from '@/dashboard/data/types';
 import { localFolder } from '@/dashboard/providers/local-folder';
 import github from '@/dashboard/ui/logos/github.svg';
 import gitlab from '@/dashboard/ui/logos/gitlab.svg';
 
 /** The three the open edition knows. */
 const OPEN_PROVIDERS: readonly RepositoryProvider[] = [
-  { id: 'github', name: 'GitHub', logo: github },
+  { id: 'github', name: 'GitHub', logo: github, pullRequests: true },
   { id: 'gitlab', name: 'GitLab', logo: gitlab, comingSoon: true },
   localFolder,
 ];
@@ -40,4 +41,9 @@ export function offeredRepositoryProviders(mode: ServerMode): RepositoryProvider
 
 export function repositoryProvider(id: string): RepositoryProvider | undefined {
   return repositoryProviders().find((provider) => provider.id === id);
+}
+
+/** Whether any of these repositories comes from a provider with pull requests. */
+export function offersPullRequests(repos: readonly Pick<Repo, 'provider'>[]): boolean {
+  return repos.some((repo) => repositoryProvider(repo.provider)?.pullRequests === true);
 }

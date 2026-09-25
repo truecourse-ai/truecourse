@@ -63,6 +63,18 @@ export interface ContextLedgerWrite {
   removed: string[];
 }
 
+/**
+ * The repository is already another workspace's source. A repository is ONE
+ * workspace's: its documentation is read by the workspace that connected it,
+ * and a push to it is reported to that one workspace.
+ */
+export class RepositorySourceTakenError extends Error {
+  constructor(readonly repoFullName: string) {
+    super(`${repoFullName} is already a source in another workspace.`);
+    this.name = 'RepositorySourceTakenError';
+  }
+}
+
 /** A source already exists for this scope (a site URL, a repository). */
 export class ContextSourceExistsError extends Error {
   constructor(
@@ -77,7 +89,14 @@ export class ContextSourceExistsError extends Error {
 export interface ContextStore {
   listSources(org: string): Promise<ContextSource[]>;
   getSource(org: string, sourceId: string): Promise<ContextSource | null>;
+  /** Throws {@link RepositorySourceTakenError} for a repository another workspace already reads. */
   createSource(org: string, input: ContextSourceInput): Promise<ContextSource>;
+  /**
+   * The workspace whose source reads this repository, whichever workspace the
+   * caller is in — null when no workspace does. The one cross-workspace read:
+   * a push names a repository and nothing else.
+   */
+  repositorySourceWorkspace(repoFullName: string): Promise<string | null>;
   /** Returns the updated source, or null when it no longer exists. */
   updateSource(org: string, sourceId: string, patch: ContextSourcePatch): Promise<ContextSource | null>;
   /** Drop the source, its documents, its syncs and every binding to it. */
@@ -134,6 +153,9 @@ class UninstalledContextStore implements ContextStore {
     this.fail();
   }
   createSource(): Promise<ContextSource> {
+    this.fail();
+  }
+  repositorySourceWorkspace(): Promise<string | null> {
     this.fail();
   }
   updateSource(): Promise<ContextSource | null> {
@@ -198,6 +220,8 @@ export const listContextSources = (org: string): Promise<ContextSource[]> => act
 export const getContextSource = (org: string, sourceId: string): Promise<ContextSource | null> =>
   active.getSource(org, sourceId);
 
+export const repositorySourceWorkspace = (repoFullName: string): Promise<string | null> =>
+  active.repositorySourceWorkspace(repoFullName);
 export const createContextSource = (org: string, input: ContextSourceInput): Promise<ContextSource> =>
   active.createSource(org, input);
 

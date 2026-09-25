@@ -239,6 +239,34 @@
       "when": 1790192018708,
       "tag": "0033_usage_cost_by_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790245546417,
+      "tag": "0034_repository_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1790245566670,
+      "tag": "0035_default_branch_sha",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790245581177,
+      "tag": "0036_pull_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1790253579831,
+      "tag": "0037_main_chain_sha",
+      "breakpoints": true
     }
   ]
 }

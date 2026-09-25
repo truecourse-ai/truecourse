@@ -49,6 +49,17 @@ describe('PostgresInstallationStore (Drizzle, validated against pglite)', () => 
     expect(await store.getInstallation(999)).toBeNull();
   });
 
+  it('keeps the permissions it knows when a re-save carries none', async () => {
+    await store.saveInstallation({ ...installation(1), permissions: { checks: 'write' } });
+    expect((await store.getInstallation(1))?.permissions).toEqual({ checks: 'write' });
+    await store.saveInstallation(installation(1));
+    expect((await store.getInstallation(1))?.permissions).toEqual({ checks: 'write' });
+    await store.saveInstallation({ ...installation(1), permissions: { checks: 'write', pull_requests: 'read' } });
+    expect((await store.getInstallation(1))?.permissions).toEqual({ checks: 'write', pull_requests: 'read' });
+    await store.saveInstallation(installation(2));
+    expect((await store.getInstallation(2))?.permissions).toBeNull();
+  });
+
   it('keeps a known name and the first createdAt when a re-save carries none', async () => {
     await store.saveInstallation(installation(1));
     // A list that did not name the account must not unname the row.

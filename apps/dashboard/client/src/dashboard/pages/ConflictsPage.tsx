@@ -22,24 +22,40 @@ import {
   type FilterDimension,
 } from '@/dashboard/ui/filter-builder';
 import { facetDimensions } from '@/dashboard/ui/filter-facets';
+import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { StatusWord, tallyOf, type StatusTone } from '@/dashboard/ui/status-word';
 import { useContextSignal } from '@/dashboard/shell/use-context';
+import { useDashboardState } from '@/dashboard/shell/dashboard-state';
+import {
+  pullRequestHover,
+  pullRequestKey,
+  pullRequestLabel,
+  useWorkspacePullRequests,
+  type PullRequestMark,
+} from '@/dashboard/shell/use-pull-requests';
+import { offersPullRequests } from '@/dashboard/data/providers';
+import type { WorkspacePullRequestRow } from '@truecourse/shared';
 import { useEffect, useRef } from 'react';
 import { ContextFrame } from './ContextFrame';
 import { conflictHref } from './context-hrefs';
 
-const DIMENSIONS = ['status', 'area'] as const;
+const DIMENSIONS = ['status', 'area', 'pr'] as const;
 type Dimension = (typeof DIMENSIONS)[number];
-const DIMENSION_WORD: Record<Dimension, string> = { status: 'Status', area: 'Area' };
+const DIMENSION_WORD: Record<Dimension, string> = { status: 'Status', area: 'Area', pr: 'Pull request' };
 const isDimension = (key: string): key is Dimension =>
   (DIMENSIONS as readonly string[]).includes(key);
 
-/** One conflict as the table reads it. */
+/**
+ * One conflict as the table reads it: the workspace's, or one an open pull
+ * request's check found its head would create, listed under the number. A
+ * created conflict is not in the workspace corpus and has no page to open.
+ */
 export interface ConflictRow {
   id: string;
   title: string;
   area: string;
   resolved: boolean;
+  pullRequest: PullRequestMark | null;
 }
 
 /** A conflict's state, open first: the order the filter offers and the tally counts in. */
@@ -52,7 +68,9 @@ const STATUS_TONE: Record<ConflictStatus, StatusTone> = { open: 'blocked', resol
 const statusOf = (row: ConflictRow): ConflictStatus => (row.resolved ? 'resolved' : 'open');
 
 function valueOf(row: ConflictRow, dimension: Dimension): string {
-  return dimension === 'status' ? statusOf(row) : row.area;
+  if (dimension === 'status') return statusOf(row);
+  if (dimension === 'pr') return row.pullRequest ? pullRequestKey(row.pullRequest) : '';
+  return row.area;
 }
 
 function keeps(row: ConflictRow, selected: readonly string[]): boolean {
@@ -115,8 +133,22 @@ export function conflictRows(data: SpecCorpusResponse | null): ConflictRow[] {
       title: conflict.note || `${conflict.a} and ${conflict.b}`,
       area: conflict.area,
       resolved: conflict.resolved,
+      pullRequest: null,
     }))
     .sort((a, b) => Number(a.resolved) - Number(b.resolved) || a.title.localeCompare(b.title));
+}
+
+/** The conflicts each open pull request's check found it would create, open by definition. */
+function pullRequestConflictRows(pulls: readonly WorkspacePullRequestRow[]): ConflictRow[] {
+  return pulls.flatMap((pr) =>
+    pr.check.conflictsCreated.map((conflict, i) => ({
+      id: `${pullRequestKey(pr)}:${i}`,
+      title: conflict.note || `${conflict.docs[0]} and ${conflict.docs[1]}`,
+      area: '',
+      resolved: false,
+      pullRequest: pr,
+    })),
+  );
 }
 
 export default function ConflictsPage() {
@@ -124,9 +156,13 @@ export default function ConflictsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const signal = useContextSignal();
   const { data, loaded, error } = useWorkspaceCorpus(signal);
+  const { repos } = useDashboardState();
   const [query, setQuery] = useState('');
+  // The pull request rows draw only for a provider that has pull requests.
+  const showPulls = offersPullRequests(repos);
+  const pulls = useWorkspacePullRequests(showPulls, signal);
 
-  const all = useMemo(() => conflictRows(data), [data]);
+  const all = useMemo(() => [...conflictRows(data), ...pullRequestConflictRows(pulls)], [data, pulls]);
 
   const selected = useMemo(
     () =>
@@ -161,7 +197,7 @@ export default function ConflictsPage() {
   );
 
   const dimensions = useMemo<FilterDimension[]>(() => {
-    const areas = [...new Set(all.map((row) => row.area))].sort((a, b) => a.localeCompare(b));
+    const areas = [...new Set(all.map((row) => row.area))].filter(Boolean).sort((a, b) => a.localeCompare(b));
     return facetDimensions<ConflictRow>({
       rows: all,
       selected,
@@ -180,9 +216,21 @@ export default function ConflictsPage() {
           valuesOf: (row) => [valueOf(row, 'area')],
           values: areas.map((area) => ({ value: area, label: area })),
         },
+        ...(showPulls
+          ? [
+              {
+                key: 'pr',
+                label: DIMENSION_WORD.pr,
+                valuesOf: (row: ConflictRow) => (row.pullRequest ? [pullRequestKey(row.pullRequest)] : []),
+                values: pulls.map((pr) => ({ value: pullRequestKey(pr), label: pullRequestLabel(pr, repos.length > 1) })),
+                // A pull request whose check created no conflict has no row to narrow to.
+                hideEmpty: true,
+              },
+            ]
+          : []),
       ],
     });
-  }, [all, matchesQuery, selected]);
+  }, [all, matchesQuery, selected, showPulls, pulls, repos.length]);
 
   const rows = useMemo(
     () => all.filter((row) => matchesQuery(row) && keeps(row, selected)),
@@ -212,7 +260,11 @@ export default function ConflictsPage() {
         label="Conflicts"
         rows={rows}
         rowId={(row) => row.id}
-        onOpen={(row) => navigate(conflictHref(row.id))}
+        onOpen={(row) => {
+          if (!row.pullRequest) navigate(conflictHref(row.id));
+        }}
+        // A conflict a pull request would create has no page until it is merged.
+        openable={(row) => row.pullRequest === null}
         query={query}
         onQuery={setQuery}
         searchPlaceholder="Search conflicts"
@@ -230,6 +282,24 @@ export default function ConflictsPage() {
             cell: (row) => <span className="text-foreground">{row.title}</span>,
           },
           { key: 'area', label: 'Area', width: '14rem', className: 'text-muted-foreground', cell: (row) => row.area },
+          ...(showPulls
+            ? [
+                {
+                  key: 'pr',
+                  label: 'Pull request',
+                  width: '7rem',
+                  className: 'text-foreground',
+                  cell: (row: ConflictRow) =>
+                    row.pullRequest ? (
+                      <HoverPopover portal width="narrow" content={pullRequestHover(row.pullRequest)}>
+                        <span>#{row.pullRequest.number}</span>
+                      </HoverPopover>
+                    ) : (
+                      ''
+                    ),
+                },
+              ]
+            : []),
           {
             key: 'status',
             label: 'Status',

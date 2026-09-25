@@ -590,6 +590,14 @@ function RepositoriesTab() {
                             {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''}
                             {sees ? ` · ${sees}` : ''}
                           </span>
+                          {/* The App asked for the checks permission after this
+                              account installed it: until the owner accepts it on
+                              GitHub, checks run here and are not posted there. */}
+                          {i.postsChecks === false && (
+                            <span className="text-muted-foreground">
+                              {' · checks not posted to GitHub until the checks permission is accepted'}
+                            </span>
+                          )}
                         </span>
                         {/* Which repositories the App can see is GitHub's
                             setting, on the installation's own page there. */}

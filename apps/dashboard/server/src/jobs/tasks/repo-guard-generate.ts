@@ -53,7 +53,7 @@ import {
   persistGeneratedGuard,
   readGeneratedReport,
 } from '../materialize-guard.js';
-import { firstLine, type OnboardingJobRequest } from './onboarding.js';
+import { chainEnded, firstLine, workTreeVia, type ChainEnd, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_GENERATE_TASK = 'repo.guard-generate';
 
@@ -94,6 +94,8 @@ export interface GuardGenerateJobResult {
 export interface RepoGuardGenerateTaskDeps {
   /** Enqueue the baseline run a generate with scenarios chains into. */
   chainGuardRun(request: OnboardingJobRequest): Promise<void>;
+  /** A generate that chained no run ended its chain: see {@link ChainEnd}. */
+  onChainEnd?: ChainEnd;
   startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runGenerate?: typeof guardGenerateInProcess;
 }
@@ -107,6 +109,8 @@ export function createRepoGuardGenerateTask(
   // address too: `onError` is handed the payload alone. Keyed by job id, and
   // cleared however the job settles.
   const runIds = new Map<string, string>();
+  /** The commit each job cloned, for the settle hook. Same lifetime as `runIds`. */
+  const commits = new Map<string, string>();
 
   return {
     type: REPO_GUARD_GENERATE_TASK,
@@ -147,9 +151,10 @@ export function createRepoGuardGenerateTask(
           const llm = await startLlm(ctx.payload.workspaceOrgId, meter);
 
           await ctx.phase('clone');
-          const tree = await acquireWorkTree(repoFullName);
+          const tree = await acquireWorkTree(repoFullName, workTreeVia(ctx.payload));
           try {
             const commitSha = await resolveCommitSha(tree.dir);
+            commits.set(ctx.jobId, commitSha);
             if (resume) assertGuardGenerateResumeCommit(resume, commitSha);
             activityRun.setGitRef?.(commitSha);
             activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
@@ -348,28 +353,56 @@ export function createRepoGuardGenerateTask(
 
     async onSettled(ctx, outcome, result) {
       runIds.delete(ctx.jobId);
+      const commitSha = commits.get(ctx.jobId) ?? null;
+      commits.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however the generate ended.
       await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-generate');
-      // Only a generate that left a scenario set has anything to run: a blocked
-      // corpus and a generate that settled no flow end the chain here (their
-      // notifications already say why), and so does a failure or a cancel. An
-      // unchanged set still runs — the code under it may have moved, and the
-      // baseline run is what says so.
-      if (outcome !== 'succeeded') return;
-      if ((result as { status?: string } | undefined)?.status !== 'ok') return;
-      try {
-        // A fresh request, not this job's payload: the chained job gets its own
-        // row id from the enqueue, never generate's.
-        const { repoId, repoFullName, workspaceOrgId } = ctx.payload;
-        await deps.chainGuardRun({ repoId, repoFullName, workspaceOrgId, source: 'chain' });
-      } catch (err) {
-        // A chain that cannot be enqueued is not this generate's failure: the
-        // scenarios are stored, and the run can be started by hand.
-        log.warn(
-          `[jobs] could not chain the baseline run for ${ctx.payload.repoFullName}: ${(err as Error).message}`,
-        );
+      // The chain's commit: the one this job was pinned to, else the one it
+      // cloned. Carried into the run, and reported when the chain ends.
+      const target = ctx.payload.commitSha ?? commitSha;
+      if (!(await chainRun(ctx.payload, outcome, result, target)) && chainEnded(outcome)) {
+        await deps.onChainEnd?.(ctx.payload, target);
       }
     },
   };
+
+  /**
+   * Chain the run a finished generate owes, and say whether one was asked for.
+   * Only a generate that left a scenario set has anything to run: a blocked
+   * corpus and a generate that settled no flow end the chain here (their
+   * notifications already say why), and so does a failure or a cancel. An
+   * unchanged set still runs — the code under it may have moved, and the
+   * baseline run is what says so.
+   */
+  async function chainRun(
+    payload: GuardGenerateJobPayload,
+    outcome: string,
+    result: unknown,
+    commitSha: string | null,
+  ): Promise<boolean> {
+    if (outcome !== 'succeeded') return false;
+    if ((result as { status?: string } | undefined)?.status !== 'ok') return false;
+    try {
+      // A fresh request, not this job's payload: the chained job gets its own
+      // row id from the enqueue, never generate's. Pinned to the chain's
+      // commit, so the run works the tree the scenarios were authored on.
+      const { repoId, repoFullName, workspaceOrgId } = payload;
+      await deps.chainGuardRun({
+        repoId,
+        repoFullName,
+        workspaceOrgId,
+        source: 'chain',
+        ...(commitSha ? { commitSha } : {}),
+      });
+      return true;
+    } catch (err) {
+      // A chain that cannot be enqueued is not this generate's failure: the
+      // scenarios are stored, and the run can be started by hand.
+      log.warn(
+        `[jobs] could not chain the baseline run for ${payload.repoFullName}: ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
 }

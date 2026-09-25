@@ -31,6 +31,12 @@ export interface WorkTreeVia {
   workspaceOrgId: string;
   /** The branch to clone. Absent means the repository's default branch. */
   defaultBranch?: string;
+  /**
+   * The commit to check out, when the tree must be a particular one: the
+   * chain's pinned commit, a pull request's head. Absent means the branch's
+   * tip. A provider that copies a folder has no commits to choose from.
+   */
+  commitSha?: string;
   /** Where the provider finds it when the name is not enough: a folder's path. */
   location?: string;
 }

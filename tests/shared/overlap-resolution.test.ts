@@ -14,6 +14,7 @@ import {
   orphanedConflictResolutions,
   suppressedClaims,
   normalizeQuote,
+  disputeKey,
   resolveConflictId,
   isConflictId,
   type ConflictResolutionLike,
@@ -261,18 +262,54 @@ describe('section-scoped conflict resolutions — dispute matching, verdicts, cl
     ).toEqual([{ doc: 'README.md', anchor: 'taskline', quote: 'rm permanently deletes the task.' }]);
   });
 
-  it('matches by NORMALIZED quotes (backticks / whitespace survive a rescan-style rewrite)', () => {
-    const reworded: ConflictResolutionLike = {
+  it('suppresses the sentence the CURRENT scan quoted, not the one the verdict recorded', () => {
+    const rescanned = disputed();
+    rescanned.areas[0].overlaps[0].sections[1].quote = 'rm archives the task; three hours of history are kept.';
+    expect(suppressedClaims(rescanned, { conflictResolutions: [pickReadme] })).toEqual([
+      { doc: 'docs/SPEC.md', anchor: 'rm <id>', quote: 'rm archives the task; three hours of history are kept.' },
+    ]);
+  });
+
+  it('matches by ANCHORS whatever the quotes say (the session re-excerpts a dispute on every scan)', () => {
+    const drifted: ConflictResolutionLike = {
       ...pickReadme,
-      // Same sentences, backtick-styled + line-wrapped as a fresh scan might store.
-      quoteA: '`rm`   permanently\ndeletes the task.',
-      quoteB: '`rm` archives the task, keeping history.',
-      // A stale anchor the rescan renamed — quote identity still matches.
-      anchorA: 'Taskline (v2)',
+      quoteA: 'rm permanently deletes the task. Restore is not possible.',
+      quoteB: 'rm archives the task.',
     };
-    const decisions = { conflictResolutions: [reworded] };
+    const decisions = { conflictResolutions: [drifted] };
     expect(openConflicts(disputed(), decisions)).toEqual([]);
     expect(buildCorpusConflicts(disputed(), decisions)[0].resolution?.verdict).toBe('a');
+  });
+
+  it('does NOT match a renamed anchor: quotes are evidence, never identity', () => {
+    const renamed: ConflictResolutionLike = { ...pickReadme, anchorA: 'Taskline (v2)' };
+    const decisions = { conflictResolutions: [renamed] };
+    expect(openConflicts(disputed(), decisions)).toHaveLength(1);
+    expect(orphanedConflictResolutions(disputed(), decisions)).toEqual([renamed]);
+  });
+
+  it('disputeKey is the unordered pair plus each side\'s folded anchor (null = the lead)', () => {
+    const sections = [
+      { doc: 'README.md', heading: '`Taskline`' },
+      { doc: 'docs/SPEC.md', heading: 'rm <id>' },
+    ];
+    expect(disputeKey('README.md', 'docs/SPEC.md', sections)).toBe(
+      disputeKey('docs/SPEC.md', 'README.md', [...sections].reverse()),
+    );
+    expect(disputeKey('README.md', 'docs/SPEC.md', sections)).toBe(
+      disputeKey('README.md', 'docs/SPEC.md', [{ doc: 'README.md', heading: 'taskline' }, sections[1]]),
+    );
+    // A doc with no pointer is its lead, the same as an explicit null heading.
+    expect(disputeKey('README.md', 'docs/SPEC.md', undefined)).toBe(
+      disputeKey('README.md', 'docs/SPEC.md', [{ doc: 'README.md', heading: null }, { doc: 'docs/SPEC.md', heading: null }]),
+    );
+    expect(disputeKey('README.md', 'docs/SPEC.md', sections)).not.toBe(disputeKey('README.md', 'docs/SPEC.md', undefined));
+    // Delimiters inside a heading never fold two disputes into one, and an
+    // empty heading is not the lead.
+    expect(disputeKey('a.md', 'b.md', [{ doc: 'a.md', heading: 'x|b.md#y' }, { doc: 'b.md', heading: 'z' }])).not.toBe(
+      disputeKey('a.md', 'b.md', [{ doc: 'a.md', heading: 'x' }, { doc: 'b.md', heading: 'y|b.md#z' }]),
+    );
+    expect(disputeKey('a.md', 'b.md', [{ doc: 'a.md', heading: '' }])).not.toBe(disputeKey('a.md', 'b.md', undefined));
   });
 
   it('matches by ANCHOR when a side has no quote', () => {
@@ -313,34 +350,33 @@ describe('section-scoped conflict resolutions — dispute matching, verdicts, cl
     expect(normalizeQuote('  `rm`  Deletes\nthe  task. ')).toBe('rm deletes the task.');
   });
 
-  describe('dormantResolutionForPair — the reapply hint for quote-drifted verdicts', () => {
+  describe('dormantResolutionForPair — the reapply hint for a verdict recorded under other anchors', () => {
     const conflict = () => buildCorpusConflicts(disputed(), {})[0];
 
-    it('finds a same-pair verdict whose quotes drifted (does not match the dispute)', () => {
-      const drifted: ConflictResolutionLike = {
+    it('finds a same-pair verdict whose anchors differ (does not match the dispute)', () => {
+      const moved: ConflictResolutionLike = {
         ...pickReadme,
-        // The overlap session re-excerpted both sides — same dispute, new bytes.
-        quoteA: 'rm permanently deletes the task. Restore is not possible.',
-        quoteB: 'rm archives the task.',
+        // The dispute was re-flagged under a renamed heading — same pair, other key.
+        anchorA: 'Taskline (v2)',
       };
       const c = conflict();
-      const decisions = { conflictResolutions: [drifted] };
-      // Not resolved (quote identity is precise, deliberately)…
+      const decisions = { conflictResolutions: [moved] };
+      // Not resolved (anchor identity is precise, deliberately)…
       expect(openConflicts(disputed(), decisions)).toHaveLength(1);
       // …but surfaced as the pair's dormant verdict.
-      expect(dormantResolutionForPair(decisions, c.a, c.b, c.sections)).toBe(drifted);
+      expect(dormantResolutionForPair(decisions, c.a, c.b, c.sections)).toBe(moved);
     });
 
     it('matches the pair in EITHER doc order', () => {
-      const drifted: ConflictResolutionLike = {
+      const moved: ConflictResolutionLike = {
         ...pickReadme,
         docA: 'docs/SPEC.md',
-        quoteA: 'drifted',
+        anchorA: 'rm <id> (old)',
         docB: 'README.md',
-        quoteB: 'also drifted',
+        anchorB: 'taskline',
       };
       const c = conflict();
-      expect(dormantResolutionForPair({ conflictResolutions: [drifted] }, c.a, c.b, c.sections)).toBe(drifted);
+      expect(dormantResolutionForPair({ conflictResolutions: [moved] }, c.a, c.b, c.sections)).toBe(moved);
     });
 
     it('returns nothing when the resolution MATCHES the dispute (it resolves, no hint)', () => {

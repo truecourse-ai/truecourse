@@ -29,7 +29,11 @@ import {
   subscribeSessionRunWrites,
   workspaceOfRepo,
 } from './stores.js';
-import { PgInviteLinkStore, PgRepositoryStore, sweepStoredVersions } from '@truecourse/data-store';
+import { PgInviteLinkStore, PgPullRequestStore, PgRepositoryStore, sweepStoredVersions } from '@truecourse/data-store';
+import { installationOctokit, loadGithubAppConfig } from '@truecourse/github-app';
+import { createPullRequestChecks } from './services/pull-request-checks.service.js';
+import { listContextSources } from '@truecourse/core/lib/context-store';
+import { repositoryConfig } from '@truecourse/core/services/context';
 import { setRepoProviderLookup } from './services/work-tree.service.js';
 import { startRunChangeRelay } from './services/run-events.service.js';
 import {
@@ -185,7 +189,50 @@ export async function startServer(): Promise<void> {
   //    link hook enqueues the connected repository's Flow setup, and started
   //    after — the task bodies read seams (the work-tree provider) the
   //    connection installs.
-  const jobs = createServerJobs({ db: getDb(), connectionString: databaseUrl });
+  // The pull requests, and GitHub as the checks read it: through the App's
+  // installations, built here rather than by the connection below because
+  // the check job is a task of the queue, which comes first.
+  const pulls = new PgPullRequestStore(getDb());
+  const githubConfig = loadGithubAppConfig();
+  const octokitFor = githubConfig
+    ? (installationId: number) => installationOctokit(githubConfig, installationId)
+    : null;
+  const appUrl = process.env.WORKOS_APP_URL || 'http://localhost:3000';
+  // The checks service and the queue need each other: the service enqueues
+  // and cancels through the queue, and a disconnect settles checks through
+  // the service. The service takes the queue lazily, so both can be built.
+  const pullRequestChecks = octokitFor
+    ? createPullRequestChecks({
+        jobs: {
+          enqueuePullRequestCheck: (request) => jobs.enqueuePullRequestCheck(request),
+          cancel: (jobId) => jobs.cancel(jobId),
+        },
+        pulls,
+        repos: repoLinks,
+        octokitFor,
+        sourceInstallationOf: async (workspaceOrgId, repoFullName) => {
+          const sources = await listContextSources(workspaceOrgId);
+          const source = sources.find((s) => s.kind === 'repository' && repositoryConfig(s.config).repoFullName === repoFullName);
+          return source ? (repositoryConfig(source.config).installationId ?? null) : null;
+        },
+      })
+    : null;
+  const jobs = createServerJobs({
+    db: getDb(),
+    connectionString: databaseUrl,
+    repos: repoLinks,
+    ...(octokitFor && pullRequestChecks
+      ? {
+          pullRequestCheck: {
+            pulls,
+            repos: repoLinks,
+            octokitFor,
+            appUrl,
+            onStopped: (repoFullName, number, reason) => pullRequestChecks.supersede(repoFullName, number, reason),
+          },
+        }
+      : {}),
+  });
   // Disconnecting a repository stops whatever it has in flight.
   setRepoJobsCanceller(jobs.cancelRepoJobs);
   // A Context mutation is workspace-wide, so it rides the SSE stream the
@@ -229,6 +276,19 @@ export async function startServer(): Promise<void> {
         repoFullName: link.repoFullName,
         workspaceOrgId: link.workspaceOrgId,
         source: 'chain',
+      });
+      return outcome.status;
+    },
+    pulls,
+    ...(pullRequestChecks ? { checks: pullRequestChecks } : {}),
+    // A push to the default branch runs the main chain at the pushed commit.
+    startMainChain: async (trigger) => {
+      const link = await repoLinks.getRepo(trigger.repoFullName);
+      if (!link) return 'failed';
+      const outcome = await jobs.startMainChain({
+        repoId: link.slug,
+        repoFullName: link.repoFullName,
+        workspaceOrgId: link.workspaceOrgId,
       });
       return outcome.status;
     },
@@ -313,6 +373,7 @@ export async function startServer(): Promise<void> {
     github,
     localRouter: local?.router ?? null,
     jobs,
+    pulls: { store: pulls, checks: pullRequestChecks },
     featureRouters,
     // Who a workspace IS, for the operator's Credits page. Local mode has no
     // identity provider to ask, and no operator routes to ask for.

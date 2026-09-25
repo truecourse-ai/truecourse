@@ -85,6 +85,12 @@ export interface GithubInstallationSummary {
    * a held account: at 1, removing it here uninstalls the App on GitHub.
    */
   workspaces?: number
+  /**
+   * Whether the account has granted the App the checks permission, so a pull
+   * request's check is posted on GitHub. False until the account's owner
+   * accepts it; absent while GitHub has not yet said what was granted.
+   */
+  postsChecks?: boolean
 }
 
 /**

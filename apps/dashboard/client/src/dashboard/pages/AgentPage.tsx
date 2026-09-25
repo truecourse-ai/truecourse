@@ -5,9 +5,9 @@
  * The index is the platform's index shape (search full width, ONE filter row
  * of Add filter, dimension, value, then a one-line table), and one row is one
  * whole piece of work, which opens as one conversation at '/agent/:runId'.
- * Kind, Status and Repository live in the address (`?kind=&status=&repo=`), so a
- * narrowed page is a place: the repository console, Home and the toasts link
- * straight to `?repo=<id>`.
+ * Kind, Status, Repository and Pull request live in the address
+ * (`?kind=&status=&repo=&pr=`), so a narrowed page is a place: the repository
+ * console, Home and the toasts link straight to `?repo=<id>`.
  *
  * The list follows the work without a reload: the workspace job stream and the
  * repositories' own store writes both re-read it (see `useWorkspaceRuns`).
@@ -51,7 +51,9 @@ import { RUN_STATUS_TONE, StatusWord, tallyOf } from '@/dashboard/ui/status-word
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { useRunTrigger } from '@/dashboard/shell/use-run-trigger';
 import { useWorkspaceRuns } from '@/dashboard/shell/use-workspace-runs';
-import { jobCommand, jobRepoFullName, waitingFact } from '@/dashboard/shell/use-active-jobs';
+import { jobCommand, jobPullRequest, jobRepoFullName, waitingFact } from '@/dashboard/shell/use-active-jobs';
+import { pullRequestKey } from '@/dashboard/shell/use-pull-requests';
+import { offersPullRequests } from '@/dashboard/data/providers';
 import { conversationHref } from '@/dashboard/shell/real-runs';
 import { subscribeToServerEvents } from '@/dashboard/shell/event-stream';
 import type { Repo } from '@/dashboard/data/types';
@@ -59,11 +61,11 @@ import type { Repo } from '@/dashboard/data/types';
 const STATUSES = Object.keys(RUN_STATUS_META) as WorkStatus[];
 
 /** The filter dimensions, in the order the Add filter menu offers them. */
-const DIMENSION_KEYS = ['kind', 'status', 'repo'] as const;
+const DIMENSION_KEYS = ['kind', 'status', 'repo', 'pr'] as const;
 type DimensionKey = (typeof DIMENSION_KEYS)[number];
 
 /** The URL parameter each dimension is spelled with. */
-const PARAM: Record<DimensionKey, string> = { kind: 'kind', status: 'status', repo: 'repo' };
+const PARAM: Record<DimensionKey, string> = { kind: 'kind', status: 'status', repo: 'repo', pr: 'pr' };
 
 /**
  * One piece of work on the index: a run of the agent, or a job the workspace
@@ -75,6 +77,8 @@ interface AgentRow {
   command: string;
   status: WorkStatus;
   repo: { id: string; fullName: string } | null;
+  /** The pull request the work is for: a check, or the scan a check ran (a workspace run, so it names the repository itself). */
+  pullRequest: { repoFullName: string; number: number } | null;
   /** The ref the work is on; work that has not started names none. */
   gitRef: string;
   /** When the work started, or when it was enqueued. */
@@ -92,6 +96,7 @@ const runRow = (run: WorkspaceRun): AgentRow => ({
   command: run.command,
   status: run.status,
   repo: run.repo,
+  pullRequest: run.pullRequest ? { repoFullName: run.pullRequest.repoFullName, number: run.pullRequest.number } : null,
   gitRef: run.gitRef,
   startedAt: run.startedAt,
   waitingOn: null,
@@ -131,6 +136,7 @@ function jobRow(
     command,
     status: job.status === 'queued' ? 'queued' : 'running',
     repo: repo ? { id: repo.id, fullName: repo.fullName } : null,
+    pullRequest: fullName !== null && jobPullRequest(job) !== null ? { repoFullName: fullName, number: jobPullRequest(job)! } : null,
     gitRef: '',
     startedAt: at,
     waitingOn: job.status === 'queued' ? waitingFact(job, jobs) : null,
@@ -196,7 +202,8 @@ function AgentIndex() {
         q === '' ||
         commandLabel(row.command).toLowerCase().includes(q) ||
         (row.repo?.fullName.toLowerCase().includes(q) ?? false) ||
-        row.gitRef.toLowerCase().includes(q)
+        row.gitRef.toLowerCase().includes(q) ||
+        (row.pullRequest !== null && `#${row.pullRequest.number}`.includes(q))
       );
     },
     [query],
@@ -207,14 +214,21 @@ function AgentIndex() {
     const kinds = selectedValues(selected, 'kind');
     const statuses = selectedValues(selected, 'status');
     const pickedRepos = selectedValues(selected, 'repo');
-    return all.filter(
-      (row) =>
+    const pickedPulls = selectedValues(selected, 'pr');
+    return all.filter((row) => {
+      const pull = pullKeyOf(row);
+      return (
         (kinds.length === 0 || kinds.includes(row.command)) &&
         (statuses.length === 0 || statuses.includes(row.status)) &&
         (pickedRepos.length === 0 || (row.repo !== null && pickedRepos.includes(row.repo.id))) &&
-        matchesQuery(row),
-    );
+        (pickedPulls.length === 0 || (pull !== null && pickedPulls.includes(pull))) &&
+        matchesQuery(row)
+      );
+    });
   }, [runs, matchesQuery, selected]);
+
+  // The pull request column and filter draw only for a provider that has them.
+  const showPulls = offersPullRequests(connected);
 
   const tally = useMemo(
     () =>
@@ -228,6 +242,12 @@ function AgentIndex() {
   const dimensions = useMemo<FilterDimension[]>(() => {
     const all = runs ?? [];
     const commands = [...new Set(all.map((r) => r.command))].sort();
+    // The pull requests the work was for, newest work first, as the rows come.
+    const pulls = new Map<string, AgentRow>();
+    for (const row of all) {
+      const key = pullKeyOf(row);
+      if (key !== null && !pulls.has(key)) pulls.set(key, row);
+    }
     return facetDimensions<AgentRow>({
       rows: all,
       selected,
@@ -255,9 +275,25 @@ function AgentIndex() {
           valuesOf: (row) => (row.repo === null ? [] : [row.repo.id]),
           values: connected.map((repo) => ({ value: repo.id, label: repo.fullName })),
         },
+        ...(showPulls
+          ? [
+              {
+                key: 'pr',
+                label: 'Pull request',
+                valuesOf: (row: AgentRow) => {
+                  const key = pullKeyOf(row);
+                  return key === null ? [] : [key];
+                },
+                values: [...pulls].map(([value, row]) => ({
+                  value,
+                  label: connected.length > 1 ? `${row.pullRequest!.repoFullName} #${row.pullRequest!.number}` : `#${row.pullRequest!.number}`,
+                })),
+              },
+            ]
+          : []),
       ],
     });
-  }, [runs, connected, matchesQuery, selected]);
+  }, [runs, connected, matchesQuery, selected, showPulls]);
 
   const columns = useMemo<IndexColumn<AgentRow>[]>(
     () => [
@@ -281,6 +317,16 @@ function AgentIndex() {
         // clones nothing) belongs to no repository, and says so.
         cell: (row) => row.repo?.fullName ?? '—',
       },
+      ...(showPulls
+        ? [
+            {
+              key: 'pr',
+              label: 'Pull request', width: '7rem',
+              className: 'text-foreground',
+              cell: (row: AgentRow) => (row.pullRequest === null ? '' : `#${row.pullRequest.number}`),
+            } satisfies IndexColumn<AgentRow>,
+          ]
+        : []),
       {
         key: 'status',
         label: 'Status', width: '8rem',
@@ -301,7 +347,7 @@ function AgentIndex() {
         cell: (row) => (row.run ? runDuration(row.run) : ''),
       },
     ],
-    [],
+    [showPulls],
   );
 
   const narrowed = query.trim() !== '' || selected.length > 0;
@@ -340,6 +386,11 @@ function AgentIndex() {
       </div>
     </div>
   );
+}
+
+/** The filter value a row carries along the Pull request dimension; null when it is nobody's. */
+function pullKeyOf(row: AgentRow): string | null {
+  return row.pullRequest === null ? null : pullRequestKey(row.pullRequest);
 }
 
 /** The status a row wears: what the agent needs first, what it did otherwise. */
@@ -465,6 +516,9 @@ function ConversationRoute({ runId }: { runId: string }) {
           <span className="flex items-center gap-3 text-[11px]">
             {run.repo && (
               <span className="font-mono text-muted-foreground">{run.repo.fullName}</span>
+            )}
+            {run.pullRequest && (
+              <span className="font-mono text-muted-foreground">#{run.pullRequest.number}</span>
             )}
             <RunStatusWord status={run.status} run={run} />
             <span className="font-mono text-muted-foreground">{shortRef(run.gitRef)}</span>

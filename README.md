@@ -74,6 +74,29 @@ Every LLM call is a turn of an agent session, whether the work takes thirty
 turns or one, so what a run spent is one record per session kind, priced from
 OpenRouter's model list. Settings › Usage reads it back.
 
+## Pull request checks
+
+With the GitHub App connected, every pull request of a connected repository is
+checked at its head against the default branch's stored state: the documents it
+changes are re-scanned for conflicts with the rest of the workspace, its flows
+are generated and run, and the result lands as a GitHub check (`TrueCourse`) —
+new failures, a conflict the pull request would create, a head that does not
+build, or clean. The base is
+the state stored at the pull request's merge-base commit; a pull request whose
+merge-base predates the repository's stored state is skipped as `no-base` until
+it is rebased. The check's report is in the GitHub check; its progress and
+transcripts are its run on the Agent page, and the pull request is a column on
+Code › Runs, Agent and Context.
+
+A self-hosted App needs two more permissions than connecting alone — **Pull
+requests: read**, which delivers the events and reads the changed files, and
+**Checks: read and write**, which posts the check — and to subscribe to the
+**Pull request**, **Check run** and **Check suite** events. An account that
+installed the App before those were added is asked by GitHub to accept them:
+without Pull requests read nothing is checked, and without Checks write the
+checks run here and are not posted to GitHub, which Settings › Repositories
+says on the account's row.
+
 ## Telemetry
 
 The app sends product analytics to PostHog. The server sends every product

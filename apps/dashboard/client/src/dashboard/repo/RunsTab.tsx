@@ -33,6 +33,8 @@ import { GUARD_OUTCOMES, formatGuardTime } from '@/lib/guard-drifts';
 import { guardStatusMeta } from '@/lib/guard-status';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { jobCommand, jobRepoFullName, waitingFact } from '@/dashboard/shell/use-active-jobs';
+import { pullRequestHover, useRepoPullRequests } from '@/dashboard/shell/use-pull-requests';
+import { offersPullRequests } from '@/dashboard/data/providers';
 import type { Repo } from '@/dashboard/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
@@ -82,6 +84,10 @@ export function RunsTab({ repo }: { repo: Repo }) {
   const { runs: history, loading, error } = useGuardRunList(repo.id, reloadKey);
   const { activeJobs } = useDashboardState();
   const [query, setQuery] = useState('');
+  // The pull requests behind the column's hover, from a provider that has them.
+  const showPulls = offersPullRequests([repo]);
+  const pulls = useRepoPullRequests(repo.id, showPulls, reloadKey);
+  const pullsByNumber = useMemo(() => new Map(pulls.map((pr) => [pr.number, pr])), [pulls]);
 
   const stored = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -141,13 +147,29 @@ export function RunsTab({ repo }: { repo: Repo }) {
         className: 'font-mono text-[12px] text-foreground',
         cell: (row) => row.live?.branch ?? row.run?.branch ?? '',
       },
-      {
-        key: 'pr',
-        label: 'Pull request',
-        width: '7rem',
-        className: 'text-foreground',
-        cell: (row) => (row.run?.pullRequest != null ? `#${row.run.pullRequest}` : ''),
-      },
+      ...(showPulls
+        ? [
+            {
+              key: 'pr',
+              label: 'Pull request',
+              width: '7rem',
+              className: 'text-foreground',
+              cell: (row: RunRow) => {
+                if (row.run?.pullRequest == null) return '';
+                const pr = pullsByNumber.get(row.run.pullRequest);
+                const cell = <span>#{row.run.pullRequest}</span>;
+                // The title and the head branch ride the number on hover.
+                return pr ? (
+                  <HoverPopover portal width="narrow" content={pullRequestHover(pr)}>
+                    {cell}
+                  </HoverPopover>
+                ) : (
+                  cell
+                );
+              },
+            } satisfies IndexColumn<RunRow>,
+          ]
+        : []),
       {
         key: 'origin',
         label: 'Origin',
@@ -180,7 +202,7 @@ export function RunsTab({ repo }: { repo: Repo }) {
         cell: (row) => formatGuardTime(row.live?.at ?? row.run!.ranAt),
       },
     ],
-    [],
+    [showPulls, pullsByNumber],
   );
 
   return (

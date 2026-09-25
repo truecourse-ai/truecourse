@@ -49,6 +49,8 @@ import type {
   WorkspaceInvitation,
   WorkspaceInviteLink,
   WorkspaceMembersResponse,
+  PullRequestListItem,
+  WorkspacePullRequestRow,
 } from '@truecourse/shared';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
@@ -929,6 +931,22 @@ export async function getContextCorpus(): Promise<SpecCorpusResponse | null> {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
+}
+
+/**
+ * A repository's pull requests, newest update first, each with its latest
+ * check in one line. `all` lists the closed and merged ones too.
+ */
+export function getRepoPullRequests(repoId: string, opts: { all?: boolean } = {}): Promise<{ pullRequests: PullRequestListItem[] }> {
+  return fetchApi<{ pullRequests: PullRequestListItem[] }>(`/api/repos/${repoId}/pulls${opts.all ? '?state=all' : ''}`);
+}
+
+/**
+ * Every open pull request of the workspace whose latest check settled with a
+ * report: the conflicts it created and the sections it moved.
+ */
+export function getContextPullRequests(): Promise<{ pullRequests: WorkspacePullRequestRow[] }> {
+  return fetchApi<{ pullRequests: WorkspacePullRequestRow[] }>('/api/context/pull-requests');
 }
 
 /** Has the workspace's Context moved since the corpus was built? */

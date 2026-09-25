@@ -49,6 +49,8 @@ import {
   markContextChanged,
   readContextDocByRef,
   removeContextSource,
+  repositorySourceWorkspace,
+  RepositorySourceTakenError,
   setContextBindings,
   updateContextSource,
 } from '@truecourse/core/lib/context-store';
@@ -119,6 +121,7 @@ import {
   type SiteSourceConfig,
 } from '@truecourse/shared';
 import { requireJobs } from '../jobs/current.js';
+import type { PullRequestChecks } from '../services/pull-request-checks.service.js';
 import { refusedWithoutCredits } from './credits.js';
 import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
 import {
@@ -154,6 +157,11 @@ export interface ContextRouterDeps {
   repoLinks?: RepoOwnershipLookup | null;
   /** The same connection's installation access. Absent when GitHub is unconfigured. */
   github?: ContextGithubAccess | null;
+  /**
+   * What re-checks the pull requests a conflict blocked once it is resolved.
+   * Absent when GitHub is unconfigured: nothing to re-check.
+   */
+  checks?: Pick<PullRequestChecks, 'rerunBlockedByConflict'> | null;
 }
 
 /** The workspace the caller is acting in, or a refusal. */
@@ -168,6 +176,7 @@ function statusOf(err: unknown): number | null {
   if (err instanceof ContextConfigError) return 400;
   if (err instanceof InvalidSourceUrlError || err instanceof LlmsTxtFetchError) return 400;
   if (err instanceof ContextKindUnsupportedError) return 400;
+  if (err instanceof RepositorySourceTakenError) return 409;
   return null;
 }
 
@@ -796,6 +805,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
       );
       const who = actorOf(req);
       if (who) captureAction(EVENTS.conflictResolved, { ...who, properties: { verdict } });
+      // A conflict resolved is what a check stopped on: the pull requests it
+      // blocked are checked again, the way clearing the last block on a
+      // generate starts it. Fire-and-forget; the resolution is saved either way.
+      deps.checks?.rerunBlockedByConflict(org).catch((err: unknown) => {
+        log.warn(`[context] could not re-check the pull requests a conflict blocked: ${(err as Error).message}`);
+      });
       res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
     } catch (e) {
       respond(res, next, e);
@@ -916,6 +931,11 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     if (kind !== 'repository') return normalizeConfig(orgOf(req), kind, rawConfig);
     const raw = (rawConfig ?? {}) as Partial<RepositorySourceConfig>;
     const repoFullName = typeof raw.repoFullName === 'string' ? raw.repoFullName.trim() : '';
+    // A repository is one workspace's source. Refused before anything is
+    // reached or stored, on the check and on the add alike; the store's
+    // unique column is the backstop for two adds racing.
+    const owner = repoFullName ? await repositorySourceWorkspace(repoFullName) : null;
+    if (owner !== null && owner !== orgOf(req)) throw new RepositorySourceTakenError(repoFullName);
     const resolved = await repositoryAccess(req, repoFullName, installationId);
     const branch = typeof raw.branch === 'string' ? raw.branch.trim() : '';
     return normalizeConfig(orgOf(req), 'repository', {

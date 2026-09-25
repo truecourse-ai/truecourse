@@ -138,7 +138,7 @@ export function createLocalConnection(deps: LocalConnectionDeps): LocalMount {
     const sync = deps.contextSync;
     if (!folder || !sync || watched.has(repo.repoFullName)) return;
     watchRepo(folder, () => {
-      syncRepositorySource(org, repo.repoFullName, sync);
+      void syncRepositorySource(org, repo.repoFullName, sync);
     });
     watched.set(repo.repoFullName, folder);
   };

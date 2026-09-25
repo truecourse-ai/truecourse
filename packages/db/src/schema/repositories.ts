@@ -35,6 +35,12 @@ export const providerAccounts = pgTable(
     accountId: text('account_id').notNull(),
     accountLogin: text('account_login').notNull(),
     accountType: text('account_type').notNull(),
+    /**
+     * The permissions the account granted the App, as the provider names them
+     * (`{ checks: 'write', ... }`): what the App may post back. Null until the
+     * provider's installation event first said.
+     */
+    permissions: jsonb('permissions').$type<Record<string, string>>(),
     createdAt: ts('created_at').notNull(),
     updatedAt: ts('updated_at').notNull(),
   },
@@ -79,6 +85,13 @@ export const repositories = pgTable(
     slug: text('slug').notNull(),
     /** The branch the provider tracks; null for a local folder, which has whatever is checked out. */
     defaultBranch: text('default_branch'),
+    /** The newest commit the provider reported pushed to that branch; null until one was. */
+    defaultBranchSha: text('default_branch_sha'),
+    /**
+     * The commit the newest main chain was started at. The repository owes a
+     * chain while the pushed commit above differs from it.
+     */
+    mainChainSha: text('main_chain_sha'),
     /** Where the provider finds it, when the name is not enough: a local folder's absolute path. */
     location: text('location'),
     /**

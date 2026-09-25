@@ -53,6 +53,15 @@ import {
 } from '@/dashboard/ui/status-word';
 import { formatRelativeTime } from '@truecourse/shared';
 import { useContextDocuments, useContextSignal, useContextSources } from '@/dashboard/shell/use-context';
+import { useDashboardState } from '@/dashboard/shell/dashboard-state';
+import {
+  pullRequestHover,
+  pullRequestKey,
+  pullRequestLabel,
+  useWorkspacePullRequests,
+  type PullRequestMark,
+} from '@/dashboard/shell/use-pull-requests';
+import { offersPullRequests } from '@/dashboard/data/providers';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { ContextFrame } from './ContextFrame';
 import { CONTEXT_BASE, docHref, sourceHref } from './context-hrefs';
@@ -64,7 +73,7 @@ import {
 } from './context-inclusion';
 
 /** The dimensions the one filter row narrows along, each its own address parameter. */
-const DIMENSIONS = ['area', 'status', 'inclusion', 'source', 'repo'] as const;
+const DIMENSIONS = ['area', 'status', 'inclusion', 'source', 'repo', 'pr'] as const;
 type Dimension = (typeof DIMENSIONS)[number];
 const DIMENSION_WORD: Record<Dimension, string> = {
   area: 'Area',
@@ -72,7 +81,15 @@ const DIMENSION_WORD: Record<Dimension, string> = {
   inclusion: 'Inclusion',
   source: 'Source',
   repo: 'Repository',
+  pr: 'Pull request',
 };
+
+/**
+ * One row: a workspace document, or one an open pull request's check moved —
+ * the same document under the pull request's number, so what a merge would
+ * change is listed beside what stands.
+ */
+type DocumentRow = ContextDocumentRow & { pullRequest: PullRequestMark | null };
 const isDimension = (key: string): key is Dimension =>
   (DIMENSIONS as readonly string[]).includes(key);
 
@@ -81,7 +98,7 @@ const isDimension = (key: string): key is Dimension =>
  * repositories). A document the corpus does not hold has no coverage status, so
  * it carries no value along that dimension and no status filter answers with it.
  */
-function valuesOf(row: ContextDocumentRow, dimension: Dimension): string[] {
+function valuesOf(row: DocumentRow, dimension: Dimension): string[] {
   switch (dimension) {
     case 'area':
       return [row.area];
@@ -93,11 +110,13 @@ function valuesOf(row: ContextDocumentRow, dimension: Dimension): string[] {
       return [row.sourceId];
     case 'repo':
       return row.repositories;
+    case 'pr':
+      return row.pullRequest ? [pullRequestKey(row.pullRequest)] : [];
   }
 }
 
 /** AND across dimensions, OR within one: the reading every multi-dimension filter has. */
-function keeps(row: ContextDocumentRow, selected: readonly string[]): boolean {
+function keeps(row: DocumentRow, selected: readonly string[]): boolean {
   for (const dimension of DIMENSIONS) {
     const wanted = selectedValues(selected, dimension);
     if (wanted.length > 0 && !wanted.some((value) => valuesOf(row, dimension).includes(value))) {
@@ -135,9 +154,30 @@ export default function DocumentsPage() {
   const signal = useContextSignal();
   const { documents, error } = useContextDocuments(signal);
   const { sources } = useContextSources(signal);
+  const { repos } = useDashboardState();
   const [query, setQuery] = useState('');
+  // The pull request rows draw only for a provider that has pull requests.
+  const showPulls = offersPullRequests(repos);
+  const pulls = useWorkspacePullRequests(showPulls, signal);
 
-  const rowsAll = useMemo(() => documents ?? [], [documents]);
+  // The workspace's documents, then the ones each open pull request's check
+  // moved or put in conflict: only what the pull request changed is a row,
+  // never its whole corpus under a number.
+  const rowsAll = useMemo<DocumentRow[]>(() => {
+    const own = (documents ?? []).map((row) => ({ ...row, pullRequest: null }));
+    const byRef = new Map(own.map((row) => [row.ref, row]));
+    const moved = pulls.flatMap((pr) => {
+      const refs = new Set([
+        ...pr.check.sectionsMoved.map((s) => s.doc),
+        ...pr.check.conflictsCreated.flatMap((c) => c.docs),
+      ]);
+      return [...refs].flatMap((ref) => {
+        const row = byRef.get(ref);
+        return row ? [{ ...row, pullRequest: pr }] : [];
+      });
+    });
+    return [...own, ...moved];
+  }, [documents, pulls]);
 
   // The selection lives in the address: one parameter per dimension.
   const selected = useMemo(
@@ -165,7 +205,7 @@ export default function DocumentsPage() {
   );
 
   const matchesQuery = useCallback(
-    (row: ContextDocumentRow) => {
+    (row: DocumentRow) => {
       const q = query.trim().toLowerCase();
       return q === '' || row.title.toLowerCase().includes(q);
     },
@@ -179,8 +219,8 @@ export default function DocumentsPage() {
     const repositories = [...new Set(rowsAll.flatMap((row) => row.repositories))].sort((a, b) =>
       a.localeCompare(b),
     );
-    const values = (dimension: Dimension) => (row: ContextDocumentRow) => valuesOf(row, dimension);
-    return facetDimensions<ContextDocumentRow>({
+    const values = (dimension: Dimension) => (row: DocumentRow) => valuesOf(row, dimension);
+    return facetDimensions<DocumentRow>({
       rows: rowsAll,
       selected,
       matches: matchesQuery,
@@ -222,9 +262,21 @@ export default function DocumentsPage() {
           valuesOf: values('repo'),
           values: repositories.map((repo) => ({ value: repo, label: repo })),
         },
+        ...(showPulls
+          ? [
+              {
+                key: 'pr',
+                label: DIMENSION_WORD.pr,
+                valuesOf: values('pr'),
+                values: pulls.map((pr) => ({ value: pullRequestKey(pr), label: pullRequestLabel(pr, repos.length > 1) })),
+                // A pull request whose check moved nothing has no row to narrow to.
+                hideEmpty: true,
+              },
+            ]
+          : []),
       ],
     });
-  }, [rowsAll, matchesQuery, selected, sources]);
+  }, [rowsAll, matchesQuery, selected, sources, showPulls, pulls, repos.length]);
 
   const rows = useMemo(
     () => rowsAll.filter((row) => matchesQuery(row) && keeps(row, selected)),
@@ -265,10 +317,10 @@ export default function DocumentsPage() {
       }
       {...(onlySource ? { right: <SourceHeader source={onlySource} /> } : {})}
     >
-      <IndexTable<ContextDocumentRow>
+      <IndexTable<DocumentRow>
         label="Documents"
         rows={rows}
-        rowId={(row) => row.ref}
+        rowId={(row) => (row.pullRequest ? `${row.ref}@${pullRequestKey(row.pullRequest)}` : row.ref)}
         onOpen={(row) => navigate(docHref(row.ref))}
         query={query}
         onQuery={setQuery}
@@ -306,6 +358,24 @@ export default function DocumentsPage() {
             className: 'font-mono text-[12px] text-muted-foreground',
             cell: repositoriesLabel,
           },
+          ...(showPulls
+            ? [
+                {
+                  key: 'pr',
+                  label: 'Pull request',
+                  width: '7rem',
+                  className: 'text-foreground',
+                  cell: (row: DocumentRow) =>
+                    row.pullRequest ? (
+                      <HoverPopover portal width="narrow" content={pullRequestHover(row.pullRequest)}>
+                        <span>#{row.pullRequest.number}</span>
+                      </HoverPopover>
+                    ) : (
+                      ''
+                    ),
+                },
+              ]
+            : []),
           {
             key: 'status',
             label: 'Status',

@@ -51,7 +51,7 @@ import { createUsageMeter, withCredits, type UsageMeter } from '../../services/u
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
 import { markWorldStateUnknown, materializeStoredGuardState, persistGuardRun } from '../materialize-guard.js';
-import { firstLine, mirrorTracker, type OnboardingJobRequest } from './onboarding.js';
+import { chainEnded, firstLine, mirrorTracker, workTreeVia, type ChainEnd, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_RUN_TASK = 'repo.guard-run';
 
@@ -70,6 +70,8 @@ export interface GuardRunJobResult {
 export interface RepoGuardRunTaskDeps {
   startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runGuard?: typeof guardRunInProcess;
+  /** The run is the chain's last link, so every settle ends it: see {@link ChainEnd}. */
+  onChainEnd?: ChainEnd;
 }
 
 /**
@@ -91,6 +93,8 @@ export function createRepoGuardRunTask(
 ): JobDefinition<GuardRunJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runGuard = deps.runGuard ?? guardRunInProcess;
+  /** The commit each job cloned, for the settle hook. Cleared as the job settles. */
+  const commits = new Map<string, string>();
 
   return {
     type: REPO_GUARD_RUN_TASK,
@@ -117,9 +121,10 @@ export function createRepoGuardRunTask(
         : null;
 
       await ctx.phase('clone');
-      const tree = await acquireWorkTree(repoFullName);
+      const tree = await acquireWorkTree(repoFullName, workTreeVia(ctx.payload));
       try {
         const commitSha = await resolveCommitSha(tree.dir);
+        commits.set(ctx.jobId, commitSha);
         const ref = { repoKey: repoFullName, commitSha };
         // The documents first: a scenario binds to a `context/` ref, and the
         // runner resolves that bind by reading the document out of the clone.
@@ -163,8 +168,7 @@ export function createRepoGuardRunTask(
         // A run opens no session record of its own; the judge's model, when
         // it was on, is the one model the stored run was on.
         await persistGuardRun(ref, tree.dir, result.latest, {
-          producedByRun: null,
-          model: judge?.attribution.model ?? null,
+          provenance: { producedByRun: null, model: judge?.attribution.model ?? null },
         });
 
         const { summary } = result.latest;
@@ -205,10 +209,14 @@ export function createRepoGuardRunTask(
       data: { repoFullName: payload.repoFullName },
     }),
 
-    async onSettled(ctx) {
+    async onSettled(ctx, outcome) {
+      const commitSha = commits.get(ctx.jobId) ?? null;
+      commits.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
-      // however the run ended. Nothing chains after the baseline run.
+      // however the run ended. Nothing chains after the run: it is the
+      // chain's end, whatever it was started by.
       await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-run');
+      if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, ctx.payload.commitSha ?? commitSha);
     },
   };
 }

@@ -52,6 +52,8 @@ export function observeRepositories(store: RepositoryStore): RepositoryStore {
       if (going) report(EVENTS.repoDisconnected, going);
     },
     getRepo: (repoFullName) => store.getRepo(repoFullName),
+    recordDefaultBranchSha: (repoFullName, commitSha) => store.recordDefaultBranchSha(repoFullName, commitSha),
+    recordMainChainSha: (repoFullName, commitSha) => store.recordMainChainSha(repoFullName, commitSha),
     listReposForWorkspace: (workspaceOrgId) => store.listReposForWorkspace(workspaceOrgId),
     listReposForAccount: (provider, accountId) => store.listReposForAccount(provider, accountId),
     // A move keeps every connection: nothing was connected or disconnected.

@@ -25,7 +25,7 @@
  * bodies it was the last reader of are swept with them.
  */
 
-import { pgTable, text, integer, timestamp, primaryKey, index, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, timestamp, primaryKey, index, jsonb, unique } from 'drizzle-orm/pg-core';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
 
@@ -39,6 +39,12 @@ export const contextSources = pgTable(
     title: text('title').notNull(),
     /** The scope: repository → repoFullName/include/exclude/branch; site → llmsTxtUrl. */
     config: jsonb('config').notNull(),
+    /**
+     * A repository source's `owner/repo`, lifted out of `config` so the database
+     * holds the rule that a repository is ONE workspace's source: unique across
+     * every workspace, null for every other kind.
+     */
+    repoFullName: text('repo_full_name'),
     /** 'synced' | 'syncing' | 'failed' | 'paused' | 'never'. */
     status: text('status').notNull(),
     /** The failure reason, verbatim — null unless the status needs one. */
@@ -50,6 +56,7 @@ export const contextSources = pgTable(
   (t) => [
     primaryKey({ columns: [t.workspaceOrgId, t.id] }),
     index('context_sources_org_kind_idx').on(t.workspaceOrgId, t.kind),
+    unique('context_sources_repo_full_name_unique').on(t.repoFullName),
   ],
 );
 

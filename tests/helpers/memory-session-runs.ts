@@ -86,6 +86,7 @@ export class MemorySessionRunStore implements SessionRunBackend {
       command: opts.command,
       runId: randomUUID(),
       gitRef: opts.gitRef,
+      ...(opts.pullRequest ? { pullRequest: opts.pullRequest } : {}),
       startedAt: (opts.now?.() ?? new Date()).toISOString(),
       status: 'running',
       sessions: [],
