@@ -675,7 +675,7 @@ const MODEL_PLACEHOLDER: Record<LlmProviderChoice, string> = {
   openai: 'gpt-5.6',
   bedrock: 'anthropic.claude-opus-5',
   copilot: 'gpt-5.6',
-  google: 'gemini-2.5-pro',
+  google: 'gemini-3.8-flash',
   truecourse: '',
 };
 
