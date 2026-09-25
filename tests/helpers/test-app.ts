@@ -198,6 +198,8 @@ export function createTestApp(overrides: Partial<CreateAppOptions> = {}) {
     // The routes that start work enqueue onto a runner; a test that is not ABOUT
     // the queue gets one that records the enqueue and runs nothing.
     jobs: stubJobs().mount,
+    // No MCP sign-in unless a test is about the MCP server: `/mcp` answers 503.
+    mcpAuth: null,
     ...overrides,
   });
 }

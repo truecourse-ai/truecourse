@@ -9,22 +9,30 @@
  * verifier answers the machine's one implicit session and no WorkOS client is
  * built at all (see `./local.ts`).
  *
- * Everything downstream takes the same three things either way — a verifier, a
- * public router, the workspace's people — so no route, job or store knows which
- * mode it is running in.
+ * Everything downstream takes the same things either way — a verifier, a
+ * public router, the workspace's people, and the gate `/mcp` sits behind — so
+ * no route, tool, job or store knows which mode it is running in.
  */
 
 import { WorkOS } from '@workos-inc/node';
 import { Router } from 'express';
+import { createRemoteJWKSet } from 'jose';
 import type { AuthVerifier, ServerMode, WorkspaceInviteLinkStore } from '@truecourse/shared';
 import { loadWorkosConfig } from './config.js';
 import { createInviteLinkRouter } from './invite-links.js';
 import {
   createAuthRouter,
+  createMembershipCheck,
   createSessionVerifier,
   createWorkspaceSessionTools,
   type WorkspaceSessionTools,
 } from './workos-auth.js';
+import {
+  createHostedMcpAuth,
+  createLocalMcpAuth,
+  loadMcpOAuthConfig,
+  type McpAuth,
+} from './mcp.js';
 import {
   createLocalAuthRouter,
   createLocalSessionVerifier,
@@ -52,6 +60,14 @@ export {
   localUser,
 } from './local.js';
 export { createWorkspaceMembersRouter } from './workspace-members.js';
+export {
+  createHostedMcpAuth,
+  createLocalMcpAuth,
+  loadMcpOAuthConfig,
+  type HostedMcpAuthOptions,
+  type McpAuth,
+  type McpOAuthConfig,
+} from './mcp.js';
 
 export interface Auth {
   mode: ServerMode;
@@ -70,6 +86,11 @@ export interface Auth {
    * Null in local mode, where there is no identity provider to move through.
    */
   workspaceSession: WorkspaceSessionTools | null;
+  /**
+   * How a request to `/mcp` becomes a session. Null on a hosted server whose
+   * MCP sign-in is not configured (`WORKOS_AUTHKIT_DOMAIN`, `TRUECOURSE_MCP_URL`).
+   */
+  mcp: McpAuth | null;
 }
 
 export interface AuthDeps {
@@ -87,12 +108,22 @@ export function createAuth(mode: ServerMode, deps: AuthDeps): Auth {
       router: createLocalAuthRouter(),
       members: createLocalWorkspaceMembersRouter(),
       workspaceSession: null,
+      mcp: createLocalMcpAuth(),
     };
   }
   const config = loadWorkosConfig();
+  const mcpConfig = loadMcpOAuthConfig();
   const workos = new WorkOS(config.apiKey, { clientId: config.clientId });
   const verify = createSessionVerifier(workos, config);
   const workspaceSession = createWorkspaceSessionTools(workos, config);
+  const mcp = mcpConfig
+    ? createHostedMcpAuth({
+        issuer: mcpConfig.issuer,
+        resource: mcpConfig.resource,
+        keys: createRemoteJWKSet(new URL('/oauth2/jwks', mcpConfig.issuer)),
+        isMember: createMembershipCheck(workos),
+      })
+    : null;
   return {
     mode,
     verify,
@@ -108,5 +139,6 @@ export function createAuth(mode: ServerMode, deps: AuthDeps): Auth {
       ),
     members: createWorkspaceMembersRouter(workos, config, deps.inviteLinks),
     workspaceSession,
+    mcp,
   };
 }

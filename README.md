@@ -70,6 +70,24 @@ sentence. Documentation is kept or dropped by whether it describes that product,
 so nothing connects (no repository, no documentation source, no scan) until the
 workspace has said it.
 
+## Connect Claude Code
+
+The server has an MCP endpoint, `/mcp`, that lets Claude Code read the
+workspace (documents, conflicts, flows, runs, failures, coverage, dependencies,
+sources) and make the decisions the dashboard offers. It starts no scan,
+generation or run.
+
+```bash
+claude mcp add --transport http truecourse http://localhost:3001/mcp   # local mode
+claude mcp add --transport http truecourse https://<your-host>/mcp     # hosted
+```
+
+Local mode needs no sign-in. Hosted, Claude Code signs in through WorkOS
+AuthKit and the connection is the one workspace chosen there. A hosted server
+needs `WORKOS_AUTHKIT_DOMAIN` (the AuthKit domain, e.g.
+`https://example.authkit.app`) and `TRUECOURSE_MCP_URL` (the public URL of its
+`/mcp`); without them `/mcp` answers 503.
+
 ## Telemetry
 
 TrueCourse sends usage analytics to PostHog: which actions are taken and

@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@sentry/node": "^10.0.0",
     "@truecourse/agent-loop": "workspace:*",
     "@truecourse/core": "workspace:*",
@@ -28,12 +29,14 @@
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "@workos-inc/node": "^7.0.0",
+    "ai": "^6.0.0",
     "chokidar": "^4.0.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
+    "jose": "^6.2.1",
     "posthog-node": "^5.52.4",
     "socket.io": "^4.8.0",
-    "ai": "^6.0.0"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

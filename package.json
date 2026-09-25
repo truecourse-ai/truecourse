@@ -13,8 +13,8 @@
     "typecheck": "turbo typecheck --concurrency=2"
   },
   "devDependencies": {
-    "ai": "^6.0.0",
     "@electric-sql/pglite": "^0.2.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@sentry/node": "^10.0.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
@@ -35,9 +35,11 @@
     "@types/react-dom": "^19.0.0",
     "@types/supertest": "^7.2.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "ai": "^6.0.0",
     "drizzle-orm": "^0.45.2",
     "esbuild": "^0.24.0",
     "express": "^4.22.1",
+    "jose": "^6.2.1",
     "js-yaml": "^4.1.0",
     "jsdom": "^26.0.0",
     "posthog-js": "^1.372.10",

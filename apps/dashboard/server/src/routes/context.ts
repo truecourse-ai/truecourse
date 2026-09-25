@@ -27,70 +27,31 @@
  * slug to resolve. The per-repository half (which sources a repository reads)
  * is `createContextBindingsRouter`, which does sit behind the project resolver.
  *
- * Every mutation emits the workspace-level `context.changed` event on the SSE
- * stream the workspace already holds open, so the Context pages re-read without
- * a repo socket room.
+ * Thin adapters: what a source operation and a decision DO is in
+ * `context-sources.service` and `context-decisions.service`, which the MCP
+ * tools call too. Here a request becomes their arguments and their answer or
+ * refusal becomes a response.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { createAppError } from '@truecourse/core/lib/errors';
-import { log } from '@truecourse/core/lib/logger';
-import { getProjectBySlug, readRegistry, type RegistryEntry } from '@truecourse/core/config/registry';
+import { getProjectBySlug } from '@truecourse/core/config/registry';
 import {
   contextBindings,
-  contextChangedAt,
-  contextReposForSource,
-  createContextSource,
-  getContextSource,
-  listContextBindings,
-  listContextDocuments,
   listContextSources,
-  listContextSyncs,
-  markContextChanged,
   readContextDocByRef,
-  removeContextSource,
   setContextBindings,
-  updateContextSource,
 } from '@truecourse/core/lib/context-store';
 import {
-  composeContextDocumentRows,
-  corpusDocSourceId,
   ContextConfigError,
   ContextKindUnsupportedError,
-  filterContextDocumentRows,
-  repositoryConfig,
-  repositorySourceId,
-  siteConfig,
-  siteSourceId,
-  type ContextSourceDriver,
-  type ContextSourceScope,
 } from '@truecourse/core/services/context';
-import {
-  InvalidSourceUrlError,
-  LlmsTxtFetchError,
-  type ConflictResolution,
-  type CuratedCorpus,
-  type DecisionsFile,
-} from '@truecourse/spec-consolidator';
+import { InvalidSourceUrlError, LlmsTxtFetchError, diffCorpora, type CuratedCorpus } from '@truecourse/spec-consolidator';
 import {
   listWorkspaceSpecVersions,
   loadWorkspaceSpec,
   readWorkspaceSpecVersion,
 } from '@truecourse/core/lib/spec-store';
-import { diffCorpora } from '@truecourse/spec-consolidator';
-import {
-  addWorkspaceConflictResolution,
-  addWorkspaceManualExclude,
-  addWorkspaceManualInclude,
-  getWorkspaceDecisions,
-  removeWorkspaceConflictResolution,
-  removeWorkspaceManualExclude,
-  removeWorkspaceManualInclude,
-} from '@truecourse/core/commands/spec-in-process';
-import {
-  docCoveragePlainStatus,
-  readGuardCoverageSources,
-} from '@truecourse/core/commands/guard-read';
 import {
   requireWorkspaceDescription,
   WorkspaceDescriptionRequiredError,
@@ -102,52 +63,36 @@ import {
   LlmProbeFailedError,
   startWorkspaceLlm,
 } from '../services/workspace-llm.service.js';
-import {
-  contextIsStale,
-  recordFailedWorkspaceScanRun,
-} from '../services/context-scan.service.js';
-import { unblockWorkspaceGenerates } from '../services/guard-unblock.service.js';
-import {
-  CONTEXT_SOURCE_KINDS,
-  type ContextSource,
-  type GuardCoveragePlainStatus,
-  type ContextSourceConfig,
-  type ContextSourceKind,
-  type ContextSourceView,
-  type RepositoryProviderId,
-  type RepositorySourceConfig,
-  type SiteSourceConfig,
-} from '@truecourse/shared';
+import { recordFailedWorkspaceScanRun } from '../services/context-scan.service.js';
 import { requireJobs } from '../jobs/current.js';
 import { refusedWithoutCredits } from './credits.js';
-import { actorOf, captureAction, EVENTS } from '../observability/posthog.js';
+import { emitContextChanged } from '../services/context.service.js';
+import type { RepoOwnershipLookup } from '../middleware/project.js';
 import {
-  addableContextKinds,
-  emitContextChanged,
-  serverContextDrivers,
-} from '../services/context.service.js';
-import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
-
-/**
- * What Context needs of GitHub to store a source for a repository, whether or
- * not Code has connected it. A source may read ANY repository one of the
- * workspace's installations can reach, so the installation is what is
- * validated, and reaching the repository through it is also where its default
- * branch comes from.
- */
-export interface ContextGithubAccess {
-  /** The ids of the installations this workspace connected. */
-  listInstallations(workspaceOrgId: string): Promise<number[]>;
-  /** The Code link of a connected repository, or null when it has none. */
-  linkFor(
-    repoFullName: string,
-  ): Promise<{ installationId: number; defaultBranch: string } | null>;
-  /** The repository as one installation sees it, or null when it cannot reach it. */
-  reachRepository(
-    installationId: number,
-    repoFullName: string,
-  ): Promise<{ defaultBranch: string } | null>;
-}
+  addSource,
+  editSource,
+  listSources,
+  listWorkspaceDocuments,
+  pauseSource,
+  previewSource,
+  readSource,
+  readSourceDocuments,
+  removeSource,
+  syncSource,
+  type ContextCaller,
+  type ContextGithubAccess,
+} from '../services/context-sources.service.js';
+import {
+  ConflictVerdictError,
+  excludeDocument,
+  includeDocument,
+  readWorkspaceCorpus,
+  resolveConflict,
+  unexcludeDocument,
+  unincludeDocument,
+  unresolveConflict,
+  workspaceStaleness,
+} from '../services/context-decisions.service.js';
 
 export interface ContextRouterDeps {
   /** Present when the server has a GitHub App configured; null otherwise. */
@@ -168,6 +113,7 @@ function statusOf(err: unknown): number | null {
   if (err instanceof ContextConfigError) return 400;
   if (err instanceof InvalidSourceUrlError || err instanceof LlmsTxtFetchError) return 400;
   if (err instanceof ContextKindUnsupportedError) return 400;
+  if (err instanceof ConflictVerdictError) return 400;
   return null;
 }
 
@@ -186,194 +132,28 @@ function respond(res: Response, next: NextFunction, err: unknown): void {
   res.status(status).json({ error: err instanceof Error ? err.message : String(err) });
 }
 
-/** A source plus the two facts every listing shows: how many docs, who reads it. */
-function toView(
-  source: ContextSource,
-  docCounts: Map<string, number>,
-  readers: Map<string, string[]>,
-): ContextSourceView {
-  return {
-    ...source,
-    docCount: docCounts.get(source.id) ?? 0,
-    repositories: readers.get(source.id) ?? [],
-  };
-}
-
-/** The same view for ONE source: its documents counted, its readers named. */
-async function oneView(org: string, source: ContextSource): Promise<ContextSourceView> {
-  const [documents, readers] = await Promise.all([
-    listContextDocuments(org, source.id),
-    contextReposForSource(org, source.id),
-  ]);
-  return toView(
-    source,
-    new Map([[source.id, documents.length]]),
-    new Map([[source.id, readers]]),
-  );
-}
-
-/** Compose the whole listing from three reads, not one per source. */
-async function listViews(org: string): Promise<ContextSourceView[]> {
-  const [sources, documents, bindings] = await Promise.all([
-    listContextSources(org),
-    listContextDocuments(org),
-    listContextBindings(org),
-  ]);
-  const docCounts = new Map<string, number>();
-  for (const doc of documents) docCounts.set(doc.sourceId, (docCounts.get(doc.sourceId) ?? 0) + 1);
-  const readers = new Map<string, string[]>();
-  for (const binding of bindings) {
-    readers.set(binding.sourceId, [...(readers.get(binding.sourceId) ?? []), binding.repoFullName]);
-  }
-  return sources.map((source) => toView(source, docCounts, readers));
-}
-
-/** A kind whose identity its DRIVER names, because the routes cannot. */
-type DriverNamedKind = Exclude<ContextSourceKind, 'repository' | 'site'>;
-
-/**
- * A validated scope, tagged by the kind it belongs to, so callers narrow. The
- * two the open edition names itself carry their own shape; every other kind
- * arrives with the identity its driver gave it (an Atlassian source is named
- * after the site its workspace connected, which only the driver can look up).
- */
-type NormalizedConfig =
-  | { kind: 'repository'; config: RepositorySourceConfig }
-  | { kind: 'site'; config: SiteSourceConfig }
-  | { kind: DriverNamedKind; config: ContextSourceConfig; identity: ContextSourceScope };
-
-/** Validate and normalize the scope a caller supplied for this kind. */
-async function normalizeConfig(
-  org: string,
-  kind: ContextSourceKind,
-  config: unknown,
-): Promise<NormalizedConfig> {
-  const raw = (config ?? {}) as ContextSourceConfig;
-  if (kind === 'repository') return { kind, config: repositoryConfig(raw) };
-  if (kind === 'site') return { kind, config: siteConfig(raw) };
-  const driver = await driverFor(org, kind);
-  if (!driver.scope) throw new ContextKindUnsupportedError(kind);
-  const identity = await driver.scope(raw);
-  return { kind, config: identity.config, identity };
-}
-
-/** A source's title at creation: the origin names it, and the first sync corrects it. */
-function titleFor(scope: NormalizedConfig): string {
-  if (scope.kind === 'repository') return scope.config.repoFullName;
-  if (scope.kind === 'site') return new URL(scope.config.llmsTxtUrl).host;
-  return scope.identity.title;
-}
-
-/**
- * The driver this server has for a kind IN THIS WORKSPACE, or a refusal naming
- * the kind. A kind an edition drives but this workspace is not entitled to has
- * no driver here, so it reads exactly as a kind nothing can sync.
- */
-async function driverFor(org: string, kind: ContextSourceKind): Promise<ContextSourceDriver> {
-  const driver = (await serverContextDrivers(org)).get(kind);
-  if (!driver) throw new ContextKindUnsupportedError(kind);
-  return driver;
-}
-
 /** One query parameter's values — `?repo=a&repo=b` and `?repo=a` read alike. */
 function queryValues(raw: unknown): string[] {
   const list = Array.isArray(raw) ? raw : [raw];
   return list.map((value) => String(value).trim()).filter((value) => value !== '');
 }
 
-/** The verdicts a conflict resolution may carry — the repository route's set. */
-const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
-
-/**
- * Write one workspace decision, then start the Flow generation it unblocked in
- * every repository whose conflicts it settled. Every decision goes through here:
- * whether one clears the last conflict of a repository's slice is what the
- * derivation answers, not something a route can tell from the verb it served.
- */
-async function settled(
-  org: string,
-  write: () => Promise<DecisionsFile>,
-): Promise<DecisionsFile> {
-  const decisions = await write();
-  await unblockWorkspaceGenerates(org);
-  return decisions;
-}
-
-/**
- * Start the workspace Document scan after a change to WHICH documents the
- * corpus should hold (a source removed). Returns the job id, or null when a
- * scan is already running — which is not a failure: the running scan's settle
- * hook re-reads the workspace's staleness stamp and queues the one follow-up
- * run itself.
- */
-async function startWorkspaceScan(org: string, source: 'link'): Promise<string | null> {
-  try {
-    const outcome = await requireJobs().enqueueContextScan({ workspaceOrgId: org, source });
-    return outcome.status === 'queued' ? outcome.jobId : null;
-  } catch (err) {
-    // A queue that is not running must not fail the change the user just made.
-    log.warn(`[context] could not start the document scan for ${org}: ${(err as Error).message}`);
-    return null;
-  }
-}
-
-/**
- * Read `kind` off a request body, refusing anything this server cannot sync —
- * which is a question about the DRIVERS it registered at boot, not a constant.
- */
-async function readKind(org: string, body: { kind?: unknown }): Promise<ContextSourceKind> {
-  const kind = typeof body.kind === 'string' ? body.kind.trim() : '';
-  if (!(CONTEXT_SOURCE_KINDS as readonly string[]).includes(kind)) {
-    throw new ContextConfigError(
-      `Unknown source kind ${JSON.stringify(kind)}. Known kinds: ${CONTEXT_SOURCE_KINDS.join(', ')}.`,
-    );
-  }
-  await driverFor(org, kind as ContextSourceKind);
-  return kind as ContextSourceKind;
-}
-
 export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   const router: Router = Router();
 
-  /**
-   * The repositories this caller may link, by both names they can be given:
-   * the registry slug the client routes on, and the `owner/repo` the store
-   * keys by. A repository another workspace connected is simply not here.
-   */
-  async function linkableRepos(req: Request): Promise<Map<string, RegistryEntry>> {
-    const byName = new Map<string, RegistryEntry>();
-    for (const entry of await readRegistry(orgOf(req))) {
-      if (!(await isVisibleTo(deps.repoLinks, req, entry))) continue;
-      byName.set(entry.slug, entry);
-      byName.set(entry.name, entry);
-    }
-    return byName;
-  }
-
-  /** `repoIds` (slugs or `owner/repo`) → the repo keys the bindings store uses. */
-  async function readRepoIds(req: Request, value: unknown): Promise<string[]> {
-    if (value === undefined || value === null) return [];
-    if (!Array.isArray(value)) throw new ContextConfigError('repoIds must be a list.');
-    const linkable = await linkableRepos(req);
-    const out: string[] = [];
-    for (const raw of value) {
-      const entry = typeof raw === 'string' ? linkable.get(raw.trim()) : undefined;
-      if (!entry) throw createAppError(`Repository "${String(raw)}" not found`, 404);
-      if (!out.includes(entry.name)) out.push(entry.name);
-    }
-    return out;
-  }
+  /** The caller as the services take it: the workspace, the person, their repositories. */
+  const callerOf = (req: Request): ContextCaller => ({
+    org: orgOf(req),
+    ...(req.user?.id ? { userId: req.user.id } : {}),
+    repoLinks: deps.repoLinks,
+    github: deps.github,
+  });
 
   // --- Read ----------------------------------------------------------------
 
   router.get('/sources', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const [sources, changedAt] = await Promise.all([listViews(org), contextChangedAt(org)]);
-      // Which kinds can be ADDED is this server's own answer — the drivers it
-      // registered at boot — so the add dialog offers what exists here and
-      // nothing else.
-      res.json({ sources, changedAt, addableKinds: await addableContextKinds(org) });
+      res.json(await listSources(orgOf(req)));
     } catch (e) {
       respond(res, next, e);
     }
@@ -383,18 +163,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   // reads exactly this, and says nothing it does not carry.
   router.get('/sources/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const sourceId = req.params.id as string;
-      const source = await getContextSource(org, sourceId);
-      if (!source) {
-        res.status(404).json({ error: `Context source "${sourceId}" not found` });
-        return;
-      }
-      const [view, syncs] = await Promise.all([
-        oneView(org, source),
-        listContextSyncs(org, sourceId, 50),
-      ]);
-      res.json({ source: view, syncs });
+      res.json(await readSource(orgOf(req), req.params.id as string));
     } catch (e) {
       respond(res, next, e);
     }
@@ -402,25 +171,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
 
   router.get('/sources/:id/documents', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const sourceId = req.params.id as string;
-      const source = await getContextSource(org, sourceId);
-      if (!source) {
-        res.status(404).json({ error: `Context source "${sourceId}" not found` });
-        return;
-      }
-      const [documents, readers] = await Promise.all([
-        listContextDocuments(org, sourceId),
-        listContextBindings(org),
-      ]);
-      const view = toView(
-        source,
-        new Map([[sourceId, documents.length]]),
-        new Map([
-          [sourceId, readers.filter((b) => b.sourceId === sourceId).map((b) => b.repoFullName)],
-        ]),
-      );
-      res.json({ source: view, documents });
+      res.json(await readSourceDocuments(orgOf(req), req.params.id as string));
     } catch (e) {
       respond(res, next, e);
     }
@@ -453,21 +204,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   // nothing is enriched at read time.
   router.get('/corpus', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const [corpus, decisions] = await Promise.all([
-        loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
-        getWorkspaceDecisions(org),
-      ]);
-      if (!corpus) {
+      const read = await readWorkspaceCorpus(orgOf(req));
+      if (!read) {
         res.status(404).json({ error: 'No documents have been scanned yet.' });
         return;
       }
-      res.json({
-        corpus,
-        manualIncludes: decisions.manualIncludes ?? [],
-        manualExcludes: decisions.manualExcludes ?? [],
-        conflictResolutions: decisions.conflictResolutions ?? [],
-      });
+      res.json(read);
     } catch (e) {
       respond(res, next, e);
     }
@@ -515,129 +257,30 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     }
   });
 
-  /**
-   * THE Documents view: one row per document of the workspace
-   * corpus, composed here rather than in the browser — the row's status is a
-   * join over every repository that reads it, and no client may be asked to
-   * fan that out.
-   *
-   * The reads are per REPOSITORY, never per document: each repository's guard
-   * state is read once and every document it reads is composed against it, and
-   * each document's body is read once for the workspace however many
-   * repositories read it. A document no repository reads is answered without
-   * reading its body at all.
-   *
-   * The rows are every document Context knows, not only the kept ones: the
-   * decisions ride in, so a document the scan skipped and a document a reader
-   * excluded each get a row saying where it stands and why.
-   *
-   * `?area=&status=&source=&repo=&inclusion=` narrow the answer, repeatable,
-   * AND across dimensions and OR within one — the same reading the page's
-   * filter row has.
-   */
+  // THE Documents view. `?area=&status=&source=&repo=&inclusion=` narrow the
+  // answer, repeatable, AND across dimensions and OR within one — the same
+  // reading the page's filter row has.
   router.get('/documents', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus');
-      if (!corpus) {
-        res.json({ documents: [], corpusAt: null });
-        return;
-      }
-      const [sources, documents, bindings, decisions] = await Promise.all([
-        listContextSources(org),
-        listContextDocuments(org),
-        listContextBindings(org),
-        getWorkspaceDecisions(org),
-      ]);
-
-      // The repositories a row may name: the ones this caller can see, by the
-      // `owner/repo` the bindings key on and the store key guard reads by.
-      const visible = new Map<string, RegistryEntry>();
-      for (const entry of (await linkableRepos(req)).values()) visible.set(entry.name, entry);
-
-      // Which documents each visible repository reads: its linked sources' docs.
-      const docsBySource = new Map<string, string[]>();
-      for (const doc of corpus.docs) {
-        const sourceId = corpusDocSourceId(doc);
-        if (!sourceId) continue;
-        docsBySource.set(sourceId, [...(docsBySource.get(sourceId) ?? []), doc.ref]);
-      }
-      const refsByRepo = new Map<string, string[]>();
-      for (const binding of bindings) {
-        if (!visible.has(binding.repoFullName)) continue;
-        const refs = docsBySource.get(binding.sourceId) ?? [];
-        if (refs.length === 0) continue;
-        refsByRepo.set(binding.repoFullName, [
-          ...(refsByRepo.get(binding.repoFullName) ?? []),
-          ...refs,
-        ]);
-      }
-
-      // One body read per document, for the documents somebody reads.
-      const bodies = new Map<string, string>();
-      for (const ref of new Set([...refsByRepo.values()].flat())) {
-        const body = await readContextDocByRef(org, ref);
-        if (body !== null) bodies.set(ref, body);
-      }
-
-      // One guard-state read per repository, then every document it reads
-      // composed against it. The externals index is deliberately not read: it
-      // never changes which of the five words a section wears.
-      const coverage = new Map<string, Map<string, GuardCoveragePlainStatus>>();
-      for (const [repoFullName, refs] of refsByRepo) {
-        const guard = await readGuardCoverageSources(visible.get(repoFullName)!.path, undefined, {
-          externals: false,
-        });
-        const words = new Map<string, GuardCoveragePlainStatus>();
-        for (const ref of new Set(refs)) {
-          const body = bodies.get(ref);
-          if (body === undefined) continue;
-          const word = docCoveragePlainStatus(ref, body, guard);
-          if (word) words.set(ref, word);
-        }
-        coverage.set(repoFullName, words);
-      }
-
-      const rows = composeContextDocumentRows({
-        corpus,
-        sources,
-        documents,
-        bindings,
-        coverage,
-        visibleRepos: new Set(visible.keys()),
-        decisions: {
-          manualIncludes: decisions.manualIncludes ?? [],
-          manualExcludes: decisions.manualExcludes ?? [],
-        },
-      });
-      res.json({
-        documents: filterContextDocumentRows(rows, {
+      res.json(
+        await listWorkspaceDocuments(callerOf(req), {
           area: req.query.area === undefined ? [] : queryValues(req.query.area),
           status: req.query.status === undefined ? [] : queryValues(req.query.status),
           source: req.query.source === undefined ? [] : queryValues(req.query.source),
           repo: req.query.repo === undefined ? [] : queryValues(req.query.repo),
           inclusion: req.query.inclusion === undefined ? [] : queryValues(req.query.inclusion),
         }),
-        corpusAt: corpus.generatedAt ?? null,
-      });
+      );
     } catch (e) {
       respond(res, next, e);
     }
   });
 
-  // Has the workspace's Context moved since the corpus was built? One stamp
-  // against one stamp — the amber dot on Scan reads exactly this.
+  // Has the workspace's Context moved since the corpus was built? The amber dot
+  // on Scan reads exactly this.
   router.get('/staleness', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const [changedAt, corpus] = await Promise.all([
-        contextChangedAt(org),
-        loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
-      ]);
-      const corpusAt = corpus?.generatedAt ?? null;
-      // No corpus yet is not "stale": there is nothing to be behind. The
-      // Context page shows a workspace that never scanned as never scanned.
-      res.json({ changedAt, corpusAt, stale: contextIsStale(corpusAt, changedAt) });
+      res.json(await workspaceStaleness(orgOf(req)));
     } catch (e) {
       respond(res, next, e);
     }
@@ -694,48 +337,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   });
 
   // --- Decisions, at workspace scope ---------------------------------------
-  //
-  // The workspace's corpus is one corpus, so a force-include, a force-exclude
-  // and a conflict verdict are settled ONCE here rather than per repository.
-  // Each write persists the decisions artifact and acks it; the corpus itself
-  // is unchanged until the next scan, which is what the staleness dot says.
-  //
-  // What a decision DOES move right away is a Flow generation that stopped on
-  // an open conflict, in every repository the decision left with none —
-  // `settled` is that pass (see guard-unblock.service).
 
-  const includeAck = (decisions: DecisionsFile): Record<string, unknown> => ({
-    manualIncludes: decisions.manualIncludes ?? [],
-    manualExcludes: decisions.manualExcludes ?? [],
-  });
-
-  /** `{ ref }` off a decision request body, or a refusal. */
-  function readRef(req: Request): string {
-    const ref = (req.body as { ref?: unknown })?.ref;
-    if (typeof ref !== 'string' || !ref.trim()) throw new ContextConfigError('Missing ref.');
-    return ref.trim();
-  }
-
-  /**
-   * An INCLUSION decision, on top of {@link settled}: it changes which
-   * documents the corpus should hold, and only a scan can apply it. So the
-   * workspace's changed-at stamp moves and the change is announced — which is
-   * what lights the amber dot on Scan and says a scan is what is missing.
-   *
-   * A conflict verdict is not one of these: it is applied at Flow generation,
-   * so it leaves the corpus's own document set alone.
-   */
-  async function decided(org: string, write: () => Promise<DecisionsFile>): Promise<DecisionsFile> {
-    const decisions = await settled(org, write);
-    await markContextChanged(org);
-    await emitContextChanged(org, { change: 'documents' });
-    return decisions;
-  }
+  const refOf = (req: Request): unknown => (req.body as { ref?: unknown } | undefined)?.ref;
 
   router.post('/includes', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      res.json(includeAck(await decided(org, () => addWorkspaceManualInclude(org, readRef(req)))));
+      res.json(await includeDocument(orgOf(req), refOf(req)));
     } catch (e) {
       respond(res, next, e);
     }
@@ -743,8 +350,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
 
   router.delete('/includes', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      res.json(includeAck(await decided(org, () => removeWorkspaceManualInclude(org, readRef(req)))));
+      res.json(await unincludeDocument(orgOf(req), refOf(req)));
     } catch (e) {
       respond(res, next, e);
     }
@@ -752,8 +358,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
 
   router.post('/excludes', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      res.json(includeAck(await decided(org, () => addWorkspaceManualExclude(org, readRef(req)))));
+      res.json(await excludeDocument(orgOf(req), refOf(req)));
     } catch (e) {
       respond(res, next, e);
     }
@@ -761,8 +366,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
 
   router.delete('/excludes', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      res.json(includeAck(await decided(org, () => removeWorkspaceManualExclude(org, readRef(req)))));
+      res.json(await unexcludeDocument(orgOf(req), refOf(req)));
     } catch (e) {
       respond(res, next, e);
     }
@@ -771,32 +375,11 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/conflict-resolution', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      const body = (req.body ?? {}) as Partial<ConflictResolution>;
-      const { docA, docB, verdict } = body;
-      if (!docA || !docB || docA === docB) {
-        res.status(400).json({ error: 'docA and docB are required and must differ.' });
-        return;
-      }
-      if (!verdict || !CONFLICT_VERDICTS.includes(verdict)) {
-        res.status(400).json({ error: `verdict must be one of ${CONFLICT_VERDICTS.join(', ')}.` });
-        return;
-      }
-      const decisions = await settled(org, () =>
-        addWorkspaceConflictResolution(org, {
-          docA,
-          anchorA: body.anchorA ?? null,
-          quoteA: body.quoteA,
-          docB,
-          anchorB: body.anchorB ?? null,
-          quoteB: body.quoteB,
-          verdict,
-          resolvedAt: new Date().toISOString(),
-          note: body.note,
-        }),
+      const conflictResolutions = await resolveConflict(
+        { org, ...(req.user?.id ? { userId: req.user.id } : {}) },
+        req.body ?? {},
       );
-      const who = actorOf(req);
-      if (who) captureAction(EVENTS.conflictResolved, { ...who, properties: { verdict } });
-      res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
+      res.json({ conflictResolutions });
     } catch (e) {
       respond(res, next, e);
     }
@@ -804,27 +387,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
 
   router.delete('/conflict-resolution', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const body = (req.body ?? {}) as {
-        docA?: string;
-        anchorA?: string | null;
-        docB?: string;
-        anchorB?: string | null;
-      };
-      if (!body.docA || !body.docB) {
-        res.status(400).json({ error: 'docA and docB are required.' });
-        return;
-      }
-      const { docA, docB } = body;
-      const decisions = await settled(org, () =>
-        removeWorkspaceConflictResolution(org, {
-          docA,
-          docB,
-          anchorA: body.anchorA ?? null,
-          anchorB: body.anchorB ?? null,
-        }),
-      );
-      res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
+      res.json({ conflictResolutions: await unresolveConflict(orgOf(req), req.body ?? {}) });
     } catch (e) {
       respond(res, next, e);
     }
@@ -836,322 +399,28 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   // titles. Runs the real driver — no source exists yet, so nothing is written.
   router.post('/sources/preview', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const body = (req.body ?? {}) as { kind?: unknown; config?: unknown; installationId?: unknown };
-      const kind = await readKind(org, body);
-      const scope = await scopeFor(req, kind, body.config, body.installationId);
-      res.json(await (await driverFor(org, kind)).check(scope.config));
+      res.json(await previewSource(callerOf(req), req.body ?? {}));
     } catch (e) {
       respond(res, next, e);
     }
   });
-
-  /** Is this repository one this workspace connected in Code? */
-  async function isLinkable(req: Request, repoFullName: string): Promise<boolean> {
-    return (await linkableRepos(req)).has(repoFullName);
-  }
-
-  /**
-   * WHICH installation reads a repository source, and on which branch. Two ways
-   * in, and no third: the request names an installation of this workspace that
-   * can reach the repository, or the repository is one this workspace connected
-   * in Code and its link says both. Nothing is resolved for a repository that is
-   * neither, and the scope it yields is refused for want of an installation.
-   */
-  async function repositoryAccess(
-    req: Request,
-    repoFullName: string,
-    asked: unknown,
-  ): Promise<{
-    provider?: RepositoryProviderId;
-    path?: string;
-    installationId?: number;
-    defaultBranch?: string;
-  }> {
-    const access = deps.github ?? null;
-    // A folder on this machine answers for itself: there is no account to name
-    // and nothing to reach over the network, only the path it was connected
-    // from. It must be one this workspace connected — the only way a path
-    // becomes a repository here.
-    if (await isLinkable(req, repoFullName)) {
-      const connected = await deps.repoLinks?.getRepo(repoFullName);
-      if (connected?.provider === 'local' && connected.location) {
-        return { provider: 'local', path: connected.location };
-      }
-    }
-    if (asked === undefined || asked === null) {
-      // The link is only read for a repository this workspace can see, so
-      // naming another workspace's repository resolves nothing.
-      if (!(await isLinkable(req, repoFullName))) return {};
-      const link = await access?.linkFor(repoFullName);
-      return link
-        ? { installationId: link.installationId, defaultBranch: link.defaultBranch }
-        : {};
-    }
-    const installationId =
-      typeof asked === 'number' && Number.isInteger(asked) && asked > 0 ? asked : 0;
-    const installations =
-      access && installationId > 0 ? await access.listInstallations(orgOf(req)) : [];
-    if (!installations.includes(installationId)) {
-      throw createAppError('That GitHub account is not connected to this workspace.', 400);
-    }
-    const reached = await access!.reachRepository(installationId, repoFullName);
-    if (!reached) {
-      throw createAppError(`Repository "${repoFullName}" not found`, 404);
-    }
-    return { installationId, defaultBranch: reached.defaultBranch };
-  }
-
-  /**
-   * The scope a source is stored and checked with. A repository scope is
-   * completed first: the installation it reads through and, when the request
-   * named no branch, the branch that installation resolved.
-   */
-  async function scopeFor(
-    req: Request,
-    kind: ContextSourceKind,
-    rawConfig: unknown,
-    installationId: unknown,
-  ): Promise<NormalizedConfig> {
-    if (kind !== 'repository') return normalizeConfig(orgOf(req), kind, rawConfig);
-    const raw = (rawConfig ?? {}) as Partial<RepositorySourceConfig>;
-    const repoFullName = typeof raw.repoFullName === 'string' ? raw.repoFullName.trim() : '';
-    const resolved = await repositoryAccess(req, repoFullName, installationId);
-    const branch = typeof raw.branch === 'string' ? raw.branch.trim() : '';
-    return normalizeConfig(orgOf(req), 'repository', {
-      ...raw,
-      ...(resolved.provider === undefined ? {} : { provider: resolved.provider }),
-      ...(resolved.path === undefined ? {} : { path: resolved.path }),
-      ...(resolved.installationId === undefined ? {} : { installationId: resolved.installationId }),
-      branch: branch || resolved.defaultBranch || '',
-    });
-  }
 
   // --- Add -----------------------------------------------------------------
 
   router.post('/sources', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      // Nothing enters a workspace that has not said what its product is: the
-      // documents this source yields would be attributed against nothing.
-      await requireWorkspaceDescription(org);
-      const body = (req.body ?? {}) as {
-        kind?: unknown;
-        config?: unknown;
-        repoIds?: unknown;
-        installationId?: unknown;
-        sync?: unknown;
-      };
-      // Added without a sync, a source is stored paused: the sweep and a push
-      // would otherwise sync one that has never synced within the hour.
-      const sync = body.sync !== false;
-      const kind = await readKind(org, body);
-      const scope = await scopeFor(req, kind, body.config, body.installationId);
-      const repoKeys = await readRepoIds(req, body.repoIds);
-
-      const existing = await listContextSources(org);
-      const id =
-        scope.kind === 'repository'
-          ? newRepositorySourceId(existing, scope.config.repoFullName)
-          : scope.kind === 'site'
-            ? newSiteSourceId(existing, scope.config)
-            : newDriverSourceId(existing, scope.identity);
-
-      const source = await createContextSource(org, {
-        id,
-        kind,
-        title: titleFor(scope),
-        config: scope.config,
-        ...(sync ? {} : { status: 'paused' as const }),
-      });
-      // A Repository source is read by the repository it scopes, when Code has
-      // connected that repository; a source for one Code has not is read by
-      // nobody until somebody links it. A site is read by whoever the caller
-      // named, which may be nobody.
-      const links =
-        scope.kind === 'repository' && (await isLinkable(req, scope.config.repoFullName))
-          ? [...new Set([scope.config.repoFullName, ...repoKeys])]
-          : repoKeys;
-      for (const repoKey of links) {
-        await setContextBindings(org, repoKey, [
-          ...new Set([...(await contextBindings(org, repoKey)), id]),
-        ]);
-      }
-      await emitContextChanged(org, { change: 'sources', sourceId: id });
-
-      const who = actorOf(req);
-      if (who) captureAction(EVENTS.contextSourceAdded, { ...who, properties: { kind } });
-
-      const outcome = sync
-        ? await requireJobs().enqueueContextSync({ workspaceOrgId: org, sourceId: id, source: 'add' })
-        : null;
-      res.status(202).json({
-        source: { ...source, docCount: 0, repositories: links },
-        ...(outcome?.status === 'queued' ? { jobId: outcome.jobId } : {}),
-      });
+      res.status(202).json(await addSource(callerOf(req), req.body ?? {}));
     } catch (e) {
       respond(res, next, e);
     }
   });
 
-  /** The id a new Repository source takes, refusing a second one for a repository. */
-  function newRepositorySourceId(existing: ContextSource[], repoFullName: string): string {
-    const already = existing.find(
-      (source) =>
-        source.kind === 'repository' &&
-        (source.config as { repoFullName?: string }).repoFullName === repoFullName,
-    );
-    if (already) {
-      throw createAppError(
-        `${repoFullName} already has a Repository source ("${already.id}").`,
-        409,
-      );
-    }
-    return repositorySourceId(repoFullName);
-  }
-
-  /** The id a new site source takes, refusing a URL the workspace already has. */
-  function newSiteSourceId(existing: ContextSource[], config: SiteSourceConfig): string {
-    const already = existing.find(
-      (source) =>
-        source.kind === 'site' &&
-        (source.config as SiteSourceConfig).llmsTxtUrl === config.llmsTxtUrl,
-    );
-    if (already) {
-      throw createAppError(
-        `${config.llmsTxtUrl} is already a source of this workspace ("${already.id}").`,
-        409,
-      );
-    }
-    return siteSourceId(config.llmsTxtUrl, new Set(existing.map((source) => source.id)));
-  }
-
-  /**
-   * The id a driver named, refused when the workspace already holds it: a
-   * project or a space is one source, and adding it twice would be two ledgers
-   * of the same documents.
-   */
-  function newDriverSourceId(existing: ContextSource[], identity: ContextSourceScope): string {
-    const already = existing.find((source) => source.id === identity.sourceId);
-    if (already) {
-      throw createAppError(
-        `${identity.title} is already a source of this workspace ("${already.id}").`,
-        409,
-      );
-    }
-    return identity.sourceId;
-  }
-
   // --- Edit the scope ------------------------------------------------------
 
-  /**
-   * A new scope for a source that already exists, validated exactly as the add
-   * validates one. A repository source keeps the repository it was created for
-   * — everything else about its scope (the branch, the patterns) is editable.
-   */
-  async function editedConfig(
-    org: string,
-    source: ContextSource,
-    raw: unknown,
-  ): Promise<NormalizedConfig> {
-    if (source.kind !== 'repository') return normalizeConfig(org, source.kind, raw);
-    const current = source.config as Partial<RepositorySourceConfig>;
-    const stored = current.repoFullName ?? '';
-    const asked = (raw ?? {}) as Partial<RepositorySourceConfig>;
-    const named = typeof asked.repoFullName === 'string' ? asked.repoFullName.trim() : '';
-    if (named !== '' && named !== stored) {
-      throw new ContextConfigError(
-        `A repository source always reads ${stored}; its repository cannot be changed.`,
-      );
-    }
-    // The repository and how it is read are what the source was created with;
-    // an edit replaces the branch and the patterns around them.
-    return normalizeConfig(org, 'repository', {
-      ...asked,
-      repoFullName: stored,
-      ...(current.provider === undefined ? {} : { provider: current.provider }),
-      ...(current.path === undefined ? {} : { path: current.path }),
-      installationId: current.installationId,
-    });
-  }
-
-  /**
-   * The scope a source reads, replaced. The new documents are the old ones'
-   * replacement, so the edit SYNCS — a paused source is the one exception, and
-   * its answer says so rather than leaving the reader to guess.
-   */
   router.patch('/sources/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const sourceId = req.params.id as string;
-      const source = await getContextSource(org, sourceId);
-      if (!source) {
-        res.status(404).json({ error: `Context source "${sourceId}" not found` });
-        return;
-      }
-      // A sync already reading the old scope would store documents the new one
-      // does not name, so the edit waits for it rather than racing it.
-      if (source.status === 'syncing') {
-        res.status(409).json({ error: `${source.title} is already syncing.` });
-        return;
-      }
       const body = (req.body ?? {}) as { config?: unknown };
-      const scope = await editedConfig(org, source, body.config);
-      if (scope.kind === 'site') {
-        const clash = (await listContextSources(org)).find(
-          (other) =>
-            other.id !== sourceId &&
-            other.kind === 'site' &&
-            (other.config as SiteSourceConfig).llmsTxtUrl === scope.config.llmsTxtUrl,
-        );
-        if (clash) {
-          throw createAppError(
-            `${scope.config.llmsTxtUrl} is already a source of this workspace ("${clash.id}").`,
-            409,
-          );
-        }
-      } else if (scope.kind !== 'repository') {
-        // A scope re-pointed at what another source of this workspace already
-        // reads would be two ledgers of the same documents. The id it WOULD
-        // take is what says so; this source keeps the id it was created with.
-        const clash = (await listContextSources(org)).find(
-          (other) => other.id !== sourceId && other.id === scope.identity.sourceId,
-        );
-        if (clash) {
-          throw createAppError(
-            `${scope.identity.title} is already a source of this workspace ("${clash.id}").`,
-            409,
-          );
-        }
-      }
-
-      const updated = await updateContextSource(org, sourceId, { config: scope.config });
-      if (!updated) {
-        res.status(404).json({ error: `Context source "${sourceId}" not found` });
-        return;
-      }
-      await emitContextChanged(org, { change: 'sources', sourceId });
-      const view = await oneView(org, updated);
-
-      // Pausing is the user's own stop, and every trigger honors it — including
-      // this one. Resuming is what syncs the scope just stored.
-      if (updated.status === 'paused') {
-        res.status(202).json({
-          source: view,
-          note: `${updated.title} is paused. Resume it to sync this scope.`,
-        });
-        return;
-      }
-      const outcome = await requireJobs().enqueueContextSync({
-        workspaceOrgId: org,
-        sourceId,
-        source: 'manual',
-      });
-      if (outcome.status === 'busy') {
-        res.status(409).json({ error: `${updated.title} is already syncing.` });
-        return;
-      }
-      res.status(202).json({ source: view, jobId: outcome.jobId });
+      res.status(202).json(await editSource(orgOf(req), req.params.id as string, body.config));
     } catch (e) {
       respond(res, next, e);
     }
@@ -1161,27 +430,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
 
   router.post('/sources/:id/sync', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const sourceId = req.params.id as string;
-      const source = await getContextSource(org, sourceId);
-      if (!source) {
-        res.status(404).json({ error: `Context source "${sourceId}" not found` });
-        return;
-      }
-      if (source.status === 'paused') {
-        res.status(409).json({ error: `${source.title} is paused. Resume it to sync.` });
-        return;
-      }
-      const outcome = await requireJobs().enqueueContextSync({
-        workspaceOrgId: org,
-        sourceId,
-        source: 'manual',
-      });
-      if (outcome.status === 'busy') {
-        res.status(409).json({ error: `${source.title} is already syncing.` });
-        return;
-      }
-      res.status(202).json({ jobId: outcome.jobId });
+      res.status(202).json(await syncSource(orgOf(req), req.params.id as string));
     } catch (e) {
       respond(res, next, e);
     }
@@ -1191,30 +440,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
 
   router.post('/sources/:id/pause', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const sourceId = req.params.id as string;
       const body = (req.body ?? {}) as { paused?: unknown };
       if (typeof body.paused !== 'boolean') {
         res.status(400).json({ error: 'Missing { paused: boolean }.' });
         return;
       }
-      const source = await getContextSource(org, sourceId);
-      if (!source) {
-        res.status(404).json({ error: `Context source "${sourceId}" not found` });
-        return;
-      }
-      // Pausing keeps the note a failure left, so resuming puts the source back
-      // where it was rather than reporting a success that never happened.
-      const status = body.paused
-        ? 'paused'
-        : source.statusNote
-          ? 'failed'
-          : source.lastSyncAt
-            ? 'synced'
-            : 'never';
-      const updated = await updateContextSource(org, sourceId, { status });
-      await emitContextChanged(org, { change: 'sources', sourceId });
-      res.json({ source: updated });
+      res.json(await pauseSource(orgOf(req), req.params.id as string, body.paused));
     } catch (e) {
       respond(res, next, e);
     }
@@ -1224,24 +455,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
 
   router.delete('/sources/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = orgOf(req);
-      const sourceId = req.params.id as string;
-      const source = await getContextSource(org, sourceId);
-      if (!source) {
-        res.status(404).json({ error: `Context source "${sourceId}" not found` });
-        return;
-      }
-      // Named BEFORE the removal, because the links go with it — the answer
-      // says which repositories just stopped reading this source.
-      const repositories = (await listContextBindings(org))
-        .filter((binding) => binding.sourceId === sourceId)
-        .map((binding) => binding.repoFullName);
-      await removeContextSource(org, sourceId);
-      await emitContextChanged(org, { change: 'sources', sourceId });
-      // The corpus still holds this source's documents; re-scanning is what
-      // takes them out of it (and out of every repository's slice).
-      const scan = await startWorkspaceScan(org, 'link');
-      res.json({ removed: source, repositories, ...(scan ? { jobId: scan } : {}) });
+      res.json(await removeSource(orgOf(req), req.params.id as string));
     } catch (e) {
       respond(res, next, e);
     }

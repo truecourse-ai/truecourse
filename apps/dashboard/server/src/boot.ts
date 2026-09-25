@@ -314,6 +314,7 @@ export async function startServer(): Promise<void> {
     localRouter: local?.router ?? null,
     jobs,
     featureRouters,
+    mcpAuth: auth.mcp,
     // Who a workspace IS, for the operator's Credits page. Local mode has no
     // identity provider to ask, and no operator routes to ask for.
     ...(auth.workspaceSession
