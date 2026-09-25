@@ -45,6 +45,7 @@ import {
   mergeInterfaceCatalogs,
   readAuthoredInterfaceCatalog,
   staleAuthoredPlaceDiagnostics,
+  webScreensNeedingAuthoring,
 } from '@truecourse/guard-runner'
 
 // ---------------------------------------------------------------------------
@@ -2304,6 +2305,17 @@ describe('a shared component', () => {
     // Home may not keep its twin of the component's task.
     expect(refusals[0]).toContain(`\`${homeCopy}\` is kept, and it is the same task as`)
     expect(readAuthoredFile().interfaces.map((task) => task.type === 'web' && task.at)).toEqual([SIDEBAR.id])
+  })
+
+  // Its row is brought to where it stands, grounded on nothing: a module that
+  // moved under a place that earns no session is not work for the next setup.
+  it('is not work again once it is no longer shared, whatever its module does', async () => {
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
+    fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return null }\n')
+    const unshared = new Map([...context].filter(([id]) => id !== SIDEBAR.id))
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: unshared })
+    const gate = webScreensNeedingAuthoring({ derived: DERIVED, authored: readAuthoredFile(), recipeContract: authoringRecipeContract(repo), repoRoot: repo })
+    expect([...gate]).toEqual([])
   })
 
   it('earns no session once the grounding no longer finds it shared', async () => {

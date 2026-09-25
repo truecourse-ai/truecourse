@@ -496,6 +496,16 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   )
   if (Object.keys(migrated).length > 0) recordLedger(migrated)
 
+  // A component the grounding no longer finds shared earns no session, so its
+  // row is brought to where it stands — its inputs now, grounded on nothing —
+  // or a module that moved under it would call it work on every later setup.
+  const unshared = grounding
+    ? all.filter((item) => item.place.kind === 'component' && !components.has(item.place.id) && item.record && item.needsAuthoring)
+    : []
+  if (unshared.length > 0) {
+    recordLedger(Object.fromEntries(unshared.map((item) => [item.place.id, ledgerRow(item, item.record!.status, false)])))
+  }
+
   /**
    * Fold one accepted fragment: validate it against the catalog as it stands,
    * write what it authored, and record the screen's row. Both paths into the
