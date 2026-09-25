@@ -2404,14 +2404,49 @@ describe('a shared component', () => {
     expect(gate()).toBe(false)
   })
 
-  it('earns no session once the grounding no longer finds it shared', async () => {
+  // The screens now grounded on its module own its controls: the place, its
+  // tasks and its ledger row go, so nothing keeps a twin of what they author.
+  it('is retired with its tasks once the grounding no longer finds it shared', async () => {
     await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
     fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return null }\n')
     const next = scriptedDriver(script)
-    const result = await authorWebInterfaces({ repoRoot: repo, driver: next.driver, persistence: memoryPersistence().persistence, context })
-    expect(next.seen).toHaveLength(0)
+    const unshared = new Map([...context].filter(([id]) => id !== SIDEBAR.id))
+    const collapse = readAuthoredFile().interfaces[0]!.id
+    const result = await authorWebInterfaces({ repoRoot: repo, driver: next.driver, persistence: memoryPersistence().persistence, context: unshared })
+    expect(next.seen.map(placeOf)).not.toContain(SIDEBAR.id)
+    expect(result.retired.map((task) => task.id)).toEqual([collapse])
+    const file = readAuthoredFile()
+    expect(file.interfaces).toEqual([])
+    expect(file.resources?.web?.some((place) => place.id === SIDEBAR.id) ?? false).toBe(false)
+    expect(file.authoring?.[SIDEBAR.id]).toBeUndefined()
+  })
+
+  // A context pass that found nothing (or could not run) says nothing about
+  // what is shared: the component stands as it is.
+  it('is left as it is by a run whose context pass came back empty', async () => {
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
+    const before = readAuthoredFile()
+    const next = scriptedDriver(script)
+    const result = await authorWebInterfaces({ repoRoot: repo, driver: next.driver, persistence: memoryPersistence().persistence, context: new Map() })
     expect(result.skipped).toContain(SIDEBAR.id)
-    expect(readAuthoredFile().interfaces.map((task) => task.type === 'web' && task.at)).toEqual([SIDEBAR.id])
+    const after = readAuthoredFile()
+    expect(after.interfaces).toEqual(before.interfaces)
+    expect(after.resources).toEqual(before.resources)
+    expect(after.authoring?.[SIDEBAR.id]).toEqual(before.authoring?.[SIDEBAR.id])
+  })
+
+  // A component whose session failed is retired like any other once it is no
+  // longer shared, so no setup names it as awaiting a refresh forever.
+  it('retires a failed component row once it is no longer shared', async () => {
+    const failing: Script = async (place, input) =>
+      place === SIDEBAR.id
+        ? { kind: 'failure', failure: { kind: 'transport', detail: 'connection reset', class: 'provider', retryability: 'none' } }
+        : script(place, input)
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(failing).driver, persistence: memoryPersistence().persistence, context, shared })
+    expect(readAuthoredFile().authoring?.[SIDEBAR.id]?.status).toBe('failed')
+    const unshared = new Map([...context].filter(([id]) => id !== SIDEBAR.id))
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: unshared })
+    expect(readAuthoredFile().authoring?.[SIDEBAR.id]).toBeUndefined()
   })
 })
 

@@ -293,6 +293,7 @@ export async function guardSetupInProcess(
               authored: run.authored,
               skipped: run.skipped,
               places: run.places,
+              retired: run.retired,
               diagnostics: run.diagnostics,
               spent: run.spent,
               labelRekeys: run.labelRekeys,

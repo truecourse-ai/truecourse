@@ -95,7 +95,7 @@ import { ownTaskContext, ownTasks } from './catalog-context.js'
 import type { LiveScreens, ObserveScreenResult } from './live-screen.js'
 import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem, type SharedPlaceBrief } from './session.js'
 import type { SharedComponent } from './shared-places.js'
-import { recordAuthoringLedger, registerSharedPlaces, writeAuthoredCatalog } from './write.js'
+import { recordAuthoringLedger, registerSharedPlaces, retireAuthoredPlaces, writeAuthoredCatalog } from './write.js'
 
 /**
  * Where a screen's accepted fragment is stored, keyed on the digest of what its
@@ -264,6 +264,11 @@ export interface AuthorRunResult {
    * dropped. Never stored; the merged catalog readers see is unchanged.
    */
   diagnostics: MapperDiagnostic[]
+  /**
+   * Tasks retired with a shared component the context pass no longer finds
+   * shared, each with why; their screens own those controls now.
+   */
+  retired: { id: string; reason: string }[]
   spent: { turns: number; tokens: number; costUsd: number }
 }
 
@@ -349,6 +354,32 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const grounding = opts.context && opts.context.size > 0
     ? new Map([...opts.context].map(([placeId, context]) => [placeId, groundingFiles(context)]))
     : undefined
+
+  // A component place a context pass that ran no longer finds shared is
+  // retired with its tasks and its row: the screens now grounded on its module
+  // own those controls, and would author them again beside it. An empty pass
+  // says nothing about what is shared, so it retires nothing.
+  const retired: { id: string; reason: string }[] = []
+  let retiredPath: string | undefined
+  const unshared = grounding
+    ? new Set(
+        (authored?.resources?.[AUTHORED_SURFACE] ?? [])
+          .filter((place) => place.kind === 'component' && !components.has(place.id))
+          .map((place) => place.id),
+      )
+    : new Set<string>()
+  if (authored && unshared.size > 0) {
+    const written = retireAuthoredPlaces({
+      repoRoot: opts.repoRoot,
+      authored,
+      derived,
+      placeIds: unshared,
+      ...(opts.now ? { now: opts.now } : {}),
+    })
+    authored = written.file
+    retiredPath = written.path
+    retired.push(...written.tasks.map((id) => ({ id, reason: 'its shared component is no longer shared' })))
+  }
   // A run that may stand the app up re-opens the screens authored from source
   // alone; if the world then does not come up, they are left as they are.
   const all = planWorkItems(derived, authored, recipeContract, {
@@ -389,8 +420,8 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const skipped: string[] = []
   const selected = all.filter((item) => {
     if (stale.has(item.place.id)) return false
-    // A component this run's grounding no longer finds shared has no module to
-    // brief and no screen to observe it at: it keeps its tasks and earns no session.
+    // A component this run has no grounding for (its context pass came back
+    // empty) has no module to brief: it keeps its tasks and earns no session.
     if (item.place.kind === 'component' && !components.has(item.place.id)) {
       skipped.push(item.place.id)
       return false
@@ -473,7 +504,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const spent = { turns: 0, tokens: 0, costUsd: 0 }
   let authoredCount = 0
   let labelRekeys = 0
-  let path: string | undefined
+  let path: string | undefined = retiredPath
 
   /** Lay rows over the ledger and keep the in-memory catalog in step. */
   const recordLedger = (
@@ -504,16 +535,6 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
       .map((item) => [item.place.id, ledgerRow(item, 'authored', false)]),
   )
   if (Object.keys(migrated).length > 0) recordLedger(migrated)
-
-  // A component the grounding no longer finds shared earns no session, so its
-  // row is brought to where it stands — its inputs now, grounded on nothing —
-  // or a module that moved under it would call it work on every later setup.
-  const unshared = grounding
-    ? all.filter((item) => item.place.kind === 'component' && !components.has(item.place.id) && item.record && item.needsAuthoring)
-    : []
-  if (unshared.length > 0) {
-    recordLedger(Object.fromEntries(unshared.map((item) => [item.place.id, ledgerRow(item, item.record!.status, false)])))
-  }
 
   // THE VIEWS this run's context pass read, what it found shared decided over
   // them: recorded, so a later setup knows to look again when one moves.
@@ -843,6 +864,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     skipped,
     findings,
     diagnostics,
+    retired,
     spent,
   }
 }

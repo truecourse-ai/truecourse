@@ -12,6 +12,7 @@
 import { atomicWriteJson, guardAuthoredInterfacesPath } from '@truecourse/guard-runner'
 import {
   InterfacesFragmentSchema,
+  rootPlaceOf,
   type InterfaceAuthoringRecord,
   type InterfaceResource,
   type InterfacesFile,
@@ -145,4 +146,48 @@ export function registerSharedPlaces(input: RegisterSharedPlacesInput): { path: 
     candidate: { ...base, resources: { ...base.resources, web } },
     ...(input.now ? { now: input.now } : {}),
   })
+}
+
+export interface RetireAuthoredPlacesInput {
+  repoRoot: string
+  authored: InterfacesFile
+  derived: InterfacesFile | null
+  /** The root places to retire, by id. */
+  placeIds: ReadonlySet<string>
+  now?: () => string
+}
+
+/**
+ * Take root places out of the authored catalog whole: each place and the places
+ * nested on it, every web task located there, and each one's ledger row. What
+ * the retired places carried is owned by whatever grounds their controls now.
+ * Returns the ids of the tasks retired alongside the written file.
+ */
+export function retireAuthoredPlaces(input: RetireAuthoredPlacesInput): { path: string; file: InterfacesFile; tasks: string[] } {
+  const places = new Map(
+    [...(input.derived?.resources?.web ?? []), ...(input.authored.resources?.web ?? [])].map((place) => [place.id, place]),
+  )
+  const retired = (placeId: string | undefined): boolean => {
+    const root = placeId === undefined ? undefined : rootPlaceOf(placeId, places)?.id
+    return root !== undefined && input.placeIds.has(root)
+  }
+  const tasks = input.authored.interfaces.filter((task) => task.type === 'web' && retired(task.at))
+  const retiredTasks = new Set(tasks)
+  const authoring = Object.fromEntries(
+    Object.entries(input.authored.authoring ?? {}).filter(([placeId]) => !input.placeIds.has(placeId)),
+  )
+  const web = (input.authored.resources?.web ?? []).filter((place) => !retired(place.id))
+  const { authoring: _authoring, ...base } = input.authored
+  const written = writeAuthoredCatalog({
+    repoRoot: input.repoRoot,
+    derived: input.derived,
+    candidate: {
+      ...base,
+      interfaces: input.authored.interfaces.filter((task) => !retiredTasks.has(task)),
+      resources: { ...input.authored.resources, web },
+      ...(Object.keys(authoring).length > 0 ? { authoring } : {}),
+    },
+    ...(input.now ? { now: input.now } : {}),
+  })
+  return { ...written, tasks: tasks.map((task) => task.id) }
 }

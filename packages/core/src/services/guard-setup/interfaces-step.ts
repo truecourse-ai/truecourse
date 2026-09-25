@@ -93,6 +93,8 @@ export interface InterfacesAuthorRun {
     /** The screen's existing tasks its session retired, each with why. */
     retired?: { id: string; reason: string }[];
   }[];
+  /** Tasks retired with a shared component that is no longer shared, each with why. */
+  retired?: { id: string; reason: string }[];
   diagnostics: MapperDiagnostic[];
   spent: { turns: number; tokens: number; costUsd: number };
   /** The state reconciliation that closed the run, when anything was authored. */
@@ -275,8 +277,8 @@ export function buildInterfacesStep(
       }
       // A retired task leaves the catalog, and the scenarios grounded on it are
       // left exactly as they are: the row says which went, and why.
-      for (const place of run.places) {
-        for (const task of place.retired ?? []) notes.push(`retired ${task.id}: ${task.reason}`);
+      for (const task of [...(run.retired ?? []), ...run.places.flatMap((place) => place.retired ?? [])]) {
+        notes.push(`retired ${task.id}: ${task.reason}`);
       }
       return {
         status: allFailed ? 'failed' : 'ok',
