@@ -26,12 +26,15 @@
  *   3    the catalog                               — SOFT. The externals declaration
  *                                                    skeleton (det) + the
  *                                                    dependency-catalog session seam.
- *   4    interfaces                                — SOFT. The cli reconcile session
+ *   4    the one seed (data AND auth)              — SOFT, never blocks. The seed
+ *                                                    authoring session (`seedSession`).
+ *   5    interfaces                                — SOFT. The cli reconcile session
  *                                                    over the union's disputes, then
  *                                                    the web-task authoring run
- *                                                    (both behind `authorInterfaces`).
- *   5    the one seed (data AND auth)              — SOFT, never blocks. The seed
- *                                                    authoring session (`seedSession`).
+ *                                                    (both behind `authorInterfaces`),
+ *                                                    which opens the app's screens
+ *                                                    signed in as a seeded principal
+ *                                                    — hence after the seed.
  *   5.5  private preparations                      — HARD on execution failure;
  *                                                    unsupported profiles may skip.
  *   6    auth                                      — SOFT; the one step that may end
@@ -47,9 +50,12 @@
  * (`skipped`/`unchanged`). That spine is written at every step boundary, not
  * only when the run ends, so a run that stops part-way — an empty balance, a
  * killed process — is carried on from what it reached rather than paying for
- * those steps again. `refresh` forces every step; refreshing the SEED
- * additionally needs `confirmSeedReplace` to answer true, and a caller that cannot
- * ask answers false — a hand-edited seed script is never clobbered by an option.
+ * those steps again. `refresh` forces every step. A seed the engine drafted and
+ * nobody has edited since is re-drafted when what it IS moves (the seed stage,
+ * the schema it seeds; see `engineSeedRedraftDue`); replacing
+ * any OTHER seed needs `refresh` and `confirmSeedReplace` to answer true, and a
+ * caller that cannot ask answers false — a hand-edited seed script is never
+ * clobbered by an option.
  *
  * SINGLE-STEP MODE (`only`): run one LLM-bearing
  * step in isolation — prior steps replay from what they left on disk (never a
@@ -74,6 +80,7 @@ import {
   legacyPreparationFingerprint,
   preparationFingerprintComponents,
   recipeContractFingerprint,
+  authoringRecipeContract,
   dependencyCatalogIdentity,
   preparationCatalog,
   dependenciesPath,
@@ -86,6 +93,8 @@ import {
   readInterfaceCatalog,
   readAuthoredInterfaceCatalog,
   webScreensNeedingAuthoring,
+  authoringViewsMoved,
+  canObserveLiveScreens,
   resolveSeedScript,
   FINGERPRINT_INPUTS,
   RecipeSchema,
@@ -133,7 +142,7 @@ import { probeApiServers } from './endpoint-probe.js'
 import { deriveExternalsSkeleton } from './externals-skeleton.js'
 import { extendCredentialRegistrations } from './credential-registrations.js'
 import {
-  detectRoleColumns,
+  SEED_STAGE_VERSION,
   readExistingSeedScript,
   seedDraftGate,
   type SeedDraftDatabase,
@@ -171,7 +180,7 @@ const SPEC_EXCERPT_CHARS = 1500
  * deterministic `mapInterfaces` pass whose in-memory output every later step
  * reads, so it always runs and the detection snapshot is always this run's.
  */
-export const GUARD_SETUP_ONLY_STEPS = ['recipe', 'catalog', 'interfaces', 'seed', 'preparations', 'auth'] as const
+export const GUARD_SETUP_ONLY_STEPS = ['recipe', 'catalog', 'seed', 'interfaces', 'preparations', 'auth'] as const
 export type GuardSetupOnlyStep = (typeof GUARD_SETUP_ONLY_STEPS)[number]
 
 /**
@@ -231,10 +240,11 @@ export interface GuardSetupOptions {
    */
   only?: GuardSetupOnlyStep
   /**
-   * Asked ONCE, and only when a refresh would REPLACE an existing `api.seed`. A
-   * seed script is a human-reviewed artifact of the repo's setup bundle:
-   * `refresh` alone is not consent, and a caller that cannot ask answers false,
-   * so an option can never clobber a hand-edited script.
+   * Asked ONCE, and only when a refresh would REPLACE an existing `api.seed`
+   * the engine did not draft (or that was edited since). A seed script is a
+   * human-reviewed artifact of the repo's setup bundle: `refresh` alone is not
+   * consent, and a caller that cannot ask answers false, so an option can
+   * never clobber a hand-edited script.
    */
   confirmSeedReplace?: () => Promise<boolean>
   signal?: AbortSignal
@@ -275,7 +285,8 @@ export interface GuardSetupOptions {
   catalogSession?: GuardSetupCatalogSession
   /**
    * The interfaces step body: the cli reconcile session over the mapping's
-   * diagnostics, then the web-task authoring run.
+   * diagnostics, then the web-task authoring run. Runs after the seed step, so
+   * `recipe` carries the seed the authoring signs its browser in with.
    * Absent ⇒ the step reports a `skipped` placeholder row.
    */
   authorInterfaces?: GuardSetupInterfacesStep
@@ -298,14 +309,14 @@ export interface GuardSetupOptions {
 }
 
 /** Stable step taxonomy for the progress tracker —
- *  recipe → detect → catalog → interfaces → seed → auth
+ *  recipe → detect → catalog → seed → interfaces → preparations → auth
  *  (the old externals step folded INTO catalog). */
 export const GUARD_SETUP_STEPS = [
   { key: 'recipe', label: 'Deriving the recipe' },
   { key: 'detect', label: 'Detecting dependencies' },
   { key: 'catalog', label: 'Cataloguing dependencies' },
-  { key: 'interfaces', label: 'Authoring the interface catalog' },
   { key: 'seed', label: 'Preparing data + principals' },
+  { key: 'interfaces', label: 'Authoring the interface catalog' },
   { key: 'preparations', label: 'Verifying private starting states' },
   { key: 'auth', label: 'Verifying supplied auth' },
 ] as const
@@ -362,7 +373,7 @@ export interface GuardSetupInterfacesStepInput {
   refresh: boolean
   /** Re-author places that already carry authored tasks (the `replace` option). */
   replace: boolean
-  /** The recipe as it stands on disk when the step runs. */
+  /** The recipe as it stands on disk when the step runs — the seed step's write included. */
   recipe: Recipe
   /** The memoized mapping's in-memory catalog — what resolutions edit BEFORE
    *  the corrected snapshot is written back. */
@@ -423,7 +434,6 @@ export interface GuardSetupSeedSessionInput {
    * first (`requiredResources`) — the rows a test must already have.
    */
   requiredResources?: RequiredResource[]
-  roles: { name: string; source: string }[]
   specExcerpts: { doc: string; text: string }[]
   /** The repo's ecosystem — decides the drafted script's language/extension. */
   ecosystem: string
@@ -433,9 +443,6 @@ export interface GuardSetupSeedSessionInput {
   existingScript?: { scriptPath: string; scriptContent: string }
   /** The seed step's PRE-RUN input fingerprint — the session's cache key. */
   fingerprint: string
-  /** The step's fingerprint under its OLD formula, for the key a miss falls
-   *  back to. Delete with the legacy hash. */
-  legacyFingerprint: string
   /**
    * Whether setup was handed a FRESH CHECKOUT — a git repository carrying
    * nothing git ignores beyond what the caller materialized into it. A cloned
@@ -449,6 +456,12 @@ export interface GuardSetupSeedSessionInput {
   /** The live phase line: what is running now, and what to call it when done. */
   onPhase?: (running: string, done: string) => void
 }
+/** A coverage rule the seed could not satisfy, and why. */
+export interface SeedUnmetRule {
+  rule: string
+  reason: string
+}
+
 export type GuardSetupSeedSessionResult =
   | {
       status: 'ok'
@@ -466,6 +479,8 @@ export type GuardSetupSeedSessionResult =
        * letting a reader assume a clone verified it.
        */
       coldProofSkipped?: string
+      /** The coverage rules the seed could not satisfy: notes on the step, never a failure. */
+      unmet?: SeedUnmetRule[]
     }
   | {
       status: 'failed' | 'skipped'
@@ -556,10 +571,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const settled = settledSteps(repoRoot, opts.refresh === true)
   /** The detection snapshot, once the detect step has read it: a catalog input. */
   let detectionSnapshot = ''
+  /** The files the schema parsers read, once the detect step has read them: a seed input. */
+  let schemaFiles: readonly string[] = []
   /** Whether a step's settled row still holds — its named inputs when it has
    *  them, else its old fingerprint one last time. */
   const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
-    stepSettled(repoRoot, key, settled(key), legacyFingerprint, detectionSnapshot)
+    stepSettled(repoRoot, key, settled(key), legacyFingerprint, { detectionJson: detectionSnapshot, schemaFiles })
   /**
    * Record a step's row with its inputs BY NAME, read off the tree as the row
    * is recorded, which is the state its fingerprint was computed over. A step
@@ -567,11 +584,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
    * refresh re-opens every step on request, so it names none.
    */
   const pushStep = (row: GuardSetupTaxonomyStep): void => {
-    const inputComponents = stepInputComponents(repoRoot, row.key, detectionSnapshot)
+    const inputComponents = stepInputComponents(repoRoot, row.key, { detectionJson: detectionSnapshot, schemaFiles })
     steps.push({ ...row, ...(Object.keys(inputComponents).length > 0 ? { inputComponents } : {}) })
     const settledRow = settled(row.key)
-    if (settledRow === null || settledRow.inputFingerprint === row.inputFingerprint) return
+    if (settledRow === null) return
     const moved = movedNamedInputs(settledRow.inputComponents, inputComponents)
+    // A stage bump re-opens a step whose fingerprint did not move.
+    if (settledRow.inputFingerprint === row.inputFingerprint && !moved?.includes(STAGE_INPUT)) return
     fact(row.key, moved ? `re-opened: ${moved.join(', ') || 'no named input'} moved` : 're-opened: the settled row names no inputs')
   }
 
@@ -663,6 +682,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       datastoreUrls: mapped.datastoreUrls,
     }
     detectionSnapshot = canonicalDetectionJson(mapped.externalServices, mapped.database, mapped.datastoreUrls)
+    schemaFiles = mapped.database?.schemaFiles ?? []
     return { world, inputFingerprint: recipeStepFingerprint(needsFingerprint(recipeNeeds(world))) }
   }
 
@@ -1006,6 +1026,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const datastoreUrls = mapped.datastoreUrls
   const detectionSnapshotJson = canonicalDetectionJson(detectedExternals, database, datastoreUrls)
   detectionSnapshot = detectionSnapshotJson
+  schemaFiles = database?.schemaFiles ?? []
   pushStep({ key: 'detect', status: 'ok', inputFingerprint: '' })
   for (const service of detectedExternals) fact('detect', detectedServiceFact(service))
   if (database) {
@@ -1024,9 +1045,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   )
   soFar.detection = {
     externalServices: detectedExternals,
-    database: database
-      ? { type: database.type, driver: database.driver, tables: database.tables.length }
-      : null,
+    database: database ? detectedDatabaseRow(database) : null,
     datastoreUrls,
   }
   settleSpine()
@@ -1206,13 +1225,134 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   if (externalsStep) soFar.externals = externalsStep
   settleSpine()
 
-  // ---- Step 4: interfaces — reconcile the cli disputes, author the web tasks.
+  // The recipe on disk may have changed under the catalog step (the skeleton is a
+  // real write), so the seed drafts against the RELOADED one — its fingerprint has
+  // already moved.
+  const current = reloadRecipe(repoRoot) ?? recipe
+
+  // ---- Step 4: the one seed — data AND auth. SOFT. -------------------------
+  const seedFpOf = (): string => computeSeedStepFingerprint(repoRoot, schemaFiles)
+  const priorSeedRow = priorReport?.steps.find((row) => row.key === 'seed')
+  const priorDrafted = priorSeedRow?.draftedSeed
+  /** The seed row's `draftedSeed`: this run's draft, or the prior one while the seed still matches it. */
+  const draftedSeedOf = (drafted: boolean): { draftedSeed?: string } => {
+    const now = seedDigest(repoRoot, reloadRecipe(repoRoot) ?? current)
+    return now !== null && (drafted || now === priorDrafted) ? { draftedSeed: now } : {}
+  }
+  let seedStep: GuardSetupSeedStep | undefined
+  /** A recipe defect the seed's cold-clone proof surfaced: the run fails on it. */
+  let recipeFailure: string | undefined
+  if (enter('seed')) {
+    const seedFpPre = seedFpOf()
+    if (replayed('seed')) {
+      // Prior step: the seed the recipe declares (or the absence of one) is what
+      // the auth step runs against. Nothing is drafted, nothing is replaced.
+      if (!ranBefore('seed')) {
+        throw new SetupStepNotReadyError('seed', 'no seed row in guard/setup.json')
+      }
+      fact('seed', 'replayed: the declared `api.seed` stands as it is, nothing was drafted or proved')
+      opts.onStepDone?.('seed', 'replayed — the declared `api.seed` stands as it is')
+    } else if (holds('seed', legacySeedStepFingerprint(repoRoot))) {
+      const existingSeed = current.api?.seed
+      seedStep = existingSeed
+        ? {
+            status: 'ok',
+            outcome: 'exists',
+            command: existingSeed.command,
+            ...(existingSeed.script ? { scriptPath: existingSeed.script } : {}),
+            ...declaredNames(existingSeed),
+          }
+        : { status: 'skipped', reason: 'unchanged since the last run, which drafted no seed either' }
+      pushStep({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre, ...draftedSeedOf(false) })
+      fact(
+        'seed',
+        existingSeed
+          ? `seed unchanged since the last setup, from cache: \`${existingSeed.command}\` stands`
+          : 'seed unchanged since the last setup, from cache: the last run drafted none either',
+      )
+      for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
+      opts.onStepDone?.('seed', 'unchanged')
+    } else {
+      const schemes = collectSecuritySchemes(openApiDocs)
+      const specProbes = collectProbeCandidates(openApiDocs)
+      const seedRun = await runSeedStep({
+        opts,
+        recipe: current,
+        database,
+        routes: routesFromInterfaces(mapped.interfaces),
+        schemes,
+        // Spec-derived probes first (their security is stated); the mapped
+        // operations fill in when the spec declares none, so a corpus with
+        // markdown API docs still gets a lookup rather than a search.
+        probeCandidates: specProbes.length > 0 ? specProbes : probeCandidatesFromInterfaces(mapped.interfaces),
+        apiAuthEvidence: apiAuthEvidence({
+          interfaces: mapped.interfaces,
+          database,
+          docs: corpusDocTexts(repoRoot),
+          securitySchemes: schemes,
+        }),
+        requiredResources: requiredResources(mapped.interfaces),
+        fingerprint: seedFpPre,
+        engineDrafted: priorDrafted !== undefined && priorDrafted === seedDigest(repoRoot, current),
+        redraftDue: engineSeedRedraftDue(repoRoot, priorSeedRow, current, schemaFiles),
+        freshCheckout,
+        onPhase: (running, done) => phases.enter({ running, done }),
+      })
+      seedStep = seedRun.step
+      pushStep({
+        key: 'seed',
+        status: seedStep.status,
+        ...(seedStep.reason ? { reason: seedStep.reason } : {}),
+        // Post-write: a drafted seed moved recipe.json AND the script the recipe
+        // fingerprint folds, so the settled value is the tree it left behind.
+        inputFingerprint: seedFpOf(),
+        ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
+        ...draftedSeedOf(seedStep.outcome === 'drafted'),
+      })
+      // The cold-clone proof is the one place the recipe's `install`/`build`
+      // run in a tree that did not grow across the session's attempts. When
+      // they fail there, the recipe verified against a tree a fresh clone will
+      // not have — a recipe-gate failure found late. Reported as one: the
+      // recipe row is UNSETTLED (the next run re-derives instead of skipping
+      // on its unchanged manifests) and the run fails with the reason, so
+      // nothing chains a generate onto an install that does not work.
+      if (seedRun.recipeDefect && seedStep.reason) {
+        recipeFailure = seedStep.reason
+        const recipeRow = steps.findIndex((row) => row.key === 'recipe')
+        const row: GuardSetupTaxonomyStep = {
+          key: 'recipe',
+          status: 'failed',
+          reason: recipeFailure,
+          inputFingerprint: steps[recipeRow]?.inputFingerprint ?? legacyRecipeFp,
+          ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
+        }
+        if (recipeRow >= 0) steps[recipeRow] = row
+        else steps.push(row)
+        recipeStep = { ...recipeStep, status: 'failed', reason: recipeFailure }
+        fact('recipe', `unsettled by the seed's cold-clone proof: ${firstReasonLine(recipeFailure)}`)
+      }
+      fact('seed', seedOutcomeFact(seedStep, seedRun.fromCache === true))
+      if (seedRun.coldProofSkipped) fact('seed', seedRun.coldProofSkipped)
+      for (const unmet of seedRun.unmet ?? []) fact('seed', `coverage not seeded: ${unmet.rule} (${unmet.reason})`)
+      for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
+      opts.onStepDone?.('seed', seedSummary(seedStep))
+    }
+  }
+  // The recipe row too: the seed's cold-clone proof may have unsettled it.
+  soFar.recipe = recipeStep
+  if (seedStep) soFar.seed = seedStep
+  settleSpine()
+
+  // ---- Step 5: interfaces — reconcile the cli disputes, author the web tasks.
   // SOFT: an authoring failure fails the STEP, never setup — the derived half of
   // the catalog is already on disk, and generate runs on whatever authored half
   // exists. Skip-when-settled needs BOTH halves settled: an unchanged place set
   // with the authored file missing (deleted, or a clone that never authored) is
   // work, not a skip; `replace` is an explicit re-author and never skips
-  // either.
+  // either. It runs AFTER the seed on purpose: the authoring sessions open the
+  // app's screens in a browser signed in as a seeded principal, so the seed's
+  // principals are an input of theirs, and the recipe they read is the one the
+  // seed step just wrote.
   if (enter('interfaces')) {
     const interfacesFp = interfacesFingerprint(repoRoot)
     const authoredExists = fs.existsSync(guardAuthoredInterfacesPath(repoRoot))
@@ -1229,10 +1369,14 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       fact('interfaces', 'replayed: the authored catalog stands as it is')
       opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
     } else if (holds('interfaces', legacyInterfacesFingerprint(repoRoot)) && authoredExists && opts.replace !== true &&
+      !authoringViewsMoved(repoRoot, readAuthoredInterfaceCatalog(repoRoot)) &&
       webScreensNeedingAuthoring({
         derived: readInterfaceCatalog(repoRoot),
         authored: readAuthoredInterfaceCatalog(repoRoot),
-        recipeContract: recipeContractFingerprint(repoRoot, 'seed'),
+        recipeContract: authoringRecipeContract(repoRoot),
+        repoRoot,
+        // A screen authored from source alone is work once the step can look at it live.
+        liveAvailable: opts.authorInterfaces !== undefined && (await canObserveLiveScreens(reloadRecipe(repoRoot) ?? recipe)),
       }).size === 0) {
       pushStep({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
       fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')
@@ -1298,114 +1442,6 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       opts.onStepDone?.('interfaces', 'not wired into this run')
     }
   }
-  settleSpine()
-
-  // The recipe on disk may have changed under the catalog step (the skeleton is a
-  // real write), so the seed drafts against the RELOADED one — its fingerprint has
-  // already moved.
-  const current = reloadRecipe(repoRoot) ?? recipe
-
-  // ---- Step 5: the one seed — data AND auth. SOFT. -------------------------
-  const seedFpOf = (): string => computeSeedStepFingerprint(repoRoot)
-  let seedStep: GuardSetupSeedStep | undefined
-  /** A recipe defect the seed's cold-clone proof surfaced: the run fails on it. */
-  let recipeFailure: string | undefined
-  if (enter('seed')) {
-    const seedFpPre = seedFpOf()
-    if (replayed('seed')) {
-      // Prior step: the seed the recipe declares (or the absence of one) is what
-      // the auth step runs against. Nothing is drafted, nothing is replaced.
-      if (!ranBefore('seed')) {
-        throw new SetupStepNotReadyError('seed', 'no seed row in guard/setup.json')
-      }
-      fact('seed', 'replayed: the declared `api.seed` stands as it is, nothing was drafted or proved')
-      opts.onStepDone?.('seed', 'replayed — the declared `api.seed` stands as it is')
-    } else if (holds('seed', legacySeedStepFingerprint(repoRoot))) {
-      const existingSeed = current.api?.seed
-      seedStep = existingSeed
-        ? {
-            status: 'ok',
-            outcome: 'exists',
-            command: existingSeed.command,
-            ...(existingSeed.script ? { scriptPath: existingSeed.script } : {}),
-            ...declaredNames(existingSeed),
-          }
-        : { status: 'skipped', reason: 'unchanged since the last run, which drafted no seed either' }
-      pushStep({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
-      fact(
-        'seed',
-        existingSeed
-          ? `seed unchanged since the last setup, from cache: \`${existingSeed.command}\` stands`
-          : 'seed unchanged since the last setup, from cache: the last run drafted none either',
-      )
-      for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
-      opts.onStepDone?.('seed', 'unchanged')
-    } else {
-      const schemes = collectSecuritySchemes(openApiDocs)
-      const specProbes = collectProbeCandidates(openApiDocs)
-      const seedRun = await runSeedStep({
-        opts,
-        recipe: current,
-        database,
-        routes: routesFromInterfaces(mapped.interfaces),
-        schemes,
-        // Spec-derived probes first (their security is stated); the mapped
-        // operations fill in when the spec declares none, so a corpus with
-        // markdown API docs still gets a lookup rather than a search.
-        probeCandidates: specProbes.length > 0 ? specProbes : probeCandidatesFromInterfaces(mapped.interfaces),
-        apiAuthEvidence: apiAuthEvidence({
-          interfaces: mapped.interfaces,
-          database,
-          docs: corpusDocTexts(repoRoot),
-          securitySchemes: schemes,
-        }),
-        requiredResources: requiredResources(mapped.interfaces),
-        fingerprint: seedFpPre,
-        legacyFingerprint: legacySeedStepFingerprint(repoRoot),
-        freshCheckout,
-        onPhase: (running, done) => phases.enter({ running, done }),
-      })
-      seedStep = seedRun.step
-      pushStep({
-        key: 'seed',
-        status: seedStep.status,
-        ...(seedStep.reason ? { reason: seedStep.reason } : {}),
-        // Post-write: a drafted seed moved recipe.json AND the script the recipe
-        // fingerprint folds, so the settled value is the tree it left behind.
-        inputFingerprint: seedFpOf(),
-        ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
-      })
-      // The cold-clone proof is the one place the recipe's `install`/`build`
-      // run in a tree that did not grow across the session's attempts. When
-      // they fail there, the recipe verified against a tree a fresh clone will
-      // not have — a recipe-gate failure found late. Reported as one: the
-      // recipe row is UNSETTLED (the next run re-derives instead of skipping
-      // on its unchanged manifests) and the run fails with the reason, so
-      // nothing chains a generate onto an install that does not work.
-      if (seedRun.recipeDefect && seedStep.reason) {
-        recipeFailure = seedStep.reason
-        const recipeRow = steps.findIndex((row) => row.key === 'recipe')
-        const row: GuardSetupTaxonomyStep = {
-          key: 'recipe',
-          status: 'failed',
-          reason: recipeFailure,
-          inputFingerprint: steps[recipeRow]?.inputFingerprint ?? legacyRecipeFp,
-          ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
-        }
-        if (recipeRow >= 0) steps[recipeRow] = row
-        else steps.push(row)
-        recipeStep = { ...recipeStep, status: 'failed', reason: recipeFailure }
-        fact('recipe', `unsettled by the seed's cold-clone proof: ${firstReasonLine(recipeFailure)}`)
-      }
-      fact('seed', seedOutcomeFact(seedStep, seedRun.fromCache === true))
-      if (seedRun.coldProofSkipped) fact('seed', seedRun.coldProofSkipped)
-      for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
-      opts.onStepDone?.('seed', seedSummary(seedStep))
-    }
-  }
-  // The recipe row too: the seed's cold-clone proof may have unsettled it.
-  soFar.recipe = recipeStep
-  if (seedStep) soFar.seed = seedStep
   settleSpine()
 
   // Private state is its own targeted setup step; it never replaces the main seed.
@@ -1503,9 +1539,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         : {}),
       detection: {
         externalServices: detectedExternals,
-        database: database
-          ? { type: database.type, driver: database.driver, tables: database.tables.length }
-          : null,
+        database: database ? detectedDatabaseRow(database) : null,
         datastoreUrls,
       },
     },
@@ -1659,14 +1693,15 @@ function writeCatalogSettle(repoRoot: string, fingerprint: string): void {
 }
 
 /** Sorted derived web place `(id, address)` pairs :: the recipe CONTRACT as it
- *  stands before the seed step — the interfaces step re-runs when a screen
- *  appeared, moved or vanished, or when the promise it derives against changed.
- *  A dependency bump, a catalog edit, and the seed and preparations the later
- *  steps of the same run write reach none of it.
+ *  stands before the preparations step, the seed included — the interfaces
+ *  step re-runs when a screen appeared, moved or vanished, or when the promise
+ *  it derives against changed, the principals it signs in with among it. A
+ *  dependency bump, a catalog edit, and the preparations a later step of the
+ *  same run writes reach none of it.
  *  Exported for the pre-flight estimate's settled check. */
 export function interfacesFingerprint(repoRoot: string): string {
   return createHash('sha256')
-    .update(`${derivedWebPlacePairs(repoRoot)}::${recipeContractFingerprint(repoRoot, 'seed')}`)
+    .update(`${derivedWebPlacePairs(repoRoot)}::${authoringRecipeContract(repoRoot)}`)
     .digest('hex')
 }
 
@@ -1693,12 +1728,49 @@ function derivedWebPlacePairs(repoRoot: string): string {
  * seed's own block is in it: the row is stamped after the seed wrote, and a
  * seed deleted by hand re-opens the step) plus the catalog's IDENTITY: which
  * classes of starting state exist, never how the catalog session worded them,
- * and never a dependency version the seed does not read.
+ * and never a dependency version the seed does not read; plus the SCHEMA
+ * files the parsers read the product's data model from (`schemaFiles`, from
+ * the detection), whose change re-seeds.
  */
-export function computeSeedStepFingerprint(repoRoot: string): string {
+export function computeSeedStepFingerprint(repoRoot: string, schemaFiles: readonly string[]): string {
   return createHash('sha256')
-    .update(`${recipeContractFingerprint(repoRoot, 'preparations')}::${dependencyCatalogIdentity(repoRoot)}`)
+    .update(
+      `${recipeContractFingerprint(repoRoot, 'preparations')}::${dependencyCatalogIdentity(repoRoot)}::${schemaFilesFingerprint(repoRoot, schemaFiles)}`,
+    )
     .digest('hex')
+}
+
+/** One digest over the schema files' paths and contents, as they stand in the tree. */
+export function schemaFilesFingerprint(repoRoot: string, schemaFiles: readonly string[]): string {
+  const hash = createHash('sha256').update('schema')
+  for (const file of [...schemaFiles].sort()) {
+    let content: Buffer | string
+    try {
+      content = fs.readFileSync(path.join(repoRoot, file))
+    } catch {
+      content = '\0missing'
+    }
+    hash.update(`\n${file}\t${createHash('sha256').update(content).digest('hex')}`)
+  }
+  return hash.digest('hex')
+}
+
+/**
+ * The schema files the last setup's detection recorded: what the pre-flight
+ * estimate folds into the seed's keys, since it runs no analysis pass of its own.
+ */
+export function recordedSchemaFiles(repoRoot: string): string[] {
+  return readGuardSetup(repoRoot)?.detection?.database?.schemaFiles ?? []
+}
+
+/** The detection snapshot's datastore row, as the setup report records it. */
+function detectedDatabaseRow(database: SeedDraftDatabase): NonNullable<NonNullable<GuardSetupReport['detection']>['database']> {
+  return {
+    type: database.type,
+    driver: database.driver,
+    tables: database.tables.length,
+    ...(database.schemaFiles && database.schemaFiles.length > 0 ? { schemaFiles: database.schemaFiles } : {}),
+  }
 }
 
 /** {@link computeSeedStepFingerprint} as it was computed before the slices —
@@ -1727,6 +1799,13 @@ export function authFingerprint(repoRoot: string): string {
 }
 
 /**
+ * The named input a step whose session carries a hand-bumped stage version
+ * records it under. Unlike every other name, one missing from a stored row
+ * re-opens the step: that row settled under an earlier stage.
+ */
+const STAGE_INPUT = 'stage'
+
+/**
  * A step's fingerprint inputs BY NAME, off the tree as it stands: what each
  * step fingerprint above folds, one digest per input, so two rows of the same
  * step can be compared input by input. `detect` has no fingerprint and no inputs.
@@ -1734,7 +1813,7 @@ export function authFingerprint(repoRoot: string): string {
 function stepInputComponents(
   repoRoot: string,
   key: GuardSetupTaxonomyKey,
-  detectionJson: string,
+  { detectionJson = '', schemaFiles = [] }: StepObservations,
 ): Record<string, string> {
   const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex').slice(0, 16)
   switch (key) {
@@ -1753,12 +1832,14 @@ function stepInputComponents(
     case 'interfaces':
       return {
         places: digest(derivedWebPlacePairs(repoRoot)),
-        'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'seed')),
+        'recipe.contract': digest(authoringRecipeContract(repoRoot)),
       }
     case 'seed':
       return {
+        [STAGE_INPUT]: `seed-v${SEED_STAGE_VERSION}`,
         'recipe.contract': digest(recipeContractFingerprint(repoRoot, 'preparations')),
         catalog: digest(dependencyCatalogIdentity(repoRoot)),
+        schema: digest(schemaFilesFingerprint(repoRoot, schemaFiles)),
       }
     case 'preparations':
       return preparationFingerprintComponents(repoRoot)
@@ -1773,6 +1854,16 @@ function stepInputComponents(
  * never settles, whatever it carries beside the fingerprint.
  */
 const UNSETTLEABLE_FINGERPRINT = 'authoring-unavailable'
+
+/**
+ * What a run observed that some steps' inputs are computed from: the detection
+ * snapshot (the recipe's needs, the catalog) and the schema files the parsers
+ * read (the seed). A caller that has not observed them passes nothing.
+ */
+export interface StepObservations {
+  detectionJson?: string
+  schemaFiles?: readonly string[]
+}
 
 /** A settled step row, as the next run's gate reads it. */
 export interface SettledStepRow {
@@ -1816,16 +1907,21 @@ export function settledSteps(
  * current scheme, so changing what a step folds re-opens nothing by itself. A
  * row that predates the names is compared against the step's OLD fingerprint,
  * once — it then settles again with names, and never takes this path twice.
+ * The one exception is a step's {@link STAGE_INPUT}: a row must carry the
+ * stage version the step runs now, or it re-opens.
  */
 export function stepSettled(
   repoRoot: string,
   key: GuardSetupTaxonomyKey,
   settled: SettledStepRow | null,
   legacyFingerprint: string,
-  detectionJson = '',
+  observed: StepObservations = {},
 ): boolean {
   if (!settled) return false
-  const current = stepInputComponents(repoRoot, key, detectionJson)
+  const current = stepInputComponents(repoRoot, key, observed)
+  // The stage version is never filled in: a row that does not carry the
+  // stage the step runs now settled under an older one.
+  if (STAGE_INPUT in current && settled.inputComponents?.[STAGE_INPUT] !== current[STAGE_INPUT]) return false
   // Names that share nothing with the step's scheme prove nothing about it:
   // such a row is compared like one that has none.
   const stored = settled.inputComponents
@@ -2185,8 +2281,10 @@ async function runSeedStep(args: {
   requiredResources: RequiredResource[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
-  /** The same, under the step's OLD formula — the old key's half. */
-  legacyFingerprint: string
+  /** The existing seed is the one the engine last drafted, unedited since. */
+  engineDrafted: boolean
+  /** That seed is re-drafted without a refresh: see {@link engineSeedRedraftDue}. */
+  redraftDue: boolean
   /** Whether the tree setup was handed is a fresh checkout — the cold proof's gate. */
   freshCheckout: boolean
   onPhase: (running: string, done: string) => void
@@ -2197,13 +2295,16 @@ async function runSeedStep(args: {
   recipeDefect?: boolean
   /** The cold-clone proof stood down, in the seam's own words. */
   coldProofSkipped?: string
+  unmet?: SeedUnmetRule[]
 }> {
   const { opts, recipe, database, routes, schemes } = args
   const existing = recipe.api?.seed
 
-  // Idempotence: a repo that already has a seed and did not ask for a refresh is
-  // REPORTED, not re-drafted. That is the whole "bare setup no-ops" contract.
-  if (existing && !opts.refresh) {
+  // Idempotence: a repo that already has a seed of its own and did not ask for
+  // a refresh is REPORTED, not re-drafted. That is the whole "bare setup
+  // no-ops" contract. A seed the engine drafted is drafted again when what the
+  // seed IS moved under it; any other re-opening reports it as it stands.
+  if (existing && !opts.refresh && !args.redraftDue) {
     return {
       step: {
         status: 'ok',
@@ -2219,7 +2320,7 @@ async function runSeedStep(args: {
   if (existing) {
     // `refresh` is not consent to overwrite a hand-edited script; the caller is
     // asked, and a caller that cannot ask answers false.
-    replaceExisting = (await opts.confirmSeedReplace?.()) ?? false
+    replaceExisting = args.engineDrafted || ((await opts.confirmSeedReplace?.()) ?? false)
     if (!replaceExisting) {
       return {
         step: {
@@ -2269,7 +2370,6 @@ async function runSeedStep(args: {
     probeCandidates: args.probeCandidates,
     apiAuthEvidence: args.apiAuthEvidence,
     requiredResources: args.requiredResources,
-    roles: detectRoleColumns(database),
     specExcerpts: readSpecExcerpts(opts.repoRoot),
     ecosystem: detectEcosystems(opts.repoRoot)[0] ?? 'js',
     replaceExisting,
@@ -2280,7 +2380,6 @@ async function runSeedStep(args: {
         })()
       : {}),
     fingerprint: args.fingerprint,
-    legacyFingerprint: args.legacyFingerprint,
     freshCheckout: args.freshCheckout,
     onPhase: args.onPhase,
   })
@@ -2302,6 +2401,7 @@ async function runSeedStep(args: {
       ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
       ...(result.fromCache ? { fromCache: true } : {}),
       ...(result.coldProofSkipped ? { coldProofSkipped: result.coldProofSkipped } : {}),
+      ...(result.unmet && result.unmet.length > 0 ? { unmet: result.unmet } : {}),
     }
   }
   return {
@@ -2309,6 +2409,41 @@ async function runSeedStep(args: {
     ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
     ...(result.recipeDefect ? { recipeDefect: true } : {}),
   }
+}
+
+/**
+ * Whether a re-opened seed step re-drafts the existing seed without a refresh.
+ * Only a seed the engine drafted and nobody edited since (the prior seed row's
+ * `draftedSeed` still matches it), and only when what that seed IS moved under
+ * it: the seed stage, or the schema it seeds — or the prior attempt at it
+ * failed. Any other re-opening input (a recipe edit elsewhere, the catalog)
+ * keeps the seed, since a re-draft is a paid session whose renamed credentials
+ * and fixtures would re-open every screen that reads them. Shared with the
+ * pre-flight estimate, which prices exactly the sessions this lets run.
+ */
+export function engineSeedRedraftDue(
+  repoRoot: string,
+  priorSeedRow: GuardSetupTaxonomyStep | undefined,
+  recipe: Recipe,
+  schemaFiles: readonly string[],
+): boolean {
+  const drafted = priorSeedRow?.draftedSeed
+  if (drafted === undefined || drafted !== seedDigest(repoRoot, recipe)) return false
+  if (priorSeedRow?.status === 'failed') return true
+  const stored = priorSeedRow?.inputComponents ?? {}
+  const now = stepInputComponents(repoRoot, 'seed', { schemaFiles })
+  return stored[STAGE_INPUT] !== now[STAGE_INPUT] || stored.schema !== now.schema
+}
+
+/**
+ * A digest of the `api.seed` block and the script it names, as they stand now:
+ * what the seed row's `draftedSeed` records. Null when no seed is declared.
+ */
+function seedDigest(repoRoot: string, recipe: Recipe): string | null {
+  const seed = recipe.api?.seed
+  if (!seed) return null
+  const script = readExistingSeedScript(repoRoot, recipe)?.scriptContent ?? ''
+  return createHash('sha256').update(JSON.stringify(seed)).update('\0').update(script).digest('hex').slice(0, 16)
 }
 
 /** The fixture/credential names a seed declares, sorted, omitted when empty. */

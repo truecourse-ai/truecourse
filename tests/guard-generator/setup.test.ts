@@ -33,12 +33,11 @@ import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
   dependenciesPath,
-  recipeContractFingerprint,
+  authoringRecipeContract,
   screenAuthoringFingerprint,
 } from '@truecourse/guard-runner'
 import {
   runGuardSetup,
-  detectRoleColumns,
   needsFingerprint,
   recipeNeeds,
   recipeStepFingerprint,
@@ -207,9 +206,11 @@ function seedSeam(
   }
 }
 
-/** A seed seam that really WRITES its artifacts — the post-write fingerprint case. */
-function writingSeedSeam(): GuardSetupSeedSession {
+/** A seed seam that really WRITES its artifacts — the post-write fingerprint
+ *  case — recording each briefing it was handed in `inputs` when given one. */
+function writingSeedSeam(inputs: GuardSetupSeedSessionInput[] = []): GuardSetupSeedSession {
   return async (input) => {
+    inputs.push(input)
     const scriptPath = 'scripts/guard-seed.mjs'
     fs.mkdirSync(path.join(input.repoRoot, 'scripts'), { recursive: true })
     fs.writeFileSync(path.join(input.repoRoot, scriptPath), '// drafted\n')
@@ -297,8 +298,8 @@ describe('runGuardSetup — the step spine', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ])
@@ -321,8 +322,8 @@ describe('runGuardSetup — the step spine', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ])
@@ -496,8 +497,10 @@ describe('runGuardSetup — skip when settled', () => {
       'needs',
     ])
     expect(Object.keys(first.steps.find((s) => s.key === 'seed')?.inputComponents ?? {})).toEqual([
+      'stage',
       'recipe.contract',
       'catalog',
+      'schema',
     ])
 
     // The app starts talking to a datastore nothing stood up before: the recipe
@@ -512,6 +515,97 @@ describe('runGuardSetup — skip when settled', () => {
     expect(facts).toContain('recipe | re-opened: needs moved')
     expect(facts.filter((line) => line.startsWith('seed | re-opened'))).toEqual([])
     expect(statuses(second)).toMatchObject({ seed: 'skipped:unchanged' })
+  })
+
+  /** Rewrite the stored seed row as one settled under an earlier stage. */
+  function asEarlierStage(r: string, report: Awaited<ReturnType<typeof runGuardSetup>>['report']): void {
+    const { stage: _stage, ...earlier } = report.steps.find((s) => s.key === 'seed')!.inputComponents!
+    writeGuardSetup(r, {
+      ...report,
+      steps: report.steps.map((s) => (s.key === 'seed' ? { ...s, inputComponents: earlier } : s)),
+    })
+  }
+
+  // A new name on a stored row is filled in, never moved — except the stage
+  // version: a seed row settled under an earlier stage re-opens the step, and a
+  // seed the engine drafted, untouched since, is drafted again without asking.
+  it('a seed row from an earlier stage re-opens the seed step and re-drafts the seed it drafted', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const probe = probeStub()
+    const inputs: GuardSetupSeedSessionInput[] = []
+    const first = await runAndPersist(r, { probe: probe.probe, seedSession: writingSeedSeam(inputs) })
+    expect(first.seed?.outcome).toBe('drafted')
+    asEarlierStage(r, first)
+    const facts: string[] = []
+    const second = await runAndPersist(r, {
+      probe: probe.probe,
+      seedSession: writingSeedSeam(inputs),
+      confirmSeedReplace: async () => {
+        throw new Error('a seed the engine drafted is replaced without asking')
+      },
+      onStepFact: (step, line) => facts.push(`${step} | ${line}`),
+    })
+    expect(facts).toContain('seed | re-opened: stage moved')
+    expect(inputs).toHaveLength(2)
+    expect(inputs[1]?.replaceExisting).toBe(true)
+    expect(second.seed?.outcome).toBe('drafted')
+    expect(statuses(second)).toMatchObject({ recipe: 'skipped:unchanged', catalog: 'skipped:unchanged', seed: 'ok' })
+  })
+
+  // Only what the seed IS (its stage, the schema it seeds) re-drafts it. A
+  // recipe edit elsewhere re-opens the step but keeps the drafted seed, and the
+  // seed stays the engine's for a later move that does re-draft it.
+  it('an unrelated recipe edit re-opens the seed step without re-drafting the seed the engine drafted', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const inputs: GuardSetupSeedSessionInput[] = []
+    await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    const target = recipePath(r)
+    const onDisk = JSON.parse(fs.readFileSync(target, 'utf8')) as { api: { env: Record<string, string> } }
+    onDisk.api.env.EXTRA = '1'
+    fs.writeFileSync(target, JSON.stringify(onDisk, null, 2) + '\n')
+    const facts: string[] = []
+    const second = await runAndPersist(r, {
+      seedSession: writingSeedSeam(inputs),
+      onStepFact: (step, line) => facts.push(`${step} | ${line}`),
+    })
+    expect(facts).toContain('seed | re-opened: recipe.contract moved')
+    expect(inputs).toHaveLength(1)
+    expect(second.seed).toMatchObject({ status: 'ok', outcome: 'exists' })
+    asEarlierStage(r, second)
+    await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    expect(inputs).toHaveLength(2)
+  })
+
+  // Someone edited the drafted script: it is theirs now, and a re-opened step
+  // leaves it alone unless they consent.
+  it('a drafted seed edited by hand is not re-drafted when the step re-opens', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const inputs: GuardSetupSeedSessionInput[] = []
+    const first = await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    fs.writeFileSync(path.join(r, 'scripts/guard-seed.mjs'), '// mine now\n')
+    asEarlierStage(r, first)
+    const second = await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    expect(inputs).toHaveLength(1)
+    expect(second.seed).toMatchObject({ status: 'ok', outcome: 'exists' })
+    // Still the user's on the run after: the carried row does not adopt it.
+    asEarlierStage(r, second)
+    await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    expect(inputs).toHaveLength(1)
+  })
+
+  // A seed written by hand was never the engine's to replace.
+  it('a hand-written seed is not re-drafted when the step re-opens', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } })
+    const seed = seedSeam()
+    const first = await runAndPersist(r, { seedSession: seed.seam })
+    asEarlierStage(r, first)
+    const second = await runAndPersist(r, { seedSession: seed.seam })
+    expect(seed.inputs).toHaveLength(0)
+    expect(second.seed).toMatchObject({ status: 'ok', outcome: 'exists', command: 'node mine.mjs' })
   })
 
   // The seed's cold-clone proof is where the recipe's `install`/`build` first
@@ -745,6 +839,55 @@ describe('runGuardSetup — skip when settled', () => {
     expect(probe.calls).toBe(2)
   })
 
+  // The seed builds its world from the schema the parsers read, so a change to
+  // a file they read it from is a new world to seed; any other file is not.
+  it('re-opens the seed step when a schema file the parsers read changes, and only then', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    fs.mkdirSync(path.join(r, 'prisma'), { recursive: true })
+    fs.writeFileSync(path.join(r, 'prisma/schema.prisma'), 'model Link {\n  id Int @id\n}\n')
+    const mapped = interfaces({ database: { ...DATABASE, schemaFiles: ['prisma/schema.prisma'] } })
+    const seed = seedSeam()
+    await runAndPersist(r, { interfaces: mapped, seedSession: seed.seam })
+    expect(seed.inputs).toHaveLength(1)
+
+    fs.writeFileSync(path.join(r, 'README.md'), '# not a schema\n')
+    const unchanged = await runAndPersist(r, { interfaces: mapped, seedSession: seed.seam })
+    expect(statuses(unchanged).seed).toBe('skipped:unchanged')
+
+    fs.writeFileSync(path.join(r, 'prisma/schema.prisma'), 'model Link {\n  id Int @id\n  pinned Boolean @default(false)\n}\n')
+    const facts: string[] = []
+    const moved = await runAndPersist(r, { interfaces: mapped, seedSession: seed.seam, onStepFact: (step, line) => facts.push(`${step} | ${line}`) })
+    expect(seed.inputs).toHaveLength(2)
+    expect(statuses(moved).seed).toBe('ok')
+    expect(facts).toContain('seed | re-opened: schema moved')
+    expect(moved.detection?.database?.schemaFiles).toEqual(['prisma/schema.prisma'])
+  })
+
+  // A coverage rule the seed could not satisfy is a note on the seed step,
+  // never a failure: the step is ok, and each unmet rule is one fact.
+  it('records each coverage rule the seed did not satisfy as a fact on an ok step', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const facts: string[] = []
+    const { report } = await runGuardSetup(
+      baseOpts(r, {
+        seedSession: seedSeam({
+          status: 'ok',
+          scriptPath: 'scripts/guard-seed.mjs',
+          command: 'node scripts/guard-seed.mjs',
+          unmet: [{ rule: 'preserved formats', reason: 'the archiver runs in a worker the recipe does not start' }],
+        }).seam,
+        onStepFact: (step, line) => {
+          if (step === 'seed') facts.push(line)
+        },
+      }),
+    )
+    expect(report.status).toBe('ok')
+    expect(report.steps.find((step) => step.key === 'seed')?.status).toBe('ok')
+    expect(facts).toContain('coverage not seeded: preserved formats (the archiver runs in a worker the recipe does not start)')
+  })
+
   // The post-write fingerprint invariant: a step that WRITES records the tree as
   // it left it, or it would never match itself again.
   it('a seed step that wrote its artifacts matches itself on the next run', async () => {
@@ -975,8 +1118,10 @@ describe('runGuardSetup — the happy path', () => {
   }, 120_000)
 
   // The grounding is what makes the ONE-artifact draft possible: the schema says
-  // what is creatable, the routes say what must be reachable, the specs the roles.
-  it('brief the seed seam with the schema, the routes, the roles and the specs', async () => {
+  // what is creatable, the routes say what must be reachable, the specs the
+  // kinds of user. Which principals to mint is the session's call, never a list
+  // the engine derives.
+  it('brief the seed seam with the schema, the routes and the specs', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
     const seed = seedSeam()
@@ -987,7 +1132,7 @@ describe('runGuardSetup — the happy path', () => {
     expect(input.database.driver).toBe('prisma')
     expect(input.database.tables.map((t) => t.name)).toEqual(['User', 'Org'])
     expect(input.routes).toContainEqual({ method: 'GET', path: '/orgs' })
-    expect(input.roles.map((role) => role.name).sort()).toEqual(['member', 'owner'])
+    expect(input).not.toHaveProperty('roles')
     expect(input.specExcerpts[0]).toMatchObject({ doc: DOC })
     expect(input.specExcerpts[0].text).toMatch(/org owner/)
     expect(input.replaceExisting).toBe(false)
@@ -1247,7 +1392,7 @@ describe('runGuardSetup — the interfaces step', () => {
     }
   }
 
-  it('the seed a run drafts after them does not re-open the catalog or the interfaces rows', async () => {
+  it('the seed a run drafts does not re-open the catalog or the interfaces rows', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
     writeCatalogs(r, { authored: true })
@@ -1262,8 +1407,9 @@ describe('runGuardSetup — the interfaces step', () => {
     writeGuardSetup(r, one.report)
     expect(catalogCalls).toBe(1)
     expect(one.report.steps.find((s) => s.key === 'seed')).toMatchObject({ status: 'ok' })
-    // The seed step wrote `api.seed` into the recipe AFTER the catalog and
-    // interfaces rows were stamped: neither reads it, so neither moves.
+    // The seed step wrote `api.seed` into the recipe AFTER the catalog row was
+    // stamped (which does not read it) and BEFORE the interfaces row (which was
+    // stamped over the recipe the seed left behind): neither moves.
     expect(JSON.parse(fs.readFileSync(recipePath(r), 'utf-8')).api.seed).toBeDefined()
 
     const facts: string[] = []
@@ -1284,8 +1430,8 @@ describe('runGuardSetup — the interfaces step', () => {
         .map((s) => [s.key, s.status, s.reason]),
     ).toEqual([
       ['catalog', 'skipped', 'unchanged'],
-      ['interfaces', 'skipped', 'unchanged'],
       ['seed', 'skipped', 'unchanged'],
+      ['interfaces', 'skipped', 'unchanged'],
     ])
     expect(facts.filter((line) => line.includes('re-opened'))).toEqual([])
   })
@@ -1363,7 +1509,7 @@ describe('runGuardSetup — the interfaces step', () => {
         inputFingerprint: screenAuthoringFingerprint({
           derived: DERIVED,
           place: DERIVED.resources!.web[0],
-          recipeContract: recipeContractFingerprint(r),
+          recipeContract: authoringRecipeContract(r),
         }),
       },
     }
@@ -1473,56 +1619,6 @@ describe('runGuardSetup — the interfaces step', () => {
 
     expect(seam.inputs[0].diagnostics).toEqual([diagnostic])
     expect(seam.inputs[0].interfaces).toHaveLength(1)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// detectRoleColumns — the deterministic grounding the seed briefing carries
-// ---------------------------------------------------------------------------
-
-describe('detectRoleColumns', () => {
-  it('reads the enumerated values of a role column on a principal-shaped table', () => {
-    expect(detectRoleColumns(DATABASE)).toEqual([
-      { name: 'owner', source: 'User.role' },
-      { name: 'member', source: 'User.role' },
-    ])
-  })
-
-  // A schema with no role column yields one principal — the honest default, not a
-  // degradation, and certainly not an invented hierarchy.
-  it('reports none when no principal table carries a role column', () => {
-    expect(
-      detectRoleColumns({
-        ...DATABASE,
-        tables: [{ name: 'Org', columns: [{ name: 'id', type: 'Int', isPrimaryKey: true }] }],
-      }),
-    ).toEqual([])
-  })
-
-  it('ignores a role-shaped column on a table that is not a principal', () => {
-    expect(
-      detectRoleColumns({
-        ...DATABASE,
-        tables: [{ name: 'Widget', columns: [{ name: 'kind', type: "enum('a','b')" }] }],
-      }),
-    ).toEqual([])
-  })
-
-  it('falls back to a defaulted role column when the type is not enumerated', () => {
-    expect(
-      detectRoleColumns({
-        ...DATABASE,
-        tables: [
-          {
-            name: 'User',
-            columns: [
-              { name: 'email', type: 'String' },
-              { name: 'role', type: 'String', defaultValue: "'member'" },
-            ],
-          },
-        ],
-      }),
-    ).toEqual([{ name: 'member', source: 'User.role' }])
   })
 })
 

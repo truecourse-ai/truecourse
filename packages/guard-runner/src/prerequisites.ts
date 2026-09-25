@@ -2,10 +2,12 @@ import { resolveGuardPrerequisite, scenarioPrerequisiteProblems, type GuardPrere
 import {
   resolveDependencies,
   scenarioDependencyNames,
+  suppliedInstancesFor,
   dependencyBlockFor,
   registeredEnvironment,
   type ResolvedDependencies,
   type DependencyBlock,
+  type SuppliedInstance,
 } from './dependencies.js'
 import { loadExternalsLocal, resolveExternals, externalsInjectEnv, externalsSecrets, type ResolvedExternal } from './externals.js'
 import type { RecipeApiExternal } from './recipe.js'
@@ -155,6 +157,36 @@ export function scenarioAccountEnvironment(scenario: GuardScenario | Pick<GuardS
     }
   }
   return { env, secrets }
+}
+
+/**
+ * The world a screen is OBSERVED in, outside any scenario, built from the same
+ * pieces a run builds a scenario's from. A scenario binds a subset of the
+ * provided dependencies; an observation binds none in particular, so it binds
+ * every provided one, and a screen that reads one renders the way the scenario
+ * binding it will see it.
+ *
+ * - `serverEnv` is what the run's shared world (the seed) gets on top of the
+ *   default server's env: the provided external accounts.
+ * - `env` and `supplied` are what a web scenario's sandbox gets on top of the
+ *   surface's env: the accounts and every provided dependency's registration.
+ * - `secrets` is every value the redactor must mask in what either one prints.
+ */
+export function observationWorld(
+  repoRoot: string,
+  declared?: Record<string, RecipeApiExternal>,
+): { serverEnv: Record<string, string>; env: Record<string, string>; secrets: Map<string, string>; supplied: SuppliedInstance[] } {
+  const resolved = resolvePrerequisites(repoRoot, declared)
+  const binding = {
+    needs: resolved.dependencies.dependencies.filter((d) => d.state === 'provided').map((d) => d.name),
+  }
+  const account = scenarioAccountEnvironment(binding, resolved)
+  return {
+    serverEnv: externalsInjectEnv(resolved.externals),
+    env: account.env,
+    secrets: account.secrets,
+    supplied: suppliedInstancesFor(binding, resolved.dependencies),
+  }
 }
 
 export function scenarioPrerequisiteBlock(

@@ -10,7 +10,7 @@ import { stepChecks } from './step-parts.js'
  * declarative, deterministic, and waiting only on observable state.
  *
  * Five decisions are load-bearing here, and each is documented at its schema:
- *   - the LOCATOR is closed to the handles a USER perceives ({@link GuardWebLocatorSchema});
+ *   - the LOCATOR is the handles a USER perceives, plus one marked escape ({@link GuardWebLocatorSchema});
  *   - the step declares its own DRIVER ({@link webDriver});
  *   - the address is asserted ORIGIN-STRIPPED ({@link GuardWebExpectSchema});
  *   - the verb set is CLOSED at eight ({@link GuardWebStepSchema});
@@ -34,11 +34,10 @@ import {
  * THE LOCATOR VOCABULARY: the ARIA roles a web step may name. Closed on purpose —
  * the primary locator is a role plus an accessible name (`getByRole` semantics),
  * and the members beside it ({@link GuardWebLocatorSchema}) are the OTHER ways a
- * user perceives an element. No CSS, no XPath, no test ids: those address the
- * IMPLEMENTATION, and a scenario that addresses the implementation stops being a
- * user-replayable probe of the promise. An element no user-perceivable handle
- * reaches is not guessed at — the claim that needs it is a gap naming the
- * unlocatable element. Deliberate side effect: coverage rewards accessible markup.
+ * user perceives an element. No XPath and no test ids; a CSS selector only as the
+ * one NON-CANONICAL member, carried with a reason and reported, because it
+ * addresses the IMPLEMENTATION and a scenario written in it stops being a
+ * user-replayable probe of the promise.
  *
  * The list is the ARIA role set the browser engine resolves, verbatim; narrowing
  * it further would only mean refusing markup that is perfectly locatable.
@@ -128,8 +127,33 @@ export const GUARD_WEB_ROLES = [
   'treeitem',
 ] as const
 
+/** Each member's handle key, in the order the locator unions list the members. */
+const HANDLE_KEYS = ['role', 'placeholder', 'label', 'text', 'title', 'alt', 'css'] as const
+
 /**
- * The two escapes EVERY locator member carries, whichever handle it addresses the
+ * What a locator that does not parse is told. A bare string (a selector, an
+ * XPath, a test id) is told the shape; an object is told what its OWN member
+ * refused — the member its handle key names — rather than the union's "Invalid
+ * input", which names nothing an author can fix.
+ */
+const locatorShapeError: z.ZodErrorMap = (issue, ctx) => {
+  const data: unknown = ctx.data
+  if (typeof data !== 'object' || data === null) {
+    return {
+      message:
+        'a locator is an object — {"role": "<aria role>", "name": "<accessible name>"}, one visible handle ({"title": …}, {"label": …}, {"placeholder": …}, {"text": …}, {"alt": …}), or {"css": "<selector>"} — a bare string is never a selector',
+    }
+  }
+  if (issue.code === z.ZodIssueCode.invalid_union) {
+    const member = HANDLE_KEYS.findIndex((key) => key in data)
+    const refused = member >= 0 ? issue.unionErrors[member]?.issues[0] : undefined
+    if (refused) return { message: `${refused.path.length > 0 ? `${refused.path.join('.')} — ` : ''}${refused.message}` }
+  }
+  return { message: ctx.defaultError }
+}
+
+/**
+ * The escapes EVERY locator member carries, whichever handle it addresses the
  * element by — the strictness rules are a property of locating, not of one member.
  *
  * The match is case-insensitive and substring by default (the way a reader would
@@ -140,49 +164,108 @@ export const GUARD_WEB_ROLES = [
  * reading the same is a genuine ambiguity — the step fails saying how many it
  * found, rather than silently acting on the first and passing for the wrong reason.
  *
- * `pick: first` is the one authored exception: a page can legitimately show many
- * controls that read the same (a grid of slot buttons, a list of identical rows)
- * where ANY of them serves the flow. Declaring it says "many matches are expected;
- * act on the first" — the intent is on the page, not guessed by the driver, so an
- * UNDECLARED ambiguity still fails as loudly as ever.
+ * `pick` is the one authored exception: a page can legitimately show many
+ * controls that read the same (a grid of slot buttons, a list of identical rows,
+ * a page icon and a sidebar button sharing a tooltip). `"first"` says "many
+ * matches are expected; any serves, act on the first"; a 1-based position (`3`)
+ * says "the third of them is the one". Either way the intent is on the page, not
+ * guessed by the driver, so an UNDECLARED ambiguity still fails as loudly as ever.
  */
-/** A named container narrows an action without relying on DOM selectors. */
-export const GuardWebScopeSchema = z.object({
-  role: z.enum(GUARD_WEB_ROLES),
-  name: z.string().min(1),
-  exact: z.boolean().optional(),
-}).strict()
-export type GuardWebScope = z.infer<typeof GuardWebScopeSchema>
+const pick = z.union([z.literal('first'), z.number().int().positive()]).optional()
+/** Demand the WHOLE value rather than a case-insensitive substring. */
+const exact = z.boolean().optional()
 
-const locatorEscapes = {
-  within: GuardWebScopeSchema.optional(),
-  /** Demand the WHOLE value rather than a case-insensitive substring. */
-  exact: z.boolean().optional(),
-  /** Act on the FIRST of several legitimate matches. See the strictness note above. */
-  pick: z.literal('first').optional(),
+/**
+ * What a `css` value may not look like. The browser engine reads a selector string
+ * as XPath when it starts with `//` or `..`, as ANOTHER engine when it starts with
+ * `<engine>=` (`xpath=`, `text=`, `css=`, `id=`, `data-testid=`) or `internal:`,
+ * and as a chain of engines across `>>`. A CSS selector never needs any of those,
+ * so each is refused, and the runner hands what passes to the CSS engine alone.
+ */
+const NOT_A_CSS_SELECTOR = /^(\/\/|\.\.|[a-z][\w-]*\s*=|internal:)|>>/i
+
+/** A raw CSS selector — the NON-CANONICAL escape. */
+const cssSelector = z
+  .string()
+  .min(1)
+  .refine((value) => !NOT_A_CSS_SELECTOR.test(value.trim()), {
+    message:
+      '`css` is a plain CSS selector — never XPath (`//…`, `..`), an engine prefix (`xpath=`, `text=`, `css=`, `data-testid=`, `internal:`) or a `>>` chain',
+  })
+
+/**
+ * The handle each locator member addresses its element by, as raw shapes. The
+ * user-perceivable six come first; `css` is the escape for an element none of them
+ * reaches (see {@link GuardWebLocatorSchema}), and carries no `exact` because a
+ * selector has no substring reading.
+ */
+const handleShapes = {
+  role: {
+    role: z.enum(GUARD_WEB_ROLES),
+    /** The element's accessible name (its label, its text, its `aria-label`). */
+    name: z.string().min(1).optional(),
+    exact,
+  },
+  /** The prompt text INSIDE an empty input — what a user reads before typing. */
+  placeholder: { placeholder: z.string().min(1), exact },
+  /** The visible LABEL of a form control, as `getByLabel` computes it. */
+  label: { label: z.string().min(1), exact },
+  /** The element's own visible TEXT — the plainest handle a reader has. */
+  text: { text: z.string().min(1), exact },
+  /** The `title` attribute — the tooltip a user hovers to read. */
+  title: { title: z.string().min(1), exact },
+  /** An image's ALT TEXT — what a user is told the picture is. */
+  alt: { alt: z.string().min(1), exact },
+  /** A raw CSS selector — the NON-CANONICAL escape ({@link NOT_A_CSS_SELECTOR}). */
+  css: { css: cssSelector },
 } as const
+
+/**
+ * A SCOPE: one element a locator is narrowed to — a dialog, a panel, the page's
+ * `main`. Any member of the locator family, `pick` included, but never scoped in
+ * turn: one level of `within` is what a page's structure needs, and a scope that
+ * must resolve to exactly one element keeps each level checkable on its own.
+ */
+const scopeSchema = z.union([
+  z.object({ ...handleShapes.role, pick }).strict(),
+  z.object({ ...handleShapes.placeholder, pick }).strict(),
+  z.object({ ...handleShapes.label, pick }).strict(),
+  z.object({ ...handleShapes.text, pick }).strict(),
+  z.object({ ...handleShapes.title, pick }).strict(),
+  z.object({ ...handleShapes.alt, pick }).strict(),
+  z.object({ ...handleShapes.css, pick }).strict(),
+], { errorMap: locatorShapeError })
+/**
+ * The locator types are spelled out rather than inferred, and every locator schema
+ * is annotated with them: inferred, the members are inlined into each schema that
+ * embeds them, past what tsc will serialize into a declaration (TS7056). The
+ * annotation is also the check that schema and type agree.
+ */
+export type GuardWebPick = 'first' | number
+export type GuardWebScope =
+  | { role: GuardWebRole; name?: string; exact?: boolean; pick?: GuardWebPick }
+  | { placeholder: string; exact?: boolean; pick?: GuardWebPick }
+  | { label: string; exact?: boolean; pick?: GuardWebPick }
+  | { text: string; exact?: boolean; pick?: GuardWebPick }
+  | { title: string; exact?: boolean; pick?: GuardWebPick }
+  | { alt: string; exact?: boolean; pick?: GuardWebPick }
+  | { css: string; pick?: GuardWebPick }
+export const GuardWebScopeSchema: z.ZodType<GuardWebScope, z.ZodTypeDef, GuardWebScope> = scopeSchema
+
+const within = GuardWebScopeSchema.optional()
 
 /**
  * The locator MEMBERS, as raw shapes — kept as shapes rather than schemas because
  * {@link GuardWebStateSchema} is each of them with the ARIA-state fields added, and
  * a union cannot be `.extend`ed.
  */
-const roleShape = {
-  role: z.enum(GUARD_WEB_ROLES),
-  /** The element's accessible name (its label, its text, its `aria-label`). */
-  name: z.string().min(1).optional(),
-  ...locatorEscapes,
-} as const
-/** The prompt text INSIDE an empty input — what a user reads before typing. */
-const placeholderShape = { placeholder: z.string().min(1), ...locatorEscapes } as const
-/** The visible LABEL of a form control, as `getByLabel` computes it. */
-const labelShape = { label: z.string().min(1), ...locatorEscapes } as const
-/** The element's own visible TEXT — the plainest handle a reader has. */
-const textShape = { text: z.string().min(1), ...locatorEscapes } as const
-/** The `title` attribute — the tooltip a user hovers to read. */
-const titleShape = { title: z.string().min(1), ...locatorEscapes } as const
-/** An image's ALT TEXT — what a user is told the picture is. */
-const altShape = { alt: z.string().min(1), ...locatorEscapes } as const
+const roleShape = { ...handleShapes.role, within, pick } as const
+const placeholderShape = { ...handleShapes.placeholder, within, pick } as const
+const labelShape = { ...handleShapes.label, within, pick } as const
+const textShape = { ...handleShapes.text, within, pick } as const
+const titleShape = { ...handleShapes.title, within, pick } as const
+const altShape = { ...handleShapes.alt, within, pick } as const
+const cssShape = { ...handleShapes.css, within, pick } as const
 
 /**
  * ONE element of the page under test, addressed the way a USER finds it: by its
@@ -192,26 +275,60 @@ const altShape = { alt: z.string().min(1), ...locatorEscapes } as const
  * tooltip they hover, the alt text of a picture. `${…}` tokens interpolate in every
  * one of those values, so a step can click the row an earlier step created.
  *
- * The family is closed at those six, and the exclusions are the point: a CSS
- * selector, an XPath and a test id are all names the IMPLEMENTATION gave itself,
- * invisible to every user of the app, and a scenario written in them stops being a
- * user-replayable probe of the promise — it passes for markup nobody can operate
- * and breaks on a refactor that changed nothing a user sees. The members here are
- * all things a person can point at on the screen; that is the whole membership rule,
- * and it is why the family can grow without ever growing a selector.
+ * Those six are CANONICAL: each is something a person can point at on the screen,
+ * and a scenario written in them is a user-replayable probe of the promise.
+ *
+ * `css` is the seventh member and the one exception: a raw selector, for a control
+ * the app gives no user-perceivable handle (an icon-only button with no
+ * `aria-label`, two controls sharing one tooltip). It addresses the IMPLEMENTATION,
+ * so a locator carrying it anywhere — as its handle or in its `within` — is
+ * NON-CANONICAL ({@link isNonCanonicalLocator}): it is authored only with a reason,
+ * proven against the live screen, and recorded, so the ambiguity it works around
+ * is reported rather than hidden.
  *
  * Each member is exclusive (they are strict objects, so two handles at once is a
- * parse error) and each carries the same `exact` / `pick` escapes — see
- * {@link locatorEscapes} for the strictness discipline they belong to.
+ * parse error) and each carries the same `within` / `pick` escapes — see
+ * {@link pick} for the strictness discipline they belong to.
  */
-export const GuardWebLocatorSchema = z.union([
+const locatorSchema = z.union([
   z.object(roleShape).strict(),
   z.object(placeholderShape).strict(),
   z.object(labelShape).strict(),
   z.object(textShape).strict(),
   z.object(titleShape).strict(),
   z.object(altShape).strict(),
-])
+  z.object(cssShape).strict(),
+], { errorMap: locatorShapeError })
+export type GuardWebLocator = GuardWebScope & { within?: GuardWebScope }
+export const GuardWebLocatorSchema: z.ZodType<GuardWebLocator, z.ZodTypeDef, GuardWebLocator> = locatorSchema
+
+/**
+ * True when the locator reaches its element through a CSS selector anywhere — its
+ * own handle or its scope. Derived from the shape and nothing else: whether a
+ * locator is canonical is never something an author declares. `pick` does not make
+ * a locator non-canonical.
+ */
+export function isNonCanonicalLocator(locator: GuardWebLocator | GuardWebScope): boolean {
+  return 'css' in locator || ('within' in locator && locator.within !== undefined && 'css' in locator.within)
+}
+
+/**
+ * A locator as one string, the same for two locators that address their element
+ * the same way whatever order their keys were written in — `within` and `pick`
+ * included. What a proven locator is recognised by when it appears again.
+ */
+export function webLocatorKey(locator: GuardWebLocator | GuardWebScope): string {
+  return JSON.stringify(sortedKeys(locator))
+}
+
+function sortedKeys(value: object): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => [k, typeof v === 'object' && v !== null ? sortedKeys(v) : v]),
+  )
+}
 
 /**
  * THE ARIA STATES a web step may assert on an element. Closed, and closed at the
@@ -264,7 +381,7 @@ function stateMember<S extends z.ZodRawShape>(shape: S) {
  * element's state must BE. Several states of the same element may be named at once
  * (a tab that is selected AND not disabled); each is evaluated and recorded on its own.
  */
-export const GuardWebStateSchema = z.union([
+const stateSchema = z.union([
   stateMember(roleShape),
   stateMember(placeholderShape),
   stateMember(labelShape),
@@ -272,6 +389,14 @@ export const GuardWebStateSchema = z.union([
   stateMember(titleShape),
   stateMember(altShape),
 ])
+export type GuardWebStateExpect = Exclude<GuardWebLocator, { css: string }> & {
+  checked?: boolean
+  pressed?: boolean
+  selected?: boolean
+  expanded?: boolean
+  disabled?: boolean
+}
+export const GuardWebStateSchema: z.ZodType<GuardWebStateExpect, z.ZodTypeDef, GuardWebStateExpect> = stateSchema
 
 /**
  * The state assertions one `state` member carries, in the fixed order of
@@ -372,7 +497,7 @@ export const GuardWebClassSchema = z
  */
 /** Cardinality and absence address all matches, never an authored first match. */
 const allMatchesLocator = GuardWebLocatorSchema.refine((target) => target.pick === undefined, {
-  message: '`pick: first` cannot be used for an assertion about all matching elements',
+  message: '`pick` cannot be used for an assertion about all matching elements',
 })
 
 /**
@@ -579,6 +704,55 @@ export const GuardWebClickStepSchema = z
   .strict()
 
 /**
+ * THE KEYS a step may press: the small, named set a user's claim is ever about —
+ * submitting with Enter, dismissing with Escape, moving focus with Tab, moving
+ * through a list or a menu with the arrows. A key outside it is refused rather
+ * than passed to the browser, so a typo is a schema error, not a keystroke.
+ */
+export const GUARD_WEB_KEYS = ['Enter', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'] as const
+export const GuardWebKeySchema = z.enum(GUARD_WEB_KEYS)
+export type GuardWebKey = z.infer<typeof GuardWebKeySchema>
+
+/**
+ * Press one key — on the element `on` names (focused first, the way a user
+ * clicks into a search box before pressing Enter), or on whatever the page has
+ * focused when `on` is absent (Escape closing the open menu). The claim it
+ * states is one only the keyboard makes: a search that submits on Enter, a menu
+ * that closes on Escape.
+ */
+export const GuardWebPressStepSchema = z
+  .object({
+    driver: webDriver,
+    press: GuardWebKeySchema,
+    on: GuardWebLocatorSchema.optional(),
+    expect: GuardWebExpectSchema.optional(),
+    capture,
+    timeoutMs,
+    note,
+    milestone,
+    checks: stepChecks,
+  })
+  .strict()
+
+/**
+ * Move the pointer over an element and leave it there — what reveals a control
+ * a page shows only on hover (a row's delete button). The revealed control is
+ * then clicked by the next step, whose own wait finds it.
+ */
+export const GuardWebHoverStepSchema = z
+  .object({
+    driver: webDriver,
+    hover: GuardWebLocatorSchema,
+    expect: GuardWebExpectSchema.optional(),
+    capture,
+    timeoutMs,
+    note,
+    milestone,
+    checks: stepChecks,
+  })
+  .strict()
+
+/**
  * Type a value into an input, addressed by its LABEL (a labelled input's
  * accessible name is its label, so `{ role: textbox, name: "Title" }` is how a user
  * would describe it). The value carries the same `${…}` tokens every other authored
@@ -747,8 +921,11 @@ export const GuardWebFileSchema = z
 export const GuardWebUploadStepSchema = z
   .object({
     driver: webDriver,
-    /** The control a user would operate to pick a file — never the hidden input. */
-    upload: GuardWebLocatorSchema,
+    /** The control a user would operate to pick a file — never the hidden input,
+     *  so never a `css` locator, which is how the hidden input would be reached. */
+    upload: GuardWebLocatorSchema.refine((locator) => !isNonCanonicalLocator(locator), {
+      message: 'an upload names the control a user operates to pick a file — never a `css` locator',
+    }),
     /** The bytes handed to the chooser, and the name they arrive under. */
     file: GuardWebFileSchema,
     expect: GuardWebExpectSchema.optional(),
@@ -838,21 +1015,20 @@ export const GuardWebCredentialStepSchema = z
 
 /**
  * ONE web step — one action, or one assertion, taken by a real browser against the
- * web surface the sandbox serves. The verbs are closed at eight: navigate, click,
- * fill, select, upload, history, credential, expect. There is deliberately no hover, no scroll, no
- * keyboard: each would be a promise about how the page is OPERATED rather than what
- * it PROMISES, and the vocabulary grows only when a real claim cannot be stated
- * without it — which is exactly what `history` was (2026-08-11: "Back and Forward
- * move through the views" had no verb, and rode as a re-navigation that proved a
- * different sentence) and what `upload` is (2026-08-14: a document app's central
- * promise is "you can put a file into it", and no combination of click and fill
- * states it — a file chooser is not a text field).
+ * web surface the sandbox serves. The verbs are closed at ten: navigate, click,
+ * fill, select, upload, press, hover, history, credential, expect. There is
+ * deliberately no scroll, no drag and no free typing of keys: each would be a
+ * promise about how the page is OPERATED rather than what it PROMISES, and the
+ * vocabulary grows only when a real claim cannot be stated without it — which is
+ * what `history` was ("Back and Forward move through the views" rode as a
+ * re-navigation that proved a different sentence), what `upload` is (a file
+ * chooser is not a text field), and what `press` and `hover` are (a search that
+ * submits on Enter, a menu that closes on Escape, a delete button a row shows only
+ * under the pointer).
  */
 export type GuardWebRole = (typeof GUARD_WEB_ROLES)[number]
-export type GuardWebLocator = z.infer<typeof GuardWebLocatorSchema>
 export type GuardWebCapture = z.infer<typeof GuardWebCaptureSchema>
 export type GuardWebCaptures = z.infer<typeof GuardWebCapturesSchema>
-export type GuardWebStateExpect = z.infer<typeof GuardWebStateSchema>
 export type GuardWebAttributeExpect = z.infer<typeof GuardWebAttributeSchema>
 export type GuardWebClassExpect = z.infer<typeof GuardWebClassSchema>
 export type GuardWebExpect = z.infer<typeof webExpectSchema>
@@ -862,6 +1038,8 @@ export type GuardWebClickStep = z.infer<typeof GuardWebClickStepSchema>
 export type GuardWebSelectStep = z.infer<typeof GuardWebSelectStepSchema>
 export type GuardWebFillStep = z.infer<typeof GuardWebFillStepSchema>
 export type GuardWebUploadStep = z.infer<typeof GuardWebUploadStepSchema>
+export type GuardWebPressStep = z.infer<typeof GuardWebPressStepSchema>
+export type GuardWebHoverStep = z.infer<typeof GuardWebHoverStepSchema>
 export type GuardWebHistoryStep = z.infer<typeof GuardWebHistoryStepSchema>
 export type GuardWebCredentialStep = z.infer<typeof GuardWebCredentialStepSchema>
 export type GuardWebExpectStep = z.infer<typeof GuardWebExpectStepSchema>
@@ -875,6 +1053,8 @@ export type GuardWebStep =
   | GuardWebFillStep
   | GuardWebSelectStep
   | GuardWebUploadStep
+  | GuardWebPressStep
+  | GuardWebHoverStep
   | GuardWebHistoryStep
   | GuardWebCredentialStep
   | GuardWebExpectStep
@@ -885,6 +1065,8 @@ export const GuardWebStepSchema: z.ZodType<GuardWebStep, z.ZodTypeDef, unknown> 
   GuardWebFillStepSchema,
   GuardWebSelectStepSchema,
   GuardWebUploadStepSchema,
+  GuardWebPressStepSchema,
+  GuardWebHoverStepSchema,
   GuardWebHistoryStepSchema,
   GuardWebCredentialStepSchema,
   GuardWebExpectStepSchema,
@@ -923,6 +1105,16 @@ export function isWebUploadStep(step: GuardWebStep): step is GuardWebUploadStep 
   return 'upload' in step
 }
 
+/** True when the web step presses a key. */
+export function isWebPressStep(step: GuardWebStep): step is GuardWebPressStep {
+  return 'press' in step
+}
+
+/** True when the web step moves the pointer over an element. */
+export function isWebHoverStep(step: GuardWebStep): step is GuardWebHoverStep {
+  return 'hover' in step
+}
+
 /** True when the web step presses the browser's Back or Forward. */
 export function isWebHistoryStep(step: GuardWebStep): step is GuardWebHistoryStep {
   return 'history' in step
@@ -947,6 +1139,8 @@ export function isWebExpectStep(step: GuardWebStep): step is GuardWebExpectStep 
     !isWebFillStep(step) &&
     !isWebSelectStep(step) &&
     !isWebUploadStep(step) &&
+    !isWebPressStep(step) &&
+    !isWebHoverStep(step) &&
     !isWebHistoryStep(step) &&
     !isWebCredentialStep(step)
   )
@@ -978,7 +1172,7 @@ export function webStepCaptureNames(step: GuardWebStep): string[] {
 // --- Presentation: the words a step list and a failure both use --------
 
 /** The field a locator member keeps its authored value in. See {@link webLocatorValueKey}. */
-export type GuardWebLocatorValueKey = 'name' | 'placeholder' | 'label' | 'text' | 'title' | 'alt'
+export type GuardWebLocatorValueKey = 'name' | 'placeholder' | 'label' | 'text' | 'title' | 'alt' | 'css'
 
 /**
  * WHICH field of a locator carries its authored value — the one string `${…}`
@@ -993,6 +1187,7 @@ export function webLocatorValueKey(locator: object): GuardWebLocatorValueKey {
   if ('label' in locator) return 'label'
   if ('text' in locator) return 'text'
   if ('title' in locator) return 'title'
+  if ('css' in locator) return 'css'
   return 'alt'
 }
 
@@ -1001,7 +1196,7 @@ export function webLocatorValueKey(locator: object): GuardWebLocatorValueKey {
  * value it carries — in the one place every renderer and the driver's compiler
  * read it from, so a new member can never be described one way and compiled another.
  */
-export function webLocatorHandle(locator: GuardWebLocator): {
+export function webLocatorHandle(locator: GuardWebLocator | GuardWebScope): {
   key: GuardWebLocatorValueKey
   kind: string
   value: string | undefined
@@ -1015,10 +1210,13 @@ export function webLocatorHandle(locator: GuardWebLocator): {
   return { key, kind, value }
 }
 
-/** `button “Save”` / `first placeholder “Search”` — one locator, in a reader's words. */
-export function describeWebLocator(locator: GuardWebLocator): string {
+/** `button “Save”` / `first placeholder “Search”` / `#3 css “main button”` — one locator, in a reader's words. */
+export function describeWebLocator(locator: GuardWebLocator | GuardWebScope): string {
   const { kind, value } = webLocatorHandle(locator)
-  return `${locator.pick === 'first' ? 'first ' : ''}${kind}${value === undefined ? '' : ` “${value}”`}${locator.exact ? ' (exact)' : ''}${locator.within ? ` within ${describeWebLocator(locator.within)}` : ''}`
+  const picked = locator.pick === undefined ? '' : locator.pick === 'first' ? 'first ' : `#${locator.pick} `
+  const exact = 'exact' in locator && locator.exact ? ' (exact)' : ''
+  const scope = 'within' in locator && locator.within ? ` within ${describeWebLocator(locator.within)}` : ''
+  return `${picked}${kind}${value === undefined ? '' : ` “${value}”`}${exact}${scope}`
 }
 
 /**
@@ -1106,6 +1304,8 @@ export function describeWebCommand(step: GuardWebStep): string {
   if (isWebUploadStep(step)) {
     return `upload “${webFileName(step.file)}” to ${describeWebLocator(step.upload)}`
   }
+  if (isWebPressStep(step)) return `press ${step.press}${step.on ? ` on ${describeWebLocator(step.on)}` : ''}`
+  if (isWebHoverStep(step)) return `hover ${describeWebLocator(step.hover)}`
   if (isWebHistoryStep(step)) return `go ${step.history}`
   // The NAME only — the value is a secret the runner holds.
   if (isWebCredentialStep(step)) return `sign in as ${step.credential}`

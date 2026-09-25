@@ -14,6 +14,7 @@
  *   GET /health   → 200 text/plain "ok" (the readiness probe)
  *   GET /         → heading "Guard Web Fixture"
  *                   link "Notes" → /notes
+ *                   button "Menu" → reveals the menu item link "Guarded" → /guarded
  *                   button "Reveal" → replaces the status paragraph's text with
  *                                     "the secret is out" (no navigation)
  *                   textbox "Title" + button "Save" → /notes?title=<value>
@@ -60,12 +61,48 @@
  *                     - image with alt text "Company logo";
  *                     - button with the title "Close the panel";
  *                     - paragraph "row two of three" (the plain-text handle).
+ *   GET /icons    → heading "Icons"; the controls NO user-perceivable handle
+ *                   reaches, the surface the non-canonical `css` locator and the
+ *                   observer's unnamed-element details need:
+ *                     - in `main`, a sort button that is a lone icon
+ *                       (`<i class="bi bi-chevron-expand">`, no name at all) and a
+ *                       view button whose only content is a private-use glyph;
+ *                     - an `<i title="More">` page-options trigger in `main`, and a
+ *                       sidebar `button "More"` in the navigation — one title, two
+ *                       controls;
+ *                     - two list rows, each with an identical icon-only delete
+ *                       button (the positional `pick` case);
+ *                     - a menu trigger carrying a widget's state attribute before
+ *                       its test id, and a long `data-hint`;
+ *                     - a close button whose icon has only Tailwind utility
+ *                       classes (`w-[16px]`), which a selector must escape.
+ *                   Each click writes what it did into paragraph `#status`.
+ *   GET /widgets  → heading "Widgets"; controls with NO interactive role, the
+ *                   surface the observer's no-role controls and unnamed containers
+ *                   need:
+ *                     - a react-select-shaped list whose options are plain `div`s
+ *                       with `-option-` ids (no role, no pointer cursor), and a
+ *                       click-handled card `div` with a pointer cursor;
+ *                     - a modal drawn from plain `div`s: a fixed overlay over the
+ *                       whole viewport, a heading "Delete link", buttons "Cancel"
+ *                       and "Confirm", and an icon-only close button carrying a
+ *                       test id — no `dialog` role anywhere.
+ *                   Each click writes what it did into paragraph `#status`.
  *   GET /upload   → heading "Upload"; the surface the `upload` verb needs — a
  *                   visible labelled file input, a hidden one behind a button (the
- *                   react-dropzone shape), an `accept=".pdf"` one that refuses
+ *                   react-dropzone shape), a hidden one its visible label opens
+ *                   ("Import file"), an `accept=".pdf"` one that refuses
  *                   anything else in the app's own words, and a button that opens
  *                   no chooser at all. Every picked file is reported back with the
  *                   name, the size, the type and its first bytes.
+ *   GET /flaky    → redirects to / on its FIRST load only, then serves heading
+ *                   "Flaky" — a guard that loses a race on a fresh load.
+ *   GET /guarded  → a page whose script sends a DIRECT load back to /; only a
+ *                   visit through the link in /'s menu stays (heading "Guarded").
+ *   GET /nowhere  → always redirects to /, and nothing links to it.
+ *   GET /pointer  → heading "Pointer"; row "Inbox" whose button "Delete" shows
+ *                   only while the pointer is over the row, and button "Options"
+ *                   opening menu "Actions", which Escape closes.
  *
  * The JSON surface — the SAME state the pages render, read as structured data, which
  * is what a `request` step is for: drive the UI, then ask the app what actually
@@ -120,6 +157,11 @@ const HOME = page(
 <p id="status">nothing revealed yet</p>
 <button type="button" onclick="document.getElementById('status').textContent = 'the secret is out'">Reveal</button>
 <p><a href="/notes">Notes</a></p>
+<button type="button" aria-haspopup="menu" aria-expanded="false"
+  onclick="document.getElementById('menu').hidden = false; this.setAttribute('aria-expanded', 'true')">Menu</button>
+<div id="menu" role="menu" hidden>
+  <a role="menuitem" href="/guarded" onclick="sessionStorage.setItem('via-link', '1')">Guarded</a>
+</div>
 <form onsubmit="event.preventDefault(); location.href = '/notes?title=' + encodeURIComponent(document.getElementById('title').value)">
   <label for="title">Title</label>
   <input id="title" name="title" type="text">
@@ -142,6 +184,50 @@ const SLOW = page(
   `<h1>Slow</h1>
 <p id="slow">still working</p>
 <script>setTimeout(function () { document.getElementById('slow').textContent = 'ready at last' }, ${delayMs})</script>`,
+)
+
+/** Controls with no accessible name, or one name shared by two controls. */
+const ICONS = page(
+  'Icons',
+  `<style>i.bi { display: inline-block; width: 16px; height: 16px }</style>
+<nav aria-label="Sidebar"><button type="button" title="More" onclick="say('sidebar more')">More</button></nav>
+<main>
+  <h1>Icons</h1>
+  <button type="button" data-action="sort" onclick="say('sorted')"><i class="bi bi-chevron-expand"></i></button>
+  <button type="button" onclick="say('viewed')"><span class="glyph">\uE0A1</span></button>
+  <i class="bi bi-three-dots" title="More" style="cursor: pointer" onclick="say('page options')"></i>
+  <button type="button" data-state="closed" data-testid="menu-trigger" data-hint="${'h'.repeat(200)}" onclick="say('menu')"><i class="bi bi-list"></i></button>
+  <button type="button" class="p-2 hover:bg-gray-100" onclick="say('closed')"><i class="w-[16px] h-4"></i></button>
+  <ul>
+    <li>Alpha <button type="button" onclick="say('deleted Alpha')"><i class="bi bi-trash"></i></button></li>
+    <li>Beta <button type="button" onclick="say('deleted Beta')"><i class="bi bi-trash"></i></button></li>
+  </ul>
+  <p id="status">idle</p>
+</main>
+<script>function say(text) { document.getElementById('status').textContent = text }</script>`,
+)
+
+/** Clickable elements with no role, and a modal with no dialog role. */
+const WIDGETS = page(
+  'Widgets',
+  `<main>
+  <h1>Widgets</h1>
+  <div class="rs__menu">
+    <div id="react-select-7-option-0" tabindex="-1" onclick="say('chose Work')">Work</div>
+    <div id="react-select-7-option-1" tabindex="-1" onclick="say('chose Personal')">Personal</div>
+  </div>
+  <div class="card" style="cursor: pointer" onclick="say('opened card')">Guard Seed Link</div>
+  <p id="status">idle</p>
+</main>
+<div style="position: fixed; inset: 0; background: rgba(0,0,0,0.2)">
+  <div class="panel">
+    <div><button type="button" data-testid="close-modal-button" onclick="say('closed')"><i class="bi bi-x"></i></button></div>
+    <h2>Delete link</h2>
+    <button type="button" onclick="say('cancelled')">Cancel</button>
+    <button type="button" onclick="say('confirmed')">Confirm</button>
+  </div>
+</div>
+<script>function say(text) { document.getElementById('status').textContent = text }</script>`,
 )
 
 /**
@@ -255,6 +341,8 @@ const UPLOAD = page(
 <input id="hidden-file" type="file" style="display:none"></p>
 <p><label for="pdf-file">PDF only</label>
 <input id="pdf-file" type="file" accept=".pdf"></p>
+<p><label for="import-file">Import file</label>
+<input id="import-file" type="file" hidden></p>
 <p><button type="button" id="inert">Not an upload</button></p>
 <p id="picked">nothing picked yet</p>
 <script>
@@ -283,6 +371,7 @@ function report(source, input) {
 document.getElementById('visible-file').onchange = function () { report('visible', this) }
 document.getElementById('hidden-file').onchange = function () { report('hidden', this) }
 document.getElementById('pdf-file').onchange = function () { report('pdf', this) }
+document.getElementById('import-file').onchange = function () { report('import', this) }
 document.getElementById('pick').onclick = function () { document.getElementById('hidden-file').click() }
 // Found, clickable, and behind it nothing asks for a file.
 document.getElementById('inert').onclick = function () {
@@ -384,6 +473,27 @@ function whoamiPage(req) {
   )
 }
 
+// A direct load of /guarded is sent back to /; a visit through the hub's menu link is not.
+const GUARDED = page(
+  'Guarded',
+  `<h1>Guarded</h1>
+<script>if (!sessionStorage.getItem('via-link')) location.replace('/')</script>`,
+)
+
+const POINTER = page(
+  'Pointer',
+  `<h1>Pointer</h1>
+<style>.row .delete { display: none } .row:hover .delete { display: inline }</style>
+<div class="row" role="row" aria-label="Inbox"><span>Inbox</span> <button class="delete" type="button">Delete</button></div>
+<button type="button" onclick="document.getElementById('actions').hidden = false">Options</button>
+<div id="actions" role="menu" aria-label="Actions" hidden><button role="menuitem" type="button">Rename</button></div>
+<script>document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape') document.getElementById('actions').hidden = true
+})</script>`,
+)
+
+let flakyLoads = 0
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
   if (url.pathname === '/health') {
@@ -396,8 +506,25 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 404, { error: `no route ${req.method} ${url.pathname}` })
     return
   }
+  // Signing out clears the session cookie, the way an app's own sign-out does.
+  if (url.pathname === '/sign-out') {
+    res.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'session=; Path=/; Max-Age=0' })
+    res.end(page('Signed out', '<h1>Signed out</h1>'))
+    return
+  }
+  if (url.pathname === '/nowhere' || (url.pathname === '/flaky' && flakyLoads++ === 0)) {
+    res.writeHead(302, { location: '/' })
+    res.end()
+    return
+  }
   const html =
-    url.pathname === '/'
+    url.pathname === '/flaky'
+      ? page('Flaky', '<h1>Flaky</h1>')
+      : url.pathname === '/guarded'
+        ? GUARDED
+        : url.pathname === '/pointer'
+          ? POINTER
+          : url.pathname === '/'
       ? HOME
       : url.pathname === '/notes'
         ? notesPage(url)
@@ -407,6 +534,10 @@ const server = http.createServer(async (req, res) => {
             ? LONG
           : url.pathname === '/controls'
             ? CONTROLS
+            : url.pathname === '/icons'
+              ? ICONS
+            : url.pathname === '/widgets'
+              ? WIDGETS
             : url.pathname === '/capture'
               ? CAPTURE
               : url.pathname === '/upload'

@@ -24,9 +24,9 @@ describe('combined interface context regression', () => {
     expect(shared.text).toContain('onClick={onCancel}>Cancel</button>')
     const totals: number[] = []
     for (const [index, screen] of screens.entries()) {
-      const context = { module: index ? 'ExpenseDetail.tsx' : 'Expenses.tsx', renders: ['DeleteDialog.tsx'], closure: 2, apiEffects: [], rpcCalls: [], unjoined: [] }
+      const context = { module: index ? 'ExpenseDetail.tsx' : 'Expenses.tsx', renders: ['DeleteDialog.tsx'], closure: 2, renderClosure: ['DeleteDialog.tsx'], apiEffects: [], rpcCalls: [], unjoined: [] }
       const source = placeSourcePack(repo, context, shared.modules)!
-      const tasks = ownTaskContext({ derived, authored: null, screenId: screen.id, replace: false })
+      const tasks = ownTaskContext({ derived, authored: null, screenId: screen.id })
       const briefing = placeBriefing({ place: screen, existing: [], states, screens, nested: [dialogs[index]], context, ownTaskContext: tasks, sourcePack: source.text })
       const def = interfaceAuthorSessionDef({ repoRoot: repo, derived, authored: null, replaceable: new Set(), scope: { screenId: screen.id, address: screen.address } })
       const opening = {

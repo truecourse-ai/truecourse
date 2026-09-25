@@ -40,7 +40,24 @@ export {
   type AuthorFinding,
 } from './findings.js'
 export { MAX_PACK_BYTES, clusterPack, type ClusterPack } from './pack.js'
+export {
+  nonCanonicalLocators,
+  writeNonCanonicalLocators,
+  type NonCanonicalLocator,
+} from './non-canonical.js'
+export { LiveProofReachSchema, proveLocators, type LiveProofReach } from './live-proof.js'
 export { buildAuthorTools, type AuthorToolsInput } from './tools.js'
+export {
+  liveScreenLines,
+  observeScreenTool,
+  publicFixtureFields,
+  renderObservation,
+  type LiveScreenObserver,
+  type LiveScreens,
+  type ObserveScreenResult,
+  type ScreenObservation,
+  type ScreenObservationRequest,
+} from './live-screen.js'
 export {
   INTERFACE_AUTHOR_BUDGET,
   INTERFACE_AUTHOR_SESSION_KIND,
@@ -52,6 +69,7 @@ export {
 } from './session.js'
 export {
   INTERFACE_AUTHOR_CACHE_NAME,
+  fragmentCacheKey,
   authorWebInterfaces,
   defaultAuthorConcurrency,
   planWorkItems,
@@ -75,4 +93,10 @@ export {
   type StateMerge,
   type StateReconciliation,
 } from './reconcile.js'
-export { writeAuthoredCatalog, type WriteAuthoredInput } from './write.js'
+export { registerSharedPlaces, writeAuthoredCatalog, type WriteAuthoredInput } from './write.js'
+export {
+  detectSharedComponents,
+  ownsBehavior,
+  sharedComponentId,
+  type SharedComponent,
+} from './shared-places.js'

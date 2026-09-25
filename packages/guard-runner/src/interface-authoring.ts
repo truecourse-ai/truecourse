@@ -10,26 +10,44 @@
  *
  * THE RULE, per screen:
  *
- *  - a ledger row saying `authored` or `empty` is SETTLED — the session reached
- *    an outcome the write path accepted, and nothing re-opens it but an explicit
- *    re-author;
- *  - a row saying `failed` or `rejected` is work again only when the screen's
- *    input digest MOVED. A provider that died costs that screen one run, not
- *    one run every setup forever, and the setup report names it so a person can
- *    ask for a retry;
+ *  - a ledger row is work again when the screen's input digest MOVED, or one
+ *    of the source files its session was grounded on changed, or (when the
+ *    caller knows the current grounding) a file joined or left that set —
+ *    whatever the row's status. A settled screen re-opened this way is RECONCILED against
+ *    the tasks it already has (kept, amended, retired), never re-invented;
+ *  - a row authored from source alone (`sourceOnly`) is work again for a
+ *    caller that can look at the screen live, and for no other: a run that
+ *    still cannot leaves it where it is rather than paying for the same
+ *    source-only answer again. A live world a run tried to stand up and could
+ *    not is recorded with the recipe it failed under (`liveUnavailable`), and
+ *    until that recipe moves ({@link liveWorldFailed}) no caller can look;
+ *  - otherwise it is not: a settled row stays settled, and a `failed` or
+ *    `rejected` one waits for an explicit refresh. A provider that died costs
+ *    that screen one run, not one run every setup forever, and the setup report
+ *    names it so a person can ask for a retry;
+ *  - apart from any row, a view the last context pass read that moved
+ *    ({@link authoringViewsMoved}) is work for the context pass: a component
+ *    may have become shared, and no screen records the layouts;
  *  - NO row is a screen from before the ledger: it is judged ONCE by the old
  *    inference (it carries a task and every readable kind is established) so an
  *    upgrade re-authors nothing, and the run writes it a row.
  */
 
 import crypto from 'node:crypto'
-import type {
-  Interface,
-  InterfaceAuthoringRecord,
-  InterfaceResource,
-  InterfacesFile,
+import fs from 'node:fs'
+import path from 'node:path'
+import {
+  isRootPlace,
+  rootPlaceOf,
+  type Interface,
+  type InterfaceAuthoringRecord,
+  type InterfaceResource,
+  type InterfacesFile,
 } from '@truecourse/shared'
+import { resolveWebSurface, type Recipe } from './recipe.js'
+import { recipeContractFingerprint } from './recipe-slices.js'
 import { staleAuthoredPlaceDiagnostics, webScreensNeedingReadables } from './store.js'
+import { preflightBrowser } from './web/browser.js'
 
 /** The surface authoring writes — the one nothing derives. */
 const AUTHORED_SURFACE = 'web'
@@ -40,9 +58,12 @@ const AUTHORED_SURFACE = 'web'
  * bumps this in the same commit, which re-opens every screen and re-keys every
  * cached fragment.
  */
-export const INTERFACE_AUTHOR_STAGE_VERSION = 1
+export const INTERFACE_AUTHOR_STAGE_VERSION = 6
 
-/** One screen, what authoring has settled on it, and what it would run over. */
+/**
+ * One screen — or one shared component, the other place authoring owes a
+ * session — what authoring has settled on it, and what it would run over.
+ */
 export interface WebScreenAuthoringState {
   place: InterfaceResource
   /** Ids of the authored tasks located on this screen (directly or nested). */
@@ -51,8 +72,16 @@ export interface WebScreenAuthoringState {
   record?: InterfaceAuthoringRecord
   /** The digest a session for this screen would run over — its cache key too. */
   inputFingerprint: string
-  /** A session is owed here: no settled row, or a failed one whose inputs moved. */
+  /**
+   * A session is owed here: no settled row, a row whose inputs or sources
+   * moved, or a source-only row the caller can now look at live.
+   */
   needsAuthoring: boolean
+  /**
+   * The ONLY reason a session is owed is a live look at a row authored from
+   * source alone: a run whose live world does not come up owes nothing here.
+   */
+  awaitsLiveLook: boolean
 }
 
 export interface WebScreenAuthoringInput {
@@ -62,48 +91,153 @@ export interface WebScreenAuthoringInput {
   authored: InterfacesFile | null
   /** The recipe CONTRACT the tasks would be authored against. */
   recipeContract: string
+  /**
+   * The working tree, when the caller has one: a row's recorded source files
+   * are re-read against it. Absent ⇒ only the input digest is compared.
+   */
+  repoRoot?: string
+  /**
+   * The files each place is grounded on NOW (its route module and what it
+   * renders), when the caller derived them. With it (and `repoRoot`), a row is
+   * work again when the file SET it recorded differs from this one — a module
+   * moved into or out of the place's grounding, as when a component becomes
+   * shared and leaves every screen that rendered it — or a digest moved. A place
+   * the map does not name is grounded on nothing. Without it, only the files the
+   * row recorded are re-read.
+   */
+  grounding?: ReadonlyMap<string, readonly string[]>
+  /**
+   * Whether the caller can stand the app up for the sessions to look at
+   * ({@link canObserveLiveScreens}). With it, a row authored from source
+   * alone is work again.
+   */
+  liveAvailable?: boolean
 }
 
 /**
- * Every SCREEN both catalog halves know, in catalog order, with what authoring
- * has settled on it. Pure: it reads no tree and writes nothing.
+ * Every SCREEN and every shared COMPONENT both catalog halves know (the root
+ * places, {@link isRootPlace}), in catalog order, with what authoring has
+ * settled on it. It writes nothing, and reads the tree only for the source files
+ * a row recorded (when `repoRoot` is given).
  */
 export function webScreenAuthoringStates(
   input: WebScreenAuthoringInput,
 ): WebScreenAuthoringState[] {
   const places = placeIndex(input.derived, input.authored)
-  const screens = [...places.values()].filter((place) => place.kind === 'screen')
+  const roots = [...places.values()].filter(isRootPlace)
+  const screens = roots.filter((place) => place.kind === 'screen')
   const located = new Map<string, string[]>()
   for (const task of input.authored?.interfaces ?? []) {
     if (task.type !== AUTHORED_SURFACE) continue
-    const screen = task.at ? screenOf(task.at, places) : screenAt(routeOf(task), screens)
+    const screen = task.at ? rootPlaceOf(task.at, places)?.id : screenAt(routeOf(task), screens)
     if (!screen) continue
     located.set(screen, [...(located.get(screen) ?? []), task.id])
   }
   const unestablished = webScreensNeedingReadables(input.derived, input.authored)
   const ledger = input.authored?.authoring ?? {}
   const derivedPlaces = derivedPlaceIndex(input.derived)
+  const canLook =
+    input.liveAvailable === true && !(input.repoRoot !== undefined && liveWorldFailed(input.repoRoot, input.authored))
 
-  return screens.map((place) => {
+  return roots.map((place) => {
     const record = ledger[place.id]
     const inputFingerprint = fingerprintOf(derivedPlaces, place, input.recipeContract)
+    const moved = record
+      ? record.inputFingerprint !== inputFingerprint ||
+        (input.repoRoot !== undefined &&
+          sourcesMoved(input.repoRoot, record.sources, input.grounding && (input.grounding.get(place.id) ?? [])))
+      : // The old inference, for a screen written before the ledger: a screen
+        // that carries a task and has every readable kind established is what
+        // a settled session leaves behind, so it is not re-bought.
+        unestablished.has(place.id) ||
+        (!located.has(place.id) &&
+          !input.authored?.resources?.[AUTHORED_SURFACE]?.some(
+            (candidate) => candidate.id === place.id && candidate.readables,
+          ))
+    const awaitsLiveLook = !moved && canLook && record?.sourceOnly === true
     return {
       place,
       tasks: located.get(place.id) ?? [],
       ...(record ? { record } : {}),
       inputFingerprint,
-      needsAuthoring: record
-        ? unsettledAuthoring(record) && record.inputFingerprint !== inputFingerprint
-        : // The old inference, for a screen written before the ledger: a screen
-          // that carries a task and has every readable kind established is what
-          // a settled session leaves behind, so it is not re-bought.
-          unestablished.has(place.id) ||
-          (!located.has(place.id) &&
-            !input.authored?.resources?.[AUTHORED_SURFACE]?.some(
-              (candidate) => candidate.id === place.id && candidate.readables,
-            )),
+      needsAuthoring: moved || awaitsLiveLook,
+      awaitsLiveLook,
     }
   })
+}
+
+/** What a file that cannot be read records in place of a digest. */
+const MISSING_SOURCE = 'missing'
+
+/**
+ * Each repo-relative file's content digest, the way a ledger row records the
+ * source a session was grounded on. A file that cannot be read is recorded as
+ * missing, so its reappearance moves the row too.
+ */
+export function sourceDigests(repoRoot: string, files: readonly string[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const file of [...new Set(files)].sort()) {
+    try {
+      out[file] = crypto.createHash('sha256').update(fs.readFileSync(path.join(repoRoot, file))).digest('hex').slice(0, 16)
+    } catch {
+      out[file] = MISSING_SOURCE
+    }
+  }
+  return out
+}
+
+/**
+ * Whether a row's grounding moved: with `current` (the files the place is
+ * grounded on now), whether that set of files and their digests differs from
+ * the recorded one; without it, whether any recorded file reads differently
+ * now. No record against no current file moves nothing.
+ */
+export function sourcesMoved(
+  repoRoot: string,
+  sources: Readonly<Record<string, string>> | undefined,
+  current?: readonly string[],
+): boolean {
+  const recorded = sources ?? {}
+  const now = sourceDigests(repoRoot, current ?? Object.keys(recorded))
+  const files = Object.keys(now)
+  return files.length !== Object.keys(recorded).length || files.some((file) => recorded[file] !== now[file])
+}
+
+/**
+ * Whether a view the last context pass read has moved since
+ * (`authoringViews`): which components are shared may have changed, though no
+ * screen's own row says so. A file that recorded none moves nothing.
+ */
+export function authoringViewsMoved(repoRoot: string, authored: InterfacesFile | null): boolean {
+  return authored?.authoringViews !== undefined && sourcesMoved(repoRoot, authored.authoringViews)
+}
+
+/**
+ * Whether a run can look at this recipe's screens live: it declares a web
+ * surface to serve and the browser is installed. The cheap half of what
+ * standing the app up needs, and the half that decides whether a row
+ * authored from source alone is worth re-opening.
+ */
+export async function canObserveLiveScreens(recipe: Recipe | null | undefined): Promise<boolean> {
+  return recipe != null && resolveWebSurface(recipe) !== null && (await preflightBrowser()).ok
+}
+
+/**
+ * What decides whether a live world that would not come up would come up now:
+ * the whole recipe contract (install, build, services, the seed and the
+ * preparations) and the scripts it names. The app's own source is not folded:
+ * a world that fails on it is retried once the recipe moves or on a refresh.
+ */
+export function liveWorldInputs(repoRoot: string): string {
+  return recipeContractFingerprint(repoRoot)
+}
+
+/**
+ * Whether the last authoring run's live world failed under the recipe as it
+ * stands now (`liveUnavailable`): standing it up again would fail the same way.
+ */
+export function liveWorldFailed(repoRoot: string, authored: InterfacesFile | null): boolean {
+  return authored?.liveUnavailable !== undefined && authored.liveUnavailable.recipe === liveWorldInputs(repoRoot)
 }
 
 /** A row that never reached an accepted outcome — the two retryable words. */
@@ -113,8 +247,8 @@ export function unsettledAuthoring(record: InterfaceAuthoringRecord): boolean {
 
 /**
  * THE PER-SCREEN INPUT DIGEST — what decides whether a session for this screen
- * would produce something else, and therefore both when a failed screen retries
- * and what its cached fragment is keyed on. Four inputs, and the reasons the
+ * would produce something else, and therefore both when a screen is re-opened
+ * and (with its sources) what its cached fragment is keyed on. Four inputs, and the reasons the
  * rest are left out matter as much as the four:
  *
  *  - the STAGE VERSION, so a prompt fix that changes what a session should say
@@ -132,9 +266,9 @@ export function unsettledAuthoring(record: InterfaceAuthoringRecord): boolean {
  * work again forever. The peer-wide context (every screen's address, the state
  * registry) is absent for the neighbouring reason: it moves whenever ANY screen
  * is authored, which would re-key every screen for a change to somebody else.
- * And the screen's SOURCE is absent because it is not what re-opens the step —
- * the step's own key is the derived place set plus the contract — so folding it
- * here would promise a retry no run ever performs.
+ * And the screen's SOURCE is kept beside it rather than in it: the files are
+ * only known once the analyzer grounds the place, so the row records them with
+ * their digests ({@link sourceDigests}) and the check re-reads just those.
  */
 export function screenAuthoringFingerprint(input: {
   derived: InterfacesFile | null
@@ -151,7 +285,7 @@ function fingerprintOf(
 ): string {
   const own = derived.get(place.id) ?? place
   const nested = [...derived.values()]
-    .filter((candidate) => candidate.id !== own.id && screenOf(candidate.id, derived) === own.id)
+    .filter((candidate) => candidate.id !== own.id && rootPlaceOf(candidate.id, derived)?.id === own.id)
     .sort((a, b) => a.id.localeCompare(b.id))
   const material = {
     stage: `interface-author-v${INTERFACE_AUTHOR_STAGE_VERSION}`,
@@ -185,19 +319,6 @@ function derivedPlaceIndex(derived: InterfacesFile | null): Map<string, Interfac
   return new Map((derived?.resources?.[AUTHORED_SURFACE] ?? []).map((place) => [place.id, place]))
 }
 
-/** The screen a place sits on, walking `of` up; a screen resolves to itself. */
-function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): string | undefined {
-  const seen = new Set<string>()
-  let current: string | undefined = id
-  while (current && !seen.has(current)) {
-    seen.add(current)
-    const place: InterfaceResource | undefined = places.get(current)
-    if (!place) return undefined
-    if (place.kind === 'screen') return place.id
-    current = place.of
-  }
-  return undefined
-}
 
 /** The route a task starts at — its first navigate step, else its entry. */
 function routeOf(task: Pick<Interface, 'steps' | 'entry'>): string | undefined {

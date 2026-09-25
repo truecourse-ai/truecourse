@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
-import { join, resolve } from 'path'
-import type { FileAnalysis, DatabaseType, DatabaseInfo, DatabaseConnectionInfo, DatabaseDetectionResult, TableInfo, RelationInfo } from '@truecourse/shared'
+import { join, relative, resolve, sep } from 'path'
+import type { FileAnalysis, DatabaseType, DatabaseInfo, DatabaseConnectionInfo, DatabaseDetectionResult, TableInfo, RelationInfo, EnumInfo } from '@truecourse/shared'
 import { DATABASE_IMPORT_MAP, DOCKER_IMAGE_MAP } from './patterns/database-patterns.js'
 import { parsePrismaSchema } from './schema-parsers/prisma.js'
 import { parseEfCoreProject, type EfCoreProjectFile } from './schema-parsers/efcore.js'
@@ -13,6 +13,19 @@ interface DetectedDatabase {
   driver: string
   serviceName: string
   connectionEnvVar?: string
+}
+
+/** One datastore's parsed schema, and the files it was read from (repo-relative). */
+interface ParsedSchema {
+  tables: TableInfo[]
+  relations: RelationInfo[]
+  enums: EnumInfo[]
+  files: Set<string>
+}
+
+/** A file path relative to the repository root, `/`-separated. */
+function repoRelative(rootPath: string, file: string): string {
+  return relative(resolve(rootPath), resolve(file)).split(sep).join('/')
 }
 
 /** Model scope for C# files that belong to no detected service. */
@@ -87,7 +100,20 @@ export function detectDatabases(
   }
 
   // 4. Parse schema files for table/relation info
-  const schemaResults = new Map<DatabaseType, { tables: TableInfo[]; relations: RelationInfo[] }>()
+  const schemaResults = new Map<DatabaseType, ParsedSchema>()
+  /** Fold one parse into its datastore's schema, remembering the files it came from. */
+  const addSchema = (
+    dbType: DatabaseType,
+    parsed: { tables: TableInfo[]; relations: RelationInfo[]; enums?: EnumInfo[] },
+    files: readonly string[],
+  ): void => {
+    const existing = schemaResults.get(dbType) || { tables: [], relations: [], enums: [], files: new Set<string>() }
+    existing.tables.push(...parsed.tables)
+    existing.relations.push(...parsed.relations)
+    existing.enums.push(...(parsed.enums ?? []))
+    for (const file of files) existing.files.add(repoRelative(rootPath, file))
+    schemaResults.set(dbType, existing)
+  }
 
   // Prisma schemas
   const prismaFiles = findFiles(rootPath, 'schema.prisma', ['node_modules', '.git', 'dist'])
@@ -121,10 +147,7 @@ export function detectDatabases(
       }
     }
 
-    const existing = schemaResults.get(dbType) || { tables: [], relations: [] }
-    existing.tables.push(...result.tables)
-    existing.relations.push(...result.relations)
-    schemaResults.set(dbType, existing)
+    addSchema(dbType, result, [prismaFile])
   }
 
   // EF Core is a model-scoped ORM: DbContext declarations, entity classes,
@@ -200,10 +223,12 @@ export function detectDatabases(
       const dbType =
         result.dbType ?? (efProviderTypes.length === 1 ? efProviderTypes[0]! : null)
       if (dbType === null) continue
-      const existing = schemaResults.get(dbType) || { tables: [], relations: [] }
-      existing.tables.push(...result.tables)
-      existing.relations.push(...result.relations)
-      schemaResults.set(dbType, existing)
+      // The model is reconciled across its scope's files, so every one of them is a schema file.
+      addSchema(
+        dbType,
+        result,
+        efFiles.filter((file) => file.serviceName === result.serviceName).map((file) => file.filePath),
+      )
     }
   }
 
@@ -220,11 +245,7 @@ export function detectDatabases(
         const result = parser.parse(content)
         if (result.tables.length === 0) continue
 
-        const dbType = parser.detectDbType(content)
-        const existing = schemaResults.get(dbType) || { tables: [], relations: [] }
-        existing.tables.push(...result.tables)
-        existing.relations.push(...result.relations)
-        schemaResults.set(dbType, existing)
+        addSchema(parser.detectDbType(content), result, [analysis.filePath])
       } catch {
         // Skip files that can't be read
       }
@@ -249,6 +270,8 @@ export function detectDatabases(
       driver,
       tables: schema?.tables || [],
       relations: schema?.relations || [],
+      ...(schema && schema.enums.length > 0 ? { enums: schema.enums } : {}),
+      ...(schema && schema.files.size > 0 ? { schemaFiles: [...schema.files].sort() } : {}),
       connectedServices: Array.from(entry.services),
     })
 

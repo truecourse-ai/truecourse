@@ -35,13 +35,20 @@
  * later `db_query` that SELECTs a token back cannot leak it either.
  *
  * CACHE: author-class. KEEPS the `guard/seed` name; the key is the seed
- * step's own input fingerprint (recipe ∷ dependency catalog) + the prompt
- * fingerprint. The fresh-world PROOF always re-runs on hits — a cached script
- * is a draft to re-prove, never a proof.
+ * step's own input fingerprint (recipe contract ∷ dependency catalog ∷ the
+ * schema files the parsers read) + the stage version. The fresh-world PROOF always re-runs on
+ * hits — a cached script is a draft to re-prove, never a proof.
+ *
+ * COVERAGE: the seed builds a bounded coverage world from the product's DOMAIN
+ * (the schema the source-facts parsers read, and the files they read it from), not the minimum
+ * the recipe needs: one principal per kind of user the product has (the seed
+ * decides which, each described by what makes it distinct), relations at
+ * none / one / several, every enum value, visible flags both ways, and the
+ * state the app itself produces made by the app's own path. What it cannot
+ * satisfy comes back as `unmet`, notes on the step and never a failure.
  */
 
 import fs from 'node:fs';
-import { LEGACY_SEED_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -55,6 +62,7 @@ import {
 } from '@truecourse/agent-loop';
 import {
   SEED_CACHE_NAME,
+  SEED_STAGE_VERSION,
   SeedProvidesProposalSchema,
   buildSeedUserPrompt,
   connectionEnvVars,
@@ -92,8 +100,10 @@ import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { proveSeedFromColdClone } from './seed-cold-proof.js';
+import { outputTail, servicesController } from './services-lifecycle.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
+import { DEFAULT_WEB_PRINCIPAL } from '../interface-author/principals.js';
 import { isCreditsExhausted } from '@truecourse/shared';
 
 export const SEED_SESSION_KIND = 'guard-setup.seed';
@@ -212,31 +222,20 @@ export const SeedSessionOutcomeSchema = z
     /** Required (by the fold) for every declared credential; see the probe schema. */
     probes: z.record(z.string(), SeedCredentialProbeSchema).optional(),
     findings: z.array(z.string()),
+    /** Each coverage rule the seed could not satisfy, with why; omitted when every one is met. */
+    unmet: z
+      .array(z.object({ rule: z.string().min(1), reason: z.string().min(1) }).strict())
+      .optional(),
   })
   .strict();
 export type SeedSessionOutcome = z.infer<typeof SeedSessionOutcomeSchema>;
 
-/**
- * THE SEED STAGE'S VERSION, bumped by hand. A drafted seed that was proved by
- * execution is not made wrong by a reworded prompt; a prompt change that fixes
- * WRONG output bumps this in the same commit.
- */
-export const SEED_STAGE_VERSION = 1;
-
 /** `sha256(stage version :: the seed step's input fingerprint)` — the step
- *  fingerprint already folds the recipe contract and the catalog's identity. */
+ *  fingerprint already folds the recipe contract, the catalog's identity and
+ *  the schema files the parsers read. */
 export function seedSessionCacheKey(stepFingerprint: string): string {
   return createHash('sha256')
     .update(`seed-v${SEED_STAGE_VERSION}::${stepFingerprint}`)
-    .digest('hex');
-}
-
-/** {@link seedSessionCacheKey} as it was computed while the prompt was in it —
- *  the key a miss falls back to, over the step's OLD fingerprint. Delete with
- *  the legacy hash. */
-export function seedSessionLegacyCacheKey(legacyStepFingerprint: string): string {
-  return createHash('sha256')
-    .update(`${LEGACY_SEED_SESSION_PROMPT_FINGERPRINT}::${legacyStepFingerprint}`)
     .digest('hex');
 }
 
@@ -262,7 +261,7 @@ export function seedScriptTargetPath(input: {
  *  turn's cost — shape problems that become silent 401s at run time. */
 export function providesWarnings(
   provides: SeedProvidesProposal,
-  input: Pick<GuardSetupSeedSessionInput, 'securitySchemes' | 'roles' | 'requiredResources'>,
+  input: Pick<GuardSetupSeedSessionInput, 'securitySchemes' | 'requiredResources'>,
 ): string[] {
   const warnings: string[] = [];
   // The route surface's resources with no fixture that looks like one of them —
@@ -288,6 +287,11 @@ export function providesWarnings(
         `credential "${name}" satisfies "${cred.satisfies}", which is not a declared security scheme — the write path DROPS an unknown \`satisfies\` (declared: ${[...known].join(', ') || '(none)'})`,
       );
     }
+    if (cred.header.toLowerCase() === 'cookie' && !cred.description) {
+      warnings.push(
+        `credential "${name}" is a web session with no \`description\` — say who this user is and what makes it distinct: authoring chooses whom to observe and act as from it`,
+      );
+    }
     if (cred.header.toLowerCase() === 'authorization') {
       warnings.push(
         `credential "${name}" is injected as the Authorization header — its manifest value must carry the full header value (e.g. \`Bearer <token>\`); the runner adds no prefix`,
@@ -297,11 +301,6 @@ export function providesWarnings(
   if (credentials.length === 0 && input.securitySchemes.length > 0) {
     warnings.push(
       'no credentials declared while the API declares security schemes — omit credentials only when the API truly has no authentication',
-    );
-  }
-  if (input.roles.length > 0 && credentials.length < input.roles.length) {
-    warnings.push(
-      `${input.roles.length} role(s) were detected (${input.roles.map((r) => r.name).join(', ')}) but only ${credentials.length} credential(s) are declared — the doctrine is one principal per role`,
     );
   }
   return warnings;
@@ -329,10 +328,10 @@ export interface RequiredPrincipalSurface {
  * nothing, so a genuinely open API still passes with a fixtures-only seed.
  *  - `api` authenticates when the corpus declares security schemes.
  *  - `web` (only when the recipe prepares a `web` surface) authenticates when
- *    the schema holds login principals, or schemes/roles say the app does.
+ *    the schema holds login principals, or declared schemes say the app does.
  */
 export function requiredPrincipalSurfaces(
-  input: Pick<GuardSetupSeedSessionInput, 'recipe' | 'database' | 'securitySchemes' | 'roles' | 'apiAuthEvidence'>,
+  input: Pick<GuardSetupSeedSessionInput, 'recipe' | 'database' | 'securitySchemes' | 'apiAuthEvidence'>,
 ): RequiredPrincipalSurface[] {
   const out: RequiredPrincipalSurface[] = [];
   const schemeNames = input.securitySchemes.map((s) => s.name).join(', ');
@@ -357,9 +356,7 @@ export function requiredPrincipalSurfaces(
         ? `the schema holds login principals (${loginTables.join(', ')})`
         : input.securitySchemes.length > 0
           ? `the corpus declares security schemes (${schemeNames})`
-          : input.roles.length > 0
-            ? `role(s) were detected (${input.roles.map((r) => r.name).join(', ')})`
-            : null;
+          : null;
     if (why !== null) out.push({ surface: 'web', why });
   }
   return out;
@@ -562,7 +559,7 @@ export function existingSeedMachinery(repoRoot: string): { path: string; excerpt
 }
 
 /** The opening message: the one-shot draft's grounding (verbatim — the same
- *  schema/route/scheme/role rendering), plus the session-specific facts. */
+ *  schema/route/scheme rendering), plus the session-specific facts. */
 export function seedSessionBriefing(world: SeedSessionWorld): string {
   const { input } = world;
   const catalog = loadDependencyCatalog(input.repoRoot);
@@ -571,13 +568,14 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     databaseType: input.database.type,
     tables: input.database.tables,
     relations: input.database.relations,
+    ...(input.database.enums ? { enums: input.database.enums } : {}),
+    ...(input.database.schemaFiles ? { schemaFiles: input.database.schemaFiles } : {}),
     connectionEnv: connectionEnvVars(input.recipe),
     appImports: input.database.appImports,
     blocked: [],
     ...(input.routes.length > 0 ? { routes: input.routes } : {}),
     ...(input.securitySchemes.length > 0 ? { securitySchemes: input.securitySchemes } : {}),
     ...(input.apiAuthEvidence && input.apiAuthEvidence.length > 0 ? { apiAuthEvidence: input.apiAuthEvidence } : {}),
-    ...(input.roles.length > 0 ? { roles: input.roles } : {}),
     ...(input.specExcerpts.length > 0 ? { specExcerpts: input.specExcerpts } : {}),
     ...(input.existingScript ? { replacing: input.existingScript } : {}),
     ecosystem: input.ecosystem,
@@ -592,6 +590,7 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     ...requiredSurfaceLines(input),
     ...probeCandidateLines(input),
     ...requiredResourceLines(input),
+    ...coverageLines(requiredPrincipalSurfaces(input).some((r) => r.surface === 'web')),
     '',
     '## The dependency catalog (scenarios/dependencies.json)',
     catalog.dependencies.length === 0
@@ -615,7 +614,7 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     '',
     grounding,
     '',
-    'Work loop: PRINCIPALS FIRST — your first `run_seed_draft` must already mint and probe every principal the "Runnable surfaces" section above requires, with only the rows they need; grow the fixtures in later drafts (a draft omitting a required principal is refused without running, and a budget death only salvages what has verified). Draft EARLY, iterate from real errors. Read only what the briefing above does not already answer, then `check_provides` for the free shape check and `run_seed_draft` to PROVE the draft (idempotence included: run it twice — the second run against the rows the first left behind is the real test). For every credential you mint, the same call must declare `probes` — per credential, an endpoint that REQUIRES it; the engine sends the minted value verbatim and also checks the same request is refused without it. Then produce the outcome `{script, command, provides, probes, findings}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty.',
+    'Work loop: PRINCIPALS FIRST — your first `run_seed_draft` must already mint and probe every principal the "Runnable surfaces" section above requires, with only the rows they need; grow the fixtures in later drafts (a draft omitting a required principal is refused without running, and a budget death only salvages what has verified). Draft EARLY, iterate from real errors. Read only what the briefing above does not already answer, then `check_provides` for the free shape check and `run_seed_draft` to PROVE the draft (idempotence included: run it twice — the second run against the rows the first left behind is the real test). For every credential you mint, the same call must declare `probes` — per credential, an endpoint that REQUIRES it; the engine sends the minted value verbatim and also checks the same request is refused without it. Then grow the coverage world draft by draft, and produce the outcome `{script, command, provides, probes, findings, unmet}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty. `unmet` names each coverage rule the seed does not satisfy, as `{rule, reason}`; omit it when every one is met.',
   ];
   return lines.join('\n');
 }
@@ -633,7 +632,7 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
   const lines = ['', '## Runnable surfaces — the principals this seed must mint'];
   if (required.length === 0) {
     lines.push(
-      'No security schemes, login tables or roles were detected. If the app truly has no authentication, a fixtures-only seed passes; if you FIND authentication while reading, mint the principal anyway.',
+      'No security schemes or login tables were detected. If the app truly has no authentication, a fixtures-only seed passes; if you FIND authentication while reading, mint the principal anyway.',
     );
     return lines;
   }
@@ -646,14 +645,41 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
       lines.push(
         `- **web** — ${r.why}, and the recipe prepares a web surface (\`${(input.recipe.web?.serve ?? []).join(' ')}\`). Mint a principal that can SIGN IN to the web UI:`,
         `  1. create the user with a KNOWN password and publish the login fields as a FIXTURE (e.g. \`webUser\` with \`email\` + \`password\`) — web scenarios fill the login form with \`{{fixture:webUser.email}}\` / \`{{fixture:webUser.password}}\`;`,
-        `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as a credential (\`header: "Cookie"\`);`,
+        `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as the credential \`${DEFAULT_WEB_PRINCIPAL}\` (\`header: "Cookie"\`), with a \`description\` as the Coverage section asks;`,
         `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page);`,
         `  4. when the login endpoint pairs a body token with a cookie (a CSRF double-submit — the login route compares \`body.csrfToken\` to a cookie a mint route set), add \`"csrf": {"path": "/<the csrf mint route>"}\` to the \`login\` block — the engine GETs it fresh before each login POST, carries its cookies, and injects the token into the body. NEVER publish a csrf token as a fixture: it is minted per exchange, and a static one can never validate.`,
         `  5. also create a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` (same login fields, its own stable email); credential-mutation tests burn it. It needs no credential and no probe, and a draft that omits it is refused without running.`,
+        `  6. then mint the other principals the "Coverage" section below asks for, each signed in and proven the same way as this one.`,
       );
     }
   }
   return lines;
+}
+
+/**
+ * The briefing's coverage section: the rules that turn the domain into a
+ * bounded world (one instance per rule, never the cross product), the
+ * principals the seed derives from it, and what counts as unmet. `web` says
+ * the principals sign in to the web surface, as web sessions.
+ */
+export function coverageLines(web: boolean): string[] {
+  return [
+    '',
+    '## Coverage: the world the screens and tests explore',
+    'Seed more than the minimum the principals need. The interface catalog is authored LIVE against this world right after the seed, and a screen shows only what the world holds. Build it from the domain: the SCHEMA below (its tables, enums, relations) and the schema files it names, BOUNDED: one instance per rule, never every combination.',
+    `- PRINCIPALS: decide which KINDS OF USER this product has, from the schema (role and permission columns, ownership and membership tables, subscription, verification and sign-in-method state) and from the auth guards in its source (read the middleware, the route guards and the page-level redirects that decide who may see or do what). Mint ONE principal per distinct kind that changes what a user can see or do, and no two of the same kind; a user who owns nothing is a kind when the app shows it something different (its empty states). The owner of the seeded data is the principal above, \`${DEFAULT_WEB_PRINCIPAL}\`.` +
+      (web
+        ? ` Each other one signs in like it: its login fields as a fixture and its web session as a credential named for its kind (\`<kind>WebSession\`, \`header: "Cookie"\`), probed with its own \`login\` block on a page that kind may load.`
+        : '') +
+      ` EVERY principal's credential carries \`description\`: one line saying who this user is and what makes it distinct from the others (its role, what it owns or shares, its state), in the app's own terms — the interface authoring that follows chooses whom to observe each screen as, and whom each task runs as, from these descriptions alone.`,
+    '- RELATIONS at none, one and several where a list could look different: several (3 or more) of every entity a user lists, a many-to-many with at least 2 on one side (a project with 2 or more members), a child under a parent where the model nests (a folder inside a folder, a reply to a comment), and a record one principal shares with another where the app shares records. A user who owns nothing is the "none".',
+    '- Every ENUM or status value at least once, and every user-visible BOOLEAN flag both ways (an enabled and a disabled record, a completed and an open one).',
+    '- Every nullable user-visible field both filled and null, once each (a record with a description and one without, a user with a photo and one without).',
+    '- Skip tables no user sees (audit logs, internal job queues, sessions beyond the principals\'): that is your call.',
+    '- STATE THE APP PRODUCES (the output of a background job, a processed or uploaded file, a generated report or export) is produced by the app\'s own code: the seed runs once the services are up and before any server boots, so no server of the app is running and none of its routes can be called. Import and call the module that does the work (the job\'s handler, the worker\'s processor, the service function the route calls) from the seed, and wait for it to finish, then prove it by execution like every fixture. Never by inserting its rows alone. When the app\'s code cannot be driven from the seed (it needs a running server, or a service the recipe does not start), it is unmet.',
+    '- Publish the ids and handles scenarios will reference as fixture fields, as for the resources above.',
+    'Name every rule the seed does not satisfy in the outcome\'s `unmet`, one `{rule, reason}` each (a principal the domain has no concept of, a state the app cannot produce here). An unmet rule is a note on the step, never a failure. State held by an external service (payments, an OAuth provider) and feature flags are unmet: they belong to the recipe, not the seed.',
+  ];
 }
 
 /** The briefing's candidate-probe section: confirming a probe is a LOOKUP. */
@@ -1318,47 +1344,6 @@ export interface BuildSeedSessionOptions {
   coldProof?: boolean;
 }
 
-/** One `api.services` lifecycle handle — up/down/reset through `runBuild`,
- *  exactly as `verifyProposal` runs them, teardown always safe to call twice.
- *
- *  The FIRST bring-up wipes when the tree carries the world-dirty marker: the
- *  compose project is named after the repository, so one shared world outlives
- *  every job of it, and a run that was cancelled or crashed mid-scenario left
- *  its rows behind for this setup's baseline assertions to inherit. */
-function servicesController(repoRoot: string, recipe: Recipe, signal?: AbortSignal) {
-  const services = recipe.api?.services;
-  let up = false;
-  return {
-    async up(): Promise<void> {
-      if (!services) return;
-      const marker = guardWorldDirtyMarkerPath(repoRoot);
-      if (services.reset && fs.existsSync(marker)) {
-        await runBuild(repoRoot, services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
-        fs.rmSync(marker, { force: true });
-      }
-      const result = await runBuild(repoRoot, services.up, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
-      if (!result.ok) {
-        throw new Error(
-          `\`${services.up}\` failed${result.timedOut ? ' (timed out)' : ''}: ${tail(result.output)}`,
-        );
-      }
-      up = true;
-    },
-    async down(): Promise<void> {
-      if (!services?.down || !up) return;
-      up = false;
-      await runBuild(repoRoot, services.down, recipe.env, DEFAULT_BUILD_TIMEOUT_MS);
-    },
-    /** The wipe (`down -v`), when the recipe declares one; a no-op otherwise.
-     *  Best-effort: a reset that fails is not a verdict, the `up` after it is. */
-    async reset(): Promise<void> {
-      if (!services?.reset) return;
-      up = false;
-      await runBuild(repoRoot, services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, signal);
-    },
-  };
-}
-
 /**
  * The `GuardSetupSeedSession` the command adapter injects. One session,
  * concurrency 1. The fold runs here after the outcome — on cache hits too,
@@ -1426,7 +1411,7 @@ export function buildSeedSession(
       if (!built.ok) {
         return {
           status: 'failed',
-          reason: `the recipe \`build\` failed${built.timedOut ? ' (timed out)' : ''}: ${tail(built.output)}`,
+          reason: `the recipe \`build\` failed${built.timedOut ? ' (timed out)' : ''}: ${outputTail(built.output)}`,
         };
       }
     }
@@ -1447,7 +1432,7 @@ export function buildSeedSession(
       if (!built.ok) {
         return {
           status: 'failed',
-          reason: `the recipe \`web.build\` failed${built.timedOut ? ' (timed out)' : ''}: ${tail(built.output)}`,
+          reason: `the recipe \`web.build\` failed${built.timedOut ? ' (timed out)' : ''}: ${outputTail(built.output)}`,
         };
       }
     }
@@ -1457,7 +1442,6 @@ export function buildSeedSession(
         repoRoot: input.repoRoot,
         cacheName: SEED_CACHE_NAME,
         key: seedSessionCacheKey(input.fingerprint),
-        legacyKeys: [seedSessionLegacyCacheKey(input.legacyFingerprint)],
         schema: SeedSessionOutcomeSchema,
         run: async () => {
           const { driver, persistence } = await context.acquire();
@@ -1557,6 +1541,7 @@ export function buildSeedSession(
         ...(outcome.fromCache ? { fromCache: true } : {}),
         ...(world.salvaged ? { salvaged: true } : {}),
         ...(folded.coldProofSkipped ? { coldProofSkipped: folded.coldProofSkipped } : {}),
+        ...(outcome.output.unmet && outcome.output.unmet.length > 0 ? { unmet: outcome.output.unmet } : {}),
       };
     } catch (error) {
       // An empty balance did not refuse the seed — it refused to buy one. The
@@ -1762,10 +1747,6 @@ function clip(text: string): string {
   return `… (${text.length - MAX_TOOL_OUTPUT_CHARS} chars clipped)\n${text.slice(-MAX_TOOL_OUTPUT_CHARS)}`;
 }
 
-function tail(output: string): string {
-  return output.trimEnd().split('\n').slice(-5).join(' / ');
-}
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -1785,10 +1766,10 @@ Data and auth are ONE artifact on purpose: a login token cannot be minted withou
 - PRINCIPALS FIRST, FIXTURES SECOND: mint and probe every principal the briefing's "Runnable surfaces" section requires in your FIRST draft, with only the rows they need; grow fixtures afterwards. \`run_seed_draft\` refuses a draft that omits a required principal, so nothing without them can verify — a budget death before they exist salvages nothing, while one after keeps them.
 - AN API PRINCIPAL IS REQUIRED BY EVIDENCE, NOT BY DOC FORMAT: when the briefing's "Runnable surfaces" names \`api\` — a declared scheme, a credential header on a mapped operation, a token table in the schema, or docs describing a bearer/api-key header — mint the API credential the way the app issues it (its own token-issuing service or the row + hash its verifier reads), scoped to the seeded principal's team/organisation when the app scopes tokens, and publish it with the exact header value the verifier expects. A web session cookie is NOT an api principal: the API refuses it.
 - SEED THE RESOURCES THE ROUTES REFERENCE: the briefing lists the resources the route surface takes by id or handle. Create ONE of each through the app's own service path, owned by the seeded principal, and publish its id and handles as fixture fields — a flow that reads, updates or acts on an existing record has nothing to act on otherwise. A resource that needs a real artifact (a document needs a PDF) still has a service path: write the artifact the way the app's own tests do and call the app's create function.
-- Principals: one per role the app actually distinguishes; mint the secret the way the APP would (its own token issuance, or the same signing secret and algorithm it verifies with); the value must survive the seed process (stateless token or a session row — a secret held in memory authenticates nothing); the header value is injected VERBATIM ("Bearer <token>" ONLY if that is what the API's own verifier expects — read the verifier, do not assume the prefix).
+- Principals: one per kind of user the briefing's Coverage section has you decide; mint the secret the way the APP would (its own token issuance, or the same signing secret and algorithm it verifies with); the value must survive the seed process (stateless token or a session row — a secret held in memory authenticates nothing); the header value is injected VERBATIM ("Bearer <token>" ONLY if that is what the API's own verifier expects — read the verifier, do not assume the prefix).
 - A WEB SURFACE AUTHENTICATES BY SESSION, NOT HEADER: when the briefing requires a web principal, create the user with a known password and publish the login fields as a FIXTURE (scenarios fill the login form from them), mint a DURABLE session the app's own validator accepts, publish its full Cookie header value as a credential, and probe it with \`{"surface": "web", "path": …, "login": {…}}\` — the engine proves the LOGIN (the app's own JSON login endpoint must accept the published fixture values and refuse a corrupted password) and then the authenticated page load, refused anonymously (401/403 or a login redirect). The login proof is what catches a secret the world stored under an earlier run: a cookie that validates proves nothing about the password the fixture advertises. A login endpoint that pairs a body token with a cookie (CSRF double-submit) takes \`"csrf": {"path": "/<mint route>"}\` inside \`login\` — the engine runs the two-step itself; never publish a csrf token as a fixture, a static one can never validate.
 - IDEMPOTENCE CONVERGES SECRETS: an exists path that merely skips creation leaves an OLDER run's password live while your manifest publishes a new one — look up AND update the secret (with the app's own hashing) so the published value is always the live one; the login probe refuses exactly this drift.
-- MINT A SACRIFICIAL PRINCIPAL whenever the briefing requires a web principal — it is a requirement, not a judgement call, and a draft without it is refused before it runs: one extra sign-in-capable user beside the role principals, published as the fixture \`sacrificialUser\` with the same login fields as the primary web principal and its own stable email, its description stating it is DISPOSABLE. Credential-mutation tests (password change, session revocation, account deletion) burn IT instead of a shared principal, and your converging exists path restores it every run — without one, those tests have only the shared principal to mutate, and one such mutation once locked an entire run out of sign-in. No credential or probe needed: it is a fixture, and scenarios log in through the form.
+- MINT A SACRIFICIAL PRINCIPAL whenever the briefing requires a web principal — it is a requirement, not a judgement call, and a draft without it is refused before it runs: one extra sign-in-capable user beside the other principals, published as the fixture \`sacrificialUser\` with the same login fields as the primary web principal and its own stable email, its description stating it is DISPOSABLE. Credential-mutation tests (password change, session revocation, account deletion) burn IT instead of a shared principal, and your converging exists path restores it every run — without one, those tests have only the shared principal to mutate, and one such mutation once locked an entire run out of sign-in. No credential or probe needed: it is a fixture, and scenarios log in through the form.
 - CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one endpoint that REQUIRES it. The engine boots the credential's surface, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Probe endpoints are a LOOKUP, not a search: the briefing lists spec-derived candidates whose security requires a scheme — confirm one; do not spend turns hunting the route surface.
 
 # Your tools

@@ -157,6 +157,7 @@ const KIND_WORD: Record<InterfaceResourceKind, string> = {
   screen: 'screen',
   dialog: 'dialog',
   panel: 'panel',
+  component: 'shared component',
   'command-group': 'command group',
   'rest-noun': 'endpoint',
 };

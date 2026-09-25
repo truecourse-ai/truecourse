@@ -734,6 +734,7 @@ describe('guard-generator prompts', () => {
       sectionKeys: ['sha256:section'],
       assignmentFingerprints: [],
       interfaceFingerprints: ['sha256:interface'],
+      hasScenario: true,
       prerequisiteMaterial: '',
       prerequisiteShape: '',
       recipeSlice: 'slice',
@@ -1291,8 +1292,10 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# THE LOCATOR POLICY')
     // Role + accessible name primary, the five alternates, and the exclusions.
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('role + accessible name')
-    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('NO CSS selectors, NO XPath, NO test ids')
-    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"pick": "first"')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('NO XPath, NO test ids, and NO CSS selector of your own')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"pick"')
+    // A plan target that is already a JSON locator (css, pick, any handle) is copied verbatim.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('`{ "driver": "web", "click": { "css": "button[data-testid=\"sort\"]" } }`')
     // The translation rule — realization lines become locators, one worked example.
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('click: button "Add Repository"')
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"click": { "role": "button", "name": "Add Repository" }')
@@ -1321,7 +1324,9 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // near 131K chars; named under `definitions` the whole prompt stays bounded.
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"definitions"')
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('#/definitions/webLocator')
-    expect(GENERATE_WEB_SYSTEM_PROMPT.length).toBeLessThan(40_000)
+    // The css member, the numeric pick and the named scope grew it ~1.9K past 39K,
+    // and the press and hover verbs with their plan translations ~1.6K more.
+    expect(GENERATE_WEB_SYSTEM_PROMPT.length).toBeLessThan(45_000)
   })
 
   it('GENERATE_WEB_PROMPT_FINGERPRINT is pinned — and the cli/api pins did not move with the arm', () => {
@@ -1334,8 +1339,13 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // (the login form is for flows ABOUT signing in).
     // Native selection and named-container scopes change the authored vocabulary.
     // Verified preparation profiles also change the browser authoring schema.
+    // The non-canonical `css` member and the positional `pick` change it again.
+    // A task's `principal` (a credential to sign in with, or none) moves it once more.
+    // A library-neutral `css` example replaced an icon-font one.
+    // The press and hover verbs, and the press/hover/upload plan translations.
+    // The plan's `performed as` / `signed out` lines name a task's principal.
     // Regex flags moved into a `flags` field beside `matches`.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('81ec5e8b98031267')
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('c2501c2312c5c27b')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {

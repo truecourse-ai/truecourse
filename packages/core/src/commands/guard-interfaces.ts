@@ -21,6 +21,7 @@
 
 import {
   appendInterfaceFindings,
+  writeNonCanonicalLocators,
   authorWebInterfaces,
   planWorkItems,
   reconcileAuthoredStates,
@@ -28,6 +29,7 @@ import {
   StateReconcileResponseSchema,
   type AuthorProgress,
   type AuthorRunResult,
+  type LiveScreens,
   type PlaceResult,
   type ReconcileComplete,
   type StateReconciliation,
@@ -35,7 +37,7 @@ import {
 import {
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
-  recipeContractFingerprint,
+  authoringRecipeContract,
 } from '@truecourse/guard-runner';
 import { CreditsExhaustedError, isCreditsPauseFailure } from '@truecourse/shared';
 import type { SessionDriver, SessionEvent, SessionPersistence } from '@truecourse/agent-loop';
@@ -79,7 +81,7 @@ export function readGuardInterfacesAuthorView(repoRoot: string): GuardInterfaces
   const derived = readInterfaceCatalog(repoRoot);
   const authored = readAuthoredInterfaceCatalog(repoRoot);
   return {
-    places: planWorkItems(derived, authored, recipeContractFingerprint(repoRoot, 'seed')).map((item) => ({
+    places: planWorkItems(derived, authored, authoringRecipeContract(repoRoot), { repoRoot }).map((item) => ({
       id: item.place.id,
       kind: item.place.kind,
       title: item.place.title,
@@ -126,6 +128,8 @@ export interface RunGuardInterfaceAuthorOptions {
   sessionsKey?: string;
   /** Reuse the caller's run and persistence; the caller owns its lifecycle. */
   sessionRun?: Pick<SessionRunStore, 'runId' | 'dir' | 'persistence'>;
+  /** Stands up the running app the sessions may observe, on a cache miss; the caller tears it down. */
+  openLive?: () => Promise<LiveScreens | undefined>;
   signal?: AbortSignal;
   onProgress?: (event: AuthorProgress) => void;
   onSessionEvent?: (placeId: string, event: SessionEvent) => void;
@@ -205,12 +209,13 @@ export async function runGuardInterfaceAuthoring(
 
     // The GROUNDING, once per run and amortised over every place in it:
     // the route module of each place, the modules it renders, and the api effects
-    // its requests join to. One analyzer pass, so the sessions read instead of
+    // its requests join to — and the shared components several screens render. One analyzer pass, so the sessions read instead of
     // rediscovering. It degrades to nothing rather than failing the run.
     opts.onStatus?.('reading the working tree');
     const context = await deriveWebAuthoringContext(repoRoot, { catalog: readInterfaceCatalog(repoRoot) });
     opts.onStatus?.(
-      `context: ${context.contexts.size} place(s) grounded from ${context.files} file(s) in ${context.seconds}s`,
+      `context: ${context.contexts.size} place(s) grounded from ${context.files} file(s) in ${context.seconds}s` +
+        (context.shared.length > 0 ? `, ${context.shared.length} shared component(s)` : ''),
     );
 
     const result = await authorWebInterfaces({
@@ -218,6 +223,8 @@ export async function runGuardInterfaceAuthoring(
       driver,
       persistence: run.persistence,
       context: context.contexts,
+      shared: { components: context.shared, rendered: context.sharedRendered },
+      ...(opts.openLive ? { openLive: opts.openLive } : {}),
       ...(opts.places ? { places: opts.places } : {}),
       ...(opts.replace !== undefined ? { replace: opts.replace } : {}),
       ...(opts.refresh !== undefined ? { refresh: opts.refresh } : {}),
@@ -251,6 +258,10 @@ export async function runGuardInterfaceAuthoring(
         complete: stateReconcileComplete(driver, run.persistence, opts.signal),
       });
     }
+
+    // THE NON-CANONICAL RECORD: every step that needed `css`, regenerated from
+    // the catalog as it now stands, beside the findings it is reported with.
+    writeNonCanonicalLocators(repoRoot);
 
     ownedRun?.finish(runStatus(result.places, opts.signal));
     return {

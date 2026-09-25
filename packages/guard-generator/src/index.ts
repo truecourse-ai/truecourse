@@ -281,7 +281,6 @@ export {
 
 export {
   seedDraftGate,
-  detectRoleColumns,
   principalShapedTables,
   readExistingSeedScript,
   connectionEnvVars,
@@ -290,6 +289,7 @@ export {
   resolveScriptPath,
   writeSeedArtifacts,
   SEED_CACHE_NAME,
+  SEED_STAGE_VERSION,
   type DraftSeedResult,
   type SeedBlockedFlow,
   type SeedDraftDatabase,
@@ -306,6 +306,10 @@ export {
   interfacesFingerprint,
   legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  engineSeedRedraftDue,
+  recordedSchemaFiles,
+  schemaFilesFingerprint,
+  type StepObservations,
   legacySeedStepFingerprint,
   authFingerprint,
   settledSteps,
@@ -328,6 +332,7 @@ export {
   type GuardSetupSeedSession,
   type GuardSetupSeedSessionInput,
   type GuardSetupSeedSessionResult,
+  type SeedUnmetRule,
   type GuardSetupAuthStep,
   type GuardSetupAuthStepInput,
   type GuardSetupAuthStepResult,
@@ -519,6 +524,7 @@ export {
   quoteInvalidOutput,
   flattenZodError,
   scenarioCompositionDefect,
+  unprovenCssLocatorDefect,
   cliCompositionDefect,
   apiCompositionDefect,
 } from './validate.js'

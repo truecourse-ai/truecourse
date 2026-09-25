@@ -34,12 +34,17 @@ import {
   InterfaceResourceIdSchema,
   InterfaceResourceSchema,
   InterfaceActivateStepSchema,
+  InterfaceHoverStepSchema,
   InterfaceInputStepSchema,
   InterfaceNavigateStepSchema,
+  InterfacePressStepSchema,
+  InterfaceUploadStepSchema,
   InterfaceStateIdSchema,
   InterfaceStateSchema,
   InterfacesFileSchema,
+  INTERFACE_READABLE_KINDS,
   resolvedInterfaceFingerprint,
+  rootPlaceOf,
   type Interface,
   type InterfaceResource,
   type InterfaceState,
@@ -50,15 +55,12 @@ import { mergeInterfaceCatalogs } from '@truecourse/guard-runner'
 /** The surface this pass authors. Web is the only one nothing derives. */
 export const AUTHORED_SURFACE = 'web'
 
-/** What a place has to answer for before the write path accepts it. */
-const READABLE_KINDS = ['markers', 'elements', 'controls', 'rows'] as const
-
 /** `web/<kebab-slug>` — the id shape every authored task is held to. */
 const AUTHORED_ID = /^web\/[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 /**
- * The steps a web task is made of — the three web members of the shared step
- * vocabulary. `invoke` and `request` are the cli and api members: a web task
+ * The steps a web task is made of — the web members of the shared step
+ * vocabulary: navigate, input, activate, press, hover and upload. `invoke` and `request` are the cli and api members: a web task
  * that wanted one would be describing another surface's interface, and the
  * closed union says so at parse time rather than in a review comment. It also
  * keeps the outcome schema a driver renders down to what a web task can be,
@@ -68,6 +70,9 @@ export const AuthoredWebStepSchema = z.discriminatedUnion('kind', [
   InterfaceNavigateStepSchema,
   InterfaceInputStepSchema,
   InterfaceActivateStepSchema,
+  InterfacePressStepSchema,
+  InterfaceHoverStepSchema,
+  InterfaceUploadStepSchema,
 ])
 export type AuthoredWebStep = z.infer<typeof AuthoredWebStepSchema>
 
@@ -95,16 +100,22 @@ export const AuthoredTaskSchema = z
     endState: InterfaceStateIdSchema.optional(),
     at: InterfaceResourceIdSchema.optional(),
     to: InterfaceResourceIdSchema.optional(),
+    /**
+     * Who performs it: a seeded credential's name, or `anonymous` for a task
+     * done signed out. The session omits it for the default principal, and
+     * `check_draft` records the default's name in its place on a live world.
+     */
+    principal: z.string().min(1).optional(),
     /** Api interface ids this task's steps reach, `[]` when it reaches none. */
     apiEffects: z.array(z.string().min(1)).optional(),
   })
   .strict()
 export type AuthoredTask = z.infer<typeof AuthoredTaskSchema>
 
-/** A new place or an enrichment of this screen and its nested places. */
+/** A new place or an enrichment of this screen (or shared component) and its nested places. */
 export const AuthoredPlaceSchema = InterfaceResourceSchema.refine(
-  (place) => place.kind === 'screen' || place.kind === 'panel' || place.kind === 'dialog',
-  { path: ['kind'], message: 'web authoring declares screens, panels and dialogs only' },
+  (place) => place.kind === 'screen' || place.kind === 'component' || place.kind === 'panel' || place.kind === 'dialog',
+  { path: ['kind'], message: 'web authoring declares screens, shared components, panels and dialogs only' },
 )
 export type AuthoredPlace = z.infer<typeof AuthoredPlaceSchema>
 
@@ -129,7 +140,15 @@ export type AuthoredPlace = z.infer<typeof AuthoredPlaceSchema>
  */
 export const AuthoredFragmentSchema = z
   .object({
+    /** New tasks, and this screen's existing tasks AMENDED under their own ids. */
     interfaces: z.array(AuthoredTaskSchema),
+    /**
+     * Ids of this screen's existing tasks that stand exactly as they are. Kept
+     * tasks are not re-sent: the catalog keeps them byte for byte.
+     */
+    kept: z.array(z.string().min(1)).optional(),
+    /** This screen's existing tasks that no longer exist in the source, each with why. */
+    retired: z.array(z.object({ id: z.string().min(1), reason: z.string().min(1) }).strict()).optional(),
     states: z.array(InterfaceStateSchema).optional(),
     resources: z.array(AuthoredPlaceSchema).optional(),
     /** What the reading could not settle, one line each — never a guess. */
@@ -147,14 +166,20 @@ export const EMPTY_FRAGMENT: AuthoredFragment = { interfaces: [] }
  * Lay a freshly checked piece over the draft a session already has accepted.
  * A piece names what it is about and nothing else, so an id it re-sends is a
  * CORRECTION of that entry and an id it omits is left exactly as it was — which
- * is what lets a session fix one locator without resending the catalog.
+ * is what lets a session fix one locator without resending the catalog. The
+ * same goes for a decision about an existing task: the piece's word on an id
+ * (kept, retired, or amended by re-sending it) replaces the draft's earlier one.
  */
 export function foldAuthoredFragment(
   base: AuthoredFragment,
   addition: AuthoredFragment,
 ): AuthoredFragment {
+  const decided = new Set([...(addition.kept ?? []), ...(addition.retired ?? []).map((entry) => entry.id)])
+  const restated = new Set([...decided, ...addition.interfaces.map((task) => task.id)])
   return collapseAuthoredIds({
-    interfaces: [...base.interfaces, ...addition.interfaces],
+    interfaces: [...base.interfaces.filter((task) => !decided.has(task.id)), ...addition.interfaces],
+    kept: [...(base.kept ?? []).filter((id) => !restated.has(id)), ...(addition.kept ?? [])],
+    retired: [...(base.retired ?? []).filter((entry) => !restated.has(entry.id)), ...(addition.retired ?? [])],
     states: [...(base.states ?? []), ...(addition.states ?? [])],
     resources: [...(base.resources ?? []), ...(addition.resources ?? [])],
     unresolved: [...(base.unresolved ?? []), ...(addition.unresolved ?? [])],
@@ -204,8 +229,12 @@ export function collapseAuthoredIds(fragment: AuthoredFragment): AuthoredFragmen
   const lines = (values: readonly string[] | undefined): string[] => [...new Set(values ?? [])]
   const unresolved = lines(fragment.unresolved)
   const findings = lines(fragment.findings)
+  const kept = lines(fragment.kept)
+  const retired = [...new Map((fragment.retired ?? []).map((entry) => [entry.id, entry])).values()]
   return {
     interfaces: [...interfaces.values()],
+    ...(kept.length > 0 ? { kept } : {}),
+    ...(retired.length > 0 ? { retired } : {}),
     ...(states.size > 0 ? { states: [...states.values()] } : {}),
     ...(resources.size > 0 ? { resources: [...resources.values()] } : {}),
     ...(unresolved.length > 0 ? { unresolved } : {}),
@@ -310,12 +339,20 @@ export interface ValidateFragmentInput {
   authored: InterfacesFile | null
   fragment: AuthoredFragment
   /**
-   * Ids the fragment is allowed to REPLACE — the work item's own prior tasks on
-   * a re-author. Anything else that collides is refused: the authored file is
-   * hand-owned work, and overwriting it is the one loss no derivation
-   * can undo.
+   * The work item's own prior tasks — the only ids the fragment may amend or
+   * retire, and the ones it has to ACCOUNT for: each is kept, amended (re-sent
+   * under its id) or retired with a reason. Anything else that collides is
+   * refused: the authored file is hand-owned work, and overwriting it is the
+   * one loss no derivation can undo.
    */
   replaceable?: ReadonlySet<string>
+  /**
+   * Treat a prior task the fragment does not account for as kept rather than
+   * refusing the fragment. A live session is held to the accounting; a cached
+   * fragment written against another catalog is not, and what it never
+   * mentioned stays as it is.
+   */
+  carryUnaccounted?: boolean
   /**
    * The place this session was given. A session authors ONE screen — the tasks
    * performed on it, or on a dialog/panel that sits on it — so a task located
@@ -324,18 +361,29 @@ export interface ValidateFragmentInput {
    * hand-run check).
    */
   scope?: { screenId: string; address?: string }
+  /**
+   * Existing tasks of OTHER places whose sessions reconcile them later in the
+   * same run: the screens that render a shared component this session authors.
+   * A task of the draft with the same fingerprint as one of them is not refused
+   * — the component is where that task lives now — and the screen's session is
+   * the one held to retiring or amending its copy (a KEPT twin is refused).
+   */
+  yielding?: ReadonlySet<string>
 }
 
 /**
  * Hold a fragment to every rule at once and return the file it would produce.
  * The schema does the structural half (ids resolve in the area registry, a
- * screen sits on nothing, a state id is not a sentence, a step's target is an
- * ARIA role and an accessible name); this adds the five rules that are about
+ * screen sits on nothing, a state id is not a sentence, a step's target is one
+ * locator handle and a `css` one says why); this adds the rules that are about
  * AUTHORING rather than about the shape:
  *
  *  1. an id names one thing — no collision with a derived or authored entry;
  *  2. a fingerprint names one thing — the same task authored twice is one task,
- *     and its second copy would double every scenario grounded on it;
+ *     and its second copy would double every scenario grounded on it. That
+ *     holds for a task the draft KEEPS too: an existing task of this screen
+ *     whose twin now lives elsewhere (a shared component took it over) has to
+ *     be retired or amended;
  *  3. a task is REACHABLE and says where it happens — `at`, or a first
  *     `navigate` step, and when both the address and the place are known they
  *     have to agree;
@@ -343,7 +391,15 @@ export interface ValidateFragmentInput {
  *     registry already defines and never redefines it as something else;
  *  5. a place the draft declares answers for all four readable kinds, counting
  *     what this screen's earlier sessions established — an omitted kind is
- *     unknown, and nothing returns to a screen the ledger has settled.
+ *     unknown, and nothing returns to a screen the ledger has settled;
+ *  6. every one of this screen's existing tasks is accounted for — kept,
+ *     amended or retired — exactly once ({@link accountForPrior});
+ *  7. an opener is not a task on its own — a task that leaves the user at a
+ *     dialog or a panel (`to`) is matched by a task performed there (or on a
+ *     place nested in it), in the draft or the catalog, or by an `unresolved`
+ *     line naming that place ({@link unservedOpenedPlaces}). A screen's task
+ *     that opens a shared component's dialog is exempt: the component's
+ *     session serves it.
  */
 export function validateFragment(input: ValidateFragmentInput): FragmentValidation {
   const { derived, authored } = input
@@ -352,8 +408,18 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
     return { ok: false, errors: draft.error.issues.map((issue) => `${issue.path.join('.')} — ${issue.message}`) }
   }
   const fragment = draft.data
-  const replaceable = input.replaceable ?? new Set<string>()
   const errors: string[] = []
+  // ---- 6. every existing task accounted for --------------------------------
+  const accounting = accountForPrior(fragment, input.replaceable ?? new Set<string>())
+  errors.push(...accounting.errors)
+  if (!input.carryUnaccounted && accounting.unaccounted.length > 0) {
+    errors.push(
+      `this screen's existing task(s) ${accounting.unaccounted.map((id) => `\`${id}\``).join(', ')} are not accounted for — list each in \`kept\` when it stands as it is, re-send it under its id when it changed, or put it in \`retired\` with the reason it is gone`,
+    )
+  }
+  // What the fragment may overwrite: its amendments and retirements, never a
+  // task it keeps or (on a carried fragment) never mentioned.
+  const replaceable = accounting.replaceable
   // The places the draft would leave behind — built before the tasks are
   // stamped, because a step's identity resolves against the readables the same
   // fragment declares.
@@ -380,16 +446,15 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   // A web entry is indexed under its STORED key and under the key it would be
   // stamped with now: the two differ for every task authored before its place
   // declared its readables, and a duplicate must be caught under either.
+  const existing = [...(derived?.interfaces ?? []), ...(authored?.interfaces ?? [])]
+  const keysOf = (iface: Interface): string[] =>
+    iface.type === AUTHORED_SURFACE
+      ? [iface.fingerprint, resolvedInterfaceFingerprint(iface, iface.at ? drafted.get(iface.at) : undefined)]
+      : [iface.fingerprint]
   const twins = new Map<string, string>()
-  for (const iface of [...(derived?.interfaces ?? []), ...(authored?.interfaces ?? [])]) {
-    if (replaceable.has(iface.id)) continue
-    twins.set(iface.fingerprint, iface.id)
-    if (iface.type === AUTHORED_SURFACE) {
-      twins.set(
-        resolvedInterfaceFingerprint(iface, iface.at ? drafted.get(iface.at) : undefined),
-        iface.id,
-      )
-    }
+  for (const iface of existing) {
+    if (replaceable.has(iface.id) || input.yielding?.has(iface.id)) continue
+    for (const key of keysOf(iface)) twins.set(key, iface.id)
   }
   for (const task of stamped.interfaces) {
     const twin = twins.get(task.fingerprint)
@@ -399,6 +464,21 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
       )
     }
     twins.set(task.fingerprint, task.id)
+  }
+  const prior = input.replaceable ?? new Set<string>()
+  const elsewhere = new Map<string, string>()
+  for (const iface of existing) {
+    if (prior.has(iface.id)) continue
+    for (const key of keysOf(iface)) elsewhere.set(key, iface.id)
+  }
+  for (const iface of existing) {
+    if (!prior.has(iface.id) || replaceable.has(iface.id)) continue
+    const twin = keysOf(iface).map((key) => elsewhere.get(key)).find((id) => id !== undefined && id !== iface.id)
+    if (twin) {
+      errors.push(
+        `\`${iface.id}\` is kept, and it is the same task as \`${twin}\` — same entry, same steps. Retire it (or amend it) so one invocable thing is one entry.`,
+      )
+    }
   }
 
   // ---- 3. reachable, and located where it says -----------------------------
@@ -424,7 +504,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
   if (input.scope) {
     for (const place of stamped.resources) {
-      if (screenFor(place.id, places)?.id !== input.scope.screenId) {
+      if (rootPlaceOf(place.id, places)?.id !== input.scope.screenId) {
         errors.push(`\`${place.id}\` is not a resource of \`${input.scope.screenId}\` — enrich only this screen and its nested places`)
       }
     }
@@ -438,7 +518,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   // shows nothing of this kind" is a reading nobody but the session made.
   for (const place of stamped.resources) {
     const readables = places.get(place.id)?.readables
-    const unstated = READABLE_KINDS.filter((kind) => readables?.[kind] === undefined)
+    const unstated = INTERFACE_READABLE_KINDS.filter((kind) => readables?.[kind] === undefined)
     if (unstated.length > 0) {
       errors.push(
         `\`${place.id}\` leaves ${unstated.map((kind) => `\`${kind}\``).join(', ')} unstated — state each of \`markers\`, \`elements\`, \`controls\` and \`rows\` explicitly, \`[]\` when this place has none of that kind`,
@@ -457,7 +537,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
         `\`${task.id}\` navigates to \`${first.route}\` but its entry is \`${task.entry.path}\` — the entry IS the address the task starts at`,
       )
     }
-    const screen = task.at ? screenFor(task.at, places) : undefined
+    const screen = task.at ? rootPlaceOf(task.at, places) : undefined
     if (screen?.address && screen.address !== task.entry.path) {
       errors.push(
         `\`${task.id}\` is \`at\` a place addressed \`${screen.address}\`, and its entry says \`${task.entry.path}\``,
@@ -475,6 +555,15 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
         )
       }
     }
+  }
+
+  // ---- 7. an opener is not a task on its own --------------------------------
+  const merged = mergeInterfaceCatalogs(derived, candidate)
+  const screenScope = input.scope !== undefined && places.get(input.scope.screenId)?.kind === 'screen'
+  for (const { task, place } of unservedOpenedPlaces(stamped.interfaces, merged?.interfaces ?? [], places, { unresolved: fragment.unresolved ?? [], screenScope })) {
+    errors.push(
+      `\`${task}\` opens \`${place.id}\` (${place.kind} "${place.title}"), and no task is performed there — read the component it opens and author what a user does in it (including cancelling or closing it) \`at: "${place.id}"\`, or add an \`unresolved\` line naming \`${place.id}\` and why its controls could not be authored`,
+    )
   }
 
   // ---- 4. a state id names one world, catalog-wide -------------------------
@@ -496,7 +585,7 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
 
   // ---- the structural half: the merged catalog has to parse ---------------
-  const parsed = InterfacesFileSchema.safeParse(mergeInterfaceCatalogs(derived, candidate))
+  const parsed = InterfacesFileSchema.safeParse(merged)
   if (!parsed.success) {
     for (const issue of parsed.error.issues) {
       errors.push(`${issue.path.join('.') || 'catalog'} — ${issue.message}`)
@@ -504,6 +593,83 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, errors: [], authored: candidate }
+}
+
+/**
+ * The dialogs and panels the draft's tasks open (`to`) that nothing serves: no
+ * task of the merged catalog is performed at the place or at one nested in it,
+ * and no `unresolved` line names it ({@link namesPlace}). In a screen's scope a
+ * place that sits on a shared component is the component session's to serve,
+ * never the screen's. One entry per place, with the first task that opens it.
+ */
+export function unservedOpenedPlaces(
+  openers: readonly Pick<AuthoredTask, 'id' | 'to'>[],
+  catalog: readonly Pick<Interface, 'at'>[],
+  places: ReadonlyMap<string, InterfaceResource>,
+  opts: { unresolved: readonly string[]; screenScope: boolean },
+): { task: string; place: InterfaceResource }[] {
+  const served = new Set<string>()
+  for (const task of catalog) {
+    const seen = new Set<string>()
+    for (let id = task.at; id !== undefined && !seen.has(id); id = places.get(id)?.of) {
+      seen.add(id)
+      served.add(id)
+    }
+  }
+  const unserved = new Map<string, { task: string; place: InterfaceResource }>()
+  for (const task of openers) {
+    const place = task.to ? places.get(task.to) : undefined
+    if (!place || (place.kind !== 'dialog' && place.kind !== 'panel')) continue
+    if (opts.screenScope && rootPlaceOf(place.id, places)?.kind === 'component') continue
+    if (served.has(place.id) || unserved.has(place.id) || opts.unresolved.some((line) => namesPlace(line, place))) continue
+    unserved.set(place.id, { task: task.id, place })
+  }
+  return [...unserved.values()]
+}
+
+/** The quote marks a title is named between: straight, backticked and typographic. */
+const QUOTE_PAIRS: readonly (readonly [string, string])[] = [['"', '"'], ["'", "'"], ['`', '`'], ['“', '”'], ['‘', '’']]
+
+/**
+ * Does an `unresolved` line name this place? By its id as a whole word (not
+ * inside a longer id), or by its whole title in quotes — a title such as
+ * "Delete" is a word a line says about anything, so only the quoted phrase
+ * names the place.
+ */
+export function namesPlace(line: string, place: Pick<InterfaceResource, 'id' | 'title'>): boolean {
+  const lower = line.toLowerCase()
+  if (lower.split(/[^a-z0-9-]+/).includes(place.id)) return true
+  const title = place.title.toLowerCase()
+  return QUOTE_PAIRS.some(([open, close]) => lower.includes(`${open}${title}${close}`))
+}
+
+/**
+ * The fragment's word on each of the screen's existing tasks. An id is KEPT
+ * (listed in `kept`), AMENDED (re-sent in `interfaces` under its own id) or
+ * RETIRED (listed in `retired` with a reason) — one of the three, and only an
+ * id that IS one of them. `replaceable` is what the write may overwrite: the
+ * amended and the retired.
+ */
+export function accountForPrior(
+  fragment: AuthoredFragment,
+  prior: ReadonlySet<string>,
+): { replaceable: Set<string>; unaccounted: string[]; errors: string[] } {
+  const errors: string[] = []
+  const kept = new Set(fragment.kept ?? [])
+  const retired = new Set((fragment.retired ?? []).map((entry) => entry.id))
+  const amended = new Set(fragment.interfaces.map((task) => task.id).filter((id) => prior.has(id)))
+  for (const id of [...kept, ...retired]) {
+    if (!prior.has(id)) errors.push(`\`${id}\` is not one of this screen's existing tasks — only those are kept or retired`)
+  }
+  for (const id of kept) {
+    if (retired.has(id)) errors.push(`\`${id}\` is both kept and retired`)
+    if (amended.has(id)) errors.push(`\`${id}\` is both kept and re-sent — re-send it only when it changed`)
+  }
+  for (const id of retired) {
+    if (amended.has(id)) errors.push(`\`${id}\` is both retired and re-sent`)
+  }
+  const unaccounted = [...prior].filter((id) => !kept.has(id) && !retired.has(id) && !amended.has(id)).sort()
+  return { replaceable: new Set([...prior].filter((id) => retired.has(id) || amended.has(id))), unaccounted, errors }
 }
 
 /**
@@ -536,6 +702,8 @@ export function candidateAuthored(
     // travels untouched: this fragment's own row is recorded by the run's fold,
     // after the outcome is known.
     ...(authored?.authoring ? { authoring: authored.authoring } : {}),
+    ...(authored?.authoringViews ? { authoringViews: authored.authoringViews } : {}),
+    ...(authored?.liveUnavailable ? { liveUnavailable: authored.liveUnavailable } : {}),
   }
 }
 
@@ -562,19 +730,3 @@ function overlay<T extends { id: string }>(base: readonly T[], additions: readon
   return result
 }
 
-/** The screen a place sits on, walking the `of` chain up; a screen is itself. */
-function screenFor(
-  id: string,
-  places: ReadonlyMap<string, InterfaceResource>,
-): InterfaceResource | undefined {
-  const seen = new Set<string>()
-  let current: string | undefined = id
-  while (current && !seen.has(current)) {
-    seen.add(current)
-    const place: InterfaceResource | undefined = places.get(current)
-    if (!place) return undefined
-    if (place.kind === 'screen') return place
-    current = place.of
-  }
-  return undefined
-}

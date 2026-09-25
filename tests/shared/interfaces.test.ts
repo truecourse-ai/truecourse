@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it, expect } from 'vitest'
@@ -17,11 +18,13 @@ import {
   InterfaceRowFactSchema,
   InterfaceRowRoleSchema,
   InterfaceSchema,
+  InterfaceAuthoringRecordSchema,
   InterfaceSequenceSchema,
   InterfaceSlotKindSchema,
   InterfaceStateIdSchema,
   InterfaceStateSchema,
   InterfaceStepSchema,
+  readableLocators,
   InterfaceStepKindSchema,
   InterfacesFileSchema,
   type InterfacesFile,
@@ -40,6 +43,7 @@ import {
   type InterfaceSequenceNode,
   type InterfaceStep,
   isLabelOnlyRekey,
+  rootPlaceOf,
 } from '@truecourse/shared'
 
 function iface(steps: InterfaceStep[], over: Partial<Interface> = {}): Interface {
@@ -81,8 +85,8 @@ const EMPTY_CATALOG = {
 } satisfies InterfacesFile
 
 describe('interface schemas', () => {
-  it('the step vocabulary is the closed five-kind set', () => {
-    expect(InterfaceStepKindSchema.options).toEqual(['invoke', 'request', 'navigate', 'input', 'activate'])
+  it('the step vocabulary is the closed eight-kind set', () => {
+    expect(InterfaceStepKindSchema.options).toEqual(['invoke', 'request', 'navigate', 'input', 'activate', 'press', 'hover', 'upload'])
   })
 
   it('parses every step kind', () => {
@@ -2516,13 +2520,15 @@ describe('the resource registry', () => {
     ...over,
   })
 
-  it('a resource is a place: id, kind, title — and the kind set is closed at five', () => {
+  it('a resource is a place: id, kind, title — and the kind set is closed at six', () => {
     expect(() => InterfaceResourceSchema.parse(rulesDialog())).not.toThrow()
-    // Three web kinds, plus the cli and api places the SOM restructure added.
+    // Four web kinds (the shared component among them), plus the cli and api
+    // places the SOM restructure added.
     expect(InterfaceResourceKindSchema.options).toEqual([
       'screen',
       'dialog',
       'panel',
+      'component',
       'command-group',
       'rest-noun',
     ])
@@ -2530,6 +2536,8 @@ describe('the resource registry', () => {
       expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind }))).not.toThrow()
     }
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'modal' }))).toThrow()
+    // A shared component, like a screen, sits on nothing.
+    expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'component', of: 'repos-repoid' }))).toThrow(/a component sits on nothing/)
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'dropdown' }))).toThrow()
     // Ids are kebab-case, exactly like state ids and for the same reason.
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ id: 'The Rules Dialog' }))).toThrow()
@@ -3008,5 +3016,170 @@ describe('resolvedInterfaceFingerprint', () => {
     for (const iface of (referenceCatalog ?? EMPTY_CATALOG).interfaces) {
       expect(resolvedInterfaceFingerprint(iface, undefined), iface.id).toBe(iface.fingerprint)
     }
+  })
+})
+
+/**
+ * NON-CANONICAL STEP TARGETS. A step may address its element by any handle of
+ * the scenario locator family, `css` included, and a step whose target or scope
+ * carries `css` says why. None of it may move the identity of a step written in
+ * role + name, which is every step stored before the other handles existed.
+ */
+describe('a step target beyond role and name', () => {
+  const entry = { method: 'GET' as const, path: '/tags/{id}' }
+  const fingerprintOf = (steps: InterfaceStep[]) => interfaceFingerprint({ type: 'web', entry, steps })
+
+  it('keeps the identity of a role+name step and its role+name scope byte for byte', () => {
+    const step: InterfaceStep = {
+      kind: 'activate',
+      target: { role: 'button', name: 'Delete  tag', exact: true },
+      within: { role: 'dialog', name: 'Delete tag' },
+    }
+    // The fold as it was written before targets took other handles.
+    const body = ['web', 'GET /tags/{id}', ['activate', 'button "Delete tag"', 'exact', 'within', 'dialog', 'Delete tag', 'false'].join('\u0000')].join('\n')
+    const before = `sha256:${crypto.createHash('sha256').update(body, 'utf-8').digest('hex')}`
+    expect(fingerprintOf([step])).toBe(before)
+    // The reason never enters it either.
+    expect(fingerprintOf([{ ...step, why: 'a note' }])).toBe(before)
+  })
+
+  it('takes every handle, a css escape and a position, and folds each apart', () => {
+    const targets = [
+      { title: 'More' },
+      { text: 'More' },
+      { css: 'main i[title="More"]' },
+      { title: 'More', pick: 2 },
+      { role: 'button', name: 'More' },
+    ] as const
+    const prints = targets.map((target) =>
+      fingerprintOf([InterfaceStepSchema.parse({ kind: 'activate', target, why: 'css needs one' })]),
+    )
+    expect(new Set(prints).size).toBe(targets.length)
+    const scoped = (within: object) => fingerprintOf([InterfaceStepSchema.parse({ kind: 'activate', target: { title: 'More' }, within, why: 'x' })])
+    expect(scoped({ css: 'main' })).not.toBe(scoped({ role: 'main', name: 'Tag' }))
+    expect(scoped({ css: 'main', pick: 1 })).not.toBe(scoped({ css: 'main' }))
+  })
+
+  it('renders every handle in a reader’s words', () => {
+    expect(describeInterfaceTarget({ title: 'More' })).toBe('title "More"')
+    expect(describeInterfaceTarget({ css: 'main button:has(i.bi-sort)', pick: 2 })).toBe('css "main button:has(i.bi-sort)" (#2)')
+    expect(describeInterfaceTarget({ role: 'button', name: 'Save', pick: 'first' })).toBe('button "Save" (first)')
+  })
+
+  const catalogWith = (steps: unknown[], readables?: object): unknown => ({
+    version: 2,
+    generatedAt: '2026-09-23T00:00:00.000Z',
+    recipeFingerprint: 'sha256:recipe',
+    interfaces: [{ id: 'web/rename-tag', type: 'web', title: 'Rename a tag', entry, at: 'tags-id', steps, fingerprint: 'sha256:x' }],
+    resources: { web: [{ id: 'tags-id', kind: 'screen', title: 'Tag', address: '/tags/{id}', ...(readables ? { readables } : {}) }] },
+  })
+
+  it('refuses a step reaching its element through css, in its target or its scope, without a why', () => {
+    for (const step of [
+      { kind: 'activate', target: { css: 'button:has(i.bi-check2)' } },
+      { kind: 'activate', target: { title: 'More' }, within: { css: 'main' } },
+    ]) {
+      const parsed = InterfacesFileSchema.safeParse(catalogWith([step]))
+      expect(parsed.success).toBe(false)
+      expect(!parsed.success && parsed.error.issues.map((i) => i.path.join('.'))).toContain('interfaces.0.steps.0.why')
+      expect(InterfacesFileSchema.safeParse(catalogWith([{ ...step, why: 'icon-only confirm button' }])).success).toBe(true)
+    }
+    // A position alone is canonical and needs no reason.
+    expect(InterfacesFileSchema.safeParse(catalogWith([{ kind: 'activate', target: { title: 'More', pick: 2 } }])).success).toBe(true)
+  })
+
+  it('takes a key press, a hover and an upload as web steps, with a named key only', () => {
+    expect(InterfaceStepSchema.safeParse({ kind: 'press', key: 'Enter', target: { role: 'searchbox', name: 'Search' } }).success).toBe(true)
+    expect(InterfaceStepSchema.safeParse({ kind: 'press', key: 'Escape' }).success).toBe(true)
+    expect(InterfaceStepSchema.safeParse({ kind: 'press', key: 'PageDown' }).success).toBe(false)
+    expect(InterfaceStepSchema.safeParse({ kind: 'hover', target: { role: 'row', name: 'Inbox' } }).success).toBe(true)
+    expect(InterfaceStepSchema.safeParse({ kind: 'upload', target: { label: 'Import file' }, file: { text: 'url', as: 'links.csv' } }).success).toBe(true)
+    // An upload names its file the way the web driver's verb does: one byte source, a name.
+    expect(InterfaceStepSchema.safeParse({ kind: 'upload', target: { label: 'Import file' }, file: { text: 'url' } }).success).toBe(false)
+  })
+
+  it('refuses an upload through css, and a press scoped within an element it does not name', () => {
+    const upload = InterfacesFileSchema.safeParse(catalogWith([
+      { kind: 'upload', target: { css: 'input[type=file]' }, file: { text: 'x', as: 'x.csv' } },
+    ]))
+    expect(!upload.success && upload.error.issues[0].message).toContain('never a `css` locator')
+    const press = InterfacesFileSchema.safeParse(catalogWith([{ kind: 'press', key: 'Enter', within: { role: 'dialog', name: 'Search' } }]))
+    expect(!press.success && press.error.issues[0].message).toContain('give it a `target`')
+    // A css press or hover says why, like an activate.
+    const hover = InterfacesFileSchema.safeParse(catalogWith([{ kind: 'hover', target: { css: 'li.row' } }]))
+    expect(!hover.success && hover.error.issues.map((i) => i.path.join('.'))).toContain('interfaces.0.steps.0.why')
+  })
+
+  it('tells presses apart by their key, and never by an upload’s file', () => {
+    const print = (steps: unknown[]) => fingerprintOf(steps.map((step) => InterfaceStepSchema.parse(step)))
+    const on = { role: 'searchbox', name: 'Search' }
+    expect(print([{ kind: 'press', key: 'Enter', target: on }])).not.toBe(print([{ kind: 'press', key: 'Escape', target: on }]))
+    expect(print([{ kind: 'press', key: 'Escape' }])).not.toBe(print([{ kind: 'press', key: 'Enter' }]))
+    expect(print([{ kind: 'hover', target: on }])).not.toBe(print([{ kind: 'activate', target: on }]))
+    const upload = (text: string) => ({ kind: 'upload', target: { label: 'Import file' }, file: { text, as: 'links.csv' } })
+    expect(print([upload('a')])).toBe(print([upload('b')]))
+  })
+
+  it('refuses a role handle with no name, as a target or as a scope', () => {
+    for (const step of [
+      { kind: 'activate', target: { role: 'button' } },
+      { kind: 'input', target: { role: 'textbox', name: 'Name' }, within: { role: 'dialog' } },
+    ]) {
+      const parsed = InterfaceStepSchema.safeParse(step)
+      expect(parsed.success).toBe(false)
+      expect(!parsed.success && parsed.error.issues[0].message).toContain('a role handle names its element')
+    }
+  })
+
+  it('lets a readable reach its element through css only when it says why', () => {
+    const step = [{ kind: 'activate', target: { role: 'button', name: 'Save' } }]
+    const unexplained = InterfacesFileSchema.safeParse(catalogWith(step, { rows: [{ within: { css: 'main .cards' }, item: 'generic', template: '<name>', slots: [{ name: 'name', kind: 'text' }] }] }))
+    expect(unexplained.success).toBe(false)
+    expect(!unexplained.success && unexplained.error.issues[0].path.slice(-4)).toEqual(['readables', 'rows', 0, 'why'])
+    expect(!unexplained.success && unexplained.error.issues[0].message).toContain('must say `why`')
+    const explained = InterfacesFileSchema.safeParse(
+      catalogWith(step, { elements: [{ element: { css: 'main h1' }, why: 'the heading is a styled div with no heading role' }] }),
+    )
+    expect(explained.success).toBe(true)
+  })
+
+  it('lists every readable locator with the fact it belongs to', () => {
+    expect(
+      readableLocators({
+        readables: {
+          markers: [{ marker: 'Saved' }, { marker: 'Delete link', within: { css: 'div.modal' }, why: 'no dialog role' }],
+          controls: [{ id: 'pick', control: { role: 'checkbox', name: 'Pick' }, states: ['checked'] }],
+        },
+      }),
+    ).toEqual([
+      { kind: 'markers', index: 1, locator: { css: 'div.modal' }, why: 'no dialog role' },
+      { kind: 'controls', index: 0, id: 'pick', locator: { role: 'checkbox', name: 'Pick' } },
+    ])
+  })
+})
+
+describe('an authoring ledger row', () => {
+  it('refuses any unknown field', () => {
+    expect(InterfaceAuthoringRecordSchema.safeParse({ status: 'authored', inputFingerprint: 'abc', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('the root place a place sits on', () => {
+  const places = new Map([
+    { id: 'links', kind: 'screen' as const, title: '/links' },
+    { id: 'sidebar', kind: 'component' as const, title: 'Sidebar' },
+    { id: 'delete-link', kind: 'dialog' as const, title: 'Delete link', of: 'links-panel' },
+    { id: 'links-panel', kind: 'panel' as const, title: 'Links', of: 'links' },
+    { id: 'orphan', kind: 'dialog' as const, title: 'Orphan', of: 'gone' },
+    { id: 'loop-a', kind: 'dialog' as const, title: 'A', of: 'loop-b' },
+    { id: 'loop-b', kind: 'dialog' as const, title: 'B', of: 'loop-a' },
+  ].map((place) => [place.id, place]))
+  it('walks `of` up to a screen or a component, and a root is its own', () => {
+    expect(rootPlaceOf('delete-link', places)?.id).toBe('links')
+    expect(rootPlaceOf('sidebar', places)?.id).toBe('sidebar')
+  })
+  it('is undefined when the chain breaks or loops', () => {
+    expect(rootPlaceOf('orphan', places)).toBeUndefined()
+    expect(rootPlaceOf('loop-a', places)).toBeUndefined()
   })
 })

@@ -130,3 +130,41 @@ it('preserves native selection and dialog scope in the generation briefing', () 
   expect(realizationLines(legacy, 'web')[0]).toContain('fill: textbox');
   expect(legacy.fingerprint).not.toBe(scoped.fingerprint);
 });
+
+it('compiles a key press, a hover and an upload to the web driver verbs, verbatim', () => {
+  const task = iface({
+    id: 'web/import-links', type: 'web', entry: { method: 'GET', path: '/links' },
+    steps: [
+      { kind: 'press', key: 'Enter', target: { role: 'searchbox', name: 'Search' } },
+      { kind: 'press', key: 'Escape' },
+      { kind: 'hover', target: { css: 'li.row' }, why: 'the row has no role' },
+      { kind: 'upload', target: { label: 'Import file' }, file: { base64: '{{fixture:bookmarks.base64}}', as: 'bookmarks.html' } },
+    ],
+  });
+  expect(realizationLines(task, 'web').map((line) => line.split('   (interface')[0])).toEqual([
+    'press: Enter on searchbox "Search"',
+    'press: Escape',
+    'hover: {"css":"li.row"}',
+    'upload: {"base64":"{{fixture:bookmarks.base64}}","as":"bookmarks.html"} to {"label":"Import file"}',
+  ]);
+  expect(interfaceDigest(task).steps).toEqual([
+    'press Enter: searchbox "Search"',
+    'press Escape',
+    'hover: {"css":"li.row"}',
+    'upload {"base64":"{{fixture:bookmarks.base64}}","as":"bookmarks.html"}: {"label":"Import file"}',
+  ]);
+});
+
+it('says who a task is performed as, and leaves the fingerprint alone', () => {
+  const steps = [{ kind: 'activate' as const, target: { role: 'button', name: 'Invite member' } }];
+  const task = iface({ id: 'web/invite-member', type: 'web', entry: { method: 'GET', path: '/team' }, steps, principal: 'adminWebSession' });
+  const signIn = iface({ id: 'web/sign-in', type: 'web', entry: { method: 'GET', path: '/login' }, steps, principal: 'anonymous' });
+  expect(realizationLines(task, 'web').map((line) => line.split('   (interface')[0])).toEqual([
+    'performed as: adminWebSession',
+    'click: button "Invite member"',
+  ]);
+  expect(realizationLines(signIn, 'web')[0]).toBe('signed out: no credential   (interface web/sign-in)');
+  const { principal: _principal, ...unnamed } = task;
+  expect(realizationLines(iface(unnamed), 'web')).toHaveLength(1);
+  expect(task.fingerprint).toBe(iface(unnamed).fingerprint);
+});

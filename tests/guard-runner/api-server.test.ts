@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   startApiServer,
   spawnApiProcess,
@@ -49,6 +49,32 @@ describe('allocateFreePort', () => {
 })
 
 describe('startApiServer', () => {
+  it('an abort kills a boot whose readiness wait never settles', async () => {
+    const healthUrls: string[] = []
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      healthUrls.push(String(input))
+      return new Promise<Response>(() => {})
+    })
+    try {
+      const ac = new AbortController()
+      void startApiServer({
+        resolvedServe: [process.execPath, FIXTURE_API_SERVER],
+        cwd: tempCwd(),
+        env: ENV,
+        healthPath: '/health',
+        readyTimeoutMs: 60_000,
+        signal: ac.signal,
+      })
+      await vi.waitFor(() => expect(healthUrls).toHaveLength(1), { timeout: 5_000 })
+      ac.abort()
+      // The port is released only when the child is gone.
+      const port = Number(new URL(healthUrls[0]!).port)
+      await vi.waitFor(() => expect(isPortHeld(port)).toBe(false), { timeout: 5_000 })
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
   it('boots the fixture, injects PORT, and answers on baseUrl', async () => {
     const cwd = tempCwd()
     const result = await startApiServer({

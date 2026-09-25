@@ -35,6 +35,8 @@ import {
   GuardSetupReportSchema,
   InterfacesFileSchema,
   InterfacesFragmentSchema,
+  INTERFACE_READABLE_KINDS,
+  rootPlaceOf,
   type GuardAutoResolutions,
   type GuardClaimsFile,
   type GuardFlowsFile,
@@ -297,7 +299,7 @@ export function mergeInterfaceCatalogs(
   }
 }
 
-/** Screens with unestablished readable kinds, including their nested places.
+/** Root places (screens and shared components) with unestablished readable kinds, including their nested places.
  * Missing means unknown; only an explicit array (including []) settles a kind.
  * Stale authored routes are excluded by the same rule as authoring's work list. */
 export function webScreensNeedingReadables(
@@ -309,18 +311,9 @@ export function webScreensNeedingReadables(
   const stale = new Set(staleAuthoredPlaceDiagnostics(derived, authored).map((d) => d.subject))
   const missing = new Set<string>()
   for (const place of resources) {
-    if ((['markers', 'elements', 'controls', 'rows'] as const).every((kind) =>
-      place.readables?.[kind] !== undefined)) continue
-    let current: typeof place | undefined = place
-    const seen = new Set<string>()
-    while (current && !seen.has(current.id)) {
-      seen.add(current.id)
-      if (current.kind === 'screen') {
-        if (!stale.has(current.id)) missing.add(current.id)
-        break
-      }
-      current = current.of ? places.get(current.of) : undefined
-    }
+    if (INTERFACE_READABLE_KINDS.every((kind) => place.readables?.[kind] !== undefined)) continue
+    const root = rootPlaceOf(place.id, places)
+    if (root && !stale.has(root.id)) missing.add(root.id)
   }
   return missing
 }

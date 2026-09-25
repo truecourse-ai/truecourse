@@ -444,8 +444,8 @@ describe('guardSetupInProcess', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ]);
@@ -656,7 +656,7 @@ describe('guardSetupInProcess — hosted injection', () => {
       catalogSession: async () => ({ status: 'ok', added: [], findings: [] }),
       driver, transportMode: 'api', sessionsKey: key,
       sessionRun: parent, tracker, onRunStarted, interfaces: interfaces(),
-      seedSession: async () => {
+      verifyAuth: async () => {
         // Interfaces must not close the run before setup's later steps execute.
         expect((await listStoredSessionRuns(key))[0].status).toBe('running');
         return { status: 'skipped', reason: 'stubbed in this test' };
@@ -712,8 +712,8 @@ describe('guardSetupInProcess — hosted injection', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ]);
@@ -725,8 +725,8 @@ describe('guardSetupInProcess — hosted injection', () => {
       ['recipe', ['guard-setup.recipe-repair']],
       ['detect', []],
       ['catalog', ['guard-setup.dependency-catalog']],
-      ['interfaces', ['guard-setup.reconcile-interfaces', 'guard-interfaces.web-tasks']],
       ['seed', ['guard-setup.seed']],
+      ['interfaces', ['guard-setup.reconcile-interfaces', 'guard-interfaces.web-tasks']],
       ['preparations', ['guard-setup.preparation-observations', 'guard-setup.preparations']],
       ['auth', ['guard-setup.auth-proof']],
     ]);

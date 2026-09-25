@@ -12,9 +12,12 @@
 import { atomicWriteJson, guardAuthoredInterfacesPath } from '@truecourse/guard-runner'
 import {
   InterfacesFragmentSchema,
+  rootPlaceOf,
   type InterfaceAuthoringRecord,
+  type InterfaceResource,
   type InterfacesFile,
 } from '@truecourse/shared'
+import type { SharedComponent } from './shared-places.js'
 
 export interface WriteAuthoredInput {
   repoRoot: string
@@ -66,11 +69,19 @@ export interface RecordAuthoringLedgerInput {
   derived: InterfacesFile | null
   /** The rows to lay over the ledger, by screen id. */
   rows: Readonly<Record<string, InterfaceAuthoringRecord>>
+  /** The views the context pass read, replacing the recorded ones. */
+  views?: Readonly<Record<string, string>>
+  /**
+   * The live world this run tried to stand up: the recipe digest it failed
+   * under, or `null` when it came up (which clears a recorded failure).
+   */
+  liveUnavailable?: { recipe: string } | null
   now?: () => string
 }
 
 /**
- * Record what authoring settled on one or more screens. Laid over the existing
+ * Record what authoring settled on one or more screens (and, when given, the
+ * views the run's context pass read, and whether its live world came up). Laid over the existing
  * ledger by id and written through the same validated path the fragments take,
  * so a row lands whether or not the session that produced it wrote a task — a
  * screen whose session failed has nothing else to leave behind, and the row IS
@@ -85,10 +96,98 @@ export function recordAuthoringLedger(
     recipeFingerprint: '',
     interfaces: [],
   }
+  const { liveUnavailable: _recorded, ...rest } = base
+  const liveUnavailable = input.liveUnavailable === undefined ? base.liveUnavailable : input.liveUnavailable
   return writeAuthoredCatalog({
     repoRoot: input.repoRoot,
     derived: input.derived,
-    candidate: { ...base, authoring: { ...base.authoring, ...input.rows } },
+    candidate: {
+      ...rest,
+      authoring: { ...base.authoring, ...input.rows },
+      ...(input.views ? { authoringViews: { ...input.views } } : {}),
+      ...(liveUnavailable ? { liveUnavailable } : {}),
+    },
     ...(input.now ? { now: input.now } : {}),
   })
+}
+
+export interface RegisterSharedPlacesInput {
+  repoRoot: string
+  authored: InterfacesFile | null
+  derived: InterfacesFile | null
+  components: readonly SharedComponent[]
+  now?: () => string
+}
+
+/**
+ * Put every shared component in the authored catalog as a `component` place:
+ * its id, its name, and the module it is rendered from. A place already there
+ * keeps everything else it carries (its readables above all); nothing is
+ * written when every place already stands as it would. `undefined` ⇒ no write.
+ */
+export function registerSharedPlaces(input: RegisterSharedPlacesInput): { path: string; file: InterfacesFile } | undefined {
+  const existing = new Map((input.authored?.resources?.web ?? []).map((place) => [place.id, place]))
+  const registered = input.components.map((component): InterfaceResource => ({
+    ...existing.get(component.id),
+    id: component.id,
+    kind: 'component',
+    title: component.title,
+    description: `shared UI rendered from ${component.module}`,
+  }))
+  const changed = registered.filter((place) => JSON.stringify(place) !== JSON.stringify(existing.get(place.id)))
+  if (changed.length === 0) return undefined
+  const base: InterfacesFile = input.authored ?? { version: 2, generatedAt: '', recipeFingerprint: '', interfaces: [] }
+  const byId = new Map(changed.map((place) => [place.id, place]))
+  const web = (base.resources?.web ?? []).map((place) => byId.get(place.id) ?? place)
+  for (const place of changed) if (!existing.has(place.id)) web.push(place)
+  return writeAuthoredCatalog({
+    repoRoot: input.repoRoot,
+    derived: input.derived,
+    candidate: { ...base, resources: { ...base.resources, web } },
+    ...(input.now ? { now: input.now } : {}),
+  })
+}
+
+export interface RetireAuthoredPlacesInput {
+  repoRoot: string
+  authored: InterfacesFile
+  derived: InterfacesFile | null
+  /** The root places to retire, by id. */
+  placeIds: ReadonlySet<string>
+  now?: () => string
+}
+
+/**
+ * Take root places out of the authored catalog whole: each place and the places
+ * nested on it, every web task located there, and each one's ledger row. What
+ * the retired places carried is owned by whatever grounds their controls now.
+ * Returns the ids of the tasks retired alongside the written file.
+ */
+export function retireAuthoredPlaces(input: RetireAuthoredPlacesInput): { path: string; file: InterfacesFile; tasks: string[] } {
+  const places = new Map(
+    [...(input.derived?.resources?.web ?? []), ...(input.authored.resources?.web ?? [])].map((place) => [place.id, place]),
+  )
+  const retired = (placeId: string | undefined): boolean => {
+    const root = placeId === undefined ? undefined : rootPlaceOf(placeId, places)?.id
+    return root !== undefined && input.placeIds.has(root)
+  }
+  const tasks = input.authored.interfaces.filter((task) => task.type === 'web' && retired(task.at))
+  const retiredTasks = new Set(tasks)
+  const authoring = Object.fromEntries(
+    Object.entries(input.authored.authoring ?? {}).filter(([placeId]) => !input.placeIds.has(placeId)),
+  )
+  const web = (input.authored.resources?.web ?? []).filter((place) => !retired(place.id))
+  const { authoring: _authoring, ...base } = input.authored
+  const written = writeAuthoredCatalog({
+    repoRoot: input.repoRoot,
+    derived: input.derived,
+    candidate: {
+      ...base,
+      interfaces: input.authored.interfaces.filter((task) => !retiredTasks.has(task)),
+      resources: { ...input.authored.resources, web },
+      ...(Object.keys(authoring).length > 0 ? { authoring } : {}),
+    },
+    ...(input.now ? { now: input.now } : {}),
+  })
+  return { ...written, tasks: tasks.map((task) => task.id) }
 }

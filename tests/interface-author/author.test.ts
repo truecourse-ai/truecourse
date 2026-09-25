@@ -36,13 +36,18 @@ import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree
 import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays'
 import { buildScreens, screenShowRows } from '../../apps/dashboard/client/src/lib/interface-pom'
 import type { AuthoredFragment } from '../../packages/core/src/services/interface-author/draft'
+import type { LiveScreens } from '../../packages/core/src/services/interface-author/live-screen'
 import { InterfacesFileSchema, interfaceFingerprint, type InterfacesFile } from '../../packages/shared/src/index'
 import {
   guardAuthoredInterfacesPath,
+  authoringRecipeContract,
   guardInterfacesPath,
+  recipePath,
   mergeInterfaceCatalogs,
   readAuthoredInterfaceCatalog,
   staleAuthoredPlaceDiagnostics,
+  authoringViewsMoved,
+  webScreensNeedingAuthoring,
 } from '@truecourse/guard-runner'
 
 // ---------------------------------------------------------------------------
@@ -114,6 +119,7 @@ const REPORT_FRAGMENT: AuthoredFragment = {
     },
   ],
   resources: [{ id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid', readables: NO_READABLES }],
+  unresolved: ['"the Rules dialog" lists rules only once a scan ran'],
 }
 
 beforeEach(() => {
@@ -900,6 +906,214 @@ describe('re-running', () => {
       expect(readAuthoredFile().authoring!['root'].status).toBe('authored')
     })
 
+    /**
+     * RECONCILE. A settled screen re-opens when what it was authored from
+     * moved — here the source file its row recorded — and its session accounts
+     * for the tasks it already has instead of re-inventing them.
+     */
+    describe('a settled screen whose source moved', () => {
+      const context = new Map([['root', {
+        module: 'src/Home.tsx', renders: [], closure: 1, renderClosure: [],
+        apiEffects: ['api/post-api-repos'], rpcCalls: [], unjoined: [],
+      }]])
+      const both: Script = async (place) =>
+        ({ kind: 'outcome', value: place === 'root' ? HOME_FRAGMENT : { interfaces: [] } })
+
+      async function settle(): Promise<void> {
+        installMemoryKvCache()
+        const { persistence } = memoryPersistence()
+        await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(both).driver, persistence, context })
+        expect(readAuthoredFile().authoring!['root'].sources).toEqual({ 'src/Home.tsx': expect.any(String) })
+      }
+      afterEach(() => resetKvCacheStore())
+
+      it('stays settled while its source holds', async () => {
+        await settle()
+        const { persistence } = memoryPersistence()
+        const again = await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence, context })
+        expect(again.places).toEqual([])
+      })
+
+      it('re-opens just that screen, past its cached fragment, briefed with its tasks to account for', async () => {
+        await settle()
+        fs.writeFileSync(path.join(repo, 'src', 'Home.tsx'), 'export function Home() { return <main>Repositories</main> }\n')
+        const started: string[] = []
+        let briefing = ''
+        const { persistence } = memoryPersistence()
+        const result = await authorWebInterfaces({
+          repoRoot: repo,
+          driver: scriptedDriver(async (place, input) => {
+            started.push(place)
+            briefing = input.initialMessages.join('\n')
+            return {
+              kind: 'outcome',
+              value: { interfaces: [], retired: [{ id: HOME_TASK.id, reason: 'the add form is gone from Home.tsx' }] },
+            }
+          }).driver,
+          persistence,
+          context,
+        })
+        expect(started).toEqual(['root'])
+        expect(briefing).toContain('Account for EACH of these tasks')
+        expect(briefing).toContain(`  ${HOME_TASK.id}`)
+        expect(result.places[0]).toMatchObject({
+          status: 'authored',
+          retired: [{ id: HOME_TASK.id, reason: 'the add form is gone from Home.tsx' }],
+        })
+        expect(readAuthoredFile().interfaces).toEqual([])
+      })
+
+      it('keeps a task the session says still stands, byte for byte', async () => {
+        await settle()
+        const before = readAuthoredFile().interfaces
+        fs.appendFileSync(path.join(repo, 'src', 'Home.tsx'), '// a comment\n')
+        const { persistence } = memoryPersistence()
+        await authorWebInterfaces({
+          repoRoot: repo,
+          driver: scriptedDriver(async () => ({ kind: 'outcome', value: { interfaces: [], kept: [HOME_TASK.id] } })).driver,
+          persistence,
+          context,
+        })
+        expect(readAuthoredFile().interfaces).toEqual(before)
+      })
+
+      it('refuses an outcome that leaves one of its tasks unaccounted for', async () => {
+        await settle()
+        fs.appendFileSync(path.join(repo, 'src', 'Home.tsx'), '// a comment\n')
+        const { persistence } = memoryPersistence()
+        const result = await authorWebInterfaces({
+          repoRoot: repo,
+          driver: scriptedDriver(async () => ({ kind: 'outcome', value: { interfaces: [] } })).driver,
+          persistence,
+          context,
+        })
+        expect(result.places[0].status).not.toBe('authored')
+        expect(result.places[0].problems.join('\n')).toContain(`\`${HOME_TASK.id}\` are not accounted for`)
+        expect(readAuthoredFile().interfaces.map((task) => task.id)).toEqual([HOME_TASK.id])
+      })
+    })
+
+    /**
+     * A screen authored with no live screen to look at (no browser, no web
+     * surface up) is settled only for runs that cannot look either: the first
+     * run that can re-opens it, and one that still cannot leaves it be.
+     */
+    describe('a screen authored from source alone', () => {
+      const both: Script = async (place) =>
+        ({ kind: 'outcome', value: place === 'root' ? HOME_FRAGMENT : { interfaces: [] } })
+      /** A live world whose one observer reaches every address and sees an empty page. */
+      const world = (): LiveScreens => ({
+        observer: {
+          principal: 'webSession',
+          async observe({ path }: { path: string }) {
+            return {
+              ok: true as const,
+              observation: { path, address: path, title: '', tree: '- main', omittedLines: 0, activated: [], problems: [], reachedBy: 'load' as const },
+            }
+          },
+          async probe() {
+            return { ok: true as const, readings: [] }
+          },
+          async close() {},
+        },
+      })
+
+      it('is recorded as such, and re-opened by the first run that can look at it live', async () => {
+        await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(both).driver, persistence: memoryPersistence().persistence })
+        expect(Object.values(readAuthoredFile().authoring ?? {}).map((row) => row.sourceOnly)).toEqual([true, true])
+
+        const started: string[] = []
+        const live = await authorWebInterfaces({
+          repoRoot: repo,
+          driver: scriptedDriver(async (place) => {
+            started.push(place)
+            return { kind: 'outcome', value: place === 'root' ? { interfaces: [], kept: [HOME_TASK.id] } : { interfaces: [] } }
+          }).driver,
+          persistence: memoryPersistence().persistence,
+          openLive: async () => world(),
+        })
+        expect(started.sort()).toEqual(['repos-repoid', 'root'])
+        expect(live.places.map((place) => place.status)).toEqual(['authored', 'empty'])
+        expect(Object.values(readAuthoredFile().authoring ?? {}).map((row) => row.sourceOnly)).toEqual([undefined, undefined])
+
+        const again = await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence: memoryPersistence().persistence, openLive: async () => world() })
+        expect(again.places).toEqual([])
+      })
+
+      it('is left settled by a run whose live world does not come up', async () => {
+        await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(both).driver, persistence: memoryPersistence().persistence })
+        const before = readAuthoredFile().authoring
+        let opened = 0
+        const result = await authorWebInterfaces({
+          repoRoot: repo,
+          driver: refuses,
+          persistence: memoryPersistence().persistence,
+          openLive: async () => {
+            opened++
+            return undefined
+          },
+        })
+        expect(opened).toBe(1)
+        expect(result.places).toEqual([])
+        expect(readAuthoredFile().authoring).toEqual(before)
+      })
+
+      // A world that would not come up is not stood up again every run: the
+      // failure is recorded with the recipe it failed under, and only a recipe
+      // that moved (here the seed's command, which no screen's inputs fold)
+      // makes the live look work again.
+      it('owes no live look again until the recipe the world failed under moves', async () => {
+        const recipeFile = recipePath(repo)
+        const writeRecipe = (command: string): void => {
+          fs.mkdirSync(path.dirname(recipeFile), { recursive: true })
+          fs.writeFileSync(recipeFile, JSON.stringify({ api: { seed: { command, provides: {} } } }))
+        }
+        writeRecipe('node seed.mjs')
+        await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(both).driver, persistence: memoryPersistence().persistence })
+        let opened = 0
+        const failing = async (): Promise<undefined> => {
+          opened++
+          return undefined
+        }
+        await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence: memoryPersistence().persistence, openLive: failing })
+        await authorWebInterfaces({ repoRoot: repo, driver: refuses, persistence: memoryPersistence().persistence, openLive: failing })
+        expect(opened).toBe(1)
+        const owed = (): number =>
+          webScreensNeedingAuthoring({
+            derived: DERIVED,
+            authored: readAuthoredFile(),
+            recipeContract: authoringRecipeContract(repo),
+            repoRoot: repo,
+            liveAvailable: true,
+          }).size
+        expect(owed()).toBe(0)
+        writeRecipe('node seed-fixed.mjs')
+        expect(owed()).toBe(2)
+      })
+    })
+
+    it('re-opens a settled screen whose derived place moved', async () => {
+      await firstRun()
+      fs.writeFileSync(
+        guardInterfacesPath(repo),
+        JSON.stringify({
+          ...DERIVED,
+          resources: { web: [DERIVED.resources!.web[0], { ...DERIVED.resources!.web[1], title: 'The repository report' }] },
+        }),
+      )
+      const started: string[] = []
+      const { persistence } = memoryPersistence()
+      await authorWebInterfaces({
+        repoRoot: repo,
+        driver: scriptedDriver(async (place) => {
+          started.push(place)
+          return { kind: 'outcome', value: { interfaces: [], kept: ['web/open-rules-panel'] } }
+        }).driver,
+        persistence,
+      })
+      expect(started).toEqual(['repos-repoid'])
+    })
+
     // The upgrade: an authored half written before the ledger. What the old
     // inference calls done is recorded as done, for free, and never re-bought.
     it('writes a row for a screen the old inference calls done, with no session', async () => {
@@ -1272,7 +1486,7 @@ describe('a session that skipped `check_draft`', () => {
 
 describe('source and task evidence in the initial session', () => {
   const context = new Map([['root', {
-    module: 'src/Home.tsx', renders: ['src/Form.tsx'], closure: 2,
+    module: 'src/Home.tsx', renders: ['src/Form.tsx'], closure: 2, renderClosure: ['src/Form.tsx'],
     apiEffects: ['api/post-api-repos'], rpcCalls: [], unjoined: [],
   }]])
 
@@ -1324,7 +1538,7 @@ describe('source and task evidence in the initial session', () => {
     const { driver } = scriptedDriver(async (_place, input) => {
       const briefing = input.initialMessages.join('\n')
       expect(briefing).toContain(JSON.stringify(HOME_TASK.steps))
-      expect(briefing).toContain('Replacement: preserve surviving ids and exact steps')
+      expect(briefing).toContain('Reconcile: account for every authored task')
       expect(briefing).toContain('1 complete definitions included, 0 omitted')
       expect(await callTool(input, 'check_draft', { interfaces: [HOME_TASK] })).toContain('Accepted and kept')
       return { kind: 'outcome', value: { interfaces: [HOME_TASK] } }
@@ -1416,6 +1630,7 @@ describe('the briefing carries what the AST pass knows', () => {
             module: 'src/Home.tsx',
             renders: ['src/RepoGrid.tsx'],
             closure: 4,
+            renderClosure: ['src/RepoGrid.tsx'],
             apiEffects: ['api/post-api-repos'],
             unjoined: ['GET /v3/insights — no api interface declares it'],
             rpcCalls: ['repo.list'],
@@ -1519,7 +1734,7 @@ describe('the places are in the briefing, not a tool', () => {
     let briefing = ''
     const { driver } = scriptedDriver(async (_place, input) => {
       briefing = input.initialMessages.join('\n')
-      return { kind: 'outcome', value: { interfaces: [] } }
+      return { kind: 'outcome', value: { interfaces: [], kept: ['web/open-rules-panel'] } }
     })
     await authorWebInterfaces({
       repoRoot: repo,
@@ -1744,7 +1959,7 @@ describe('sessions run in a pool, the fold does not', () => {
     ])
 
     function pack(module: string, renders: string[]) {
-      return { module, renders, closure: renders.length + 1, apiEffects: [], unjoined: [], rpcCalls: [] }
+      return { module, renders, closure: renders.length + 1, renderClosure: renders, apiEffects: [], unjoined: [], rpcCalls: [] }
     }
 
     beforeEach(() => {
@@ -1901,6 +2116,7 @@ describe('readable authoring through storage and the screen read view', () => {
     }`)
     const fragment: AuthoredFragment = {
       interfaces: [],
+      kept: oldTasks.map((task) => task.id),
       resources: [
         { id: 'root', kind: 'screen', title: '/', readables: {
           markers: [], elements: [{ id: 'heading', element: { role: 'heading', name: 'Repositories' } }],
@@ -1921,7 +2137,7 @@ describe('readable authoring through storage and the screen read view', () => {
     }
     const { driver } = scriptedDriver(async (place, input) => {
       expect(place).toBe('root')
-      expect(input.initialMessages.join('\n')).toContain('Preserve these tasks')
+      expect(input.initialMessages.join('\n')).toContain('Account for EACH of these tasks')
       const source = await callTool(input, 'read_file', { path: 'src/Home.tsx' })
       expect(source).toContain('<h1>Repositories</h1>')
       expect(source).toContain('repos.map(repo => <li>{repo.name}</li>)')
@@ -1930,7 +2146,7 @@ describe('readable authoring through storage and the screen read view', () => {
       expect(await callTool(input, 'check_draft', fragment)).toContain('Accepted and kept')
       return { kind: 'outcome', value: fragment }
     })
-    // A named place selects enrichment; replacing existing tasks requires --replace.
+    // A named place is reconciled: its one task stands, and only readables land.
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
     expect(result.places[0].status).toBe('authored')
     expect(result.authored).toBe(0)
@@ -1997,6 +2213,344 @@ describe('readable authoring through storage and the screen read view', () => {
         ? { interfaces: [], resources: [{ ...DERIVED.resources!.web[0], readables }] } : { interfaces: [] } })).driver })
     expect(result.places[0].status).toBe('authored')
     expect(readAuthoredFile().resources!.web[0].readables).toEqual(readables)
-    expect(planWorkItems(DERIVED, readAuthoredFile(), '')[0].needsAuthoring).toBe(false)
+    expect(planWorkItems(DERIVED, readAuthoredFile(), authoringRecipeContract(repo), { repoRoot: repo })[0].needsAuthoring).toBe(false)
+  })
+})
+
+/**
+ * SHARED PLACES — a component several screens render is registered as a place of
+ * kind `component`, authored ONCE before the screens, and named in each screen's
+ * briefing with its tasks instead of being authored again there.
+ */
+describe('a shared component', () => {
+  const SIDEBAR = { id: 'component-sidebar-1a2b3c4d', module: 'src/Sidebar.tsx', title: 'Sidebar', screens: ['root', 'repos-repoid'] }
+  const shared = { components: [SIDEBAR], rendered: new Map([['root', [SIDEBAR.id]], ['repos-repoid', [SIDEBAR.id]]]) }
+  const grounding = (module: string) => ({ module, renders: [], closure: 1, renderClosure: [], apiEffects: [], unjoined: [], rpcCalls: [] })
+  const context = new Map([
+    ['root', grounding('src/Home.tsx')],
+    ['repos-repoid', grounding('src/Report.tsx')],
+    [SIDEBAR.id, grounding(SIDEBAR.module)],
+  ])
+  const COLLAPSE = {
+    id: 'web/collapse-sidebar',
+    type: 'web' as const,
+    title: 'Collapse the sidebar',
+    entry: { method: 'GET', path: '/' },
+    steps: [{ kind: 'activate' as const, target: { role: 'button', name: 'Collapse' } }],
+    at: SIDEBAR.id,
+  }
+  const script: Script = async (place, input) => {
+    if (place !== SIDEBAR.id) return { kind: 'outcome', value: { interfaces: [] } }
+    const checked = await callTool(input, 'check_draft', { interfaces: [COLLAPSE] })
+    expect(checked).toContain('Accepted and kept')
+    return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+  }
+
+  beforeEach(() => {
+    installMemoryKvCache()
+    fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return <button onClick={() => toggle()}>Collapse</button> }\n')
+    fs.writeFileSync(path.join(repo, 'src', 'Report.tsx'), 'export function Report() { return <h1>Report</h1> }\n')
+  })
+  afterEach(() => resetKvCacheStore())
+
+  it('is registered as its own place and authored once, before the screens, at a screen that renders it', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver, seen } = scriptedDriver(script)
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, context, shared })
+    expect(seen.map(placeOf)).toEqual([SIDEBAR.id, 'root', 'repos-repoid'])
+    // The task's id lands in the component's own namespace, like any place's.
+    const [collapse] = result.places.find((place) => place.placeId === SIDEBAR.id)!.taskIds
+    expect(collapse).toMatch(/^web\/screen-component-sidebar-.*-task-collapse-sidebar-/)
+    const file = readAuthoredFile()
+    expect(file.resources!.web.find((place) => place.id === SIDEBAR.id)).toMatchObject({ kind: 'component', title: 'Sidebar' })
+    expect(file.interfaces.map((task) => [task.id, task.type === 'web' && task.at])).toEqual([[collapse, SIDEBAR.id]])
+    expect(file.authoring?.[SIDEBAR.id]?.sources).toEqual({ [SIDEBAR.module]: expect.any(String) })
+    // The component's session is told what it is and where it is observed.
+    expect(seen[0].initialMessages.at(-1)).toContain('This place is a SHARED COMPONENT: `src/Sidebar.tsx`, rendered by 2 screen(s)')
+    // Each screen is told the shared place it renders, with its tasks, and never asked to author it.
+    for (const screen of seen.slice(1)) {
+      expect(screen.initialMessages.at(-1)).toContain(`${SIDEBAR.id}  ·  Sidebar  ·  ${collapse}`)
+    }
+  })
+
+  it('refuses a screen session that authors the shared component’s controls', async () => {
+    const { persistence } = memoryPersistence()
+    const refusals: string[] = []
+    const { driver } = scriptedDriver(async (place, input) => {
+      if (place !== 'root') return script(place, input)
+      refusals.push(await callTool(input, 'check_draft', { interfaces: [{ ...COLLAPSE, id: 'web/collapse-sidebar-again' }] }))
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, context, shared })
+    expect(refusals[0]).toContain('is not a task of `root`')
+  })
+
+  it('is served from the cache on the next run, and re-opened when its module changes', async () => {
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
+    const again = scriptedDriver(script)
+    const second = await authorWebInterfaces({ repoRoot: repo, driver: again.driver, persistence: memoryPersistence().persistence, context, shared })
+    expect(again.seen).toHaveLength(0)
+    expect(second.skipped).toContain(SIDEBAR.id)
+
+    fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return <button onClick={() => collapse()}>Collapse</button> }\n')
+    const third = scriptedDriver(script)
+    await authorWebInterfaces({ repoRoot: repo, driver: third.driver, persistence: memoryPersistence().persistence, context, shared })
+    expect(third.seen.map(placeOf)).toEqual([SIDEBAR.id])
+  })
+
+  it('re-opens a screen whose rendered component became shared, and moves the screen’s copy of its task to it', async () => {
+    // Before: the sidebar is part of Home's own grounding, and its task is Home's.
+    const unshared = new Map([['root', { ...grounding('src/Home.tsx'), renders: [SIDEBAR.module] }]])
+    const ownCopy = { ...COLLAPSE, id: 'web/collapse-sidebar-on-home', at: 'root' }
+    await authorWebInterfaces({
+      repoRoot: repo,
+      persistence: memoryPersistence().persistence,
+      context: unshared,
+      driver: scriptedDriver(async (place, input) => {
+        if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
+        const checked = await callTool(input, 'check_draft', { interfaces: [ownCopy] })
+        return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+      }).driver,
+    })
+    const [homeCopy] = readAuthoredFile().interfaces.map((task) => task.id)
+
+
+    // After: a second screen renders it, so it is shared and leaves Home's
+    // grounding. No file Home recorded changed, and Home re-opens all the same.
+    const refusals: string[] = []
+    const next = scriptedDriver(async (place, input) => {
+      if (place !== 'root') return script(place, input)
+      refusals.push(await callTool(input, 'check_draft', { interfaces: [], kept: [homeCopy] }))
+      const checked = await callTool(input, 'check_draft', {
+        interfaces: [],
+        retired: [{ id: homeCopy, reason: 'the sidebar is a shared place now' }],
+      })
+      return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+    })
+    const result = await authorWebInterfaces({
+      repoRoot: repo,
+      driver: next.driver,
+      persistence: memoryPersistence().persistence,
+      context: new Map([['root', grounding('src/Home.tsx')], [SIDEBAR.id, grounding(SIDEBAR.module)]]),
+      shared: { components: [SIDEBAR], rendered: new Map([['root', [SIDEBAR.id]]]) },
+    })
+    expect(next.seen.map(placeOf)).toEqual([SIDEBAR.id, 'root'])
+    // The component's first draft twins Home's copy, and is accepted: Home re-opens in this run.
+    expect(result.places.find((place) => place.placeId === SIDEBAR.id)!.status).toBe('authored')
+    // Home may not keep its twin of the component's task.
+    expect(refusals[0]).toContain(`\`${homeCopy}\` is kept, and it is the same task as`)
+    expect(readAuthoredFile().interfaces.map((task) => task.type === 'web' && task.at)).toEqual([SIDEBAR.id])
+  })
+
+  // The screen that would have retired its copy never settled: the copy goes
+  // anyway, since the component's twin is that very task, and one invocable
+  // thing is one entry.
+  it('leaves one copy of a task the component took over when the screen’s own session fails', async () => {
+    const unshared = new Map([['root', { ...grounding('src/Home.tsx'), renders: [SIDEBAR.module] }]])
+    const ownCopy = { ...COLLAPSE, id: 'web/collapse-sidebar-on-home', at: 'root' }
+    await authorWebInterfaces({
+      repoRoot: repo,
+      persistence: memoryPersistence().persistence,
+      context: unshared,
+      driver: scriptedDriver(async (place, input) => {
+        if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
+        const checked = await callTool(input, 'check_draft', { interfaces: [ownCopy] })
+        return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+      }).driver,
+    })
+
+    const result = await authorWebInterfaces({
+      repoRoot: repo,
+      driver: scriptedDriver(async (place, input) =>
+        place === 'root'
+          ? { kind: 'failure', failure: { kind: 'transport', detail: 'connection reset', class: 'provider', retryability: 'none' } }
+          : script(place, input),
+      ).driver,
+      persistence: memoryPersistence().persistence,
+      context: new Map([['root', grounding('src/Home.tsx')], [SIDEBAR.id, grounding(SIDEBAR.module)]]),
+      shared: { components: [SIDEBAR], rendered: new Map([['root', [SIDEBAR.id]]]) },
+    })
+    expect(Object.fromEntries(result.places.map((place) => [place.placeId, place.status]))).toEqual({ [SIDEBAR.id]: 'authored', root: 'failed' })
+    const tasks = readAuthoredFile().interfaces
+    expect(tasks.map((task) => task.type === 'web' && task.at)).toEqual([SIDEBAR.id])
+    expect(new Set(tasks.map((task) => task.fingerprint)).size).toBe(tasks.length)
+  })
+
+  // Its row is brought to where it stands, grounded on nothing: a module that
+  // moved under a place that earns no session is not work for the next setup.
+  it('is not work again once it is no longer shared, whatever its module does', async () => {
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
+    fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return null }\n')
+    const unshared = new Map([...context].filter(([id]) => id !== SIDEBAR.id))
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: unshared })
+    const gate = webScreensNeedingAuthoring({ derived: DERIVED, authored: readAuthoredFile(), recipeContract: authoringRecipeContract(repo), repoRoot: repo })
+    expect([...gate]).toEqual([])
+  })
+
+  // What is shared is decided over every view the screens render, the layouts
+  // the framework wraps them in included, and no screen's own row records a
+  // layout: a view that moved outside every row is work for the context pass.
+  it('is looked for again when a view outside every screen’s own sources moves', async () => {
+    fs.writeFileSync(path.join(repo, 'src', 'Layout.tsx'), 'export function Layout({ children }) { return <main>{children}</main> }\n')
+    const inLayout = new Map([...context].map(([id, place]) => [id, { ...place, renderClosure: ['src/Layout.tsx', SIDEBAR.module] }]))
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: inLayout, shared })
+    const gate = () => authoringViewsMoved(repo, readAuthoredFile())
+    expect(gate()).toBe(false)
+    fs.writeFileSync(path.join(repo, 'src', 'Layout.tsx'), 'export function Layout({ children }) { return <main><Nav />{children}</main> }\n')
+    expect(gate()).toBe(true)
+    expect(webScreensNeedingAuthoring({ derived: DERIVED, authored: readAuthoredFile(), recipeContract: authoringRecipeContract(repo), repoRoot: repo }).size).toBe(0)
+    // The run that looks again records what it looked at.
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: inLayout, shared })
+    expect(gate()).toBe(false)
+  })
+
+  // The screens now grounded on its module own its controls: the place, its
+  // tasks and its ledger row go, so nothing keeps a twin of what they author.
+  // A layout the framework would wrap the screens in, added where the context
+  // pass looked for one, is a view that joined the set: the pass runs again.
+  it('is looked for again when a layout appears where the context pass looked for one', async () => {
+    const lookedFor = new Map([...context].map(([id, place]) => [id, { ...place, layoutCandidates: ['src/layout.tsx'] }]))
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: lookedFor, shared })
+    expect(authoringViewsMoved(repo, readAuthoredFile())).toBe(false)
+    fs.writeFileSync(path.join(repo, 'src', 'layout.tsx'), 'export default function Layout({ children }) { return <><Nav />{children}</> }\n')
+    expect(authoringViewsMoved(repo, readAuthoredFile())).toBe(true)
+  })
+
+  it('is retired with its tasks once the grounding no longer finds it shared', async () => {
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
+    fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return null }\n')
+    const next = scriptedDriver(script)
+    const unshared = new Map([...context].filter(([id]) => id !== SIDEBAR.id))
+    const collapse = readAuthoredFile().interfaces[0]!.id
+    const result = await authorWebInterfaces({ repoRoot: repo, driver: next.driver, persistence: memoryPersistence().persistence, context: unshared })
+    expect(next.seen.map(placeOf)).not.toContain(SIDEBAR.id)
+    expect(result.retired.map((task) => task.id)).toEqual([collapse])
+    const file = readAuthoredFile()
+    expect(file.interfaces).toEqual([])
+    expect(file.resources?.web?.some((place) => place.id === SIDEBAR.id) ?? false).toBe(false)
+    expect(file.authoring?.[SIDEBAR.id]).toBeUndefined()
+  })
+
+  // A context pass that found nothing (or could not run) says nothing about
+  // what is shared: the component stands as it is.
+  it('is left as it is by a run whose context pass came back empty', async () => {
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
+    const before = readAuthoredFile()
+    const next = scriptedDriver(script)
+    const result = await authorWebInterfaces({ repoRoot: repo, driver: next.driver, persistence: memoryPersistence().persistence, context: new Map() })
+    expect(result.skipped).toContain(SIDEBAR.id)
+    const after = readAuthoredFile()
+    expect(after.interfaces).toEqual(before.interfaces)
+    expect(after.resources).toEqual(before.resources)
+    expect(after.authoring?.[SIDEBAR.id]).toEqual(before.authoring?.[SIDEBAR.id])
+  })
+
+  // A component whose session failed is retired like any other once it is no
+  // longer shared, so no setup names it as awaiting a refresh forever.
+  it('retires a failed component row once it is no longer shared', async () => {
+    const failing: Script = async (place, input) =>
+      place === SIDEBAR.id
+        ? { kind: 'failure', failure: { kind: 'transport', detail: 'connection reset', class: 'provider', retryability: 'none' } }
+        : script(place, input)
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(failing).driver, persistence: memoryPersistence().persistence, context, shared })
+    expect(readAuthoredFile().authoring?.[SIDEBAR.id]?.status).toBe('failed')
+    const unshared = new Map([...context].filter(([id]) => id !== SIDEBAR.id))
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: unshared })
+    expect(readAuthoredFile().authoring?.[SIDEBAR.id]).toBeUndefined()
+  })
+})
+
+/**
+ * THE PRINCIPAL OF A SCREEN — the first look observes each literal address as
+ * the default principal, and the session decides whom else to observe and act
+ * as from the principals it is briefed with.
+ */
+describe('the principal a screen is observed as', () => {
+  /** An observer that reaches only the paths `reaches` admits, ending at /dashboard otherwise. */
+  const observerAs = (principal: string, reaches: (path: string) => boolean) => ({
+    principal,
+    async observe({ path }: { path: string }) {
+      const reached = reaches(path)
+      return {
+        ok: true as const,
+        observation: {
+          path,
+          address: reached ? path : '/dashboard',
+          title: '',
+          tree: `- heading "as ${principal}"`,
+          omittedLines: 0,
+          activated: [],
+          problems: [],
+          ...(reached ? { reachedBy: 'load' as const } : {}),
+        },
+      }
+    },
+    async probe({ path }: { path: string }) {
+      return reaches(path)
+        ? { ok: true as const, readings: [{ matches: 1, visible: true }] }
+        : { ok: false as const, reason: `${path} could not be reached`, unreached: path }
+    },
+    async close() {},
+  })
+
+  it('takes the first look as the default principal only, and briefs the session with who else it can be', async () => {
+    const owner = observerAs('webSession', () => false)
+    const anonymous = observerAs('anonymous', () => true)
+    const { driver, seen } = scriptedDriver(async () => ({ kind: 'outcome', value: { interfaces: [] } }))
+    await authorWebInterfaces({
+      repoRoot: repo,
+      driver,
+      persistence: memoryPersistence().persistence,
+      openLive: async () => ({
+        observer: owner,
+        principals: new Map([['webSession', owner], ['anonymous', anonymous]]),
+        descriptions: new Map([['webSession', 'owns the seeded repositories']]),
+      }),
+    })
+    const briefing = seen.find((input) => placeOf(input) === 'root')!.initialMessages.at(-1)!
+    expect(briefing).toContain('signed in as the default principal `webSession`')
+    expect(briefing).toContain('  `webSession` — owns the seeded repositories')
+    expect(briefing).toContain('The default principal was SENT AWAY from this address')
+    expect(briefing).toContain('- heading "as webSession"')
+    expect(briefing).not.toContain('- heading "as anonymous"')
+  })
+
+  it('refuses a css proof sent away from an address another principal reaches, naming who does', async () => {
+    const owner = observerAs('webSession', () => false)
+    const admin = observerAs('instanceAdminWebSession', () => true)
+    const task = { ...HOME_TASK, endState: undefined, steps: [{ kind: 'activate', target: { css: 'main button:has(svg[data-icon="plus"])' }, why: 'icon-only add button, no aria-label' }] }
+    const { driver } = scriptedDriver(async (place, input) => {
+      if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
+      const refused = await callTool(input, 'check_draft', { interfaces: [task] })
+      expect(refused).toContain('is never reached as `webSession`, and is reached as `instanceAdminWebSession`')
+      const checked = await callTool(input, 'check_draft', { interfaces: [{ ...task, principal: 'instanceAdminWebSession' }] })
+      expect(checked).toContain('Accepted and kept')
+      return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+    })
+    await authorWebInterfaces({
+      repoRoot: repo,
+      driver,
+      persistence: memoryPersistence().persistence,
+      openLive: async () => ({ observer: owner, principals: new Map([['webSession', owner], ['instanceAdminWebSession', admin]]) }),
+    })
+    const [authored] = readAuthoredFile().interfaces
+    expect(authored.principal).toBe('instanceAdminWebSession')
+    expect(authored.steps[0]).not.toHaveProperty('proven')
+  })
+
+  it('accepts css from source, stamped unproven, where no principal reaches the address', async () => {
+    const owner = observerAs('webSession', () => false)
+    const { driver } = scriptedDriver(async (place, input) => {
+      if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
+      const checked = await callTool(input, 'check_draft', {
+        interfaces: [{ ...HOME_TASK, endState: undefined, steps: [{ kind: 'activate', target: { css: 'main button:has(svg[data-icon="plus"])' }, why: 'icon-only add button, no aria-label' }] }],
+      })
+      expect(checked).toContain('Accepted and kept')
+      return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+    })
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence: memoryPersistence().persistence, openLive: async () => ({ observer: owner }) })
+    const [task] = readAuthoredFile().interfaces
+    expect(task.steps[0]).toMatchObject({ proven: false })
+    expect(task.principal).toBe('webSession')
   })
 })

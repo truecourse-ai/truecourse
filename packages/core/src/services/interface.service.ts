@@ -577,6 +577,8 @@ function detectDatabaseContext(
         targetTable: r.targetTable,
         foreignKeyColumn: r.foreignKeyColumn,
       })),
+      ...(primary.enums ? { enums: primary.enums.map((e) => ({ name: e.name, values: [...e.values] })) } : {}),
+      ...(primary.schemaFiles ? { schemaFiles: [...primary.schemaFiles] } : {}),
       appImports: collectClientImports(repoPath, fileAnalyses),
     };
   } catch (error) {

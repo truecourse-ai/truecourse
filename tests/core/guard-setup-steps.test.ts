@@ -287,12 +287,12 @@ describe('the persisted report', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ]);
-    expect(whole.reached).toEqual(['catalog', 'interfaces', 'seed', 'preparations', 'auth']);
+    expect(whole.reached).toEqual(['catalog', 'seed', 'interfaces', 'preparations', 'auth']);
 
     // One step, forced: --refresh with --only-<step> re-runs that step alone.
     const single = seams();
@@ -311,8 +311,8 @@ describe('the persisted report', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
+      'interfaces',
       'preparations',
       'auth',
     ]);
@@ -350,6 +350,40 @@ describe('estimateGuardSetupCost({ only })', () => {
         stage.stage,
       );
     }
+  });
+});
+
+describe('estimateGuardSetupCost: an engine-drafted seed', () => {
+  /** A seed seam that writes a seed into the recipe, as a drafting session does. */
+  const drafting = (): GuardSetupSeedSession => async (input) => {
+    fs.mkdirSync(path.join(input.repoRoot, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(input.repoRoot, 'scripts/guard-seed.mjs'), '// drafted\n');
+    const doc = JSON.parse(fs.readFileSync(recipePath(input.repoRoot), 'utf8'));
+    doc.api.seed = { command: 'node scripts/guard-seed.mjs', script: 'scripts/guard-seed.mjs', provides: {} };
+    fs.writeFileSync(recipePath(input.repoRoot), JSON.stringify(doc, null, 2) + '\n');
+    return { status: 'ok', scriptPath: 'scripts/guard-seed.mjs', command: 'node scripts/guard-seed.mjs' };
+  };
+  const seedCalls = async (r: string): Promise<number> =>
+    (await estimateGuardSetupCost(r)).stages?.find((stage) => stage.stage === 'guard-setup.seed')?.calls ?? 0;
+
+  // The estimate prices a re-draft exactly when the run would draft again.
+  it('prices a re-draft only when what the seed is moved', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    await guardSetupInProcess(r, { interfaces: interfaces(), recipeRunner: neverCalled, ...seams(), seedSession: drafting() });
+    expect(readGuardSetup(r)!.steps.find((row) => row.key === 'seed')?.draftedSeed).toBeDefined();
+    expect(await seedCalls(r)).toBe(0);
+
+    const doc = JSON.parse(fs.readFileSync(recipePath(r), 'utf8'));
+    doc.api.env = { ...doc.api.env, EXTRA: '1' };
+    fs.writeFileSync(recipePath(r), JSON.stringify(doc, null, 2) + '\n');
+    expect(await seedCalls(r)).toBe(0);
+
+    const report = readGuardSetup(r)!;
+    const row = report.steps.find((step) => step.key === 'seed')!;
+    delete row.inputComponents?.stage;
+    writeGuardSetup(r, report);
+    expect(await seedCalls(r)).toBeGreaterThan(0);
   });
 });
 

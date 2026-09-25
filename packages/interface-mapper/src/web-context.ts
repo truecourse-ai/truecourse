@@ -38,6 +38,7 @@
  * have to be the ones the catalog on disk carries (the catalog's job).
  */
 
+import path from 'node:path'
 import type { FileAnalysis, Interface, ModuleDependency } from '@truecourse/shared'
 import type { WebPlace } from './web-tree.js'
 
@@ -56,6 +57,22 @@ export interface WebPlaceContext {
   renders: string[]
   /** How many first-party modules the walk reached, cap or no cap. */
   closure: number
+  /**
+   * EVERY first-party view this place renders, however deep, repo-relative:
+   * the render chain from its route module and from the layouts the framework
+   * wraps it in (a Next.js app-router `layout`, a pages-router `_app`), the
+   * layouts themselves included. Uncapped and unbounded in depth (see
+   * {@link renderGraph}): it says which components a place renders, which is
+   * what the shared places are found from, and is never a briefing's list.
+   */
+  renderClosure: string[]
+  /**
+   * Every file a framework layout of this place could be written in, found or
+   * not, repo-relative: where the pass looked for the layouts in
+   * {@link renderClosure}. A layout added at one of them joins what the place
+   * renders though no file the pass read changed. Absent ⇒ looked for none.
+   */
+  layoutCandidates?: string[]
   /** Ids of the derived api interfaces this place's requests join to. */
   apiEffects: string[]
   /**
@@ -84,8 +101,12 @@ export interface WebPlaceContext {
 export interface DeriveWebPlaceContextsInput {
   /** Absolute repo root — every path in the pack is relative to it. */
   repoRoot: string
-  /** Place id → the seed it was minted from (`formWebResources().seeds`). */
-  seeds: ReadonlyMap<string, WebPlace>
+  /**
+   * Place id → the module that is the place and the address it is reached at:
+   * a screen's seed (`formWebResources().seeds`), or a shared component's module
+   * with no address of its own (`''`).
+   */
+  seeds: ReadonlyMap<string, Pick<WebPlace, 'filePath' | 'address'> & { idiom?: WebPlace['idiom'] }>
   fileAnalyses: readonly FileAnalysis[]
   /**
    * Resolved import edges — `buildDependencyGraph(fileAnalyses, repoRoot)`. A
@@ -137,6 +158,7 @@ export function deriveWebPlaceContexts(
   const edges = groupEdges(input.dependencies)
   const index = apiOperations(input.apiInterfaces)
   const depth = input.depth ?? DEPTH
+  const graph = renderGraph(analyses, edges)
 
   const contexts = new Map<string, WebPlaceContext>()
   for (const [placeId, seed] of input.seeds) {
@@ -144,12 +166,15 @@ export function deriveWebPlaceContexts(
     if (!analyses.has(module)) continue
     const closure = walk(module, { analyses, edges, depth })
     const rendered = renderReachable(module, closure, analyses, edges)
+    const layouts = seed.idiom ? layoutModules(module, seed.idiom, analyses) : []
     contexts.set(placeId, {
       module: relative(input.repoRoot, module),
       renders: renderedModules(closure, analyses, seed.address, rendered).map((path) =>
         relative(input.repoRoot, path),
       ),
       closure: closure.length,
+      renderClosure: renderClosure(module, layouts, analyses, edges, graph).map((path) => relative(input.repoRoot, path)),
+      layoutCandidates: layoutLookups(module, seed.idiom).flat().map((path) => relative(input.repoRoot, path)),
       ...join(closure, analyses, index),
     })
   }
@@ -385,6 +410,139 @@ function renderedModules(
   const keptViews = evidenced.length > 0 ? evidenced : views
   const kept = keptViews.length > 0 ? keptViews : ordered.filter((node) => node.hop === 1)
   return kept.slice(0, MAX_RENDERS).map((node) => node.path)
+}
+
+/**
+ * The layouts the framework wraps a route module in, outermost first — the
+ * modules no screen imports and every screen renders:
+ * - Next.js app router: the `layout` of the page's folder and of every folder
+ *   above it up to the `app` directory (route groups included);
+ * - Next.js pages router: the `_app` of the pages directory the page sits in.
+ * A page that picks its layout itself (a pages-router `getLayout`) imports and
+ * renders it, so the render chain already reaches it.
+ */
+function layoutModules(
+  module: string,
+  idiom: WebPlace['idiom'],
+  analyses: ReadonlyMap<string, FileAnalysis>,
+): string[] {
+  const found = (candidates: readonly string[]): string | undefined => candidates.find((file) => analyses.has(file))
+  const groups = layoutLookups(module, idiom)
+  if (idiom === 'next-app') return groups.flatMap((group) => found(group) ?? []).reverse()
+  const app = groups.map(found).find((file) => file !== undefined)
+  return app ? [app] : []
+}
+
+/**
+ * Every file a framework layout of this module could be written in, one group
+ * per directory, nearest first, each group in extension order: an app-router
+ * `layout` in every directory up to `app`, a pages-router `_app` in every
+ * directory up to `pages`. {@link layoutModules} is what of these exists.
+ */
+function layoutLookups(module: string, idiom: WebPlace['idiom'] | undefined): string[][] {
+  const name = idiom === 'next-app' ? 'layout' : idiom === 'next-pages' ? '_app' : undefined
+  if (!name) return []
+  const root = idiom === 'next-app' ? 'app' : 'pages'
+  const groups: string[][] = []
+  for (let dir = path.dirname(module); path.dirname(dir) !== dir; dir = path.dirname(dir)) {
+    groups.push(LAYOUT_EXTENSIONS.map((extension) => path.join(dir, `${name}${extension}`)))
+    if (path.basename(dir) === root) break
+  }
+  return groups
+}
+
+/** The extensions a layout module is written in. */
+const LAYOUT_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js']
+
+/**
+ * Every view a place renders, however deep: the views of the render chain from
+ * its route module and from each of its layouts (the layouts themselves first),
+ * each named once. Like {@link renderedModules}, a root whose chain names no
+ * view keeps the views of its import walk rather than naming none.
+ */
+function renderClosure(
+  module: string,
+  layouts: readonly string[],
+  analyses: ReadonlyMap<string, FileAnalysis>,
+  edges: ReadonlyMap<string, readonly ModuleDependency[]>,
+  graph: RenderGraph,
+): string[] {
+  const isView = (file: string): boolean => {
+    const analysis = analyses.get(file)
+    return !(analysis && isBarrel(analysis)) && COMPONENT_EXTENSIONS.some((extension) => file.endsWith(extension))
+  }
+  const named = new Set<string>(layouts.filter(isView))
+  for (const root of [...layouts, module]) {
+    const views = graph.closure(root).filter(isView)
+    const fallback = views.length > 0
+      ? views
+      : walk(root, { analyses, edges, depth: Number.POSITIVE_INFINITY })
+          .filter((node) => node.hop > 0 && isView(node.path))
+          .map((node) => node.path)
+    for (const view of fallback) named.add(view)
+  }
+  named.delete(module)
+  return [...named]
+}
+
+/** One run's render chains, each module's worked out once. */
+interface RenderGraph {
+  /** Every module `root` renders, however deep, nearest first; `root` itself excluded. */
+  closure(root: string): string[]
+}
+
+/**
+ * THE RENDER GRAPH of one derivation: a module renders the modules its
+ * render-evidenced edges reach ({@link renderEvidenced}), a barrel on the way
+ * resolved to the modules behind the names asked of it (the walk's rule). Each
+ * module's successors and each root's closure are computed once and reused, so
+ * a layout every screen sits in is walked once per run, and a closure is
+ * followed to its end: a cycle is entered once, and no depth cuts it short.
+ */
+function renderGraph(
+  analyses: ReadonlyMap<string, FileAnalysis>,
+  edges: ReadonlyMap<string, readonly ModuleDependency[]>,
+): RenderGraph {
+  const successors = new Map<string, string[]>()
+  const closures = new Map<string, string[]>()
+  /** The modules an edge into `target` reaches: itself, or through a barrel, what it re-exports under `names`. */
+  const behind = (target: string, names: readonly string[], seen: Set<string>): string[] => {
+    const analysis = analyses.get(target)
+    if (!analysis || !isBarrel(analysis)) return [target]
+    if (seen.has(target)) return []
+    seen.add(target)
+    return (edges.get(target) ?? [])
+      .filter((edge) => names.length === 0 || edge.importedNames.some((name) => names.includes(name)))
+      .flatMap((edge) => behind(edge.target, edge.importedNames, seen))
+  }
+  const next = (module: string): string[] => {
+    const known = successors.get(module)
+    if (known) return known
+    const analysis = analyses.get(module)
+    const reached = (edges.get(module) ?? [])
+      .filter((edge) => renderEvidenced(analysis, edge))
+      .flatMap((edge) => behind(edge.target, edge.importedNames, new Set()))
+    successors.set(module, reached)
+    return reached
+  }
+  return {
+    closure(root) {
+      const known = closures.get(root)
+      if (known) return known
+      const reached = new Set<string>([root])
+      const queue = [root]
+      for (let i = 0; i < queue.length; i++) {
+        for (const target of next(queue[i])) {
+          if (reached.has(target)) continue
+          reached.add(target)
+          queue.push(target)
+        }
+      }
+      const closure = queue.slice(1)
+      closures.set(root, closure)
+      return closure
+    },
+  }
 }
 
 /** The address's own words — static segments only, short ones dropped as noise. */

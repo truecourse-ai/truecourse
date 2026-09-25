@@ -338,6 +338,31 @@ export { openWebSession } from './web/session.js'
 export type { WebSession, OpenWebSessionOptions, OpenWebSessionResult } from './web/session.js'
 export { startWebSurface } from './web/surface.js'
 export type { StartWebSurfaceOptions, WebSurfaceHandle } from './web/surface.js'
+// The screen observer: what interface authoring reads a live screen with.
+export {
+  createWebObserver,
+  observeScreen,
+  probeLocator,
+  boundTree,
+  MAX_OBSERVATION_BYTES,
+} from './web/observe.js'
+export { MAX_UNNAMED_CONTROLS, type UnnamedContainer, type UnnamedControl } from './web/unnamed-controls.js'
+export { addressFillsTemplate, hasAddressSlot } from './web/address.js'
+export { openPage, samePage, OPEN_PAGE_RETRIES, type OpenPageResult, type PageReachedBy } from './web/open-page.js'
+export type {
+  CreateWebObserverOptions,
+  LocatorProbeRequest,
+  LocatorProbeResult,
+  LocatorProbeStep,
+  LocatorReading,
+  ObserveActivation,
+  ObserveHover,
+  ObserveKeyPress,
+  ObserveScreenResult,
+  ScreenObservation,
+  ScreenObservationRequest,
+  WebScreenObserver,
+} from './web/observe.js'
 export {
   launchWebBrowser,
   isBrowserInstalled,
@@ -422,7 +447,12 @@ export {
 
 export {
   INTERFACE_AUTHOR_STAGE_VERSION,
+  authoringViewsMoved,
+  liveWorldInputs,
+  canObserveLiveScreens,
   screenAuthoringFingerprint,
+  sourceDigests,
+  sourcesMoved,
   unsettledAuthoring,
   webScreenAuthoringStates,
   webScreensNeedingAuthoring,
@@ -489,6 +519,7 @@ export { RecipePreparationBaselineCheckSchema } from './recipe.js';
 
 export {
   recipeContractFingerprint,
+  authoringRecipeContract,
   computePreparationFingerprint,
   legacyPreparationFingerprint,
   preparationFingerprintComponents,

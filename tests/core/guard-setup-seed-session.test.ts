@@ -40,9 +40,9 @@ import {
   type GuardSetupOptions,
   type GuardSetupSeedSessionInput,
   type SeedDraftDatabase,
+  SeedProvidesProposalSchema,
 } from '@truecourse/guard-generator';
 import { FINGERPRINT_INPUTS } from '@truecourse/guard-runner';
-import { seedSessionCacheKey, seedSessionLegacyCacheKey } from '../../packages/core/src/services/guard-setup/index';
 import {
   buildSeedSession,
   existingSeedMachinery,
@@ -184,7 +184,6 @@ function seedInput(r: string, over: Partial<GuardSetupSeedSessionInput> = {}): G
     routes: [{ method: 'GET', path: '/orgs' }],
     securitySchemes: [],
     probeCandidates: [],
-    roles: [],
     specExcerpts: [],
     ecosystem: 'js',
     replaceExisting: false,
@@ -307,6 +306,20 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
     expect(recipeOf(r).api?.seed).toEqual({ command: COMMAND, script: TARGET, provides: PROVIDES });
     // The session's scratch directory is gone with the session.
     expect(fs.readdirSync(path.join(r, '.truecourse', '.cache', 'guard', 'seed-drafts'))).toEqual([]);
+  }, 60_000);
+
+  it('returns the coverage rules the session could not satisfy beside the proven seed', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const unmet = [{ rule: 'an org with several bookings', reason: 'bookings are created by a worker this world does not run' }];
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [], unmet });
+    });
+
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result).toMatchObject({ status: 'ok', unmet });
   }, 60_000);
 
   it('proves the fold in a FRESH world — down, up, then the real run', async () => {
@@ -958,7 +971,7 @@ describe('buildSeedSession — every authenticating surface must get a probed pr
       return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
     });
 
-    // No security schemes, no roles, no login table: nothing requires a principal.
+    // No security schemes, no login table: nothing requires a principal.
     const result = await seedSession(harness(stub.driver).context)(seedInput(r));
     expect(result).toMatchObject({ status: 'ok', fixtures: ['org'] });
   }, 60_000);
@@ -1567,7 +1580,7 @@ describe('the seed session definition', () => {
         credentials: { owner: { header: 'Authorization', satisfies: 'nope' } },
         fixtures: { org: ['id'] },
       },
-      { securitySchemes: [{ name: 'bearerAuth', summary: 'JWT' }], roles: [{ name: 'admin', source: 'User.role' }] },
+      { securitySchemes: [{ name: 'bearerAuth', summary: 'JWT' }] },
     );
 
     expect(warnings.join('\n')).toMatch(/not a declared security scheme/);
@@ -1657,7 +1670,7 @@ describe('requiredPrincipalSurfaces — which surfaces demand a probed principal
     // No web block ⇒ no web requirement, whatever the schema says.
     writeRecipe(r);
     expect(requiredPrincipalSurfaces(seedInput(r, { database: PRINCIPAL_DATABASE }))).toEqual([]);
-    // A web block over a schema with no login table (and no schemes/roles)
+    // A web block over a schema with no login table (and no schemes)
     // requires nothing — a public site stays seedable with fixtures alone.
     writeRecipe(r, {}, webBlock(r));
     expect(requiredPrincipalSurfaces(seedInput(r))).toEqual([]);
@@ -1714,6 +1727,105 @@ describe('requiredPrincipalSurfaces — which surfaces demand a probed principal
         required,
       ),
     ).toEqual([]);
+  });
+});
+
+describe('seedSessionBriefing — the domain and the coverage world', () => {
+  const worldFor = (r: string, over: Partial<GuardSetupSeedSessionInput> = {}) =>
+    ({
+      input: seedInput(r, over),
+      server: { name: 'default', serve: ['node', 'x'], cwd: 'sandbox', healthPath: '/health', readyTimeoutMs: 1, env: {} },
+      targetPath: TARGET,
+      scratchDir: path.join(r, 'scratch'),
+      knownSchemes: new Set(),
+      secrets: new Map(),
+    }) as never;
+
+  const DOMAIN_DATABASE: SeedDraftDatabase = {
+    ...PRINCIPAL_DATABASE,
+    tables: [
+      ...PRINCIPAL_DATABASE.tables,
+      { name: 'Booking', columns: [{ name: 'id', type: 'Int', isPrimaryKey: true }, { name: 'status', type: 'BookingStatus' }] },
+    ],
+    enums: [{ name: 'BookingStatus', values: ['OPEN', 'CLOSED'] }],
+    schemaFiles: ['schema.prisma'],
+  };
+
+  it("is grounded in the parsed schema: its tables, its enums and the files it was read from, with the coverage rules", () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const briefing = seedSessionBriefing(worldFor(r, { database: DOMAIN_DATABASE }));
+    expect(briefing).toContain('read from: schema.prisma');
+    expect(briefing).toContain('    - status: BookingStatus');
+    expect(briefing).toContain('ENUMS (a column typed by one takes exactly these values):\n  BookingStatus: OPEN, CLOSED');
+    expect(briefing).toContain('## Coverage: the world the screens and tests explore');
+    for (const rule of [/RELATIONS at none, one and several/, /Every ENUM or status value/, /BOOLEAN flag both ways/, /both filled and null/, /STATE THE APP PRODUCES/]) {
+      expect(briefing).toMatch(rule);
+    }
+    expect(briefing).toContain('`{script, command, provides, probes, findings, unmet}`');
+    // The model is no longer found by a walk of its own: nothing but the parsed schema is quoted.
+    expect(briefing).not.toContain('## The domain: what the product can hold');
+  });
+
+  // The seed runs after the services are up and before any server boots, in
+  // a run and in this session alike: state the app produces is reached
+  // through the app's own code, never through a route nobody is serving.
+  it('asks for state the app produces through its own code, never a route, since no server runs', () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const briefing = seedSessionBriefing(worldFor(r, { database: DOMAIN_DATABASE }));
+    const rule = briefing.split('\n').find((line) => line.includes('STATE THE APP PRODUCES'));
+    expect(rule).toMatch(/no server of the app is running/);
+    expect(rule).not.toMatch(/by triggering the app's real path \(its route/);
+  });
+
+  it('asks the seed to decide the kinds of user and describe each, naming no fixed set but the owner', () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const briefing = seedSessionBriefing(worldFor(r, { database: DOMAIN_DATABASE }));
+    expect(briefing).toMatch(/PRINCIPALS: decide which KINDS OF USER this product has/);
+    expect(briefing).toMatch(/auth guards in its source/);
+    expect(briefing).toMatch(/EVERY principal's credential carries `description`/);
+    expect(briefing).toContain('`webSession`');
+    for (const fixed of ['adminWebSession', 'memberWebSession', 'emptyWebSession']) expect(briefing).not.toContain(fixed);
+  });
+
+  it('states a role enum as a schema fact, never as a list of principals to mint', () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const database = {
+      ...DOMAIN_DATABASE,
+      tables: [...DOMAIN_DATABASE.tables, { name: 'Member', columns: [{ name: 'email', type: 'String' }, { name: 'role', type: 'MemberRole' }] }],
+      enums: [...DOMAIN_DATABASE.enums, { name: 'MemberRole', values: ['ADMIN', 'MEMBER'] }],
+    };
+    const briefing = seedSessionBriefing(worldFor(r, { database }));
+    expect(briefing).toContain('  MemberRole: ADMIN, MEMBER');
+    expect(briefing).not.toMatch(/\bROLES\b|ONE PRINCIPAL PER/);
+  });
+
+  it('accepts described principals, and warns about a web session with no description', () => {
+    const described = SeedProvidesProposalSchema.parse({
+      credentials: {
+        webSession: { header: 'Cookie', description: 'owns every seeded booking' },
+        auditorWebSession: { header: 'Cookie', description: 'read-only auditor: sees every booking, changes none' },
+      },
+    });
+    const input = { securitySchemes: [], requiredResources: [] };
+    expect(providesWarnings(described, input).filter((line) => line.includes('description'))).toEqual([]);
+    const bare = SeedProvidesProposalSchema.parse({ credentials: { webSession: { header: 'Cookie' } } });
+    expect(providesWarnings(bare, input)).toContainEqual(expect.stringContaining('credential "webSession" is a web session with no `description`'));
+  });
+
+  it('names the remaining tables only once the schema is past its column budget', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const wide = Array.from({ length: 40 }, (_, i) => ({
+      name: `T${i}`,
+      columns: Array.from({ length: 20 }, (_, c) => ({ name: `c${c}`, type: 'String' })),
+    }));
+    const briefing = seedSessionBriefing(worldFor(r, { database: { ...DATABASE, tables: wide } }));
+    expect(briefing).toContain('    - c19: String');
+    expect(briefing).toMatch(/… 10 more table\(s\), columns not listed: T30, T31/);
   });
 });
 
@@ -2006,25 +2118,28 @@ describe('the seed step key', () => {
   it('follows the recipe contract and the catalog identity, not a dependency bump', () => {
     const r = fixtureRepo();
     writeRecipe(r);
-    const before = computeSeedStepFingerprint(r);
+    const before = computeSeedStepFingerprint(r, []);
 
     // A dependency bump moves the recipe fingerprint, so it moves the OLD key.
     // The step reads neither the manifests nor a dependency version.
     fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }));
-    expect(computeSeedStepFingerprint(r)).toBe(before);
+    expect(computeSeedStepFingerprint(r, [])).toBe(before);
     expect(legacySeedStepFingerprint(r)).not.toBe(before);
 
     // A recipe edit is the contract moving, and the step re-opens on it.
     writeRecipe(r, { readyTimeoutMs: 9000 });
-    expect(computeSeedStepFingerprint(r)).not.toBe(before);
+    expect(computeSeedStepFingerprint(r, [])).not.toBe(before);
   });
 
-  it('the session key drops the prompt, and the old key stays computable', () => {
+  it('moves with a schema file the parsers read, and not with any other file', () => {
     const r = fixtureRepo();
     writeRecipe(r);
-    const current = seedSessionCacheKey(computeSeedStepFingerprint(r));
-    const legacy = seedSessionLegacyCacheKey(legacySeedStepFingerprint(r));
-    expect(current).toMatch(/^[0-9a-f]{64}$/);
-    expect(legacy).not.toBe(current);
+    const before = computeSeedStepFingerprint(r, ['schema.prisma']);
+    fs.writeFileSync(path.join(r, 'notes.ts'), 'export const x = 1;\n');
+    expect(computeSeedStepFingerprint(r, ['schema.prisma'])).toBe(before);
+    fs.appendFileSync(path.join(r, 'schema.prisma'), '\nenum Status {\n  OPEN\n  CLOSED\n}\n');
+    const moved = computeSeedStepFingerprint(r, ['schema.prisma']);
+    expect(moved).not.toBe(before);
+    expect(seedSessionCacheKey(moved)).not.toBe(seedSessionCacheKey(before));
   });
 });

@@ -1,14 +1,19 @@
-import type { TableInfo, ColumnInfo, RelationInfo } from '@truecourse/shared'
+import type { TableInfo, ColumnInfo, RelationInfo, EnumInfo } from '@truecourse/shared'
 
 /**
- * Parse a Prisma schema file and extract tables (models) and relations.
+ * Parse a Prisma schema file and extract tables (models), relations and enums.
+ * A field typed by one of the file's enums is a column whose `type` is the
+ * enum's name.
  */
 export function parsePrismaSchema(content: string): {
   tables: TableInfo[]
   relations: RelationInfo[]
+  enums: EnumInfo[]
 } {
   const tables: TableInfo[] = []
   const relations: RelationInfo[] = []
+  const enums = parsePrismaEnums(content)
+  const enumNames = new Set(enums.map((declared) => declared.name))
 
   const lines = content.split('\n')
   let currentModel: string | null = null
@@ -97,7 +102,7 @@ export function parsePrismaSchema(content: string): {
         'Bytes': 'bytes',
       }
 
-      const mappedType = scalarTypes[cleanType]
+      const mappedType = scalarTypes[cleanType] ?? (enumNames.has(cleanType) ? cleanType : undefined)
       if (!mappedType) {
         // It's likely a relation field without @relation (other side)
         // Skip it as a column unless it has no model match
@@ -150,5 +155,20 @@ export function parsePrismaSchema(content: string): {
     }
   }
 
-  return { tables, relations }
+  return { tables, relations, enums }
+}
+
+/** Every `enum Name { … }` block: its name and its values, `@map`/`@@map` attributes aside. */
+function parsePrismaEnums(content: string): EnumInfo[] {
+  const enums: EnumInfo[] = []
+  for (const match of content.matchAll(/^\s*enum\s+(\w+)\s*\{([^}]*)\}/gm)) {
+    const values = match[2]!
+      .split('\n')
+      .map((line) => line.replace(/\/\/.*$/, '').trim())
+      .filter((line) => line !== '' && !line.startsWith('@@'))
+      .map((line) => line.split(/\s+/)[0]!)
+      .filter((value) => /^\w+$/.test(value))
+    enums.push({ name: match[1]!, values })
+  }
+  return enums
 }

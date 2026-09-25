@@ -494,7 +494,7 @@ export interface SuppliedInstance {
  * `provided` — an unprovided one never gets this far.
  */
 export function suppliedInstancesFor(
-  scenario: GuardScenario,
+  scenario: GuardScenario | Pick<GuardScenario, 'needs' | 'prerequisites'>,
   resolved: ResolvedDependencies,
 ): SuppliedInstance[] {
   const byName = new Map(resolved.dependencies.map((d) => [d.name, d]))

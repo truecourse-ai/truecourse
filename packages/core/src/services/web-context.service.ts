@@ -15,11 +15,21 @@
  * command that authors. The place ids still agree, because both sides mint them
  * with the same pure function over the same tree.
  *
+ * It also finds the SHARED PLACES ({@link detectSharedComponents}): the
+ * component modules several screens render anywhere in their render closure
+ * (their layouts included) and that own a handler. Each gets a
+ * grounding of its own (its module and what it renders), and the modules are
+ * taken out of every other place's `renders` — a screen is not handed the source
+ * of UI another session authors, and it is told which shared places it renders
+ * instead.
+ *
  * Degradation is the same everywhere in this pipeline: a pass that throws costs
  * the sessions their grounding, never the run. An empty pack authors exactly as
  * the stage did before the pack existed.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { buildDependencyGraph } from '@truecourse/source-facts';
 import {
   deriveWebPlaceContexts,
@@ -29,6 +39,7 @@ import {
 } from '@truecourse/interface-mapper';
 import type { FileAnalysis, InterfacesFile } from '@truecourse/shared';
 import { log } from '../lib/logger.js';
+import { detectSharedComponents, type SharedComponent } from './interface-author/shared-places.js';
 import { analyzeWorkingTree } from './interface.service.js';
 import { nextAppRoots } from './next-app-roots.js';
 
@@ -40,8 +51,16 @@ export interface DeriveWebAuthoringContextOptions {
 }
 
 export interface WebAuthoringContext {
-  /** Place id → what the tree says about it. Empty when the pass could not run. */
+  /**
+   * Place id → what the tree says about it, screens and shared components alike.
+   * A shared component's module is in no other place's `renders`. Empty when the
+   * pass could not run.
+   */
   contexts: Map<string, WebPlaceContext>;
+  /** The shared places, most widely rendered first. */
+  shared: SharedComponent[];
+  /** Place id → the shared places it renders, by id — what its briefing names instead of their source. */
+  sharedRendered: Map<string, string[]>;
   /** How many source files the pass analyzed — the size of the fact, for the log. */
   files: number;
   /** Wall-clock seconds the pass took, so a slow repo is visible rather than felt. */
@@ -59,6 +78,8 @@ export async function deriveWebAuthoringContext(
   const started = Date.now();
   const empty = (files: number): WebAuthoringContext => ({
     contexts: new Map(),
+    shared: [],
+    sharedRendered: new Map(),
     files,
     seconds: Math.round((Date.now() - started) / 1000),
   });
@@ -76,18 +97,58 @@ export async function deriveWebAuthoringContext(
       nextAppRoots: nextAppRoots(repoRoot, fileAnalyses),
     }));
     if (seeds.size === 0) return empty(fileAnalyses.length);
-    const contexts = deriveWebPlaceContexts({
-      repoRoot,
-      seeds,
-      fileAnalyses,
-      dependencies: buildDependencyGraph(fileAnalyses, repoRoot),
-      apiInterfaces: opts.catalog?.interfaces ?? [],
+    const dependencies = buildDependencyGraph(fileAnalyses, repoRoot);
+    const apiInterfaces = opts.catalog?.interfaces ?? [];
+    const screens = deriveWebPlaceContexts({ repoRoot, seeds, fileAnalyses, dependencies, apiInterfaces });
+    const shared = detectSharedComponents({
+      contexts: screens,
+      readSource: (module) => {
+        try {
+          return fs.readFileSync(path.join(repoRoot, module), 'utf-8');
+        } catch {
+          return undefined;
+        }
+      },
     });
-    return { contexts, files: fileAnalyses.length, seconds: Math.round((Date.now() - started) / 1000) };
+    const components = deriveWebPlaceContexts({
+      repoRoot,
+      seeds: new Map(shared.map((component) => [component.id, { filePath: path.join(repoRoot, component.module), address: '' }])),
+      fileAnalyses,
+      dependencies,
+      apiInterfaces,
+    });
+    return {
+      ...separateSharedModules(new Map([...screens, ...components]), shared),
+      shared,
+      files: fileAnalyses.length,
+      seconds: Math.round((Date.now() - started) / 1000),
+    };
   } catch (error) {
     log.warn(`interface authoring: context derivation failed, sessions author without it (${errorText(error)})`);
     return empty(fileAnalyses.length);
   }
+}
+
+/**
+ * Take every shared module out of every other place's `renders`, and say which
+ * shared places each place renders anywhere in its render closure.
+ */
+function separateSharedModules(
+  contexts: ReadonlyMap<string, WebPlaceContext>,
+  shared: readonly SharedComponent[],
+): { contexts: Map<string, WebPlaceContext>; sharedRendered: Map<string, string[]> } {
+  const byModule = new Map(shared.map((component) => [component.module, component.id]));
+  const separated = new Map<string, WebPlaceContext>();
+  const sharedRendered = new Map<string, string[]>();
+  for (const [placeId, context] of contexts) {
+    const rendered = context.renderClosure.flatMap((module) => {
+      const id = byModule.get(module);
+      return id !== undefined && id !== placeId ? [id] : [];
+    });
+    if (rendered.length > 0) sharedRendered.set(placeId, rendered);
+    separated.set(placeId, { ...context, renders: context.renders.filter((module) => !byModule.has(module)) });
+  }
+  return { contexts: separated, sharedRendered };
 }
 
 function errorText(error: unknown): string {

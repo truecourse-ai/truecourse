@@ -122,6 +122,7 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
         const opened = await openWebSession({
           server: surface.server,
           evidenceDir: ctx.evidenceDir,
+          ...(ctx.signal ? { signal: ctx.signal } : {}),
         })
         if (!opened.ok) return failedToOpen(opened.reason)
         session = opened.session

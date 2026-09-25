@@ -5,10 +5,19 @@
  * killed). All timings are tiny; a prompt return is itself the proof that the
  * children were killed rather than left to their 30s step timeout.
  */
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import fs from 'node:fs'
-import { runGuard, guardLatestPath } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds } from './helpers.js'
+import { runGuard, guardLatestPath, isPortHeld } from '@truecourse/guard-runner'
+import {
+  makeTempRepo,
+  rmrf,
+  writeRecipe,
+  writeApiRecipe,
+  writeScenario,
+  scenario,
+  apiScenario,
+  specBinds,
+} from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -137,6 +146,101 @@ describe('runGuard — runTimeoutMs', () => {
     expect(res.elapsedMs).toBeGreaterThanOrEqual(1_000)
     // A timed-out run persists nothing — no LATEST, no baseline movement.
     expect(fs.existsSync(guardLatestPath(r))).toBe(false)
+  })
+
+  it('ends at the deadline even when a scenario is parked on a promise that never settles', async () => {
+    const r = repo()
+    writeApiRecipe(r)
+    writeScenario(
+      r,
+      'api/parked.yaml',
+      apiScenario({
+        id: 'parked',
+        binds: specBinds('a/b'),
+        steps: [{ request: { method: 'GET', path: '/todos' }, expect: { status: 200 } }],
+      }),
+    )
+    // The preflight's boot (the first port polled) is real; every later request
+    // parks forever, which is what a lost fetch looks like to its awaiter.
+    const realFetch = globalThis.fetch
+    const ports: number[] = []
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const port = Number(new URL(String(input)).port)
+      if (!ports.includes(port)) ports.push(port)
+      return port === ports[0] ? realFetch(input, init) : new Promise<Response>(() => {})
+    })
+    try {
+      const start = Date.now()
+      const res = await runGuard({ repoRoot: r, skipBuild: true, runTimeoutMs: 1_500 })
+      expect(Date.now() - start).toBeLessThan(10_000)
+      expect(res.status).toBe('run-timed-out')
+      expect(ports.length).toBeGreaterThan(1)
+      // The parked scenario's server died with the run.
+      const parkedPort = ports[1]!
+      await vi.waitFor(() => expect(isPortHeld(parkedPort)).toBe(false), { timeout: 5_000 })
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
+  /** One api scenario whose one request goes to `/todos`, every other fetch real. */
+  function apiRun(park: (init: RequestInit | undefined) => Promise<Response>): {
+    r: string
+    ports: number[]
+    restore: () => void
+  } {
+    const r = repo()
+    writeApiRecipe(r)
+    writeScenario(
+      r,
+      'api/parked.yaml',
+      apiScenario({
+        id: 'parked',
+        binds: specBinds('a/b'),
+        steps: [{ request: { method: 'GET', path: '/todos' }, expect: { status: 200 } }],
+      }),
+    )
+    const realFetch = globalThis.fetch
+    const ports: number[] = []
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(String(input))
+      const port = Number(url.port)
+      if (!ports.includes(port)) ports.push(port)
+      return url.pathname === '/todos' ? park(init) : realFetch(input, init)
+    })
+    return { r, ports, restore: () => fetchSpy.mockRestore() }
+  }
+
+  // The server came up healthy; the request after it never settles. The kill
+  // that cancellation owes the server outlives its readiness.
+  it('kills the server of a scenario parked on a request after the server was ready', async () => {
+    const run = apiRun(() => new Promise<Response>(() => {}))
+    try {
+      const res = await runGuard({ repoRoot: run.r, skipBuild: true, runTimeoutMs: 1_500 })
+      expect(res.status).toBe('run-timed-out')
+      const parkedPort = run.ports.at(-1)!
+      await vi.waitFor(() => expect(isPortHeld(parkedPort)).toBe(false), { timeout: 5_000 })
+    } finally {
+      run.restore()
+    }
+  })
+
+  // A scenario that settles on the signal gets to finish its own cleanup (its
+  // server stopped and gone) before the run tears down and returns.
+  it('lets a cancelled scenario finish its own cleanup before the run returns', async () => {
+    const run = apiRun(
+      (init) =>
+        new Promise<Response>((_, reject) =>
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }),
+        ),
+    )
+    try {
+      const res = await runGuard({ repoRoot: run.r, skipBuild: true, runTimeoutMs: 1_500 })
+      expect(res.status).toBe('run-timed-out')
+      expect(isPortHeld(run.ports.at(-1)!)).toBe(false)
+    } finally {
+      run.restore()
+    }
   })
 
   it('a run-timer expiry during the build reports run-timed-out with zero settled', async () => {

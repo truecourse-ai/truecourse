@@ -38,6 +38,19 @@ import type { Browser, BrowserContext, BrowserType, FileChooser, Page } from 'pl
  */
 export const WEB_VIEWPORT = { width: 1280, height: 800 } as const
 
+/**
+ * The context every browser this module opens renders in. The page must render
+ * the same on every machine: scenarios assert rendered clock labels, so the
+ * browser's timezone and locale are pinned to the same UTC/C-locale world the
+ * CLI driver's child env pins (child-env.ts).
+ */
+export const WEB_CONTEXT_OPTIONS = {
+  viewport: { ...WEB_VIEWPORT },
+  deviceScaleFactor: 1,
+  timezoneId: 'UTC',
+  locale: 'en-US',
+} as const
+
 /** The video file every web session leaves in its evidence directory. */
 export const WEB_VIDEO_FILE = 'session.webm'
 
@@ -77,9 +90,11 @@ export interface LaunchWebBrowserOptions {
   /**
    * Where the session video is recorded. The scenario's evidence directory: a
    * browser run's evidence is visual, and a video is the only artifact that shows
-   * what happened BETWEEN two steps' screenshots.
+   * what happened BETWEEN two steps' screenshots. Absent ⇒ nothing is recorded,
+   * which is what a browser opened to OBSERVE a screen (never to prove one)
+   * asks for.
    */
-  videoDir: string
+  videoDir?: string
 }
 
 /**
@@ -175,7 +190,7 @@ export async function launchWebBrowser(
   if (!loaded.ok) return { ok: false, reason: loaded.reason }
   const chromium = loaded.chromium
   if (!isBinaryPresent(chromium)) return { ok: false, reason: BROWSER_MISSING_MESSAGE }
-  fs.mkdirSync(opts.videoDir, { recursive: true })
+  if (opts.videoDir) fs.mkdirSync(opts.videoDir, { recursive: true })
 
   let browser: Browser
   try {
@@ -188,14 +203,8 @@ export async function launchWebBrowser(
   let page: Page
   try {
     context = await browser.newContext({
-      viewport: { ...WEB_VIEWPORT },
-      deviceScaleFactor: 1,
-      // The page must render the same on every machine: scenarios assert rendered
-      // clock labels, so the browser's timezone and locale are pinned to the same
-      // UTC/C-locale world the CLI driver's child env pins (child-env.ts).
-      timezoneId: 'UTC',
-      locale: 'en-US',
-      recordVideo: { dir: opts.videoDir, size: { ...WEB_VIEWPORT } },
+      ...WEB_CONTEXT_OPTIONS,
+      ...(opts.videoDir ? { recordVideo: { dir: opts.videoDir, size: { ...WEB_VIEWPORT } } } : {}),
     })
     page = await context.newPage()
   } catch (e) {
@@ -266,7 +275,7 @@ export async function launchWebBrowser(
     // The context must go down before the video file is complete — that is the
     // recorder's contract, not a race we are choosing to run.
     await context.close().catch(() => undefined)
-    if (video) {
+    if (video && opts.videoDir) {
       const target = path.join(opts.videoDir, WEB_VIDEO_FILE)
       try {
         await video.saveAs(target)

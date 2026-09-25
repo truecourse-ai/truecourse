@@ -551,6 +551,40 @@ describe('the web driver', () => {
     TEST_TIMEOUT_MS,
   )
 
+  // A scenario parked on a promise that never settles never reaches its own
+  // close, and the run stops waiting on it once cancelled: the browser it
+  // opened goes down with the run's signal, the way its servers do.
+  it(
+    'closes the browser when the run is cancelled, with no close from the scenario',
+    async () => {
+      const scoped = makeWebRepo()
+      const served = sandboxSurface(webSurfaceOf(scoped))
+      const cancel = new AbortController()
+      try {
+        const before = playwrightBrowserPids()
+        const surface = await served.open({
+          repoRoot: scoped,
+          sandbox: { cwd: scoped, env: { PATH: process.env.PATH ?? '' } },
+        } as never)
+        expect(surface.ok).toBe(true)
+        if (!surface.ok) return
+        const opened = await openWebSession({ server: surface.server, evidenceDir: path.join(scoped, 'evidence'), signal: cancel.signal })
+        expect(opened.ok).toBe(true)
+        const during = playwrightBrowserPids().filter((pid) => !before.includes(pid))
+        expect(during.length).toBeGreaterThan(0)
+
+        cancel.abort()
+        const deadline = Date.now() + 10_000
+        while (during.some(isAlive) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50))
+        expect(during.filter(isAlive)).toEqual([])
+      } finally {
+        await served.close().catch(() => undefined)
+        rmrf(scoped)
+      }
+    },
+    TEST_TIMEOUT_MS,
+  )
+
   it(
     'the browser session and the SHARED surface each close what they own',
     async () => {

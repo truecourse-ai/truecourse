@@ -268,6 +268,99 @@ describe('the component closure (tier 2)', () => {
  * on the other side is refuse-nothing: an edge whose usage the analyzer cannot
  * see stays in.
  */
+describe('the render closure', () => {
+  it('follows the render chain past the named list’s depth: a card rendered through a list is the screen’s', () => {
+    const contexts = derive(
+      { links: place('/collections/{id}', 'pages/collections/[id].tsx') },
+      [
+        file('pages/collections/[id].tsx', { calls: ['Links@3'] }),
+        file('components/Links.tsx', { calls: ['LinkList@3'] }),
+        file('components/LinkList.tsx', { calls: ['LinkRow@3'] }),
+        file('components/LinkRow.tsx', { calls: ['LinkCard@3'] }),
+        file('components/LinkCard.tsx'),
+      ],
+      [
+        edge('pages/collections/[id].tsx -> components/Links.tsx {Links}'),
+        edge('components/Links.tsx -> components/LinkList.tsx {LinkList}'),
+        edge('components/LinkList.tsx -> components/LinkRow.tsx {LinkRow}'),
+        edge('components/LinkRow.tsx -> components/LinkCard.tsx {LinkCard}'),
+      ],
+    )
+    const context = contexts.get('links')!
+    expect(context.renders).not.toContain('components/LinkCard.tsx')
+    expect(context.renderClosure).toEqual([
+      'components/Links.tsx',
+      'components/LinkList.tsx',
+      'components/LinkRow.tsx',
+      'components/LinkCard.tsx',
+    ])
+  })
+
+  it('follows the render chain to its end however deep, through a cycle, and past a barrel by the asked name', () => {
+    const chain = Array.from({ length: 12 }, (_, i) => `components/Level${i}.tsx`)
+    const contexts = derive(
+      { root: place('/', 'page.tsx') },
+      [
+        file('page.tsx', { calls: ['Level0@3'] }),
+        ...chain.map((module, i) => file(module, { calls: [i < chain.length - 1 ? `Level${i + 1}@3` : 'Level0@3', 'Button@4'] })),
+        file('ui/index.ts', { reexports: ['Button', 'Table'] }),
+        file('ui/button.tsx'),
+        file('ui/table.tsx'),
+      ],
+      [
+        edge('page.tsx -> components/Level0.tsx {Level0}'),
+        ...chain.slice(1).map((module, i) => edge(`${chain[i]} -> ${module} {Level${i + 1}}`)),
+        // The last level renders the first again: the cycle is entered once.
+        edge(`${chain[chain.length - 1]} -> ${chain[0]} {Level0}`),
+        edge(`${chain[chain.length - 1]} -> ui/index.ts {Button}`),
+        edge('ui/index.ts -> ui/button.tsx {Button}'),
+        edge('ui/index.ts -> ui/table.tsx {Table}'),
+      ],
+    )
+    expect(contexts.get('root')?.renderClosure).toEqual([...chain, 'ui/button.tsx'])
+  })
+
+  it('wraps an app-router page in every layout above it, outermost first, with what they render', () => {
+    const page = (address: string, path: string): WebPlace => ({ ...place(address, path), idiom: 'next-app' })
+    const contexts = derive(
+      { links: page('/links', 'app/(main)/links/page.tsx') },
+      [
+        file('app/layout.tsx'),
+        file('app/(main)/layout.tsx', { calls: ['Sidebar@3'] }),
+        file('app/(main)/links/page.tsx'),
+        file('components/Sidebar.tsx'),
+        file('app/(other)/layout.tsx'),
+      ],
+      [edge('app/(main)/layout.tsx -> components/Sidebar.tsx {Sidebar}')],
+    )
+    expect(contexts.get('links')?.renderClosure).toEqual(['app/layout.tsx', 'app/(main)/layout.tsx', 'components/Sidebar.tsx'])
+    // The named list is the page's own chain: a layout is not the screen's feature.
+    expect(contexts.get('links')?.renders).toEqual([])
+    // Every file a layout could be written in, found or not: one added later is
+    // a view that joined the set.
+    expect(contexts.get('links')?.layoutCandidates).toEqual(
+      expect.arrayContaining(['app/(main)/links/layout.tsx', 'app/(main)/links/layout.js', 'app/layout.tsx']),
+    )
+  })
+
+  it("wraps a pages-router page in its pages directory's `_app`", () => {
+    const page = (address: string, path: string): WebPlace => ({ ...place(address, path), idiom: 'next-pages' })
+    const contexts = derive(
+      { tags: page('/tags/{id}', 'apps/web/pages/tags/[id].tsx') },
+      [
+        file('apps/web/pages/_app.tsx', { calls: ['AuthRedirect@3'] }),
+        file('apps/web/pages/tags/[id].tsx'),
+        file('apps/web/layouts/AuthRedirect.tsx'),
+      ],
+      [edge('apps/web/pages/_app.tsx -> apps/web/layouts/AuthRedirect.tsx {AuthRedirect}')],
+    )
+    expect(contexts.get('tags')?.renderClosure).toEqual(['apps/web/pages/_app.tsx', 'apps/web/layouts/AuthRedirect.tsx'])
+    expect(contexts.get('tags')?.layoutCandidates).toEqual(
+      expect.arrayContaining(['apps/web/pages/tags/_app.tsx', 'apps/web/pages/_app.jsx']),
+    )
+  })
+})
+
 describe('render evidence (the `/signin` regression)', () => {
   it('drops a module imported for a CONSTANT, and everything reached only through it', () => {
     const contexts = derive(

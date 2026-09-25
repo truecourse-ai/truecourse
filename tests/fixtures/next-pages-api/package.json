@@ -1,0 +1,5 @@
+{
+  "name": "next-pages-api-fixture",
+  "private": true,
+  "dependencies": { "next": "^15.0.0", "next-connect": "^1.0.0" }
+}

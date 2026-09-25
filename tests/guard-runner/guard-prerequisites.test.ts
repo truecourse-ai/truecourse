@@ -7,6 +7,7 @@ import {
   scenarioAccountEnvironment,
   externalsInjectEnv,
   externalsLocalPath,
+  observationWorld,
   dependenciesPath,
   dependenciesLocalPath,
   runGuard,
@@ -237,4 +238,23 @@ it('withholds every associated service when one shared account requirement is in
     expect.arrayContaining([expect.objectContaining({ field: 'MISSING_KEY', resolved: false })]),
   )
   expect(externalsInjectEnv(resolved.externals)).toEqual({})
+})
+
+describe('the world a screen is observed in', () => {
+  it('binds every provided account and dependency, and masks their secrets', () => {
+    const r = repo()
+    write(dependenciesPath(r), { dependencies: ['account', 'unregistered'].map(name => ({
+      name, class: 'supplied', summary: name, services: [name + '-service'], needs: [],
+      registration: { kind: 'env', vars: [{ name: name.toUpperCase() + '_KEY', description: 'Key', secret: true }] },
+    })) })
+    write(dependenciesLocalPath(r), { account: { env: { ACCOUNT_KEY: 'selected-key' } } })
+    write(externalsLocalPath(r), { currencybeacon: { env: { CURRENCYBEACON_API_KEY: 'provider-key' } } })
+
+    const world = observationWorld(r, declared)
+    const account = { CURRENCYBEACON_BASE_URL: declared.currencybeacon.baseUrl, CURRENCYBEACON_API_KEY: 'provider-key' }
+    expect(world.serverEnv).toEqual(account)
+    expect(world.env).toEqual({ ...account, ACCOUNT_KEY: 'selected-key' })
+    expect(world.supplied.map((instance) => instance.name)).toEqual(['account'])
+    expect([...world.secrets.values()].sort()).toEqual(['provider-key', 'selected-key'])
+  })
 })

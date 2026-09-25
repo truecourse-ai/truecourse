@@ -9,7 +9,8 @@
  * every step would re-run from scratch. Collect them after a run, materialize
  * them into the next clone before one, and setup behaves as it does locally.
  *
- * The interface catalog travels too — both halves plus its findings ledger —
+ * The interface catalog travels too — both halves plus its findings ledger and
+ * its record of non-canonical locators —
  * because the Interfaces view has no working tree to read and the
  * interfaces step's settle check needs the authored half to exist.
  *
@@ -21,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { GuardSetupReportSchema, type GuardSetupReport } from '@truecourse/shared';
+import { guardNonCanonicalLocatorsPath } from '@truecourse/shared/work-tree';
 import {
   dependenciesPath,
   guardAuthoredInterfacesPath,
@@ -66,6 +68,7 @@ export function collectGuardSetupBundle(repoRoot: string): Record<string, string
     guardInterfacesPath(repoRoot),
     guardAuthoredInterfacesPath(repoRoot),
     guardInterfaceFindingsPath(repoRoot),
+    guardNonCanonicalLocatorsPath(repoRoot),
     recipePath(repoRoot),
     dependenciesPath(repoRoot),
     path.join(scenariosDir(repoRoot), 'dependencies.settle.json'),

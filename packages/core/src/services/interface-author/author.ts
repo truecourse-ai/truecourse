@@ -48,6 +48,7 @@
  * adapter picks both (the configured transport, the run's sessions store).
  */
 
+import { createHash } from 'node:crypto'
 import type {
   SessionDriver,
   SessionEvent,
@@ -55,12 +56,17 @@ import type {
   SharedPromptPrefix,
 } from '@truecourse/agent-loop'
 import {
+  hasAddressSlot,
+  mergeInterfaceCatalogs,
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
-  recipeContractFingerprint,
+  authoringRecipeContract,
+  liveWorldInputs,
+  sourceDigests,
   staleAuthoredPlaceDiagnostics,
   unsettledAuthoring,
   webScreenAuthoringStates,
+  type WebScreenAuthoringInput,
 } from '@truecourse/guard-runner'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import type {
@@ -69,7 +75,7 @@ import type {
   InterfacesFile,
   MapperDiagnostic,
 } from '@truecourse/shared'
-import { isLabelOnlyRekey } from '@truecourse/shared'
+import { isLabelOnlyRekey, isRootPlace, resolvedInterfaceFingerprint, rootPlaceOf } from '@truecourse/shared'
 import { readCachedSessionOutput, storeCachedSessionOutput } from '../agent/session-cache.js'
 import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
@@ -85,16 +91,44 @@ import { clusterPlaces, orderClustersLongestFirst, type PlaceCluster } from './c
 import type { AuthorFinding } from './findings.js'
 import { clusterPack, type ClusterPack } from './pack.js'
 import { placeSourcePack } from './place-pack.js'
-import { ownTaskContext } from './catalog-context.js'
-import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem } from './session.js'
-import { recordAuthoringLedger, writeAuthoredCatalog } from './write.js'
+import { ownTaskContext, ownTasks } from './catalog-context.js'
+import type { LiveScreens, ObserveScreenResult } from './live-screen.js'
+import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem, type SharedPlaceBrief } from './session.js'
+import type { SharedComponent } from './shared-places.js'
+import { recordAuthoringLedger, registerSharedPlaces, retireAuthoredPlaces, writeAuthoredCatalog } from './write.js'
 
 /**
  * Where a screen's accepted fragment is stored, keyed on the digest of what its
- * session ran over — the same value its ledger row records. There is no legacy
+ * session ran over — the same value its ledger row records — and on whether the
+ * session had the live screen ({@link fragmentCacheKey}). There is no legacy
  * key: authoring had no cache before this one.
  */
 export const INTERFACE_AUTHOR_CACHE_NAME = 'guard/interfaces-author'
+
+/**
+ * A screen's cache key: its input digest and the source files it is grounded
+ * on (a moved file is a different answer). A fragment authored from source
+ * alone is keyed apart from one authored beside the live screen: the live one
+ * is what a run that can stand the app up wants, so a source-only fragment
+ * (written the time the world would not come up) is served only to another run
+ * where it will not.
+ */
+export function fragmentCacheKey(
+  inputFingerprint: string,
+  sources: Readonly<Record<string, string>>,
+  live: boolean,
+): string {
+  const files = Object.entries(sources).sort(([a], [b]) => a.localeCompare(b))
+  const key = files.length > 0
+    ? `${inputFingerprint}:${createHash('sha256').update(JSON.stringify(files)).digest('hex').slice(0, 16)}`
+    : inputFingerprint
+  return live ? `${key}:live` : key
+}
+
+/** The source files a place is grounded on: its route module and what it renders. */
+function groundingFiles(context: WebPlaceContext | undefined): string[] {
+  return context ? [context.module, ...context.renders] : []
+}
 
 /** An explicit ask to author again reads no cached fragment: the point of both
  *  `replace` and `refresh` is to spend a session. */
@@ -108,7 +142,7 @@ export interface AuthorRunOptions {
   persistence: SessionPersistence
   /** Author only these place ids; default = every screen needing tasks or readable facts. */
   places?: readonly string[]
-  /** Re-author places that already carry authored tasks (their tasks may be replaced). */
+  /** Re-open every screen, settled or not, reading no cached fragment; each is reconciled against its tasks. */
   replace?: boolean
   /**
    * Re-open the screens whose ledger row says they never settled, whatever
@@ -133,6 +167,31 @@ export interface AuthorRunOptions {
    * A place with no entry is briefed exactly as it was before the pack existed.
    */
   context?: ReadonlyMap<string, WebPlaceContext>
+  /**
+   * The shared places the context pass found ({@link detectSharedComponents}),
+   * and which of them each place renders. Each is registered in the authored
+   * catalog as a `component` place and authored ONCE, before the screens, at a
+   * screen that renders it; a screen's briefing names the shared places it
+   * renders with their tasks instead of handing it their source. A component
+   * place the pass no longer finds earns no session. Absent ⇒ no component is
+   * authored.
+   */
+  shared?: {
+    components: readonly SharedComponent[]
+    rendered: ReadonlyMap<string, readonly string[]>
+  }
+  /**
+   * Stands the running app up, when the caller can: called at most once, and
+   * only when a screen's live fragment is not cached — a run served wholly from
+   * the cache boots nothing. What it hands back gives every session
+   * `observe_screen`, and a screen whose address has no slot is observed once
+   * before its session starts so the tree rides the briefing. Absent, or
+   * `undefined` back ⇒ the sessions author from source alone, and the failure
+   * is recorded with the recipe it failed under, so a screen owed only a live
+   * look is not work again until that recipe moves. The caller tears the world
+   * down after the run.
+   */
+  openLive?: () => Promise<LiveScreens | undefined>
   signal?: AbortSignal
   onProgress?: (event: AuthorProgress) => void
   /** Every transcript event, as it is persisted — the caller's live view. */
@@ -172,6 +231,8 @@ export interface PlaceResult {
    * the task exists, it is just somebody else's entry now.
    */
   raced?: string[]
+  /** This screen's existing tasks the session retired, each with its reason. */
+  retired?: { id: string; reason: string }[]
   spent: { turns: number; tokens: number; costUsd: number }
   /** Whether a resume grant could continue a failed session. */
   resumable?: boolean
@@ -203,6 +264,11 @@ export interface AuthorRunResult {
    * dropped. Never stored; the merged catalog readers see is unchanged.
    */
   diagnostics: MapperDiagnostic[]
+  /**
+   * Tasks retired with a shared component the context pass no longer finds
+   * shared, each with why; their screens own those controls now.
+   */
+  retired: { id: string; reason: string }[]
   spent: { turns: number; tokens: number; costUsd: number }
 }
 
@@ -213,6 +279,8 @@ export interface AuthorWorkItem {
   existing: string[]
   /** Tasks or readable facts still need a source reading. */
   needsAuthoring: boolean
+  /** Work only for a run whose live world comes up: the row was authored from source alone. */
+  awaitsLiveLook: boolean
   /** What the ledger says authoring settled here, when it says anything. */
   record?: InterfaceAuthoringRecord
   /** The digest this screen's session runs over — its ledger row and cache key. */
@@ -227,17 +295,22 @@ export interface AuthorWorkItem {
  *
  * Whether a screen is WORK is the ledger's answer ({@link webScreenAuthoringStates}),
  * which is why the recipe contract is a parameter: it is one of the inputs each
- * screen's row settled over.
+ * screen's row settled over. With the working tree, a row whose recorded source
+ * files changed is work too, and with the current grounding, so is a row whose
+ * set of grounding files is not the one it recorded; when the caller can look
+ * at the screens live, so is a row authored from source alone.
  */
 export function planWorkItems(
   derived: InterfacesFile | null,
   authored: InterfacesFile | null,
   recipeContract: string,
+  opts: Pick<WebScreenAuthoringInput, 'repoRoot' | 'grounding' | 'liveAvailable'> = {},
 ): AuthorWorkItem[] {
-  return webScreenAuthoringStates({ derived, authored, recipeContract }).map((state) => ({
+  return webScreenAuthoringStates({ derived, authored, recipeContract, ...opts }).map((state) => ({
     place: state.place,
     existing: state.tasks,
     needsAuthoring: state.needsAuthoring,
+    awaitsLiveLook: state.awaitsLiveLook,
     ...(state.record ? { record: state.record } : {}),
     inputFingerprint: state.inputFingerprint,
   }))
@@ -262,9 +335,58 @@ function placeIndex(
 export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<AuthorRunResult> {
   const derived = readInterfaceCatalog(opts.repoRoot)
   let authored = readAuthoredInterfaceCatalog(opts.repoRoot)
-  const recipeContract = recipeContractFingerprint(opts.repoRoot, 'seed')
+  const recipeContract = authoringRecipeContract(opts.repoRoot)
 
-  const all = planWorkItems(derived, authored, recipeContract)
+  // THE SHARED PLACES, registered before the work list is planned: each is a
+  // root place of its own, so it is planned, ledgered and cached like a screen.
+  const components = new Map((opts.shared?.components ?? []).map((component) => [component.id, component]))
+  const registered = registerSharedPlaces({
+    repoRoot: opts.repoRoot,
+    authored,
+    derived,
+    components: [...components.values()],
+    ...(opts.now ? { now: opts.now } : {}),
+  })
+  if (registered) authored = registered.file
+
+  // The grounding as the context pass found it NOW, when it found any: a pass
+  // that could not run leaves every row to be judged by the files it recorded.
+  const grounding = opts.context && opts.context.size > 0
+    ? new Map([...opts.context].map(([placeId, context]) => [placeId, groundingFiles(context)]))
+    : undefined
+
+  // A component place a context pass that ran no longer finds shared is
+  // retired with its tasks and its row: the screens now grounded on its module
+  // own those controls, and would author them again beside it. An empty pass
+  // says nothing about what is shared, so it retires nothing.
+  const retired: { id: string; reason: string }[] = []
+  let retiredPath: string | undefined
+  const unshared = grounding
+    ? new Set(
+        (authored?.resources?.[AUTHORED_SURFACE] ?? [])
+          .filter((place) => place.kind === 'component' && !components.has(place.id))
+          .map((place) => place.id),
+      )
+    : new Set<string>()
+  if (authored && unshared.size > 0) {
+    const written = retireAuthoredPlaces({
+      repoRoot: opts.repoRoot,
+      authored,
+      derived,
+      placeIds: unshared,
+      ...(opts.now ? { now: opts.now } : {}),
+    })
+    authored = written.file
+    retiredPath = written.path
+    retired.push(...written.tasks.map((id) => ({ id, reason: 'its shared component is no longer shared' })))
+  }
+  // A run that may stand the app up re-opens the screens authored from source
+  // alone; if the world then does not come up, they are left as they are.
+  const all = planWorkItems(derived, authored, recipeContract, {
+    repoRoot: opts.repoRoot,
+    ...(grounding ? { grounding } : {}),
+    liveAvailable: opts.openLive !== undefined,
+  })
 
   // THE STALE-PLACE RULE — a WORK-LIST rule, never a merge rule.
   // An authored screen the derivation no longer produces (in a repo whose
@@ -298,6 +420,12 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const skipped: string[] = []
   const selected = all.filter((item) => {
     if (stale.has(item.place.id)) return false
+    // A component this run has no grounding for (its context pass came back
+    // empty) has no module to brief: it keeps its tasks and earns no session.
+    if (item.place.kind === 'component' && !components.has(item.place.id)) {
+      skipped.push(item.place.id)
+      return false
+    }
     if (named) return named.has(item.place.id)
     // An explicit refresh re-opens what never settled, whatever its inputs say:
     // a screen whose provider died is exactly the screen nothing else retries.
@@ -310,20 +438,87 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   })
   const work = opts.limit != null ? selected.slice(0, opts.limit) : selected
 
+  // What each screen is grounded on NOW, recorded on its ledger row and folded
+  // into its cache key: a change to one of these files re-opens the screen.
+  const sourcesOf = new Map(
+    all.map((item) => [item.place.id, sourceDigests(opts.repoRoot, groundingFiles(opts.context?.get(item.place.id)))]),
+  )
+  /**
+   * A ledger row, with the sources it settled over when the place is grounded.
+   * A screen that SETTLED with no live look says so; one that never settled
+   * waits for a refresh either way.
+   */
+  const ledgerRow = (item: AuthorWorkItem, status: PlaceResult['status'], sourceOnly: boolean): InterfaceAuthoringRecord => {
+    const sources = sourcesOf.get(item.place.id)!
+    return {
+      status,
+      inputFingerprint: item.inputFingerprint,
+      ...(Object.keys(sources).length > 0 ? { sources } : {}),
+      ...(sourceOnly && (status === 'authored' || status === 'empty') ? { sourceOnly: true as const } : {}),
+    }
+  }
+  /** What each place's first look saw — filled once it has run. */
+  let looks = new Map<string, ObserveScreenResult>()
+  const cacheKey = (item: AuthorWorkItem, live: boolean): string =>
+    fragmentCacheKey(item.inputFingerprint, sourcesOf.get(item.place.id)!, live)
+
+  // Where a shared component is authored and observed: the first screen that
+  // renders it at an address with no slot, else the first that renders it.
+  const allPlaces = placeIndex(derived, authored)
+  const representative = new Map<string, string>()
+  for (const component of components.values()) {
+    const addresses = component.screens.flatMap((id) => allPlaces.get(id)?.address ?? [])
+    const address = addresses.find((candidate) => !hasAddressSlot(candidate)) ?? addresses[0]
+    if (address !== undefined) representative.set(component.id, address)
+  }
+  /** The shared places a place renders, each with the tasks the catalog already has at it. */
+  const sharedPlacesOf = (placeId: string, catalog: InterfacesFile | null): SharedPlaceBrief[] => {
+    const merged = mergeInterfaceCatalogs(derived, catalog)
+    return (opts.shared?.rendered.get(placeId) ?? []).flatMap((id) => {
+      const component = components.get(id)
+      return component ? [{ id, title: component.title, tasks: ownTasks(merged, id).map((task) => task.id) }] : []
+    })
+  }
+  /** The place a session authors — its root, and the address it is authored at. */
+  const scopeOf = (item: AuthorWorkItem): { screenId: string; address?: string } => {
+    const address = item.place.address ?? representative.get(item.place.id)
+    return { screenId: item.place.id, ...(address ? { address } : {}) }
+  }
+
+  // The screens this run re-opens, once the cache has served what it can: a
+  // shared component authored before them may take over a task one of them
+  // renders it with, and that screen's session retires or amends its copy.
+  let reopening: readonly AuthorWorkItem[] = []
+  /** The existing tasks a component's draft may twin: those of the re-opening screens that render it. */
+  const yieldingTo = (item: AuthorWorkItem): ReadonlySet<string> =>
+    new Set(
+      item.place.kind === 'component'
+        ? reopening
+            .filter((screen) => opts.shared?.rendered.get(screen.place.id)?.includes(item.place.id))
+            .flatMap((screen) => screen.existing)
+        : [],
+    )
+
   const results: PlaceResult[] = []
   const prepared = new Map<string, PreparedPlace['place']>()
   const spent = { turns: 0, tokens: 0, costUsd: 0 }
   let authoredCount = 0
   let labelRekeys = 0
-  let path: string | undefined
+  let path: string | undefined = retiredPath
 
   /** Lay rows over the ledger and keep the in-memory catalog in step. */
-  const recordLedger = (rows: Readonly<Record<string, InterfaceAuthoringRecord>>): void => {
+  const recordLedger = (
+    rows: Readonly<Record<string, InterfaceAuthoringRecord>>,
+    views?: Record<string, string>,
+    liveUnavailable?: { recipe: string } | null,
+  ): void => {
     const written = recordAuthoringLedger({
       repoRoot: opts.repoRoot,
       authored,
       derived,
       rows,
+      ...(views ? { views } : {}),
+      ...(liveUnavailable !== undefined ? { liveUnavailable } : {}),
       ...(opts.now ? { now: opts.now } : {}),
     })
     authored = written.file
@@ -337,12 +532,21 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const migrated = Object.fromEntries(
     all
       .filter((item) => item.record === undefined && !item.needsAuthoring && !stale.has(item.place.id))
-      .map((item) => [
-        item.place.id,
-        { status: 'authored', inputFingerprint: item.inputFingerprint } as const,
-      ]),
+      .map((item) => [item.place.id, ledgerRow(item, 'authored', false)]),
   )
   if (Object.keys(migrated).length > 0) recordLedger(migrated)
+
+  // THE VIEWS this run's context pass read, what it found shared decided over
+  // them, and the files it looked for a framework layout in (recorded missing
+  // while there is none): recorded, so a later setup knows to look again when
+  // one moves or a layout appears.
+  if (opts.context && opts.context.size > 0) {
+    const views = sourceDigests(
+      opts.repoRoot,
+      [...opts.context.values()].flatMap((place) => [place.module, ...place.renders, ...place.renderClosure, ...(place.layoutCandidates ?? [])]),
+    )
+    if (JSON.stringify(views) !== JSON.stringify(authored?.authoringViews ?? {})) recordLedger({}, views)
+  }
 
   /**
    * Fold one accepted fragment: validate it against the catalog as it stands,
@@ -354,10 +558,19 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const foldFragment = (
     item: AuthorWorkItem,
     fragment: AuthoredFragment,
-    replaceable: ReadonlySet<string>,
     briefedWith: InterfacesFile | null,
+    carryUnaccounted: boolean,
   ): PreparedPlace => {
-    const result = preparePlace({ item, fragment, derived, authored, briefedWith, replaceable })
+    const result = preparePlace({
+      item,
+      scope: scopeOf(item),
+      fragment,
+      derived,
+      authored,
+      briefedWith,
+      carryUnaccounted,
+      yielding: yieldingTo(item),
+    })
     if (result.candidate) {
       const before = new Map((authored?.interfaces ?? []).map((task) => [task.id, task]))
       for (const task of result.candidate.interfaces) {
@@ -385,174 +598,261 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   // work-list order exactly as a peer that already landed would be — so the
   // sessions that DO run are briefed with it. An entry the catalog no longer
   // accepts (a peer took an id since) is a miss like any other.
-  const pending: AuthorWorkItem[] = []
-  for (const item of work) {
-    const cached = reauthoring(opts)
-      ? null
-      : await readCachedSessionOutput({
-          repoRoot: opts.repoRoot,
-          cacheName: INTERFACE_AUTHOR_CACHE_NAME,
-          key: item.inputFingerprint,
-          schema: AuthoredFragmentSchema,
-        })
-    if (cached === null) {
-      pending.push(item)
-      continue
-    }
-    const result = foldFragment(item, cached, new Set(), authored)
-    if (result.place.status === 'rejected') {
-      pending.push(item)
-      continue
-    }
-    const place: PlaceResult = { ...result.place, spent: { turns: 0, tokens: 0, costUsd: 0 }, fromCache: true }
-    results.push(place)
-    recordLedger({ [item.place.id]: { status: place.status, inputFingerprint: item.inputFingerprint } })
-    opts.onProgress?.({ kind: 'place-done', place })
-  }
-
-  // THE CLUSTERS: the places that read the same modules, grouped. They
-  // become the pool's serial groups — one worker per cluster, members in order.
-  const clusters = clusterPlaces({
-    places: pending.map((item) => item.place.id),
-    context: opts.context ?? new Map(),
-  })
-  const clusterOf = new Map<string, PlaceCluster>()
-  for (const cluster of clusters) {
-    for (const placeId of cluster.places) clusterOf.set(placeId, cluster)
-  }
-  // THE HAND-OFF ORDER (step 2j): longest cluster first. The pool starts serial
-  // groups in first-appearance order of the item list, so the ORDER of this
-  // list IS the schedule — LPT here means the longest serial chain starts at
-  // t=0 instead of last. The REPORT is unaffected: results are re-sorted to
-  // the work-list order below, whatever order the sessions ran in.
-  const itemOf = new Map(pending.map((item) => [item.place.id, item]))
-  const scheduled = orderClustersLongestFirst(clusters).flatMap((cluster) =>
-    cluster.places.map((placeId) => itemOf.get(placeId)!),
-  )
-  // The pack, read ONCE per cluster at its first member: every member opens with
-  // the same bytes, which is what makes it a shared prefix rather than a
-  // per-session copy of the same files. Members run serially, so "first member"
-  // is well-defined and the read happens when the cluster starts, not before.
-  const packs = new Map<string, { pack?: ClusterPack; prefix?: SharedPromptPrefix }>()
-  const packOf = (placeId: string) => {
-    const cluster = clusterOf.get(placeId)!
-    if (!packs.has(cluster.id)) {
-      const pack = clusterPack(opts.repoRoot, cluster)
-      packs.set(cluster.id, pack ? { pack, prefix: { messages: [pack.text], cacheKey: cluster.id } } : {})
-    }
-    return packs.get(cluster.id)!
-  }
-
-  // Per-session captures, keyed by place: the catalog each session was BRIEFED
-  // with (taken when its def is built — the pool builds def and briefing in one
-  // tick). Outcome validation reads the live catalog —
-  // between the two lies everything its peers landed while it was thinking. For
-  // a peer of the same cluster there is nothing there: it already folded.
-  const briefed = new Map<string, InterfacesFile | null>()
-  const placeOf = new Map(pending.map((item) => [placeWorkItem(item.place.id), item.place.id]))
-
-  await runSessionPool<AuthorWorkItem, AuthoredFragment>({
-    items: scheduled,
-    workItem: (item) => placeWorkItem(item.place.id),
-    serialKey: (item) => clusterOf.get(item.place.id)!.id,
-    sharedPrefix: (item) => packOf(item.place.id).prefix,
-    session: (item) => {
-      // An explicit `replace` re-author may replace THIS place's own tasks and
-      // nothing else: every other authored entry is somebody else's work.
-      const replaceable = new Set(opts.replace ? item.existing : [])
-      briefed.set(item.place.id, authored)
-      return {
-        ...interfaceAuthorSessionDef({
-          repoRoot: opts.repoRoot,
-          derived,
-          // Tools must see peers' accepted work, even on a resumed session.
-          get authored() { return authored },
-          replaceable,
-          scope: scopeOf(item),
-        }),
-        validateOutcome(fragment) {
-          // Validate and write synchronously before the loop marks the session
-          // completed. No peer can change the catalog between these operations.
-          const result = foldFragment(item, fragment, replaceable, briefed.get(item.place.id) ?? null)
-          prepared.set(item.place.id, result.place)
-          if (result.place.status === 'rejected') {
-            return `The catalog cannot accept this outcome. Correct these problems, run check_draft on the corrected pieces, and return the draftId of the check that accepted them:\n- ${result.place.problems.join('\n- ')}`
-          }
-        },
+  //
+  // The live fragment is probed first. Only its misses stand the app up, and a
+  // source-only fragment is read only when the app would not come up: that is
+  // the fragment this run would have written itself.
+  const serveCached = async (items: readonly AuthorWorkItem[], live: boolean): Promise<AuthorWorkItem[]> => {
+    const misses: AuthorWorkItem[] = []
+    for (const item of items) {
+      const cached = reauthoring(opts)
+        ? null
+        : await readCachedSessionOutput({
+            repoRoot: opts.repoRoot,
+            cacheName: INTERFACE_AUTHOR_CACHE_NAME,
+            key: cacheKey(item, live),
+            schema: AuthoredFragmentSchema,
+          })
+      if (cached === null) {
+        misses.push(item)
+        continue
       }
-    },
-    briefing: (item) => {
-      // The catalog as it stood when this session started: every place already
-      // folded, and none of the peers still running beside it.
-      const briefedWith = briefed.get(item.place.id) ?? null
-      const places = placeIndex(derived, briefedWith)
-      return [
-        placeBriefing({
-          place: item.place,
-          existing: item.existing,
-          replaceTasks: Boolean(opts.replace),
-          ownTaskContext: ownTaskContext({ derived, authored: briefedWith, screenId: item.place.id, replace: Boolean(opts.replace) }),
-          sourcePack: placeSourcePack(opts.repoRoot, opts.context?.get(item.place.id), packOf(item.place.id).pack?.modules)?.text,
-          states: registryStates(derived, briefedWith),
-          screens: screenTable(places),
-          nested: placesOn(item.place.id, places),
-          ...(opts.context?.get(item.place.id)
-            ? { context: opts.context.get(item.place.id)! }
-            : {}),
-        }),
-      ]
-    },
-    driver: opts.driver,
-    persistence: opts.persistence,
-    ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
-    ...(opts.signal ? { signal: opts.signal } : {}),
-    ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
-    ...(opts.now ? { now: opts.now } : {}),
-    onProgress: (event) => {
-      if (event.kind !== 'item-start') return
-      opts.onProgress?.({
-        kind: 'place-start',
-        placeId: placeOf.get(event.workItem)!,
-        index: event.index,
-        total: event.total,
-      })
-    },
-    onSessionEvent: (workItem, event) => opts.onSessionEvent?.(placeOf.get(workItem)!, event),
-    // Persistence happens in validateOutcome; the fold records final spend
-    // and failures after any corrections have finished.
-    fold: async (item, outcome, sessionId) => {
-      const last = prepared.get(item.place.id)
-      const place: PlaceResult = outcome.status === 'completed'
-        ? { ...last!, sessionId, spent: outcome.spent }
-        : {
-            placeId: item.place.id, sessionId, spent: outcome.spent,
-            status: 'failed', taskIds: [],
-            unresolved: last?.unresolved ?? [],
-            findings: last?.findings ?? [],
-            problems: [...(last?.problems ?? []), describeFailure(outcome.failure)],
-            resumable: outcome.resumable,
-          }
+      // A cached fragment was written against the catalog of its day: an
+      // existing task it never mentions stands as it is.
+      const result = foldFragment(item, cached, authored, true)
+      if (result.place.status === 'rejected') {
+        misses.push(item)
+        continue
+      }
+      const place: PlaceResult = { ...result.place, spent: { turns: 0, tokens: 0, costUsd: 0 }, fromCache: true }
       results.push(place)
-      // The ledger row, whatever the verdict: a screen that failed is a screen
-      // this run REACHED, and recording that is what stops the next run paying
-      // for the same failure. The digest is the one the work list planned over.
-      recordLedger({
-        [item.place.id]: { status: place.status, inputFingerprint: item.inputFingerprint },
-      })
-      // The fragment an accepted outcome produced, under this screen's digest:
-      // the next run over the same inputs folds it instead of buying it again.
-      if (outcome.status === 'completed' && (place.status === 'authored' || place.status === 'empty')) {
-        await storeCachedSessionOutput(
-          { repoRoot: opts.repoRoot, cacheName: INTERFACE_AUTHOR_CACHE_NAME, key: item.inputFingerprint },
-          outcome.output,
-        )
-      }
-      spent.turns += place.spent.turns
-      spent.tokens += place.spent.tokens
-      spent.costUsd += place.spent.costUsd
+      recordLedger({ [item.place.id]: ledgerRow(item, place.status, !live) })
       opts.onProgress?.({ kind: 'place-done', place })
-    },
-  })
+    }
+    return misses
+  }
+  const liveMisses = opts.openLive ? await serveCached(work, true) : [...work]
+  const live = liveMisses.length > 0 ? await opts.openLive?.() : undefined
+  // Whether the world came up is recorded with the recipe it was stood up
+  // from: one that failed is not stood up again until that recipe moves.
+  if (opts.openLive && liveMisses.length > 0) {
+    if (!live) recordLedger({}, undefined, { recipe: liveWorldInputs(opts.repoRoot) })
+    else if (authored?.liveUnavailable) recordLedger({}, undefined, null)
+  }
+  // A screen owed only a live look is left as it stands when none came up.
+  const lookless = live ? [] : liveMisses.filter((item) => item.awaitsLiveLook)
+  skipped.push(...lookless.map((item) => item.place.id))
+  const pending = live ? liveMisses : await serveCached(liveMisses.filter((item) => !item.awaitsLiveLook), false)
+  reopening = pending.filter((item) => item.place.kind !== 'component')
+
+  // THE FIRST LOOK, before any session starts: every pending screen whose
+  // address has no slot is opened once, as the default principal, so its tree
+  // (or where that principal was sent instead) is in the briefing — the cached
+  // prefix — rather than bought with a turn. Whom else to observe it as is the
+  // session's call. A slotted address needs a value the session reads, so it
+  // observes itself.
+  looks = await firstLooks(pending, scopeOf, live, opts.signal)
+
+  // THE PHASES: the shared components first, then the screens, so a screen's
+  // briefing names the tasks its shared places already carry. Within a phase the
+  // clusters run side by side.
+  const runSessions = async (items: readonly AuthorWorkItem[]): Promise<void> => {
+    if (items.length === 0) return
+    // THE CLUSTERS: the places that read the same modules, grouped. They
+    // become the pool's serial groups — one worker per cluster, members in order.
+    const clusters = clusterPlaces({
+      places: items.map((item) => item.place.id),
+      context: opts.context ?? new Map(),
+    })
+    const clusterOf = new Map<string, PlaceCluster>()
+    for (const cluster of clusters) {
+      for (const placeId of cluster.places) clusterOf.set(placeId, cluster)
+    }
+    // THE HAND-OFF ORDER (step 2j): longest cluster first. The pool starts serial
+    // groups in first-appearance order of the item list, so the ORDER of this
+    // list IS the schedule — LPT here means the longest serial chain starts at
+    // t=0 instead of last. The REPORT is unaffected: results are re-sorted to
+    // the work-list order below, whatever order the sessions ran in.
+    const itemOf = new Map(items.map((item) => [item.place.id, item]))
+    const scheduled = orderClustersLongestFirst(clusters).flatMap((cluster) =>
+      cluster.places.map((placeId) => itemOf.get(placeId)!),
+    )
+    // The pack, read ONCE per cluster at its first member: every member opens with
+    // the same bytes, which is what makes it a shared prefix rather than a
+    // per-session copy of the same files. Members run serially, so "first member"
+    // is well-defined and the read happens when the cluster starts, not before.
+    const packs = new Map<string, { pack?: ClusterPack; prefix?: SharedPromptPrefix }>()
+    const packOf = (placeId: string) => {
+      const cluster = clusterOf.get(placeId)!
+      if (!packs.has(cluster.id)) {
+        const pack = clusterPack(opts.repoRoot, cluster)
+        packs.set(cluster.id, pack ? { pack, prefix: { messages: [pack.text], cacheKey: cluster.id } } : {})
+      }
+      return packs.get(cluster.id)!
+    }
+
+    // Per-session captures, keyed by place: the catalog each session was BRIEFED
+    // with (taken when its def is built — the pool builds def and briefing in one
+    // tick). Outcome validation reads the live catalog —
+    // between the two lies everything its peers landed while it was thinking. For
+    // a peer of the same cluster there is nothing there: it already folded.
+    const briefed = new Map<string, InterfacesFile | null>()
+    const placeOf = new Map(items.map((item) => [placeWorkItem(item.place.id), item.place.id]))
+
+    await runSessionPool<AuthorWorkItem, AuthoredFragment>({
+      items: scheduled,
+      workItem: (item) => placeWorkItem(item.place.id),
+      serialKey: (item) => clusterOf.get(item.place.id)!.id,
+      sharedPrefix: (item) => packOf(item.place.id).prefix,
+      session: (item) => {
+        // A session may amend or retire THIS place's own tasks and nothing else:
+        // every other authored entry is somebody else's work.
+        const replaceable = new Set(item.existing)
+        briefed.set(item.place.id, authored)
+        return {
+          ...interfaceAuthorSessionDef({
+            repoRoot: opts.repoRoot,
+            derived,
+            // Tools must see peers' accepted work, even on a resumed session.
+            get authored() { return authored },
+            replaceable,
+            scope: scopeOf(item),
+            yielding: yieldingTo(item),
+            ...(live ? { live } : {}),
+          }),
+          validateOutcome(fragment) {
+            // Validate and write synchronously before the loop marks the session
+            // completed. No peer can change the catalog between these operations.
+            const result = foldFragment(item, fragment, briefed.get(item.place.id) ?? null, false)
+            prepared.set(item.place.id, result.place)
+            if (result.place.status === 'rejected') {
+              return `The catalog cannot accept this outcome. Correct these problems, run check_draft on the corrected pieces, and return the draftId of the check that accepted them:\n- ${result.place.problems.join('\n- ')}`
+            }
+          },
+        }
+      },
+      briefing: (item) => {
+        // The catalog as it stood when this session started: every place already
+        // folded, and none of the peers still running beside it.
+        const briefedWith = briefed.get(item.place.id) ?? null
+        const places = placeIndex(derived, briefedWith)
+        const component = components.get(item.place.id)
+        const address = scopeOf(item).address
+        return [
+          placeBriefing({
+            place: item.place,
+            existing: item.existing,
+            ...(component
+              ? { component: { module: component.module, screens: component.screens, ...(address ? { address } : {}) } }
+              : {}),
+            sharedPlaces: sharedPlacesOf(item.place.id, briefedWith),
+            ownTaskContext: ownTaskContext({ derived, authored: briefedWith, screenId: item.place.id }),
+            sourcePack: placeSourcePack(opts.repoRoot, opts.context?.get(item.place.id), packOf(item.place.id).pack?.modules)?.text,
+            states: registryStates(derived, briefedWith),
+            screens: screenTable(places),
+            nested: placesOn(item.place.id, places),
+            ...(opts.context?.get(item.place.id)
+              ? { context: opts.context.get(item.place.id)! }
+              : {}),
+            ...(live
+              ? {
+                  live: {
+                    screens: live,
+                    ...(looks.get(item.place.id) ? { observation: looks.get(item.place.id)! } : {}),
+                  },
+                }
+              : {}),
+          }),
+        ]
+      },
+      driver: opts.driver,
+      persistence: opts.persistence,
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
+      ...(opts.now ? { now: opts.now } : {}),
+      onProgress: (event) => {
+        if (event.kind !== 'item-start') return
+        opts.onProgress?.({
+          kind: 'place-start',
+          placeId: placeOf.get(event.workItem)!,
+          index: event.index,
+          total: event.total,
+        })
+      },
+      onSessionEvent: (workItem, event) => opts.onSessionEvent?.(placeOf.get(workItem)!, event),
+      // Persistence happens in validateOutcome; the fold records final spend
+      // and failures after any corrections have finished.
+      fold: async (item, outcome, sessionId) => {
+        const last = prepared.get(item.place.id)
+        const place: PlaceResult = outcome.status === 'completed'
+          ? { ...last!, sessionId, spent: outcome.spent }
+          : {
+              placeId: item.place.id, sessionId, spent: outcome.spent,
+              status: 'failed', taskIds: [],
+              unresolved: last?.unresolved ?? [],
+              findings: last?.findings ?? [],
+              problems: [...(last?.problems ?? []), describeFailure(outcome.failure)],
+              resumable: outcome.resumable,
+            }
+        results.push(place)
+        // The ledger row, whatever the verdict: a screen that failed is a screen
+        // this run REACHED, and recording that is what stops the next run paying
+        // for the same failure. The digest is the one the work list planned over.
+        recordLedger({ [item.place.id]: ledgerRow(item, place.status, live === undefined) })
+        // The fragment an accepted outcome produced, under this screen's digest:
+        // the next run over the same inputs folds it instead of buying it again.
+        if (outcome.status === 'completed' && (place.status === 'authored' || place.status === 'empty')) {
+          await storeCachedSessionOutput(
+            {
+              repoRoot: opts.repoRoot,
+              cacheName: INTERFACE_AUTHOR_CACHE_NAME,
+              key: cacheKey(item, live !== undefined),
+            },
+            outcome.output,
+          )
+        }
+        spent.turns += place.spent.turns
+        spent.tokens += place.spent.tokens
+        spent.costUsd += place.spent.costUsd
+        opts.onProgress?.({ kind: 'place-done', place })
+      },
+    })
+  }
+  await runSessions(pending.filter((item) => item.place.kind === 'component'))
+  await runSessions(pending.filter((item) => item.place.kind !== 'component'))
+
+  // A shared component may have taken over a task of a screen re-opened in
+  // this run, on the promise that the screen's session retires its copy. A
+  // screen whose session did not settle never did: its copy goes now, since
+  // the component's twin IS that task, and one invocable thing is one entry.
+  const settled = new Set(results.filter((place) => place.status === 'authored' || place.status === 'empty').map((place) => place.placeId))
+  const takenOver = new Set(
+    results.filter((place) => components.has(place.placeId)).flatMap((place) => place.taskIds),
+  )
+  const placesNow = placeIndex(derived, authored)
+  const takenKeys = new Set((authored?.interfaces ?? []).filter((task) => takenOver.has(task.id)).map((task) => task.fingerprint))
+  const orphaned = new Set(
+    reopening
+      .filter((screen) => !settled.has(screen.place.id))
+      .flatMap((screen) => screen.existing)
+      .filter((id) => {
+        const task = authored?.interfaces.find((candidate) => candidate.id === id)
+        if (!task || task.type !== AUTHORED_SURFACE) return false
+        const place = task.at ? placesNow.get(task.at) : undefined
+        return takenKeys.has(task.fingerprint) || takenKeys.has(resolvedInterfaceFingerprint(task, place))
+      }),
+  )
+  if (authored && orphaned.size > 0) {
+    const written = writeAuthoredCatalog({
+      repoRoot: opts.repoRoot,
+      candidate: { ...authored, interfaces: authored.interfaces.filter((task) => !orphaned.has(task.id)) },
+      derived,
+      now: opts.now,
+    })
+    authored = written.file
+    path = written.path
+  }
 
   // Completion order is provider latency; the report is the work list.
   const order = new Map(work.map((item, index) => [item.place.id, index]))
@@ -569,8 +869,41 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     skipped,
     findings,
     diagnostics,
+    retired,
     spent,
   }
+}
+
+/** How many places the first look opens at once. */
+const OBSERVE_CONCURRENCY = 4
+
+/**
+ * Take every pending place's first look, a few places at a time: a place whose
+ * address carries no slot is OBSERVED as the default principal, and what it saw
+ * rides the briefing — where it was sent when it was sent away, a refusal too,
+ * so the briefing says why instead of saying nothing.
+ */
+async function firstLooks(
+  items: readonly AuthorWorkItem[],
+  scopeOf: (item: AuthorWorkItem) => { address?: string },
+  live: LiveScreens | undefined,
+  signal?: AbortSignal,
+): Promise<Map<string, ObserveScreenResult>> {
+  const looks = new Map<string, ObserveScreenResult>()
+  if (!live) return looks
+  const queue = items.flatMap((item) => {
+    const address = scopeOf(item).address
+    return address && !hasAddressSlot(address) ? [{ item, address }] : []
+  })
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < queue.length && !signal?.aborted) {
+      const { item, address } = queue[next++]!
+      looks.set(item.place.id, await live.observer.observe({ path: address }))
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(OBSERVE_CONCURRENCY, queue.length) }, worker))
+  return looks
 }
 
 /**
@@ -582,13 +915,18 @@ export { defaultPoolConcurrency as defaultAuthorConcurrency }
 
 interface PrepareInput {
   item: AuthorWorkItem
+  /** The place the session authored, and the address it authored it at. */
+  scope: { screenId: string; address?: string }
   fragment: AuthoredFragment
   derived: InterfacesFile | null
   /** The catalog as it stands NOW — what the fragment is validated against. */
   authored: InterfacesFile | null
   /** The catalog the session was briefed with; the difference is its peers' work. */
   briefedWith: InterfacesFile | null
-  replaceable: ReadonlySet<string>
+  /** Keep an existing task the fragment never mentions instead of refusing it (a cached fragment). */
+  carryUnaccounted: boolean
+  /** Other places' tasks the fragment may twin, their screens reconciling later in the run. */
+  yielding: ReadonlySet<string>
 }
 
 interface PreparedPlace {
@@ -596,10 +934,15 @@ interface PreparedPlace {
   candidate?: InterfacesFile
 }
 
-/** Validate the proposed output against all work accepted so far. */
+/**
+ * Validate the proposed output against all work accepted so far. The screen's
+ * existing tasks are the ones it may amend or retire, and the ones it has to
+ * account for.
+ */
 function preparePlace(input: PrepareInput): PreparedPlace {
-  const { item, derived, authored, briefedWith, replaceable } = input
+  const { item, derived, authored, briefedWith } = input
   const base = { placeId: item.place.id }
+  const prior = new Set(item.existing)
 
   const unresolved = [...(input.fragment.unresolved ?? [])]
   const findings = [...(input.fragment.findings ?? [])]
@@ -607,11 +950,11 @@ function preparePlace(input: PrepareInput): PreparedPlace {
     input.fragment,
     briefedWith,
     authored,
-    replaceable,
+    prior,
     draftPlaceIndex(derived, authored, input.fragment.resources ?? []),
   )
   const racedField = raced.length > 0 ? { raced } : {}
-  if (fragment.interfaces.length === 0 && (fragment.resources?.length ?? 0) === 0) {
+  if (prior.size === 0 && fragment.interfaces.length === 0 && (fragment.resources?.length ?? 0) === 0) {
     // Either the session honestly found nothing, or everything it found was
     // authored by a peer first. Both are empty, and `raced` says which.
     return {
@@ -623,8 +966,10 @@ function preparePlace(input: PrepareInput): PreparedPlace {
     derived,
     authored,
     fragment,
-    replaceable,
-    scope: scopeOf(item),
+    replaceable: prior,
+    carryUnaccounted: input.carryUnaccounted,
+    scope: input.scope,
+    yielding: input.yielding,
   })
   if (!validation.ok) {
     // The loop returns these errors to the session before accepting its output.
@@ -640,6 +985,7 @@ function preparePlace(input: PrepareInput): PreparedPlace {
       },
     }
   }
+  const retired = (fragment.retired ?? []).filter((entry) => prior.has(entry.id))
   return {
     place: {
       ...base,
@@ -649,6 +995,7 @@ function preparePlace(input: PrepareInput): PreparedPlace {
       findings,
       problems: [],
       ...racedField,
+      ...(retired.length > 0 ? { retired } : {}),
     },
     candidate: validation.authored,
   }
@@ -715,20 +1062,12 @@ function screenTable(
     .map((place) => ({ id: place.id, ...(place.address ? { address: place.address } : {}) }))
 }
 
-/** The dialogs and panels that sit on one screen, however deeply nested. */
+/** The dialogs and panels that sit on one root place, however deeply nested. */
 function placesOn(
-  screenId: string,
+  rootId: string,
   places: ReadonlyMap<string, InterfaceResource>,
 ): InterfaceResource[] {
-  return [...places.values()].filter((place) => place.kind !== 'screen' && screenOf(place.id, places) === screenId)
-}
-
-/** The place a session authors — its screen, and the address it sits at. */
-function scopeOf(item: AuthorWorkItem): { screenId: string; address?: string } {
-  return {
-    screenId: item.place.id,
-    ...(item.place.address ? { address: item.place.address } : {}),
-  }
+  return [...places.values()].filter((place) => !isRootPlace(place) && rootPlaceOf(place.id, places)?.id === rootId)
 }
 
 function describeFailure(failure: { kind: string } & Record<string, unknown>): string {
@@ -748,17 +1087,5 @@ function describeFailure(failure: { kind: string } & Record<string, unknown>): s
   }
 }
 
-/** The screen a place sits on, walking `of` up; a screen resolves to itself. */
-function screenOf(id: string, places: ReadonlyMap<string, InterfaceResource>): string | undefined {
-  const seen = new Set<string>()
-  let current: string | undefined = id
-  while (current && !seen.has(current)) {
-    seen.add(current)
-    const place: InterfaceResource | undefined = places.get(current)
-    if (!place) return undefined
-    if (place.kind === 'screen') return place.id
-    current = place.of
-  }
-  return undefined
-}
+
 

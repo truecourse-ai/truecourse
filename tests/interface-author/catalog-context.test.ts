@@ -27,7 +27,7 @@ describe('catalog context', () => {
     const derived = file([task(0)])
     const authored = file([{ ...task(0), steps: [{ kind: 'activate', target: { role: 'button', name: 'New exact action' } }] }])
     const before = structuredClone({ derived, authored })
-    const context = ownTaskContext({ derived, authored, screenId: 'screen', replace: true })
+    const context = ownTaskContext({ derived, authored, screenId: 'screen' })
     expect(context).toContain('New exact action')
     expect(context).not.toContain('button \\"Action 0')
     expect(ownTasks(mergeInterfaceCatalogs(derived, authored), 'screen')).toHaveLength(1)
@@ -36,7 +36,7 @@ describe('catalog context', () => {
 
   it('bounds whole task definitions and omission manifests in UTF-8 bytes', () => {
     const authored = file(Array.from({ length: 500 }, (_, n) => ({ ...task(n), title: '🙂'.repeat(2_000) })))
-    const context = ownTaskContext({ derived: null, authored, screenId: 'screen', replace: true })
+    const context = ownTaskContext({ derived: null, authored, screenId: 'screen' })
     expect(Buffer.byteLength(context)).toBeLessThanOrEqual(MAX_OWN_TASK_BYTES)
     const definitions = context.split('\n\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line))
     expect(definitions).toHaveLength(1)
@@ -44,8 +44,8 @@ describe('catalog context', () => {
     expect(context).toContain('499 omitted')
     expect(context).toContain('manifest incomplete')
     expect(context).toContain('Retrieve every omitted definition')
-    expect(ownTaskContext({ derived: null, authored: file([]), screenId: 'screen', replace: false })).toContain('No existing web task')
-    expect(ownTaskContext({ derived: null, authored, screenId: 'screen', replace: false })).toContain('do not return or replace them')
+    expect(ownTaskContext({ derived: null, authored: file([]), screenId: 'screen' })).toContain('No existing web task')
+    expect(ownTaskContext({ derived: null, authored, screenId: 'screen' })).toContain('Reconcile: account for every authored task')
   })
 
   it('finds an entry beyond 200 and returns exact steps through the real tools', async () => {

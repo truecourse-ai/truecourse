@@ -360,8 +360,28 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<Start
     }
     const spawned = await spawnApiProcess(opts)
     const { server } = spawned
+    // Cancellation kills the server from here, not from the readiness loop nor
+    // from its caller: a wait parked on a promise that never settles — during
+    // the boot or on any request after it — never reaches its own abort check,
+    // and the server must not outlive the run that started it. The kill stays
+    // armed until the server is stopped.
+    const killOnAbort = (): void => server.signal('SIGKILL')
+    const disarm = (): void => opts.signal?.removeEventListener('abort', killOnAbort)
+    opts.signal?.addEventListener('abort', killOnAbort, { once: true })
     const ready = await awaitApiServerReady(spawned, opts)
-    if (ready.ok) return { ok: true, server }
+    if (ready.ok) {
+      return {
+        ok: true,
+        server: {
+          ...server,
+          stop: async () => {
+            disarm()
+            await server.stop()
+          },
+        },
+      }
+    }
+    disarm()
     // Whether the child was already gone is the question the port test is asked
     // ABOUT, so it has to be read before the kill below answers it for us.
     const diedOnItsOwn = server.exit() !== null && spawned.spawnError() === null

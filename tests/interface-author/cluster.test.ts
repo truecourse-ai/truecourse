@@ -30,6 +30,7 @@ function renders(...modules: string[]): WebPlaceContext {
     module: `${modules[0] ?? 'unknown'}`,
     renders: modules,
     closure: modules.length + 1,
+    renderClosure: modules,
     apiEffects: [],
     unjoined: [],
     rpcCalls: [],

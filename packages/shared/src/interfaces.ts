@@ -26,8 +26,12 @@ import { GuardDriverIdSchema } from './guard/drivers.js'
 import {
   GUARD_WEB_ROLES,
   GUARD_WEB_STATES,
+  GuardWebFileSchema,
+  GuardWebKeySchema,
   GuardWebLocatorSchema,
   GuardWebScopeSchema,
+  isNonCanonicalLocator,
+  webLocatorHandle,
   type GuardWebLocator,
   type GuardWebScope,
 } from './guard/web-steps.js'
@@ -39,6 +43,9 @@ export const InterfaceStepKindSchema = z.enum([
   'navigate',
   'input',
   'activate',
+  'press',
+  'hover',
+  'upload',
 ])
 export type InterfaceStepKind = z.infer<typeof InterfaceStepKindSchema>
 
@@ -90,19 +97,34 @@ function parseLegacyTarget(value: unknown): unknown {
 }
 
 /**
- * THE TARGET — the element a web step acts on, as the two things a user
- * perceives about it: the ARIA role the browser resolves, and the accessible
- * name it carries. Exactly the vocabulary a scenario's own locator uses
- * ({@link GuardWebScopeSchema}), because a task's steps compile into those
- * scenarios and a second spelling of one idea is a translation nobody wrote.
+ * A scenario scope whose role member NAMES its element. A scenario locator may
+ * carry a bare role (`{"role": "main"}`); an interface step's target and scope
+ * may not, because the catalog proves a step's control by the name the
+ * accessibility tree lists for it, and a role alone names no control.
+ */
+function namedScope() {
+  return GuardWebScopeSchema.refine((scope) => !('role' in scope) || scope.name !== undefined, {
+    message: 'a role handle names its element — {"role": "<aria role>", "name": "<accessible name>"}',
+  })
+}
+
+/**
+ * THE TARGET — the element a web step acts on, in exactly the vocabulary a
+ * scenario's own locator uses ({@link GuardWebScopeSchema}), because a task's
+ * steps compile into those scenarios and a second spelling of one idea is a
+ * translation nobody wrote. The primary member is the two things a user
+ * perceives about a control, its ARIA role and accessible name; the visible
+ * handles (title, label, placeholder, text, alt) are canonical too; `css` is the
+ * marked escape, and a step whose target or scope carries it is NON-CANONICAL
+ * ({@link interfaceStepLocator}) and must say `why`.
  *
- * It was one string, and the string is why this schema exists: a nested pair of
- * double quotes inside a JSON string argument is the hardest thing a model has
- * to write, and an authoring session that lost the closing quote of
+ * It was one string, and the string is why this schema is an object: a nested
+ * pair of double quotes inside a JSON string argument is the hardest thing a
+ * model has to write, and an authoring session that lost the closing quote of
  * `button "Add expense"` mid-argument then wrote ten million space characters
- * against the provider's output limit. Two fields have no quoting problem at
- * all, and the role arrives as an enumerated value the model is handed rather
- * than a token it has to spell.
+ * against the provider's output limit. Fields have no quoting problem at all,
+ * and the role arrives as an enumerated value the model is handed rather than a
+ * token it has to spell.
  *
  * The declared INPUT type is the object, not `unknown`: the legacy string is
  * something a stored file may still hold, never something a writer may hand in,
@@ -111,23 +133,38 @@ function parseLegacyTarget(value: unknown): unknown {
  */
 export const InterfaceTargetSchema = z.preprocess(
   parseLegacyTarget,
-  z
-    .object(GuardWebScopeSchema.shape, {
-      // What a step target that is not an object gets told — a CSS selector, an
-      // XPath or a test id arrives here, and the shape is the answer to all
-      // three.
-      invalid_type_error:
-        'a step target is {"role": "<aria role>", "name": "<accessible name>"} — a role and an accessible name, never a selector',
-    })
-    .strict(),
+  namedScope(),
 ) as unknown as z.ZodType<GuardWebScope, z.ZodTypeDef, GuardWebScope>
 export type InterfaceTarget = GuardWebScope
 
-/** A target in the words a person reads it in — `button "Add expense"`. The one
- *  rendering, shared by the prompts, the catalog views and the error messages. */
+/** A target in the words a person reads it in — `button "Add expense"`, `title "More"`,
+ *  `css "main button:has(svg[data-icon=\"sort\"])"`. The one rendering, shared by the prompts, the
+ *  catalog views and the error messages. */
 export function describeInterfaceTarget(target: InterfaceTarget): string {
-  return `${target.role} "${target.name}"${target.exact ? ' (exact)' : ''}`
+  const { kind, value } = webLocatorHandle(target)
+  const picked = target.pick === undefined ? '' : target.pick === 'first' ? ' (first)' : ` (#${target.pick})`
+  const exact = 'exact' in target && target.exact ? ' (exact)' : ''
+  return `${kind}${value === undefined ? '' : ` "${value}"`}${exact}${picked}`
 }
+
+/** The principal a signed-out browser is: no credential at all. */
+export const ANONYMOUS_PRINCIPAL = 'anonymous'
+
+/**
+ * Set on a NON-CANONICAL step or readable whose locator could not be proven
+ * live, because no principal the run can sign in as reaches its screen: the
+ * selector was written from source. Stamped by the authoring check, never by a
+ * session, and listed in the non-canonical record so a reader knows which
+ * selectors no browser vouched for.
+ */
+const proven = z.literal(false).optional()
+
+/**
+ * Why a NON-CANONICAL step reaches its element through a selector — one line, the
+ * thing a reader of the non-canonical record needs to fix the markup: what the
+ * control is and why no accessible handle reaches it.
+ */
+const why = z.string().min(1).optional()
 
 /** Put a value into a field — the target as the surface names it. */
 export const InterfaceInputStepSchema = z
@@ -136,8 +173,10 @@ export const InterfaceInputStepSchema = z
     /** Native selects choose a visible option; text controls use fill. */
     mode: z.enum(['fill', 'select']).optional(),
     target: InterfaceTargetSchema,
-    within: GuardWebScopeSchema.optional(),
+    within: namedScope().optional(),
     label: z.string().optional(),
+    why,
+    proven,
   })
   .strict()
 
@@ -146,7 +185,58 @@ export const InterfaceActivateStepSchema = z
   .object({
     kind: z.literal('activate'),
     target: InterfaceTargetSchema,
-    within: GuardWebScopeSchema.optional(),
+    within: namedScope().optional(),
+    label: z.string().optional(),
+    why,
+    proven,
+  })
+  .strict()
+
+/**
+ * Press one key — Enter, Escape, Tab or an arrow — on the target (focused
+ * first), or on whatever the page has focused when there is none: a search that
+ * submits on Enter, a menu that closes on Escape. The key is part of which task
+ * it is.
+ */
+export const InterfacePressStepSchema = z
+  .object({
+    kind: z.literal('press'),
+    key: GuardWebKeySchema,
+    target: InterfaceTargetSchema.optional(),
+    within: namedScope().optional(),
+    label: z.string().optional(),
+    why,
+    proven,
+  })
+  .strict()
+
+/** Move the pointer over the target and leave it there — what reveals a control shown only on hover. */
+export const InterfaceHoverStepSchema = z
+  .object({
+    kind: z.literal('hover'),
+    target: InterfaceTargetSchema,
+    within: namedScope().optional(),
+    label: z.string().optional(),
+    why,
+    proven,
+  })
+  .strict()
+
+/**
+ * Hand a file to the control a user operates to pick one — the web driver's
+ * `upload` verb, and its file model: `base64` (a seeded binary, named as
+ * `{{fixture:<name>.<field>}}`), `text` (bytes a reader can read, a CSV to
+ * import), or `path` (a file the scenario's own world holds), with `as` naming
+ * it. Like that verb, its target is never `css`: the hidden file input behind a
+ * styled button is not what a user operates. The file is data, not which task
+ * this is, so it is never fingerprinted.
+ */
+export const InterfaceUploadStepSchema = z
+  .object({
+    kind: z.literal('upload'),
+    target: InterfaceTargetSchema,
+    within: namedScope().optional(),
+    file: GuardWebFileSchema,
     label: z.string().optional(),
   })
   .strict()
@@ -157,13 +247,41 @@ export const InterfaceStepSchema = z.discriminatedUnion('kind', [
   InterfaceNavigateStepSchema,
   InterfaceInputStepSchema,
   InterfaceActivateStepSchema,
+  InterfacePressStepSchema,
+  InterfaceHoverStepSchema,
+  InterfaceUploadStepSchema,
 ])
 export type InterfaceInvokeStep = z.infer<typeof InterfaceInvokeStepSchema>
 export type InterfaceRequestStep = z.infer<typeof InterfaceRequestStepSchema>
 export type InterfaceNavigateStep = z.infer<typeof InterfaceNavigateStepSchema>
 export type InterfaceInputStep = z.infer<typeof InterfaceInputStepSchema>
 export type InterfaceActivateStep = z.infer<typeof InterfaceActivateStepSchema>
+export type InterfacePressStep = z.infer<typeof InterfacePressStepSchema>
+export type InterfaceHoverStep = z.infer<typeof InterfaceHoverStepSchema>
+export type InterfaceUploadStep = z.infer<typeof InterfaceUploadStepSchema>
 export type InterfaceStep = z.infer<typeof InterfaceStepSchema>
+
+/** A web step that acts on an element: every interaction kind, and a press that names where. */
+export type InterfaceTargetedStep =
+  | InterfaceInputStep
+  | InterfaceActivateStep
+  | InterfaceHoverStep
+  | InterfaceUploadStep
+  | (InterfacePressStep & { target: InterfaceTarget })
+
+/** Does this step act on an element it names? */
+export function isTargetedStep(step: InterfaceStep): step is InterfaceTargetedStep {
+  return 'target' in step && step.target !== undefined
+}
+
+/**
+ * The one scenario locator a targeted step compiles to: its target, scoped by its
+ * `within`. What the runner resolves, what a live proof resolves, and what decides
+ * whether the step is non-canonical ({@link isNonCanonicalLocator}).
+ */
+export function interfaceStepLocator(step: InterfaceTargetedStep): GuardWebLocator {
+  return step.within ? { ...step.target, within: step.within } : step.target
+}
 
 // ---------------------------------------------------------------------------
 // NAMED STATES — the per-area registry an interface's state contract points into
@@ -1047,7 +1165,10 @@ export type InterfaceResourceId = z.infer<typeof InterfaceResourceIdSchema>
  *
  *  - web: a `screen` owns an address (a navigate step reaches it), a `dialog`
  *    opens over one and blocks it, a `panel` is a region of one that swaps in
- *    without leaving it.
+ *    without leaving it, and a `component` is SHARED UI several screens render
+ *    (a layout's sidebar, a card's action menu, a search modal) — authored once,
+ *    as its own place, sitting on no screen and owning no address: its tasks
+ *    are performed on whichever screen renders it.
  *  - cli: a `command-group` is a node of the command tree — the `spec` family,
  *    the `spec docs` family under it. Its actions are the commands registered in
  *    it; its `of` is the group it is registered under.
@@ -1068,10 +1189,37 @@ export const InterfaceResourceKindSchema = z.enum([
   'screen',
   'dialog',
   'panel',
+  'component',
   'command-group',
   'rest-noun',
 ])
 export type InterfaceResourceKind = z.infer<typeof InterfaceResourceKindSchema>
+
+/**
+ * A ROOT web place — one that sits on nothing, so the `of` chain of every other
+ * place ends at one: a screen, or a shared component. Authoring runs one session
+ * per root, and a task belongs to the root its `at` chain reaches.
+ */
+export function isRootPlace(place: { kind: InterfaceResourceKind }): boolean {
+  return place.kind === 'screen' || place.kind === 'component'
+}
+
+/**
+ * The root place (a screen or a shared component) the place `id` sits on,
+ * walking its `of` chain up; a root is its own. Undefined when the chain
+ * reaches a place `places` does not hold, or loops.
+ */
+export function rootPlaceOf<P extends { id: string; kind: InterfaceResourceKind; of?: string }>(
+  id: string,
+  places: ReadonlyMap<string, P>,
+): P | undefined {
+  const seen = new Set<string>()
+  for (let place = places.get(id); place && !seen.has(place.id); place = place.of === undefined ? undefined : places.get(place.of)) {
+    seen.add(place.id)
+    if (isRootPlace(place)) return place
+  }
+  return undefined
+}
 
 /**
  * A readable's name — same enforced kebab-case as every id here. Optional on
@@ -1083,6 +1231,14 @@ export const InterfaceReadableIdSchema = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'a readable id is kebab-case')
 export type InterfaceReadableId = z.infer<typeof InterfaceReadableIdSchema>
+
+/**
+ * Why a readable reaches its element through `css` — the same one line a
+ * non-canonical step carries: what the element is and why no role+name, label,
+ * placeholder, text, title or alt reaches it (a modal drawn with no dialog role,
+ * a card list with no list role).
+ */
+const readableWhy = z.string().min(1).optional()
 
 /**
  * One TEXT MARKER a resource shows: a stable visible substring, as the page
@@ -1100,6 +1256,8 @@ export const InterfaceMarkerReadableSchema = z
     marker: z.string().min(1),
     /** The one condition it appears under. */
     when: z.string().min(1).optional(),
+    why: readableWhy,
+    proven,
   })
   .strict()
 export type InterfaceMarkerReadable = z.infer<typeof InterfaceMarkerReadableSchema>
@@ -1118,6 +1276,8 @@ export const InterfaceElementReadableSchema = z
     id: InterfaceReadableIdSchema.optional(),
     element: GuardWebLocatorSchema,
     when: z.string().min(1).optional(),
+    why: readableWhy,
+    proven,
   })
   .strict()
 export type InterfaceElementReadable = z.infer<typeof InterfaceElementReadableSchema>
@@ -1141,6 +1301,8 @@ export const InterfaceControlReadableSchema = z
     /** The ARIA states this control exposes — the driver's own closed set. */
     states: z.array(z.enum(GUARD_WEB_STATES)).min(1),
     when: z.string().min(1).optional(),
+    why: readableWhy,
+    proven,
   })
   .strict()
   .refine((fact) => new Set(fact.states).size === fact.states.length, {
@@ -1177,6 +1339,8 @@ export const InterfaceRowsReadableSchema = z
     slots: z.array(InterfaceRowSlotSchema).min(1),
     /** The one condition the items appear under. */
     when: z.string().min(1).optional(),
+    why: readableWhy,
+    proven,
   })
   .strict()
   .superRefine(rowGrammarIssues)
@@ -1244,11 +1408,11 @@ export const InterfaceResourceSchema = z
   })
   .strict()
   .superRefine((resource, ctx) => {
-    if (resource.kind === 'screen' && resource.of) {
+    if (isRootPlace(resource) && resource.of) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['of'],
-        message: 'a screen sits on nothing — `of` belongs to a panel or a dialog',
+        message: `a ${resource.kind} sits on nothing — \`of\` belongs to a panel or a dialog`,
       })
     }
     if (resource.kind !== 'screen' && resource.address) {
@@ -1261,7 +1425,7 @@ export const InterfaceResourceSchema = z
     // A readable id is a NAME — one fact per name, across all four kinds, so a
     // future reference can never point at two facts.
     const seen = new Set<string>()
-    for (const kind of ['markers', 'elements', 'controls', 'rows'] as const) {
+    for (const kind of INTERFACE_READABLE_KINDS) {
       resource.readables?.[kind]?.forEach((fact, i) => {
         if (!fact.id) return
         if (seen.has(fact.id)) {
@@ -1274,8 +1438,56 @@ export const InterfaceResourceSchema = z
         seen.add(fact.id)
       })
     }
+    // A readable is addressed the way a user finds it, and `css` is the same
+    // MARKED escape it is for a step: a readable that reaches its element
+    // through a selector says why, which is what the non-canonical record reports.
+    for (const { kind, index, locator, why } of readableLocators(resource)) {
+      if (why === undefined && isNonCanonicalLocator(locator)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['readables', kind, index, 'why'],
+          message: 'this readable reaches its element through `css`, so it must say `why`: what the element is and why no role+name, label, placeholder, text, title or alt reaches it',
+        })
+      }
+    }
   })
 export type InterfaceResource = z.infer<typeof InterfaceResourceSchema>
+
+/** The four readable kinds, in the order a place states them. */
+export const INTERFACE_READABLE_KINDS = ['markers', 'elements', 'controls', 'rows'] as const
+export type InterfaceReadableKind = (typeof INTERFACE_READABLE_KINDS)[number]
+
+/** One locator a place's readables carry: which fact, and the reason it gave for a selector. */
+export interface InterfaceReadableLocator {
+  kind: InterfaceReadableKind
+  /** 0-based, within its kind. */
+  index: number
+  /** The readable's own id, when it has one. */
+  id?: string
+  locator: GuardWebLocator
+  why?: string
+  /** Set when no browser vouched for its `css` ({@link proven}). */
+  proven?: false
+}
+
+/**
+ * Every locator a place's readables carry — a marker's and a row grammar's
+ * `within`, an element's and a control's own — in the order the place states
+ * them. What the non-canonical rules walk, for readables as for steps.
+ */
+export function readableLocators(place: { readables?: InterfaceReadables }): InterfaceReadableLocator[] {
+  const readables = place.readables
+  const entry = (kind: InterfaceReadableKind, index: number, fact: { id?: string; why?: string; proven?: false }, locator: GuardWebLocator | undefined): InterfaceReadableLocator[] =>
+    locator
+      ? [{ kind, index, ...(fact.id ? { id: fact.id } : {}), locator, ...(fact.why ? { why: fact.why } : {}), ...(fact.proven === false ? { proven: false as const } : {}) }]
+      : []
+  return [
+    ...(readables?.markers ?? []).flatMap((fact, i) => entry('markers', i, fact, fact.within)),
+    ...(readables?.elements ?? []).flatMap((fact, i) => entry('elements', i, fact, fact.element)),
+    ...(readables?.controls ?? []).flatMap((fact, i) => entry('controls', i, fact, fact.control)),
+    ...(readables?.rows ?? []).flatMap((fact, i) => entry('rows', i, fact, fact.within)),
+  ]
+}
 
 /**
  * WHERE one interface came from: `derived` = a mapping read it off the working
@@ -1387,6 +1599,16 @@ export const InterfaceSchema = z
      * fingerprint rules as `at`.
      */
     to: InterfaceResourceIdSchema.optional(),
+    /**
+     * WHO performs a web task, when it is not the world's default signed-in
+     * principal: the NAME of a seeded credential, chosen by the authoring
+     * session from its description, or {@link ANONYMOUS_PRINCIPAL} for a task
+     * done signed out (a login form, a password reset). A scenario of the task starts from that session — a
+     * `credential` step naming it, or no credential at all. A task authored
+     * beside a live world always names one (the default principal's name when
+     * the session named none); absent ⇒ the default principal. Never fingerprinted: who performs a task is not WHICH task it is.
+     */
+    principal: z.string().min(1).optional(),
     /**
      * THE UI-TO-API RELATION: the api operations this task's steps invoke, as
      * {@link InterfaceSchema.id}s of the api entries in the SAME catalog
@@ -1539,16 +1761,33 @@ export const InterfaceAuthoringStatusSchema = z.enum(['authored', 'empty', 'reje
 export type InterfaceAuthoringStatus = z.infer<typeof InterfaceAuthoringStatusSchema>
 
 /**
- * ONE screen's row of the authoring ledger: what its last session settled, and
- * the digest of the inputs it settled over. A screen whose status did not settle
- * (`failed`, `rejected`) is work again only when that digest MOVES — so a dead
- * provider costs one screen one run, not one screen every run forever.
+ * ONE screen's row of the authoring ledger: what its last session settled, the
+ * digest of the inputs it settled over, and the source files it was grounded
+ * on. The screen is work again when that digest MOVES, one of those files
+ * changed, or a file joined or left the set it is grounded on — whatever the
+ * status, so a dead provider costs one screen one run,
+ * not one screen every run forever, and a settled screen whose source moved is
+ * reconciled rather than left describing code that is gone. A row settled
+ * from source alone is work again, too, for a run that can look at the
+ * screen live.
  */
 export const InterfaceAuthoringRecordSchema = z
   .object({
     status: InterfaceAuthoringStatusSchema,
     /** The digest of everything that decides what a session for this screen produces. */
     inputFingerprint: z.string().min(1),
+    /**
+     * The source files the session was grounded on (the place's route module
+     * and the modules it renders), repo-relative, each with a short digest of
+     * its content. Absent on a row written before it was recorded, or for a
+     * screen the analyzer could not ground.
+     */
+    sources: z.record(z.string().min(1), z.string().min(1)).optional(),
+    /**
+     * The screen settled (`authored` or `empty`) with no live screen to look
+     * at (no browser, or the app would not come up): from source alone.
+     */
+    sourceOnly: z.literal(true).optional(),
   })
   .strict()
 export type InterfaceAuthoringRecord = z.infer<typeof InterfaceAuthoringRecordSchema>
@@ -1632,6 +1871,26 @@ const InterfacesFileShapeSchema = z
      * every screen it does not name is judged by that old inference ONCE.
      */
     authoring: z.record(z.string(), InterfaceAuthoringRecordSchema).optional(),
+    /**
+     * THE VIEWS the last authoring run's context pass found the places render
+     * (their modules and render closures, the framework's layouts included),
+     * repo-relative, each with a short digest of its content, plus every file
+     * the pass looked for a framework layout in (digested `missing` while there
+     * is none, so one appearing moves it). Which components are SHARED is
+     * decided over them, and no screen's own row records a layout, so one of
+     * them moving is work for the context pass even when no row's sources
+     * moved. Only `interfaces.authored.json` carries it.
+     */
+    authoringViews: z.record(z.string().min(1), z.string().min(1)).optional(),
+    /**
+     * THE LIVE WORLD the last authoring run tried to stand up and could not
+     * (install, build, seed or boot failed), with a digest of the whole recipe
+     * and the scripts it names as they stood then. While they stand there, a
+     * screen authored from source alone is not work for a live look: the same
+     * recipe would fail the same way. Cleared once a world comes up. Only
+     * `interfaces.authored.json` carries it.
+     */
+    liveUnavailable: z.object({ recipe: z.string().min(1) }).strict().optional(),
   })
   .strict()
 
@@ -1763,6 +2022,36 @@ export const InterfacesFileSchema = InterfacesFileShapeSchema
           })
         }
       }
+      // A selector is allowed only as a MARKED escape: a step whose locator
+      // carries `css` anywhere says why no accessible handle reaches its element,
+      // which is what the non-canonical record reports.
+      iface.steps.forEach((step, s) => {
+        if (step.kind === 'press' && step.within !== undefined && step.target === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['interfaces', i, 'steps', s, 'target'],
+            message: 'a press scoped `within` an element names the element it presses on — give it a `target`',
+          })
+        }
+        if (!isTargetedStep(step)) return
+        if (step.kind === 'upload') {
+          if (isNonCanonicalLocator(interfaceStepLocator(step))) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['interfaces', i, 'steps', s, 'target'],
+              message: 'an upload names the control a user operates to pick a file (its label, its button) — never a `css` locator',
+            })
+          }
+          return
+        }
+        if (step.why === undefined && isNonCanonicalLocator(interfaceStepLocator(step))) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['interfaces', i, 'steps', s, 'why'],
+            message: 'this step reaches its element through `css`, so it must say `why`: what the control is and why no role+name, title, label, placeholder, text or alt reaches it',
+          })
+        }
+      })
       // A contract describes THIS entry's surface or it describes nothing: an
       // api operation's grammar attached to a cli command is not a contract for
       // that command, it is a decoding error waiting to be read as truth.
@@ -1827,18 +2116,51 @@ function stepIdentity(step: InterfaceStep): string {
       return [step.kind, normalizeToken(step.method).toUpperCase(), normalizeToken(step.path)].join('\u0000')
     case 'navigate':
       return [step.kind, normalizeToken(step.route)].join('\u0000')
-    default:
-      // The target folds as the ONE STRING it used to be, so splitting it in
-      // two moved no stored fingerprint and no scenario's grounding with it.
-      // `exact` folds only when it is set, for the same reason.
+    case 'press':
       return [
         step.kind,
-        normalizeToken(`${step.target.role} "${step.target.name}"`),
-        ...(step.target.exact ? ['exact'] : []),
+        step.key,
+        ...(step.target ? targetIdentity(step.target) : []),
+        ...(step.within ? ['within', ...scopeIdentity(step.within)] : []),
+      ].join('\u0000')
+    default:
+      return [
+        step.kind,
+        ...targetIdentity(step.target),
         ...(step.kind === 'input' && step.mode === 'select' ? ['select'] : []),
-        ...(step.within ? ['within', step.within.role, normalizeToken(step.within.name), String(step.within.exact ?? false)] : []),
+        ...(step.within ? ['within', ...scopeIdentity(step.within)] : []),
       ].join('\u0000')
   }
+}
+
+/**
+ * A target's part of a step's identity. A role+name target folds as the ONE
+ * STRING it used to be, so splitting it in two moved no stored fingerprint and
+ * no scenario's grounding with it; `exact` and `pick` fold only when they are
+ * set, for the same reason. Every other handle folds as its key and its value.
+ */
+function targetIdentity(target: InterfaceTarget): string[] {
+  const { key, value } = webLocatorHandle(target)
+  const handle =
+    'role' in target
+      ? normalizeToken(target.name === undefined ? target.role : `${target.role} "${target.name}"`)
+      : `${key}:${normalizeToken(value ?? '')}`
+  return [
+    handle,
+    ...('exact' in target && target.exact ? ['exact'] : []),
+    ...(target.pick !== undefined ? ['pick', String(target.pick)] : []),
+  ]
+}
+
+/** A scope's part of a step's identity — the role+name fold it always had, and
+ *  any other handle by its key and value. */
+function scopeIdentity(scope: GuardWebScope): string[] {
+  const { key, value } = webLocatorHandle(scope)
+  return [
+    ...('role' in scope ? [scope.role, normalizeToken(scope.name ?? '')] : [`${key}:`, normalizeToken(value ?? '')]),
+    String(('exact' in scope && scope.exact) ?? false),
+    ...(scope.pick !== undefined ? ['pick', String(scope.pick)] : []),
+  ]
 }
 
 /**
@@ -1945,16 +2267,19 @@ function resolvedStepIdentity(
   step: InterfaceStep,
   place: Pick<InterfaceResource, 'id' | 'readables'> | undefined,
 ): string | undefined {
-  if (!place || !('target' in step) || step.within) return undefined
+  if (!place || !isTargetedStep(step) || step.within) return undefined
+  const target = step.target
+  if (!('role' in target) || target.pick !== undefined) return undefined
   const named = [...(place.readables?.controls ?? []).map((fact) => ({ id: fact.id, locator: fact.control })),
     ...(place.readables?.elements ?? []).map((fact) => ({ id: fact.id, locator: fact.element }))]
   const matches = named.filter(
     (candidate): candidate is { id: string; locator: typeof candidate.locator } =>
-      candidate.id !== undefined && sameSurfaceHandle(candidate.locator, step.target),
+      candidate.id !== undefined && sameSurfaceHandle(candidate.locator, target),
   )
   if (matches.length !== 1) return undefined
   return [
     step.kind,
+    ...(step.kind === 'press' ? [step.key] : []),
     'resolved',
     place.id,
     matches[0].id,
@@ -1963,11 +2288,15 @@ function resolvedStepIdentity(
 }
 
 /** Does a readable's locator address the same element as a step's target? */
-function sameSurfaceHandle(locator: GuardWebLocator, target: InterfaceTarget): boolean {
+function sameSurfaceHandle(
+  locator: GuardWebLocator,
+  target: Extract<InterfaceTarget, { role: string }>,
+): boolean {
   if (!('role' in locator) || locator.within || locator.pick) return false
   return (
     locator.role === target.role &&
     locator.name !== undefined &&
+    target.name !== undefined &&
     normalizeToken(locator.name) === normalizeToken(target.name) &&
     (locator.exact ?? false) === (target.exact ?? false)
   )
@@ -1989,14 +2318,19 @@ export function isLabelOnlyRekey(
     interfaceFingerprint({
       ...iface,
       steps: iface.steps.map((step) =>
-        'target' in step
+        isTargetedStep(step)
           ? {
               ...step,
-              target: { ...step.target, name: '' },
-              ...(step.within ? { within: { ...step.within, name: '' } } : {}),
+              target: unnamed(step.target),
+              ...(step.within ? { within: unnamed(step.within) } : {}),
             }
           : step,
       ),
     })
   return unlabelled(before) === unlabelled(after)
+}
+
+/** A role+name handle with its name blanked — its label taken out of its identity. */
+function unnamed(scope: GuardWebScope): GuardWebScope {
+  return 'role' in scope ? { ...scope, name: '' } : scope
 }

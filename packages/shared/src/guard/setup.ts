@@ -31,15 +31,17 @@ export type GuardSetupStepStatus = z.infer<typeof GuardSetupStepStatusSchema>
 /**
  * The setup taxonomy, in run order. `externals` folded INTO `catalog` (the
  * skeleton write runs inside that step); `interfaces` and `auth` are new steps of
- * the rebuilt setup. The legacy top-level `recipe`/`externals`/`seed` report fields stay
- * populated for back-compat — the `steps` array is the new spine.
+ * the rebuilt setup, and `interfaces` runs after `seed` because its sessions open
+ * the app signed in as a seeded principal. The legacy top-level
+ * `recipe`/`externals`/`seed` report fields stay populated for back-compat — the
+ * `steps` array is the new spine.
  */
 export const GuardSetupTaxonomyKeySchema = z.enum([
   'recipe',
   'detect',
   'catalog',
-  'interfaces',
   'seed',
+  'interfaces',
   'preparations',
   'auth',
 ])
@@ -130,6 +132,13 @@ export const GuardSetupTaxonomyStepSchema = z
      * inputs move or somebody asks for a refresh.
      */
     failedScreens: z.array(GuardSetupFailedScreenSchema).optional(),
+    /**
+     * SEED step only: a digest of the `api.seed` block and its script as the
+     * engine last drafted them, carried while they still match. A seed that
+     * still matches is the engine's to re-draft when the step re-opens; one
+     * that does not was edited by hand, and replacing it needs consent.
+     */
+    draftedSeed: z.string().optional(),
   })
   .strict()
   .superRefine((step, ctx) => {
@@ -297,7 +306,13 @@ export const GuardSetupReportSchema = z
         externalServices: z.array(DetectedExternalServiceSchema),
         /** The datastore family + driver, when one was detected. */
         database: z
-          .object({ type: z.string(), driver: z.string(), tables: z.number().int().nonnegative() })
+          .object({
+            type: z.string(),
+            driver: z.string(),
+            tables: z.number().int().nonnegative(),
+            /** The files the schema parsers read, repo-relative: the seed step's keys fold them. */
+            schemaFiles: z.array(z.string()).optional(),
+          })
           .strict()
           .nullable(),
         datastoreUrls: z.array(DatastoreUrlRefSchema),

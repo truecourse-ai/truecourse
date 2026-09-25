@@ -1,6 +1,6 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
 import type { RouteRegistration, RouterMount, RpcRouter, SupportedLanguage } from '@truecourse/shared'
-import { extractNextAppRoutes } from './routes/next-handlers.js'
+import { extractNextAppRoutes, extractNextPagesApiRoutes } from './routes/next-handlers.js'
 import { extractPythonRoutes } from './routes/python.js'
 import { extractCSharpRoutes } from './routes/csharp.js'
 import { extractNestControllerRoutes } from './routes/nest-decorators.js'
@@ -145,18 +145,21 @@ export function extractRouteRegistrations(
  *
  *  - routes CALLED on a router (`router.get('/x', h)`) — below, the original;
  *  - routes DECLARED as decorators (NestJS) — `routes/nest-decorators.js`;
- *  - routes declared by Next App Router files and explicit HTTP method exports;
+ *  - routes declared by Next App Router files and explicit HTTP method exports,
+ *    and by Next pages-router files under `pages/api/` whose one default export
+ *    answers the methods its body distinguishes — `routes/next-handlers.js`;
  *  - routes DECLARED as data (Strapi route tables) — `routes/strapi-tables.js`;
  *  - operations declared as an RPC TREE (tRPC) — `routes/trpc-routers.js`, whose
  *    product is not a route at all: a router node names no address, so it is
  *    carried as its own fact and composed into operations by the mapper.
  *
  * A file is normally written in exactly one of them, and each reader carries its
- * own gate. Next filesystem evidence is read only for route.ts/route.js candidates.
+ * own gate. Next filesystem evidence is read only for route.ts/route.js and
+ * `pages/api/**` candidates.
  */
 function extractJsRoutes(tree: Tree, filePath: string): RouteExtraction {
   const strapi = extractStrapiRouteTables(tree, filePath)
-  const routes: RouteRegistration[] = [...extractNestControllerRoutes(tree, filePath), ...strapi.routes, ...extractNextAppRoutes(tree, filePath)]
+  const routes: RouteRegistration[] = [...extractNestControllerRoutes(tree, filePath), ...strapi.routes, ...extractNextAppRoutes(tree, filePath), ...extractNextPagesApiRoutes(tree, filePath)]
   const mounts: RouterMount[] = [...strapi.mounts]
 
   const catchAll = new Set<string>()

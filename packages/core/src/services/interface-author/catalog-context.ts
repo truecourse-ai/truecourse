@@ -40,11 +40,9 @@ export function ownTasks(catalog: InterfacesFile, screenId: string): Interface[]
 }
 
 /** Whole exact definitions, captured with the initial briefing, outside the shared prefix. */
-export function ownTaskContext(input: CatalogInput & { screenId: string; replace: boolean }): string {
+export function ownTaskContext(input: CatalogInput & { screenId: string }): string {
   const tasks = ownTasks(mergeInterfaceCatalogs(input.derived, input.authored), input.screenId)
-  const instruction = input.replace
-    ? 'Replacement: preserve surviving ids and exact steps. Only replace ids listed as re-authorable in the briefing; derived tasks remain unchanged. Retrieve every omitted definition with get_interfaces before altering or replacing it.'
-    : 'Enrichment: preserve existing tasks; do not return or replace them. Inspect omitted definitions with get_interfaces when comparing a proposed task.'
+  const instruction = 'Reconcile: account for every authored task listed in the briefing against the source and the live screen. List one that still stands exactly as it is in `kept` (never re-send it), re-send one that changed under its own id with the corrected steps, and put one whose control no longer exists in `retired` with the reason. Derived tasks remain unchanged. Retrieve every omitted definition with get_interfaces before deciding on it.'
   const retrieval = 'Use search_interfaces for web catalog metadata and get_interfaces for exact actions. Use get_resources and get_states for exact resource and state definitions. Continue all pages with the same arguments and nextCursor. If the requested definitions change and a cursor is stale, restart retrieval. Source search does not search hidden catalog files.'
   const blocks: string[] = []
   const omitted: string[] = []

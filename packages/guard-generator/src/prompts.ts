@@ -34,6 +34,7 @@ import {
   GuardWebExpectSchema,
   GuardWebFileSchema,
   GuardWebLocatorSchema,
+  GuardWebScopeSchema,
   GuardWebStateSchema,
   type GuardDriverId,
 } from '@truecourse/shared'
@@ -61,6 +62,7 @@ const API_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedApiScenarioSchema.st
  *  renders at ~119K characters — named under `definitions`, ~18K. */
 const WEB_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedWebScenarioObjectSchema.strip(), {
   webLocator: GuardWebLocatorSchema,
+  webScope: GuardWebScopeSchema,
   webState: GuardWebStateSchema,
   webExpect: GuardWebExpectSchema,
   webCaptures: GuardWebCapturesSchema,
@@ -664,10 +666,13 @@ exclusion half is weak and will be flagged.
 A web step is one of: \`navigate\` (go to a surface-relative path), \`click\`
 (activate an element), \`fill\` (type a \`value\` into an editable input; empty clears it),
 \`select\` (choose an \`option\` by visible label in a native HTML select),
-\`upload\` (hand a \`file\` to the control a user would operate), \`history\` (the
-browser's own \`back\`/\`forward\` — the claim "Back returns you" is about the
-BROWSER, never re-navigation), and \`expect\` (assert on the page without acting).
-There is deliberately no hover, no scroll, no keyboard — and no sleep verb, ever:
+\`upload\` (hand a \`file\` to the control a user would operate), \`press\` (one
+key — Enter, Escape, Tab or an arrow — \`on\` an element, or on whatever has focus),
+\`hover\` (move the pointer over an element, to reveal a control shown only on
+hover), \`history\` (the browser's own \`back\`/\`forward\` — the claim "Back returns
+you" is about the BROWSER, never re-navigation), and \`expect\` (assert on the page
+without acting). There is deliberately no scroll, no drag, no free typing of keys
+beyond \`fill\` — and no sleep verb, ever:
 every expectation WAITS on observable state, bounded by \`timeoutMs\`, so "the page
 catches up" is expressed by asserting what it must show, never by waiting a
 duration.
@@ -687,25 +692,39 @@ closed to the handles a USER perceives:
   prompt inside an empty input), \`label\` (the visible label of a form control),
   \`text\` (the element's own visible words), \`title\` (the tooltip), \`alt\` (an
   image's alt text). Each member is exclusive — one handle per locator.
-- NO CSS selectors, NO XPath, NO test ids: those address the IMPLEMENTATION, and a
-  scenario that addresses the implementation stops being a user-replayable probe of
-  the promise.
+- NO XPath, NO test ids, and NO CSS selector of your own: those address the
+  IMPLEMENTATION, and a scenario that addresses the implementation stops being a
+  user-replayable probe of the promise. The one exception is a plan target written
+  as a JSON locator carrying \`css\`: the interface catalog proved it on the running
+  app for a control no user-perceivable handle reaches, so copy it verbatim.
 - The match is case-insensitive substring by default; \`"exact": true\` demands the
   whole string (use it when one name is a prefix of another).
 - A locator is STRICT: it must resolve to exactly ONE element. Two matches is a
-  genuine ambiguity and fails loudly. \`"pick": "first"\` is the one authored
-  exception, for a page that legitimately shows many controls reading the same (a
-  grid of slot buttons) where ANY serves the flow.
+  genuine ambiguity and fails loudly. \`"pick"\` is the one authored exception, for
+  a page that legitimately shows many controls reading the same: \`"first"\` when ANY
+  serves the flow (a grid of slot buttons), or a 1-based position (\`"pick": 2\`)
+  when a plan target names one.
 - A locator can carry \`within: { "role": "dialog", "name": "Delete expense", "exact": true }\` to address a control inside a named container. Preserve the plan's scope. When the page opener and confirmation share a name, scope to the dialog; do not use \`pick: first\` to hide the ambiguity.
 - A native select uses \`{ "driver": "web", "select": { "role": "combobox", "name": "Category" }, "option": "Food & drink" }\`. Never fill a native select. For custom menus, click the opener then its option; fill only editable controls. An interface input with mode select compiles to select, not fill.
 - An element no user-perceivable handle reaches is NOT guessed at: the milestone
   that needs it makes the flow blocked — name the unlocatable element in
   \`blockedOn\`.
-The realization plan writes targets as \`<role> "<name>"\`. Translate them directly:
+The realization plan writes a target either as a JSON locator — copy it verbatim as
+the step's locator, \`css\`, \`within\` and \`pick\` included, so
+\`click: {"css":"button[data-testid=\"sort\"]"}\` becomes
+\`{ "driver": "web", "click": { "css": "button[data-testid=\"sort\"]" } }\` — or as
+\`<role> "<name>"\`. Translate those directly:
 \`click: button "Add Repository"\` becomes
 \`{ "driver": "web", "click": { "role": "button", "name": "Add Repository" } }\`, and
 \`fill: textbox "Repository path"\` becomes
 \`{ "driver": "web", "fill": { "role": "textbox", "name": "Repository path" }, "value": "…" }\`.
+The other plan verbs compile as directly: \`press: Enter on searchbox "Search"\`
+becomes \`{ "driver": "web", "press": "Enter", "on": { "role": "searchbox", "name": "Search" } }\`
+(\`press: Escape\` alone has no \`on\`), \`hover: row "Inbox"\` becomes
+\`{ "driver": "web", "hover": { "role": "row", "name": "Inbox" } }\`, and
+\`upload: {"text":"url","as":"links.csv"} to label "Import file"\` becomes
+\`{ "driver": "web", "upload": { "label": "Import file" }, "file": { "text": "url", "as": "links.csv" } }\`
+— the file copied verbatim, fixture reference and all.
 
 # Addresses are SURFACE-RELATIVE
 A \`navigate\` path starts with \`/\` and never carries an origin — the sandbox
@@ -777,7 +796,10 @@ credentials, no external systems. What IS provided is the SEED: when the user pr
 lists FIXTURES, that data — principals included — already exists in the served app's
 database, and a SIGNED-IN world is reached WITHOUT the login screen: a \`credential\`
 step names one of the CREDENTIALS the user prompt lists (a seeded session cookie, a
-token) and the runner installs it into the browser before the first navigation. Fill
+token) and the runner installs it into the browser before the first navigation. A
+realization that says \`performed as: <name>\` is performed as that principal: sign in
+with the \`credential\` it names; one that says \`signed out\` takes NO credential (a
+signed-out page sends a signed-in browser away). Fill
 the login form only when the flow is ABOUT signing in, or when no credential is
 listed and a fixture carries login fields — every form login spends the app's login
 rate limit, which a run of many scenarios trips. Never block on "credentials" while
@@ -1162,6 +1184,12 @@ function resourceLines(place: InterfaceResource): string[] {
       place.description ? `: ${place.description}` : ''
     }`,
   ]
+  // A shared component is rendered by several screens and owns no address: its
+  // tasks' steps hold wherever it is rendered, so a scenario runs them on the
+  // screen it is already on rather than navigating to their entry.
+  if (place.kind === 'component') {
+    lines.push('    shared: rendered on several screens — run its tasks on the screen the scenario is on; their entry path is one such screen, not a navigation they need')
+  }
   const r = place.readables
   // A cli command group and an api noun carry NO readables — those are DOM
   // facts — so such a place renders its identity line and stops,
@@ -2147,12 +2175,12 @@ ${SEED_JSON_SCHEMA}
   words ("org owner", "regular member") and, when the API declares OpenAPI security
   schemes, a "satisfies" naming the scheme this credential fulfills.
 
-# Principals — one per role
-- Mint ONE PRINCIPAL PER ROLE the app actually distinguishes. The ROLES section below
-  lists the roles the schema and the specification agree on; create one account for
-  each, with the role stored the way the schema stores it, and declare one credential
-  per account. When no role is listed, one principal is the right answer — do not
-  invent a hierarchy the app does not have.
+# Principals — one per kind of user
+- Mint ONE PRINCIPAL PER KIND OF USER the app actually distinguishes, decided from the
+  schema and the auth guards in its source; create one account for each, stored the
+  way the schema stores it, and declare one credential per account. When the app
+  distinguishes no kinds, one principal is the right answer — do not invent a
+  hierarchy the app does not have.
 - Mint the SECRET the way the APP would: call its own token/session issuance if the
   script can import it, otherwise sign the token with the same secret and algorithm
   the app verifies with (read from the same environment variable the app reads).
@@ -2210,6 +2238,10 @@ export interface SeedDraftInput {
   tables: SeedSchemaTable[]
   /** Foreign-key relations, as the schema parsers derived them. */
   relations: { sourceTable: string; targetTable: string; foreignKeyColumn: string }[]
+  /** The enums the schema declares, with their values. */
+  enums?: { name: string; values: string[] }[]
+  /** The files the schema was parsed from, repo-relative: the session reads them for what the parse leaves out. */
+  schemaFiles?: string[]
   /** Env vars the recipe declares that name a database connection (the app's own). */
   connectionEnv: string[]
   /** How the app's own files import its client — real import lines from the tree. */
@@ -2239,13 +2271,6 @@ export interface SeedDraftInput {
    * a mandate rather than a question.
    */
   apiAuthEvidence?: { kind: string; detail: string }[]
-  /**
-   * The roles the app distinguishes — one principal is minted per entry. Derived
-   * deterministically from the schema (a role-shaped column and its enumerated
-   * values) and, where the specs name them, from the spec language. Empty ⇒ one
-   * principal, which is the honest default.
-   */
-  roles?: { name: string; source: string }[]
   /** Short excerpts of the curated specs, for the ROLE/PRINCIPAL language only. */
   specExcerpts?: { doc: string; text: string }[]
   /** The repo's ecosystem, so the script lands in the right language. */
@@ -2277,6 +2302,9 @@ export interface SeedRetryContext {
   failure: string
 }
 
+/** How many columns the seed briefing's schema lists before it names the remaining tables only. */
+const SEED_SCHEMA_MAX_COLUMNS = 600
+
 export function buildSeedUserPrompt(input: SeedDraftInput): string {
   const lines = [
     `Ecosystem: ${input.ecosystem}`,
@@ -2293,7 +2321,16 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
     '',
     'SCHEMA (parsed from this repository):',
   ]
-  for (const table of input.tables) {
+  if (input.schemaFiles && input.schemaFiles.length > 0) {
+    lines.push(`  read from: ${input.schemaFiles.join(', ')} (read_file them for what the parse leaves out: comments, attributes, indexes)`)
+  }
+  let columnsLeft = SEED_SCHEMA_MAX_COLUMNS
+  const tablesShown = input.tables.filter((table) => {
+    if (columnsLeft <= 0) return false
+    columnsLeft -= Math.max(1, table.columns.length)
+    return true
+  })
+  for (const table of tablesShown) {
     lines.push(`  ${table.name}`)
     for (const c of table.columns) {
       const flags = [
@@ -2307,6 +2344,14 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
       ].filter(Boolean)
       lines.push(`    - ${c.name}: ${c.type}${flags.length ? ` [${flags.join(', ')}]` : ''}`)
     }
+  }
+  if (tablesShown.length < input.tables.length) {
+    const rest = input.tables.slice(tablesShown.length).map((table) => table.name)
+    lines.push(`  … ${rest.length} more table(s), columns not listed: ${rest.join(', ')}`)
+  }
+  if (input.enums && input.enums.length > 0) {
+    lines.push('', 'ENUMS (a column typed by one takes exactly these values):')
+    for (const declared of input.enums) lines.push(`  ${declared.name}: ${declared.values.join(', ')}`)
   }
   if (input.relations.length > 0) {
     lines.push('', 'RELATIONS:')
@@ -2345,16 +2390,6 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
       'omit "satisfies" — there is nothing for it to name.',
     )
   }
-  if (input.roles && input.roles.length > 0) {
-    lines.push('', 'ROLES — mint ONE PRINCIPAL PER ENTRY:')
-    for (const r of input.roles) lines.push(`  ${r.name}  (${r.source})`)
-  } else {
-    lines.push(
-      '',
-      'ROLES: none were detected. Mint ONE principal unless the specification excerpts',
-      'below clearly distinguish more — do not invent a hierarchy the app does not have.',
-    )
-  }
   if (input.specExcerpts && input.specExcerpts.length > 0) {
     lines.push(
       '',
@@ -2381,7 +2416,10 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
       `REPLACING the seed script this repository already has (${input.replacing.scriptPath}).`,
       'It is quoted below because a replacement must be an IMPROVEMENT on it, not a fresh',
       'guess: keep what already works (its imports, its idempotence mechanism, the fixtures',
-      'it already provides) and change only what the instructions above require.',
+      'it already provides) and change only what the instructions above require. Keep every',
+      'credential and fixture it provides under the SAME name, with the same fields: screens',
+      'and committed scenarios reference them by name. Rename or drop one only when the data',
+      'model no longer allows it.',
       indentBlock(input.replacing.scriptContent),
     )
   }

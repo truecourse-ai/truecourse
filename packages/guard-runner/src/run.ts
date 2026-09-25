@@ -1251,7 +1251,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       return view
     }
 
-    const runOne = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
+    const executeOne = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
       // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
       // either — a run ending `aborted`/`run-timed-out` discards these results.
       if (cancel.signal.aborted) return null
@@ -1385,6 +1385,15 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       opts.onScenarioSettled?.(settled, selected.length, result)
       return result
     }
+    // Once cancelled, the run waits a short grace for each in-flight scenario:
+    // one normally settles itself on the signal, and its own cleanup (its
+    // server stopped, its private world closed) must finish before the run
+    // tears down what it stood on. One parked on a promise nothing will ever
+    // settle is abandoned when the grace runs out, or it would hold the run past
+    // its own deadline; its result is discarded either way, and the children it
+    // spawned die with the same signal.
+    const runOne = (item: (typeof runnable)[number]): Promise<GuardScenarioResult | null> =>
+      untilCancelled(executeOne(item), cancel.signal)
 
     // THREE POOLS, run concurrently — split by what a scenario keeps RESIDENT. An
     // api-server scenario boots a whole target server that lives for the scenario's
@@ -1533,6 +1542,43 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       await runBuild(repoRoot, api.services.down, loaded.recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
     }
   }
+}
+
+/**
+ * How long a cancelled run waits for an in-flight scenario to settle on the
+ * signal and finish its own cleanup before abandoning it.
+ */
+const CANCEL_GRACE_MS = 5_000
+
+/**
+ * `work`'s value; once `signal` aborts, null as soon as `work` settles (its
+ * value or failure discarded) or `CANCEL_GRACE_MS` passes, whichever is first.
+ */
+function untilCancelled<T>(work: Promise<T>, signal: AbortSignal): Promise<T | null> {
+  const drained = (): Promise<null> => {
+    let timer: NodeJS.Timeout | undefined
+    const grace = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), CANCEL_GRACE_MS)
+    })
+    const settled = work.then(
+      () => null,
+      () => null,
+    )
+    return Promise.race([settled, grace]).finally(() => clearTimeout(timer))
+  }
+  if (signal.aborted) return drained()
+  return new Promise<T | null>((resolve, reject) => {
+    const onAbort = (): void => void drained().then(resolve)
+    signal.addEventListener('abort', onAbort, { once: true })
+    work.then(
+      (value) => {
+        if (!signal.aborted) resolve(value)
+      },
+      (error: unknown) => {
+        if (!signal.aborted) reject(error)
+      },
+    ).finally(() => signal.removeEventListener('abort', onAbort))
+  })
 }
 
 /**

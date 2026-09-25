@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  accountForPrior,
   AuthoredTaskSchema,
   AuthoredFragmentSchema,
   EMPTY_FRAGMENT,
@@ -475,5 +476,119 @@ describe('folding one checked piece into the draft so far', () => {
       states: [{ id: 'listed-repository-registered', description: 'A repository is registered.' }],
     })
     expect(renamed.states!.map((s) => s.id)).toEqual(['listed-repository-registered'])
+  })
+})
+
+describe("accounting for a screen's existing tasks", () => {
+  const task = (id: string) => ({
+    id, type: 'web' as const, title: id, entry: { method: 'GET', path: '/' },
+    steps: [{ kind: 'navigate' as const, route: '/' }],
+  })
+  const prior = new Set(['web/a', 'web/b', 'web/c'])
+
+  it('lets the fragment overwrite only what it amends or retires', () => {
+    const result = accountForPrior(
+      { interfaces: [task('web/a'), task('web/new')], kept: ['web/b'], retired: [{ id: 'web/c', reason: 'gone' }] },
+      prior,
+    )
+    expect(result).toEqual({ replaceable: new Set(['web/a', 'web/c']), unaccounted: [], errors: [] })
+  })
+
+  it('names the tasks it never mentions', () => {
+    expect(accountForPrior({ interfaces: [], kept: ['web/a'] }, prior).unaccounted).toEqual(['web/b', 'web/c'])
+  })
+
+  it('refuses a decision about a task that is not the screen\'s, and two decisions about one', () => {
+    const { errors } = accountForPrior(
+      { interfaces: [task('web/a')], kept: ['web/a', 'web/elsewhere'], retired: [{ id: 'web/a', reason: 'x' }] },
+      prior,
+    )
+    expect(errors).toEqual([
+      '`web/elsewhere` is not one of this screen\'s existing tasks — only those are kept or retired',
+      '`web/a` is both kept and retired',
+      '`web/a` is both kept and re-sent — re-send it only when it changed',
+      '`web/a` is both retired and re-sent',
+    ])
+  })
+
+  it('takes the latest word on a task across check_draft pieces', () => {
+    const kept = foldAuthoredFragment({ interfaces: [] }, { interfaces: [], kept: ['web/a'] })
+    const amended = foldAuthoredFragment(kept, { interfaces: [task('web/a')] })
+    expect(amended.kept).toBeUndefined()
+    expect(amended.interfaces.map((t) => t.id)).toEqual(['web/a'])
+    const retired = foldAuthoredFragment(amended, { interfaces: [], retired: [{ id: 'web/a', reason: 'gone' }] })
+    expect(retired.interfaces).toEqual([])
+    expect(retired.retired).toEqual([{ id: 'web/a', reason: 'gone' }])
+  })
+})
+
+describe('an opener is not a task on its own', () => {
+  const dialog = { id: 'delete-dialog', kind: 'dialog' as const, title: 'Delete link', of: 'root', readables: NO_READABLES }
+  const opener = task({
+    id: 'web/open-delete-link',
+    title: 'Open the delete dialog',
+    steps: [{ kind: 'activate', target: { role: 'button', name: 'Delete' } }],
+    to: 'delete-dialog',
+  })
+  const cancel = task({
+    id: 'web/cancel-delete-link',
+    title: 'Cancel deleting a link',
+    purpose: 'control',
+    at: 'delete-dialog',
+    steps: [{ kind: 'activate', target: { role: 'button', name: 'Cancel' } }],
+  })
+
+  it('refuses a task that opens a dialog nothing is performed in', () => {
+    const result = validate(fragment({ interfaces: [opener], resources: [dialog] }))
+    expect(result.errors).toEqual([
+      expect.stringContaining('`web/open-delete-link` opens `delete-dialog` (dialog "Delete link"), and no task is performed there'),
+    ])
+  })
+
+  it('accepts it with a task at the dialog, or an unresolved line naming it', () => {
+    expect(validate(fragment({ interfaces: [opener, cancel], resources: [dialog] })).errors).toEqual([])
+    for (const line of ['"Delete link": its confirm needs a second link the seed lacks', '`delete-dialog` needs a second link the seed lacks']) {
+      expect(validate(fragment({ interfaces: [opener], resources: [dialog], unresolved: [line] })).errors, line).toEqual([])
+    }
+  })
+
+  it('is not served by a line that only mentions the title’s words, or a longer id', () => {
+    for (const line of ['Delete link: its confirm needs a second link', 'the delete link button has no name', '`delete-dialog-2` is unreachable']) {
+      expect(validate(fragment({ interfaces: [opener], resources: [dialog], unresolved: [line] })).errors, line).toHaveLength(1)
+    }
+  })
+
+  it('leaves a screen’s opener of a shared component’s dialog to the component’s session', () => {
+    const sidebar = 'component-sidebar-1a2b3c4d'
+    const authored: InterfacesFile = {
+      version: 2,
+      generatedAt: '',
+      recipeFingerprint: '',
+      interfaces: [],
+      resources: {
+        web: [
+          { id: sidebar, kind: 'component', title: 'Sidebar' },
+          { id: 'account-menu', kind: 'dialog', title: 'Account menu', of: sidebar, readables: NO_READABLES },
+        ],
+      },
+    }
+    const openMenu = task({ ...opener, id: 'web/open-account-menu', to: 'account-menu' })
+    expect(validate(fragment({ interfaces: [openMenu] }), { authored, scope: { screenId: 'root', address: '/' } }).errors).toEqual([])
+    const fromComponent = task({ ...openMenu, at: sidebar })
+    expect(validate(fragment({ interfaces: [fromComponent] }), { authored, scope: { screenId: sidebar, address: '/' } }).errors).toEqual([
+      expect.stringContaining('opens `account-menu` (dialog "Account menu"), and no task is performed there'),
+    ])
+  })
+
+  it('counts a task on a place nested in the dialog, and one the catalog already holds', () => {
+    const confirm = { id: 'confirm-panel', kind: 'panel' as const, title: 'Confirmation', of: 'delete-dialog', readables: NO_READABLES }
+    const nested = task({ ...cancel, id: 'web/confirm-delete-link', at: 'confirm-panel', steps: [{ kind: 'activate', target: { role: 'button', name: 'Confirm' } }] })
+    expect(validate(fragment({ interfaces: [opener, nested], resources: [dialog, confirm] })).errors).toEqual([])
+    const authored = validate(fragment({ interfaces: [cancel], resources: [dialog] })).authored!
+    expect(validate(fragment({ interfaces: [opener] }), { authored }).errors).toEqual([])
+  })
+
+  it('leaves a task that moves to a screen alone', () => {
+    expect(validate(fragment({ interfaces: [task({ to: 'repos-repoid' })] })).errors).toEqual([])
   })
 })

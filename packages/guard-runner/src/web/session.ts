@@ -11,6 +11,7 @@
  * one address. A session therefore takes an already-running server and closes only
  * what it opened — the browser — which is also the right ORDER: the surface goes down
  * after the page that was talking to it, or the evidence fills with connection errors.
+ * A cancelled run closes the browser too, from its signal, as it kills the servers.
  */
 
 import fs from 'node:fs'
@@ -23,6 +24,12 @@ export interface OpenWebSessionOptions {
   server: WebSurfaceHandle
   /** Absolute directory screenshots and the session video are written into. */
   evidenceDir: string
+  /**
+   * Run-level cancellation: the browser closes when it aborts, whether or not
+   * the scenario ever reaches its own close (one parked on a promise that
+   * never settles does not).
+   */
+  signal?: AbortSignal
 }
 
 export interface WebSession {
@@ -69,6 +76,16 @@ export async function openWebSession(opts: OpenWebSessionOptions): Promise<OpenW
 
   let closed = false
   let video: string | null = null
+  const close = async (): Promise<{ video: string | null }> => {
+    if (closed) return { video }
+    closed = true
+    opts.signal?.removeEventListener('abort', closeOnAbort)
+    video = await browser.close()
+    return { video }
+  }
+  const closeOnAbort = (): void => void close()
+  if (opts.signal?.aborted) closeOnAbort()
+  else opts.signal?.addEventListener('abort', closeOnAbort, { once: true })
 
   return {
     ok: true,
@@ -79,12 +96,7 @@ export async function openWebSession(opts: OpenWebSessionOptions): Promise<OpenW
       browser,
       consoleLines: () => [...browser.consoleLines(), ...browser.pageErrors().map((e) => `pageerror: ${e}`)],
       armFileChooser: () => browser.armFileChooser(),
-      async close() {
-        if (closed) return { video }
-        closed = true
-        video = await browser.close()
-        return { video }
-      },
+      close,
     },
   }
 }

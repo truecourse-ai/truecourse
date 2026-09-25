@@ -103,6 +103,8 @@ import {
   interfacesFingerprint,
   legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  engineSeedRedraftDue,
+  recordedSchemaFiles,
   legacySeedStepFingerprint,
   authFingerprint,
   collectWorkDocs,
@@ -191,12 +193,17 @@ import {
   preparationCatalog,
   readGuardDecisions,
   readAuthoredInterfaceCatalog,
-  recipeContractFingerprint,
+  authoringRecipeContract,
+  sourceDigests,
+  unsettledAuthoring,
   webScreensNeedingAuthoring,
+  authoringViewsMoved,
+  canObserveLiveScreens,
   readInterfaceCatalog,
   readMergedInterfaceCatalog,
   readManifest as readGuardManifest,
   recipePath,
+  readGuardSetup,
   staleAuthoredPlaceDiagnostics,
   type Recipe,
 } from '@truecourse/guard-runner';
@@ -214,7 +221,6 @@ import {
   SEED_SESSION_KIND,
   SeedSessionOutcomeSchema,
   seedSessionCacheKey,
-  seedSessionLegacyCacheKey,
 } from '../guard-setup/index.js';
 import {
   RECONCILE_INTERFACES_BUDGET,
@@ -225,6 +231,7 @@ import {
   INTERFACE_AUTHOR_BUDGET,
   INTERFACE_AUTHOR_CACHE_NAME,
   INTERFACE_AUTHOR_SESSION_KIND,
+  fragmentCacheKey,
   planWorkItems,
 } from '../interface-author/index.js';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
@@ -973,6 +980,7 @@ async function planGuardRealizationStages(
                 webCatalogReads: authorCatalog ? catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []) : [],
               }
             : {}),
+          hasScenario: priorScenarios.length > 0,
           prerequisiteMaterial,
           prerequisiteShape,
           recipeSlice: recipeSliceOf(chosenSurface),
@@ -1171,7 +1179,7 @@ export async function estimateGuardSetup(
   const settled = settledSteps(repoRoot, refresh);
   /** The run's own gate, step by step: named inputs when the row has them. */
   const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
-    stepSettled(repoRoot, key, settled(key), legacyFingerprint);
+    stepSettled(repoRoot, key, settled(key), legacyFingerprint, { schemaFiles: recordedSchemaFiles(repoRoot) });
 
   // ---- recipe repair: loop only on the failure path -------------------------
   // Zero whenever a recipe exists (discovery reuses it) or the settled proposal
@@ -1199,38 +1207,20 @@ export async function estimateGuardSetup(
   // probe: a detection snapshot that moves between estimate and run is unpriced.
   const catalogMax = catalogSettledRow ? 0 : 1;
 
-  // ---- interfaces: reconcile + authoring, both off the on-disk halves -------
-  const derivedCatalog = readInterfaceCatalog(repoRoot);
-  const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
-  const interfaceRecipeContract = recipeContractFingerprint(repoRoot, 'seed');
-  const interfacesSettled =
-    !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
-    webScreensNeedingAuthoring({
-      derived: derivedCatalog,
-      authored: authoredCatalog,
-      recipeContract: interfaceRecipeContract,
-    }).size === 0;
-  const staleAuthoredIds = new Set(
-    staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
-  );
-  const authorable = planWorkItems(derivedCatalog, authoredCatalog, interfaceRecipeContract).filter(
-    (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.needsAuthoring),
-  );
-  // A screen whose fragment is cached costs nothing, exactly as the run reads
-  // it — an explicit re-author reads no cache, so every screen is priced.
-  const authorCached = await Promise.all(
-    authorable.map((item) =>
-      interfacesSettled || replace || refresh
-        ? null
-        : probeSessionCache(repoRoot, INTERFACE_AUTHOR_CACHE_NAME, item.inputFingerprint, AuthoredFragmentSchema),
-    ),
-  );
-  const authorItems = interfacesSettled ? 0 : authorCached.filter((hit) => hit === null).length;
-  const reconcileMax = interfacesSettled ? 0 : 1;
-
   // ---- seed: real cache key when the step will run --------------------------
+  // An existing seed is re-drafted on a refresh, or unasked when the engine
+  // drafted it and the run's own predicate says it is due.
   const seedGateOpen =
-    !recipe || (recipe.api !== undefined && (recipe.api.seed === undefined || refresh));
+    !recipe ||
+    (recipe.api !== undefined &&
+      (recipe.api.seed === undefined ||
+        refresh ||
+        engineSeedRedraftDue(
+          repoRoot,
+          readGuardSetup(repoRoot)?.steps.find((row) => row.key === 'seed'),
+          recipe,
+          recordedSchemaFiles(repoRoot),
+        )));
   const seedSettled = recipe !== undefined && holds('seed', legacySeedStepFingerprint(repoRoot));
   let seedItems = 0;
   let seedMax = 0;
@@ -1240,14 +1230,71 @@ export async function estimateGuardSetup(
         ? await probeSessionCache(
             repoRoot,
             SEED_CACHE_NAME,
-            seedSessionCacheKey(computeSeedStepFingerprint(repoRoot)),
+            seedSessionCacheKey(computeSeedStepFingerprint(repoRoot, recordedSchemaFiles(repoRoot))),
             SeedSessionOutcomeSchema,
-            seedSessionLegacyCacheKey(legacySeedStepFingerprint(repoRoot)),
           )
         : null;
     seedMax = cached ? 0 : 1;
     seedItems = cached ? 0 : 1;
   }
+
+  // ---- interfaces: reconcile + authoring, both off the on-disk halves -------
+  // The steps before this one that write the recipe (the repair, the seed) run
+  // first in the same setup, and the authoring contract folds what they write.
+  // When either will write, every key probed here may move before the step
+  // reads it: the ceiling then prices each screen the moved key would open,
+  // cached or not, the failed ones included.
+  const contractMayMove = repairMax > 0 || (seedGateOpen && !seedSettled);
+  const derivedCatalog = readInterfaceCatalog(repoRoot);
+  const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
+  const interfaceRecipeContract = authoringRecipeContract(repoRoot);
+  // Whether the run can look at the screens live: it then re-opens the ones
+  // authored from source alone, and reads the live fragment first.
+  const liveAvailable = await canObserveLiveScreens(recipe);
+  const interfacesSettled =
+    !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
+    !authoringViewsMoved(repoRoot, authoredCatalog) &&
+    webScreensNeedingAuthoring({
+      derived: derivedCatalog,
+      authored: authoredCatalog,
+      recipeContract: interfaceRecipeContract,
+      repoRoot,
+      liveAvailable,
+    }).size === 0;
+  const staleAuthoredIds = new Set(
+    staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
+  );
+  const planned = planWorkItems(derivedCatalog, authoredCatalog, interfaceRecipeContract, { repoRoot, liveAvailable }).filter(
+    (item) => !staleAuthoredIds.has(item.place.id),
+  );
+  const authorable = planned.filter((item) => replace || item.needsAuthoring);
+  // A screen whose fragment is cached costs nothing, exactly as the run reads
+  // it — an explicit re-author reads no cache, so every screen is priced. A
+  // run that can look at the screens live authors beside them, so the live
+  // fragment is the one it would find. The sources are the ones
+  // the screen's row recorded; a screen with none is keyed on what the run's
+  // analyzer grounds it on, which this estimate cannot know, so it is priced.
+  const authorCached = await Promise.all(
+    authorable.map((item) =>
+      interfacesSettled || replace || refresh
+        ? null
+        : probeSessionCache(
+            repoRoot,
+            INTERFACE_AUTHOR_CACHE_NAME,
+            fragmentCacheKey(
+              item.inputFingerprint,
+              item.record?.sources ? sourceDigests(repoRoot, Object.keys(item.record.sources)) : {},
+              liveAvailable,
+            ),
+            AuthoredFragmentSchema,
+          ),
+    ),
+  );
+  const authorItems = interfacesSettled ? 0 : authorCached.filter((hit) => hit === null).length;
+  const authorMax = contractMayMove && !replace
+    ? planned.filter((item) => item.needsAuthoring || (item.record !== undefined && unsettledAuthoring(item.record))).length
+    : authorItems;
+  const reconcileMax = interfacesSettled && !contractMayMove ? 0 : 1;
 
   // ---- private preparations: one authoring session per changed recipe --------
   // A profile is not evidence that this setup step already settled. The runtime
@@ -1318,7 +1365,7 @@ export async function estimateGuardSetup(
       kind: INTERFACE_AUTHOR_SESSION_KIND,
       budget: INTERFACE_AUTHOR_BUDGET,
       items: authorItems,
-      maxItems: authorItems,
+      maxItems: authorMax,
       bound: interfacesSettled
         ? 'unchanged places + an authored catalog — skipped'
         : `one session per unauthored screen (${authorable.length} today)`,

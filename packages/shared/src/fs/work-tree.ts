@@ -24,6 +24,7 @@
  *   guard/interfaces.json          the derived interface catalog
  *   guard/interfaces.authored.json the hand-authored half of that catalog
  *   guard/interfaces.findings.md   the authoring sessions' findings ledger
+ *   guard/interfaces.noncanonical.json  every step locator that needed `css`
  *   guard/setup.findings.md        the setup sessions' findings ledger
  *   guard/adjudicate.findings.md   the adjudication sessions' findings ledger
  *   guard/findings.md              the rendered findings report
@@ -68,6 +69,7 @@ const WORLD_DIRTY_FILE = '.world-dirty';
 const INTERFACES_FILE = 'interfaces.json';
 const AUTHORED_INTERFACES_FILE = 'interfaces.authored.json';
 const INTERFACE_FINDINGS_FILE = 'interfaces.findings.md';
+const NON_CANONICAL_LOCATORS_FILE = 'interfaces.noncanonical.json';
 const SETUP_FINDINGS_FILE = 'setup.findings.md';
 const ADJUDICATE_FINDINGS_FILE = 'adjudicate.findings.md';
 const FINDINGS_REPORT_FILE = 'findings.md';
@@ -152,6 +154,12 @@ export function guardAuthoredInterfacesPath(workDir: string): string {
 /** Where the authoring sessions append the doc bugs they read. */
 export function guardInterfaceFindingsPath(workDir: string): string {
   return path.join(guardDir(workDir), INTERFACE_FINDINGS_FILE);
+}
+
+/** The record of every authored step that reaches its element through `css`,
+ *  regenerated from the catalog after each authoring run. */
+export function guardNonCanonicalLocatorsPath(workDir: string): string {
+  return path.join(guardDir(workDir), NON_CANONICAL_LOCATORS_FILE);
 }
 
 /** Where setup's sessions (the dependency catalog, the seed) append the
