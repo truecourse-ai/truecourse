@@ -68,11 +68,14 @@ export interface RecordAuthoringLedgerInput {
   derived: InterfacesFile | null
   /** The rows to lay over the ledger, by screen id. */
   rows: Readonly<Record<string, InterfaceAuthoringRecord>>
+  /** The views the context pass read, replacing the recorded ones. */
+  views?: Readonly<Record<string, string>>
   now?: () => string
 }
 
 /**
- * Record what authoring settled on one or more screens. Laid over the existing
+ * Record what authoring settled on one or more screens (and, when given, the
+ * views the run's context pass read). Laid over the existing
  * ledger by id and written through the same validated path the fragments take,
  * so a row lands whether or not the session that produced it wrote a task — a
  * screen whose session failed has nothing else to leave behind, and the row IS
@@ -90,7 +93,11 @@ export function recordAuthoringLedger(
   return writeAuthoredCatalog({
     repoRoot: input.repoRoot,
     derived: input.derived,
-    candidate: { ...base, authoring: { ...base.authoring, ...input.rows } },
+    candidate: {
+      ...base,
+      authoring: { ...base.authoring, ...input.rows },
+      ...(input.views ? { authoringViews: { ...input.views } } : {}),
+    },
     ...(input.now ? { now: input.now } : {}),
   })
 }

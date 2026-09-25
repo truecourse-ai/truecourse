@@ -473,12 +473,13 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   let path: string | undefined
 
   /** Lay rows over the ledger and keep the in-memory catalog in step. */
-  const recordLedger = (rows: Readonly<Record<string, InterfaceAuthoringRecord>>): void => {
+  const recordLedger = (rows: Readonly<Record<string, InterfaceAuthoringRecord>>, views?: Record<string, string>): void => {
     const written = recordAuthoringLedger({
       repoRoot: opts.repoRoot,
       authored,
       derived,
       rows,
+      ...(views ? { views } : {}),
       ...(opts.now ? { now: opts.now } : {}),
     })
     authored = written.file
@@ -504,6 +505,13 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     : []
   if (unshared.length > 0) {
     recordLedger(Object.fromEntries(unshared.map((item) => [item.place.id, ledgerRow(item, item.record!.status, false)])))
+  }
+
+  // THE VIEWS this run's context pass read, what it found shared decided over
+  // them: recorded, so a later setup knows to look again when one moves.
+  if (opts.context && opts.context.size > 0) {
+    const views = sourceDigests(opts.repoRoot, [...opts.context.values()].flatMap((place) => [place.module, ...place.renders, ...place.renderClosure]))
+    if (JSON.stringify(views) !== JSON.stringify(authored?.authoringViews ?? {})) recordLedger({}, views)
   }
 
   /**

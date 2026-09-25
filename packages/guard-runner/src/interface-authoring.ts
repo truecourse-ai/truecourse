@@ -23,6 +23,9 @@
  *    `rejected` one waits for an explicit refresh. A provider that died costs
  *    that screen one run, not one run every setup forever, and the setup report
  *    names it so a person can ask for a retry;
+ *  - apart from any row, a view the last context pass read that moved
+ *    ({@link authoringViewsMoved}) is work for the context pass: a component
+ *    may have become shared, and no screen records the layouts;
  *  - NO row is a screen from before the ledger: it is judged ONCE by the old
  *    inference (it carries a task and every readable kind is established) so an
  *    upgrade re-authors nothing, and the run writes it a row.
@@ -193,6 +196,15 @@ export function sourcesMoved(
   const now = sourceDigests(repoRoot, current ?? Object.keys(recorded))
   const files = Object.keys(now)
   return files.length !== Object.keys(recorded).length || files.some((file) => recorded[file] !== now[file])
+}
+
+/**
+ * Whether a view the last context pass read has moved since
+ * (`authoringViews`): which components are shared may have changed, though no
+ * screen's own row says so. A file that recorded none moves nothing.
+ */
+export function authoringViewsMoved(repoRoot: string, authored: InterfacesFile | null): boolean {
+  return authored?.authoringViews !== undefined && sourcesMoved(repoRoot, authored.authoringViews)
 }
 
 /**

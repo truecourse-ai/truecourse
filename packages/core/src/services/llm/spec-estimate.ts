@@ -196,6 +196,7 @@ import {
   sourceDigests,
   unsettledAuthoring,
   webScreensNeedingAuthoring,
+  authoringViewsMoved,
   canObserveLiveScreens,
   readInterfaceCatalog,
   readMergedInterfaceCatalog,
@@ -1239,6 +1240,7 @@ export async function estimateGuardSetup(
   const liveAvailable = await canObserveLiveScreens(recipe);
   const interfacesSettled =
     !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
+    !authoringViewsMoved(repoRoot, authoredCatalog) &&
     webScreensNeedingAuthoring({
       derived: derivedCatalog,
       authored: authoredCatalog,

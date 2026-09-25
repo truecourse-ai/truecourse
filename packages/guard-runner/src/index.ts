@@ -447,6 +447,7 @@ export {
 
 export {
   INTERFACE_AUTHOR_STAGE_VERSION,
+  authoringViewsMoved,
   canObserveLiveScreens,
   screenAuthoringFingerprint,
   sourceDigests,

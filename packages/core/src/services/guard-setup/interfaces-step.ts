@@ -49,6 +49,7 @@ import type {
   GuardSetupInterfacesStepResult,
 } from '@truecourse/guard-generator';
 import {
+  authoringViewsMoved,
   canObserveLiveScreens,
   computeRecipeFingerprint,
   authoringRecipeContract,
@@ -188,7 +189,10 @@ export function buildInterfacesStep(
     const unsettledScreens = planned
       .filter((item) => item.record !== undefined && unsettledAuthoring(item.record))
       .map((item) => ({ place: item.place.id, reason: `authoring ${item.record!.status}` }));
-    if (workable.length === 0) {
+    // A view the last context pass read that moved is work for the context
+    // pass alone: it may find a component newly shared, and no screen's row
+    // records the layouts.
+    if (workable.length === 0 && !authoringViewsMoved(input.repoRoot, authored)) {
       return {
         status: 'ok',
         reason: joinNotes(

@@ -702,6 +702,7 @@ export function candidateAuthored(
     // travels untouched: this fragment's own row is recorded by the run's fold,
     // after the outcome is known.
     ...(authored?.authoring ? { authoring: authored.authoring } : {}),
+    ...(authored?.authoringViews ? { authoringViews: authored.authoringViews } : {}),
   }
 }
 

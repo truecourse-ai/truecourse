@@ -45,6 +45,7 @@ import {
   mergeInterfaceCatalogs,
   readAuthoredInterfaceCatalog,
   staleAuthoredPlaceDiagnostics,
+  authoringViewsMoved,
   webScreensNeedingAuthoring,
 } from '@truecourse/guard-runner'
 
@@ -2316,6 +2317,23 @@ describe('a shared component', () => {
     await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: unshared })
     const gate = webScreensNeedingAuthoring({ derived: DERIVED, authored: readAuthoredFile(), recipeContract: authoringRecipeContract(repo), repoRoot: repo })
     expect([...gate]).toEqual([])
+  })
+
+  // What is shared is decided over every view the screens render, the layouts
+  // the framework wraps them in included, and no screen's own row records a
+  // layout: a view that moved outside every row is work for the context pass.
+  it('is looked for again when a view outside every screen’s own sources moves', async () => {
+    fs.writeFileSync(path.join(repo, 'src', 'Layout.tsx'), 'export function Layout({ children }) { return <main>{children}</main> }\n')
+    const inLayout = new Map([...context].map(([id, place]) => [id, { ...place, renderClosure: ['src/Layout.tsx', SIDEBAR.module] }]))
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: inLayout, shared })
+    const gate = () => authoringViewsMoved(repo, readAuthoredFile())
+    expect(gate()).toBe(false)
+    fs.writeFileSync(path.join(repo, 'src', 'Layout.tsx'), 'export function Layout({ children }) { return <main><Nav />{children}</main> }\n')
+    expect(gate()).toBe(true)
+    expect(webScreensNeedingAuthoring({ derived: DERIVED, authored: readAuthoredFile(), recipeContract: authoringRecipeContract(repo), repoRoot: repo }).size).toBe(0)
+    // The run that looks again records what it looked at.
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: inLayout, shared })
+    expect(gate()).toBe(false)
   })
 
   it('earns no session once the grounding no longer finds it shared', async () => {

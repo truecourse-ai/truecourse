@@ -92,6 +92,7 @@ import {
   readInterfaceCatalog,
   readAuthoredInterfaceCatalog,
   webScreensNeedingAuthoring,
+  authoringViewsMoved,
   canObserveLiveScreens,
   resolveSeedScript,
   FINGERPRINT_INPUTS,
@@ -1365,6 +1366,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       fact('interfaces', 'replayed: the authored catalog stands as it is')
       opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
     } else if (holds('interfaces', legacyInterfacesFingerprint(repoRoot)) && authoredExists && opts.replace !== true &&
+      !authoringViewsMoved(repoRoot, readAuthoredInterfaceCatalog(repoRoot)) &&
       webScreensNeedingAuthoring({
         derived: readInterfaceCatalog(repoRoot),
         authored: readAuthoredInterfaceCatalog(repoRoot),
