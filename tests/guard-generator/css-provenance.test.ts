@@ -31,6 +31,7 @@ describe('a css locator in a generated scenario', () => {
       { driver: 'web', click: { within: { css: 'main' }, pick: 2, title: 'More' } },
       { driver: 'web', click: { role: 'button', name: 'Save' }, expect: { visible: { css: 'main button:has(i.bi-chevron-expand)' } } },
       { driver: 'web', navigate: '/links', expect: { text: { contains: 'Links' }, within: { css: 'main' } } },
+      { driver: 'web', navigate: '/links', expect: { text: { contains: 'More' }, within: { title: 'More', pick: 2, within: { css: 'main' } } } },
     ]
     expect(unprovenCssLocatorDefect(steps, catalog)).toBeNull()
   })
@@ -96,6 +97,13 @@ describe('a css locator in a generated scenario', () => {
     ]) {
       expect(unprovenCssLocatorDefect([step], unproven, places), JSON.stringify(step)).toContain('step 1 addresses')
     }
+  })
+
+  // An expectation's `within` is a whole locator, so its own `within` can
+  // carry the css: the walk reaches it at any depth.
+  it('is refused when it sits in the scope of an expectation’s scope', () => {
+    const step = { driver: 'web', navigate: '/links', expect: { text: { contains: 'Links' }, within: { role: 'region', name: 'Links', within: { css: '.invented' } } } }
+    expect(unprovenCssLocatorDefect([step], catalog)).toContain('step 1 addresses')
   })
 
   it('leaves canonical locators and other drivers alone', () => {
