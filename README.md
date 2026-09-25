@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/truecourse-how-it-works.gif" alt="How TrueCourse works" width="800" />
+  <img src="assets/truecourse-how-it-works.gif" alt="How TrueCourse works" width="100%" />
 </p>
 
 TrueCourse reads the documentation a team already writes (PRDs, ADRs, READMEs,
