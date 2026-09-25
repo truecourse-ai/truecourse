@@ -19,6 +19,7 @@ import {
 import { readGuardClaimsCorpus, readGuardFlowsCorpus, scenariosDir } from './store.js'
 import { crossCheckClaimRefs } from './claim-refs.js'
 import { crossCheckCaptureRefs } from './capture-refs.js'
+import { repeatDefects } from './repeat.js'
 
 export interface ScenarioLoadError {
   /** Repo-relative path of the offending file. */
@@ -126,6 +127,12 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
         file: rel,
         message: `step ${badRe.step} ${badRe.where} ${regexLiteral(badRe.pattern, badRe.flags)} is not a valid regular expression: ${badRe.error}`,
       })
+      continue
+    }
+    // A malformed `${repeat:…}` would be sent as written; say so at load instead.
+    const repeatErrors = repeatDefects(parsed.data)
+    if (repeatErrors.length > 0) {
+      for (const message of repeatErrors) errors.push({ file: rel, message })
       continue
     }
     fileOf.set(parsed.data, rel)

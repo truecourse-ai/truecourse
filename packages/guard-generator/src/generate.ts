@@ -116,6 +116,7 @@ import {
   flowPreparationFingerprint,
   seedRosterFingerprint,
   preparationsFingerprint,
+  repeatDefects,
 } from '@truecourse/guard-runner'
 import {
   guardCoverageProgress,
@@ -2834,6 +2835,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (badRe) {
           return `step ${badRe.step} ${badRe.where}: ${regexLiteral(badRe.pattern, badRe.flags)} is not a valid regular expression — ${badRe.error}`
         }
+        const badRepeat = repeatDefects(raw)[0]
+        if (badRepeat) return badRepeat
         return null
       }
 

@@ -110,6 +110,7 @@ import {
 } from './section-index.js'
 import { isInterfaceDrifted } from './interface-drift.js'
 import { readManifest } from './manifest.js'
+import { expandScenarioRepeats } from './repeat.js'
 import { newRunNonce, scenarioUnique } from './unique.js'
 import type { GuardVisualJudge } from './visual-judge.js'
 
@@ -1251,7 +1252,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       return view
     }
 
-    const executeOne = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
+    const executeOne = async ({ scenario: authored, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
+      // Long values written short are spelled out once, before any driver sees them.
+      const scenario = expandScenarioRepeats(authored)
       // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
       // either — a run ending `aborted`/`run-timed-out` discards these results.
       if (cancel.signal.aborted) return null
