@@ -237,6 +237,7 @@ export const LLM_PROVIDER_KINDS = [
   'openai',
   'bedrock',
   'copilot',
+  'google',
 ] as const
 
 export type LlmProviderKind = (typeof LLM_PROVIDER_KINDS)[number]

@@ -13,7 +13,7 @@ export const llmProviderConfig = pgTable('llm_provider_config', {
   provider: text('provider').notNull(),
   model: text('model').notNull(),
   fallbackModel: text('fallback_model'),
-  /** Encrypted secret: API key (anthropic/openai/copilot) or Bedrock secret access key. */
+  /** Encrypted secret: API key (anthropic/openai/copilot/google) or Bedrock secret access key. */
   apiKeyEnc: text('api_key_enc'),
   /** Bedrock access key id — an identifier, not the secret. */
   accessKeyId: text('access_key_id'),

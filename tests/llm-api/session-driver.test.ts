@@ -933,6 +933,15 @@ describe('api session driver provider cache strategy', () => {
     expect(calls[0].providerOptions).toEqual({});
   });
 
+  it('google: nothing on the messages and nothing on the call', async () => {
+    const calls = await callsFor({ provider: 'google', model: 'gemini-2.5-pro', apiKey: 't' });
+
+    // The Gemini API caches a repeated prefix implicitly and has no
+    // parallel-call switch, so there is nothing to tell it.
+    expect(messageOptions(calls[0].prompt).every((o) => o === undefined)).toBe(true);
+    expect(calls[0].providerOptions).toEqual({});
+  });
+
   it('holds the cache key steady across a session and apart between sessions', async () => {
     const twoTurns: StubTurn[] = [
       { content: [text('thinking')] },
