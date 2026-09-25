@@ -144,7 +144,7 @@ function pullRequestConflictRows(pulls: readonly WorkspacePullRequestRow[]): Con
     pr.check.conflictsCreated.map((conflict, i) => ({
       id: `${pullRequestKey(pr)}:${i}`,
       title: conflict.note || `${conflict.docs[0]} and ${conflict.docs[1]}`,
-      area: '',
+      area: conflict.area,
       resolved: false,
       pullRequest: pr,
     })),

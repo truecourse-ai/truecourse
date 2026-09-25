@@ -115,6 +115,8 @@ export const PullRequestCheckReportSchema = z.object({
       docs: z.tuple([z.string(), z.string()]),
       sections: z.tuple([z.array(z.string()), z.array(z.string())]),
       note: z.string(),
+      /** The area the conflict surfaces under; a report stored before it was carried reads as none. */
+      area: z.string().default(''),
       /** The changed document's path in the repository, and its section heading's line at the head. */
       path: z.string().nullable(),
       line: z.number().int().positive().nullable(),

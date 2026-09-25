@@ -560,6 +560,7 @@ describe('the pull request check', () => {
         docs: [`context/${SOURCE}/docs/orgs.md`, `context/${SOURCE}/docs/other.md`],
         sections: [['Orgs'], ['Limits']],
         note: 'one org vs many',
+        area: 'p/c',
         path: 'docs/orgs.md',
         line: 1,
         blocksRepositories: [REPO],

@@ -480,6 +480,7 @@ function reportConflict(
     docs,
     sections: [headings(docs[0]), headings(docs[1])],
     note: conflict.note,
+    area: conflict.area,
     path,
     line,
     blocksRepositories: repos.filter((r) => r.sourceIds.some((id) => sourcesOf.has(id))).map((r) => r.repoFullName),

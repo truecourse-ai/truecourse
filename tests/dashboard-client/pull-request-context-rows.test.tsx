@@ -80,6 +80,7 @@ const PULL: WorkspacePullRequestRow = {
         docs: [REFUNDS_REF, PAYOUTS_REF],
         sections: [['window'], ['timing']],
         note: 'the refund window is two days in one and five in the other',
+        area: 'acme/refunds',
         path: 'docs/refunds.md',
         line: 3,
         blocksRepositories: [REPO.name],
@@ -188,6 +189,8 @@ describe('Context › Conflicts, the pull request rows', () => {
     expect(rows('Conflicts')).toHaveLength(2);
     expect(within(row).getByText('#7')).toBeInTheDocument();
     expect(within(row).getByText('Open')).toBeInTheDocument();
+    // The area the conflict surfaces under, as the workspace's own conflicts show theirs.
+    expect(within(row).getByText('acme/refunds')).toBeInTheDocument();
     expect(row).not.toHaveAttribute('tabindex', '0');
     expect(within(screen.getByText('who owns the refund window').closest('tr')!).queryByText('#7')).toBeNull();
     expect(screen.getByText('who owns the refund window').closest('tr')).toHaveAttribute('tabindex', '0');
