@@ -181,10 +181,19 @@ function countsLine(report: PullRequestCheckReport): string {
       `${c.fixed} fixed`,
     );
   } else {
-    parts.push(`code not run (${report.codeHalf.replace(/-/g, ' ')})`);
+    parts.push(WITHOUT_A_RUN[report.codeHalf]);
   }
   return `**${parts.join(' · ')}**`;
 }
+
+/** What the counts line says in place of the run's counts, by why there are none. */
+const WITHOUT_A_RUN: Record<PullRequestCheckReport['codeHalf'], string> = {
+  // The code half began and produced no run to compare: the head did not build or boot, or a link broke.
+  ran: 'no run to compare',
+  'stopped-by-conflict': 'code not run: an open conflict blocks it',
+  'not-connected': 'code not checked: the repository is not connected in Code',
+  'not-run': 'code not run',
+};
 
 function sections(report: PullRequestCheckReport): string[] {
   const out: string[] = [];

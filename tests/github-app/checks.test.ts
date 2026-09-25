@@ -179,6 +179,6 @@ describe('renderCheckOutput', () => {
 
   it('says the code was not run when there is no run', () => {
     const out = renderCheckOutput('conflict', report({ run: null, codeHalf: 'stopped-by-conflict' }), null);
-    expect(out.summary).toContain('code not run (stopped by conflict)');
+    expect(out.summary).toContain('code not run: an open conflict blocks it');
   });
 });
