@@ -1251,7 +1251,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       return view
     }
 
-    const runOne = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
+    const executeOne = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
       // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
       // either — a run ending `aborted`/`run-timed-out` discards these results.
       if (cancel.signal.aborted) return null
@@ -1385,6 +1385,12 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       opts.onScenarioSettled?.(settled, selected.length, result)
       return result
     }
+    // Once cancelled, the run stops waiting on a scenario. One normally settles
+    // itself on the signal, but one parked on a promise nothing will ever settle
+    // would hold the run past its own deadline; its result is discarded either way,
+    // and the children it spawned die with the same signal.
+    const runOne = (item: (typeof runnable)[number]): Promise<GuardScenarioResult | null> =>
+      untilCancelled(executeOne(item), cancel.signal)
 
     // THREE POOLS, run concurrently — split by what a scenario keeps RESIDENT. An
     // api-server scenario boots a whole target server that lives for the scenario's
@@ -1533,6 +1539,19 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       await runBuild(repoRoot, api.services.down, loaded.recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
     }
   }
+}
+
+/** `work`'s value, or null the moment `signal` aborts, whichever comes first. */
+function untilCancelled<T>(work: Promise<T>, signal: AbortSignal): Promise<T | null> {
+  if (signal.aborted) {
+    void work.catch(() => {})
+    return Promise.resolve(null)
+  }
+  return new Promise<T | null>((resolve, reject) => {
+    const onAbort = (): void => resolve(null)
+    signal.addEventListener('abort', onAbort, { once: true })
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
 }
 
 /**
