@@ -183,6 +183,66 @@ describe('runGuard — runTimeoutMs', () => {
     }
   })
 
+  /** One api scenario whose one request goes to `/todos`, every other fetch real. */
+  function apiRun(park: (init: RequestInit | undefined) => Promise<Response>): {
+    r: string
+    ports: number[]
+    restore: () => void
+  } {
+    const r = repo()
+    writeApiRecipe(r)
+    writeScenario(
+      r,
+      'api/parked.yaml',
+      apiScenario({
+        id: 'parked',
+        binds: specBinds('a/b'),
+        steps: [{ request: { method: 'GET', path: '/todos' }, expect: { status: 200 } }],
+      }),
+    )
+    const realFetch = globalThis.fetch
+    const ports: number[] = []
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(String(input))
+      const port = Number(url.port)
+      if (!ports.includes(port)) ports.push(port)
+      return url.pathname === '/todos' ? park(init) : realFetch(input, init)
+    })
+    return { r, ports, restore: () => fetchSpy.mockRestore() }
+  }
+
+  // The server came up healthy; the request after it never settles. The kill
+  // that cancellation owes the server outlives its readiness.
+  it('kills the server of a scenario parked on a request after the server was ready', async () => {
+    const run = apiRun(() => new Promise<Response>(() => {}))
+    try {
+      const res = await runGuard({ repoRoot: run.r, skipBuild: true, runTimeoutMs: 1_500 })
+      expect(res.status).toBe('run-timed-out')
+      const parkedPort = run.ports.at(-1)!
+      await vi.waitFor(() => expect(isPortHeld(parkedPort)).toBe(false), { timeout: 5_000 })
+    } finally {
+      run.restore()
+    }
+  })
+
+  // A scenario that settles on the signal gets to finish its own cleanup (its
+  // server stopped and gone) before the run tears down and returns.
+  it('lets a cancelled scenario finish its own cleanup before the run returns', async () => {
+    const run = apiRun(
+      (init) =>
+        new Promise<Response>((_, reject) =>
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }),
+        ),
+    )
+    try {
+      const res = await runGuard({ repoRoot: run.r, skipBuild: true, runTimeoutMs: 1_500 })
+      expect(res.status).toBe('run-timed-out')
+      expect(isPortHeld(run.ports.at(-1)!)).toBe(false)
+    } finally {
+      run.restore()
+    }
+  })
+
   it('a run-timer expiry during the build reports run-timed-out with zero settled', async () => {
     const r = repo()
     writeRecipe(r, { build: HANGING_BUILD })
