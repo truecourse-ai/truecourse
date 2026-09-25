@@ -71,6 +71,33 @@ describe('a css locator in a generated scenario', () => {
     expect(unprovenCssLocatorDefect(steps, [])).toContain('step 1 addresses')
   })
 
+  // A css the authoring check could not prove on a live screen was written
+  // from source: no browser vouched for it, so no scenario may copy it.
+  it('is refused when the catalog carries it stamped unproven, as a step or a readable', () => {
+    const unproven: Interface[] = [
+      {
+        ...catalog[0]!,
+        steps: [{ kind: 'activate', target: { css: 'main button.add' }, within: { css: 'main' }, why: 'icon-only add button', proven: false }],
+      },
+    ]
+    const places = [
+      {
+        id: 'links',
+        kind: 'screen' as const,
+        title: 'Links',
+        address: '/links',
+        readables: { elements: [{ element: { css: 'main .cards' }, why: 'the card list has no list role', proven: false as const }] },
+      },
+    ]
+    for (const step of [
+      { driver: 'web', click: { css: 'main button.add', within: { css: 'main' } } },
+      { driver: 'web', navigate: '/links', expect: { visible: { css: 'main .cards' } } },
+      { driver: 'web', navigate: '/links', expect: { text: { contains: 'Links' }, within: { css: 'main .cards' } } },
+    ]) {
+      expect(unprovenCssLocatorDefect([step], unproven, places), JSON.stringify(step)).toContain('step 1 addresses')
+    }
+  })
+
   it('leaves canonical locators and other drivers alone', () => {
     const steps = [
       { driver: 'web', click: { title: 'More', within: { role: 'main', name: 'Links' } } },
