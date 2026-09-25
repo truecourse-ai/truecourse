@@ -10,8 +10,6 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { buildDocSectionIndex } from '@truecourse/guard-runner';
-import { readContextDocByRef } from '@truecourse/core/lib/context-store';
 import {
   CONTEXT_SOURCE_KINDS,
   type ContextDocumentRow,
@@ -27,21 +25,22 @@ import {
   listWorkspaceDocuments,
   pauseSource,
   readSource,
+  readWorkspaceDocument,
   removeSource,
   syncSource,
 } from '../services/context-sources.service.js';
 import {
   excludeDocument,
   includeDocument,
-  resolveConflict,
+  resolveConflictById,
   unexcludeDocument,
   unincludeDocument,
-  unresolveConflict,
+  unresolveConflictById,
   workspaceConflicts,
   workspaceStaleness,
 } from '../services/context-decisions.service.js';
 import { listRepositorySummaries } from '../services/repositories.service.js';
-import { contextCallerOf, run, ToolRefusal, type McpCaller } from './caller.js';
+import { contextCallerOf, run, type McpCaller } from './caller.js';
 
 const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
@@ -106,15 +105,6 @@ function conflictRow(conflict: CorpusConflict<OverlapLike & { review?: unknown }
       : {}),
     ...(conflict.excludedRef ? { excludedRef: conflict.excludedRef } : {}),
   };
-}
-
-/** The conflict an id names, or a refusal pointing at the list. */
-async function requireConflict(org: string, id: string) {
-  const conflict = (await workspaceConflicts(org)).find((c) => c.id === id);
-  if (!conflict) {
-    throw new ToolRefusal(`No conflict "${id}" in this workspace's corpus. list_conflicts names them.`);
-  }
-  return conflict;
 }
 
 const statusWords = ['proved', 'failed', 'blocked', 'not-testable', 'not-run', 'not-linked'] as const;
@@ -191,30 +181,7 @@ export function registerWorkspaceTools(server: McpServer, caller: McpCaller): vo
       annotations: READ,
     },
     (args) =>
-      run('read_document', async () => {
-        const content = await readContextDocByRef(org, args.ref);
-        if (content === null) throw new ToolRefusal(`No document "${args.ref}" in this workspace.`);
-        const index = buildDocSectionIndex(args.ref, content);
-        const outline = index.sections.map((s) => ({
-          anchor: s.anchor,
-          heading: s.headingText,
-          level: s.level,
-          lines: [s.startLine, s.endLine],
-        }));
-        if (args.section === undefined) return { ref: args.ref, sections: outline, content };
-        const section = index.sections.find((s) => s.anchor === args.section);
-        if (!section) {
-          throw new ToolRefusal(
-            `No section "${args.section}" in ${args.ref}. Its sections: ${outline.map((s) => s.anchor).join(', ')}.`,
-          );
-        }
-        const lines = content.split('\n').slice(section.startLine - 1, section.endLine);
-        return {
-          ref: args.ref,
-          section: { anchor: section.anchor, heading: section.headingText, lines: [section.startLine, section.endLine] },
-          content: lines.join('\n'),
-        };
-      }),
+      run('read_document', () => readWorkspaceDocument(org, args.ref, args.section)),
   );
 
   server.registerTool(
@@ -230,9 +197,7 @@ export function registerWorkspaceTools(server: McpServer, caller: McpCaller): vo
     },
     (args) =>
       run('list_conflicts', async () => ({
-        conflicts: (await workspaceConflicts(org))
-          .filter((c) => args.includeResolved === true || !c.resolved)
-          .map(conflictRow),
+        conflicts: (await workspaceConflicts(org, { open: args.includeResolved !== true })).map(conflictRow),
       })),
   );
 
@@ -250,24 +215,11 @@ export function registerWorkspaceTools(server: McpServer, caller: McpCaller): vo
       annotations: WRITE,
     },
     (args) =>
-      run('resolve_conflict', async () => {
-        const conflict = await requireConflict(org, args.conflictId);
-        const section = (doc: string) => (conflict.overlap.sections ?? []).find((s) => s.doc === doc);
-        await resolveConflict(
-          { org, userId: caller.user.id },
-          {
-            docA: conflict.a,
-            anchorA: section(conflict.a)?.heading ?? null,
-            quoteA: section(conflict.a)?.quote,
-            docB: conflict.b,
-            anchorB: section(conflict.b)?.heading ?? null,
-            quoteB: section(conflict.b)?.quote,
-            verdict: args.verdict,
-            ...(args.note ? { note: args.note } : {}),
-          },
-        );
-        return { conflict: conflictRow(await requireConflict(org, args.conflictId)) };
-      }),
+      run('resolve_conflict', async () => ({
+        conflict: conflictRow(
+          await resolveConflictById({ org, userId: caller.user.id }, args.conflictId, args.verdict, args.note),
+        ),
+      })),
   );
 
   server.registerTool(
@@ -280,19 +232,9 @@ export function registerWorkspaceTools(server: McpServer, caller: McpCaller): vo
       annotations: WRITE,
     },
     (args) =>
-      run('undo_conflict_resolution', async () => {
-        const conflict = await requireConflict(org, args.conflictId);
-        if (!conflict.resolution) {
-          throw new ToolRefusal(
-            conflict.excludedRef
-              ? `This conflict is resolved because ${conflict.excludedRef} is excluded, not by a verdict.`
-              : 'This conflict has no verdict to withdraw.',
-          );
-        }
-        const { docA, anchorA, docB, anchorB } = conflict.resolution;
-        await unresolveConflict(org, { docA, anchorA, docB, anchorB });
-        return { conflict: conflictRow(await requireConflict(org, args.conflictId)) };
-      }),
+      run('undo_conflict_resolution', async () => ({
+        conflict: conflictRow(await unresolveConflictById(org, args.conflictId)),
+      })),
   );
 
   server.registerTool(

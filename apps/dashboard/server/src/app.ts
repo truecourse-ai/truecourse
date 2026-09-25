@@ -28,7 +28,7 @@ import type { ServerRouterMount } from './features.js';
 import { setCurrentJobs } from './jobs/current.js';
 import type { AuthVerifier } from '@truecourse/shared';
 import type { McpAuth } from './auth/mcp.js';
-import { createMcpRouter } from './mcp/index.js';
+import { createMcpRouter } from './routes/mcp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

@@ -704,11 +704,10 @@ export function undismissGuardClaim(
 }
 
 /** Dismiss a whole FLOW — the manual dismissal unit (a generated test's id moves
- *  on regenerate, so a test is never one). `title` is display copy carried into the
- *  decisions file. Returns the updated decisions. */
+ *  on regenerate, so a test is never one). Returns the updated decisions. */
 export function dismissGuardFlow(
   repoId: string,
-  flow: { flowId: string; title: string; note?: string },
+  flow: { flowId: string; note?: string },
 ): Promise<GuardDecisions> {
   return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/flows/dismiss`, {
     method: 'POST',

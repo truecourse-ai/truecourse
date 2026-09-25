@@ -13,9 +13,11 @@
 
 import {
   dismissGuardFlow,
+  guardFlowExists,
   undismissGuardClaim,
   undismissGuardFlow,
 } from '@truecourse/core/commands/guard-read';
+import { createAppError } from '@truecourse/core/lib/errors';
 import type { GuardDecisions } from '@truecourse/shared';
 import { captureAction, EVENTS } from '../observability/posthog.js';
 
@@ -31,20 +33,21 @@ export interface GuardDecisionActor {
 export class GuardDecisionError extends Error {}
 
 /**
- * Dismiss a whole FLOW. `title` is the flow's display copy, kept so the
- * decisions ledger reads without loading the flow corpus. Idempotent on
- * `flowId`; answers the updated ledger.
+ * Dismiss a whole FLOW, one the repository has. Idempotent on `flowId`;
+ * answers the updated ledger.
  */
 export async function dismissFlow(
   actor: GuardDecisionActor,
   repoPath: string,
-  request: { flowId?: string; title?: string; note?: string },
+  request: { flowId?: string; note?: string },
 ): Promise<GuardDecisions> {
-  const { flowId, title, note } = request;
-  if (!flowId || !title) throw new GuardDecisionError('flow dismiss requires { flowId, title }.');
+  const { flowId, note } = request;
+  if (!flowId) throw new GuardDecisionError('flow dismiss requires { flowId }.');
+  if (!(await guardFlowExists(repoPath, flowId))) {
+    throw createAppError(`Flow not found: ${flowId}`, 404);
+  }
   const written = await dismissGuardFlow(repoPath, {
     flowId,
-    title,
     dismissedAt: new Date().toISOString(),
     ...(note ? { note } : {}),
   });

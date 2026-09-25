@@ -28,7 +28,13 @@ import {
   removeWorkspaceManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
 import type { ConflictResolution, CuratedCorpus, DecisionsFile } from '@truecourse/spec-consolidator';
-import { buildCorpusConflicts, type CorpusConflict } from '@truecourse/shared';
+import { createAppError } from '@truecourse/core/lib/errors';
+import {
+  buildCorpusConflicts,
+  conflictVerdictFor,
+  resolveConflictId,
+  type CorpusConflict,
+} from '@truecourse/shared';
 import { captureAction, EVENTS } from '../observability/posthog.js';
 import { contextIsStale } from './context-scan.service.js';
 import { emitContextChanged } from './context.service.js';
@@ -200,16 +206,68 @@ export async function readWorkspaceCorpus(org: string): Promise<{
   };
 }
 
+/** One conflict of the workspace corpus, as the shared derivation classifies it. */
+export type WorkspaceConflict = CorpusConflict<CuratedCorpus['areas'][number]['overlaps'][number]>;
+
 /**
  * The workspace corpus's conflicts, each classified open or resolved by the
- * one shared derivation every surface reads. Empty before the first scan.
+ * one shared derivation every surface reads; with `open`, only the ones still
+ * open, which are the ones that stop a Flow generation. Empty before the first
+ * scan.
  */
 export async function workspaceConflicts(
   org: string,
-): Promise<CorpusConflict<CuratedCorpus['areas'][number]['overlaps'][number]>[]> {
+  filter: { open?: boolean } = {},
+): Promise<WorkspaceConflict[]> {
   const read = await readWorkspaceCorpus(org);
   if (!read) return [];
-  return buildCorpusConflicts(read.corpus, read);
+  const conflicts = buildCorpusConflicts(read.corpus, read);
+  return filter.open ? conflicts.filter((c) => !c.resolved) : conflicts;
+}
+
+/** The conflict an id names in the workspace corpus, or a 404. */
+export async function findWorkspaceConflict(org: string, id: string): Promise<WorkspaceConflict> {
+  const conflict = resolveConflictId(await workspaceConflicts(org), id);
+  if (!conflict) throw createAppError(`No conflict "${id}" in this workspace's corpus.`, 404);
+  return conflict;
+}
+
+/**
+ * Record a verdict on the conflict an id names: the same record the
+ * dashboard's verdict buttons write, keyed on each side's flagged section.
+ * Answers the conflict as it now stands.
+ */
+export async function resolveConflictById(
+  actor: DecisionActor,
+  id: string,
+  verdict: ConflictResolution['verdict'],
+  note?: string,
+): Promise<WorkspaceConflict> {
+  const conflict = await findWorkspaceConflict(actor.org, id);
+  await resolveConflict(actor, {
+    ...conflictVerdictFor(conflict.overlap, conflict.a, conflict.b, verdict),
+    ...(note ? { note } : {}),
+  });
+  return findWorkspaceConflict(actor.org, id);
+}
+
+/**
+ * Withdraw the verdict on the conflict an id names. Only a verdict can be
+ * withdrawn: a conflict resolved because one side is force-excluded opens again
+ * by undoing that exclusion. Answers the conflict as it now stands.
+ */
+export async function unresolveConflictById(org: string, id: string): Promise<WorkspaceConflict> {
+  const conflict = await findWorkspaceConflict(org, id);
+  if (!conflict.resolution) {
+    throw new ConflictVerdictError(
+      conflict.excludedRef
+        ? `This conflict is resolved because ${conflict.excludedRef} is excluded, not by a verdict.`
+        : 'This conflict has no verdict to withdraw.',
+    );
+  }
+  const { docA, anchorA, docB, anchorB } = conflict.resolution;
+  await unresolveConflict(org, { docA, anchorA, docB, anchorB });
+  return findWorkspaceConflict(org, id);
 }
 
 /**

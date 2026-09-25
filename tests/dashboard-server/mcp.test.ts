@@ -603,15 +603,19 @@ describe('write tools', () => {
       note: 'not a user path',
     });
     expect((await decisions()).body.dismissedFlows).toEqual([
-      expect.objectContaining({
-        flowId: 'task-lifecycle',
-        title: 'A user creates a task and completes it',
-        note: 'not a user path',
-      }),
+      { flowId: 'task-lifecycle', dismissedAt: expect.any(String), note: 'not a user path' },
     ]);
 
     await ok(client, 'set_flow_dismissed', { repo: fixture.project.slug, flowId: 'task-lifecycle', dismissed: false });
     expect((await decisions()).body.dismissedFlows).toEqual([]);
+
+    // A flow the repository lacks is refused by the service, as the route refuses it.
+    const missing = await call(client, 'set_flow_dismissed', {
+      repo: fixture.project.slug,
+      flowId: 'no-such-flow',
+      dismissed: true,
+    });
+    expect(missing).toMatchObject({ isError: true, text: 'Flow not found: no-such-flow' });
   });
 
   it('undoes a claim dismissal', async () => {

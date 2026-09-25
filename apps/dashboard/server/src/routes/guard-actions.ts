@@ -51,22 +51,11 @@ import {
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import { GuardExternalsWriteError } from '@truecourse/core/commands/guard-externals';
-import {
-  GuardDependencyWriteError,
-  type GuardDependencyPatch,
-} from '@truecourse/core/commands/guard-dependencies';
+import type { GuardDependencyPatch } from '@truecourse/core/commands/guard-dependencies';
 import { GUARD_SETUP_ONLY_STEPS } from '@truecourse/core/commands/guard-setup';
-import {
-  dismissFlow,
-  GuardDecisionError,
-  undismissClaim,
-  undismissFlow,
-} from '../services/guard-decisions.service.js';
-import {
-  DependencyNameRequiredError,
-  registerRepoDependency,
-} from '../services/guard-dependencies.service.js';
+import { dismissFlow, undismissClaim, undismissFlow } from '../services/guard-decisions.service.js';
+import { registerRepoDependency } from '../services/guard-dependencies.service.js';
+import { refusalStatus } from '../services/refusals.service.js';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, openConflicts, type GuardDecisions } from '@truecourse/shared';
@@ -99,13 +88,14 @@ function reportDismissal(req: Request, kind: 'claim' | 'flow'): void {
   }
 }
 
-/** A malformed decision request is a 400 with its own words; anything else is the error handler's. */
-function decisionRefusal(res: Response, next: NextFunction, err: unknown): void {
-  if (err instanceof GuardDecisionError) {
-    res.status(400).json({ error: err.message });
+/** A refusal answers its own status and words; anything else is the error handler's. */
+function refused(res: Response, next: NextFunction, err: unknown): void {
+  const status = refusalStatus(err);
+  if (status === null) {
+    next(err);
     return;
   }
-  next(err);
+  res.status(status).json({ error: (err as Error).message });
 }
 
 // Shared write tail for the decisions mutations: run the write, the optional
@@ -359,7 +349,7 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     res.json(await undismissClaim(repo.path, req.body ?? {}));
   } catch (e) {
-    decisionRefusal(res, next, e);
+    refused(res, next, e);
   }
 });
 
@@ -385,7 +375,7 @@ router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next
       ),
     );
   } catch (e) {
-    decisionRefusal(res, next, e);
+    refused(res, next, e);
   }
 });
 
@@ -396,7 +386,7 @@ router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, ne
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     res.json(await undismissFlow(repo.path, req.body ?? {}));
   } catch (e) {
-    decisionRefusal(res, next, e);
+    refused(res, next, e);
   }
 });
 
@@ -426,18 +416,10 @@ router.put('/:id/guard/dependencies', async (req: Request, res: Response, next: 
     const { name, ...patch } = (req.body ?? {}) as { name?: unknown } & GuardDependencyPatch;
     res.json(await registerRepoDependency(org, repoId, repo.path, name, patch));
   } catch (e) {
-    if (e instanceof DependencyNameRequiredError) {
-      res.status(400).json({ error: e.message });
-      return;
-    }
-    // A refused registration is the user's problem to fix (an undeclared variable,
-    // a class with nothing to register, a broken overlay) — a plain 422 with the
+    // A refused registration (no name, an undeclared variable, a class with
+    // nothing to register, a broken overlay) answers its status and the
     // engine's wording, never a 500.
-    if (e instanceof GuardDependencyWriteError || e instanceof GuardExternalsWriteError) {
-      res.status(422).json({ error: e.message });
-      return;
-    }
-    next(e);
+    refused(res, next, e);
   }
 });
 

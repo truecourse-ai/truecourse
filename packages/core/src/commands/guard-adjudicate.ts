@@ -27,6 +27,7 @@ import {
   GuardAdjudicationSchema,
   GuardScenarioSchema,
   guardResultRunId,
+  isGuardFailure,
   type GuardAdjudication,
   type GuardAdjudicationClass,
   type GuardFlow,
@@ -130,7 +131,7 @@ export async function readGuardAdjudicationView(repoRoot: string): Promise<Guard
 }
 
 function failingRows(latest: GuardLatest | null) {
-  return (latest?.scenarios ?? []).filter((row) => row.outcome === 'fail' || row.outcome === 'error');
+  return (latest?.scenarios ?? []).filter((row) => isGuardFailure(row.outcome));
 }
 
 /** The convergence rule — see {@link GuardAdjudicationView.converged}. */

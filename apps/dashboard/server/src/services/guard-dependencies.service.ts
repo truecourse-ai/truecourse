@@ -30,6 +30,47 @@ export function readRepoDependencies(repoPath: string, ref?: string): Promise<Gu
   );
 }
 
+/**
+ * The dependencies view with EVERY value withheld — not only the secrets the
+ * engine masks, but the readable ones too (a base URL, a host path): which
+ * fields are filled in, never what with. What a surface outside the dashboard
+ * is given, so a stored value cannot leave through it.
+ */
+export function dependencyFillState(view: GuardDependenciesView) {
+  return {
+    ...(view.invalidReason ? { invalidReason: view.invalidReason } : {}),
+    dependencies: view.dependencies.map((d) => ({
+      name: d.name,
+      class: d.class,
+      summary: d.summary,
+      requirement: d.requirement,
+      ...(d.when ? { when: d.when } : {}),
+      state: d.state,
+      fields: d.fields.map((f) => ({
+        field: f.field,
+        filled: f.resolved,
+        secret: f.secret,
+        ...(f.description ? { description: f.description } : {}),
+        ...(f.reason ? { reason: f.reason } : {}),
+      })),
+      ...(d.service
+        ? {
+            service: {
+              services: d.service.services,
+              baseUrlEnv: d.service.baseUrlEnv,
+              baseUrlSet: d.service.baseUrl !== null,
+              ...(d.service.mode ? { mode: d.service.mode } : {}),
+              tokenSet: d.service.tokenSet,
+              headers: d.service.headers.map((h) => h.name),
+            },
+          }
+        : {}),
+      usedBy: d.usedBy,
+      blocks: d.blocks.map((b) => ({ ...(b.flowId ? { flowId: b.flowId } : {}), title: b.title, kind: b.kind })),
+    })),
+  };
+}
+
 /** A refused registration: no name was given. */
 export class DependencyNameRequiredError extends Error {}
 

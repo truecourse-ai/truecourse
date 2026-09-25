@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Copy, Loader2 } from 'lucide-react';
-import type { ConflictResolutionLike, CorpusConflict } from '@truecourse/shared';
+import { conflictVerdictFor, type ConflictResolutionLike, type CorpusConflict } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlap, SpecOverlapReview } from '@/lib/api';
@@ -142,18 +142,8 @@ export function SpecOverlapDetail({
 
   // Build the persisted verdict from the flagged sections (heading + verbatim quote
   // per doc), the same identity a stored verdict is keyed on.
-  const buildResolution = (verdict: 'a' | 'b' | 'dismissed'): SpecConflictResolution => {
-    const secOf = (d: string) => (overlap?.sections ?? []).find((s) => s.doc === d);
-    return {
-      docA,
-      anchorA: secOf(docA)?.heading ?? null,
-      quoteA: secOf(docA)?.quote,
-      docB,
-      anchorB: secOf(docB)?.heading ?? null,
-      quoteB: secOf(docB)?.quote,
-      verdict,
-    };
-  };
+  const buildResolution = (verdict: 'a' | 'b' | 'dismissed'): SpecConflictResolution =>
+    conflictVerdictFor(overlap, docA, docB, verdict);
 
   const recordVerdict = async (verdict: 'a' | 'b' | 'dismissed'): Promise<void> => {
     setBusy(verdict);

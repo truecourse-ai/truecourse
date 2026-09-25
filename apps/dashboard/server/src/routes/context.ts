@@ -12,7 +12,8 @@
  *   POST   /api/context/sources/:id/pause     { paused: boolean }
  *   DELETE /api/context/sources/:id           drop the source, its documents and every link
  *   GET    /api/context/sources/:id/documents its ledger
- *   GET    /api/context/doc?ref=              one document's body, by its corpus ref
+ *   GET    /api/context/doc?ref=[&section=]  one document by its corpus ref, with its section
+ *                                             outline; with section, that section alone
  *   GET    /api/context/documents             the rows of the Documents view, status folded
  *                                             and inclusion said, corpus or not
  *   POST   /api/context/scan                  the workspace Document scan; 202 { jobId }
@@ -39,14 +40,9 @@ import { getProjectBySlug } from '@truecourse/core/config/registry';
 import {
   contextBindings,
   listContextSources,
-  readContextDocByRef,
   setContextBindings,
 } from '@truecourse/core/lib/context-store';
-import {
-  ContextConfigError,
-  ContextKindUnsupportedError,
-} from '@truecourse/core/services/context';
-import { InvalidSourceUrlError, LlmsTxtFetchError, diffCorpora, type CuratedCorpus } from '@truecourse/spec-consolidator';
+import { diffCorpora, type CuratedCorpus } from '@truecourse/spec-consolidator';
 import {
   listWorkspaceSpecVersions,
   loadWorkspaceSpec,
@@ -77,13 +73,14 @@ import {
   previewSource,
   readSource,
   readSourceDocuments,
+  readWorkspaceDocument,
   removeSource,
   syncSource,
   type ContextCaller,
   type ContextGithubAccess,
 } from '../services/context-sources.service.js';
+import { refusalStatus } from '../services/refusals.service.js';
 import {
-  ConflictVerdictError,
   excludeDocument,
   includeDocument,
   readWorkspaceCorpus,
@@ -108,15 +105,6 @@ function orgOf(req: Request): string {
   return org;
 }
 
-/** The engine's own refusals are already user-facing; everything else is a bug. */
-function statusOf(err: unknown): number | null {
-  if (err instanceof ContextConfigError) return 400;
-  if (err instanceof InvalidSourceUrlError || err instanceof LlmsTxtFetchError) return 400;
-  if (err instanceof ContextKindUnsupportedError) return 400;
-  if (err instanceof ConflictVerdictError) return 400;
-  return null;
-}
-
 function respond(res: Response, next: NextFunction, err: unknown): void {
   // A workspace that has not said what its product is refuses with a CODE, not
   // a sentence: the client reads it and offers the page where it is set.
@@ -124,12 +112,12 @@ function respond(res: Response, next: NextFunction, err: unknown): void {
     res.status(err.statusCode).json({ error: err.code, message: err.message });
     return;
   }
-  const status = statusOf(err);
+  const status = refusalStatus(err);
   if (status === null) {
     next(err);
     return;
   }
-  res.status(status).json({ error: err instanceof Error ? err.message : String(err) });
+  res.status(status).json({ error: (err as Error).message });
 }
 
 /** One query parameter's values — `?repo=a&repo=b` and `?repo=a` read alike. */
@@ -178,7 +166,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   });
 
   // One document's body by its corpus ref — the address the Documents view,
-  // the claims and the scenarios all use.
+  // the claims and the scenarios all use — with its section outline, or with
+  // `?section=<anchor>` that section alone.
   router.get('/doc', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
@@ -187,12 +176,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         res.status(400).json({ error: 'Missing ?ref=context/<source>/<document>.' });
         return;
       }
-      const content = await readContextDocByRef(org, ref);
-      if (content === null) {
-        res.status(404).json({ error: `Doc not found: ${ref}` });
-        return;
-      }
-      res.json({ ref, content });
+      const section = typeof req.query.section === 'string' ? req.query.section : undefined;
+      res.json(await readWorkspaceDocument(org, ref, section));
     } catch (e) {
       respond(res, next, e);
     }

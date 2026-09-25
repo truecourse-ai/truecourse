@@ -59,6 +59,7 @@ import {
   GuardFlowsFileSchema,
   GuardOutcomeSchema,
   GuardCoverageGapKindSchema,
+  isGuardFailure,
   awaitingDriverIds,
   claimIdentityKey,
   guardClaimKey,
@@ -1365,6 +1366,12 @@ async function loadFlowView(
    * commit, and the run stored there is not the run being recorded.
    */
   runOverride?: GuardLatest,
+  /**
+   * Read the externals index too. It is the one input that materializes a
+   * scratch tree, and it only moves a flow between `blocked-on` and
+   * `needs-setup`; a caller asking only WHICH flows exist passes false.
+   */
+  opts: { externals?: boolean } = {},
 ): Promise<FlowViewSources | null> {
   const corpus = await loadGuardCorpusForView(repoKey, ref)
   if (!corpus) return null
@@ -1382,7 +1389,7 @@ async function loadFlowView(
       result,
       flows: flowsFile,
       scenarios: corpus.scenarios,
-      externals: await guardExternalSetupIndexForView(repoKey, ref),
+      externals: opts.externals === false ? null : await guardExternalSetupIndexForView(repoKey, ref),
     }),
     flowsFile,
     latest,
@@ -1731,6 +1738,20 @@ function emptyFlowsView(): GuardFlowsView {
   }
 }
 
+/** Does the join carry this flow — synthesized, generated, or a Manual pseudo-flow? */
+function flowKnown(join: FlowViewSources['join'], flowId: string): boolean {
+  return join.corpus.has(flowId) || join.manifestFlows.has(flowId) || join.scenarioIdsByFlow.has(flowId)
+}
+
+/**
+ * Is there a flow with this id — any flow the Flows list shows, real or
+ * Manual? What a decision about a flow is checked against before it is written.
+ */
+export async function guardFlowExists(repoKey: string, flowId: string, ref?: string): Promise<boolean> {
+  const view = await loadFlowView(repoKey, ref, undefined, { externals: false })
+  return view !== null && flowKnown(view.join, flowId)
+}
+
 /**
  * One flow's detail: the milestone chain joined to the LIVE spec sections (heading
  * text, live/gone, and whether the bound section drifted), the per-surface
@@ -1744,11 +1765,8 @@ export async function readGuardFlowDetail(
   ref?: string,
 ): Promise<GuardFlowDetail | null> {
   const view = await loadFlowView(repoKey, ref)
-  if (!view) return null
+  if (!view || !flowKnown(view.join, flowId)) return null
   const { join } = view
-  const known =
-    join.corpus.has(flowId) || join.manifestFlows.has(flowId) || join.scenarioIdsByFlow.has(flowId)
-  if (!known) return null
 
   const flow = join.corpus.get(flowId)
   const surfaces = flowSurfaces(flowId, join)
@@ -2154,7 +2172,7 @@ export async function readGuardClaims(repoKey: string, ref?: string): Promise<Gu
     })
     const gapReason = gapByIdentity.get(identity)
     const anyPass = proofs.some((p) => p.outcome === 'pass')
-    const anyFail = proofs.some((p) => p.outcome === 'fail' || p.outcome === 'error')
+    const anyFail = proofs.some((p) => p.outcome !== undefined && isGuardFailure(p.outcome))
     const coverage: GuardClaimCoverage = anyPass
       ? 'proven'
       : anyFail

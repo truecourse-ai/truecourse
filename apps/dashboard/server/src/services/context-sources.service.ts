@@ -50,6 +50,7 @@ import {
   type ContextSourceScope,
 } from '@truecourse/core/services/context';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
+import { buildDocSectionIndex } from '@truecourse/guard-runner';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
 import {
@@ -466,6 +467,62 @@ export async function readSourceDocuments(
     ]),
   );
   return { source: view, documents };
+}
+
+/** One section of a document, as its outline lists it. */
+export interface DocumentSectionOutline {
+  /** The section's address: what a flow milestone, a claim and a coverage row bind. */
+  anchor: string;
+  heading: string;
+  level: number;
+  /** First and last line, 1-based and inclusive. */
+  lines: [number, number];
+}
+
+/** One document by its corpus ref: its text and its section outline. */
+export interface WorkspaceDocument {
+  ref: string;
+  /** The whole document, or the named section's text when one was asked for. */
+  content: string;
+  sections: DocumentSectionOutline[];
+  /** The section `content` is, when one was asked for. */
+  section?: DocumentSectionOutline;
+}
+
+/**
+ * One document's body by its corpus ref, with its section outline — the same
+ * sections a flow milestone and a coverage row bind, derived by the runner's
+ * section index. With `section` (an anchor), `content` is that section alone:
+ * its heading to the next heading of the same or higher level.
+ */
+export async function readWorkspaceDocument(
+  org: string,
+  ref: string,
+  section?: string,
+): Promise<WorkspaceDocument> {
+  const body = await readContextDocByRef(org, ref);
+  if (body === null) throw createAppError(`Doc not found: ${ref}`, 404);
+  const sections: DocumentSectionOutline[] = buildDocSectionIndex(ref, body).sections.map((s) => ({
+    anchor: s.anchor,
+    heading: s.headingText,
+    level: s.level,
+    lines: [s.startLine, s.endLine],
+  }));
+  if (section === undefined) return { ref, content: body, sections };
+  const found = sections.find((s) => s.anchor === section);
+  if (!found) {
+    throw createAppError(
+      `No section "${section}" in ${ref}. Its sections: ${sections.map((s) => s.anchor).join(', ')}.`,
+      404,
+    );
+  }
+  const [first, last] = found.lines;
+  return {
+    ref,
+    content: body.split('\n').slice(first - 1, last).join('\n'),
+    sections,
+    section: found,
+  };
 }
 
 /**

@@ -4,19 +4,11 @@ import { getGit } from '@truecourse/core/lib/git';
 import type { RegistryEntry } from '@truecourse/core/config/registry';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
 import { removeRepositoryContext } from '../services/context-lifecycle.service.js';
-import { listRepositorySummaries } from '../services/repositories.service.js';
+import { listRepositorySummaries, type RepoLinkStore } from '../services/repositories.service.js';
 import { orgOf } from '../services/workspace-llm.service.js';
-import { resolveVisibleProject, type RepoOwnershipLookup } from '../middleware/project.js';
+import { resolveVisibleProject } from '../middleware/project.js';
 
-/**
- * The connected repositories, as this router uses them: which ones a workspace
- * connected, who owns one, and the ability to disconnect one. Structural, so
- * the real store satisfies it without this module depending on where it lives.
- */
-export interface RepoLinkStore extends RepoOwnershipLookup {
-  listReposForWorkspace(workspaceOrgId: string): Promise<{ repoFullName: string }[]>;
-  unlinkRepo(repoFullName: string): Promise<void>;
-}
+export type { RepoLinkStore } from '../services/repositories.service.js';
 
 export interface ReposRouterDeps {
   /** The connected repositories of every provider; null in a test app with none. */

@@ -4,40 +4,36 @@
  * plus the decisions the dashboard offers on them.
  *
  * Every tool names its repository, resolved through the dashboard's own
- * workspace scoping (`resolveRepo`), and reads through the same core drivers
- * the guard routes read through. The writes call the services the guard action
- * routes call.
+ * workspace scoping (`resolveRepo`), and calls the service or core read the
+ * matching guard route calls.
  */
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import {
-  listGuardFlows,
-  readGuardClaims,
-  readGuardDecisions,
-  readGuardEvidence,
-  readGuardFlowDetail,
-  readGuardHistory,
-  readGuardRun,
-  readGuardRunForView,
-} from '@truecourse/core/commands/guard-read';
-import type { GuardDependenciesView } from '@truecourse/core/commands/guard-dependencies';
+import { readGuardDecisions, readGuardHistory } from '@truecourse/core/commands/guard-read';
 import {
   GUARD_COVERAGE_PLAIN_ORDER,
   guardCoveragePlainStatus,
   guardFlowPlainStatus,
   guardResultRunId,
-  type GuardClaimCoverage,
   type GuardFlowDetail,
   type GuardLatest,
   type GuardScenarioResult,
 } from '@truecourse/shared';
 import { dismissFlow, undismissClaim, undismissFlow } from '../services/guard-decisions.service.js';
 import {
+  dependencyFillState,
   readRepoDependencies,
   registerRepoDependency,
 } from '../services/guard-dependencies.service.js';
-import { resolveRepo, run, ToolRefusal, type McpCaller } from './caller.js';
+import {
+  listRepoFlows,
+  readRepoClaims,
+  readRepoFlow,
+  readRepoRun,
+  readRepoRunFailures,
+} from '../services/guard-reads.service.js';
+import { resolveRepo, run, type McpCaller } from './caller.js';
 
 const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
@@ -82,17 +78,6 @@ function runView(latest: GuardLatest) {
   };
 }
 
-/** The run a tool names, or the latest; a refusal when there is none. */
-async function runOf(repoPath: string, runId: string | undefined): Promise<GuardLatest> {
-  const found = runId ? await readGuardRun(repoPath, runId) : await readGuardRunForView(repoPath);
-  if (!found) {
-    throw new ToolRefusal(
-      runId ? `No run "${runId}" in this repository. list_runs names them.` : 'This repository has not run its tests yet.',
-    );
-  }
-  return found;
-}
-
 /** One flow's detail, as a model reads it: the chain of claims and the tests behind it. */
 function flowView(detail: GuardFlowDetail, dismissed: boolean) {
   return {
@@ -132,42 +117,6 @@ function flowView(detail: GuardFlowDetail, dismissed: boolean) {
   };
 }
 
-/** The dependencies view with every value withheld: which are filled in, never what with. */
-function dependenciesView(view: GuardDependenciesView) {
-  return {
-    ...(view.invalidReason ? { invalidReason: view.invalidReason } : {}),
-    dependencies: view.dependencies.map((d) => ({
-      name: d.name,
-      class: d.class,
-      summary: d.summary,
-      requirement: d.requirement,
-      ...(d.when ? { when: d.when } : {}),
-      state: d.state,
-      fields: d.fields.map((f) => ({
-        field: f.field,
-        filled: f.resolved,
-        secret: f.secret,
-        ...(f.description ? { description: f.description } : {}),
-        ...(f.reason ? { reason: f.reason } : {}),
-      })),
-      ...(d.service
-        ? {
-            service: {
-              services: d.service.services,
-              baseUrlEnv: d.service.baseUrlEnv,
-              baseUrlSet: d.service.baseUrl !== null,
-              ...(d.service.mode ? { mode: d.service.mode } : {}),
-              tokenSet: d.service.tokenSet,
-              headers: d.service.headers.map((h) => h.name),
-            },
-          }
-        : {}),
-      usedBy: d.usedBy,
-      blocks: d.blocks.map((b) => ({ ...(b.flowId ? { flowId: b.flowId } : {}), title: b.title, kind: b.kind })),
-    })),
-  };
-}
-
 export function registerRepositoryTools(server: McpServer, caller: McpCaller): void {
   const org = caller.org;
 
@@ -186,10 +135,13 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     (args) =>
       run('list_flows', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        const [view, decisions] = await Promise.all([listGuardFlows(repo.path), readGuardDecisions(repo.path)]);
+        const [view, decisions] = await Promise.all([
+          listRepoFlows(repo.path, args.status ? { status: args.status } : {}),
+          readGuardDecisions(repo.path),
+        ]);
         const dismissed = new Set(decisions.dismissedFlows.map((d) => d.flowId));
-        const flows = view.flows
-          .map((f) => ({
+        return {
+          flows: view.flows.map((f) => ({
             flowId: f.flowId,
             title: f.title,
             goal: f.goal,
@@ -201,11 +153,8 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
             ...(f.manual ? { manual: true } : {}),
             ...(f.epic ? { composedOf: f.composedOf } : {}),
             ...(dismissed.has(f.flowId) ? { dismissed: true } : {}),
-          }))
-          .filter((f) => !args.status || args.status.includes(f.status));
-        return {
-          flows,
-          dismissed: decisions.dismissedFlows.map((d) => ({ flowId: d.flowId, title: d.title, ...(d.note ? { note: d.note } : {}) })),
+          })),
+          dismissed: decisions.dismissedFlows.map((d) => ({ flowId: d.flowId, ...(d.note ? { note: d.note } : {}) })),
           generatedAt: view.generatedAt,
           ranAt: view.ranAt,
         };
@@ -225,10 +174,9 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
       run('get_flow', async () => {
         const repo = await resolveRepo(caller, args.repo);
         const [detail, decisions] = await Promise.all([
-          readGuardFlowDetail(repo.path, args.flowId),
+          readRepoFlow(repo.path, args.flowId),
           readGuardDecisions(repo.path),
         ]);
-        if (!detail) throw new ToolRefusal(`No flow "${args.flowId}" in ${repo.name}. list_flows names them.`);
         return flowView(detail, decisions.dismissedFlows.some((d) => d.flowId === args.flowId));
       }),
   );
@@ -250,17 +198,12 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     (args) =>
       run('set_flow_dismissed', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        if (!args.dismissed) {
-          const decisions = await undismissFlow(repo.path, { flowId: args.flowId });
-          return { dismissedFlows: decisions.dismissedFlows };
-        }
-        const detail = await readGuardFlowDetail(repo.path, args.flowId);
-        if (!detail) throw new ToolRefusal(`No flow "${args.flowId}" in ${repo.name}. list_flows names them.`);
-        const decisions = await dismissFlow(
-          { org, userId: caller.user.id, repoId: repo.slug },
-          repo.path,
-          { flowId: args.flowId, title: detail.title || args.flowId, ...(args.note ? { note: args.note } : {}) },
-        );
+        const decisions = args.dismissed
+          ? await dismissFlow({ org, userId: caller.user.id, repoId: repo.slug }, repo.path, {
+              flowId: args.flowId,
+              ...(args.note ? { note: args.note } : {}),
+            })
+          : await undismissFlow(repo.path, { flowId: args.flowId });
         return { dismissedFlows: decisions.dismissedFlows };
       }),
   );
@@ -292,7 +235,7 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     (args) =>
       run('get_run', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        return runView(await runOf(repo.path, args.runId));
+        return runView(await readRepoRun(repo.path, args.runId));
       }),
   );
 
@@ -301,7 +244,7 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     {
       title: 'Get failures with evidence',
       description:
-        "Every test that failed, errored or was blocked in a run (the latest without `runId`), each with its full failure detail, the adjudication when one was made, and the evidence transcript of what the test did. `testId` narrows to one test.",
+        "Every test that failed or errored in a run (the latest without `runId`), each with its full failure detail, the adjudication when one was made, and the evidence transcript of what the test did. `testId` narrows to one test. A blocked test never ran; get_run shows what it was blocked on.",
       inputSchema: {
         repo: repoArg,
         runId: z.string().optional(),
@@ -312,26 +255,21 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     (args) =>
       run('get_failures', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        const latest = await runOf(repo.path, args.runId);
-        const failed = latest.scenarios.filter(
-          (s) =>
-            (s.outcome === 'fail' || s.outcome === 'error' || s.outcome === 'blocked') &&
-            (!args.testId || s.id === args.testId),
-        );
-        const failures = await Promise.all(
-          failed.map(async (s) => {
-            const runId = guardResultRunId(s, latest.run);
-            const transcript = s.evidencePath ? await readGuardEvidence(repo.path, runId, s.id) : null;
-            return {
-              ...resultRow(s, latest),
-              ...(s.failure ? { failure: s.failure } : {}),
-              ...(s.adjudication ? { adjudication: s.adjudication } : {}),
-              ...(s.blockedPrecondition ? { blockedPrecondition: true } : {}),
-              evidence: transcript,
-            };
-          }),
-        );
-        return { runId: latest.run.runId, ranAt: latest.run.ranAt, failures };
+        const { run: latest, failures } = await readRepoRunFailures(repo.path, {
+          ...(args.runId ? { runId: args.runId } : {}),
+          ...(args.testId ? { testId: args.testId } : {}),
+        });
+        return {
+          runId: latest.run.runId,
+          ranAt: latest.run.ranAt,
+          failures: failures.map(({ result, evidence }) => ({
+            ...resultRow(result, latest),
+            ...(result.failure ? { failure: result.failure } : {}),
+            ...(result.adjudication ? { adjudication: result.adjudication } : {}),
+            ...(result.blockedPrecondition ? { blockedPrecondition: true } : {}),
+            evidence,
+          })),
+        };
       }),
   );
 
@@ -351,25 +289,24 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     (args) =>
       run('get_coverage', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        const view = await readGuardClaims(repo.path);
-        const wanted = new Set<GuardClaimCoverage>(args.coverage ?? []);
+        const view = await readRepoClaims(repo.path, {
+          ...(args.withFlow === undefined ? {} : { withFlow: args.withFlow }),
+          ...(args.coverage ? { coverage: args.coverage } : {}),
+        });
         return {
           extracted: view.extracted,
           totals: view.totals,
-          claims: view.claims
-            .filter((c) => args.withFlow === undefined || c.flows.length > 0 === args.withFlow)
-            .filter((c) => wanted.size === 0 || wanted.has(c.coverage))
-            .map((c) => ({
-              id: c.id,
-              claim: c.claim,
-              title: c.title,
-              doc: c.doc,
-              section: c.anchor,
-              coverage: c.coverage,
-              ...(c.gapReason ? { gapReason: c.gapReason } : {}),
-              ...(c.dismissed ? { dismissed: true } : {}),
-              flows: c.flows.map((f) => f.flowId),
-            })),
+          claims: view.claims.map((c) => ({
+            id: c.id,
+            claim: c.claim,
+            title: c.title,
+            doc: c.doc,
+            section: c.anchor,
+            coverage: c.coverage,
+            ...(c.gapReason ? { gapReason: c.gapReason } : {}),
+            ...(c.dismissed ? { dismissed: true } : {}),
+            flows: c.flows.map((f) => f.flowId),
+          })),
         };
       }),
   );
@@ -407,7 +344,7 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     (args) =>
       run('list_dependencies', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        return dependenciesView(await readRepoDependencies(repo.path));
+        return dependencyFillState(await readRepoDependencies(repo.path));
       }),
   );
 
@@ -432,7 +369,7 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
       run('set_dependency_values', async () => {
         const repo = await resolveRepo(caller, args.repo);
         const { repo: _repo, name, ...patch } = args;
-        return dependenciesView(await registerRepoDependency(org, repo.slug, repo.path, name, patch));
+        return dependencyFillState(await registerRepoDependency(org, repo.slug, repo.path, name, patch));
       }),
   );
 }
