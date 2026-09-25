@@ -103,6 +103,7 @@ import {
   interfacesFingerprint,
   legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  engineSeedRedraftDue,
   recordedSchemaFiles,
   legacySeedStepFingerprint,
   authFingerprint,
@@ -202,6 +203,7 @@ import {
   readMergedInterfaceCatalog,
   readManifest as readGuardManifest,
   recipePath,
+  readGuardSetup,
   staleAuthoredPlaceDiagnostics,
   type Recipe,
 } from '@truecourse/guard-runner';
@@ -1206,8 +1208,19 @@ export async function estimateGuardSetup(
   const catalogMax = catalogSettledRow ? 0 : 1;
 
   // ---- seed: real cache key when the step will run --------------------------
+  // An existing seed is re-drafted on a refresh, or unasked when the engine
+  // drafted it and the run's own predicate says it is due.
   const seedGateOpen =
-    !recipe || (recipe.api !== undefined && (recipe.api.seed === undefined || refresh));
+    !recipe ||
+    (recipe.api !== undefined &&
+      (recipe.api.seed === undefined ||
+        refresh ||
+        engineSeedRedraftDue(
+          repoRoot,
+          readGuardSetup(repoRoot)?.steps.find((row) => row.key === 'seed'),
+          recipe,
+          recordedSchemaFiles(repoRoot),
+        )));
   const seedSettled = recipe !== undefined && holds('seed', legacySeedStepFingerprint(repoRoot));
   let seedItems = 0;
   let seedMax = 0;

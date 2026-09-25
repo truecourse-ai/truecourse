@@ -2416,7 +2416,10 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
       `REPLACING the seed script this repository already has (${input.replacing.scriptPath}).`,
       'It is quoted below because a replacement must be an IMPROVEMENT on it, not a fresh',
       'guess: keep what already works (its imports, its idempotence mechanism, the fixtures',
-      'it already provides) and change only what the instructions above require.',
+      'it already provides) and change only what the instructions above require. Keep every',
+      'credential and fixture it provides under the SAME name, with the same fields: screens',
+      'and committed scenarios reference them by name. Rename or drop one only when the data',
+      'model no longer allows it.',
       indentBlock(input.replacing.scriptContent),
     )
   }

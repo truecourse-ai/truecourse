@@ -306,6 +306,7 @@ export {
   interfacesFingerprint,
   legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
+  engineSeedRedraftDue,
   recordedSchemaFiles,
   schemaFilesFingerprint,
   type StepObservations,

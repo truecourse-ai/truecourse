@@ -51,7 +51,8 @@
  * only when the run ends, so a run that stops part-way — an empty balance, a
  * killed process — is carried on from what it reached rather than paying for
  * those steps again. `refresh` forces every step. A seed the engine drafted and
- * nobody has edited since is re-drafted whenever its step re-opens; replacing
+ * nobody has edited since is re-drafted when what it IS moves (the seed stage,
+ * the schema it seeds; see `engineSeedRedraftDue`); replacing
  * any OTHER seed needs `refresh` and `confirmSeedReplace` to answer true, and a
  * caller that cannot ask answers false — a hand-edited seed script is never
  * clobbered by an option.
@@ -1231,7 +1232,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 
   // ---- Step 4: the one seed — data AND auth. SOFT. -------------------------
   const seedFpOf = (): string => computeSeedStepFingerprint(repoRoot, schemaFiles)
-  const priorDrafted = priorReport?.steps.find((row) => row.key === 'seed')?.draftedSeed
+  const priorSeedRow = priorReport?.steps.find((row) => row.key === 'seed')
+  const priorDrafted = priorSeedRow?.draftedSeed
   /** The seed row's `draftedSeed`: this run's draft, or the prior one while the seed still matches it. */
   const draftedSeedOf = (drafted: boolean): { draftedSeed?: string } => {
     const now = seedDigest(repoRoot, reloadRecipe(repoRoot) ?? current)
@@ -1292,6 +1294,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,
         engineDrafted: priorDrafted !== undefined && priorDrafted === seedDigest(repoRoot, current),
+        redraftDue: engineSeedRedraftDue(repoRoot, priorSeedRow, current, schemaFiles),
         freshCheckout,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
@@ -2280,6 +2283,8 @@ async function runSeedStep(args: {
   fingerprint: string
   /** The existing seed is the one the engine last drafted, unedited since. */
   engineDrafted: boolean
+  /** That seed is re-drafted without a refresh: see {@link engineSeedRedraftDue}. */
+  redraftDue: boolean
   /** Whether the tree setup was handed is a fresh checkout — the cold proof's gate. */
   freshCheckout: boolean
   onPhase: (running: string, done: string) => void
@@ -2297,9 +2302,9 @@ async function runSeedStep(args: {
 
   // Idempotence: a repo that already has a seed of its own and did not ask for
   // a refresh is REPORTED, not re-drafted. That is the whole "bare setup
-  // no-ops" contract. A seed the engine drafted is the engine's: the step
-  // re-opened because an input it was drafted from moved, so it is drafted again.
-  if (existing && !opts.refresh && !args.engineDrafted) {
+  // no-ops" contract. A seed the engine drafted is drafted again when what the
+  // seed IS moved under it; any other re-opening reports it as it stands.
+  if (existing && !opts.refresh && !args.redraftDue) {
     return {
       step: {
         status: 'ok',
@@ -2404,6 +2409,30 @@ async function runSeedStep(args: {
     ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
     ...(result.recipeDefect ? { recipeDefect: true } : {}),
   }
+}
+
+/**
+ * Whether a re-opened seed step re-drafts the existing seed without a refresh.
+ * Only a seed the engine drafted and nobody edited since (the prior seed row's
+ * `draftedSeed` still matches it), and only when what that seed IS moved under
+ * it: the seed stage, or the schema it seeds — or the prior attempt at it
+ * failed. Any other re-opening input (a recipe edit elsewhere, the catalog)
+ * keeps the seed, since a re-draft is a paid session whose renamed credentials
+ * and fixtures would re-open every screen that reads them. Shared with the
+ * pre-flight estimate, which prices exactly the sessions this lets run.
+ */
+export function engineSeedRedraftDue(
+  repoRoot: string,
+  priorSeedRow: GuardSetupTaxonomyStep | undefined,
+  recipe: Recipe,
+  schemaFiles: readonly string[],
+): boolean {
+  const drafted = priorSeedRow?.draftedSeed
+  if (drafted === undefined || drafted !== seedDigest(repoRoot, recipe)) return false
+  if (priorSeedRow?.status === 'failed') return true
+  const stored = priorSeedRow?.inputComponents ?? {}
+  const now = stepInputComponents(repoRoot, 'seed', { schemaFiles })
+  return stored[STAGE_INPUT] !== now[STAGE_INPUT] || stored.schema !== now.schema
 }
 
 /**

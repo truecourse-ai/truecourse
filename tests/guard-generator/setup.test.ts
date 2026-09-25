@@ -553,6 +553,31 @@ describe('runGuardSetup — skip when settled', () => {
     expect(statuses(second)).toMatchObject({ recipe: 'skipped:unchanged', catalog: 'skipped:unchanged', seed: 'ok' })
   })
 
+  // Only what the seed IS (its stage, the schema it seeds) re-drafts it. A
+  // recipe edit elsewhere re-opens the step but keeps the drafted seed, and the
+  // seed stays the engine's for a later move that does re-draft it.
+  it('an unrelated recipe edit re-opens the seed step without re-drafting the seed the engine drafted', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const inputs: GuardSetupSeedSessionInput[] = []
+    await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    const target = recipePath(r)
+    const onDisk = JSON.parse(fs.readFileSync(target, 'utf8')) as { api: { env: Record<string, string> } }
+    onDisk.api.env.EXTRA = '1'
+    fs.writeFileSync(target, JSON.stringify(onDisk, null, 2) + '\n')
+    const facts: string[] = []
+    const second = await runAndPersist(r, {
+      seedSession: writingSeedSeam(inputs),
+      onStepFact: (step, line) => facts.push(`${step} | ${line}`),
+    })
+    expect(facts).toContain('seed | re-opened: recipe.contract moved')
+    expect(inputs).toHaveLength(1)
+    expect(second.seed).toMatchObject({ status: 'ok', outcome: 'exists' })
+    asEarlierStage(r, second)
+    await runAndPersist(r, { seedSession: writingSeedSeam(inputs) })
+    expect(inputs).toHaveLength(2)
+  })
+
   // Someone edited the drafted script: it is theirs now, and a re-opened step
   // leaves it alone unless they consent.
   it('a drafted seed edited by hand is not re-drafted when the step re-opens', async () => {
