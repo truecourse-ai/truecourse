@@ -695,6 +695,28 @@ describe('the pull request check', () => {
     expect(await jobTypes()).toEqual(['repo.pr-check', 'repo.guard-setup']);
   });
 
+  it('a pull request’s running setup does not refuse the main chain a push starts', async () => {
+    await storeBase();
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    engines.setup = async () => {
+      await held;
+      return { report: { ranAt: '', status: 'ok', reason: '', steps: [] }, reportPath: '', sessionsRunDirs: [] } as never;
+    };
+    await pulls.savePullRequest(pr());
+    const row = await pulls.createCheck({ repoFullName: REPO, number: 7, headSha: HEAD });
+    await jobs.enqueuePullRequestCheck({ repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG, source: 'pull-request', number: 7, headSha: HEAD, checkId: row.id, installationId: 5 });
+    await settle(80);
+    const [prSetup] = await listStoredSessionRuns(REPO, 'guard-setup');
+    expect(prSetup).toMatchObject({ status: 'running', pullRequest: { number: 7 } });
+
+    // A push to the default branch while the pull request's setup runs.
+    await repos.recordDefaultBranchSha(REPO, 'main-2');
+    expect(await jobs.startMainChain({ repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG })).toMatchObject({ status: 'queued' });
+    release();
+    await drain();
+  });
+
   it('a disconnect settles every check of the repository, the one still waiting in the lane included', async () => {
     await storeBase();
     let release!: () => void;

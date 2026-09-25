@@ -721,5 +721,7 @@ const heavyJobQueue = (org: string): string => `heavy:${org}`;
  */
 async function repoIsWorking(repoFullName: string, command: RepoCommand): Promise<boolean> {
   if (command === 'guard-run') return false;
-  return (await listStoredSessionRuns(repoFullName, command)).some((run) => run.status === 'running');
+  // A pull request's check runs the same commands under its own keys; its
+  // records are stamped with the pull request and are not the repository working.
+  return (await listStoredSessionRuns(repoFullName, command)).some((run) => run.status === 'running' && !run.pullRequest);
 }
