@@ -336,6 +336,11 @@ describe('the render closure', () => {
     expect(contexts.get('links')?.renderClosure).toEqual(['app/layout.tsx', 'app/(main)/layout.tsx', 'components/Sidebar.tsx'])
     // The named list is the page's own chain: a layout is not the screen's feature.
     expect(contexts.get('links')?.renders).toEqual([])
+    // Every file a layout could be written in, found or not: one added later is
+    // a view that joined the set.
+    expect(contexts.get('links')?.layoutCandidates).toEqual(
+      expect.arrayContaining(['app/(main)/links/layout.tsx', 'app/(main)/links/layout.js', 'app/layout.tsx']),
+    )
   })
 
   it("wraps a pages-router page in its pages directory's `_app`", () => {
@@ -350,6 +355,9 @@ describe('the render closure', () => {
       [edge('apps/web/pages/_app.tsx -> apps/web/layouts/AuthRedirect.tsx {AuthRedirect}')],
     )
     expect(contexts.get('tags')?.renderClosure).toEqual(['apps/web/pages/_app.tsx', 'apps/web/layouts/AuthRedirect.tsx'])
+    expect(contexts.get('tags')?.layoutCandidates).toEqual(
+      expect.arrayContaining(['apps/web/pages/tags/_app.tsx', 'apps/web/pages/_app.jsx']),
+    )
   })
 })
 

@@ -2406,6 +2406,16 @@ describe('a shared component', () => {
 
   // The screens now grounded on its module own its controls: the place, its
   // tasks and its ledger row go, so nothing keeps a twin of what they author.
+  // A layout the framework would wrap the screens in, added where the context
+  // pass looked for one, is a view that joined the set: the pass runs again.
+  it('is looked for again when a layout appears where the context pass looked for one', async () => {
+    const lookedFor = new Map([...context].map(([id, place]) => [id, { ...place, layoutCandidates: ['src/layout.tsx'] }]))
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context: lookedFor, shared })
+    expect(authoringViewsMoved(repo, readAuthoredFile())).toBe(false)
+    fs.writeFileSync(path.join(repo, 'src', 'layout.tsx'), 'export default function Layout({ children }) { return <><Nav />{children}</> }\n')
+    expect(authoringViewsMoved(repo, readAuthoredFile())).toBe(true)
+  })
+
   it('is retired with its tasks once the grounding no longer finds it shared', async () => {
     await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence: memoryPersistence().persistence, context, shared })
     fs.writeFileSync(path.join(repo, 'src', 'Sidebar.tsx'), 'export function Sidebar() { return null }\n')

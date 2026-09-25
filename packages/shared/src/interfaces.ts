@@ -1874,10 +1874,12 @@ const InterfacesFileShapeSchema = z
     /**
      * THE VIEWS the last authoring run's context pass found the places render
      * (their modules and render closures, the framework's layouts included),
-     * repo-relative, each with a short digest of its content. Which components
-     * are SHARED is decided over them, and no screen's own row records a
-     * layout, so one of them moving is work for the context pass even when no
-     * row's sources moved. Only `interfaces.authored.json` carries it.
+     * repo-relative, each with a short digest of its content, plus every file
+     * the pass looked for a framework layout in (digested `missing` while there
+     * is none, so one appearing moves it). Which components are SHARED is
+     * decided over them, and no screen's own row records a layout, so one of
+     * them moving is work for the context pass even when no row's sources
+     * moved. Only `interfaces.authored.json` carries it.
      */
     authoringViews: z.record(z.string().min(1), z.string().min(1)).optional(),
     /**

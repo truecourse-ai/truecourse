@@ -66,6 +66,13 @@ export interface WebPlaceContext {
    * what the shared places are found from, and is never a briefing's list.
    */
   renderClosure: string[]
+  /**
+   * Every file a framework layout of this place could be written in, found or
+   * not, repo-relative: where the pass looked for the layouts in
+   * {@link renderClosure}. A layout added at one of them joins what the place
+   * renders though no file the pass read changed. Absent ⇒ looked for none.
+   */
+  layoutCandidates?: string[]
   /** Ids of the derived api interfaces this place's requests join to. */
   apiEffects: string[]
   /**
@@ -167,6 +174,7 @@ export function deriveWebPlaceContexts(
       ),
       closure: closure.length,
       renderClosure: renderClosure(module, layouts, analyses, edges, graph).map((path) => relative(input.repoRoot, path)),
+      layoutCandidates: layoutLookups(module, seed.idiom).flat().map((path) => relative(input.repoRoot, path)),
       ...join(closure, analyses, index),
     })
   }
@@ -418,26 +426,29 @@ function layoutModules(
   idiom: WebPlace['idiom'],
   analyses: ReadonlyMap<string, FileAnalysis>,
 ): string[] {
-  const found = (dir: string, name: string): string | undefined =>
-    LAYOUT_EXTENSIONS.map((extension) => path.join(dir, `${name}${extension}`)).find((file) => analyses.has(file))
-  const layouts: string[] = []
-  if (idiom === 'next-app') {
-    for (let dir = path.dirname(module); ; dir = path.dirname(dir)) {
-      const layout = found(dir, 'layout')
-      if (layout) layouts.unshift(layout)
-      if (path.basename(dir) === 'app' || path.dirname(dir) === dir) break
-    }
-  } else if (idiom === 'next-pages') {
-    for (let dir = path.dirname(module); path.dirname(dir) !== dir; dir = path.dirname(dir)) {
-      const app = found(dir, '_app')
-      if (app) {
-        layouts.push(app)
-        break
-      }
-      if (path.basename(dir) === 'pages') break
-    }
+  const found = (candidates: readonly string[]): string | undefined => candidates.find((file) => analyses.has(file))
+  const groups = layoutLookups(module, idiom)
+  if (idiom === 'next-app') return groups.flatMap((group) => found(group) ?? []).reverse()
+  const app = groups.map(found).find((file) => file !== undefined)
+  return app ? [app] : []
+}
+
+/**
+ * Every file a framework layout of this module could be written in, one group
+ * per directory, nearest first, each group in extension order: an app-router
+ * `layout` in every directory up to `app`, a pages-router `_app` in every
+ * directory up to `pages`. {@link layoutModules} is what of these exists.
+ */
+function layoutLookups(module: string, idiom: WebPlace['idiom'] | undefined): string[][] {
+  const name = idiom === 'next-app' ? 'layout' : idiom === 'next-pages' ? '_app' : undefined
+  if (!name) return []
+  const root = idiom === 'next-app' ? 'app' : 'pages'
+  const groups: string[][] = []
+  for (let dir = path.dirname(module); path.dirname(dir) !== dir; dir = path.dirname(dir)) {
+    groups.push(LAYOUT_EXTENSIONS.map((extension) => path.join(dir, `${name}${extension}`)))
+    if (path.basename(dir) === root) break
   }
-  return layouts
+  return groups
 }
 
 /** The extensions a layout module is written in. */

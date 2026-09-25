@@ -537,9 +537,14 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   if (Object.keys(migrated).length > 0) recordLedger(migrated)
 
   // THE VIEWS this run's context pass read, what it found shared decided over
-  // them: recorded, so a later setup knows to look again when one moves.
+  // them, and the files it looked for a framework layout in (recorded missing
+  // while there is none): recorded, so a later setup knows to look again when
+  // one moves or a layout appears.
   if (opts.context && opts.context.size > 0) {
-    const views = sourceDigests(opts.repoRoot, [...opts.context.values()].flatMap((place) => [place.module, ...place.renders, ...place.renderClosure]))
+    const views = sourceDigests(
+      opts.repoRoot,
+      [...opts.context.values()].flatMap((place) => [place.module, ...place.renders, ...place.renderClosure, ...(place.layoutCandidates ?? [])]),
+    )
     if (JSON.stringify(views) !== JSON.stringify(authored?.authoringViews ?? {})) recordLedger({}, views)
   }
 
