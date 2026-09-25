@@ -2308,6 +2308,40 @@ describe('a shared component', () => {
     expect(readAuthoredFile().interfaces.map((task) => task.type === 'web' && task.at)).toEqual([SIDEBAR.id])
   })
 
+  // The screen that would have retired its copy never settled: the copy goes
+  // anyway, since the component's twin is that very task, and one invocable
+  // thing is one entry.
+  it('leaves one copy of a task the component took over when the screen’s own session fails', async () => {
+    const unshared = new Map([['root', { ...grounding('src/Home.tsx'), renders: [SIDEBAR.module] }]])
+    const ownCopy = { ...COLLAPSE, id: 'web/collapse-sidebar-on-home', at: 'root' }
+    await authorWebInterfaces({
+      repoRoot: repo,
+      persistence: memoryPersistence().persistence,
+      context: unshared,
+      driver: scriptedDriver(async (place, input) => {
+        if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
+        const checked = await callTool(input, 'check_draft', { interfaces: [ownCopy] })
+        return { kind: 'outcome', value: { draftId: /"draftId":"([^"]+)"/.exec(checked)![1] } }
+      }).driver,
+    })
+
+    const result = await authorWebInterfaces({
+      repoRoot: repo,
+      driver: scriptedDriver(async (place, input) =>
+        place === 'root'
+          ? { kind: 'failure', failure: { kind: 'transport', detail: 'connection reset', class: 'provider', retryability: 'none' } }
+          : script(place, input),
+      ).driver,
+      persistence: memoryPersistence().persistence,
+      context: new Map([['root', grounding('src/Home.tsx')], [SIDEBAR.id, grounding(SIDEBAR.module)]]),
+      shared: { components: [SIDEBAR], rendered: new Map([['root', [SIDEBAR.id]]]) },
+    })
+    expect(Object.fromEntries(result.places.map((place) => [place.placeId, place.status]))).toEqual({ [SIDEBAR.id]: 'authored', root: 'failed' })
+    const tasks = readAuthoredFile().interfaces
+    expect(tasks.map((task) => task.type === 'web' && task.at)).toEqual([SIDEBAR.id])
+    expect(new Set(tasks.map((task) => task.fingerprint)).size).toBe(tasks.length)
+  })
+
   // Its row is brought to where it stands, grounded on nothing: a module that
   // moved under a place that earns no session is not work for the next setup.
   it('is not work again once it is no longer shared, whatever its module does', async () => {

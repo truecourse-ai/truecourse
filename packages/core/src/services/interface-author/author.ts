@@ -74,7 +74,7 @@ import type {
   InterfacesFile,
   MapperDiagnostic,
 } from '@truecourse/shared'
-import { isLabelOnlyRekey, isRootPlace, rootPlaceOf } from '@truecourse/shared'
+import { isLabelOnlyRekey, isRootPlace, resolvedInterfaceFingerprint, rootPlaceOf } from '@truecourse/shared'
 import { readCachedSessionOutput, storeCachedSessionOutput } from '../agent/session-cache.js'
 import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
@@ -781,6 +781,38 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   }
   await runSessions(pending.filter((item) => item.place.kind === 'component'))
   await runSessions(pending.filter((item) => item.place.kind !== 'component'))
+
+  // A shared component may have taken over a task of a screen re-opened in
+  // this run, on the promise that the screen's session retires its copy. A
+  // screen whose session did not settle never did: its copy goes now, since
+  // the component's twin IS that task, and one invocable thing is one entry.
+  const settled = new Set(results.filter((place) => place.status === 'authored' || place.status === 'empty').map((place) => place.placeId))
+  const takenOver = new Set(
+    results.filter((place) => components.has(place.placeId)).flatMap((place) => place.taskIds),
+  )
+  const placesNow = placeIndex(derived, authored)
+  const takenKeys = new Set((authored?.interfaces ?? []).filter((task) => takenOver.has(task.id)).map((task) => task.fingerprint))
+  const orphaned = new Set(
+    reopening
+      .filter((screen) => !settled.has(screen.place.id))
+      .flatMap((screen) => screen.existing)
+      .filter((id) => {
+        const task = authored?.interfaces.find((candidate) => candidate.id === id)
+        if (!task || task.type !== AUTHORED_SURFACE) return false
+        const place = task.at ? placesNow.get(task.at) : undefined
+        return takenKeys.has(task.fingerprint) || takenKeys.has(resolvedInterfaceFingerprint(task, place))
+      }),
+  )
+  if (authored && orphaned.size > 0) {
+    const written = writeAuthoredCatalog({
+      repoRoot: opts.repoRoot,
+      candidate: { ...authored, interfaces: authored.interfaces.filter((task) => !orphaned.has(task.id)) },
+      derived,
+      now: opts.now,
+    })
+    authored = written.file
+    path = written.path
+  }
 
   // Completion order is provider latency; the report is the work list.
   const order = new Map(work.map((item, index) => [item.place.id, index]))
