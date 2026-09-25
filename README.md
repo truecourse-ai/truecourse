@@ -23,6 +23,10 @@ user takes through the product, writes a test for each one against the real
 interfaces, and runs them. A failing test means the product and the documentation
 disagree, and it names which section.
 
+<p align="center">
+  <img src="assets/truecourse-how-it-works.gif" alt="How TrueCourse works" width="800" />
+</p>
+
 **[docs.truecourse.dev](https://docs.truecourse.dev)** has the guides: connecting
 documentation and a repository, how flows and claims fit together, the drivers,
 and self-hosting.
