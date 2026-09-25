@@ -487,10 +487,11 @@ export type GuardSetupSeedSessionResult =
       reason: string
       sessionRunId?: string
       /**
-       * The failure is the RECIPE's, not the seed's: the cold-clone proof ran
-       * the recipe's own `install`/`build` in a fresh copy and one of them
-       * failed. Setup treats that as the recipe gate giving way — the recipe
-       * row is unsettled so the next run re-derives it, and the run fails.
+       * The failure is the RECIPE's, not the seed's: the recipe's own
+       * `build` (or `web.build`) failed in the tree, or the cold-clone proof
+       * ran its `install`/`build` in a fresh copy and one of them failed.
+       * Setup treats that as the recipe gate giving way — the recipe row is
+       * unsettled so the next run re-derives it, and the run fails.
        */
       recipeDefect?: boolean
     }

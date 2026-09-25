@@ -457,6 +457,8 @@ describe('buildSeedSession — builds the app before the world boots', () => {
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.reason).toMatch(/`build` failed/);
     expect(result.status === 'failed' && result.reason).toMatch(/dist is on fire/);
+    // A build that fails is the recipe's defect: setup fails on it.
+    expect(result).toMatchObject({ recipeDefect: true });
     expect(h.acquires()).toBe(0);
     expect(servicesLog(r)).toEqual([]);
   }, 60_000);
