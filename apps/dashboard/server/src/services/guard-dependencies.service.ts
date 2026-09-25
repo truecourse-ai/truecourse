@@ -13,6 +13,7 @@
  * caller that must not see even the mask reads `filled` flags instead.
  */
 
+import path from 'node:path';
 import { readGuardDependenciesView, writeGuardDependency } from '@truecourse/core/commands/guard-dependencies';
 import type {
   GuardDependenciesView,
@@ -20,8 +21,23 @@ import type {
 } from '@truecourse/core/commands/guard-dependencies';
 import { readGuardOverlaysFromTree, writeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
 import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
-import { hostedDependenciesView } from '../routes/guard-dependencies-hosted.js';
 import { emitSpecComplete } from '../socket/handlers.js';
+
+/**
+ * The view as the wire carries it. It is composed over a scratch tree, so the
+ * file paths it names are that tree's — a server temp dir no reader can open.
+ * They travel repo-relative instead, the way the setup bundle names the same
+ * files.
+ */
+function hostedDependenciesView(tree: string, view: GuardDependenciesView): GuardDependenciesView {
+  const rel = (abs: string): string => path.relative(tree, abs).split(path.sep).join('/');
+  return {
+    ...view,
+    catalogPath: rel(view.catalogPath),
+    localPath: rel(view.localPath),
+    recipePath: rel(view.recipePath),
+  };
+}
 
 /** The dependencies view of one repository, at `ref` when one is named. */
 export function readRepoDependencies(repoPath: string, ref?: string): Promise<GuardDependenciesView> {

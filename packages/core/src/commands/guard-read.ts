@@ -1355,6 +1355,16 @@ interface FlowViewSources {
   latest: GuardLatest | null
   result: GuardGenerateReport | null
   scenarios: GuardScenario[]
+  /** The decisions ledger's flow dismissals, by flow id. */
+  dismissals: Map<string, GuardDismissedFlow>
+}
+
+/** A flow's dismissal as the flow views carry it. */
+function dismissalMark(flowId: string, view: FlowViewSources): { dismissed: boolean; dismissalNote?: string } {
+  const dismissal = view.dismissals.get(flowId)
+  return dismissal
+    ? { dismissed: true, ...(dismissal.note ? { dismissalNote: dismissal.note } : {}) }
+    : { dismissed: false }
 }
 
 async function loadFlowView(
@@ -1375,10 +1385,11 @@ async function loadFlowView(
 ): Promise<FlowViewSources | null> {
   const corpus = await loadGuardCorpusForView(repoKey, ref)
   if (!corpus) return null
-  const [flowsFile, storedRun, result] = await Promise.all([
+  const [flowsFile, storedRun, result, decisions] = await Promise.all([
     readGuardFlowsFile(repoKey, corpus.commit),
     runOverride ? Promise.resolve(runOverride) : readGuardRunForView(repoKey, ref),
     readGuardResultForView(repoKey, ref),
+    readGuardDecisionsStore(repoKey),
   ])
   const latest = storedRun
   return {
@@ -1395,6 +1406,7 @@ async function loadFlowView(
     latest,
     result,
     scenarios: corpus.scenarios,
+    dismissals: new Map(decisions.dismissedFlows.map((d) => [d.flowId, d])),
   }
 }
 
@@ -1682,6 +1694,7 @@ function flowListItem(
     errors: flowErrors(flowId, join, result).length,
     interfaceDrifted: surfaces.some((s) => s.interfaceDrifted === true),
     ...(flowOrphaned(flowId, join) ? { orphaned: true } : {}),
+    ...dismissalMark(flowId, view),
   }
 }
 
@@ -1912,6 +1925,7 @@ export async function readGuardFlowDetail(
     ...(flowOrphaned(flowId, join) && join.manifestFlows.get(flowId)?.orphanedReason
       ? { orphanedReason: join.manifestFlows.get(flowId)!.orphanedReason }
       : {}),
+    ...dismissalMark(flowId, view),
     generatedAt: view.result?.generatedAt ?? null,
     runId: view.latest?.run.runId ?? null,
     ranAt: view.latest?.run.ranAt ?? null,

@@ -833,6 +833,14 @@ export const GuardFlowListItemSchema = z
      * the flag is what lets a reader be told why instead of shown a hollow row.
      */
     orphaned: z.boolean().optional(),
+    /**
+     * True when the repository's decisions ledger dismisses this flow: the next
+     * generate drops it with its tests. The one reading of the ledger every
+     * surface marks a flow from. Defaulted so a payload without it parses.
+     */
+    dismissed: z.boolean().default(false),
+    /** Why it was dismissed, when the person who did it said. */
+    dismissalNote: z.string().optional(),
   })
   .strict()
 export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
@@ -1059,6 +1067,14 @@ export const GuardFlowDetailSchema = z
      * payload's answer to "why is this detail hollow".
      */
     orphaned: z.boolean().optional(),
+    /**
+     * True when the repository's decisions ledger dismisses this flow: the next
+     * generate drops it with its tests. The one reading of the ledger every
+     * surface marks a flow from. Defaulted so a payload without it parses.
+     */
+    dismissed: z.boolean().default(false),
+    /** Why it was dismissed, when the person who did it said. */
+    dismissalNote: z.string().optional(),
     /** Why it left the corpus, when the reconciliation that retired it said. */
     orphanedReason: z.string().optional(),
     generatedAt: z.string().nullable(),

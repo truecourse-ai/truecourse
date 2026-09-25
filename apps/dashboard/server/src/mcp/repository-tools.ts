@@ -10,9 +10,10 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { readGuardDecisions, readGuardHistory } from '@truecourse/core/commands/guard-read';
+import { readGuardHistory } from '@truecourse/core/commands/guard-read';
 import {
   GUARD_COVERAGE_PLAIN_ORDER,
+  GuardOutcomeSchema,
   guardCoveragePlainStatus,
   guardFlowPlainStatus,
   guardResultRunId,
@@ -79,13 +80,14 @@ function runView(latest: GuardLatest) {
 }
 
 /** One flow's detail, as a model reads it: the chain of claims and the tests behind it. */
-function flowView(detail: GuardFlowDetail, dismissed: boolean) {
+function flowView(detail: GuardFlowDetail) {
   return {
     flowId: detail.flowId,
     title: detail.title,
     goal: detail.goal,
     status: guardFlowPlainStatus({ status: detail.status, bucket: detail.bucket, findings: detail.findings.length }),
-    dismissed,
+    dismissed: detail.dismissed,
+    ...(detail.dismissalNote ? { dismissalNote: detail.dismissalNote } : {}),
     ...(detail.orphaned ? { orphaned: true, orphanedReason: detail.orphanedReason ?? null } : {}),
     steps: detail.milestones.map((m) => ({
       order: m.order,
@@ -135,11 +137,7 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     (args) =>
       run('list_flows', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        const [view, decisions] = await Promise.all([
-          listRepoFlows(repo.path, args.status ? { status: args.status } : {}),
-          readGuardDecisions(repo.path),
-        ]);
-        const dismissed = new Set(decisions.dismissedFlows.map((d) => d.flowId));
+        const view = await listRepoFlows(repo.path, args.status ? { status: args.status } : {});
         return {
           flows: view.flows.map((f) => ({
             flowId: f.flowId,
@@ -152,9 +150,9 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
             ...(f.findings > 0 ? { findings: f.findings } : {}),
             ...(f.manual ? { manual: true } : {}),
             ...(f.epic ? { composedOf: f.composedOf } : {}),
-            ...(dismissed.has(f.flowId) ? { dismissed: true } : {}),
+            ...(f.dismissed ? { dismissed: true } : {}),
+            ...(f.dismissalNote ? { dismissalNote: f.dismissalNote } : {}),
           })),
-          dismissed: decisions.dismissedFlows.map((d) => ({ flowId: d.flowId, ...(d.note ? { note: d.note } : {}) })),
           generatedAt: view.generatedAt,
           ranAt: view.ranAt,
         };
@@ -173,11 +171,7 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     (args) =>
       run('get_flow', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        const [detail, decisions] = await Promise.all([
-          readRepoFlow(repo.path, args.flowId),
-          readGuardDecisions(repo.path),
-        ]);
-        return flowView(detail, decisions.dismissedFlows.some((d) => d.flowId === args.flowId));
+        return flowView(await readRepoFlow(repo.path, args.flowId));
       }),
   );
 
@@ -228,14 +222,20 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     {
       title: 'Get run results',
       description:
-        "One run's results, test by test: outcome (pass, fail, error, stale, orphaned, blocked), the document section the test proves, and the failing step's expected and actual. Without `runId`, the latest results.",
-      inputSchema: { repo: repoArg, runId: z.string().optional() },
+        "One run's results, test by test: outcome (pass, fail, error, stale, orphaned, blocked), the document section the test proves, and the failing step's expected and actual. Without `runId`, the latest results. `outcome` narrows the tests to those outcomes; the summary stays the whole run's. Ask for `blocked` to see the tests that never ran for want of a dependency: each carries `blockedOn`, the dependency to fill in (set_dependency_values) and what it must satisfy.",
+      inputSchema: {
+        repo: repoArg,
+        runId: z.string().optional(),
+        outcome: z.array(GuardOutcomeSchema).optional().describe('Only tests with one of these outcomes.'),
+      },
       annotations: READ,
     },
     (args) =>
       run('get_run', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        return runView(await readRepoRun(repo.path, args.runId));
+        return runView(
+          await readRepoRun(repo.path, args.runId, args.outcome ? { outcome: args.outcome } : {}),
+        );
       }),
   );
 
