@@ -136,6 +136,20 @@ describe('guardRunInProcess through the executor seam', () => {
     expect(seen!.visualJudge).toBe(injected)
   })
 
+  it('hands the executor the run’s abort signal', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeVersionScenario(r, 'ver')
+    let seen: GuardExecInput | undefined
+    setGuardExecutor(async (input) => {
+      seen = input
+      return cannedReport(emptyLatest())
+    })
+    const ac = new AbortController()
+    await guardRunInProcess(r, { signal: ac.signal })
+    expect(seen!.signal).toBe(ac.signal)
+  })
+
   it('maps a missing recipe to no-recipe WITHOUT invoking the executor', async () => {
     const r = repo()
     writeVersionScenario(r, 'ver') // scenarios but no recipe.json

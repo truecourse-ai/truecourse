@@ -968,6 +968,9 @@ export async function guardRunInProcess(
         commit,
         persist: true,
         ...(visualJudge ? { visualJudge } : {}),
+        // A cancel stops the scenarios, not just the judge: without it a
+        // cancelled run holds the workspace's lane until it finishes.
+        ...(options.signal ? { signal: options.signal } : {}),
         onPhase: (phase, total) => {
           if (phase === 'build') tracker?.start('build');
           else {
