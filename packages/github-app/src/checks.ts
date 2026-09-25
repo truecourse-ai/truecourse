@@ -140,6 +140,8 @@ export function renderCheckOutput(
 ): CheckOutput {
   const title = CHECK_TITLE_OF_REASON[reason];
   if (!report) return { title, summary: settledWithoutReport(reason, detailsUrl) };
+  // Nothing was compared, so the counts say nothing: what the author needs is the commit to rebase onto.
+  if (reason === 'no-base') return { title, summary: [noBaseLine(report.base), link(detailsUrl)].filter(Boolean).join('\n\n') };
   const counts = countsLine(report);
   const full = [counts, ...sections(report), link(detailsUrl)].filter(Boolean).join('\n\n');
   const summary = full.length <= SUMMARY_LIMIT ? full : [counts, link(detailsUrl)].filter(Boolean).join('\n\n');
@@ -149,6 +151,15 @@ export function renderCheckOutput(
       : [],
   );
   return { title, summary, ...(annotations.length > 0 ? { annotations } : {}) };
+}
+
+/** Why a pull request was not checked for want of a base, and where to rebase so it can be. */
+function noBaseLine(base: PullRequestCheckReport['base']): string {
+  const onto = base.nearestWithBase
+    ? `\`${base.nearestWithBase.slice(0, 8)}\` or a newer default-branch commit`
+    : 'a newer default-branch commit';
+  const from = base.mergeBase ? ` (\`${base.mergeBase.slice(0, 8)}\`)` : '';
+  return `The commit this pull request branched from${from} has no stored state to compare against. Rebase onto ${onto} to be checked.`;
 }
 
 function settledWithoutReport(reason: PullRequestCheckReason, detailsUrl: string | null): string {

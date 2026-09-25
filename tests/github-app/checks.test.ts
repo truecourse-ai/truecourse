@@ -177,6 +177,17 @@ describe('renderCheckOutput', () => {
     expect(renderCheckOutput('no-base', null, 'https://app/agent/r').summary).toContain('Rebase onto a newer');
   });
 
+  it('names the commit to rebase onto when there is no base', () => {
+    const out = renderCheckOutput(
+      'no-base',
+      report({ run: null, codeHalf: 'not-run', base: { mergeBase: '4d55d816aaaa', commit: null, nearestWithBase: '89f5883cbbbb' } }),
+      null,
+    );
+    expect(out.summary).toBe(
+      'The commit this pull request branched from (`4d55d816`) has no stored state to compare against. Rebase onto `89f5883c` or a newer default-branch commit to be checked.',
+    );
+  });
+
   it('says the code was not run when there is no run', () => {
     const out = renderCheckOutput('conflict', report({ run: null, codeHalf: 'stopped-by-conflict' }), null);
     expect(out.summary).toContain('code not run: an open conflict blocks it');
