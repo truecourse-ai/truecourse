@@ -321,7 +321,7 @@ function AgentIndex() {
         ? [
             {
               key: 'pr',
-              label: 'Pull request', width: '7rem',
+              label: 'Pull request', width: '8rem',
               className: 'text-foreground',
               cell: (row: AgentRow) => (row.pullRequest === null ? '' : `#${row.pullRequest.number}`),
             } satisfies IndexColumn<AgentRow>,

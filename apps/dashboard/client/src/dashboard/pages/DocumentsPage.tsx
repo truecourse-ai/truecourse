@@ -363,7 +363,7 @@ export default function DocumentsPage() {
                 {
                   key: 'pr',
                   label: 'Pull request',
-                  width: '7rem',
+                  width: '8rem',
                   className: 'text-foreground',
                   cell: (row: DocumentRow) =>
                     row.pullRequest ? (

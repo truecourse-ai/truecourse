@@ -152,7 +152,7 @@ export function RunsTab({ repo }: { repo: Repo }) {
             {
               key: 'pr',
               label: 'Pull request',
-              width: '7rem',
+              width: '8rem',
               className: 'text-foreground',
               cell: (row: RunRow) => {
                 if (row.run?.pullRequest == null) return '';

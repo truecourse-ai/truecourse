@@ -287,7 +287,7 @@ export default function ConflictsPage() {
                 {
                   key: 'pr',
                   label: 'Pull request',
-                  width: '7rem',
+                  width: '8rem',
                   className: 'text-foreground',
                   cell: (row: ConflictRow) =>
                     row.pullRequest ? (
