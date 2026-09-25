@@ -9,7 +9,24 @@
 
 import { readRegistry, type RegistryEntry } from '@truecourse/core/config/registry';
 import { resolveLatestEvent } from '@truecourse/core/commands/repo-events';
-import type { RepoLinkStore } from '../routes/repos.js';
+import { resolveVisibleProject, type RepoOwnershipLookup } from '../middleware/project.js';
+
+/**
+ * The connected repositories, as the server uses them: which ones a workspace
+ * connected, who owns one, and the ability to disconnect one. Structural, so
+ * the real store satisfies it without the server depending on where it lives.
+ */
+export interface RepoLinkStore extends RepoOwnershipLookup {
+  getRepo(repoFullName: string): Promise<{
+    workspaceOrgId: string;
+    provider?: string;
+    location?: string | null;
+    checkPullRequests?: boolean;
+  } | null>;
+  listReposForWorkspace(workspaceOrgId: string): Promise<{ repoFullName: string; checkPullRequests?: boolean }[]>;
+  unlinkRepo(repoFullName: string): Promise<void>;
+  setCheckPullRequests(repoFullName: string, enabled: boolean): Promise<void>;
+}
 
 /**
  * The registry rows this workspace may see, in the order its registry holds
@@ -61,4 +78,21 @@ export async function listRepositorySummaries(
       latestEvent: await resolveLatestEvent(e.path),
     })),
   );
+}
+
+/**
+ * The repository a caller names — its slug, or its `owner/repo` name — when
+ * this workspace may see it; null otherwise. Both go through the same scoping
+ * the project-scoped routes use, so another workspace's repository is not found
+ * by either name.
+ */
+export async function resolveRepository(
+  links: RepoLinkStore | null | undefined,
+  org: string | null | undefined,
+  idOrName: string,
+): Promise<RegistryEntry | null> {
+  const asked = idOrName.trim();
+  const bySlug = await resolveVisibleProject(links, org, asked);
+  if (bySlug) return bySlug;
+  return (await visibleRepositories(links, org)).find((entry) => entry.name === asked) ?? null;
 }

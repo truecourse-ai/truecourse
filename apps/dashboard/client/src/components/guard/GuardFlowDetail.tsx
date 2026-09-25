@@ -344,11 +344,9 @@ function AuthoringAttempts({
  */
 function DismissFlowAction({
   flowId,
-  title,
   decisions,
 }: {
   flowId: string;
-  title: string;
   decisions: GuardDecisionsState;
 }) {
   const [ruling, setRuling] = useState(false);
@@ -406,7 +404,7 @@ function DismissFlowAction({
           type="button"
           disabled={ruling}
           onClick={() =>
-            void rule(() => decisions.dismissFlow({ flowId, title }))
+            void rule(() => decisions.dismissFlow({ flowId }))
           }
           className={`${BTN} disabled:opacity-50`}
         >
@@ -779,7 +777,6 @@ export function GuardFlowDetail({
                               <div className="space-y-3">
                                 <DismissFlowAction
                                   flowId={detail.flowId}
-                                  title={detail.title}
                                   decisions={decisions}
                                 />
                                 {claim && (
@@ -845,7 +842,6 @@ export function GuardFlowDetail({
             {decisions && !test && (
               <DismissFlowAction
                 flowId={detail.flowId}
-                title={detail.title}
                 decisions={decisions}
               />
             )}

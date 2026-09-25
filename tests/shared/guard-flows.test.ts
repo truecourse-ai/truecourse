@@ -346,17 +346,28 @@ describe('guard decisions — dismissedFlows', () => {
       version: 1 as const,
       dismissedClaims: [],
       dismissedFlows: [
-        { flowId: 'task-lifecycle', title: 'Task lifecycle', dismissedAt: '2026-07-24T12:00:00.000Z', note: 'not a user path' },
+        { flowId: 'task-lifecycle', dismissedAt: '2026-07-24T12:00:00.000Z', note: 'not a user path' },
       ],
     }
     expect(GuardDecisionsSchema.parse(file)).toEqual(file)
     expect(GuardDecisionsSchema.parse({ version: 1 })).toEqual(EMPTY_GUARD_DECISIONS)
   })
 
-  it('a dismissed flow needs a flowId, a title, and a timestamp', () => {
+  it('a dismissed flow needs a flowId and a timestamp', () => {
     expect(() =>
-      GuardDecisionsSchema.parse({ version: 1, dismissedFlows: [{ flowId: 'f', dismissedAt: 'now' }] }),
+      GuardDecisionsSchema.parse({ version: 1, dismissedFlows: [{ flowId: 'f' }] }),
     ).toThrow()
+    expect(() =>
+      GuardDecisionsSchema.parse({ version: 1, dismissedFlows: [{ dismissedAt: 'now' }] }),
+    ).toThrow()
+  })
+
+  it('a row written when dismissals carried a title still parses, without it', () => {
+    const parsed = GuardDecisionsSchema.parse({
+      version: 1,
+      dismissedFlows: [{ flowId: 'f', title: 'Old title', dismissedAt: 'now' }],
+    })
+    expect(parsed.dismissedFlows).toEqual([{ flowId: 'f', dismissedAt: 'now' }])
   })
 })
 

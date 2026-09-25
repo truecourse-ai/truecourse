@@ -1287,7 +1287,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
       flowWorkerSession: authorsEvery(),
     })
 
-    expect(res.orphanedFlowDismissals).toEqual([{ flowId: 'a-flow-that-was-recomposed', title: 'gone' }])
+    expect(res.orphanedFlowDismissals).toEqual([{ flowId: 'a-flow-that-was-recomposed' }])
     expect(res.written).toHaveLength(1) // the live flow is unaffected
   }, 60_000)
 })

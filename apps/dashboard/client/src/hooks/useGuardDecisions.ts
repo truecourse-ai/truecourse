@@ -32,10 +32,9 @@ import type {
 } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
-/** What a flow dismissal is written with: the id it keys on plus its display copy. */
+/** What a flow dismissal is written with: the id it keys on, and why. */
 export interface GuardFlowDismissalInput {
   flowId: string;
-  title: string;
   note?: string;
 }
 
