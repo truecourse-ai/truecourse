@@ -39,6 +39,8 @@ export interface Repo {
   fullName: string;
   provider: ProviderId;
   defaultBranch: string;
+  /** Whether its pull requests are checked; off until its Settings turn it on. */
+  checkPullRequests: boolean;
   /** What this repository's last settled run said. */
   lastCheck: {
     conclusion: CheckConclusion;

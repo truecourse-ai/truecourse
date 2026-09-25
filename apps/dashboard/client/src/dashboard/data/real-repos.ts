@@ -129,6 +129,7 @@ export function toDashboardRepo(entry: RepoResponse): Repo {
     // tracks none — a run reads whatever is checked out — so nothing is drawn
     // rather than a branch it might not be on.
     defaultBranch: entry.defaultBranch ?? (entry.provider ? '' : 'main'),
+    checkPullRequests: entry.checkPullRequests === true,
     lastCheck: {
       conclusion: 'neutral',
       word: 'Neutral',

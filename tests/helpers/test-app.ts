@@ -58,10 +58,16 @@ export const noGithubAccess: GithubMount['access'] = {
  * are real; the cast is confined to this helper.
  */
 export function testRepoLinks(orgId: string = TEST_ORG): RepoLinkStore {
+  /** Repositories whose pull request checks were turned on. */
+  const checked = new Set<string>();
   return {
-    getRepo: async () => ({ workspaceOrgId: orgId }),
+    getRepo: async (repoFullName: string) => ({ workspaceOrgId: orgId, checkPullRequests: checked.has(repoFullName) }),
     listReposForWorkspace: async () =>
-      (await readRegistry(orgId)).map((e) => ({ repoFullName: e.name })),
+      (await readRegistry(orgId)).map((e) => ({ repoFullName: e.name, checkPullRequests: checked.has(e.name) })),
+    setCheckPullRequests: async (repoFullName: string, enabled: boolean) => {
+      if (enabled) checked.add(repoFullName);
+      else checked.delete(repoFullName);
+    },
     unlinkRepo: async (repoFullName: string) => {
       const entry = (await readRegistry(orgId)).find((e) => e.name === repoFullName);
       if (entry) unregisterTestRepo(entry.slug);

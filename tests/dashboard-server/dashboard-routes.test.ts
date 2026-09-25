@@ -62,6 +62,22 @@ describe('repository routes', () => {
     expect(match!.latestEvent).toEqual({ kind: 'guarded', at: '2026-05-01T00:00:00.000Z' });
   });
 
+  it('PUT /api/repos/:id/pull-request-checks turns checking pull requests on and off; off by default', async () => {
+    const slug = fixture.project.slug;
+    const listed = async () =>
+      ((await request(app).get('/api/repos').expect(200)).body as Array<{ id: string; checkPullRequests: boolean }>)
+        .find((r) => r.id === slug)?.checkPullRequests;
+    expect(await listed()).toBe(false);
+
+    await request(app).put(`/api/repos/${slug}/pull-request-checks`).send({ enabled: true }).expect(200, { checkPullRequests: true });
+    expect(await listed()).toBe(true);
+    expect((await request(app).get(`/api/repos/${slug}`).expect(200)).body.checkPullRequests).toBe(true);
+
+    await request(app).put(`/api/repos/${slug}/pull-request-checks`).send({ enabled: false }).expect(200);
+    expect(await listed()).toBe(false);
+    await request(app).put(`/api/repos/${slug}/pull-request-checks`).send({ enabled: 'yes' }).expect(400);
+  });
+
   it('GET /api/repos/:unknown returns 404 via projectResolver', async () => {
     await request(app).get('/api/repos/no-such-slug/guard/flows').expect(404);
   });

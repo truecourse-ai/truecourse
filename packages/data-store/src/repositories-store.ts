@@ -29,6 +29,7 @@ function toRecord(r: Row): RepositoryRecord {
     defaultBranch: r.defaultBranch,
     defaultBranchSha: r.defaultBranchSha,
     mainChainSha: r.mainChainSha,
+    checkPullRequests: r.checkPullRequests,
     location: r.location,
     blocking: r.blocking,
     enabled: r.enabled,
@@ -118,6 +119,13 @@ export class PgRepositoryStore implements RepositoryStore {
       .update(repositories)
       .set({ mainChainSha: null })
       .where(and(eq(repositories.repoFullName, repoFullName), eq(repositories.mainChainSha, commitSha)));
+  }
+
+  async setCheckPullRequests(repoFullName: string, enabled: boolean): Promise<void> {
+    await this.db
+      .update(repositories)
+      .set({ checkPullRequests: enabled })
+      .where(eq(repositories.repoFullName, repoFullName));
   }
 
   async getRepo(repoFullName: string): Promise<RepositoryRecord | null> {

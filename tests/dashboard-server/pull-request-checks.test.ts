@@ -93,6 +93,8 @@ beforeEach(async () => {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   });
+  // Checks are off until a repository's Settings turn them on.
+  await repos.setCheckPullRequests('acme/api', true);
   await pulls.savePullRequest(pr());
 });
 
@@ -217,7 +219,7 @@ describe('a conflict resolved', () => {
     expect(enqueued.map((r) => r.number)).toEqual([7]);
   });
 
-  it('re-checks a repository only a context source reads, through the source’s installation', async () => {
+  it('starts nothing for a repository only a context source reads: it has no settings to turn checks on', async () => {
     const service = createPullRequestChecks({
       pulls,
       repos,
@@ -235,7 +237,41 @@ describe('a conflict resolved', () => {
     const row = await pulls.createCheck({ repoFullName: 'acme/docs', number: 3, headSha: 'head-3' });
     await pulls.updateCheck(row.id, { status: 'settled', conclusion: 'failure', reason: 'conflict' });
     await service.rerunBlockedByConflict('org_A');
-    expect(enqueued).toEqual([expect.objectContaining({ repoFullName: 'acme/docs', repoId: 'acme/docs', number: 3, installationId: 9 })]);
+    expect(enqueued).toEqual([]);
+  });
+});
+
+describe('a repository whose checks are off', () => {
+  beforeEach(async () => {
+    await repos.setCheckPullRequests('acme/api', false);
+  });
+
+  it('starts nothing and posts nothing for a new head', async () => {
+    await checks().onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
+    expect(enqueued).toEqual([]);
+    expect(pulls.checks).toEqual([]);
+    expect(github).toEqual([]);
+  });
+
+  it('still stops the check in flight when a new head arrives', async () => {
+    await repos.setCheckPullRequests('acme/api', true);
+    const service = checks();
+    await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
+    await repos.setCheckPullRequests('acme/api', false);
+    await pulls.savePullRequest(pr({ headSha: 'head-2' }));
+    await service.onPullRequest({ pr: pr({ headSha: 'head-2' }), installationId: 5, effect: 'check' });
+    expect(pulls.checks.map((c) => [c.headSha, c.status, c.reason])).toEqual([['head-1', 'settled', 'superseded']]);
+    expect(cancelled).toEqual(['acme/api#7']);
+    expect(enqueued).toHaveLength(1);
+  });
+
+  it('holds no draft check', async () => {
+    await checks().onPullRequest({ pr: pr({ draft: true }), installationId: 5, effect: 'draft' });
+    expect(pulls.checks).toEqual([]);
+  });
+
+  it('answers a re-run as disabled', async () => {
+    expect(await checks().start(pr())).toEqual({ status: 'disabled' });
   });
 });
 

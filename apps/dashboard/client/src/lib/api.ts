@@ -140,6 +140,8 @@ export type RepoResponse = {
   /** The branch the provider tracks; null for a local folder, which runs whatever is checked out. */
   defaultBranch?: string | null;
   isGitRepo?: boolean;
+  /** Whether its pull requests are checked. */
+  checkPullRequests?: boolean;
 };
 
 // How the server runs — fetched once at app boot by AppProvider so any
@@ -1037,6 +1039,14 @@ export function removeContextSource(
 /** Which workspace sources one repository reads. */
 export function getRepoContextBindings(repoId: string): Promise<ContextBindingsResponse> {
   return fetchApi<ContextBindingsResponse>(`/api/repos/${repoId}/context/bindings`);
+}
+
+/** Turn checking a repository's pull requests on or off. */
+export function putPullRequestChecks(repoId: string, enabled: boolean): Promise<{ checkPullRequests: boolean }> {
+  return fetchApi<{ checkPullRequests: boolean }>(`/api/repos/${repoId}/pull-request-checks`, {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  });
 }
 
 /** Replace the set a repository reads — the toggles are one state, saved whole. */

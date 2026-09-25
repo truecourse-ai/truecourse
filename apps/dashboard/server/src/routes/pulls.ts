@@ -145,6 +145,10 @@ export function createPullsRouter(deps: PullsRouterDeps): Router {
         return;
       }
       const started = await deps.checks.start(pr);
+      if (started.status === 'disabled') {
+        res.status(409).json({ error: `Pull request checks are off for ${pr.repoFullName}; turn them on in its Settings.` });
+        return;
+      }
       if (started.status !== 'queued') {
         res.status(409).json({ error: `#${pr.number}'s check could not be started: ${started.status}.` });
         return;

@@ -55,6 +55,7 @@ export function observeRepositories(store: RepositoryStore): RepositoryStore {
     recordDefaultBranchSha: (repoFullName, commitSha) => store.recordDefaultBranchSha(repoFullName, commitSha),
     recordMainChainSha: (repoFullName, commitSha) => store.recordMainChainSha(repoFullName, commitSha),
     forgetMainChainSha: (repoFullName, commitSha) => store.forgetMainChainSha(repoFullName, commitSha),
+    setCheckPullRequests: (repoFullName, enabled) => store.setCheckPullRequests(repoFullName, enabled),
     listReposForWorkspace: (workspaceOrgId) => store.listReposForWorkspace(workspaceOrgId),
     listReposForAccount: (provider, accountId) => store.listReposForAccount(provider, accountId),
     // A move keeps every connection: nothing was connected or disconnected.

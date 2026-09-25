@@ -92,6 +92,8 @@ export const repositories = pgTable(
      * chain while the pushed commit above differs from it.
      */
     mainChainSha: text('main_chain_sha'),
+    /** Whether its pull requests are checked. Off until someone turns it on. */
+    checkPullRequests: boolean('check_pull_requests').notNull().default(false),
     /** Where the provider finds it, when the name is not enough: a local folder's absolute path. */
     location: text('location'),
     /**

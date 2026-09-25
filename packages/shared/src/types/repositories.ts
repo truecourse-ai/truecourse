@@ -50,6 +50,8 @@ export interface RepositoryRecord {
    * chain has been started for yet.
    */
   mainChainSha?: string | null
+  /** Whether its pull requests are checked. Off until someone turns it on; a connect never sets it. */
+  checkPullRequests?: boolean
   /** Where the provider finds it when the name is not enough: a local folder's absolute path. */
   location?: string | null
   /**
@@ -89,6 +91,8 @@ export interface RepositoryStore {
    * recorded by now.
    */
   forgetMainChainSha(repoFullName: string, commitSha: string): Promise<void>
+  /** Turn checking its pull requests on or off. */
+  setCheckPullRequests(repoFullName: string, enabled: boolean): Promise<void>
   getRepo(repoFullName: string): Promise<RepositoryRecord | null>
   listReposForWorkspace(workspaceOrgId: string): Promise<RepositoryRecord[]>
   /** Every repository connected through one provider account (uninstall cleanup). */

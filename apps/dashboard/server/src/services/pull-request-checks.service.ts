@@ -13,6 +13,10 @@
  * A GitHub that refuses to take the check (the account has not accepted the
  * permission) is logged once per repository and the check runs all the same,
  * shown in the product and posted nowhere.
+ *
+ * Checks are OFF for a repository until its Settings turn them on, and always
+ * off for a repository Code has not connected (it has no settings). Off, a new
+ * head still stops the check in flight, and nothing new starts or is posted.
  */
 
 import { log } from '@truecourse/core/lib/logger';
@@ -51,9 +55,10 @@ export interface PullRequestChecksDeps {
 /**
  * What starting a check answered: the attempt's row, and the queue's word.
  * `stale` is a head the pull request no longer has, or a pull request no
- * longer open: nothing was superseded and nothing started.
+ * longer open: nothing was superseded and nothing started. `disabled` is a
+ * repository whose checks are off.
  */
-export type CheckStart = { status: 'queued'; checkId: string; jobId: string } | { status: 'busy' | 'failed' | 'stale' };
+export type CheckStart = { status: 'queued'; checkId: string; jobId: string } | { status: 'busy' | 'failed' | 'stale' | 'disabled' };
 
 export interface PullRequestChecks {
   onPullRequest(trigger: PullRequestTrigger): Promise<void>;
@@ -166,6 +171,7 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
       return { status: 'stale' };
     }
     await supersede(pr.repoFullName, pr.number, 'superseded');
+    if (!link?.checkPullRequests) return { status: 'disabled' };
     const octokit = deps.octokitFor(installationId);
     let check = await deps.pulls.createCheck({ repoFullName: pr.repoFullName, number: pr.number, headSha: pr.headSha });
     const githubCheckRunId = await postQueued(octokit, check);
@@ -193,9 +199,10 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     return { status: 'queued', checkId: check.id, jobId: outcome.jobId };
   };
 
-  /** A draft's check: settled at once, saying so. */
+  /** A draft's check: settled at once, saying so. Nothing is posted for a repository whose checks are off. */
   async function hold(pr: PullRequestRecord, installationId: number): Promise<void> {
     await supersede(pr.repoFullName, pr.number, 'superseded');
+    if (!(await deps.repos.getRepo(pr.repoFullName))?.checkPullRequests) return;
     const octokit = deps.octokitFor(installationId);
     let check = await deps.pulls.createCheck({ repoFullName: pr.repoFullName, number: pr.number, headSha: pr.headSha });
     const githubCheckRunId = await postQueued(octokit, check);
