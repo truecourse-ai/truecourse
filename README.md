@@ -73,8 +73,8 @@ workspace has said it.
 
 ## Telemetry
 
-TrueCourse sends anonymous usage analytics to PostHog: which actions are taken
-and pageviews, never your documents, keys or tokens. To turn it off, add this
+TrueCourse sends usage analytics to PostHog: which actions are taken and
+pageviews, never your documents, keys or tokens. To turn it off, add this
 to `.env`:
 
 ```bash
