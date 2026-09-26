@@ -40,21 +40,23 @@ and self-hosting.
 ## Run it locally
 
 ```bash
+cp .env.example .env
 docker compose up -d                    # Postgres, the whole of the storage
 pnpm install
 TRUECOURSE_MODE=local pnpm dev          # http://localhost:3000
 ```
 
-`TRUECOURSE_MODE=local` is one machine: no sign-in, one implicit person in one
-implicit workspace, and folders on this machine can be connected as repositories.
-It needs `DATABASE_URL` and `TRUECOURSE_SECRET_KEY`; the compose defaults are in
-`.env.example`.
+In `.env`, set `TRUECOURSE_SECRET_KEY` to a random string of 32 or more
+characters, such as the output of `openssl rand -base64 32`. Everything else in
+it already works as is.
+
+`TRUECOURSE_MODE=local` runs without sign-in, and folders on this machine can be
+connected as repositories.
 
 First stop is **Settings › Workspace**: say what your product is, in one
 sentence. Documentation is kept or dropped by whether it describes that product,
-so nothing connects — no repository, no documentation source, no scan — until the
-workspace has said it. A hosted workspace states it when it is created; a local
-one has no Create workspace dialog, so that page is where it is set.
+so nothing connects (no repository, no documentation source, no scan) until the
+workspace has said it.
 
 ## Run it on Claude Code
 
