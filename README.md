@@ -39,16 +39,23 @@ and self-hosting.
 
 ## Run it locally
 
+### Setup
+
 ```bash
 cp .env.example .env
-docker compose up -d                    # Postgres, the whole of the storage
+docker compose up -d    # starts Postgres; skip if you already run one, and set DATABASE_URL in .env to it
 pnpm install
-TRUECOURSE_MODE=local TRUECOURSE_LLM_TRANSPORT=claude-code pnpm dev   # http://localhost:3000
 ```
 
 In `.env`, set `TRUECOURSE_SECRET_KEY` to a random string of 32 or more
 characters, such as the output of `openssl rand -base64 32`. Everything else in
 it already works as is.
+
+### Run
+
+```bash
+TRUECOURSE_MODE=local TRUECOURSE_LLM_TRANSPORT=claude-code pnpm dev   # http://localhost:3000
+```
 
 TrueCourse runs on your Claude Code login, so it needs the `claude` binary on
 your PATH and signed in. Everything runs on `claude-opus-5-5`; set
