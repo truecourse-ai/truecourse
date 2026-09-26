@@ -134,6 +134,7 @@ export async function startServer(): Promise<void> {
   const auth = createAuth(mode, {
     inviteLinks: new PgInviteLinkStore(getDb()),
     manyWorkspaces: registeredServerFeatures().some((f) => f.manyWorkspaces === true),
+    port,
   });
   log.info(`[Server] ${mode} mode`);
 

@@ -76,7 +76,7 @@ function serve(mode: ServerMode) {
 }
 
 function renderAt(path: string, mode: ServerMode) {
-  const capabilities: CapabilitiesResponse = { mode };
+  const capabilities: CapabilitiesResponse = { mode, mcp: { available: false } };
   window.history.replaceState({}, '', path);
   render(
     <MemoryRouter initialEntries={[path]}>

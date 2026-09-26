@@ -28,7 +28,7 @@ function LoadingProbe() {
 describe('AppProvider (initial snapshot, no fetch)', () => {
   it('exposes the supplied mode and is not loading', () => {
     render(
-      <AppProvider initial={{ mode: 'local' }}>
+      <AppProvider initial={{ mode: 'local', mcp: { available: true, url: 'http://localhost:3001/mcp' } }}>
         <ModeProbe />
         <LoadingProbe />
       </AppProvider>,
@@ -63,7 +63,7 @@ describe('AppProvider (real fetch)', () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ mode: 'local' }),
+      json: async () => ({ mode: 'local', mcp: { available: true, url: 'http://localhost:3001/mcp' } }),
       text: async () => '',
     });
     render(

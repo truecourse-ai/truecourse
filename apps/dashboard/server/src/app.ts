@@ -12,7 +12,7 @@ import { createHomeRouter } from './routes/home.js';
 import guardRouter from './routes/guard.js';
 import guardActionsRouter from './routes/guard-actions.js';
 import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions.js';
-import capabilitiesRouter from './routes/capabilities.js';
+import { createCapabilitiesRouter } from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
 import { createUsageRouter } from './routes/usage.js';
 import { createWorkspaceProfileRouter } from './routes/workspace-profile.js';
@@ -143,7 +143,7 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // How this server runs, and whether it is alive: both public, so the client
   // can read them before it has a session. What a WORKSPACE may use is not
   // here — it rides `/api/auth/me`, where there is a workspace to answer for.
-  app.use('/api/capabilities', capabilitiesRouter);
+  app.use('/api/capabilities', createCapabilitiesRouter(opts.mcpAuth ?? null));
   // Liveness only: no database or worker probe. `release` is the deployed
   // image digest a VM release sets, so a deploy can tell the new process from
   // the one it replaced.

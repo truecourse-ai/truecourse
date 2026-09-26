@@ -98,6 +98,8 @@ export interface AuthDeps {
   inviteLinks: WorkspaceInviteLinkStore;
   /** Whether this edition lets one person be in more than one workspace. */
   manyWorkspaces: boolean;
+  /** The port this process listens on: a local server's `/mcp` is on it. */
+  port: number;
 }
 
 export function createAuth(mode: ServerMode, deps: AuthDeps): Auth {
@@ -108,7 +110,7 @@ export function createAuth(mode: ServerMode, deps: AuthDeps): Auth {
       router: createLocalAuthRouter(),
       members: createLocalWorkspaceMembersRouter(),
       workspaceSession: null,
-      mcp: createLocalMcpAuth(),
+      mcp: createLocalMcpAuth(deps.port),
     };
   }
   const config = loadWorkosConfig();
