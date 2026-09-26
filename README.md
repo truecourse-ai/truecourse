@@ -43,6 +43,8 @@ and self-hosting.
 
 ```bash
 cp .env.example .env
+echo "TRUECOURSE_MODE=local" >> .env
+echo "TRUECOURSE_LLM_TRANSPORT=claude-code" >> .env
 docker compose up -d    # starts Postgres; skip if you already run one, and set DATABASE_URL in .env to it
 pnpm install
 ```
@@ -54,7 +56,7 @@ it already works as is.
 ### Run
 
 ```bash
-TRUECOURSE_MODE=local TRUECOURSE_LLM_TRANSPORT=claude-code pnpm dev   # http://localhost:3000
+pnpm dev    # http://localhost:3000
 ```
 
 TrueCourse runs on your Claude Code login, so it needs the `claude` binary on
