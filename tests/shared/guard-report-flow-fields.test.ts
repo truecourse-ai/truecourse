@@ -138,6 +138,7 @@ describe('guard report — flow-led counts', () => {
         unsettledAreas: [{ areaId: 'billing', reason: 'flow synthesis invalid after re-ask' }],
       },
       interfaces: { total: 12, bySurface: { cli: 12 } },
+      // A report written when a flow dismissal carried a title still parses.
       orphanedFlowDismissals: [{ flowId: 'gone', title: 'a recomposed flow' }],
     })
 

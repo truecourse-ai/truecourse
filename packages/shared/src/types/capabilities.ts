@@ -85,7 +85,14 @@ export const DEFAULT_SERVER_MODE: ServerMode = 'hosted'
  */
 export interface CapabilitiesResponse {
   mode: ServerMode
+  mcp: McpAvailability
 }
+
+/**
+ * Where a developer's MCP client connects. A hosted server whose MCP sign-in
+ * is not configured has no MCP to offer.
+ */
+export type McpAvailability = { available: true; url: string } | { available: false }
 
 /** One workspace, as the operator's entitlements console lists it. */
 export interface OperatorEntitlementRow {

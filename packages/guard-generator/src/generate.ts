@@ -1723,7 +1723,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const liveFlowIds = new Set(synthesis.flows.map((f) => f.id))
   const orphanedFlowDismissals: GuardOrphanedFlowDismissal[] = decisions.dismissedFlows
     .filter((d) => !liveFlowIds.has(d.flowId))
-    .map((d) => ({ flowId: d.flowId, title: d.title }))
+    .map((d) => ({ flowId: d.flowId }))
 
   const flowsReport: GuardFlowsReport = {
     total: liveFlows.length,

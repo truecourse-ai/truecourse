@@ -90,7 +90,7 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
   async function visibleRepos(req: Request): Promise<Map<string, RegistryEntry>> {
     const visible = new Map<string, RegistryEntry>();
     for (const entry of await readRegistry(orgOf(req))) {
-      if (!(await isVisibleTo(deps.repoLinks, req, entry))) continue;
+      if (!(await isVisibleTo(deps.repoLinks, orgOf(req), entry))) continue;
       visible.set(entry.name, entry);
     }
     return visible;

@@ -60,6 +60,7 @@ import { MembersTab, type InviteKind } from '@/dashboard/pages/MembersTab';
 import { UsageTab } from '@/dashboard/pages/UsageTab';
 import { WorkspaceTab } from '@/dashboard/pages/WorkspaceTab';
 import { CreditsTab } from '@/dashboard/pages/CreditsTab';
+import { McpTab } from '@/dashboard/pages/McpTab';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { registeredSettingsTabs, type SettingsTab } from '@/dashboard/shell/registry';
 
@@ -949,7 +950,7 @@ function ModelsTab() {
 
 /**
  * The sections of Settings: the ones the product has, then whichever of this
- * edition's the workspace is entitled to. A bare `/settings` lands on the first
+ * edition's the workspace is entitled to, then MCP. A bare `/settings` lands on the first
  * (Workspace, where the sentence everything else waits on is set), and an
  * address whose section is not this workspace's lands there too.
  */
@@ -981,12 +982,13 @@ function settingsTabs(
   ];
   // A registered section that names a grant is drawn only for a workspace that
   // holds it: registering it says this bundle CARRIES it, not that this
-  // workspace may use it.
+  // workspace may use it. MCP follows them, so it sits under Connections.
   return [
     ...base,
     ...registeredSettingsTabs().filter(
       (tab) => !tab.entitlement || entitlements.has(tab.entitlement),
     ),
+    { id: 'mcp', label: 'MCP', render: () => <McpTab /> },
   ];
 }
 

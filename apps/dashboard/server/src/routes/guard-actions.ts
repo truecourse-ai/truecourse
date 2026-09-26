@@ -46,30 +46,19 @@ import {
 import { readRepoCorpusSlice } from '../services/repo-corpus.service.js';
 import {
   dismissGuardClaim,
-  undismissGuardClaim,
-  dismissGuardFlow,
-  undismissGuardFlow,
   readGuardDecisions,
   readGuardInterfaces,
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import { GuardExternalsWriteError } from '@truecourse/core/commands/guard-externals';
-import {
-  writeGuardDependency,
-  GuardDependencyWriteError,
-  type GuardDependencyPatch,
-} from '@truecourse/core/commands/guard-dependencies';
-import { readGuardOverlaysFromTree, writeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
-import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
+import type { GuardDependencyPatch } from '@truecourse/core/commands/guard-dependencies';
 import { GUARD_SETUP_ONLY_STEPS } from '@truecourse/core/commands/guard-setup';
-import { hostedDependenciesView } from './guard-dependencies-hosted.js';
+import { dismissFlow, undismissClaim, undismissFlow } from '../services/guard-decisions.service.js';
+import { registerRepoDependency } from '../services/guard-dependencies.service.js';
+import { refusalStatus } from '../services/refusals.service.js';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, openConflicts, type GuardDecisions } from '@truecourse/shared';
-import {
-  emitSpecComplete,
-} from '../socket/handlers.js';
 import { requireJobs } from '../jobs/current.js';
 import { refusedWithoutCredits } from './credits.js';
 import {
@@ -97,6 +86,16 @@ function reportDismissal(req: Request, kind: 'claim' | 'flow'): void {
       properties: { kind, repoId: req.params.id as string },
     });
   }
+}
+
+/** A refusal answers its own status and words; anything else is the error handler's. */
+function refused(res: Response, next: NextFunction, err: unknown): void {
+  const status = refusalStatus(err);
+  if (status === null) {
+    next(err);
+    return;
+  }
+  res.status(status).json({ error: (err as Error).message });
 }
 
 // Shared write tail for the decisions mutations: run the write, the optional
@@ -348,17 +347,9 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
 router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string };
-    const { doc, anchor, title } = body;
-    if (!doc || !anchor || !title) {
-      res.status(400).json({ error: 'undismiss requires { doc, anchor, title }.' });
-      return;
-    }
-    await mutateGuardDecisions(res, () =>
-      undismissGuardClaim(repo.path, { doc, anchor, title }),
-    );
+    res.json(await undismissClaim(repo.path, req.body ?? {}));
   } catch (e) {
-    next(e);
+    refused(res, next, e);
   }
 });
 
@@ -373,24 +364,18 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
 // would silently stop matching the moment the flow is re-authored.
 router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    const body = (req.body ?? {}) as { flowId?: string; title?: string; note?: string };
-    const { flowId, title, note } = body;
-    if (!flowId || !title) {
-      res.status(400).json({ error: 'flow dismiss requires { flowId, title }.' });
-      return;
-    }
-    await mutateGuardDecisions(res, () =>
-      dismissGuardFlow(repo.path, {
-        flowId,
-        title,
-        dismissedAt: new Date().toISOString(),
-        ...(note ? { note } : {}),
-      }),
+    const org = orgOf(req);
+    const repoId = req.params.id as string;
+    const repo = await resolveProjectForRequest(org, repoId);
+    res.json(
+      await dismissFlow(
+        { org, repoId, ...(req.user?.id ? { userId: req.user.id } : {}) },
+        repo.path,
+        req.body ?? {},
+      ),
     );
-    reportDismissal(req, 'flow');
   } catch (e) {
-    next(e);
+    refused(res, next, e);
   }
 });
 
@@ -399,14 +384,9 @@ router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next
 router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    const { flowId } = (req.body ?? {}) as { flowId?: string };
-    if (!flowId) {
-      res.status(400).json({ error: 'flow undismiss requires { flowId }.' });
-      return;
-    }
-    await mutateGuardDecisions(res, () => undismissGuardFlow(repo.path, flowId));
+    res.json(await undismissFlow(repo.path, req.body ?? {}));
   } catch (e) {
-    next(e);
+    refused(res, next, e);
   }
 });
 
@@ -431,32 +411,15 @@ router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, ne
 router.put('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
   const repoId = req.params.id as string;
   try {
-    const repo = await resolveProjectForRequest(orgOf(req), repoId);
-    const body = (req.body ?? {}) as { name?: unknown } & GuardDependencyPatch;
-    if (typeof body.name !== 'string' || body.name.trim() === '') {
-      res.status(400).json({ error: 'dependency write requires { name, … }.' });
-      return;
-    }
-    const { name, ...patch } = body;
-    const view = await withGuardReadTree(repo.path, undefined, async (tree) => {
-      const written = writeGuardDependency(tree, name, patch as GuardDependencyPatch, {
-        env: {},
-        hostless: true,
-      });
-      await writeGuardOverlays(repo.path, readGuardOverlaysFromTree(tree));
-      return hostedDependenciesView(tree, written);
-    });
-    emitSpecComplete(orgOf(req), repoId, 'guard-externals');
-    res.json(view);
+    const org = orgOf(req);
+    const repo = await resolveProjectForRequest(org, repoId);
+    const { name, ...patch } = (req.body ?? {}) as { name?: unknown } & GuardDependencyPatch;
+    res.json(await registerRepoDependency(org, repoId, repo.path, name, patch));
   } catch (e) {
-    // A refused registration is the user's problem to fix (an undeclared variable,
-    // a class with nothing to register, a broken overlay) — a plain 422 with the
+    // A refused registration (no name, an undeclared variable, a class with
+    // nothing to register, a broken overlay) answers its status and the
     // engine's wording, never a 500.
-    if (e instanceof GuardDependencyWriteError || e instanceof GuardExternalsWriteError) {
-      res.status(422).json({ error: e.message });
-      return;
-    }
-    next(e);
+    refused(res, next, e);
   }
 });
 

@@ -4,12 +4,13 @@
  * current state only. Thin adapters over the `@truecourse/core` guard drivers.
  *
  *   GET /:id/guard/status        composed status summary (coverage / last run / last generate)
- *   GET /:id/guard/latest        the last run's per-scenario results (+ failure/evidence + runFlows)
+ *   GET /:id/guard/latest        the last run's per-scenario results (+ failure/evidence + runFlows);
+ *                                ?outcome= narrows the tests
  *   GET /:id/guard/history       the baseline run trend (?all=1: every stored run, not just the trend)
- *   GET /:id/guard/runs/:runId   one past run snapshot (+ runFlows)
+ *   GET /:id/guard/runs/:runId   one past run snapshot (+ runFlows); ?outcome= narrows the tests
  *   GET /:id/guard/report        the last `guard generate` report
  *   GET /:id/guard/coverage      per-section coverage join for ?doc=<path> (over the live doc)
- *   GET /:id/guard/flows         the flow inventory + recipe card (the Flows tab)
+ *   GET /:id/guard/flows         the flow inventory + recipe card (the Flows tab); ?status= narrows
  *   GET /:id/guard/flows/:flowId one flow: milestones, per-surface scenarios, gaps, findings
  *   GET /:id/guard/interfaces    the code-derived interface catalog + its reverse index
  *   GET /:id/guard/dependencies  the dependency catalog joined with its registered instances
@@ -36,7 +37,22 @@ import path from 'node:path';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { orgOf } from '../services/workspace-llm.service.js';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
-import { composeGuardStatus, GUARD_VISUAL_CONTENT_TYPE } from '@truecourse/shared';
+import {
+  composeGuardStatus,
+  GUARD_COVERAGE_PLAIN_ORDER,
+  GUARD_VISUAL_CONTENT_TYPE,
+  GuardClaimCoverageSchema,
+  GuardOutcomeSchema,
+  type GuardClaimCoverage,
+  type GuardOutcome,
+  type GuardCoveragePlainStatus,
+} from '@truecourse/shared';
+import {
+  listRepoFlows,
+  readRepoClaims,
+  readRepoFlow,
+  readRepoRun,
+} from '../services/guard-reads.service.js';
 import {
   readManifestForView,
   readGuardRunForView,
@@ -44,7 +60,6 @@ import {
   readGuardHistory,
   readGuardResultForView,
   readGuardReport,
-  readGuardRun,
   readGuardScenarioSource,
   readGuardInterfaceRaw,
   readGuardFlowRaw,
@@ -59,20 +74,15 @@ import {
   computeGuardStaleness,
   composeDocCoverage,
   listGuardScenarios,
-  listGuardFlows,
-  readGuardFlowDetail,
   readGuardFlowsForView,
   readGuardScenariosForView,
   readGuardInterfaces,
-  readGuardClaims,
   readGuardClaimsForView,
   readGuardRunFlows,
   guardExternalSetupIndexForView,
   type GuardEvidenceLocator,
 } from '@truecourse/core/commands/guard-read';
-import { readGuardDependenciesView } from '@truecourse/core/commands/guard-dependencies';
-import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
-import { hostedDependenciesView } from './guard-dependencies-hosted.js';
+import { readRepoDependencies } from '../services/guard-dependencies.service.js';
 import { readGuardSetup } from '@truecourse/core/commands/guard-setup';
 import { readBundleGuardSetup } from '@truecourse/core/services/guard-setup/bundle';
 import {
@@ -88,6 +98,35 @@ import { diffScenarioSets, type GuardVersionArtifact } from '@truecourse/shared'
 import { refOf } from './route-params.js';
 
 const router: Router = Router();
+
+/** One query parameter's values — `?x=a&x=b`, `?x=a,b` and `?x=a` read alike. */
+function queryList(raw: unknown): string[] {
+  if (raw === undefined) return [];
+  return (Array.isArray(raw) ? raw : [raw])
+    .flatMap((v) => String(v).split(','))
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+/** `?outcome=` as run outcomes, the ones that are not dropped. */
+function outcomesOf(raw: unknown): GuardOutcome[] {
+  return queryList(raw).filter((o): o is GuardOutcome =>
+    (GuardOutcomeSchema.options as readonly string[]).includes(o),
+  );
+}
+
+/** `?status=` as coverage words, the ones that are not dropped. */
+function plainStatusesOf(raw: unknown): GuardCoveragePlainStatus[] {
+  return queryList(raw).filter((s): s is GuardCoveragePlainStatus =>
+    (GUARD_COVERAGE_PLAIN_ORDER as readonly string[]).includes(s),
+  );
+}
+
+/** The `?ref=` a read is pinned to, as a service filter takes it. */
+function refFilter(req: Request): { ref?: string } {
+  const ref = refOf(req);
+  return ref ? { ref } : {};
+}
 
 // The composed status overview — always 200 (each piece is null until its command
 // has run), so the tab renders empty-state CTAs rather than erroring.
@@ -123,15 +162,12 @@ router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFu
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const ref = refOf(req);
-    const latest = await readGuardRunForView(repo.path, ref);
     if (!ref) {
-      if (!latest) {
-        res.status(404).json({ error: 'No guard run has been recorded yet.' });
-        return;
-      }
-      res.json({ ...latest, runFlows: await readGuardRunFlows(repo.path, latest, ref) });
+      const latest = await readRepoRun(repo.path, undefined, { outcome: outcomesOf(req.query.outcome) });
+      res.json({ ...latest, runFlows: await readGuardRunFlows(repo.path, latest) });
       return;
     }
+    const latest = await readGuardRunForView(repo.path, ref);
     if (!latest) {
       res.json({ latest: null });
       return;
@@ -158,11 +194,9 @@ router.get('/:id/guard/history', async (req: Request, res: Response, next: NextF
 router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    const run = await readGuardRun(repo.path, req.params.runId as string);
-    if (!run) {
-      res.status(404).json({ error: 'Guard run not found.' });
-      return;
-    }
+    const run = await readRepoRun(repo.path, req.params.runId as string, {
+      outcome: outcomesOf(req.query.outcome),
+    });
     res.json({ ...run, runFlows: await readGuardRunFlows(repo.path, run, refOf(req)) });
   } catch (e) {
     next(e);
@@ -236,7 +270,7 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
 router.get('/:id/guard/flows', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    res.json(await listGuardFlows(repo.path, refOf(req)));
+    res.json(await listRepoFlows(repo.path, { status: plainStatusesOf(req.query.status), ...refFilter(req) }));
   } catch (e) {
     next(e);
   }
@@ -247,13 +281,7 @@ router.get('/:id/guard/flows', async (req: Request, res: Response, next: NextFun
 router.get('/:id/guard/flows/:flowId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    const flowId = req.params.flowId as string;
-    const detail = await readGuardFlowDetail(repo.path, flowId, refOf(req));
-    if (!detail) {
-      res.status(404).json({ error: `Flow not found: ${flowId}` });
-      return;
-    }
-    res.json(detail);
+    res.json(await readRepoFlow(repo.path, req.params.flowId as string, refOf(req)));
   } catch (e) {
     next(e);
   }
@@ -333,7 +361,17 @@ router.get(
 router.get('/:id/guard/claims', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    res.json(await readGuardClaims(repo.path, refOf(req)));
+    res.json(
+      await readRepoClaims(repo.path, {
+        ...(req.query.withFlow === 'true' || req.query.withFlow === 'false'
+          ? { withFlow: req.query.withFlow === 'true' }
+          : {}),
+        coverage: queryList(req.query.coverage).filter((c): c is GuardClaimCoverage =>
+          (GuardClaimCoverageSchema.options as readonly string[]).includes(c),
+        ),
+        ...refFilter(req),
+      }),
+    );
   } catch (e) {
     next(e);
   }
@@ -642,11 +680,7 @@ router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFun
 router.get('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    res.json(
-      await withGuardReadTree(repo.path, refOf(req), (tree) =>
-        hostedDependenciesView(tree, readGuardDependenciesView(tree, { env: {}, hostless: true })),
-      ),
-    );
+    res.json(await readRepoDependencies(repo.path, refOf(req)));
   } catch (e) {
     next(e);
   }

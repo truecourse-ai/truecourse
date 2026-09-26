@@ -85,9 +85,31 @@ describe('Guard dismiss + finding-evidence routes', () => {
   });
 
   it('dismissing a flow writes it and reports the ruling as a flow', async () => {
+    const flows = path.join(root, '.truecourse', 'scenarios', 'flows.json');
+    fs.mkdirSync(path.dirname(flows), { recursive: true });
+    fs.writeFileSync(
+      flows,
+      JSON.stringify({
+        version: 1,
+        generatedAt: '2026-07-24T13:40:00.000Z',
+        flows: [
+          {
+            id: 'flow-1',
+            title: 'Release a version',
+            goal: 'Release a version',
+            fingerprint: 'sha256:f1',
+            milestones: [{ order: 1, doc: 'docs/release.md', anchor: 'release', claimTitle: 'A release is tagged' }],
+            bindings: [{ doc: 'docs/release.md', anchor: 'release', fingerprint: 'sha256:r' }],
+            composedOf: [],
+            synthesisInputsHash: 'sha256:inputs',
+          },
+        ],
+        noFlowClaims: [],
+      }),
+    );
     const res = await request(app)
       .post(url('flows/dismiss'))
-      .send({ flowId: 'flow-1', title: 'Release a version' })
+      .send({ flowId: 'flow-1' })
       .expect(200);
     expect(res.body.dismissedFlows).toHaveLength(1);
 

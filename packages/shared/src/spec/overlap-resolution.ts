@@ -465,6 +465,30 @@ export function buildCorpusConflicts<O extends OverlapLike>(
 }
 
 /**
+ * The verdict record for one dispute: each side's flagged section (heading and
+ * verbatim quote) and the verdict. The dispute identity a stored verdict is
+ * matched on, built ONCE — the dashboard's verdict buttons and the MCP tool both
+ * record through it.
+ */
+export function conflictVerdictFor(
+  overlap: Pick<OverlapLike, 'sections'> | undefined,
+  docA: string,
+  docB: string,
+  verdict: ConflictResolutionLike['verdict'],
+): Omit<ConflictResolutionLike, 'resolvedAt' | 'note' | 'resolvedBy'> {
+  const sectionOf = (doc: string) => (overlap?.sections ?? []).find((s) => s.doc === doc);
+  return {
+    docA,
+    anchorA: sectionOf(docA)?.heading ?? null,
+    quoteA: sectionOf(docA)?.quote,
+    docB,
+    anchorB: sectionOf(docB)?.heading ?? null,
+    quoteB: sectionOf(docB)?.quote,
+    verdict,
+  };
+}
+
+/**
  * The unresolved conflicts — the guard-generate gate's blocker set. Extracting
  * both sides of one of these births a red finding that is really the unresolved
  * dispute, so generate must fail until they are resolved.

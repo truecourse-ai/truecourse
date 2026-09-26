@@ -888,14 +888,30 @@ describe('the ledger and the document', () => {
           url: 'https://docs.acme.com/a',
           contentHash: 'h1',
           updatedAt: 'x',
-          body: '# A\n\nBody.\n',
+          body: '# A\n\nBody.\n\n## Refunds\n\nTwo days.\n',
         },
       ],
       removed: [],
     });
     const ref = contextDocRef(id, 'a.md');
-    const res = await request(app).get(`/api/context/doc?ref=${encodeURIComponent(ref)}`).expect(200);
-    expect(res.body).toEqual({ ref, content: '# A\n\nBody.\n' });
+    const url = `/api/context/doc?ref=${encodeURIComponent(ref)}`;
+    const res = await request(app).get(url).expect(200);
+    expect(res.body).toMatchObject({ ref, content: '# A\n\nBody.\n\n## Refunds\n\nTwo days.\n' });
+    // The outline is the sections a flow milestone and a coverage row bind.
+    expect(res.body.sections).toEqual([
+      { anchor: 'a', heading: 'A', level: 1, lines: [1, 7] },
+      { anchor: 'a/refunds', heading: 'Refunds', level: 2, lines: [5, 7] },
+    ]);
+
+    const one = await request(app).get(`${url}&section=a%2Frefunds`).expect(200);
+    expect(one.body).toMatchObject({
+      ref,
+      content: '## Refunds\n\nTwo days.',
+      section: { anchor: 'a/refunds', heading: 'Refunds' },
+    });
+
+    const missing = await request(app).get(`${url}&section=nope`).expect(404);
+    expect(missing.body.error).toMatch(/No section "nope".*a\/refunds/);
   });
 
   it('needs a ref, and 404s one that names nothing', async () => {
