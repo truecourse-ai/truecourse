@@ -19,6 +19,12 @@
   <img src="assets/truecourse-how-it-works.gif" alt="How TrueCourse works" width="100%" />
 </p>
 
+> [!WARNING]
+> The `truecourse` npm package (the CLI) is deprecated and no longer maintained.
+> TrueCourse is becoming an IDE for Product Owners, and the first step is letting
+> them turn their documentation into end-to-end tests. This README describes the
+> product as it is now.
+
 TrueCourse reads the documentation a team already writes (PRDs, ADRs, READMEs,
 a documentation site) and turns it into tests that run.
 
