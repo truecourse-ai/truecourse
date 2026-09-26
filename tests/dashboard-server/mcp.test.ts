@@ -236,7 +236,7 @@ describe('local mode', () => {
     clearTestRegistry();
     fixture = await setupTestFixture();
     failingRun(fixture.repoPath);
-    const auth = createAuth('local', { inviteLinks: new MemoryInviteLinkStore(), manyWorkspaces: false });
+    const auth = createAuth('local', { inviteLinks: new MemoryInviteLinkStore(), manyWorkspaces: false, port: 3001 });
     const repoLinks: RepoLinkStore = {
       getRepo: async () => ({ workspaceOrgId: LOCAL_ORG_ID }),
       listReposForWorkspace: async (org) =>
@@ -270,7 +270,7 @@ describe('local mode', () => {
   });
 
   it('advertises no sign-in', async () => {
-    const auth = createAuth('local', { inviteLinks: new MemoryInviteLinkStore(), manyWorkspaces: false });
+    const auth = createAuth('local', { inviteLinks: new MemoryInviteLinkStore(), manyWorkspaces: false, port: 3001 });
     expect(auth.mcp?.resourceMetadata).toBeNull();
     const app = createTestApp({ authVerifier: auth.verify, mcpAuth: auth.mcp });
     await request(app).get(METADATA_PATH).expect(404);

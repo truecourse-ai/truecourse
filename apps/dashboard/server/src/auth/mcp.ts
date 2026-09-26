@@ -44,16 +44,19 @@ export interface McpAuth {
   gate: RequestHandler;
   /** Hosted: the metadata document and the path it is served at. Local: none. */
   resourceMetadata: { path: string; document: ProtectedResourceMetadata } | null;
+  /** The URL a developer's MCP client connects to. */
+  url: string;
 }
 
-/** Local mode: the one person, always. */
-export function createLocalMcpAuth(): McpAuth {
+/** Local mode: the one person, always, at this machine's `/mcp` on `port`. */
+export function createLocalMcpAuth(port: number): McpAuth {
   return {
     gate: (req, _res, next) => {
       req.user = localUser();
       next();
     },
     resourceMetadata: null,
+    url: `http://localhost:${port}/mcp`,
   };
 }
 
@@ -143,6 +146,7 @@ export function createHostedMcpAuth(opts: HostedMcpAuthOptions): McpAuth {
         bearer_methods_supported: ['header'],
       },
     },
+    url: opts.resource,
   };
 }
 
