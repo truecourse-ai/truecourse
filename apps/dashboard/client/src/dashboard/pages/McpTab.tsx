@@ -7,7 +7,6 @@
  * connector too; a hosted server without MCP sign-in has no URL to give.
  */
 
-import { ExternalLink } from 'lucide-react';
 import { SectionTitle } from '@/dashboard/ui/bits';
 import { StatusWord } from '@/dashboard/ui/status-word';
 import { useCopied } from '@/dashboard/ui/use-copied';
@@ -56,10 +55,9 @@ export function McpTab() {
           href={DOCS_URL}
           target="_blank"
           rel="noreferrer"
-          className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+          className="ml-auto text-[11px] font-medium text-primary hover:underline"
         >
           Read the MCP docs
-          <ExternalLink className="h-3 w-3" aria-hidden="true" />
         </a>
       </div>
       {mcp.available ? (
