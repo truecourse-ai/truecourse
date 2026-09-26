@@ -33,9 +33,8 @@ user takes through the product, writes a test for each one against the real
 interfaces, and runs them. A failing test means the product and the documentation
 disagree, and it names which section.
 
-**[docs.truecourse.dev](https://docs.truecourse.dev)** has the guides: connecting
-documentation and a repository, how flows and claims fit together, the drivers,
-and self-hosting.
+For more details, check our documentation at
+**[docs.truecourse.dev](https://docs.truecourse.dev)**.
 
 ## Run it locally
 
