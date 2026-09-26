@@ -73,27 +73,13 @@ workspace has said it.
 
 ## Telemetry
 
-The app sends product analytics to PostHog. The server sends every product
-action: a repository connected or disconnected, a scan, setup, generation or run
-starting and finishing, a context source added, a tool connection saved or
-removed, a conflict resolved, a finding dismissed, a provider saved, an invite
-link minted, a workspace created. Each
-carries identifiers and kinds only, never a document, a key, a token or an
-invite URL. It reads `POSTHOG_DISABLED`, `POSTHOG_KEY` and `POSTHOG_HOST` from
-the repo-root `.env`.
+TrueCourse sends anonymous usage analytics to PostHog: which actions are taken
+and pageviews, never your documents, keys or tokens. To turn it off, add this
+to `.env`:
 
-The browser sends what only it can see: pageviews, autocaptured clicks and form
-submits, the signed-in person's id, email and workspace, and the Join Discord
-click. Three build-time variables control it:
-
-| Variable | What it does |
-| --- | --- |
-| `VITE_POSTHOG_DISABLED` | `1` turns it off entirely: the client never starts. |
-| `VITE_POSTHOG_KEY` | Send to your own PostHog project instead of TrueCourse's. |
-| `VITE_POSTHOG_HOST` | The PostHog host. Default: `https://us.i.posthog.com`. |
-
-`POSTHOG_DISABLED=1` turns off both halves at once, so a development machine
-sends nothing.
+```bash
+POSTHOG_DISABLED=1
+```
 
 ## Contributing
 
