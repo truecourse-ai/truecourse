@@ -43,12 +43,16 @@ and self-hosting.
 cp .env.example .env
 docker compose up -d                    # Postgres, the whole of the storage
 pnpm install
-TRUECOURSE_MODE=local pnpm dev          # http://localhost:3000
+TRUECOURSE_MODE=local TRUECOURSE_LLM_TRANSPORT=claude-code pnpm dev   # http://localhost:3000
 ```
 
 In `.env`, set `TRUECOURSE_SECRET_KEY` to a random string of 32 or more
 characters, such as the output of `openssl rand -base64 32`. Everything else in
 it already works as is.
+
+TrueCourse runs on your Claude Code login, so it needs the `claude` binary on
+your PATH and signed in. Everything runs on `claude-opus-5-5`; set
+`TRUECOURSE_MODEL` in `.env` to use another model.
 
 `TRUECOURSE_MODE=local` runs without sign-in, and folders on this machine can be
 connected as repositories.
@@ -57,30 +61,6 @@ First stop is **Settings › Workspace**: say what your product is, in one
 sentence. Documentation is kept or dropped by whether it describes that product,
 so nothing connects (no repository, no documentation source, no scan) until the
 workspace has said it.
-
-## Run it on Claude Code
-
-To run on your own Claude Code login instead of an API key:
-
-```bash
-docker compose up -d
-pnpm install
-TRUECOURSE_MODE=local TRUECOURSE_LLM_TRANSPORT=claude-code pnpm dev
-```
-
-This needs the `claude` binary on your PATH and signed in. Every run then uses
-that login and the Models page is read-only; leave the variable out to save a
-provider and key on that page instead.
-
-One model runs everything — every call and every agent session of a run. On a
-Claude Code login that model is `claude-opus-5-5`, and `TRUECOURSE_MODEL` names another;
-`TRUECOURSE_FALLBACK_MODEL` is what a call retries on when the primary is
-overloaded. A workspace with its own API key names its one model on the Models
-page instead, and these variables do not apply to it.
-
-Every LLM call is a turn of an agent session, whether the work takes thirty
-turns or one, so what a run spent is one record per session kind, priced from
-OpenRouter's model list. Settings › Usage reads it back.
 
 ## Telemetry
 
