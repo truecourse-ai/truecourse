@@ -45,11 +45,11 @@ function renderTab(capabilities: CapabilitiesResponse) {
   );
 }
 
-/** The docs link: labelled, external, in a new tab. */
+/** The docs link: labelled in words, no icon, in a new tab. */
 function docs(): HTMLElement {
   const link = screen.getByRole('link', { name: 'Read the MCP docs' });
   expect(link).toHaveAttribute('target', '_blank');
-  expect(link.querySelector('svg')).not.toBeNull();
+  expect(link.querySelector('svg')).toBeNull();
   return link;
 }
 
