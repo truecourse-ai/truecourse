@@ -19,6 +19,12 @@
   <img src="assets/truecourse-how-it-works.gif" alt="How TrueCourse works" width="100%" />
 </p>
 
+> [!WARNING]
+> The `truecourse` npm package (the CLI) is deprecated and no longer maintained.
+> TrueCourse is becoming an IDE for Product Owners, and the first step is letting
+> them turn their documentation into end-to-end tests. This README describes the
+> product as it is now.
+
 TrueCourse reads the documentation a team already writes (PRDs, ADRs, READMEs,
 a documentation site) and turns it into tests that run.
 
@@ -27,76 +33,52 @@ user takes through the product, writes a test for each one against the real
 interfaces, and runs them. A failing test means the product and the documentation
 disagree, and it names which section.
 
-**[docs.truecourse.dev](https://docs.truecourse.dev)** has the guides: connecting
-documentation and a repository, how flows and claims fit together, the drivers,
-and self-hosting.
+For more details, check our documentation at
+**[docs.truecourse.dev](https://docs.truecourse.dev)**.
 
 ## Run it locally
 
+### Setup
+
 ```bash
-docker compose up -d                    # Postgres, the whole of the storage
+cp .env.example .env
+echo "TRUECOURSE_MODE=local" >> .env
+echo "TRUECOURSE_LLM_TRANSPORT=claude-code" >> .env
+docker compose up -d    # starts Postgres; skip if you already run one, and set DATABASE_URL in .env to it
 pnpm install
-TRUECOURSE_MODE=local pnpm dev          # http://localhost:3000
 ```
 
-`TRUECOURSE_MODE=local` is one machine: no sign-in, one implicit person in one
-implicit workspace, and folders on this machine can be connected as repositories.
-It needs `DATABASE_URL` and `TRUECOURSE_SECRET_KEY`; the compose defaults are in
-`.env.example`.
+In `.env`, set `TRUECOURSE_SECRET_KEY` to a random string of 32 or more
+characters, such as the output of `openssl rand -base64 32`. Everything else in
+it already works as is.
+
+### Run
+
+```bash
+pnpm dev    # http://localhost:3000
+```
+
+TrueCourse runs on your Claude Code login, so it needs the `claude` binary on
+your PATH and signed in. Everything runs on `claude-opus-5-5`; set
+`TRUECOURSE_MODEL` in `.env` to use another model.
+
+`TRUECOURSE_MODE=local` runs without sign-in, and folders on this machine can be
+connected as repositories.
 
 First stop is **Settings › Workspace**: say what your product is, in one
 sentence. Documentation is kept or dropped by whether it describes that product,
-so nothing connects — no repository, no documentation source, no scan — until the
-workspace has said it. A hosted workspace states it when it is created; a local
-one has no Create workspace dialog, so that page is where it is set.
-
-## Run it on Claude Code
-
-To run on your own Claude Code login instead of an API key:
-
-```bash
-docker compose up -d
-pnpm install
-TRUECOURSE_MODE=local TRUECOURSE_LLM_TRANSPORT=claude-code pnpm dev
-```
-
-This needs the `claude` binary on your PATH and signed in. Every run then uses
-that login and the Models page is read-only; leave the variable out to save a
-provider and key on that page instead.
-
-One model runs everything — every call and every agent session of a run. On a
-Claude Code login that model is `claude-opus-5-5`, and `TRUECOURSE_MODEL` names another;
-`TRUECOURSE_FALLBACK_MODEL` is what a call retries on when the primary is
-overloaded. A workspace with its own API key names its one model on the Models
-page instead, and these variables do not apply to it.
-
-Every LLM call is a turn of an agent session, whether the work takes thirty
-turns or one, so what a run spent is one record per session kind, priced from
-OpenRouter's model list. Settings › Usage reads it back.
+so nothing connects (no repository, no documentation source, no scan) until the
+workspace has said it.
 
 ## Telemetry
 
-The app sends product analytics to PostHog. The server sends every product
-action: a repository connected or disconnected, a scan, setup, generation or run
-starting and finishing, a context source added, a tool connection saved or
-removed, a conflict resolved, a finding dismissed, a provider saved, an invite
-link minted, a workspace created. Each
-carries identifiers and kinds only, never a document, a key, a token or an
-invite URL. It reads `POSTHOG_DISABLED`, `POSTHOG_KEY` and `POSTHOG_HOST` from
-the repo-root `.env`.
+TrueCourse sends usage analytics to PostHog: which actions are taken and
+pageviews, never your documents, keys or tokens. To turn it off, add this
+to `.env`:
 
-The browser sends what only it can see: pageviews, autocaptured clicks and form
-submits, the signed-in person's id, email and workspace, and the Join Discord
-click. Three build-time variables control it:
-
-| Variable | What it does |
-| --- | --- |
-| `VITE_POSTHOG_DISABLED` | `1` turns it off entirely: the client never starts. |
-| `VITE_POSTHOG_KEY` | Send to your own PostHog project instead of TrueCourse's. |
-| `VITE_POSTHOG_HOST` | The PostHog host. Default: `https://us.i.posthog.com`. |
-
-`POSTHOG_DISABLED=1` turns off both halves at once, so a development machine
-sends nothing.
+```bash
+POSTHOG_DISABLED=1
+```
 
 ## Contributing
 
