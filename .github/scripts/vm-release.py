@@ -69,11 +69,13 @@ SECRET_NAMES = ('DATABASE_URL', 'TRUECOURSE_SECRET_KEY', 'WORKOS_API_KEY',
                 'GITHUB_APP_CLIENT_ID', 'GITHUB_APP_CLIENT_SECRET',
                 'SENTRY_DSN', 'TRUECOURSE_MAX_CONCURRENCY', 'TRUECOURSE_MAX_API_CONCURRENCY',
                 'TRUECOURSE_CREDITS_OPENAI_API_KEY', 'TRUECOURSE_CREDITS_MODEL',
-                'TRUECOURSE_CREDITS_OPENAI_BASE_URL', 'TRUECOURSE_CREDITS_PRICE_MODEL')
+                'TRUECOURSE_CREDITS_OPENAI_BASE_URL', 'TRUECOURSE_CREDITS_PRICE_MODEL',
+                'WORKOS_AUTHKIT_DOMAIN')
 # Absent in Key Vault means "use the app's default"; access failures still fail the release.
 OPTIONAL_SECRETS = ('SENTRY_DSN', 'TRUECOURSE_MAX_CONCURRENCY', 'TRUECOURSE_MAX_API_CONCURRENCY',
                     'TRUECOURSE_CREDITS_OPENAI_API_KEY', 'TRUECOURSE_CREDITS_MODEL',
-                    'TRUECOURSE_CREDITS_OPENAI_BASE_URL', 'TRUECOURSE_CREDITS_PRICE_MODEL')
+                    'TRUECOURSE_CREDITS_OPENAI_BASE_URL', 'TRUECOURSE_CREDITS_PRICE_MODEL',
+                    'WORKOS_AUTHKIT_DOMAIN')
 INTEGER_SECRETS = ('TRUECOURSE_MAX_CONCURRENCY', 'TRUECOURSE_MAX_API_CONCURRENCY')
 
 
@@ -240,6 +242,10 @@ def application_env(config, image):
                 'TRUECOURSE_LOG_DIR': '/var/log/truecourse',
                 'SENTRY_ENVIRONMENT': 'production' if config['environment'] == 'prod' else 'dev',
                 'TRUECOURSE_RELEASE': validate_image(config, image)})
+    # MCP sign-in is AuthKit's: with its domain in Key Vault, /mcp is this
+    # hostname's; without it, neither is set and /mcp says it is not configured.
+    if 'WORKOS_AUTHKIT_DOMAIN' in env:
+        env['TRUECOURSE_MCP_URL'] = 'https://' + config['fqdn'] + '/mcp'
     return env
 
 
