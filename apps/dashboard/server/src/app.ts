@@ -282,7 +282,7 @@ export function createApp(opts: CreateAppOptions): express.Express {
   app.use('/api/repos', projectResolver, guardRouter);
   app.use('/api/repos', projectResolver, guardActionsRouter);
   app.use('/api/repos', projectResolver, sessionsRouter);
-  if (opts.pulls) app.use('/api/repos', projectResolver, createPullsRouter({ pulls: opts.pulls.store, checks: opts.pulls.checks }));
+  if (opts.pulls) app.use('/api/repos', projectResolver, createPullsRouter({ pulls: opts.pulls.store }));
 
   // Nothing under /api answered: say so as JSON. Without this a GET here falls
   // through to the SPA's index.html with a 200 and a POST to Express's HTML

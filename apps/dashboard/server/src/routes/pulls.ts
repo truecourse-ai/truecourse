@@ -7,8 +7,6 @@
  *        Agent.
  *   GET  /api/repos/:id/pulls/:number/checks/:checkId  one check with its
  *        full report — what the check's run on the Agent page shows.
- *   POST /api/repos/:id/pulls/:number/rerun            a new attempt on the
- *        pull request's current head; 202 with the check and its job.
  *   GET  /api/context/pull-requests                     every open pull
  *        request of the workspace whose latest check settled, with the
  *        conflicts it created and the sections it moved — the rows Context ›
@@ -19,7 +17,7 @@
  * pull request row names the workspace whose check it was, which can differ
  * from the repository's when a source-only repository was checked in one
  * workspace and connected in another: a row of another workspace is not
- * listed, not read and not re-run here either.
+ * listed or read here either. A check is re-run from GitHub.
  */
 
 import { Router, type NextFunction, type Request, type Response } from 'express';
@@ -34,12 +32,9 @@ import type {
   WorkspacePullRequestRow,
 } from '@truecourse/shared';
 import { orgOf } from '../services/workspace-llm.service.js';
-import type { PullRequestChecks } from '../services/pull-request-checks.service.js';
 
 export interface PullsRouterDeps {
   pulls: PullRequestStore;
-  /** Absent when GitHub is not configured: a re-run then answers 503. */
-  checks: PullRequestChecks | null;
 }
 
 const STATES: readonly (PullRequestState | 'all')[] = ['open', 'closed', 'merged', 'all'];
@@ -113,51 +108,6 @@ export function createPullsRouter(deps: PullsRouterDeps): Router {
         return;
       }
       res.json({ check });
-    } catch (e) {
-      next(e);
-    }
-  });
-
-  router.post('/:id/pulls/:number/rerun', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const org = orgOf(req);
-      const repo = await resolveProjectForRequest(org, req.params.id as string);
-      const pr = await deps.pulls.getPullRequest(repo.name, numberOf(req));
-      if (!pr || pr.workspaceOrgId !== org) {
-        res.status(404).json({ error: 'No such pull request.' });
-        return;
-      }
-      if (!deps.checks) {
-        res.status(503).json({ error: 'GitHub is not configured on this server, so pull requests cannot be checked.' });
-        return;
-      }
-      if (pr.state !== 'open') {
-        res.status(409).json({ error: `#${pr.number} is ${pr.state}; only an open pull request is checked.` });
-        return;
-      }
-      // A draft is held everywhere else; a re-run does not judge it early.
-      if (pr.draft) {
-        res.status(409).json({ error: `#${pr.number} is a draft; it is checked when it is ready for review.` });
-        return;
-      }
-      if (await deps.pulls.activeCheck(pr.repoFullName, pr.number)) {
-        res.status(409).json({ error: `#${pr.number} is being checked now.` });
-        return;
-      }
-      const started = await deps.checks.start(pr);
-      if (started.status === 'disabled') {
-        res.status(409).json({ error: `Pull request checks are off for ${pr.repoFullName}; turn them on in its Settings.` });
-        return;
-      }
-      if (started.status === 'other-base') {
-        res.status(409).json({ error: `#${pr.number} targets ${pr.baseRef}; only pull requests into the default branch are checked.` });
-        return;
-      }
-      if (started.status !== 'queued') {
-        res.status(409).json({ error: `#${pr.number}'s check could not be started: ${started.status}.` });
-        return;
-      }
-      res.status(202).json({ checkId: started.checkId, jobId: started.jobId });
     } catch (e) {
       next(e);
     }

@@ -1,7 +1,6 @@
 /**
  * The pull request routes: a repository's pull requests with their latest
- * check in one line, one check with its report, a re-run as a new attempt,
- * and the workspace-wide read Context draws its pull request rows from. A
+ * check in one line, one check with its report, and the workspace-wide read Context draws its pull request rows from. A
  * repository another workspace connected is not found, as everywhere.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -19,20 +18,15 @@ import { setupTestFixture, teardownTestFixture, type TestFixture } from '../help
 import { memoryContextStore } from '../helpers/memory-context-store';
 import { memorySpecStore } from '../helpers/memory-spec-store';
 import { memoryPullRequestStore, type MemoryPullRequestStore } from '../helpers/memory-pull-requests';
-import type { CheckStart, PullRequestChecks } from '../../apps/dashboard/server/src/services/pull-request-checks.service';
+import type { PullRequestChecks } from '../../apps/dashboard/server/src/services/pull-request-checks.service';
 
 let app: Express;
 let fixture: TestFixture;
 let pulls: MemoryPullRequestStore;
-let started: PullRequestRecord[];
 let rechecked: string[];
-let startAnswer: CheckStart;
 
 const checks: PullRequestChecks = {
-  start: async (pr) => {
-    started.push(pr);
-    return startAnswer;
-  },
+  start: async () => ({ status: 'queued', checkId: 'check_new', jobId: 'job_new' }),
   supersede: async () => {},
   rerunBlockedByConflict: async (org) => {
     rechecked.push(org);
@@ -85,9 +79,7 @@ const report = (over: Partial<PullRequestCheckReport> = {}): PullRequestCheckRep
 beforeEach(async () => {
   fixture = await setupTestFixture();
   pulls = memoryPullRequestStore();
-  started = [];
   rechecked = [];
-  startAnswer = { status: 'queued', checkId: 'check_new', jobId: 'job_new' };
   setContextStore(memoryContextStore());
   setSpecStore(memorySpecStore());
   app = createTestApp({ pulls: { store: pulls, checks } });
@@ -138,7 +130,7 @@ describe('GET /api/repos/:id/pulls', () => {
     await request(app).get('/api/repos/nobodys-repo/pulls').expect(404);
   });
 
-  it('leaves out, refuses to read and refuses to re-run a pull request another workspace checked', async () => {
+  it('leaves out and refuses to read a pull request another workspace checked', async () => {
     // The repository was a context source of another workspace before this
     // one connected it; the rows its checks left are that workspace's.
     await pulls.savePullRequest(pr(1, { workspaceOrgId: 'org_other' }));
@@ -147,8 +139,6 @@ describe('GET /api/repos/:id/pulls', () => {
     const res = await request(app).get(`/api/repos/${fixture.project.slug}/pulls`).expect(200);
     expect(res.body.pullRequests.map((p: { number: number }) => p.number)).toEqual([2]);
     await request(app).get(`/api/repos/${fixture.project.slug}/pulls/1/checks/${check.id}`).expect(404);
-    await request(app).post(`/api/repos/${fixture.project.slug}/pulls/1/rerun`).expect(404);
-    expect(started).toEqual([]);
   });
 });
 
@@ -161,39 +151,6 @@ describe('GET /api/repos/:id/pulls/:number/checks/:checkId', () => {
     expect(res.body.check).toMatchObject({ id: check.id, reason: 'clean', report: report() });
     await request(app).get(`/api/repos/${fixture.project.slug}/pulls/2/checks/${check.id}`).expect(404);
     await request(app).get(`/api/repos/${fixture.project.slug}/pulls/1/checks/nope`).expect(404);
-  });
-});
-
-describe('POST /api/repos/:id/pulls/:number/rerun', () => {
-  it('starts a new attempt on the current head and answers 202 with it', async () => {
-    await pulls.savePullRequest(pr(1));
-    const res = await request(app).post(`/api/repos/${fixture.project.slug}/pulls/1/rerun`).expect(202);
-    expect(res.body).toEqual({ checkId: 'check_new', jobId: 'job_new' });
-    expect(started.map((p) => p.number)).toEqual([1]);
-  });
-
-  it('refuses a closed pull request, an unknown one, a draft, one being checked, and a busy start', async () => {
-    await pulls.savePullRequest(pr(1, { state: 'merged' }));
-    await request(app).post(`/api/repos/${fixture.project.slug}/pulls/1/rerun`).expect(409);
-    await request(app).post(`/api/repos/${fixture.project.slug}/pulls/9/rerun`).expect(404);
-    await pulls.savePullRequest(pr(3, { draft: true }));
-    await request(app).post(`/api/repos/${fixture.project.slug}/pulls/3/rerun`).expect(409);
-    await pulls.savePullRequest(pr(4));
-    await pulls.createCheck({ repoFullName: fixture.project.name, number: 4, headSha: 'head-4' });
-    await request(app).post(`/api/repos/${fixture.project.slug}/pulls/4/rerun`).expect(409);
-    expect(started).toEqual([]);
-    await pulls.savePullRequest(pr(2));
-    startAnswer = { status: 'busy' };
-    await request(app).post(`/api/repos/${fixture.project.slug}/pulls/2/rerun`).expect(409);
-    startAnswer = { status: 'other-base' };
-    const other = await request(app).post(`/api/repos/${fixture.project.slug}/pulls/2/rerun`).expect(409);
-    expect(other.body.error).toContain('only pull requests into the default branch are checked');
-  });
-
-  it('answers 503 when GitHub is not configured', async () => {
-    app = createTestApp({ pulls: { store: pulls, checks: null } });
-    await pulls.savePullRequest(pr(1));
-    await request(app).post(`/api/repos/${fixture.project.slug}/pulls/1/rerun`).expect(503);
   });
 });
 
