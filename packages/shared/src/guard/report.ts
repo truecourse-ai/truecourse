@@ -713,14 +713,12 @@ export type GuardOrphanedDismissal = z.infer<typeof GuardOrphanedDismissalSchema
  * A `dismissedFlows` entry in `scenarios/decisions.json` that matched NO live flow
  * after synthesis — the flow it named was re-composed away (or renamed past its
  * identity overlap). Surfaced so a stale flow dismissal is never silently honored,
- * mirroring {@link GuardOrphanedDismissalSchema} for claims.
+ * mirroring {@link GuardOrphanedDismissalSchema} for claims. Not `.strict()`, so
+ * a report that still carries the dismissal's old `title` parses.
  */
-export const GuardOrphanedFlowDismissalSchema = z
-  .object({
-    flowId: z.string(),
-    title: z.string(),
-  })
-  .strict()
+export const GuardOrphanedFlowDismissalSchema = z.object({
+  flowId: z.string(),
+})
 export type GuardOrphanedFlowDismissal = z.infer<typeof GuardOrphanedFlowDismissalSchema>
 
 /** An area (or the epic pass, as `(epic)`) whose flow synthesis did not settle. */

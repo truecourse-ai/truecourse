@@ -41,7 +41,6 @@ function claim(over: Partial<GuardDismissedClaim> = {}): GuardDismissedClaim {
 function dismissedFlow(over: Partial<GuardDismissedFlow> = {}): GuardDismissedFlow {
   return {
     flowId: 'task-lifecycle',
-    title: 'Task lifecycle',
     dismissedAt: '2026-07-08T00:00:00.000Z',
     ...over,
   };
@@ -99,7 +98,6 @@ describe('guard decisions over the file store', () => {
     expect(next.dismissedFlows).toEqual([
       {
         flowId: 'task-lifecycle',
-        title: 'Task lifecycle',
         dismissedAt: '2026-07-08T00:00:00.000Z',
         note: 'not a user path',
       },
@@ -115,13 +113,12 @@ describe('guard decisions over the file store', () => {
     const next = await dismissGuardFlow(
       repo,
       dismissedFlow({
-        title: 'Task lifecycle (renamed)',
         dismissedAt: '2026-07-09T00:00:00.000Z',
         note: 'second',
       }),
     );
     expect(next.dismissedFlows).toHaveLength(1);
-    expect(next.dismissedFlows[0]).toMatchObject({ title: 'Task lifecycle (renamed)', note: 'second' });
+    expect(next.dismissedFlows[0]).toMatchObject({ dismissedAt: '2026-07-09T00:00:00.000Z', note: 'second' });
   });
 
   it('leaves dismissedClaims untouched — the two tiers are independent', async () => {

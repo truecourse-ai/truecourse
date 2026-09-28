@@ -17,22 +17,36 @@ export interface RepoOwnershipLookup {
 }
 
 /**
- * May this caller act on this registry entry? A repository exists here only by
- * being connected, so it belongs to exactly one workspace and is invisible to
- * every other one — on the list, on `/:id`, and on every project-scoped
- * router. CLOSED by construction: no store and no row both mean nobody sees
- * it, never everybody.
+ * May this workspace act on this registry entry? A repository exists here only
+ * by being connected, so it belongs to exactly one workspace and is invisible
+ * to every other one — on the list, on `/:id`, on every project-scoped router
+ * and on every MCP tool. CLOSED by construction: no store and no row both mean
+ * nobody sees it, never everybody.
  */
 export async function isVisibleTo(
   links: RepoOwnershipLookup | null | undefined,
-  req: Request,
+  org: string | null | undefined,
   entry: RegistryEntry,
 ): Promise<boolean> {
-  if (!links) return false;
-  const org = req.user?.organizationId;
-  if (!org) return false;
+  if (!links || !org) return false;
   const link = await links.getRepo(entry.name);
   return link !== null && link.workspaceOrgId === org;
+}
+
+/**
+ * The entry a slug names in this workspace, when the workspace may act on it;
+ * null otherwise. Another workspace's slug is not found in this workspace's
+ * registry, and `isVisibleTo` then asserts the row's own workspace agrees.
+ */
+export async function resolveVisibleProject(
+  links: RepoOwnershipLookup | null | undefined,
+  org: string | null | undefined,
+  slug: string,
+): Promise<RegistryEntry | null> {
+  if (!org) return null;
+  const entry = await getProjectBySlug(org, slug);
+  if (!entry || !(await isVisibleTo(links, org, entry))) return null;
+  return entry;
 }
 
 /** Marks a request the resolver already admitted, so the project-scoped
@@ -68,9 +82,8 @@ export function createProjectResolver(links: RepoOwnershipLookup | null): Reques
         res.status(400).json({ error: 'Missing project slug' });
         return;
       }
-      const org = req.user?.organizationId;
-      const project = org ? await getProjectBySlug(org, slug) : null;
-      if (!project || !(await isVisibleTo(links, req, project))) {
+      const project = await resolveVisibleProject(links, req.user?.organizationId, slug);
+      if (!project) {
         res.status(404).json({ error: `Project "${slug}" not found` });
         return;
       }

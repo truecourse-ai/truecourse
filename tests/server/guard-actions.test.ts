@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import request from 'supertest';
 import { type Express } from 'express';
 
@@ -174,12 +175,34 @@ describe('Guard action routes', () => {
   //
   // Instant file writes like the claim pair: no job, no lock, no engine run.
 
-  const flowBody = { flowId: 'task-lifecycle', title: 'Task lifecycle' };
+  const flowBody = { flowId: 'task-lifecycle' };
+
+  /** The flow the dismissals below name: a decision is only taken on a flow the repository has. */
+  function seedFlow(): void {
+    writeJson('.truecourse/scenarios/flows.json', {
+      version: 1,
+      generatedAt: '2026-07-24T13:40:00.000Z',
+      flows: [
+        {
+          id: 'task-lifecycle',
+          title: 'Task lifecycle',
+          goal: 'Create and complete a task',
+          fingerprint: 'sha256:41ac',
+          milestones: [{ order: 1, doc: DOC, anchor: 'a', claimTitle: 'claim A' }],
+          bindings: [{ doc: DOC, anchor: 'a', fingerprint: 'sha256:a' }],
+          composedOf: [],
+          synthesisInputsHash: 'sha256:inputs',
+        },
+      ],
+      noFlowClaims: [],
+    });
+  }
 
   it('POST /guard/flows/dismiss records the flow and returns the updated decisions', async () => {
+    seedFlow();
     const res = await request(app).post(url('flows/dismiss')).send({ ...flowBody, note: 'not a user path' }).expect(200);
     expect(res.body.dismissedFlows).toEqual([
-      expect.objectContaining({ flowId: 'task-lifecycle', title: 'Task lifecycle', note: 'not a user path' }),
+      { flowId: 'task-lifecycle', dismissedAt: expect.any(String), note: 'not a user path' },
     ]);
     // It reads back from the stored decisions, not just the response.
     const read = await request(app).get(url('decisions')).expect(200);
@@ -189,6 +212,7 @@ describe('Guard action routes', () => {
   });
 
   it('POST /guard/flows/dismiss is idempotent on flowId', async () => {
+    seedFlow();
     await request(app).post(url('flows/dismiss')).send(flowBody).expect(200);
     const res = await request(app).post(url('flows/dismiss')).send({ ...flowBody, note: 'second' }).expect(200);
     expect(res.body.dismissedFlows).toHaveLength(1);
@@ -196,6 +220,7 @@ describe('Guard action routes', () => {
   });
 
   it('POST /guard/flows/undismiss removes it; an unknown flow is a no-op, not an error', async () => {
+    seedFlow();
     await request(app).post(url('flows/dismiss')).send(flowBody).expect(200);
     const noop = await request(app).post(url('flows/undismiss')).send({ flowId: 'never-dismissed' }).expect(200);
     expect(noop.body.dismissedFlows.map((f: { flowId: string }) => f.flowId)).toEqual(['task-lifecycle']);
@@ -203,9 +228,11 @@ describe('Guard action routes', () => {
     expect(res.body.dismissedFlows).toEqual([]);
   });
 
-  it('POST /guard/flows/dismiss without a flowId or title is a 400', async () => {
-    await request(app).post(url('flows/dismiss')).send({ title: 'Task lifecycle' }).expect(400);
-    await request(app).post(url('flows/dismiss')).send({ flowId: 'task-lifecycle' }).expect(400);
+  it('POST /guard/flows/dismiss without a flowId is a 400, and a flow the repository lacks is a 404', async () => {
+    seedFlow();
+    await request(app).post(url('flows/dismiss')).send({ note: 'no id' }).expect(400);
+    const missing = await request(app).post(url('flows/dismiss')).send({ flowId: 'no-such-flow' }).expect(404);
+    expect(missing.body.error).toBe('Flow not found: no-such-flow');
     await request(app).post(url('flows/undismiss')).send({}).expect(400);
     const read = await request(app).get(url('decisions')).expect(200);
     expect(read.body.dismissedFlows).toEqual([]);
@@ -213,6 +240,7 @@ describe('Guard action routes', () => {
 
   // The dismissal is a decision, never a trigger: neither engine driver may run.
   it('POST /guard/flows/dismiss never starts a guard job', async () => {
+    seedFlow();
     await request(app).post(url('flows/dismiss')).send(flowBody).expect(200);
     expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
     expect(vi.mocked(guardRunInProcess)).not.toHaveBeenCalled();
@@ -227,6 +255,7 @@ describe('Guard dismiss/undismiss routes (hosted store)', () => {
   let app: Express;
   let fixture: TestFixture;
   let client: PGlite;
+  let guardStore: PgGuardStore;
 
   const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
   const claimA = { doc: 'docs/cli.md', anchor: 'a', title: 'claim A' };
@@ -239,7 +268,8 @@ describe('Guard dismiss/undismiss routes (hosted store)', () => {
     client = new PGlite();
     const db = drizzle(client, { schema }) as unknown as Db;
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-    setGuardStore(new PgGuardStore(db));
+    guardStore = new PgGuardStore(db);
+    setGuardStore(guardStore);
   });
   afterEach(async () => {
     resetGuardStore();
@@ -270,7 +300,35 @@ describe('Guard dismiss/undismiss routes (hosted store)', () => {
   });
 
   it('POST /guard/flows/dismiss writes the flow tier of the same row', async () => {
-    const flow = { flowId: 'task-lifecycle', title: 'Task lifecycle' };
+    // The flow the dismissal names, as the hosted store holds it: in a scenario set.
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-flow-'));
+    try {
+      fs.writeFileSync(
+        path.join(src, 'flows.json'),
+        JSON.stringify({
+          version: 1,
+          generatedAt: '2026-07-24T13:40:00.000Z',
+          flows: [
+            {
+              id: 'task-lifecycle',
+              title: 'Task lifecycle',
+              goal: 'Create and complete a task',
+              fingerprint: 'sha256:41ac',
+              milestones: [{ order: 1, doc: 'docs/cli.md', anchor: 'a', claimTitle: 'claim A' }],
+              bindings: [{ doc: 'docs/cli.md', anchor: 'a', fingerprint: 'sha256:a' }],
+              composedOf: [],
+              synthesisInputsHash: 'sha256:inputs',
+            },
+          ],
+          noFlowClaims: [],
+        }),
+      );
+      fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ flows: [] }));
+      await guardStore.saveScenarios({ repoKey: fixture.project.path, commitSha: 'abc1234' }, src);
+    } finally {
+      fs.rmSync(src, { recursive: true, force: true });
+    }
+    const flow = { flowId: 'task-lifecycle' };
     await request(app).post(url('flows/dismiss')).send(flow).expect(200);
     const read = await request(app).get(url('decisions')).expect(200);
     expect(read.body.dismissedFlows.map((f: { flowId: string }) => f.flowId)).toEqual(['task-lifecycle']);

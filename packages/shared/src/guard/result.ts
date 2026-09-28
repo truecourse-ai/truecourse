@@ -440,6 +440,25 @@ export function guardResultRunId(
   return result.runId ?? envelope.runId
 }
 
+/**
+ * The outcomes that are a FAILURE: a test ran and the product disagreed (`fail`)
+ * or the run could not complete it (`error`). The one definition every surface
+ * counts failures by — a run's verdict, the adjudication set, a claim's
+ * `failing`, the failures a reader is shown. `blocked`, `stale` and `orphaned`
+ * never executed, so nothing failed.
+ */
+export const GUARD_FAILURE_OUTCOMES = ['fail', 'error'] as const satisfies readonly GuardOutcome[]
+
+/** Is this outcome a failure ({@link GUARD_FAILURE_OUTCOMES})? */
+export function isGuardFailure(outcome: GuardOutcome): boolean {
+  return (GUARD_FAILURE_OUTCOMES as readonly GuardOutcome[]).includes(outcome)
+}
+
+/** Did this run fail — did any of its tests fail, counted from its summary? */
+export function guardSummaryFailed(summary: Pick<GuardSummary, 'fail' | 'error'>): boolean {
+  return summary.fail > 0 || summary.error > 0
+}
+
 /** When a recorded result last ran — the row's own timestamp, else the envelope's.
  *  Same rule as {@link guardResultRunId}. */
 export function guardResultRanAt(

@@ -344,11 +344,14 @@ function AuthoringAttempts({
  */
 function DismissFlowAction({
   flowId,
-  title,
+  dismissed,
+  note,
   decisions,
 }: {
   flowId: string;
-  title: string;
+  /** Whether the flow read says it is dismissed. */
+  dismissed: boolean;
+  note?: string;
   decisions: GuardDecisionsState;
 }) {
   const [ruling, setRuling] = useState(false);
@@ -360,7 +363,6 @@ function DismissFlowAction({
     };
   }, []);
 
-  const dismissal = decisions.flowDismissal(flowId);
   const rule = async (write: () => Promise<void>) => {
     setRuling(true);
     try {
@@ -370,7 +372,7 @@ function DismissFlowAction({
     }
   };
 
-  if (dismissal) {
+  if (dismissed) {
     return (
       <div>
         <div className={LABEL}>Dismissed</div>
@@ -385,9 +387,9 @@ function DismissFlowAction({
             Un-dismiss
           </button>
         </p>
-        {dismissal.note && (
+        {note && (
           <p className="mt-1 text-[11px] italic leading-relaxed text-muted-foreground">
-            {dismissal.note}
+            {note}
           </p>
         )}
       </div>
@@ -406,7 +408,7 @@ function DismissFlowAction({
           type="button"
           disabled={ruling}
           onClick={() =>
-            void rule(() => decisions.dismissFlow({ flowId, title }))
+            void rule(() => decisions.dismissFlow({ flowId }))
           }
           className={`${BTN} disabled:opacity-50`}
         >
@@ -570,7 +572,7 @@ export function GuardFlowDetail({
   /** Jump to the Dependencies tab, on the named service's card. */
   onOpenExternals?: (service?: string) => void;
 }) {
-  const dismissed = decisions?.flowDismissal(detail.flowId) != null;
+  const dismissed = detail.dismissed;
   // OUR OWN withheld defects (a faulty scenario, a fidelity rejection). They are
   // never a status and never red, nothing was stored and nothing in the repo
   // is broken, so they ride as a muted marker beside the status chip.
@@ -779,7 +781,8 @@ export function GuardFlowDetail({
                               <div className="space-y-3">
                                 <DismissFlowAction
                                   flowId={detail.flowId}
-                                  title={detail.title}
+                                  dismissed={detail.dismissed}
+                                  {...(detail.dismissalNote ? { note: detail.dismissalNote } : {})}
                                   decisions={decisions}
                                 />
                                 {claim && (
@@ -845,7 +848,8 @@ export function GuardFlowDetail({
             {decisions && !test && (
               <DismissFlowAction
                 flowId={detail.flowId}
-                title={detail.title}
+                dismissed={detail.dismissed}
+                {...(detail.dismissalNote ? { note: detail.dismissalNote } : {})}
                 decisions={decisions}
               />
             )}

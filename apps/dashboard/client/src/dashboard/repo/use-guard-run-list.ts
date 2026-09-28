@@ -5,12 +5,12 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { GuardHistoryEntry } from '@truecourse/shared';
+import { guardSummaryFailed, type GuardHistoryEntry } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
 /** A stored run's verdict: one failure or one error makes the run a failure. */
 export function guardRunVerdict(entry: GuardHistoryEntry): 'pass' | 'fail' {
-  return entry.summary.fail > 0 || entry.summary.error > 0 ? 'fail' : 'pass';
+  return guardSummaryFailed(entry.summary) ? 'fail' : 'pass';
 }
 
 export interface GuardRunListState {

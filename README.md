@@ -80,6 +80,16 @@ GitHub App needs **Pull requests: read** and **Checks: read and write**
 permissions, plus subscriptions to the **Pull request**, **Check run** and
 **Check suite** events.
 
+## Connect Claude Code
+
+The server has an MCP endpoint, `/mcp`, that lets Claude Code read the
+workspace (documents, conflicts, flows, runs, failures, coverage, dependencies,
+sources) and make the decisions the dashboard offers.
+
+```bash
+claude mcp add --transport http truecourse http://localhost:3001/mcp
+```
+
 ## Telemetry
 
 TrueCourse sends usage analytics to PostHog: which actions are taken and

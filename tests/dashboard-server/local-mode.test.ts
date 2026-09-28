@@ -38,7 +38,7 @@ import {
 } from '@truecourse/core/lib/context-store';
 
 /** Local mode issues no invite links; the store is handed over and never read. */
-const deps = { inviteLinks: new MemoryInviteLinkStore(), manyWorkspaces: false };
+const deps = { inviteLinks: new MemoryInviteLinkStore(), manyWorkspaces: false, port: 3001 };
 
 const WORKOS_ENV = [
   'WORKOS_API_KEY',
@@ -316,7 +316,7 @@ describe('the local workspace saying what its product is', () => {
 });
 
 describe('what the server tells the client about itself', () => {
-  it('reports the mode, and only the mode, on the public capabilities endpoint', async () => {
+  it('reports the mode and the MCP, nothing about a workspace, on the public capabilities endpoint', async () => {
     const app = createApp({
       serveStatic: false,
       authVerifier: null,
@@ -328,6 +328,7 @@ describe('what the server tells the client about itself', () => {
     // nothing about an edition or a feature list is here to be read.
     expect((await request(app).get('/api/capabilities').expect(200)).body).toEqual({
       mode: 'hosted',
+      mcp: { available: false },
     });
 
     process.env.TRUECOURSE_MODE = 'local';

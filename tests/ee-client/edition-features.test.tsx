@@ -126,7 +126,7 @@ afterEach(() => {
 });
 
 describe('Settings › Connections', () => {
-  it('is a section of Settings, after the ones the product has', async () => {
+  it('is a section of Settings, after the ones the product has and above MCP', async () => {
     renderAt('/settings');
     const sections = await screen.findByRole('navigation', { name: 'Settings sections' });
     await waitFor(() =>
@@ -138,6 +138,7 @@ describe('Settings › Connections', () => {
         'Usage',
         'Credits',
         'Connections',
+        'MCP',
       ]),
     );
   });
@@ -154,6 +155,7 @@ describe('Settings › Connections', () => {
         'Models',
         'Usage',
         'Credits',
+        'MCP',
       ]),
     );
   });

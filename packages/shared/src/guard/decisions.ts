@@ -54,16 +54,14 @@ export type GuardClaimIdentity = Pick<GuardDismissedClaim, 'doc' | 'anchor' | 't
 
 /**
  * One dismissed FLOW. Identity is `flowId` (the flow's stable handle in
- * `scenarios/flows.json`, which survives re-synthesis by milestone overlap);
- * `title` is display copy, kept so a dismissal reads without loading the flows
- * file. A dismissed flow is dropped at generate — never re-authored, never
- * re-findinged. Not `.strict()`, like the claim dismissal above.
+ * `scenarios/flows.json`, which survives re-synthesis by milestone overlap); a
+ * reader that wants its title reads the flow. A dismissed flow is dropped at
+ * generate — never re-authored, never re-findinged. Not `.strict()`, like the
+ * claim dismissal above, so an older row that carried a title still parses.
  */
 export const GuardDismissedFlowSchema = z.object({
   /** The flow's id — the identity. */
   flowId: z.string().min(1),
-  /** The flow's title when it was dismissed, for display. */
-  title: z.string().min(1),
   /** ISO timestamp the dismissal was recorded. */
   dismissedAt: z.string(),
   /** Optional free-text rationale ("not a user path", "won't fix", …). */

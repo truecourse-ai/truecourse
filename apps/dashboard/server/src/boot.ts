@@ -136,6 +136,7 @@ export async function startServer(): Promise<void> {
   const auth = createAuth(mode, {
     inviteLinks: new PgInviteLinkStore(getDb()),
     manyWorkspaces: registeredServerFeatures().some((f) => f.manyWorkspaces === true),
+    port,
   });
   log.info(`[Server] ${mode} mode`);
 
@@ -368,6 +369,7 @@ export async function startServer(): Promise<void> {
     jobs,
     pulls: { store: pulls, checks: pullRequestChecks },
     featureRouters,
+    mcpAuth: auth.mcp,
     // Who a workspace IS, for the operator's Credits page. Local mode has no
     // identity provider to ask, and no operator routes to ask for.
     ...(auth.workspaceSession

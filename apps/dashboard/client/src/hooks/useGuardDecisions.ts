@@ -28,14 +28,12 @@ import type {
   GuardClaimIdentity,
   GuardDecisions,
   GuardDismissedClaim,
-  GuardDismissedFlow,
 } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
-/** What a flow dismissal is written with: the id it keys on plus its display copy. */
+/** What a flow dismissal is written with: the id it keys on, and why. */
 export interface GuardFlowDismissalInput {
   flowId: string;
-  title: string;
   note?: string;
 }
 
@@ -46,14 +44,16 @@ export interface GuardDecisionsState {
   dismiss: (claim: GuardClaimIdentity) => Promise<void>;
   /** Reverse it. */
   undismiss: (claim: GuardClaimIdentity) => Promise<void>;
-  /** The recorded dismissal for this flow, or undefined. */
-  flowDismissal: (flowId: string) => GuardDismissedFlow | undefined;
-  /** Every dismissed flow id, what a list marks its rows from. */
-  dismissedFlowIds: ReadonlySet<string>;
   /** Rule the whole flow out, the next generate drops it with its tests. */
   dismissFlow: (flow: GuardFlowDismissalInput) => Promise<void>;
   /** Reverse it. */
   undismissFlow: (flowId: string) => Promise<void>;
+  /**
+   * Bumped by every flow ruling this hook writes. Whether a flow is dismissed
+   * rides the flow reads themselves (`dismissed` on the list and the detail),
+   * so a page re-reads them on this.
+   */
+  flowRevision: number;
 }
 
 export function useGuardDecisions(
@@ -84,10 +84,7 @@ export function useGuardDecisions(
       ),
     [decisions],
   );
-  const flowsById = useMemo(
-    () => new Map((decisions.dismissedFlows ?? []).map((f) => [f.flowId, f] as const)),
-    [decisions],
-  );
+  const [flowRevision, setFlowRevision] = useState(0);
 
   // ONE write tail for both tiers: run the route and land the decisions it
   // answers with. A disabled hook writes nothing at all.
@@ -104,11 +101,16 @@ export function useGuardDecisions(
       dismissalFor: (claim) => claimsByKey.get(dismissedClaimKey(claim.doc, claim.anchor, claim.title)),
       dismiss: (claim) => write((id) => api.dismissGuardClaim(id, claim)),
       undismiss: (claim) => write((id) => api.undismissGuardClaim(id, claim)),
-      flowDismissal: (flowId) => flowsById.get(flowId),
-      dismissedFlowIds: new Set(flowsById.keys()),
-      dismissFlow: (flow) => write((id) => api.dismissGuardFlow(id, flow)),
-      undismissFlow: (flowId) => write((id) => api.undismissGuardFlow(id, flowId)),
+      dismissFlow: async (flow) => {
+        await write((id) => api.dismissGuardFlow(id, flow));
+        setFlowRevision((n) => n + 1);
+      },
+      undismissFlow: async (flowId) => {
+        await write((id) => api.undismissGuardFlow(id, flowId));
+        setFlowRevision((n) => n + 1);
+      },
+      flowRevision,
     }),
-    [claimsByKey, flowsById, write],
+    [claimsByKey, flowRevision, write],
   );
 }

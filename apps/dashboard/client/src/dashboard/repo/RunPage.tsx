@@ -6,6 +6,7 @@
  */
 
 import { useMemo } from 'react';
+import { guardSummaryFailed } from '@truecourse/shared';
 import { FlaskConical, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { CHIP_CLASS, PageHeader } from '@/dashboard/ui/bits';
@@ -32,7 +33,7 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
   const active = activeId ? byId.get(activeId) ?? null : null;
 
   const env = shown?.run;
-  const verdict = shown && (shown.summary.fail > 0 || shown.summary.error > 0) ? 'fail' : 'pass';
+  const verdict = shown && guardSummaryFailed(shown.summary) ? 'fail' : 'pass';
   const totalMs = (shown?.scenarios ?? []).reduce((n, s) => n + s.durationMs, 0);
 
   return (

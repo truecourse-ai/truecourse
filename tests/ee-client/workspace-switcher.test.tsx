@@ -154,7 +154,7 @@ function renderShell() {
 function renderShellIn(mode: ServerMode) {
   render(
     <MemoryRouter initialEntries={['/']}>
-      <AppProvider initial={{ mode }}>
+      <AppProvider initial={{ mode, mcp: { available: false } }}>
         <AuthProvider>
           <Routes>
             <Route path="/*" element={<DashboardApp />} />
