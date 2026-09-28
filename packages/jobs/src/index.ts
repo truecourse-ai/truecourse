@@ -287,9 +287,12 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
       });
     },
     async stop() {
-      const stopping = runner;
+      // The runner drains first and is let go after: a job that finishes
+      // during the drain still enqueues what it chains, which waits in the
+      // queue for the next start (whose reap owes it again). Let go before,
+      // that enqueue failed and the chain ended with nothing to restart it.
+      await runner?.stop().catch(() => undefined);
       runner = null;
-      await stopping?.stop().catch(() => undefined);
       await hub.stop().catch(() => undefined);
     },
     routers: {

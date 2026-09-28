@@ -180,3 +180,34 @@ describe('the queue name', () => {
     await jobs.stop();
   });
 });
+
+describe('a stop', () => {
+  it('still enqueues what a job finishing during the drain chains', async () => {
+    const added: string[] = [];
+    let chained: Promise<string | null> | null = null;
+    let jobs!: Jobs;
+    const fakeRunner = {
+      addJob: async (name: string) => {
+        added.push(name);
+      },
+      // The drain: an in-flight job settles and hands its chain on.
+      stop: async () => {
+        chained = jobs.singleFlightEnqueue('test.job', ORG, 'test.job:next', { repo: 'acme/widgets' });
+        await chained;
+      },
+    } as unknown as Runner;
+    jobs = createJobs({
+      db,
+      connectionString: 'postgres://unused',
+      tasks: [],
+      hub: { start: async () => {}, stop: async () => {}, subscribe: () => () => {} },
+      startWorker: async () => fakeRunner,
+    });
+    await jobs.start();
+    await jobs.stop();
+
+    expect(await chained).not.toBeNull();
+    expect(added).toEqual(['test.job']);
+    expect(jobs.workerStarted).toBe(false);
+  });
+});
