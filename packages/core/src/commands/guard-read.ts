@@ -25,6 +25,7 @@ import {
   readGuardFlowsCorpus as readTreeFlowsCorpus,
   readGuardResult as readTreeGuardResult,
   readManifest as readTreeManifest,
+  readGuardDecisions as readTreeGuardDecisions,
   guardClaimsPath,
   dependenciesPath,
   guardFlowsPath,
@@ -559,6 +560,7 @@ export function readGuardRunFlowSummaryFromTree(treeDir: string, latest: GuardLa
     latest,
     result,
     scenarios,
+    dismissals: new Map(readTreeGuardDecisions(treeDir).dismissedFlows.map((d) => [d.flowId, d])),
   }
   const summary: GuardRunFlowSummary = {}
   for (const flowId of allFlowIds(view)) {
