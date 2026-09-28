@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parsePrismaSchema } from '../../packages/source-facts/src/schema-parsers/prisma'
+import { parseDrizzleSchema } from '../../packages/source-facts/src/schema-parsers/drizzle'
 import { detectDatabases } from '../../packages/source-facts/src/database-detector'
 
 const SCHEMA = `datasource db {
@@ -59,6 +60,55 @@ describe('parsePrismaSchema — enums', () => {
     expect(user.columns.find((column) => column.name === 'plan')).toMatchObject({ type: 'Plan', isNullable: true })
     // A relation list is still not a column.
     expect(user.columns.map((column) => column.name)).not.toContain('links')
+  })
+})
+
+describe('parseDrizzleSchema — a namespace import', () => {
+  const NAMESPACED = `import * as pg from "drizzle-orm/pg-core";
+import { account } from "./account";
+
+export const note = pg.pgTable(
+	"note",
+	{
+		id: pg
+			.text("id")
+			.notNull()
+			.primaryKey()
+			.$defaultFn(() => generateId()),
+		title: pg.text("title").notNull(),
+		isPinned: pg.boolean("is_pinned").notNull().default(false),
+		accountId: pg
+			.text("account_id")
+			.notNull()
+			.references(() => account.id, { onDelete: "cascade" }),
+		createdAt: pg.timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [pg.index().on(t.accountId)],
+);
+
+export const tag = pg.pgTable("tag", {
+	name: pg.text("name").primaryKey(),
+});
+
+// Another module's builder, not drizzle's: never a table.
+export const other = elsewhere.pgTable("other", { id: elsewhere.text("id") });
+`
+
+  it('reads tables and columns built through the namespace', () => {
+    const { tables, relations } = parseDrizzleSchema(NAMESPACED)
+    expect(tables.map((table) => table.name)).toEqual(['note', 'tag'])
+    const note = tables[0]!
+    expect(note.primaryKey).toBe('id')
+    expect(note.columns.map((column) => [column.name, column.type])).toEqual([
+      ['id', 'text'],
+      ['title', 'text'],
+      ['isPinned', 'boolean'],
+      ['accountId', 'text'],
+      ['createdAt', 'timestamp'],
+    ])
+    expect(relations).toEqual([
+      expect.objectContaining({ sourceTable: 'note', targetTable: 'account', foreignKeyColumn: 'accountId' }),
+    ])
   })
 })
 

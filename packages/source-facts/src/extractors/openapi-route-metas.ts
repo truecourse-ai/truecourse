@@ -16,6 +16,12 @@
  * exists only in that literal, so a reader of route CALLS sees none of it. On
  * documenso the whole public API is 89 such metas and zero registrations.
  *
+ * oRPC states the same thing as a call in the procedure's own builder chain,
+ * `protectedProcedure.route({ method: 'PUT', path: '/notes/{id}' }).handler(…)`,
+ * and its OpenAPIHandler names the base as the `prefix` it handles requests
+ * under (`openAPIHandler.handle(request, { prefix: '/api/openapi' })`). Both
+ * are read here; the mapper decides whether that prefix is an oRPC base.
+ *
  * What this reader takes as an operation is deliberately just the LITERAL, not
  * the procedure it is attached to. The meta declares the address and the verb on
  * its own; linking it back to a procedure would need cross-file constant
@@ -59,10 +65,11 @@ export function extractOpenApiRouteMetas(
   tree: Tree,
   filePath: string,
   language: SupportedLanguage,
-): OpenApiRouteMeta[] {
-  if (!META_LANGUAGES.has(language)) return []
+): { metas: OpenApiRouteMeta[]; handlerPrefixes: string[] } {
+  if (!META_LANGUAGES.has(language)) return { metas: [], handlerPrefixes: [] }
 
   const metas: OpenApiRouteMeta[] = []
+  const handlerPrefixes = new Set<string>()
   const cursor = tree.walk()
 
   function traverse(): void {
@@ -71,6 +78,17 @@ export function extractOpenApiRouteMetas(
       const value = node.childForFieldName('value')
       const meta = value ? readOperation(value, filePath, node) : null
       if (meta) metas.push(meta)
+    } else if (node.type === 'call_expression') {
+      const method = calledMethod(node)
+      const args = node.childForFieldName('arguments')
+      if (method === 'route' && args && isProcedureChain(node)) {
+        const value = args.namedChild(0)
+        const meta = value ? readOperation(value, filePath, node) : null
+        if (meta) metas.push(meta)
+      } else if (method === 'handle' && args) {
+        const prefix = readHandlerPrefix(args)
+        if (prefix) handlerPrefixes.add(prefix)
+      }
     }
 
     if (cursor.gotoFirstChild()) {
@@ -80,7 +98,47 @@ export function extractOpenApiRouteMetas(
   }
 
   traverse()
-  return metas
+  return { metas, handlerPrefixes: [...handlerPrefixes] }
+}
+
+/** The method name a `receiver.method(…)` call invokes, or null for a bare call. */
+function calledMethod(call: SyntaxNode): string | null {
+  const callee = call.childForFieldName('function')
+  if (callee?.type !== 'member_expression') return null
+  return callee.childForFieldName('property')?.text ?? null
+}
+
+/**
+ * Whether a `.route({…})` call sits in an oRPC procedure chain — the builder it
+ * returns is carried on to a `.handler(…)`, as in
+ * `protectedProcedure.route({…}).input(…).handler(…)`. hapi's
+ * `server.route({ method, path, handler })` has the same object shape but is a
+ * route table entry with an absolute path, and nothing is chained onto it.
+ */
+function isProcedureChain(routeCall: SyntaxNode): boolean {
+  let node: SyntaxNode = routeCall
+  while (node.parent?.type === 'member_expression' && node.parent.childForFieldName('object')?.id === node.id) {
+    const member = node.parent
+    const call = member.parent
+    if (call?.type !== 'call_expression') return false
+    if (member.childForFieldName('property')?.text === 'handler') return true
+    node = call
+  }
+  return false
+}
+
+/** The `prefix` string of a `.handle(request, { prefix })` options argument. */
+function readHandlerPrefix(args: SyntaxNode): string | null {
+  const options = args.namedChild(1)
+  if (options?.type !== 'object') return null
+  for (let i = 0; i < options.namedChildCount; i++) {
+    const pair = options.namedChild(i)
+    if (pair?.type !== 'pair' || keyName(pair) !== 'prefix') continue
+    const value = pair.childForFieldName('value')
+    const prefix = value ? extractStringLiteral(value) : null
+    return prefix?.startsWith('/') ? prefix : null
+  }
+  return null
 }
 
 /** The property name a `pair` declares, quoted or not. */
@@ -91,7 +149,8 @@ function keyName(pair: SyntaxNode): string | null {
   return extractStringLiteral(key)
 }
 
-function readOperation(value: SyntaxNode, filePath: string, pair: SyntaxNode): OpenApiRouteMeta | null {
+/** An operation literal read off `value`; `site` is the declaration it is located at. */
+function readOperation(value: SyntaxNode, filePath: string, site: SyntaxNode): OpenApiRouteMeta | null {
   if (value.type !== 'object') return null
 
   const fields = new Map<string, SyntaxNode>()
@@ -126,10 +185,10 @@ function readOperation(value: SyntaxNode, filePath: string, pair: SyntaxNode): O
     ...(label ? { label } : {}),
     location: {
       filePath,
-      startLine: pair.startPosition.row + 1,
-      endLine: pair.endPosition.row + 1,
-      startColumn: pair.startPosition.column,
-      endColumn: pair.endPosition.column,
+      startLine: site.startPosition.row + 1,
+      endLine: site.endPosition.row + 1,
+      startColumn: site.startPosition.column,
+      endColumn: site.endPosition.column,
     },
   }
 }

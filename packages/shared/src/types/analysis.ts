@@ -394,11 +394,11 @@ export const RouteRegistrationSchema = z.object({
 export type RouteRegistration = z.infer<typeof RouteRegistrationSchema>
 
 /**
- * One `openapi: { method, path }` meta literal — the REST address an RPC
- * procedure ALSO answers at, declared beside the procedure rather than in any
- * route table (the `trpc-to-openapi` / `trpc-openapi` idiom, and documenso's
- * whole public API). The path is relative to wherever the OpenAPI handler is
- * mounted; the mapper composes it with the base the app serves its document at.
+ * One REST address an RPC procedure ALSO answers at, declared beside the
+ * procedure rather than in any route table: an `openapi: { method, path }` meta
+ * (the `trpc-to-openapi` / `trpc-openapi` idiom) or an oRPC procedure's
+ * `.route({ method, path })`. The path is relative to wherever the OpenAPI
+ * handler is mounted; the mapper composes it with the app's declared base.
  */
 export const OpenApiRouteMetaSchema = z.object({
   httpMethod: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']),
@@ -444,6 +444,15 @@ export const WebRouteSchema = z.object({
 })
 
 export type WebRoute = z.infer<typeof WebRouteSchema>
+
+/** A TanStack file-route ID, before pathless/group segments become an address. */
+export const TanStackRouteSchema = z.object({
+  routeId: z.string(),
+  hasComponent: z.boolean(),
+  location: SourceLocationSchema,
+})
+
+export type TanStackRoute = z.infer<typeof TanStackRouteSchema>
 
 // ---------------------------------------------------------------------------
 // Web Redirect
@@ -592,7 +601,16 @@ export const FileAnalysisSchema = z.object({
    *  procedures, relative to the OpenAPI mount; absent when none. */
   openApiRouteMetas: z.array(OpenApiRouteMetaSchema).optional(),
   /**
-   * Prefixes this file serves with a CATCH-ALL (`app.use('/api/v2/*', handler)`),
+   * The `prefix` an OpenAPI handler is asked to answer under here
+   * (`openAPIHandler.handle(request, { prefix: '/api/openapi' })`) — the base
+   * oRPC composes each procedure's `.route` path onto. Recorded whatever
+   * library the call belongs to; the mapper checks the file's imports. Absent
+   * when none.
+   */
+  openApiHandlerPrefixes: z.array(z.string()).optional(),
+  /**
+   * Prefixes this file serves with a CATCH-ALL (`app.use('/api/v2/*', handler)`,
+   * `app.all('/api/v2/*', handler)`),
    * wildcard stripped — recorded whatever shape the handler takes, so an inline
    * one counts. Not a mount: nothing is composed onto it. It says only "this file
    * answers everything under here", which is what identifies the base of a
@@ -603,6 +621,8 @@ export const FileAnalysisSchema = z.object({
   rpcRouters: z.array(RpcRouterSchema).optional(),
   /** Routes this file DECLARES as JSX (React Router); absent when none. */
   webRoutes: z.array(WebRouteSchema).optional(),
+  /** TanStack file routes and their rendering option; absent when none. */
+  tanStackRoutes: z.array(TanStackRouteSchema).optional(),
   /** Static redirects this file declares as a framework CONFIG table
    *  (`next.config.*`'s `redirects()`); absent when it declares none. */
   webRedirects: z.array(WebRedirectSchema).optional(),

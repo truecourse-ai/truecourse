@@ -23,6 +23,15 @@
  * same surface at several bases (documenso's `/api/v2` and `/api/v2-beta`)
  * derives it at each, because each is a live address.
  *
+ * oRPC states its base another way: the OpenAPIHandler is handed a `prefix`
+ * (`handle(request, { prefix: '/api/openapi' })`) in a file importing
+ * `@orpc/openapi`. That prefix is a base when a catch-all anywhere in the tree
+ * answers it, because the app routes to the handler from a different module.
+ *
+ * An `ALL` route is a catch-all and derives nothing, with one exception: an
+ * exact path whose handler comes from an MCP SDK transport module is the MCP
+ * endpoint, one POST operation.
+ *
  * The OpenAPI double-agent rule: an operation declared in an OpenAPI doc with NO
  * matching route registration is kept and marked `specOnly` — the
  * documented-but-unimplemented drift cross-check. The mark is only meaningful
@@ -31,7 +40,7 @@
  * "the mapper can't see your code" must never read as "your code lacks this".
  */
 
-import { canonicalRoutePath, type FileAnalysis, type Interface, type RouterMount } from '@truecourse/shared'
+import { canonicalRoutePath, type FileAnalysis, type Interface, type RouteRegistration, type RouterMount } from '@truecourse/shared'
 import { buildApiInterfaces, type ApiInterfaceSeed } from './api-interfaces.js'
 import { deriveRpcOperations } from './rpc-interfaces.js'
 
@@ -123,9 +132,13 @@ export function deriveApiInterfacesFromTree(
  */
 const OPENAPI_DOCUMENT_FILES = new Set(['openapi.json', 'swagger.json', 'openapi.yaml', 'openapi.yml'])
 
+/** The oRPC package whose handler states a meta base as its `prefix`. */
+const ORPC_OPENAPI = '@orpc/openapi'
+
 /**
  * The bases at which this tree serves an OpenAPI document AND answers everything
- * underneath — see THE META BASE RULE in the module note. Deduped, deterministic.
+ * underneath, plus the served oRPC handler prefixes — see THE META BASE RULE in
+ * the module note. Deduped, deterministic.
  */
 function collectMetaBases(
   fileAnalyses: readonly FileAnalysis[],
@@ -156,6 +169,18 @@ function collectMetaBases(
       if (!last || !OPENAPI_DOCUMENT_FILES.has(last)) continue
       const base = segments.slice(0, -1).join('/')
       if (catchAlls.has(base)) bases.add(base)
+    }
+  }
+
+  // oRPC's OpenAPIHandler is told its base as the `prefix` it handles under. The
+  // handler module is not the one routing to it, so the catch-all may sit in any
+  // file; what the rule still requires is that something answers that prefix.
+  const servedAnywhere = new Set([...catchAllsByFile.values()].flatMap((set) => [...set]))
+  for (const fa of fileAnalyses) {
+    if (!fa.imports.some((i) => i.source === ORPC_OPENAPI || i.source.startsWith(`${ORPC_OPENAPI}/`))) continue
+    for (const prefix of fa.openApiHandlerPrefixes ?? []) {
+      const base = canonicalRoutePath(prefix)
+      if (servedAnywhere.has(base)) bases.add(base)
     }
   }
   // `codeOps` is the composed view the rest of the derivation works from; a base
@@ -192,7 +217,7 @@ function collectMetaOperations(
 /**
  * Route registrations across every analyzed file, each path composed with its
  * file's full mount prefix. `ALL` routes are catch-alls, not operations a user
- * contract names — skipped.
+ * contract names — skipped, except an MCP endpoint (see {@link servesMcpTransport}).
  */
 function collectRouteOperations(fileAnalyses: readonly FileAnalysis[]): ApiInterfaceSeed[] {
   const prefixes = buildMountPrefixes(fileAnalyses)
@@ -200,15 +225,51 @@ function collectRouteOperations(fileAnalyses: readonly FileAnalysis[]): ApiInter
   for (const fa of fileAnalyses) {
     const prefix = prefixes.get(fa.filePath) ?? ''
     for (const route of fa.routeRegistrations ?? []) {
-      if (route.httpMethod === 'ALL') continue
+      const method = route.httpMethod === 'ALL' ? (servesMcpTransport(fa, route, fileAnalyses) ? 'POST' : null) : route.httpMethod
+      if (!method) continue
       seeds.push({
-        method: route.httpMethod,
+        method,
         path: canonicalRoutePath(composePath(prefix, route.path)),
         ...(route.handlerName ? { label: route.handlerName } : {}),
       })
     }
   }
   return seeds
+}
+
+/** MCP HTTP transport modules, excluding client, stdio and type-only imports. */
+const MCP_HTTP_TRANSPORTS = new Set([
+  '@modelcontextprotocol/sdk/server/streamableHttp.js',
+  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js',
+])
+
+/**
+ * Whether an `ALL` route at an exact path is an MCP endpoint: its handler (named,
+ * or the function an inline handler calls) is imported from a module that imports
+ * the MCP SDK — one hop, by the same import matching the mounts use. MCP clients
+ * talk JSON-RPC over POST to that one address, so it is one POST operation. A
+ * wildcard path stays a catch-all, whatever answers it.
+ */
+function servesMcpTransport(
+  fa: FileAnalysis,
+  route: RouteRegistration,
+  all: readonly FileAnalysis[],
+): boolean {
+  if (route.path.includes('*')) return false
+  const { startLine, startColumn, endLine, endColumn } = route.location
+  const handlers = route.handlerName
+    ? [route.handlerName]
+    : fa.calls.filter(({ location: loc }) =>
+      (loc.startLine > startLine || (loc.startLine === startLine && loc.startColumn >= startColumn)) &&
+      (loc.endLine < endLine || (loc.endLine === endLine && loc.endColumn <= endColumn)),
+    ).map((call) => call.callee)
+  return handlers.some((name) => {
+    const imp = fa.imports.find((i) => !i.isTypeOnly && i.specifiers.some((s) => (s.alias ?? s.name) === name))
+    if (!imp) return false
+    const targets = all.filter((t) => t !== fa && fileMatchesImportSource(fa.filePath, t.filePath, imp.source))
+    if (targets.length !== 1) return false
+    return targets[0]!.imports.some((i) => !i.isTypeOnly && MCP_HTTP_TRANSPORTS.has(i.source))
+  })
 }
 
 /**

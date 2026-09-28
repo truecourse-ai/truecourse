@@ -19,7 +19,7 @@ export function extractCalls(
   // Traverse the tree to find call expressions
   function traverse(node: SyntaxNode) {
     if (callNodeTypes.has(node.type)) {
-      const call = extractCallExpression(node, filePath, sourceCode, functionContext)
+      const call = extractCallExpression(node, filePath, functionContext)
       if (call) {
         calls.push(call)
       }
@@ -36,15 +36,19 @@ export function extractCalls(
   // extractJsxReferences returns empty for non-TSX/JSX files.
   const jsxRefs = extractJsxReferences(sourceCode, filePath)
   for (const ref of jsxRefs) {
-    const callerName = functionContext.get(ref.line) || undefined
+    // The root text excludes leading whitespace; compiler positions are relative
+    // to that text, while callers and source locations use the complete file.
+    const line = ref.line + tree.rootNode.startPosition.row
+    const column = ref.column + (ref.line === 0 ? tree.rootNode.startPosition.column : 0)
+    const callerName = functionContext.get(line) || undefined
     calls.push({
       callee: ref.callee,
       location: {
         filePath,
-        startLine: ref.line + 1,
-        endLine: ref.line + 1,
-        startColumn: ref.column,
-        endColumn: ref.column,
+        startLine: line + 1,
+        endLine: line + 1,
+        startColumn: column,
+        endColumn: column,
       },
       callerFunction: callerName,
     })
@@ -59,7 +63,6 @@ export function extractCalls(
 function extractCallExpression(
   callNode: SyntaxNode,
   filePath: string,
-  sourceCode: string,
   functionContext: Map<number, string>
 ): CallExpression | null {
   const functionNode = callNode.childForFieldName('function')
@@ -86,21 +89,19 @@ function extractCallExpression(
       functionNode.childForFieldName('name')
 
     if (objectNode && propertyNode) {
-      const receiver = sourceCode.slice(objectNode.startIndex, objectNode.endIndex)
-      const method = sourceCode.slice(propertyNode.startIndex, propertyNode.endIndex)
-      calleeName = `${receiver}.${method}`
+      calleeName = `${objectNode.text}.${propertyNode.text}`
     }
   } else {
     // Regular function call: func()
-    calleeName = sourceCode.slice(functionNode.startIndex, functionNode.endIndex)
+    calleeName = functionNode.text
   }
 
-  // Extract arguments
+  // Node text preserves the original source coordinates. Slicing rootNode.text
+  // at a file-relative index is wrong when the root omits leading whitespace.
   const args: string[] = []
   if (argumentsNode) {
     for (const argNode of argumentsNode.namedChildren) {
-      const argText = sourceCode.slice(argNode.startIndex, argNode.endIndex)
-      args.push(argText)
+      args.push(argNode.text)
     }
   }
 
