@@ -70,11 +70,6 @@ sentence. Documentation is kept or dropped by whether it describes that product,
 so nothing connects (no repository, no documentation source, no scan) until the
 workspace has said it.
 
-With API transport, Google Gemini uses full JSON Schema tool definitions with
-optional arguments and their limits preserved. Gemini 3 uses high thinking for
-Flow setup and web interface authoring, with draft deadlines stated at the start
-of each session. Other Gemini models keep their default thinking settings.
-
 ## Pull request checks
 
 With the GitHub App connected, a connected repository's pull requests are
