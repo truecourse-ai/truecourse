@@ -176,6 +176,13 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(env['TRUECOURSE_MAX_CONCURRENCY'], '8')
             self.assertNotIn('SENTRY_DSN', env)
             self.assertNotIn('TRUECOURSE_MAX_API_CONCURRENCY', env)
+            self.assertEqual(env['WORKOS_AUTHKIT_DOMAIN'], 'configured')
+            self.assertEqual(env['TRUECOURSE_MCP_URL'], 'https://example.test/mcp')
+            absent.add('WORKOS_AUTHKIT_DOMAIN')
+            env = vm.application_env(CONFIG, IMAGE)
+            self.assertNotIn('WORKOS_AUTHKIT_DOMAIN', env)
+            self.assertNotIn('TRUECOURSE_MCP_URL', env)
+            absent.discard('WORKOS_AUTHKIT_DOMAIN')
             values['TRUECOURSE_MAX_CONCURRENCY'] = 'eight'
             with self.assertRaisesRegex(RuntimeError, 'positive integer'):
                 vm.application_env(CONFIG, IMAGE)
