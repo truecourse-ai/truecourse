@@ -149,6 +149,10 @@ export function createPullsRouter(deps: PullsRouterDeps): Router {
         res.status(409).json({ error: `Pull request checks are off for ${pr.repoFullName}; turn them on in its Settings.` });
         return;
       }
+      if (started.status === 'other-base') {
+        res.status(409).json({ error: `#${pr.number} targets ${pr.baseRef}; only pull requests into the default branch are checked.` });
+        return;
+      }
       if (started.status !== 'queued') {
         res.status(409).json({ error: `#${pr.number}'s check could not be started: ${started.status}.` });
         return;

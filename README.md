@@ -78,8 +78,8 @@ OpenRouter's model list. Settings › Usage reads it back.
 
 With the GitHub App connected, a connected repository's pull requests are
 checked once its Settings turn **Check pull requests** on (it is off by
-default). Each is checked at its head against the default branch's stored
-state: the documents it
+default). Only pull requests into the default branch are checked. Each is
+checked at its head against the default branch's stored state: the documents it
 changes are re-scanned for conflicts with the rest of the workspace, its flows
 are generated and run, and the result lands as a GitHub check (`TrueCourse`) —
 new failures, a conflict the pull request would create, a head that does not

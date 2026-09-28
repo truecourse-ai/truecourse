@@ -185,6 +185,9 @@ describe('POST /api/repos/:id/pulls/:number/rerun', () => {
     await pulls.savePullRequest(pr(2));
     startAnswer = { status: 'busy' };
     await request(app).post(`/api/repos/${fixture.project.slug}/pulls/2/rerun`).expect(409);
+    startAnswer = { status: 'other-base' };
+    const other = await request(app).post(`/api/repos/${fixture.project.slug}/pulls/2/rerun`).expect(409);
+    expect(other.body.error).toContain('only pull requests into the default branch are checked');
   });
 
   it('answers 503 when GitHub is not configured', async () => {

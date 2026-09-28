@@ -271,6 +271,28 @@ describe('a conflict resolved', () => {
   });
 });
 
+describe('a pull request into a branch other than the default one', () => {
+  it('starts nothing and posts nothing, and a draft is not held', async () => {
+    const service = checks();
+    await pulls.savePullRequest(pr({ baseRef: 'release' }));
+    expect(await service.start(pr({ baseRef: 'release' }))).toEqual({ status: 'other-base' });
+    await service.onPullRequest({ pr: pr({ baseRef: 'release', draft: true }), installationId: 5, effect: 'draft' });
+    expect(enqueued).toEqual([]);
+    expect(pulls.checks).toEqual([]);
+    expect(github).toEqual([]);
+  });
+
+  it('stops the check in flight when the base moves off the default branch', async () => {
+    const service = checks();
+    await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
+    await pulls.savePullRequest(pr({ baseRef: 'release' }));
+    await service.onPullRequest({ pr: pr({ baseRef: 'release' }), installationId: 5, effect: 'check' });
+    expect(pulls.checks.map((c) => [c.status, c.reason])).toEqual([['settled', 'superseded']]);
+    expect(cancelled).toEqual(['job_1']);
+    expect(enqueued).toHaveLength(1);
+  });
+});
+
 describe('a repository whose checks are off', () => {
   beforeEach(async () => {
     await repos.setCheckPullRequests('acme/api', false);

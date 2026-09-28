@@ -15,8 +15,11 @@
  * shown in the product and posted nowhere.
  *
  * Checks are OFF for a repository until its Settings turn them on, and always
- * off for a repository Code has not connected (it has no settings). Off, a new
- * head still stops the check in flight, and nothing new starts or is posted.
+ * off for a repository Code has not connected (it has no settings). A pull
+ * request into a branch other than the repository's default one is not
+ * checked either: only the default branch has stored state to compare with.
+ * Unchecked, a new head still stops the check in flight, and nothing new
+ * starts or is posted.
  */
 
 import { log } from '@truecourse/core/lib/logger';
@@ -35,6 +38,7 @@ import {
   type PullRequestCheckRecord,
   type PullRequestRecord,
   type PullRequestStore,
+  type RepositoryRecord,
   type RepositoryStore,
 } from '@truecourse/shared';
 import type { EnqueueResult, JobsMount } from '../jobs/index.js';
@@ -56,9 +60,12 @@ export interface PullRequestChecksDeps {
  * What starting a check answered: the attempt's row, and the queue's word.
  * `stale` is a head the pull request no longer has, or a pull request no
  * longer open: nothing was superseded and nothing started. `disabled` is a
- * repository whose checks are off.
+ * repository whose checks are off; `other-base` a pull request that targets
+ * a branch other than the repository's default one.
  */
-export type CheckStart = { status: 'queued'; checkId: string; jobId: string } | { status: 'busy' | 'failed' | 'stale' | 'disabled' };
+export type CheckStart =
+  | { status: 'queued'; checkId: string; jobId: string }
+  | { status: 'busy' | 'failed' | 'stale' | 'disabled' | 'other-base' };
 
 export interface PullRequestChecks {
   onPullRequest(trigger: PullRequestTrigger): Promise<void>;
@@ -78,6 +85,23 @@ export interface PullRequestChecks {
    * them. Best-effort.
    */
   rerunBlockedByConflict(workspaceOrgId: string): Promise<void>;
+}
+
+/**
+ * Why a pull request is not checked, or null when it is. Only the default
+ * branch has stored state to compare a head with, so a pull request into any
+ * other branch is not checked.
+ */
+function notChecked(
+  pr: PullRequestRecord,
+  link: RepositoryRecord | null,
+): { status: 'disabled' | 'other-base'; why: string } | null {
+  if (!link) return { status: 'disabled', why: 'the repository is not connected in Code' };
+  if (!link.checkPullRequests) return { status: 'disabled', why: 'checks are off for this repository' };
+  if (pr.baseRef !== link.defaultBranch) {
+    return { status: 'other-base', why: `it targets ${pr.baseRef}, not the default branch ${link.defaultBranch ?? '(unknown)'}` };
+  }
+  return null;
 }
 
 export function createPullRequestChecks(deps: PullRequestChecksDeps): PullRequestChecks {
@@ -178,11 +202,10 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
       return { status: 'stale' };
     }
     await supersede(pr.repoFullName, pr.number, 'superseded');
-    if (!link?.checkPullRequests) {
-      log.info(
-        `[checks] ${pr.repoFullName}#${pr.number} at ${pr.headSha.slice(0, 8)} not checked: ${link ? 'checks are off for this repository' : 'the repository is not connected in Code'}`,
-      );
-      return { status: 'disabled' };
+    const skipped = notChecked(pr, link);
+    if (skipped) {
+      log.info(`[checks] ${pr.repoFullName}#${pr.number} at ${pr.headSha.slice(0, 8)} not checked: ${skipped.why}`);
+      return { status: skipped.status };
     }
     const octokit = deps.octokitFor(installationId);
     let check = await deps.pulls.createCheck({ repoFullName: pr.repoFullName, number: pr.number, headSha: pr.headSha });
@@ -214,11 +237,9 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
   /** A draft's check: settled at once, saying so. Nothing is posted for a repository whose checks are off. */
   async function hold(pr: PullRequestRecord, installationId: number): Promise<void> {
     await supersede(pr.repoFullName, pr.number, 'superseded');
-    const link = await deps.repos.getRepo(pr.repoFullName);
-    if (!link?.checkPullRequests) {
-      log.info(
-        `[checks] ${pr.repoFullName}#${pr.number} draft not held: ${link ? 'checks are off for this repository' : 'the repository is not connected in Code'}`,
-      );
+    const skipped = notChecked(pr, await deps.repos.getRepo(pr.repoFullName));
+    if (skipped) {
+      log.info(`[checks] ${pr.repoFullName}#${pr.number} draft not held: ${skipped.why}`);
       return;
     }
     const octokit = deps.octokitFor(installationId);
