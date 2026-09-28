@@ -8,7 +8,7 @@
  * row settled, its job stopped, GitHub told — and a new attempt starts. A
  * draft is held: the same supersede, then a check settled at once saying it
  * is checked when ready. A close cancels what is in flight. A re-run pressed
- * on GitHub or in the product is a new attempt on the current head.
+ * on GitHub is a new attempt on the current head, logged either way.
  *
  * A GitHub that refuses to take the check (the account has not accepted the
  * permission) is logged once per repository and the check runs all the same,
@@ -278,11 +278,22 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
         const checks = trigger.checkId
           ? [await deps.pulls.getCheck(trigger.checkId)].filter((c): c is PullRequestCheckRecord => c !== null)
           : await deps.pulls.listChecksForHead(trigger.repoFullName, trigger.headSha);
+        const at = `${trigger.repoFullName}@${trigger.headSha.slice(0, 8)}`;
+        if (checks.length === 0) log.info(`[checks] re-run of ${at}: no check of ours on that head, nothing re-run`);
         for (const number of new Set(checks.map((c) => c.number))) {
           const pr = await deps.pulls.getPullRequest(trigger.repoFullName, number);
           // The current head only: a re-run of an old head would judge a head
           // the pull request no longer has.
-          if (!pr || pr.state !== 'open' || pr.headSha !== trigger.headSha) continue;
+          if (!pr || pr.state !== 'open' || pr.headSha !== trigger.headSha) {
+            const why = !pr
+              ? 'the pull request is unknown'
+              : pr.state !== 'open'
+                ? `the pull request is ${pr.state}`
+                : `the pull request's head is now ${pr.headSha.slice(0, 8)}`;
+            log.info(`[checks] re-run of ${at} for #${number} not started: ${why}`);
+            continue;
+          }
+          log.info(`[checks] re-run of ${at} for #${number}: ${pr.draft ? 'held as a draft' : 'a new attempt'}`);
           if (pr.draft) await hold(pr, trigger.installationId);
           else await start(pr, trigger.installationId);
         }

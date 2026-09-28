@@ -436,6 +436,7 @@ async function handleCheckRerun(deps: WebhookDeps, payload: CheckRerunPayload): 
   const repoFullName = payload.repository.full_name;
   const workspaceOrgId = await workspaceOfRepository(deps, repoFullName, payload.installation.id);
   if (workspaceOrgId === null) return;
+  log.info(`[github-app] ${repoFullName}@${headSha.slice(0, 8)} ${payload.check_run ? 'check run' : 'check suite'} rerequested`);
   deps.onCheckRerun({
     repoFullName,
     workspaceOrgId,

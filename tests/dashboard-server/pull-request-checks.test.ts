@@ -5,7 +5,8 @@
  * a close cancels; a re-run pressed on GitHub is a new attempt on the
  * current head. GitHub refusing the check is said once and stops nothing.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { log } from '@truecourse/core/lib/logger';
 import type { PullRequestRecord } from '@truecourse/shared';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
 import { createPullRequestChecks } from '../../apps/dashboard/server/src/services/pull-request-checks.service';
@@ -351,8 +352,12 @@ describe('a re-run', () => {
     await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
     // The pull request moved on: a re-run of the old head is nobody's.
     await pulls.savePullRequest(pr({ headSha: 'head-2' }));
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
     await service.onCheckRerun({ repoFullName: 'acme/api', workspaceOrgId: 'org_A', installationId: 5, headSha: 'head-1', checkId: null });
     expect(enqueued).toHaveLength(1);
+    // Nothing starts, and the log says why.
+    expect(info).toHaveBeenCalledWith("[checks] re-run of acme/api@head-1 for #7 not started: the pull request's head is now head-2");
+    info.mockRestore();
     await pulls.savePullRequest(pr({ headSha: 'head-1' }));
     await service.onCheckRerun({ repoFullName: 'acme/api', workspaceOrgId: 'org_A', installationId: 5, headSha: 'head-1', checkId: null });
     expect(enqueued).toHaveLength(2);
