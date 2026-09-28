@@ -139,6 +139,8 @@ export interface GuardStore {
    * whose summary could not be derived is simply not here.
    */
   readGuardRunCoverage(repoPath: string, scope?: string): Promise<GuardRunCoverage[]>;
+  /** One stored run's flow summary, by run id. Null when it has none (never derived, or no such run). */
+  readGuardRunFlows(repoPath: string, runId: string): Promise<GuardRunFlowSummary | null>;
   /** The `guard generate` report `at` names: the newest of the scope, the
    *  newest at a commit, or one version by id. */
   readGuardResult(repoKey: string, at?: VersionAt): Promise<GuardGenerateReport | null>;
@@ -332,6 +334,8 @@ export const writeGuardRunCoverage = (repoPath: string, run: GuardRunCoverage): 
   getGuardStore().writeGuardRunCoverage(repoPath, run);
 export const readGuardRunCoverage = (repoPath: string, scope?: string): Promise<GuardRunCoverage[]> =>
   getGuardStore().readGuardRunCoverage(repoPath, scope);
+export const readGuardRunFlows = (repoPath: string, runId: string): Promise<GuardRunFlowSummary | null> =>
+  getGuardStore().readGuardRunFlows(repoPath, runId);
 export const readGuardResult = (
   repoKey: string,
   at?: VersionAt,

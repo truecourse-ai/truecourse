@@ -26,14 +26,11 @@ import { log } from '@truecourse/core/lib/logger';
 import {
   createCheck,
   installationOf,
-  renderCheckOutput,
-  updateCheck,
   type CheckRerunTrigger,
   type OctokitClient,
   type PullRequestTrigger,
 } from '@truecourse/github-app';
 import {
-  CHECK_CONCLUSION_OF_REASON,
   pullRequestRef,
   type PullRequestCheckReason,
   type PullRequestCheckRecord,
@@ -43,6 +40,7 @@ import {
   type RepositoryStore,
 } from '@truecourse/shared';
 import type { EnqueueResult, JobsMount } from '../jobs/index.js';
+import { settleCheck } from '../jobs/pr-check-chain.js';
 
 export interface PullRequestChecksDeps {
   jobs: Pick<JobsMount, 'enqueuePullRequestCheck' | 'cancelCheckJob'>;
@@ -73,6 +71,12 @@ export interface PullRequestChecks {
    * disconnect, `error` when the process running it died.
    */
   supersede(repoFullName: string, number: number, reason: 'superseded' | 'cancelled' | 'error'): Promise<void>;
+  /**
+   * Settle ONE check with `reason`, when it is still open, and nothing else:
+   * the check of a job that is already gone (the process died under it, or a
+   * disconnect is stopping it). Never a newer attempt of the same pull request.
+   */
+  settleStopped(checkId: string, reason: 'cancelled' | 'error'): Promise<void>;
   /**
    * A conflict was resolved in the workspace: every open pull request whose
    * latest check settled on a conflict is checked again, whichever conflict it
@@ -125,32 +129,6 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
   }
 
   /**
-   * Settle a row with a reason and move GitHub's check with it, when one was
-   * posted. A row that settled meanwhile (its job got there first) keeps its
-   * word, and GitHub is not told twice.
-   */
-  async function settle(
-    octokit: OctokitClient,
-    check: PullRequestCheckRecord,
-    reason: PullRequestCheckReason,
-  ): Promise<void> {
-    const settled = await deps.pulls.settleCheck(check.id, {
-      conclusion: CHECK_CONCLUSION_OF_REASON[reason],
-      reason,
-    });
-    if (!settled || check.githubCheckRunId === null) return;
-    try {
-      await updateCheck(octokit, check.repoFullName, check.githubCheckRunId, {
-        status: 'completed',
-        reason,
-        output: renderCheckOutput(reason, null, null),
-      });
-    } catch (err) {
-      log.warn(`[checks] could not move GitHub's check for ${check.repoFullName}#${check.number}: ${(err as Error).message}`);
-    }
-  }
-
-  /**
    * The installation a pull request's checks read GitHub through: the one the
    * event named, else the repository's link. Null when neither has one.
    */
@@ -160,22 +138,31 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     return link ? installationOf(link) : null;
   }
 
+  /** Settle a check with a reason alone, telling GitHub through the pull request's installation. */
+  async function settleWith(
+    check: PullRequestCheckRecord,
+    reason: PullRequestCheckReason,
+  ): Promise<{ settled: PullRequestCheckRecord | null; pr: PullRequestRecord | null }> {
+    const pr = await deps.pulls.getPullRequest(check.repoFullName, check.number);
+    const installationId = pr ? await installationFor(pr) : null;
+    return { settled: await settleCheck(deps, check.id, installationId, { reason }, null), pr };
+  }
+
   const supersede: PullRequestChecks['supersede'] = async (repoFullName, number, reason) => {
     const active = await deps.pulls.activeCheck(repoFullName, number);
     if (!active) return;
-    const pr = await deps.pulls.getPullRequest(repoFullName, number);
-    const installationId = pr ? await installationFor(pr) : null;
     // The row first, so the jobs' own settles find it settled and leave it,
     // and a link of its chain still queued does nothing when it starts.
-    if (installationId !== null) await settle(deps.octokitFor(installationId), active, reason);
-    else await deps.pulls.settleCheck(active.id, { conclusion: 'neutral', reason });
+    const { settled, pr } = await settleWith(active, reason);
     // Stopped and waited for (the wait is bounded): a running coordinator holds
     // the pull request's single-flight key until it unwinds, and the next
     // attempt's enqueue would find the key taken. The webhook does not wait
-    // on this.
+    // on this. The job is the one the SETTLED row names: a link that started
+    // between the read and the settle wrote its own id, and is the one to stop.
     const workspaceOrgId = pr?.workspaceOrgId;
-    if (workspaceOrgId && active.jobId) {
-      await deps.jobs.cancelCheckJob(workspaceOrgId, active.jobId).catch((err: unknown) => {
+    const jobId = settled?.jobId;
+    if (workspaceOrgId && jobId) {
+      await deps.jobs.cancelCheckJob(workspaceOrgId, jobId).catch((err: unknown) => {
         log.warn(`[checks] could not stop the jobs of ${repoFullName}#${number}: ${(err as Error).message}`);
       });
     }
@@ -221,7 +208,7 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
       // just made would wait for nobody. The head goes unchecked until a
       // re-run or the next push.
       log.warn(`[checks] ${pr.repoFullName}#${pr.number} at ${pr.headSha.slice(0, 8)} not checked: its earlier attempt is still running`);
-      await settle(octokit, check, 'cancelled');
+      await settleCheck(deps, check.id, installationId, { reason: 'cancelled' }, null);
       return { status: 'busy' };
     }
     await deps.pulls.updateCheck(check.id, { jobId: outcome.jobId });
@@ -240,12 +227,16 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     let check = await deps.pulls.createCheck({ repoFullName: pr.repoFullName, number: pr.number, headSha: pr.headSha });
     const githubCheckRunId = await postQueued(octokit, check);
     check = (await deps.pulls.updateCheck(check.id, { githubCheckRunId })) ?? check;
-    await settle(octokit, check, 'draft');
+    await settleCheck(deps, check.id, installationId, { reason: 'draft' }, null);
   }
 
   return {
     start,
     supersede,
+    async settleStopped(checkId, reason) {
+      const check = await deps.pulls.getCheck(checkId);
+      if (check && check.status !== 'settled') await settleWith(check, reason);
+    },
     async rerunBlockedByConflict(workspaceOrgId) {
       const pulls = (await deps.pulls.listWorkspacePullRequests(workspaceOrgId, { state: 'open' })).filter((pr) => !pr.draft);
       const latest = await deps.pulls.latestChecks(pulls);

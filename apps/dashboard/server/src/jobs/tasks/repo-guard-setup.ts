@@ -52,6 +52,7 @@ import {
   linkStarted,
   pauseLinkCheck,
   settleLinkCheck,
+  settleWithoutRun,
   type PullRequestCheckPort,
 } from '../pr-check-chain.js';
 import {
@@ -332,14 +333,16 @@ export function createRepoGuardSetupTask(
           return;
         }
         // A setup that ended the chain: the head could not pass it, it broke,
-        // or it has nothing to generate from. A cancel was settled by
-        // whoever cancelled; a pause leaves the check open for its resume.
+        // it was stopped, or it has nothing to generate from — which settles
+        // on the spec half alone. A pause leaves the check open for its resume.
         if (outcome === 'failed') {
           await settleLinkCheck(port, pr, { reason: wasRefused ? 'build-failed' : 'error', report: { codeHalf: 'ran' } }, link);
         } else if (outcome === 'paused') {
           await pauseLinkCheck(port, pr, link);
-        } else if (outcome === 'succeeded') {
-          await settleLinkCheck(port, pr, { reason: 'clean', report: { codeHalf: 'not-run' } }, link);
+        } else if (outcome === 'cancelled') {
+          await settleLinkCheck(port, pr, { reason: 'cancelled' }, link);
+        } else {
+          await settleWithoutRun(port, ctx.payload.repoFullName, pr, link);
         }
         // The pull request's chain ended here, and it held the lane: whatever
         // the default branch was left owing starts now, as after a main chain.

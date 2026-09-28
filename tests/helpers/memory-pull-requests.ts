@@ -91,7 +91,7 @@ export function memoryPullRequestStore(clock: () => string = () => new Date().to
       return { ...check };
     },
     async updateCheck(id, patch: PullRequestCheckPatch) {
-      const index = checks.findIndex((c) => c.id === id);
+      const index = checks.findIndex((c) => c.id === id && c.status !== 'settled');
       if (index < 0) return null;
       checks[index] = { ...checks[index]!, ...patch };
       return { ...checks[index]! };

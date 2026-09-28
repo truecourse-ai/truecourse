@@ -931,12 +931,13 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     if (kind !== 'repository') return normalizeConfig(orgOf(req), kind, rawConfig);
     const raw = (rawConfig ?? {}) as Partial<RepositorySourceConfig>;
     const repoFullName = typeof raw.repoFullName === 'string' ? raw.repoFullName.trim() : '';
-    // A repository is one workspace's source. Refused before anything is
-    // reached or stored, on the check and on the add alike; the store's
-    // unique column is the backstop for two adds racing.
+    // Access first: whether another workspace reads a repository is told only
+    // to someone who can reach it. Then a repository is one workspace's
+    // source, refused before anything is stored, on the check and on the add
+    // alike; the store's unique column is the backstop for two adds racing.
+    const resolved = await repositoryAccess(req, repoFullName, installationId);
     const owner = repoFullName ? await repositorySourceWorkspace(repoFullName) : null;
     if (owner !== null && owner !== orgOf(req)) throw new RepositorySourceTakenError(repoFullName);
-    const resolved = await repositoryAccess(req, repoFullName, installationId);
     const branch = typeof raw.branch === 'string' ? raw.branch.trim() : '';
     return normalizeConfig(orgOf(req), 'repository', {
       ...raw,

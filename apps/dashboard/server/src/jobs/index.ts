@@ -195,12 +195,13 @@ export interface CreateServerJobsOptions {
   /**
    * The pull request check's stores and GitHub client. Without them the task
    * is not registered: a server with no GitHub App has no pull requests.
-   * `onStopped` settles a check whose job never reached its own settle — one
-   * a disconnect stopped while it was still queued (`cancelled`), or one the
-   * process died under (`error`), which boot reaps.
+   * `onStopped` settles the one check whose job never reached its own
+   * settle — one a disconnect stopped while it was queued or paused
+   * (`cancelled`), or one the process went down under (`error`), which boot
+   * reaps.
    */
   pullRequestCheck?: RepoPullRequestCheckTaskDeps & {
-    onStopped?: (repoFullName: string, number: number, reason: 'cancelled' | 'error') => Promise<void>;
+    onStopped?: (checkId: string, reason: 'cancelled' | 'error') => Promise<void>;
   };
   contextSync?: ContextSyncTaskDeps;
   contextScan?: Omit<ContextScanTaskDeps, 'ripple' | 'rescan'>;
@@ -530,15 +531,11 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
         const request = job.payload as OnboardingJobRequest | null;
         // A check whose job died with the process, the coordinator or a link
         // of its chain: its row and GitHub's check would otherwise say
-        // "running" for ever. A check is not restarted.
-        const check =
-          job.type === REPO_PR_CHECK_TASK
-            ? (job.payload as Pick<PullRequestCheckJobRequest, 'repoFullName' | 'number'>)
-            : request?.pullRequest
-              ? { repoFullName: request.repoFullName, number: request.pullRequest.number }
-              : null;
-        if (check) {
-          await opts.pullRequestCheck?.onStopped?.(check.repoFullName, check.number, 'error');
+        // "running" for ever. The check is the one the job's own payload
+        // names, never whichever attempt is newest now. It is not restarted.
+        const checkId = checkIdOf(job.type, job.payload);
+        if (checkId) {
+          await opts.pullRequestCheck?.onStopped?.(checkId, 'error');
           continue;
         }
         // A link of a chain never ended, so the push it served is owed again,
@@ -558,12 +555,14 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     ...(opts.hub ? { hub: opts.hub } : {}),
   });
 
-  // Every heavy job of the repository goes, RUNNING OR QUEUED: the workspace's
-  // heavy lane means a disconnected repository can easily have one waiting its
-  // turn, and `getActiveByKey` covers both states (`jobs.cancel` settles a
-  // queued row outright — the worker that later claims its graphile job finds
-  // the row unclaimable and skips the body, freeing the lane immediately).
-  // Its pull request checks go with it, found by their keys' prefix.
+  // Every heavy job of the repository goes, RUNNING, QUEUED OR PAUSED: the
+  // workspace's heavy lane means a disconnected repository can easily have one
+  // waiting its turn, and `getActiveByKey` covers both active states
+  // (`jobs.cancel` settles a queued row outright — the worker that later
+  // claims its graphile job finds the row unclaimable and skips the body,
+  // freeing the lane immediately). A paused one would otherwise be carried on
+  // by the next grant, against a repository that is gone. Its pull request
+  // checks go with it, found by their keys' prefix.
   const cancelRepoJobs = async (
     repoFullName: string,
     orgId: string,
@@ -580,15 +579,29 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     // cancelled, and their jobs stopped (a check still queued would otherwise
     // never be settled by anyone).
     for (const task of HEAVY_TASKS) {
-      const prefix = pullRequestJobKey(task, repoFullName, 0).slice(0, -1);
       for (const job of await jobs.jobStore.listActive(orgId, task)) {
-        if (!job.key?.startsWith(prefix)) continue;
-        const number = Number(job.key.slice(prefix.length));
-        if (opts.pullRequestCheck?.onStopped) await opts.pullRequestCheck.onStopped(repoFullName, number, 'cancelled');
+        const number = pullRequestOfKey(task, repoFullName, job.key);
+        if (number === null) continue;
+        await stopCheckOf(repoFullName, number);
         if ((await jobs.cancel(job.id)) === 'not-here') return 'not-here';
       }
     }
+    for (const job of await jobs.jobStore.listPaused(orgId)) {
+      if (!HEAVY_TASKS.includes(job.type)) continue;
+      const number = pullRequestOfKey(job.type, repoFullName, job.key);
+      if (number === null && job.key !== jobKey(job.type, repoFullName)) continue;
+      const checkId = checkIdOf(job.type, job.payload);
+      if (checkId) await opts.pullRequestCheck?.onStopped?.(checkId, 'cancelled');
+      await jobs.jobStore.cancelPaused(job.id);
+    }
     return 'stopped';
+  };
+
+  /** Settle the check still open for a pull request of a repository being disconnected. */
+  const stopCheckOf = async (repoFullName: string, number: number): Promise<void> => {
+    const check = opts.pullRequestCheck;
+    const active = await check?.pulls.activeCheck(repoFullName, number);
+    if (active) await check?.onStopped?.(active.id, 'cancelled');
   };
 
   /**
@@ -705,6 +718,21 @@ const jobKey = (task: string, repoFullName: string): string => `${task}:${repoFu
  */
 const pullRequestJobKey = (task: string, repoFullName: string, number: number): string =>
   `${task}:${repoFullName}#${number}`;
+
+/** The pull request a job key of the repository names, or null when it is not one of its checks' keys. */
+function pullRequestOfKey(task: string, repoFullName: string, key: string | null): number | null {
+  const prefix = pullRequestJobKey(task, repoFullName, 0).slice(0, -1);
+  if (!key?.startsWith(prefix)) return null;
+  const number = Number(key.slice(prefix.length));
+  return Number.isInteger(number) ? number : null;
+}
+
+/** The check a heavy job's stored payload works for: the coordinator's own, or the one a link carries. */
+function checkIdOf(type: string, payload: Record<string, unknown> | null): string | null {
+  if (!payload) return null;
+  if (type === REPO_PR_CHECK_TASK) return (payload as Partial<PullRequestCheckJobRequest>).checkId ?? null;
+  return (payload as Partial<OnboardingJobRequest>).pullRequest?.checkId ?? null;
+}
 
 /**
  * The workspace's heavy lane: setup, generation and the run of EVERY repository

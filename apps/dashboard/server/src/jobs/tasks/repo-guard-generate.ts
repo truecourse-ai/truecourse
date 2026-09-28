@@ -426,12 +426,13 @@ export function createRepoGuardGenerateTask(
         if (chained === 'chained') return;
         const link = runId ? checkLinks.record(port.appUrl, runId) : null;
         const status = (result as Partial<GuardGenerateJobResult> | undefined)?.status;
-        // A cancel was settled by whoever cancelled.
+        // A cancel settles as one; a supersede got there first and keeps its word.
         if (outcome === 'paused') await pauseLinkCheck(port, pr, link);
+        else if (outcome === 'cancelled') await settleLinkCheck(port, pr, { reason: 'cancelled' }, link);
         else if (outcome === 'succeeded' && status === 'open-conflicts') {
           // Conflicts the head did not create still block generation, as on main.
           await settleLinkCheck(port, pr, { reason: 'conflict', conclusion: 'neutral', report: { codeHalf: 'stopped-by-conflict' } }, link);
-        } else if (outcome !== 'cancelled') {
+        } else {
           await settleLinkCheck(port, pr, { reason: 'error', report: { codeHalf: 'ran' } }, link);
         }
         // The pull request's chain ended here: see the setup's.

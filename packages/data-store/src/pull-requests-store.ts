@@ -3,7 +3,7 @@
  * contract of `@truecourse/shared` over `pull_requests` and
  * `pull_request_checks`. A pull request is upserted by (repository, number) as
  * the webhook last saw it; a check is inserted per attempt on a head and only
- * ever patched forward.
+ * ever patched forward: a settled row takes no further write.
  */
 
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
@@ -180,7 +180,7 @@ export class PgPullRequestStore implements PullRequestStore {
     const rows = await this.db
       .update(pullRequestChecks)
       .set(patch)
-      .where(eq(pullRequestChecks.id, id))
+      .where(and(eq(pullRequestChecks.id, id), ne(pullRequestChecks.status, 'settled')))
       .returning();
     return rows[0] ? toCheck(rows[0]) : null;
   }

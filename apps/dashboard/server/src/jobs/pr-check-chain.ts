@@ -11,11 +11,13 @@
  * A link whose check is already settled (a newer head superseded it, the pull
  * request closed) does nothing: its row keeps the first word. A link the
  * balance paused leaves its check open, so its resume carries the same check on.
+ * A link someone cancelled settles its check `cancelled`, unless the cancel was
+ * a supersede, which settled it first.
  */
 
 import { log } from '@truecourse/core/lib/logger';
 import {
-  readGuardRunCoverage,
+  readGuardRunFlows,
   readGuardRunForCommit,
   readManifest,
 } from '@truecourse/core/lib/guard-store';
@@ -49,6 +51,9 @@ export interface PullRequestCheckPort {
   /** Where the product is served, for the check's details link. */
   appUrl: string;
 }
+
+/** What settling a check writes through: its row, and GitHub's check. */
+export type CheckWriter = Pick<PullRequestCheckPort, 'pulls' | 'octokitFor'>;
 
 /** Where a check's link points: the record of the link it stopped in, or the run it settled on. */
 export const checkLinks = {
@@ -86,7 +91,8 @@ export async function postCheck(
 /**
  * A link of the check's chain started: the row names its job (what a
  * supersede stops) and GitHub's check points at it. False when the check is
- * already settled, and the link then does nothing.
+ * already settled, and the link then does nothing: the write itself refuses a
+ * settled row, so a supersede landing between the read and the write wins.
  */
 export async function linkStarted(
   port: PullRequestCheckPort,
@@ -97,12 +103,13 @@ export async function linkStarted(
 ): Promise<boolean> {
   const check = await port.pulls.getCheck(link.checkId);
   if (!check || check.status === 'settled') return false;
-  await port.pulls.updateCheck(check.id, {
+  const started = await port.pulls.updateCheck(check.id, {
     status: 'running',
     jobId,
     ...(check.startedAt ? {} : { startedAt: new Date().toISOString() }),
   });
-  await postCheck(port.octokitFor(link.installationId), check, {
+  if (!started) return false;
+  await postCheck(port.octokitFor(link.installationId), started, {
     status: 'in_progress',
     detailsUrl,
     output: { title: 'Checking', summary: what },
@@ -117,37 +124,43 @@ export async function checkIsOpen(port: PullRequestCheckPort, link: PullRequestL
 }
 
 /**
- * Settle a check with the report's half this settle adds merged over the half
- * its row holds, and move GitHub's check with it. The one transition: a row a
- * webhook settled meanwhile keeps its word, and GitHub is not told twice.
+ * Settle a check and move GitHub's check with it: the one transition to
+ * `settled`, whoever takes it. The report's half this settle adds is merged
+ * over the half its row holds; an outcome with no report of its own (a
+ * supersede, a cancel) says so on GitHub without one. A row settled meanwhile
+ * keeps its word, GitHub is not told twice, and the answer is null. GitHub is
+ * not told at all without an installation to tell it through.
  */
 export async function settleCheck(
-  port: PullRequestCheckPort,
-  check: PullRequestCheckRecord,
-  installationId: number,
+  port: CheckWriter,
+  checkId: string,
+  installationId: number | null,
   outcome: CheckOutcome,
   detailsUrl: string | null,
 ): Promise<PullRequestCheckRecord | null> {
-  const current = (await port.pulls.getCheck(check.id)) ?? check;
-  const report = current.report || outcome.report ? ({ ...current.report, ...outcome.report } as PullRequestCheckReport) : null;
+  const current = await port.pulls.getCheck(checkId);
+  if (!current) return null;
+  const report = outcome.report ? ({ ...current.report, ...outcome.report } as PullRequestCheckReport) : null;
   const conclusion = outcome.conclusion ?? CHECK_CONCLUSION_OF_REASON[outcome.reason];
-  const settled = await port.pulls.settleCheck(check.id, {
+  const settled = await port.pulls.settleCheck(checkId, {
     conclusion,
     reason: outcome.reason,
     ...(report ? { report } : {}),
     ...(outcome.guardRunId ? { guardRunId: outcome.guardRunId } : {}),
   });
   if (!settled) {
-    log.info(`[jobs] check ${check.id} of ${check.repoFullName}#${check.number} was settled before it could be: ${outcome.reason} not recorded`);
+    log.info(`[jobs] check ${checkId} of ${current.repoFullName}#${current.number} was settled before it could be: ${outcome.reason} not recorded`);
     return null;
   }
-  await postCheck(port.octokitFor(installationId), settled, {
-    status: 'completed',
-    reason: outcome.reason,
-    conclusion,
-    ...(detailsUrl ? { detailsUrl } : {}),
-    output: renderCheckOutput(outcome.reason, report, detailsUrl),
-  });
+  if (installationId !== null) {
+    await postCheck(port.octokitFor(installationId), settled, {
+      status: 'completed',
+      reason: outcome.reason,
+      conclusion,
+      ...(detailsUrl ? { detailsUrl } : {}),
+      output: renderCheckOutput(outcome.reason, report, detailsUrl),
+    });
+  }
   return settled;
 }
 
@@ -183,7 +196,7 @@ export async function pauseLinkCheck(
   }
 }
 
-/** Settle the check a link works for; nothing when its row is gone. */
+/** Settle the check a link works for; never throws. */
 export async function settleLinkCheck(
   port: PullRequestCheckPort,
   link: PullRequestLink,
@@ -191,11 +204,31 @@ export async function settleLinkCheck(
   detailsUrl: string | null,
 ): Promise<void> {
   try {
-    const check = await port.pulls.getCheck(link.checkId);
-    if (check) await settleCheck(port, check, link.installationId, outcome, detailsUrl);
+    await settleCheck(port, link.checkId, link.installationId, outcome, detailsUrl);
   } catch (err) {
     log.warn(`[jobs] could not settle check ${link.checkId}: ${(err as Error).message}`);
   }
+}
+
+/**
+ * Settle a check whose chain ended with nothing to run (the repository reads
+ * no documents): on the spec half alone, as the coordinator would have. A
+ * conflict the head created, already on the row, fails it and links to them.
+ */
+export async function settleWithoutRun(
+  port: PullRequestCheckPort,
+  repoFullName: string,
+  link: PullRequestLink,
+  detailsUrl: string | null,
+): Promise<void> {
+  const check = await port.pulls.getCheck(link.checkId);
+  const conflicted = (check?.report?.conflictsCreated.length ?? 0) > 0;
+  await settleLinkCheck(
+    port,
+    link,
+    { reason: conflicted ? 'conflict' : 'clean', report: { codeHalf: 'not-run' } },
+    conflicted ? checkLinks.conflicts(port.appUrl, repoFullName, link.number) : detailsUrl,
+  );
 }
 
 /** A run that could not start: the head does not build, seed or boot. */
@@ -273,7 +306,7 @@ export async function compareWithBase(input: {
 
 /** The base run's flows as stored beside it, else derived from its snapshot. */
 async function baseFlowSummary(repoFullName: string, run: GuardLatest): Promise<GuardRunFlowSummary> {
-  const stored = (await readGuardRunCoverage(repoFullName)).find((r) => r.runId === run.run.runId)?.flows;
+  const stored = await readGuardRunFlows(repoFullName, run.run.runId);
   if (stored && Object.keys(stored).length > 0) return stored;
   return (await readGuardRunFlowSummary(repoFullName, run)) ?? {};
 }

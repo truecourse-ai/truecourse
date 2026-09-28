@@ -292,10 +292,10 @@ function mountJobs(): JobsMount {
       repos,
       octokitFor: () => octokit,
       appUrl: 'https://app',
-      onStopped: async (_repo, number, reason) => {
-        cancelledChecks.push(number);
-        const active = await pulls.activeCheck(REPO, number);
-        if (active) await pulls.settleCheck(active.id, { conclusion: 'neutral', reason });
+      onStopped: async (checkId, reason) => {
+        const stopped = await pulls.getCheck(checkId);
+        if (stopped) cancelledChecks.push(stopped.number);
+        await pulls.settleCheck(checkId, { conclusion: 'neutral', reason });
       },
       startLlm: async () => testLlm,
       runScan: (opts) => engines.scan(opts),
@@ -827,6 +827,81 @@ describe('the pull request check', () => {
     // Nothing restarted it: the pull request's commit owes the main chain nothing.
     expect((await new JobStore(db).listForOrg(ORG)).filter((j) => j.type === 'repo.guard-setup')).toHaveLength(1);
     await reborn.stop();
+  });
+
+  it('a boot reap settles the dead job’s own check, never a newer attempt of the pull request', async () => {
+    await storeBase();
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    engines.setup = async () => {
+      await held;
+      return { report: { ranAt: '', status: 'ok', reason: '', steps: [] }, reportPath: '', sessionsRunDirs: [] } as never;
+    };
+    await pulls.savePullRequest(pr());
+    const first = await pulls.createCheck({ repoFullName: REPO, number: 7, headSha: HEAD });
+    await jobs.enqueuePullRequestCheck({ repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG, source: 'pull-request', number: 7, headSha: HEAD, checkId: first.id, installationId: 5 });
+    await settle(80);
+    // Another replica superseded it and opened the next attempt, still waiting.
+    await pulls.settleCheck(first.id, { conclusion: 'neutral', reason: 'superseded' });
+    const second = await pulls.createCheck({ repoFullName: REPO, number: 7, headSha: HEAD });
+
+    const reborn = mountJobs();
+    await reborn.start();
+    expect(await pulls.getCheck(first.id)).toMatchObject({ reason: 'superseded' });
+    expect(await pulls.getCheck(second.id)).toMatchObject({ status: 'queued' });
+    release();
+    await drain();
+    await reborn.stop();
+  });
+
+  it('a link someone stopped settles its check cancelled', async () => {
+    await storeBase();
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    engines.setup = async () => {
+      await held;
+      return { report: { ranAt: '', status: 'ok', reason: '', steps: [] }, reportPath: '', sessionsRunDirs: [] } as never;
+    };
+    await pulls.savePullRequest(pr());
+    const row = await pulls.createCheck({ repoFullName: REPO, number: 7, headSha: HEAD });
+    await jobs.enqueuePullRequestCheck({ repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG, source: 'pull-request', number: 7, headSha: HEAD, checkId: row.id, installationId: 5 });
+    await settle(80);
+    const setup = (await new JobStore(db).listActive(ORG)).find((j) => j.type === 'repo.guard-setup')!;
+    const stopping = jobs.cancel(setup.id);
+    await settle(20);
+    release();
+    await stopping;
+    await drain();
+    expect(await pulls.getCheck(row.id)).toMatchObject({ status: 'settled', conclusion: 'neutral', reason: 'cancelled' });
+  });
+
+  it('a disconnect settles a check whose link is paused for credits, and the paused job is not carried on', async () => {
+    await storeBase();
+    engines.setup = async () => {
+      throw new CreditsExhaustedError('out of credits');
+    };
+    const open = await check();
+    expect(await new JobStore(db).listPaused(ORG)).toHaveLength(1);
+
+    expect(await jobs.cancelRepoJobs(REPO, ORG)).toBe('stopped');
+    expect(cancelledChecks).toEqual([7]);
+    expect(await pulls.getCheck(open.id)).toMatchObject({ status: 'settled', reason: 'cancelled' });
+    expect(await new JobStore(db).listPaused(ORG)).toEqual([]);
+  });
+
+  it('a chain with nothing to run settles on the conflicts the head created', async () => {
+    await storeBase();
+    await setContextBindings(ORG, REPO, []);
+    const conflict = { docs: ['a', 'b'] as [string, string], sections: [[], []] as [string[], string[]], note: 'n', path: null, line: null, blocksRepositories: [] };
+    engines.setup = async () => {
+      const open = await pulls.activeCheck(REPO, 7);
+      await pulls.updateCheck(open!.id, { report: { ...open!.report!, conflictsCreated: [conflict] } });
+      return { report: { ranAt: '', status: 'ok', reason: '', steps: [] }, reportPath: '', sessionsRunDirs: [] } as never;
+    };
+    const settled = await check();
+    expect(await jobTypes()).toEqual(['repo.pr-check', 'repo.guard-setup']);
+    expect(settled).toMatchObject({ status: 'settled', conclusion: 'failure', reason: 'conflict' });
+    expect(settled.report).toMatchObject({ codeHalf: 'not-run', conflictsCreated: [conflict] });
   });
 
   it('a head superseded while its run runs keeps the webhook’s word, and GitHub is not told twice', async () => {

@@ -269,7 +269,10 @@ export interface PullRequestStore {
     headSha: string
     jobId?: string | null
   }): Promise<PullRequestCheckRecord>
-  /** Returns the patched row, or null when the id names none. */
+  /**
+   * Patch a check still queued or running. Null when the row is settled (a
+   * settled check never goes back) or absent, and nothing is written.
+   */
   updateCheck(id: string, patch: PullRequestCheckPatch): Promise<PullRequestCheckRecord | null>
   /**
    * Settle a check that is still queued or running: the one transition to

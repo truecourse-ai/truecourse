@@ -20,7 +20,7 @@ import { runWithTrace, type TraceContext } from '@truecourse/llm-api';
 import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
 import { log } from '@truecourse/core/lib/logger';
 import type { JobStepTracker } from './steps.js';
-import { executeJob, type JobDefinition, type JobPayload, type JobRuntime } from './harness.js';
+import { executeJob, JobCancelled, type JobDefinition, type JobPayload, type JobRuntime } from './harness.js';
 
 /**
  * One job type the worker can run: its definition, or — when the body must read
@@ -97,23 +97,6 @@ export function registerJob<M>(
     });
     return running;
   };
-}
-
-/**
- * The reason a job's signal carries when someone CANCELLED it (a supersede, a
- * close, a disconnect, a user's stop), as opposed to the process shutting down
- * under it. A body that records how it ended reads it through {@link wasCancelled}.
- */
-export class JobCancelled extends Error {
-  constructor() {
-    super('the job was cancelled');
-    this.name = 'JobCancelled';
-  }
-}
-
-/** Whether `signal` was aborted by a cancel, rather than by the process shutting down. */
-export function wasCancelled(signal: AbortSignal | undefined): boolean {
-  return signal?.aborted === true && signal.reason instanceof JobCancelled;
 }
 
 /**

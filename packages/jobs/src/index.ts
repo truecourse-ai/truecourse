@@ -317,15 +317,15 @@ export {
   type JobSettledInfo,
   type JobStartedInfo,
   type StepDef,
+  JobCancelled,
+  wasCancelled,
 } from './harness.js';
 export {
   cancelLocalJob,
   isJobRunningLocally,
-  JobCancelled,
   registerJob,
   startWorker,
   stepBridge,
-  wasCancelled,
   type JobHelperSignals,
   type JobTask,
   type StartWorker,

@@ -37,12 +37,13 @@ import { log } from '@truecourse/core/lib/logger';
 import { parseContextDocRef } from '@truecourse/core/lib/context-ref';
 import { repositoryDocumentsIn, sliceCorpus } from '@truecourse/core/services/context';
 import { conflictsCreated } from '@truecourse/core/services/pr-check/compare';
-import { renderCheckOutput, type OctokitClient } from '@truecourse/github-app';
+import { splitRepo, type OctokitClient } from '@truecourse/github-app';
 import {
   isForkPullRequest,
   openConflicts,
   pullRequestWorkspaceScope,
   type CorpusConflict,
+  type NotificationLevel,
   type PullRequestCheckConclusion,
   type PullRequestCheckReason,
   type PullRequestCheckReport,
@@ -133,7 +134,7 @@ export function createRepoPullRequestCheckTask(
       const fork = isForkPullRequest(pr);
       const workspaceScope = pullRequestWorkspaceScope(repoFullName, number);
       const decide = async (outcome: CheckOutcome, detailsUrl: string | null) => {
-        await settleCheck(deps, opened, installationId, outcome, detailsUrl);
+        await settleCheck(deps, opened.id, installationId, outcome, detailsUrl);
         const result: Required<PullRequestCheckJobResult> = {
           repoFullName,
           number,
@@ -145,12 +146,14 @@ export function createRepoPullRequestCheckTask(
       };
 
       try {
-        await deps.pulls.updateCheck(opened.id, {
+        // A write refused is a check settled since it was read: nothing to do.
+        const running = await deps.pulls.updateCheck(opened.id, {
           status: 'running',
           jobId: ctx.jobId,
           startedAt: opened.startedAt ?? new Date().toISOString(),
         });
-        await postCheck(octokit, opened, {
+        if (!running) return { notification: null };
+        await postCheck(octokit, running, {
           status: 'in_progress',
           output: { title: 'Checking', summary: `Checking ${headSha.slice(0, 8)} against its base.` },
         });
@@ -254,7 +257,7 @@ export function createRepoPullRequestCheckTask(
           }
 
           // The code half is the repository's own chain, carrying the check.
-          await deps.pulls.updateCheck(opened.id, { report });
+          if (!(await deps.pulls.updateCheck(opened.id, { report }))) return { notification: null };
           const started = await deps.chainGuardSetup?.({
             repoId: ctx.payload.repoId,
             repoFullName,
@@ -298,17 +301,7 @@ export function createRepoPullRequestCheckTask(
         // not the pull request's, a cancel — is settled here with the one
         // word for it, and GitHub's check is moved with it.
         const reason = unsettledReason(outcome);
-        if (!reason) return;
-        const check = await deps.pulls.settleCheck(checkId, {
-          conclusion: CHECK_CONCLUSION_OF_REASON[reason],
-          reason,
-        });
-        if (!check) return;
-        await postCheck(deps.octokitFor(installationId), check, {
-          status: 'completed',
-          reason,
-          output: renderCheckOutput(reason, null, null),
-        });
+        if (reason) await settleCheck(deps, checkId, installationId, { reason }, null);
       } catch (err) {
         log.warn(`[jobs] could not settle check ${checkId}: ${(err as Error).message}`);
       }
@@ -328,10 +321,17 @@ function unsettledReason(outcome: Exclude<JobOutcomeStatus, 'paused'>): PullRequ
   }
 }
 
+/** A failure warns, a success is one, and a check that neither passed nor failed is news. */
+const NOTIFICATION_LEVEL_OF_CONCLUSION = {
+  failure: 'warning',
+  success: 'success',
+  neutral: 'info',
+} as const satisfies Record<PullRequestCheckConclusion, NotificationLevel>;
+
 function notificationFor(result: Required<PullRequestCheckJobResult>) {
   const title = `#${result.number}: ${result.reason.replace(/-/g, ' ')}`;
   return {
-    level: result.conclusion === 'failure' ? ('warning' as const) : ('success' as const),
+    level: NOTIFICATION_LEVEL_OF_CONCLUSION[result.conclusion],
     title,
     data: { repoFullName: result.repoFullName, pullRequest: result.number, checkId: result.checkId },
   };
@@ -343,10 +343,8 @@ async function resolveMergeBase(
   baseRef: string,
   headSha: string,
 ): Promise<string> {
-  const [owner, repo] = repoFullName.split('/');
   const { data } = await octokit.repos.compareCommitsWithBasehead({
-    owner: owner ?? '',
-    repo: repo ?? '',
+    ...splitRepo(repoFullName),
     basehead: `${baseRef}...${headSha}`,
   });
   return data.merge_base_commit.sha;
@@ -418,10 +416,8 @@ async function scanHead(input: {
   const documents = repositoryDocumentsIn(input.tree, config);
   const headPaths = new Set(documents.map((d) => d.docPath));
   const ledgerPaths = new Set((await listContextDocuments(input.workspaceOrgId, source.id)).map((d) => d.docPath));
-  const [owner, repo] = input.pr.repoFullName.split('/');
   const files = await input.octokit.paginate(input.octokit.pulls.listFiles, {
-    owner: owner ?? '',
-    repo: repo ?? '',
+    ...splitRepo(input.pr.repoFullName),
     pull_number: input.pr.number,
     per_page: 100,
   });

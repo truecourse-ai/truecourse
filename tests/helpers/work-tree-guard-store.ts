@@ -41,6 +41,7 @@ import type {
   GuardHistoryEntry,
   GuardLatest,
   GuardManifest,
+  GuardRunFlowSummary,
 } from '@truecourse/shared';
 import {
   setGuardStore as setGuardStoreByPackage,
@@ -179,6 +180,16 @@ export class WorkTreeGuardStore implements GuardStore {
     const file = guardSectionsPath(repoPath, run.runId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(run, null, 2) + '\n');
+  }
+
+  async readGuardRunFlows(repoPath: string, runId: string): Promise<GuardRunFlowSummary | null> {
+    if (!SAFE_SEGMENT.test(runId)) return null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(guardSectionsPath(repoPath, runId), 'utf-8')) as GuardRunCoverage;
+      return parsed.flows ?? null;
+    } catch {
+      return null;
+    }
   }
 
   async readGuardRunCoverage(repoPath: string): Promise<GuardRunCoverage[]> {

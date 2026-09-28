@@ -25,6 +25,11 @@
  * no error and no notification — nobody is waiting to be told about work they
  * stopped themselves.
  *
+ * A SHUTDOWN is not a cancel. A job the process stopped under (its signal
+ * aborted without {@link JobCancelled}) is left as it stands, running, with no
+ * settle and no settled hook: the next boot's reap finds it exactly as it finds
+ * a job the process died under, and recovers it the one way.
+ *
  * And so is a PAUSE. A body that ran out of credits throws
  * `CreditsExhaustedError`, and nothing about that is a failure: the row settles
  * `paused` carrying the reason and whatever resume pointer the body declared
@@ -45,6 +50,23 @@ import { JobStepTracker, type StepEmit } from './steps.js';
 const CREDITS_HREF = '/settings/credits';
 
 /** The minimum every job payload carries: the tracked row it settles. */
+/**
+ * The reason a job's signal carries when someone CANCELLED it (a supersede, a
+ * close, a disconnect, a user's stop), as opposed to the process shutting down
+ * under it. A body that records how it ended reads it through {@link wasCancelled}.
+ */
+export class JobCancelled extends Error {
+  constructor() {
+    super('the job was cancelled');
+    this.name = 'JobCancelled';
+  }
+}
+
+/** Whether `signal` was aborted by a cancel, rather than by the process shutting down. */
+export function wasCancelled(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true && signal.reason instanceof JobCancelled;
+}
+
 export interface JobPayload {
   jobId: string;
   /**
@@ -352,9 +374,17 @@ export async function executeJob<P extends JobPayload, M>(
     );
   };
 
+  // Stopped by the process going down: left for the next boot's reap.
+  const shutDown = (): boolean => {
+    if (!opts.signal?.aborted || wasCancelled(opts.signal)) return false;
+    log.info(`[jobs] ${def.type} ${jobId}: stopped by a shutdown, left for the next boot to recover`);
+    return true;
+  };
+
   try {
     const outcome = await def.run(ctx);
     runResult = outcome.result;
+    if (shutDown()) return;
     if (opts.signal?.aborted) {
       await settleCancelled();
     } else {
@@ -371,6 +401,8 @@ export async function executeJob<P extends JobPayload, M>(
     // to know.
     if (isCreditsExhausted(err)) {
       await settlePaused();
+    } else if (shutDown()) {
+      return;
     } else if (opts.signal?.aborted) {
       await settleCancelled();
     } else {

@@ -221,7 +221,7 @@ export async function startServer(): Promise<void> {
             repos: repoLinks,
             octokitFor,
             appUrl,
-            onStopped: (repoFullName, number, reason) => pullRequestChecks.supersede(repoFullName, number, reason),
+            onStopped: (checkId, reason) => pullRequestChecks.settleStopped(checkId, reason),
           },
         }
       : {}),

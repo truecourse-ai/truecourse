@@ -144,6 +144,9 @@ describe('checks', () => {
       settledAt: '2026-09-21T11:00:00.000Z',
     });
     expect(settled).toMatchObject({ status: 'settled', reason: 'no-base', githubCheckRunId: 9007199254740, report });
+    // A settled check never goes back.
+    expect(await store.updateCheck(first.id, { status: 'running', jobId: 'late' })).toBeNull();
+    expect(await store.getCheck(first.id)).toMatchObject({ status: 'settled', jobId: null });
     expect(await store.activeCheck('acme/api', 7)).toBeNull();
 
     const second = await store.createCheck({ repoFullName: 'acme/api', number: 7, headSha: 'h2' });
