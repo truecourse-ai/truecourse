@@ -8,6 +8,10 @@ import type { TableInfo, ColumnInfo, RelationInfo } from '@truecourse/shared'
  *   `userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' })`
  * contain braces nested inside parens. A naive regex with `\{...\}`
  * stops at the first close brace, missing later columns.
+ *
+ * The builders are read bare (`import { pgTable, text }`) or through the
+ * namespace the file imports drizzle as (`import * as pg from
+ * 'drizzle-orm/pg-core'`, then `pg.pgTable(…)` and `pg\n  .text(…)`).
  */
 export function parseDrizzleSchema(sourceCode: string): {
   tables: TableInfo[]
@@ -15,10 +19,14 @@ export function parseDrizzleSchema(sourceCode: string): {
 } {
   const tables: TableInfo[] = []
   const relations: RelationInfo[] = []
+  const qualifier = namespaceQualifier(sourceCode)
 
   // Find the start of each pgTable/mysqlTable/sqliteTable call.
   // Pattern: export const xxx = pgTable('table_name', { ... })
-  const headerPattern = /(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:pgTable|mysqlTable|sqliteTable)\s*\(\s*['"](\w+)['"]\s*,\s*\{/g
+  const headerPattern = new RegExp(
+    `(?:export\\s+)?(?:const|let)\\s+(\\w+)\\s*=\\s*${qualifier}(?:pgTable|mysqlTable|sqliteTable)\\s*\\(\\s*['"](\\w+)['"]\\s*,\\s*\\{`,
+    'g',
+  )
 
   let header
   while ((header = headerPattern.exec(sourceCode)) !== null) {
@@ -30,7 +38,7 @@ export function parseDrizzleSchema(sourceCode: string): {
     const columnsBlock = extractBalancedBlock(sourceCode, blockStart)
     if (columnsBlock === null) continue
 
-    const columns = parseDrizzleColumns(columnsBlock)
+    const columns = parseDrizzleColumns(columnsBlock, qualifier)
     const primaryKey = columns.find((c) => c.isPrimaryKey)?.name
 
     // Store both the SQL name and the JS variable name. Drizzle queries use
@@ -62,6 +70,19 @@ export function parseDrizzleSchema(sourceCode: string): {
   }
 
   return { tables, relations }
+}
+
+/**
+ * The optional builder prefix, as a regex fragment: `(?:pg\s*\.\s*)?` for each
+ * namespace the file imports a `drizzle-orm/*` module as, so the parser takes
+ * `pg.pgTable(` and `pg\n  .text(` and still refuses another module's
+ * `elsewhere.pgTable(`. A file with no namespace import gets the empty fragment.
+ */
+function namespaceQualifier(sourceCode: string): string {
+  const names = [...sourceCode.matchAll(/import\s+\*\s+as\s+(\w+)\s+from\s+['"]drizzle-orm(?:\/[^'"]*)?['"]/g)].map(
+    (match) => match[1]!,
+  )
+  return names.length > 0 ? `(?:(?:${names.join('|')})\\s*\\.\\s*)?` : ''
 }
 
 /**
@@ -116,14 +137,18 @@ function extractBalancedBlock(source: string, start: number): string | null {
   return null
 }
 
-function parseDrizzleColumns(block: string): ColumnInfo[] {
+function parseDrizzleColumns(block: string, qualifier: string): ColumnInfo[] {
   const columns: ColumnInfo[] = []
 
   // Match column definitions: fieldName: type('col_name').chain()...
   // e.g., id: uuid('id').defaultRandom().primaryKey(),
   // e.g., name: text('name').notNull(),
   // e.g., repoId: uuid('repo_id').notNull().references(() => repos.id, { onDelete: 'cascade' }),
-  const colPattern = /(\w+)\s*:\s*(uuid|text|integer|boolean|timestamp|jsonb|varchar|serial|bigint|real|doublePrecision|smallint|numeric|char|date|time|interval)\s*\([^)]*\)([\s\S]*?)(?=,\s*\w+\s*:|$)/g
+  // e.g., title: pg.text('title').notNull(), through a namespace import
+  const colPattern = new RegExp(
+    `(\\w+)\\s*:\\s*${qualifier}(uuid|text|integer|boolean|timestamp|jsonb|varchar|serial|bigint|real|doublePrecision|smallint|numeric|char|date|time|interval)\\s*\\([^)]*\\)([\\s\\S]*?)(?=,\\s*\\w+\\s*:|$)`,
+    'g',
+  )
 
   let colMatch
   while ((colMatch = colPattern.exec(block)) !== null) {

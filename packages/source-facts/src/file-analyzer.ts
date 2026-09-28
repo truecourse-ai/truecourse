@@ -6,6 +6,7 @@ import { extractCalls, buildFunctionContext } from './extractors/calls.js'
 import { extractHttpCalls } from './extractors/http-calls.js'
 import { extractRouteRegistrations } from './extractors/route-registrations.js'
 import { extractOpenApiRouteMetas } from './extractors/openapi-route-metas.js'
+import { extractTanStackRoutes } from './extractors/tanstack-routes.js'
 import { extractWebRoutes } from './extractors/web-routes.js'
 import { extractWebRedirects } from './extractors/web-redirects.js'
 import { extractCliCommands } from './extractors/cli-commands.js'
@@ -128,10 +129,16 @@ function buildFileAnalysis(
     rpcRouters,
     catchAllPrefixes,
   } = extractRouteRegistrations(tree, filePath, language)
-  // The `openapi: {method, path}` metas — REST addresses declared beside a
-  // procedure rather than in any route table (trpc-to-openapi).
-  const openApiRouteMetas = extractOpenApiRouteMetas(tree, filePath, language)
+  // REST addresses declared beside a procedure rather than in any route table
+  // (trpc-to-openapi metas, oRPC `.route`), and the prefixes an OpenAPI handler
+  // answers under.
+  const { metas: openApiRouteMetas, handlerPrefixes: openApiHandlerPrefixes } = extractOpenApiRouteMetas(
+    tree,
+    filePath,
+    language,
+  )
   const webRoutes = extractWebRoutes(tree, filePath, language)
+  const tanStackRoutes = extractTanStackRoutes(tree, filePath, imports)
   const webRedirects = extractWebRedirects(tree, filePath, language)
   const cliCommands = extractCliCommands(tree, filePath, language)
   const externalHttp = extractExternalHttp(tree, filePath, language)
@@ -163,9 +170,11 @@ function buildFileAnalysis(
     ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
     ...(routerMounts.length > 0 ? { routerMounts } : {}),
     ...(openApiRouteMetas.length > 0 ? { openApiRouteMetas } : {}),
+    ...(openApiHandlerPrefixes.length > 0 ? { openApiHandlerPrefixes } : {}),
     ...(catchAllPrefixes.length > 0 ? { catchAllPrefixes } : {}),
     ...(rpcRouters.length > 0 ? { rpcRouters } : {}),
     ...(webRoutes.length > 0 ? { webRoutes } : {}),
+    ...(tanStackRoutes.length > 0 ? { tanStackRoutes } : {}),
     ...(webRedirects.redirects.length > 0 ? { webRedirects: webRedirects.redirects } : {}),
     ...(webRedirects.redirectsUnconditionally ? { redirectsUnconditionally: true } : {}),
     ...(cliCommands.length > 0 ? { cliCommands } : {}),

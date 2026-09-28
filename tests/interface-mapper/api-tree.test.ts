@@ -353,6 +353,151 @@ describe('deriveApiInterfacesFromTree — openapi metas', () => {
 })
 
 /**
+ * The oRPC surface: each procedure declares its REST address with
+ * `.route({ method, path })`, and the OpenAPIHandler states its base as the
+ * `prefix` it handles requests under. The app reaches that handler through
+ * `app.all` catch-alls, which are not operations themselves.
+ */
+const ORPC_APP_SOURCE = `
+  import { Hono } from 'hono'
+  import { handleOpenApi } from '../openapi/handler'
+  import { handleRpc } from '../rpc/handler'
+  import { handleMcp } from '../mcp/handler'
+  import { handleHealth } from './health'
+
+  export function createApp() {
+    const app = new Hono()
+    app.all('/api/rpc/*', (c) => handleRpc(c.req.raw))
+    app.all('/api/openapi', (c) => handleOpenApi(c.req.raw))
+    app.all('/api/openapi/*', (c) => handleOpenApi(c.req.raw))
+    app.get('/api/health', () => handleHealth())
+    app.all('/mcp', (c) => handleMcp(c.req.raw))
+    app.all('/mcp/*', (c) => handleMcp(c.req.raw))
+    app.all('/.well-known/*', () => new Response(null, { status: 404 }))
+    return app
+  }
+`
+
+const ORPC_HANDLER_SOURCE = `
+  import { OpenAPIHandler } from '@orpc/openapi/fetch'
+  import { router } from '../router'
+
+  const openAPIHandler = new OpenAPIHandler(router, {})
+
+  export async function handleOpenApi(request) {
+    const { response } = await openAPIHandler.handle(request, { prefix: '/api/openapi', context: {} })
+    return response ?? new Response('NOT_FOUND', { status: 404 })
+  }
+`
+
+const ORPC_ROUTER_SOURCE = `
+  import { protectedProcedure, publicProcedure } from '../context'
+
+  export const notesRouter = {
+    list: protectedProcedure
+      .route({ method: 'GET', path: '/notes', operationId: 'listNotes', summary: 'List notes' })
+      .input(listInput)
+      .handler(({ context }) => listNotes(context.user.id)),
+    update: protectedProcedure
+      .route({ method: 'PUT', path: '/notes/{id}', summary: 'Update a note' })
+      .handler(({ input }) => updateNote(input)),
+    // No REST address declared: served only through the RPC envelope.
+    getRoot: publicProcedure.handler(() => getRoot()),
+  }
+`
+
+const MCP_HANDLER_SOURCE = `
+  import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
+  import { createMcpServer } from './server'
+
+  export async function handleMcp(request) {
+    const transport = new WebStandardStreamableHTTPServerTransport({})
+    await createMcpServer().connect(transport)
+    return transport.handleRequest(request)
+  }
+`
+
+describe('deriveApiInterfacesFromTree — oRPC routes and an MCP endpoint', () => {
+  const tree = [
+    analyze('apps/server/src/http/app.ts', ORPC_APP_SOURCE),
+    analyze('apps/server/src/openapi/handler.ts', ORPC_HANDLER_SOURCE),
+    analyze('packages/api/src/features/notes/router.ts', ORPC_ROUTER_SOURCE),
+    analyze('apps/server/src/mcp/handler.ts', MCP_HANDLER_SOURCE),
+  ]
+  const paths = deriveApiInterfacesFromTree(tree).map((j) => `${j.entry?.method} ${j.entry?.path}`)
+
+  it("serves each procedure's declared route under the OpenAPI handler's prefix", () => {
+    expect(paths).toContain('GET /api/openapi/notes')
+    expect(paths).toContain('PUT /api/openapi/notes/{id}')
+  })
+
+  it('serves an exact-path catch-all as POST when its handler is an MCP transport', () => {
+    expect(paths).toContain('POST /mcp')
+  })
+
+  it('recognizes a named imported transport handler', () => {
+    const app = analyze('apps/server/src/http/app.ts', ORPC_APP_SOURCE.replace(
+      "app.all('/mcp', (c) => handleMcp(c.req.raw))", "app.all('/mcp', handleMcp)",
+    ))
+    expect(deriveApiInterfacesFromTree([app, tree[3]!]).map(j => j.entry?.path)).toContain('/mcp')
+  })
+
+  it('does not borrow a transport call from another route on the same line', () => {
+    const app = analyze('apps/server/src/http/app.ts', `
+      import { Hono } from 'hono'
+      import { handleMcp } from '../mcp/handler'
+      const app = new Hono()
+      app.all('/ordinary', () => new Response('ok')); app.all('/mcp', (c) => handleMcp(c.req.raw))
+    `)
+    expect(deriveApiInterfacesFromTree([app, tree[3]!]).map(j => j.entry?.path)).toEqual(['/mcp'])
+  })
+
+  it('requires an HTTP server transport, not just any MCP SDK import', () => {
+    const handler = analyze('apps/server/src/mcp/handler.ts', MCP_HANDLER_SOURCE.replace(
+      '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js', '@modelcontextprotocol/sdk/client/index.js',
+    ))
+    expect(deriveApiInterfacesFromTree([tree[0]!, handler]).map(j => j.entry?.path)).not.toContain('/mcp')
+  })
+
+  it('keeps every other catch-all out of the catalog', () => {
+    expect(paths.sort()).toEqual([
+      'GET /api/health',
+      'GET /api/openapi/notes',
+      'POST /mcp',
+      'PUT /api/openapi/notes/{id}',
+    ])
+  })
+
+  it('derives no routes when no catch-all serves the handler prefix', () => {
+    const unserved = deriveApiInterfacesFromTree([
+      analyze('apps/server/src/openapi/handler.ts', ORPC_HANDLER_SOURCE),
+      analyze('packages/api/src/features/notes/router.ts', ORPC_ROUTER_SOURCE),
+    ])
+    expect(unserved).toEqual([])
+  })
+
+  it('reads no route off a `.route({…})` call that is not a procedure chain', () => {
+    // hapi's route table has the same object shape, but it is not relative to
+    // any OpenAPI base, and no handler chain follows it.
+    const hapi = analyze('src/server.ts', `server.route({ method: 'GET', path: '/notes', handler: listNotes })`)
+    expect(hapi.openApiRouteMetas).toBeUndefined()
+  })
+
+  it('does not treat the prefix of a non-oRPC handle call as a base', () => {
+    const other = analyze(
+      'apps/server/src/openapi/handler.ts',
+      ORPC_HANDLER_SOURCE.replace("'@orpc/openapi/fetch'", "'./local-openapi'"),
+    )
+    const derived = deriveApiInterfacesFromTree([
+      analyze('apps/server/src/http/app.ts', ORPC_APP_SOURCE),
+      other,
+      analyze('packages/api/src/features/notes/router.ts', ORPC_ROUTER_SOURCE),
+    ]).map((j) => j.entry?.path)
+    expect(derived).not.toContain('/api/openapi/notes')
+  })
+})
+
+/**
  * Monorepo scoped specifiers: `@documenso/auth/server` names `packages/auth/server`.
  * Without this the mount is read but its target never resolves, and the sub-router's
  * routes stay at the bare paths it declares them with — an address that 404s.

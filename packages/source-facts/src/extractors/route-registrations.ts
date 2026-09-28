@@ -207,6 +207,12 @@ function extractJsRoutes(tree: Tree, filePath: string): RouteExtraction {
           if (isRouterLikeReceiver(receiver, evidence, true)) {
             const route = extractRoute(methodName, argsNode, filePath, node)
             if (route) routes.push(route)
+            // app.all('/prefix/*', handler) answers everything under the prefix,
+            // as a wildcard `use` does.
+            if (methodName === 'all') {
+              const wildcard = extractCatchAllPrefix(argsNode)
+              if (wildcard !== null) catchAll.add(wildcard)
+            }
           }
         }
       }

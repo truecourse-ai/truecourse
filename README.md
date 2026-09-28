@@ -70,6 +70,17 @@ sentence. Documentation is kept or dropped by whether it describes that product,
 so nothing connects (no repository, no documentation source, no scan) until the
 workspace has said it.
 
+## Interface discovery
+
+Flow setup reads API operations from route registrations, OpenAPI documents,
+tRPC metadata and oRPC procedures with explicit REST routes. It recognizes an
+MCP HTTP endpoint through its transport handler. Web screens come from Next.js,
+Remix flat routes, React Router JSX and TanStack file routes that declare a
+component. Flow setup then authors interactions on those screens.
+
+Drizzle schemas support named and namespace imports, including multiline column
+builders. The parsed tables and columns ground database seed generation.
+
 ## Pull request checks
 
 With the GitHub App connected, a connected repository's pull requests are

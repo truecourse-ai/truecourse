@@ -1,10 +1,10 @@
 /**
  * The web derivation, structural half: the PLACES a navigate step can reach,
- * read off the working tree. The first web surface anything derives — every web
- * catalog that exists today was typed by a human reading the app's JSX.
+ * read off the working tree. TanStack declarations carry their component option
+ * as an analyzer fact; their reader excludes declarations that render nothing.
  *
  * WHY THIS IS A TREE-LEVEL PASS and not a per-file extractor beside the api
- * ones. Two of the three web-routing idioms declare a route by PUTTING A FILE
+ * ones. Two web-routing idioms declare a route by PUTTING A FILE
  * SOMEWHERE: there is no syntax in the file to read, and the only thing that
  * distinguishes `apps/web/pages/router/index.tsx` (a screen at `/router`) from
  * `admin/src/pages/Home/HomePage.tsx` (a React component) is a `next.config.js`
@@ -41,11 +41,12 @@
 import { canonicalRoutePath, type FileAnalysis } from '@truecourse/shared'
 import { readNextAppRoutes, readNextPagesRoutes } from './web/next-files.js'
 import { readRemixFlatRoutes } from './web/remix-flat.js'
+import { readTanStackRoutes } from './web/tanstack-router.js'
 import { readReactRouterRoutes } from './web/react-router.js'
 
 /** Which reader recognised a place — kept so a surprising address can be traced
  *  back to the convention that produced it. */
-export type WebPlaceIdiom = 'next-app' | 'next-pages' | 'remix-flat' | 'react-router'
+export type WebPlaceIdiom = 'next-app' | 'next-pages' | 'remix-flat' | 'react-router' | 'tanstack-router'
 
 /** What an idiom reader reports: one place, at the address it is reached by. */
 export interface WebPlaceSeed {
@@ -87,6 +88,7 @@ const READERS: ReadonlyArray<(tree: WebTree) => WebPlaceSeed[]> = [
   readNextPagesRoutes,
   readRemixFlatRoutes,
   readReactRouterRoutes,
+  readTanStackRoutes,
 ]
 
 /**
