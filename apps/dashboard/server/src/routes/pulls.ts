@@ -14,22 +14,23 @@
  *
  * The repository routes sit behind the project resolver, so another
  * workspace's repository answers 404 like every other repository route. A
- * pull request row names the workspace whose check it was, which can differ
- * from the repository's when a source-only repository was checked in one
- * workspace and connected in another: a row of another workspace is not
- * listed or read here either. A check is re-run from GitHub.
+ * pull request row names the workspace that recorded it, which can differ
+ * from the repository's once it was disconnected and connected again
+ * elsewhere: a row of another workspace is not listed or read here either. A
+ * check is re-run from GitHub.
  */
 
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import type {
-  PullRequestCheckRecord,
-  PullRequestCheckSummary,
-  PullRequestListItem,
-  PullRequestState,
-  PullRequestStore,
-  WorkspacePullRequestRow,
+import {
+  pullRequestRef,
+  type PullRequestCheckRecord,
+  type PullRequestCheckSummary,
+  type PullRequestListItem,
+  type PullRequestState,
+  type PullRequestStore,
+  type WorkspacePullRequestRow,
 } from '@truecourse/shared';
 import { orgOf } from '../services/workspace-llm.service.js';
 
@@ -84,12 +85,12 @@ export function createPullsRouter(deps: PullsRouterDeps): Router {
       const org = orgOf(req);
       const repo = await resolveProjectForRequest(org, req.params.id as string);
       const state = stateOf(req);
-      const items: PullRequestListItem[] = [];
-      for (const pr of await deps.pulls.listPullRequests(repo.name, { state })) {
-        if (pr.workspaceOrgId !== org) continue;
-        const latest = await deps.pulls.latestCheck(pr.repoFullName, pr.number);
-        items.push({ ...pr, check: latest ? summarize(latest) : null });
-      }
+      const pulls = (await deps.pulls.listPullRequests(repo.name, { state })).filter((pr) => pr.workspaceOrgId === org);
+      const latest = await deps.pulls.latestChecks(pulls);
+      const items: PullRequestListItem[] = pulls.map((pr) => {
+        const check = latest.get(pullRequestRef(pr.repoFullName, pr.number));
+        return { ...pr, check: check ? summarize(check) : null };
+      });
       res.json({ pullRequests: items });
     } catch (e) {
       next(e);
@@ -124,8 +125,10 @@ export function createWorkspacePullsRouter(deps: Pick<PullsRouterDeps, 'pulls'>)
     try {
       const org = orgOf(req);
       const rows: WorkspacePullRequestRow[] = [];
-      for (const pr of await deps.pulls.listWorkspacePullRequests(org, { state: 'open' })) {
-        const check = await deps.pulls.latestCheck(pr.repoFullName, pr.number);
+      const pulls = await deps.pulls.listWorkspacePullRequests(org, { state: 'open' });
+      const latest = await deps.pulls.latestChecks(pulls);
+      for (const pr of pulls) {
+        const check = latest.get(pullRequestRef(pr.repoFullName, pr.number));
         if (!check || check.status !== 'settled' || !check.report) continue;
         // A settled check carries all three; the narrowing is for the type.
         if (!check.conclusion || !check.reason || !check.settledAt) continue;

@@ -52,7 +52,7 @@ export function observeRepositories(store: RepositoryStore): RepositoryStore {
       if (going) report(EVENTS.repoDisconnected, going);
     },
     getRepo: (repoFullName) => store.getRepo(repoFullName),
-    recordDefaultBranchSha: (repoFullName, commitSha) => store.recordDefaultBranchSha(repoFullName, commitSha),
+    recordDefaultBranchSha: (repoFullName, commitSha, pushedAt) => store.recordDefaultBranchSha(repoFullName, commitSha, pushedAt),
     recordMainChainSha: (repoFullName, commitSha) => store.recordMainChainSha(repoFullName, commitSha),
     forgetMainChainSha: (repoFullName, commitSha) => store.forgetMainChainSha(repoFullName, commitSha),
     setCheckPullRequests: (repoFullName, enabled) => store.setCheckPullRequests(repoFullName, enabled),

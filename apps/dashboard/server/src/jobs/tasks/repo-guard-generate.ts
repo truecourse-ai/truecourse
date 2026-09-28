@@ -56,6 +56,7 @@ import {
   checkIsOpen,
   checkLinks,
   linkStarted,
+  pauseLinkCheck,
   settleLinkCheck,
   type PullRequestCheckPort,
 } from '../pr-check-chain.js';
@@ -426,7 +427,7 @@ export function createRepoGuardGenerateTask(
         const link = runId ? checkLinks.record(port.appUrl, runId) : null;
         const status = (result as Partial<GuardGenerateJobResult> | undefined)?.status;
         // A cancel was settled by whoever cancelled.
-        if (outcome === 'paused') await settleLinkCheck(port, pr, { reason: 'credits' }, link);
+        if (outcome === 'paused') await pauseLinkCheck(port, pr, link);
         else if (outcome === 'succeeded' && status === 'open-conflicts') {
           // Conflicts the head did not create still block generation, as on main.
           await settleLinkCheck(port, pr, { reason: 'conflict', conclusion: 'neutral', report: { codeHalf: 'stopped-by-conflict' } }, link);

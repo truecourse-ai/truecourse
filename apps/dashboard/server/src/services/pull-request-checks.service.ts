@@ -34,6 +34,7 @@ import {
 } from '@truecourse/github-app';
 import {
   CHECK_CONCLUSION_OF_REASON,
+  pullRequestRef,
   type PullRequestCheckReason,
   type PullRequestCheckRecord,
   type PullRequestRecord,
@@ -48,12 +49,6 @@ export interface PullRequestChecksDeps {
   pulls: PullRequestStore;
   repos: RepositoryStore;
   octokitFor: (installationId: number) => OctokitClient;
-  /**
-   * The installation a workspace's context SOURCE reads a repository through,
-   * for a repository Code has not connected: its checks have no link to read
-   * the installation off. Null when the workspace has no such source.
-   */
-  sourceInstallationOf?: (workspaceOrgId: string, repoFullName: string) => Promise<number | null>;
 }
 
 /**
@@ -88,20 +83,20 @@ export interface PullRequestChecks {
 }
 
 /**
- * Why a pull request is not checked, or null when it is. Only the default
- * branch has stored state to compare a head with, so a pull request into any
- * other branch is not checked.
+ * Whether a pull request is checked: the repository's link when it is, else
+ * why not. Only the default branch has stored state to compare a head with,
+ * so a pull request into any other branch is not checked.
  */
-function notChecked(
+function checkable(
   pr: PullRequestRecord,
   link: RepositoryRecord | null,
-): { status: 'disabled' | 'other-base'; why: string } | null {
+): { link: RepositoryRecord } | { status: 'disabled' | 'other-base'; why: string } {
   if (!link) return { status: 'disabled', why: 'the repository is not connected in Code' };
   if (!link.checkPullRequests) return { status: 'disabled', why: 'checks are off for this repository' };
   if (pr.baseRef !== link.defaultBranch) {
     return { status: 'other-base', why: `it targets ${pr.baseRef}, not the default branch ${link.defaultBranch ?? '(unknown)'}` };
   }
-  return null;
+  return { link };
 }
 
 export function createPullRequestChecks(deps: PullRequestChecksDeps): PullRequestChecks {
@@ -157,13 +152,12 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
 
   /**
    * The installation a pull request's checks read GitHub through: the one the
-   * event named, else the repository's link, else the workspace's source.
+   * event named, else the repository's link. Null when neither has one.
    */
   async function installationFor(pr: PullRequestRecord, given?: number): Promise<number | null> {
     if (given !== undefined) return given;
     const link = await deps.repos.getRepo(pr.repoFullName);
-    if (link) return installationOf(link);
-    return (await deps.sourceInstallationOf?.(pr.workspaceOrgId, pr.repoFullName)) ?? null;
+    return link ? installationOf(link) : null;
   }
 
   const supersede: PullRequestChecks['supersede'] = async (repoFullName, number, reason) => {
@@ -175,12 +169,13 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     // and a link of its chain still queued does nothing when it starts.
     if (installationId !== null) await settle(deps.octokitFor(installationId), active, reason);
     else await deps.pulls.settleCheck(active.id, { conclusion: 'neutral', reason });
-    // Stopped without waiting: a running link unwinds in its own time (a build
-    // mid-way can take a while), and the next attempt waits behind it in the
-    // workspace's lane anyway, so nothing that follows needs it gone first.
+    // Stopped and waited for (the wait is bounded): a running coordinator holds
+    // the pull request's single-flight key until it unwinds, and the next
+    // attempt's enqueue would find the key taken. The webhook does not wait
+    // on this.
     const workspaceOrgId = pr?.workspaceOrgId;
     if (workspaceOrgId && active.jobId) {
-      void deps.jobs.cancelCheckJob(workspaceOrgId, active.jobId).catch((err: unknown) => {
+      await deps.jobs.cancelCheckJob(workspaceOrgId, active.jobId).catch((err: unknown) => {
         log.warn(`[checks] could not stop the jobs of ${repoFullName}#${number}: ${(err as Error).message}`);
       });
     }
@@ -188,7 +183,6 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
 
   const start: PullRequestChecks['start'] = async (pr, given) => {
     const installationId = await installationFor(pr, given);
-    const link = await deps.repos.getRepo(pr.repoFullName);
     if (installationId === null) {
       log.warn(`[checks] ${pr.repoFullName}#${pr.number} has no installation to check through`);
       return { status: 'failed' };
@@ -202,18 +196,17 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
       return { status: 'stale' };
     }
     await supersede(pr.repoFullName, pr.number, 'superseded');
-    const skipped = notChecked(pr, link);
-    if (skipped) {
-      log.info(`[checks] ${pr.repoFullName}#${pr.number} at ${pr.headSha.slice(0, 8)} not checked: ${skipped.why}`);
-      return { status: skipped.status };
+    const verdict = checkable(pr, await deps.repos.getRepo(pr.repoFullName));
+    if (!('link' in verdict)) {
+      log.info(`[checks] ${pr.repoFullName}#${pr.number} at ${pr.headSha.slice(0, 8)} not checked: ${verdict.why}`);
+      return { status: verdict.status };
     }
     const octokit = deps.octokitFor(installationId);
     let check = await deps.pulls.createCheck({ repoFullName: pr.repoFullName, number: pr.number, headSha: pr.headSha });
     const githubCheckRunId = await postQueued(octokit, check);
     check = (await deps.pulls.updateCheck(check.id, { githubCheckRunId })) ?? check;
     const outcome = await deps.jobs.enqueuePullRequestCheck({
-      // A repository only a source reads has no slug; the socket room is the name's.
-      repoId: link?.slug ?? pr.repoFullName,
+      repoId: verdict.link.slug,
       repoFullName: pr.repoFullName,
       workspaceOrgId: pr.workspaceOrgId,
       source: 'pull-request',
@@ -223,10 +216,11 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
       installationId,
     });
     if (outcome.status !== 'queued') {
-      // Another replica still runs the check this one superseded: the row
+      // Another replica still runs the check this one superseded (a cancel
+      // here cannot reach it), or its unwinding outlasted the wait: the row
       // just made would wait for nobody. The head goes unchecked until a
       // re-run or the next push.
-      log.warn(`[checks] ${pr.repoFullName}#${pr.number} at ${pr.headSha.slice(0, 8)} not checked: its earlier attempt is still running elsewhere`);
+      log.warn(`[checks] ${pr.repoFullName}#${pr.number} at ${pr.headSha.slice(0, 8)} not checked: its earlier attempt is still running`);
       await settle(octokit, check, 'cancelled');
       return { status: 'busy' };
     }
@@ -237,9 +231,9 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
   /** A draft's check: settled at once, saying so. Nothing is posted for a repository whose checks are off. */
   async function hold(pr: PullRequestRecord, installationId: number): Promise<void> {
     await supersede(pr.repoFullName, pr.number, 'superseded');
-    const skipped = notChecked(pr, await deps.repos.getRepo(pr.repoFullName));
-    if (skipped) {
-      log.info(`[checks] ${pr.repoFullName}#${pr.number} draft not held: ${skipped.why}`);
+    const verdict = checkable(pr, await deps.repos.getRepo(pr.repoFullName));
+    if (!('link' in verdict)) {
+      log.info(`[checks] ${pr.repoFullName}#${pr.number} draft not held: ${verdict.why}`);
       return;
     }
     const octokit = deps.octokitFor(installationId);
@@ -253,11 +247,12 @@ export function createPullRequestChecks(deps: PullRequestChecksDeps): PullReques
     start,
     supersede,
     async rerunBlockedByConflict(workspaceOrgId) {
-      for (const pr of await deps.pulls.listWorkspacePullRequests(workspaceOrgId, { state: 'open' })) {
-        if (pr.draft) continue;
+      const pulls = (await deps.pulls.listWorkspacePullRequests(workspaceOrgId, { state: 'open' })).filter((pr) => !pr.draft);
+      const latest = await deps.pulls.latestChecks(pulls);
+      for (const pr of pulls) {
         try {
-          const latest = await deps.pulls.latestCheck(pr.repoFullName, pr.number);
-          if (latest?.status === 'settled' && latest.reason === 'conflict') await start(pr);
+          const check = latest.get(pullRequestRef(pr.repoFullName, pr.number));
+          if (check?.status === 'settled' && check.reason === 'conflict') await start(pr);
         } catch (err) {
           log.warn(`[checks] could not re-check ${pr.repoFullName}#${pr.number}: ${(err as Error).message}`);
         }

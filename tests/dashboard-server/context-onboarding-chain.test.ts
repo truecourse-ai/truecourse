@@ -415,7 +415,7 @@ describe('a push to the default branch', () => {
     jobs.enqueueContextSync({ workspaceOrgId: ORG, sourceId: SOURCE, source: 'push' });
 
   it('scans the documents it changed first, then runs the chain at the pushed commit', async () => {
-    await repos.recordDefaultBranchSha(REPO, 'sha-pushed');
+    await repos.recordDefaultBranchSha(REPO, 'sha-pushed', new Date().toISOString());
     jobs = mount([doc('docs/one.md', '# One\n')]);
     await jobs.start();
 
@@ -434,7 +434,7 @@ describe('a push to the default branch', () => {
   });
 
   it('runs the chain straight after a sync that changed no document', async () => {
-    await repos.recordDefaultBranchSha(REPO, 'sha-pushed');
+    await repos.recordDefaultBranchSha(REPO, 'sha-pushed', new Date().toISOString());
     jobs = mount([]);
     await jobs.start();
 
@@ -449,7 +449,7 @@ describe('a push to the default branch', () => {
   });
 
   it('starts no chain from a sync when no push is owed one', async () => {
-    await repos.recordDefaultBranchSha(REPO, 'sha-pushed');
+    await repos.recordDefaultBranchSha(REPO, 'sha-pushed', new Date().toISOString());
     await repos.recordMainChainSha(REPO, 'sha-pushed');
     jobs = mount([]);
     await jobs.start();

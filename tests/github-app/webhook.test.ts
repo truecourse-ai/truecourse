@@ -151,7 +151,7 @@ describe('webhook router', () => {
     await post('push', {
       ref: 'refs/heads/main',
       after: 'sha-after',
-      repository: { full_name: 'acme/api', default_branch: 'main' },
+      repository: { full_name: 'acme/api', default_branch: 'main', pushed_at: 1_790_000_000 },
       installation: { id: 5 },
     }).expect(202);
 
@@ -210,13 +210,30 @@ describe('webhook router', () => {
     await post('push', {
       ref: 'refs/heads/main',
       after: 'sha-after',
-      repository: { full_name: 'acme/api', default_branch: 'main' },
+      repository: { full_name: 'acme/api', default_branch: 'main', pushed_at: 1_790_000_000 },
       installation: { id: 5 },
     }).expect(202);
 
     expect(baselineCalls).toHaveLength(1);
     expect(shaWhenReported).toBe('sha-after');
     expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBe('sha-after');
+  });
+
+  it('keeps the later push when an earlier one is delivered after it', async () => {
+    await store.linkRepo(repoLink('acme/api', 5));
+    const push = (after: string, pushedAt: number) =>
+      post('push', {
+        ref: 'refs/heads/main',
+        after,
+        repository: { full_name: 'acme/api', default_branch: 'main', pushed_at: pushedAt },
+        installation: { id: 5 },
+      }).expect(202);
+
+    await push('sha-2', 1_790_000_060);
+    await push('sha-1', 1_790_000_000);
+
+    expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBe('sha-2');
+    expect(baselineCalls.map((t) => t.commitSha)).toEqual(['sha-2']);
   });
 
   it('ignores a push to an unconnected repo', async () => {

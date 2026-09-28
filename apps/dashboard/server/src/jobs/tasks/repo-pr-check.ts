@@ -4,9 +4,9 @@
  * is the repository's own chain (setup → generate → run), carrying the pull
  * request, and that chain's end settles the check (see `../pr-check-chain.ts`).
  *
- * What this job does, in order: fetch the head; find the base (the exact
- * merge-base, and the scenario set, setup bundle and run stored there — with
- * none of them the check settles `no-base`); and, when the repository is a
+ * What this job does, in order: find the base (the exact merge-base, and the
+ * scenario set, setup bundle and run stored there — with none of them the
+ * check settles `no-base`); fetch the head; and, when the repository is a
  * context source and the head changed a document in that source's scope, scan
  * the head's documents into the pull request's corpus, stored under the pull
  * request's scope and never promoted. A conflict the head creates, or one open
@@ -15,8 +15,10 @@
  * on main. Otherwise the report's first half (the base, the scan, the
  * conflicts) goes on the check's row and the setup is enqueued.
  *
- * A check the balance stopped pauses, and its resume is a new attempt on the
- * same head. A cancelled check is neutral.
+ * A check the balance stopped stays open while its job is paused, and the
+ * resume carries the same check on. A newer head, a close or a draft settles
+ * it meanwhile, as it settles any open check, and the resume then does
+ * nothing. A cancelled check is neutral.
  */
 
 import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
@@ -35,7 +37,7 @@ import { log } from '@truecourse/core/lib/logger';
 import { parseContextDocRef } from '@truecourse/core/lib/context-ref';
 import { repositoryDocumentsIn, sliceCorpus } from '@truecourse/core/services/context';
 import { conflictsCreated } from '@truecourse/core/services/pr-check/compare';
-import { createCheck, renderCheckOutput, type OctokitClient } from '@truecourse/github-app';
+import { renderCheckOutput, type OctokitClient } from '@truecourse/github-app';
 import {
   isForkPullRequest,
   openConflicts,
@@ -57,14 +59,15 @@ import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-l
 import { createUsageMeter, withCredits, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { sliceChanged } from '../context-ripple.js';
-import { checkLinks, postCheck, settleCheck, type CheckOutcome, type PullRequestCheckPort } from '../pr-check-chain.js';
+import { checkLinks, pauseCheck, postCheck, settleCheck, type CheckOutcome, type PullRequestCheckPort } from '../pr-check-chain.js';
 import { firstLine, pipelineTracker, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_PR_CHECK_TASK = 'repo.pr-check';
 
-/** The check's own phases, after the clone. */
+/** The check's own phases. */
 export const PR_CHECK_STEPS = [
   { key: 'base', label: 'Finding the base' },
+  { key: 'clone', label: 'Cloning the head' },
   { key: 'scan', label: 'Scanning changed documents' },
 ] as const;
 
@@ -107,13 +110,11 @@ export function createRepoPullRequestCheckTask(
 ): JobDefinition<PullRequestCheckJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runScan = deps.runScan ?? workspaceContextScanInProcess;
-  /** The check row each job works on: its payload's, or the new attempt a resume made. */
-  const checks = new Map<string, string>();
 
   return {
     type: REPO_PR_CHECK_TASK,
     title: 'Checking a pull request',
-    steps: [{ key: 'clone', label: 'Cloning the head' }, ...PR_CHECK_STEPS],
+    steps: [...PR_CHECK_STEPS],
     org: (payload) => payload.workspaceOrgId,
     traceMeta: (payload) => ({ repoFullName: payload.repoFullName, commitSha: payload.headSha }),
 
@@ -121,22 +122,13 @@ export function createRepoPullRequestCheckTask(
       const { repoFullName, number, headSha, installationId, workspaceOrgId } = ctx.payload;
       const pr = await deps.pulls.getPullRequest(repoFullName, number);
       if (!pr) throw new Error(`${repoFullName}#${number} is not a pull request this workspace holds.`);
+      const link = await deps.repos.getRepo(repoFullName);
+      if (!link) throw new Error(`${repoFullName} is no longer connected in Code.`);
       const octokit = deps.octokitFor(installationId);
-      // A resumed job's row already settled (paused): this run is the next
-      // attempt on the same head, with a row and a GitHub check of its own.
-      let check = await deps.pulls.getCheck(ctx.payload.checkId);
-      if (!check || check.status === 'settled') {
-        check = await deps.pulls.createCheck({ repoFullName, number, headSha, jobId: ctx.jobId });
-        const githubCheckRunId = await createCheck(octokit, repoFullName, { headSha, externalId: check.id }).catch(
-          (err: unknown) => {
-            log.warn(`[jobs] could not post a check for ${repoFullName}#${number}: ${(err as Error).message}`);
-            return null;
-          },
-        );
-        check = (await deps.pulls.updateCheck(check.id, { githubCheckRunId })) ?? check;
-      }
-      checks.set(ctx.jobId, check.id);
-      const opened = check;
+      // Settled while this job waited (a newer head, a close, a draft, most
+      // often during a pause for credits): nothing is left to do.
+      const opened = await deps.pulls.getCheck(ctx.payload.checkId);
+      if (!opened || opened.status === 'settled') return { notification: null };
       const meter = createUsageMeter({ workspaceOrgId, repoFullName, jobType: REPO_PR_CHECK_TASK, jobId: ctx.jobId });
       const fork = isForkPullRequest(pr);
       const workspaceScope = pullRequestWorkspaceScope(repoFullName, number);
@@ -153,15 +145,46 @@ export function createRepoPullRequestCheckTask(
       };
 
       try {
-        await deps.pulls.updateCheck(opened.id, { status: 'running', jobId: ctx.jobId, startedAt: new Date().toISOString() });
+        await deps.pulls.updateCheck(opened.id, {
+          status: 'running',
+          jobId: ctx.jobId,
+          startedAt: opened.startedAt ?? new Date().toISOString(),
+        });
         await postCheck(octokit, opened, {
           status: 'in_progress',
           output: { title: 'Checking', summary: `Checking ${headSha.slice(0, 8)} against its base.` },
         });
 
-        // Through the installation the check reads GitHub with, so a
-        // repository only a context source reads clones too, and the head is
-        // checked out under its own branch name.
+        // The base: the exact merge-base, and everything stored there. Found
+        // before the clone, which a check with no base never reads.
+        await ctx.phase('base');
+        const mergeBase = await resolveMergeBase(octokit, repoFullName, pr.baseRef, headSha);
+        const base = (await hasStoredBase(repoFullName, mergeBase)) ? mergeBase : null;
+        const emptyReport = (parts: Partial<PullRequestCheckReport> = {}): PullRequestCheckReport => ({
+          base: { mergeBase, commit: base, nearestWithBase: null },
+          fork,
+          conflictsCreated: [],
+          sectionsMoved: [],
+          repositoriesAffected: [],
+          run: null,
+          specHalf: 'not-a-source',
+          codeHalf: 'not-run',
+          ...parts,
+        });
+        await deps.pulls.updateCheck(opened.id, { mergeBaseSha: mergeBase, baseCommitSha: base });
+        if (!base) {
+          return await decide(
+            {
+              reason: 'no-base',
+              report: emptyReport({
+                base: { mergeBase, commit: null, nearestWithBase: await nearestCommitWithBase(repoFullName) },
+              }),
+            },
+            null,
+          );
+        }
+
+        // The head is checked out under its own branch name.
         await ctx.phase('clone');
         const tree = await acquireWorkTree(repoFullName, {
           workspaceOrgId,
@@ -170,36 +193,6 @@ export function createRepoPullRequestCheckTask(
           defaultBranch: pr.headRef,
         });
         try {
-          // The base: the exact merge-base, and everything stored there.
-          await ctx.phase('base');
-          const mergeBase = await resolveMergeBase(octokit, repoFullName, pr.baseRef, headSha);
-          const link = await deps.repos.getRepo(repoFullName);
-          const connected = link?.enabled === true;
-          const base = connected && (await hasStoredBase(repoFullName, mergeBase)) ? mergeBase : null;
-          const emptyReport = (parts: Partial<PullRequestCheckReport> = {}): PullRequestCheckReport => ({
-            base: { mergeBase, commit: base, nearestWithBase: null },
-            fork,
-            conflictsCreated: [],
-            sectionsMoved: [],
-            repositoriesAffected: [],
-            run: null,
-            specHalf: 'not-a-source',
-            codeHalf: 'not-run',
-            ...parts,
-          });
-          await deps.pulls.updateCheck(opened.id, { mergeBaseSha: mergeBase, baseCommitSha: base });
-          if (connected && !base) {
-            return await decide(
-              {
-                reason: 'no-base',
-                report: emptyReport({
-                  base: { mergeBase, commit: null, nearestWithBase: await nearestCommitWithBase(repoFullName) },
-                }),
-              },
-              null,
-            );
-          }
-
           // The spec half: the head's documents, when it changed any in scope.
           await ctx.phase('scan');
           const spec = await scanHead({
@@ -207,7 +200,7 @@ export function createRepoPullRequestCheckTask(
             tree: tree.dir,
             pr: { repoFullName, number, baseRef: pr.baseRef },
             workspaceOrgId,
-            defaultBranch: link?.defaultBranch ?? null,
+            defaultBranch: link.defaultBranch ?? null,
             run: async (documents, sourceId) => {
               const llm = await startLlm(workspaceOrgId, meter);
               return withCredits(meter, () =>
@@ -249,7 +242,6 @@ export function createRepoPullRequestCheckTask(
             reason: created.length > 0 ? 'conflict' : 'clean',
             report: { ...report, codeHalf },
           });
-          if (!connected || !base) return await decide(specOutcome('not-connected'), created.length > 0 ? conflictsUrl : null);
           if (sliceOpen.length > 0) {
             // Open conflicts the pull request did not create still block
             // generation, but are not its failure.
@@ -293,21 +285,26 @@ export function createRepoPullRequestCheckTask(
     }),
 
     async onSettled(ctx, outcome) {
-      const checkId = checks.get(ctx.jobId) ?? ctx.payload.checkId;
-      checks.delete(ctx.jobId);
+      const { checkId, installationId } = ctx.payload;
       await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-run');
-      // A check the body did not settle or hand over — a failure that is not
-      // the pull request's, a cancel, an empty balance — is settled here with
-      // the one word for it, and GitHub's check is moved with it.
-      const reason = unsettledReason(outcome);
-      if (!reason) return;
       try {
+        // An empty balance leaves the check open for the resume.
+        if (outcome === 'paused') {
+          const check = await deps.pulls.getCheck(checkId);
+          if (check && check.status !== 'settled') await pauseCheck(deps, check, installationId, null);
+          return;
+        }
+        // A check the body did not settle or hand over — a failure that is
+        // not the pull request's, a cancel — is settled here with the one
+        // word for it, and GitHub's check is moved with it.
+        const reason = unsettledReason(outcome);
+        if (!reason) return;
         const check = await deps.pulls.settleCheck(checkId, {
           conclusion: CHECK_CONCLUSION_OF_REASON[reason],
           reason,
         });
         if (!check) return;
-        await postCheck(deps.octokitFor(ctx.payload.installationId), check, {
+        await postCheck(deps.octokitFor(installationId), check, {
           status: 'completed',
           reason,
           output: renderCheckOutput(reason, null, null),
@@ -320,7 +317,7 @@ export function createRepoPullRequestCheckTask(
 }
 
 /** The reason a job outcome settles a check the body left open, or null when the body settled it. */
-function unsettledReason(outcome: JobOutcomeStatus): PullRequestCheckReason | null {
+function unsettledReason(outcome: Exclude<JobOutcomeStatus, 'paused'>): PullRequestCheckReason | null {
   switch (outcome) {
     case 'succeeded':
       return null;
@@ -328,8 +325,6 @@ function unsettledReason(outcome: JobOutcomeStatus): PullRequestCheckReason | nu
       return 'error';
     case 'cancelled':
       return 'cancelled';
-    case 'paused':
-      return 'credits';
   }
 }
 

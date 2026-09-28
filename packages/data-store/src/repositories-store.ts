@@ -5,7 +5,7 @@
  * `@truecourse/shared`.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, lte, or } from 'drizzle-orm';
 import type {
   RepositoryLink,
   RepositoryProviderId,
@@ -82,6 +82,7 @@ export class PgRepositoryStore implements RepositoryStore {
           // A reconnect starts afresh: the last push the old connection saw
           // says nothing about the branch now.
           defaultBranchSha: null,
+          defaultBranchPushedAt: null,
           mainChainSha: null,
           location: rec.location ?? null,
           blocking: rec.blocking,
@@ -100,11 +101,18 @@ export class PgRepositoryStore implements RepositoryStore {
     await this.db.delete(repositories).where(eq(repositories.repoFullName, repoFullName));
   }
 
-  async recordDefaultBranchSha(repoFullName: string, commitSha: string): Promise<void> {
-    await this.db
+  async recordDefaultBranchSha(repoFullName: string, commitSha: string, pushedAt: string): Promise<boolean> {
+    const rows = await this.db
       .update(repositories)
-      .set({ defaultBranchSha: commitSha })
-      .where(eq(repositories.repoFullName, repoFullName));
+      .set({ defaultBranchSha: commitSha, defaultBranchPushedAt: pushedAt })
+      .where(
+        and(
+          eq(repositories.repoFullName, repoFullName),
+          or(isNull(repositories.defaultBranchPushedAt), lte(repositories.defaultBranchPushedAt, pushedAt)),
+        ),
+      )
+      .returning({ repoFullName: repositories.repoFullName });
+    return rows.length > 0;
   }
 
   async recordMainChainSha(repoFullName: string, commitSha: string): Promise<void> {

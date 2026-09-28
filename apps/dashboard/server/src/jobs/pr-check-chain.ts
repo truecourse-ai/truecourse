@@ -9,7 +9,8 @@
  * coordinator (`repo.pr-check`) hands over: the base, the documents it scanned,
  * the conflicts the head creates. The link that settles merges its own half in.
  * A link whose check is already settled (a newer head superseded it, the pull
- * request closed) does nothing: its row keeps the first word.
+ * request closed) does nothing: its row keeps the first word. A link the
+ * balance paused leaves its check open, so its resume carries the same check on.
  */
 
 import { log } from '@truecourse/core/lib/logger';
@@ -20,7 +21,7 @@ import {
 } from '@truecourse/core/lib/guard-store';
 import { readGuardRunFlowSummary } from '@truecourse/core/commands/guard-read';
 import { compareFlows, sectionsMoved } from '@truecourse/core/services/pr-check/compare';
-import { renderCheckOutput, updateCheck, type OctokitClient } from '@truecourse/github-app';
+import { PAUSED_CHECK_OUTPUT, renderCheckOutput, updateCheck, type OctokitClient } from '@truecourse/github-app';
 import {
   isWorldBootFailure,
   readGuardFlowsCorpus,
@@ -148,6 +149,38 @@ export async function settleCheck(
     output: renderCheckOutput(outcome.reason, report, detailsUrl),
   });
   return settled;
+}
+
+/**
+ * The balance paused the job a check waits on. The check stays open: the
+ * resumed job carries it on, and a newer head, a close or a draft settles it
+ * meanwhile as it settles any open check. GitHub's check says why it waits.
+ */
+export async function pauseCheck(
+  port: PullRequestCheckPort,
+  check: PullRequestCheckRecord,
+  installationId: number,
+  detailsUrl: string | null,
+): Promise<void> {
+  await postCheck(port.octokitFor(installationId), check, {
+    status: 'in_progress',
+    ...(detailsUrl ? { detailsUrl } : {}),
+    output: PAUSED_CHECK_OUTPUT,
+  });
+}
+
+/** Mark the check a link works for paused; nothing when its row is gone or settled. */
+export async function pauseLinkCheck(
+  port: PullRequestCheckPort,
+  link: PullRequestLink,
+  detailsUrl: string | null,
+): Promise<void> {
+  try {
+    const check = await port.pulls.getCheck(link.checkId);
+    if (check && check.status !== 'settled') await pauseCheck(port, check, link.installationId, detailsUrl);
+  } catch (err) {
+    log.warn(`[jobs] could not mark check ${link.checkId} paused: ${(err as Error).message}`);
+  }
 }
 
 /** Settle the check a link works for; nothing when its row is gone. */

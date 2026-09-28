@@ -595,11 +595,13 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
    * Stop the one job a pull request's check names. Never by the pull request's
    * keys: a newer attempt's jobs hold those same keys by the time a slow cancel
    * gets to them. The caller settles the check's row first, so a link the
-   * stopped job still chains finds it settled and does nothing.
+   * stopped job still chains finds it settled and does nothing. A job paused
+   * for credits is cancelled too, so no grant carries it on.
    */
   const cancelCheckJob = async (orgId: string, jobId: string): Promise<void> => {
     const job = await jobs.jobStore.get(jobId, orgId);
-    if (job && isActiveJob(job.status)) await jobs.cancel(job.id);
+    if (job?.status === 'paused') await jobs.jobStore.cancelPaused(job.id);
+    else if (job && isActiveJob(job.status)) await jobs.cancel(job.id);
   };
 
   /**

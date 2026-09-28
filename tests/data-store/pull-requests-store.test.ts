@@ -81,6 +81,12 @@ describe('pull requests', () => {
     expect(await store.getPullRequest('acme/api', 8)).toBeNull();
   });
 
+  it('keeps a later update over one delivered after it', async () => {
+    expect(await store.savePullRequest(pr('acme/api', 7, { headSha: 'head-new', updatedAt: '2026-09-21T11:00:00.000Z' }))).toBe(true);
+    expect(await store.savePullRequest(pr('acme/api', 7, { headSha: 'head-old', updatedAt: '2026-09-21T10:00:00.000Z' }))).toBe(false);
+    expect((await store.getPullRequest('acme/api', 7))?.headSha).toBe('head-new');
+  });
+
   it('lists one repository newest update first, narrowed by state', async () => {
     await store.savePullRequest(pr('acme/api', 1));
     await store.savePullRequest(pr('acme/api', 2, { state: 'closed' }));
@@ -91,9 +97,8 @@ describe('pull requests', () => {
     expect((await store.listPullRequests('acme/api', { state: 'closed' })).map((p) => p.number)).toEqual([2]);
   });
 
-  it('lists a workspace by the rows’ own workspace, a repository only a source reads included', async () => {
+  it('lists a workspace by the rows’ own workspace', async () => {
     await store.savePullRequest(pr('acme/api', 1));
-    // No `repositories` row: the workspace reads it as a context source only.
     await store.savePullRequest(pr('acme/handbook', 2));
     await store.savePullRequest(pr('other/repo', 3, { workspaceOrgId: 'org_B' }));
     expect((await store.listWorkspacePullRequests('org_A')).map((p) => p.number)).toEqual([2, 1]);
@@ -142,7 +147,17 @@ describe('checks', () => {
     expect(await store.activeCheck('acme/api', 7)).toBeNull();
 
     const second = await store.createCheck({ repoFullName: 'acme/api', number: 7, headSha: 'h2' });
-    expect((await store.latestCheck('acme/api', 7))?.id).toBe(second.id);
+    await store.savePullRequest(pr('acme/api', 8));
+    const other = await store.createCheck({ repoFullName: 'acme/api', number: 8, headSha: 'h8' });
+    const latest = await store.latestChecks([
+      { repoFullName: 'acme/api', number: 7 },
+      { repoFullName: 'acme/api', number: 8 },
+      { repoFullName: 'acme/api', number: 9 },
+    ]);
+    expect([...latest].map(([ref, c]) => [ref, c.id])).toEqual([
+      ['acme/api#7', second.id],
+      ['acme/api#8', other.id],
+    ]);
     expect((await store.activeCheck('acme/api', 7))?.id).toBe(second.id);
     expect(await store.updateCheck('nope', { status: 'running' })).toBeNull();
   });

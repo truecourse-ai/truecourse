@@ -113,6 +113,12 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+/** What an open check says while the job it waits on is paused for credits. */
+export const PAUSED_CHECK_OUTPUT: CheckOutput = {
+  title: 'Paused: the workspace is out of credits',
+  summary: 'The check carries on as soon as the workspace can spend again.',
+};
+
 /** The one-line title each reason wears on the check. */
 const CHECK_TITLE_OF_REASON: Record<PullRequestCheckReason, string> = {
   clean: 'No new failures, no conflicts created',
@@ -123,7 +129,6 @@ const CHECK_TITLE_OF_REASON: Record<PullRequestCheckReason, string> = {
   draft: 'Checked when ready for review',
   superseded: 'Superseded by a newer commit',
   cancelled: 'Cancelled',
-  credits: 'Paused: the workspace is out of credits',
   error: 'The check could not run',
 };
 
@@ -172,7 +177,6 @@ function settledWithoutReport(reason: PullRequestCheckReason, detailsUrl: string
     draft: 'Drafts are not checked. Mark the pull request ready for review and it will be.',
     superseded: 'A newer commit was pushed; that one is checked instead.',
     cancelled: 'The check was stopped before it settled.',
-    credits: 'The check carries on as soon as the workspace can spend again.',
     error: 'Something on our side stopped the check; it was not the pull request.',
   };
   return [lines[reason], link(detailsUrl)].filter(Boolean).join('\n\n');
@@ -202,7 +206,6 @@ const WITHOUT_A_RUN: Record<PullRequestCheckReport['codeHalf'], string> = {
   // The code half began and produced no run to compare: the head did not build or boot, or a link broke.
   ran: 'no run to compare',
   'stopped-by-conflict': 'code not run: an open conflict blocks it',
-  'not-connected': 'code not checked: the repository is not connected in Code',
   'not-run': 'code not run',
 };
 

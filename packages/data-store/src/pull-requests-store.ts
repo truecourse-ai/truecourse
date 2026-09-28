@@ -8,16 +8,17 @@
 
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import crypto from 'node:crypto';
-import type {
-  PullRequestCheckConclusion,
-  PullRequestCheckPatch,
-  PullRequestCheckReason,
-  PullRequestCheckRecord,
-  PullRequestCheckReport,
-  PullRequestCheckStatus,
-  PullRequestRecord,
-  PullRequestState,
-  PullRequestStore,
+import {
+  pullRequestRef,
+  type PullRequestCheckConclusion,
+  type PullRequestCheckPatch,
+  type PullRequestCheckReason,
+  type PullRequestCheckRecord,
+  type PullRequestCheckReport,
+  type PullRequestCheckStatus,
+  type PullRequestRecord,
+  type PullRequestState,
+  type PullRequestStore,
 } from '@truecourse/shared';
 import { pullRequestChecks, pullRequests, type Db } from '@truecourse/db';
 import { iso } from './iso.js';
@@ -76,7 +77,7 @@ const byState = (state: PullRequestState | 'all' | undefined) =>
 export class PgPullRequestStore implements PullRequestStore {
   constructor(private readonly db: Db) {}
 
-  async savePullRequest(rec: PullRequestRecord): Promise<void> {
+  async savePullRequest(rec: PullRequestRecord): Promise<boolean> {
     const values = {
       repoFullName: rec.repoFullName,
       number: rec.number,
@@ -95,10 +96,16 @@ export class PgPullRequestStore implements PullRequestStore {
       updatedAt: rec.updatedAt,
     };
     const { repoFullName: _repo, number: _number, ...set } = values;
-    await this.db
+    const rows = await this.db
       .insert(pullRequests)
       .values(values)
-      .onConflictDoUpdate({ target: [pullRequests.repoFullName, pullRequests.number], set });
+      .onConflictDoUpdate({
+        target: [pullRequests.repoFullName, pullRequests.number],
+        set,
+        setWhere: sql`${pullRequests.updatedAt} <= excluded.updated_at`,
+      })
+      .returning({ number: pullRequests.number });
+    return rows.length > 0;
   }
 
   async getPullRequest(repoFullName: string, number: number): Promise<PullRequestRecord | null> {
@@ -126,9 +133,7 @@ export class PgPullRequestStore implements PullRequestStore {
     workspaceOrgId: string,
     opts: { state?: PullRequestState | 'all' } = {},
   ): Promise<PullRequestRecord[]> {
-    // By the row's own workspace: a repository is one workspace's, and a
-    // repository only a context source reads has no `repositories` row to
-    // join through.
+    // By the row's own workspace: a repository is one workspace's.
     const rows = await this.db
       .select()
       .from(pullRequests)
@@ -197,14 +202,25 @@ export class PgPullRequestStore implements PullRequestStore {
     return rows[0] ? toCheck(rows[0]) : null;
   }
 
-  async latestCheck(repoFullName: string, number: number): Promise<PullRequestCheckRecord | null> {
+  async latestChecks(
+    pulls: ReadonlyArray<Pick<PullRequestRecord, 'repoFullName' | 'number'>>,
+  ): Promise<Map<string, PullRequestCheckRecord>> {
+    if (pulls.length === 0) return new Map();
+    const wanted = sql.join(
+      pulls.map((p) => sql`(${p.repoFullName}, ${p.number})`),
+      sql`, `,
+    );
     const rows = await this.db
-      .select()
+      .selectDistinctOn([pullRequestChecks.repoFullName, pullRequestChecks.number])
       .from(pullRequestChecks)
-      .where(and(eq(pullRequestChecks.repoFullName, repoFullName), eq(pullRequestChecks.number, number)))
-      .orderBy(desc(pullRequestChecks.createdAt), desc(pullRequestChecks.attempt))
-      .limit(1);
-    return rows[0] ? toCheck(rows[0]) : null;
+      .where(sql`(${pullRequestChecks.repoFullName}, ${pullRequestChecks.number}) in (${wanted})`)
+      .orderBy(
+        pullRequestChecks.repoFullName,
+        pullRequestChecks.number,
+        desc(pullRequestChecks.createdAt),
+        desc(pullRequestChecks.attempt),
+      );
+    return new Map(rows.map((row) => [pullRequestRef(row.repoFullName, row.number), toCheck(row)]));
   }
 
   async activeCheck(repoFullName: string, number: number): Promise<PullRequestCheckRecord | null> {

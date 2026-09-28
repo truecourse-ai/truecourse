@@ -380,7 +380,7 @@ const pushWebhook = (app: Express, repoFullName: string) => {
   const { payload, signature } = signed({
     ref: 'refs/heads/main',
     after: 'abc123',
-    repository: { full_name: repoFullName, default_branch: 'main' },
+    repository: { full_name: repoFullName, default_branch: 'main', pushed_at: Math.floor(Date.now() / 1000) },
     installation: { id: INSTALLATION_ID },
   });
   return request(app)

@@ -6,12 +6,13 @@
  * and only ever patched forward.
  */
 
-import type {
-  PullRequestCheckPatch,
-  PullRequestCheckRecord,
-  PullRequestRecord,
-  PullRequestState,
-  PullRequestStore,
+import {
+  pullRequestRef,
+  type PullRequestCheckPatch,
+  type PullRequestCheckRecord,
+  type PullRequestRecord,
+  type PullRequestState,
+  type PullRequestStore,
 } from '@truecourse/shared';
 
 export interface MemoryPullRequestStore extends PullRequestStore {
@@ -43,12 +44,15 @@ export function memoryPullRequestStore(clock: () => string = () => new Date().to
     async savePullRequest(rec) {
       // Timestamps leave as the Postgres store hands them back: ISO with a `Z`.
       const iso = (at: string): string => new Date(at).toISOString();
+      const held = pullRequests.get(key(rec.repoFullName, rec.number));
+      if (held && held.updatedAt > iso(rec.updatedAt)) return false;
       pullRequests.set(key(rec.repoFullName, rec.number), {
         ...rec,
         openedAt: iso(rec.openedAt),
         closedAt: rec.closedAt === null ? null : iso(rec.closedAt),
         updatedAt: iso(rec.updatedAt),
       });
+      return true;
     },
     async getPullRequest(repoFullName, number) {
       return pullRequests.get(key(repoFullName, number)) ?? null;
@@ -102,8 +106,13 @@ export function memoryPullRequestStore(clock: () => string = () => new Date().to
       const check = checks.find((c) => c.id === id);
       return check ? { ...check } : null;
     },
-    async latestCheck(repoFullName, number) {
-      return newestFirst(checks.filter((c) => c.repoFullName === repoFullName && c.number === number))[0] ?? null;
+    async latestChecks(pulls) {
+      const latest = new Map<string, PullRequestCheckRecord>();
+      for (const { repoFullName, number } of pulls) {
+        const newest = newestFirst(checks.filter((c) => c.repoFullName === repoFullName && c.number === number))[0];
+        if (newest) latest.set(pullRequestRef(repoFullName, number), newest);
+      }
+      return latest;
     },
     async activeCheck(repoFullName, number) {
       return (

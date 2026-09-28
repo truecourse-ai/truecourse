@@ -163,32 +163,37 @@ describe('a head to check', () => {
 });
 
 describe('a supersede', () => {
-  it('does not wait for the jobs it stops before the next attempt starts', async () => {
-    let stopped = false;
+  it('waits for the job it stops, so the next attempt finds the pull request’s key free', async () => {
+    let unwinding = false;
+    const enqueuedWhileUnwinding: boolean[] = [];
     const service = createPullRequestChecks({
       pulls,
       repos,
       octokitFor: () => octokit,
       jobs: {
         enqueuePullRequestCheck: async (request) => {
+          enqueuedWhileUnwinding.push(unwinding);
           enqueued.push(request);
           jobIds += 1;
           return { status: 'queued', jobId: `job_${jobIds}` };
         },
-        // A running link that takes its time to unwind.
-        cancelCheckJob: () => new Promise<void>(() => { stopped = true; }),
+        // A running coordinator that takes its time to unwind.
+        cancelCheckJob: async () => {
+          unwinding = true;
+          await new Promise((r) => setTimeout(r, 20));
+          unwinding = false;
+        },
       },
     });
     await service.onPullRequest({ pr: pr(), installationId: 5, effect: 'check' });
     await pulls.savePullRequest(pr({ headSha: 'head-2' }));
     await service.onPullRequest({ pr: pr({ headSha: 'head-2' }), installationId: 5, effect: 'check' });
 
-    expect(stopped).toBe(true);
+    expect(enqueuedWhileUnwinding).toEqual([false, false]);
     expect(pulls.checks.map((c) => [c.headSha, c.status])).toEqual([
       ['head-1', 'settled'],
       ['head-2', 'queued'],
     ]);
-    expect(enqueued).toHaveLength(2);
   });
 });
 
@@ -250,12 +255,11 @@ describe('a conflict resolved', () => {
     expect(enqueued.map((r) => r.number)).toEqual([7]);
   });
 
-  it('starts nothing for a repository only a context source reads: it has no settings to turn checks on', async () => {
+  it('starts nothing for a repository Code has not connected: it has no settings to turn checks on', async () => {
     const service = createPullRequestChecks({
       pulls,
       repos,
       octokitFor: () => octokit,
-      sourceInstallationOf: async (org, repoFullName) => (org === 'org_A' && repoFullName === 'acme/docs' ? 9 : null),
       jobs: {
         enqueuePullRequestCheck: async (request) => {
           enqueued.push(request);

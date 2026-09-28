@@ -260,7 +260,7 @@ afterEach(async () => {
 
 describe('a push to the default branch', () => {
   it('starts a setup pinned to the pushed commit, and the chain it starts stays on it', async () => {
-    await repos.recordDefaultBranchSha(REPO, tree.head);
+    await repos.recordDefaultBranchSha(REPO, tree.head, new Date().toISOString());
     expect(await jobs.startMainChain(request())).toMatchObject({ status: 'queued' });
     await bodyStarted(1);
     expect(acquisitions[0]!.via).toMatchObject({ workspaceOrgId: ORG, commitSha: tree.head });
@@ -291,13 +291,13 @@ describe('a push to the default branch', () => {
   });
 
   it('follows a running chain up ONCE for the pushes that landed meanwhile, at the newest one', async () => {
-    await repos.recordDefaultBranchSha(REPO, 'sha-0');
+    await repos.recordDefaultBranchSha(REPO, 'sha-0', new Date().toISOString());
     await jobs.startMainChain(request());
     await bodyStarted(1);
     // Three pushes while the chain is at its first link: each is remembered,
     // none starts anything.
     for (const sha of ['sha-1', 'sha-2', 'sha-3']) {
-      await repos.recordDefaultBranchSha(REPO, sha);
+      await repos.recordDefaultBranchSha(REPO, sha, new Date().toISOString());
       expect(await jobs.startMainChain(request())).toEqual({ status: 'busy' });
     }
     // The chain runs its course (setup, then the generate it chained, which
@@ -321,10 +321,10 @@ describe('a push to the default branch', () => {
   });
 
   it('does not follow a CANCELLED chain up, however many pushes it missed', async () => {
-    await repos.recordDefaultBranchSha(REPO, 'sha-0');
+    await repos.recordDefaultBranchSha(REPO, 'sha-0', new Date().toISOString());
     await jobs.startMainChain(request());
     await bodyStarted(1);
-    await repos.recordDefaultBranchSha(REPO, 'sha-1');
+    await repos.recordDefaultBranchSha(REPO, 'sha-1', new Date().toISOString());
     // A disconnect cancels the chain; the body is held at its clone, so let
     // it go once the cancel has been asked for.
     const cancelled = jobs.cancelRepoJobs(REPO, ORG);
@@ -368,7 +368,7 @@ describe('a chain a server restart interrupted', () => {
   }
 
   it('is owed again, and the next boot restarts it at its commit', async () => {
-    await repos.recordDefaultBranchSha(REPO, 'sha-1');
+    await repos.recordDefaultBranchSha(REPO, 'sha-1', new Date().toISOString());
     await repos.recordMainChainSha(REPO, 'sha-1');
     await orphanedGenerate({ commitSha: 'sha-1' });
 
@@ -380,7 +380,7 @@ describe('a chain a server restart interrupted', () => {
   });
 
   it('is not restarted a second time when it was itself the restart', async () => {
-    await repos.recordDefaultBranchSha(REPO, 'sha-1');
+    await repos.recordDefaultBranchSha(REPO, 'sha-1', new Date().toISOString());
     await repos.recordMainChainSha(REPO, 'sha-1');
     await orphanedGenerate({ commitSha: 'sha-1', recovery: true });
 
@@ -392,7 +392,7 @@ describe('a chain a server restart interrupted', () => {
   });
 
   it('leaves alone a push whose own chain started after it', async () => {
-    await repos.recordDefaultBranchSha(REPO, 'sha-2');
+    await repos.recordDefaultBranchSha(REPO, 'sha-2', new Date().toISOString());
     await repos.recordMainChainSha(REPO, 'sha-2');
     await orphanedGenerate({ commitSha: 'sha-1' });
 
@@ -403,7 +403,7 @@ describe('a chain a server restart interrupted', () => {
   });
 
   it('carries the restart mark down the chain it restarted', async () => {
-    await repos.recordDefaultBranchSha(REPO, 'sha-1');
+    await repos.recordDefaultBranchSha(REPO, 'sha-1', new Date().toISOString());
     await repos.recordMainChainSha(REPO, 'sha-1');
     await orphanedGenerate({ commitSha: 'sha-1' });
 

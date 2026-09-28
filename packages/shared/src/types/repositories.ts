@@ -81,8 +81,12 @@ export interface RepositoryStore {
   linkRepo(rec: RepositoryLink): Promise<RepositoryRecord>
   /** Disconnect it. */
   unlinkRepo(repoFullName: string): Promise<void>
-  /** The provider reported a push to the default branch: remember its commit. */
-  recordDefaultBranchSha(repoFullName: string, commitSha: string): Promise<void>
+  /**
+   * The provider reported a push to the default branch, made at `pushedAt`:
+   * remember its commit. False when the row already holds a later push (the
+   * provider does not deliver its events in order), which is kept.
+   */
+  recordDefaultBranchSha(repoFullName: string, commitSha: string, pushedAt: string): Promise<boolean>
   /** A main chain was started at this commit: the push it serves is no longer owed. */
   recordMainChainSha(repoFullName: string, commitSha: string): Promise<void>
   /**

@@ -66,6 +66,7 @@ export {
 export { GITHUB_PROVIDER, installationOf } from './provider.js';
 export {
   CHECK_NAME,
+  PAUSED_CHECK_OUTPUT,
   createCheck,
   renderCheckOutput,
   updateCheck,

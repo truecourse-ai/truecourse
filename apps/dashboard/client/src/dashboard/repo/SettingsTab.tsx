@@ -24,25 +24,21 @@ import { Facts, providerName } from '@/dashboard/ui/bits';
 import type { Repo } from '@/dashboard/data/types';
 import { repositoryProvider } from '@/dashboard/data/providers';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
-import { putPullRequestChecks } from '@/lib/api';
 
 export function SettingsTab({ repo }: { repo: Repo }) {
-  const { unlinkRepo } = useDashboardState();
+  const { unlinkRepo, setCheckPullRequests } = useDashboardState();
   const navigate = useNavigate();
   const [confirmUnlink, setConfirmUnlink] = useState(false);
-  const [checkPullRequests, setCheckPullRequests] = useState(repo.checkPullRequests);
+  const checkPullRequests = repo.checkPullRequests;
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const toggleChecks = async (): Promise<void> => {
-    const next = !checkPullRequests;
-    setCheckPullRequests(next);
     setSaving(true);
     setSaveError(null);
     try {
-      await putPullRequestChecks(repo.id, next);
+      await setCheckPullRequests(repo.id, !checkPullRequests);
     } catch (err) {
-      setCheckPullRequests(!next);
       setSaveError((err as Error).message);
     } finally {
       setSaving(false);

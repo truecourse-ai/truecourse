@@ -273,6 +273,20 @@ export class JobStore {
   }
 
   /**
+   * Stop ONE paused job, by id: the work it would carry on is no longer
+   * wanted. It settles `cancelled` and leaves the Credits page's paused list,
+   * as {@link supersedePaused} does by key. Returns null when it was not paused.
+   */
+  async cancelPaused(id: string): Promise<JobView | null> {
+    const [row] = await this.db
+      .update(jobs)
+      .set({ status: 'cancelled', pauseReason: null, finishedAt: new Date().toISOString() })
+      .where(and(eq(jobs.id, id), eq(jobs.status, 'paused')))
+      .returning();
+    return row ? toJobView(row) : null;
+  }
+
+  /**
    * Stop a job deliberately (a disconnect, a superseding request). Only an
    * ACTIVE row moves — a job that already settled keeps its outcome — so the
    * single-flight key frees without rewriting history. Returns null when there

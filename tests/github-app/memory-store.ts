@@ -24,6 +24,8 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
   /** installation id → the workspaces attached, in attach order. */
   private links = new Map<number, string[]>();
   private repos = new Map<string, RepositoryRecord>();
+  /** When each repository's recorded push was made, as `recordDefaultBranchSha` orders them. */
+  private pushedAt = new Map<string, string>();
 
   private record(account: InstallationAccount): InstallationRecord {
     return {
@@ -99,6 +101,7 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
       // As the Postgres store does: a re-link forgets the last push it saw.
       defaultBranchSha: null,
     };
+    this.pushedAt.delete(rec.repoFullName);
     this.repos.set(rec.repoFullName, stored);
     return stored;
   }
@@ -107,9 +110,13 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
     this.repos.delete(repoFullName);
   }
 
-  async recordDefaultBranchSha(repoFullName: string, commitSha: string): Promise<void> {
+  async recordDefaultBranchSha(repoFullName: string, commitSha: string, pushedAt: string): Promise<boolean> {
     const repo = this.repos.get(repoFullName);
-    if (repo) this.repos.set(repoFullName, { ...repo, defaultBranchSha: commitSha });
+    const held = this.pushedAt.get(repoFullName);
+    if (!repo || (held !== undefined && held > pushedAt)) return false;
+    this.repos.set(repoFullName, { ...repo, defaultBranchSha: commitSha });
+    this.pushedAt.set(repoFullName, pushedAt);
+    return true;
   }
 
   async recordMainChainSha(repoFullName: string, commitSha: string): Promise<void> {

@@ -65,13 +65,22 @@ describe('the pushed commit', () => {
   it('is remembered per repository, and forgotten by a re-link', async () => {
     await store.linkRepo(githubRepo('acme/api'));
     expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBeNull();
-    await store.recordDefaultBranchSha('acme/api', 'sha-1');
+    await store.recordDefaultBranchSha('acme/api', 'sha-1', '2026-09-21T10:00:00.000Z');
     expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBe('sha-1');
     // A repository nobody connected records nothing, quietly.
-    await store.recordDefaultBranchSha('acme/other', 'sha-2');
+    expect(await store.recordDefaultBranchSha('acme/other', 'sha-2', '2026-09-21T10:00:00.000Z')).toBe(false);
     expect(await store.getRepo('acme/other')).toBeNull();
     await store.linkRepo(githubRepo('acme/api'));
     expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBeNull();
+    // Nor does the old connection's push time outlast it.
+    expect(await store.recordDefaultBranchSha('acme/api', 'sha-0', '2026-09-21T09:00:00.000Z')).toBe(true);
+  });
+
+  it('keeps a later push over one delivered after it', async () => {
+    await store.linkRepo(githubRepo('acme/api'));
+    expect(await store.recordDefaultBranchSha('acme/api', 'sha-2', '2026-09-21T10:01:00.000Z')).toBe(true);
+    expect(await store.recordDefaultBranchSha('acme/api', 'sha-1', '2026-09-21T10:00:00.000Z')).toBe(false);
+    expect((await store.getRepo('acme/api'))?.defaultBranchSha).toBe('sha-2');
   });
 
   it('remembers the commit a main chain started at, and a re-link forgets it too', async () => {

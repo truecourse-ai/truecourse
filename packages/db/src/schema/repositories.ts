@@ -87,6 +87,8 @@ export const repositories = pgTable(
     defaultBranch: text('default_branch'),
     /** The newest commit the provider reported pushed to that branch; null until one was. */
     defaultBranchSha: text('default_branch_sha'),
+    /** When that commit was pushed, as the provider stamped it: a push reported late never replaces a newer one. */
+    defaultBranchPushedAt: ts('default_branch_pushed_at'),
     /**
      * The commit the newest main chain was started at. The repository owes a
      * chain while the pushed commit above differs from it.

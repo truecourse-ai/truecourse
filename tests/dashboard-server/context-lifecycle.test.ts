@@ -259,7 +259,7 @@ function postPush(app: Express, ref: string) {
   const body = {
     ref,
     after: 'c0ffee',
-    repository: { full_name: REPO, default_branch: 'main' },
+    repository: { full_name: REPO, default_branch: 'main', pushed_at: Math.floor(Date.now() / 1000) },
     installation: { id: INSTALLATION_ID },
   };
   const payload = JSON.stringify(body);

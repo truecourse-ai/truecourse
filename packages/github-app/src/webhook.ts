@@ -159,7 +159,8 @@ interface InstallationRepositoriesPayload {
 interface PushPayload {
   ref: string;
   after: string;
-  repository: { full_name: string; default_branch: string };
+  /** `pushed_at` is the push's own time, in epoch seconds. */
+  repository: { full_name: string; default_branch: string; pushed_at: number };
   installation?: { id: number };
 }
 
@@ -333,8 +334,14 @@ async function handlePush(
   }
 
   // The row remembers the newest push BEFORE anything is started for it, so a
-  // chain already running finds this commit when it ends and follows up.
-  await deps.repos.recordDefaultBranchSha(link.repoFullName, payload.after);
+  // chain already running finds this commit when it ends and follows up. A
+  // push delivered after a later one changes nothing: the later one started
+  // what was owed.
+  const pushedAt = new Date(payload.repository.pushed_at * 1000).toISOString();
+  if (!(await deps.repos.recordDefaultBranchSha(link.repoFullName, payload.after, pushedAt))) {
+    log.info(`[github-app] ${link.repoFullName} push of ${payload.after.slice(0, 8)} arrived after a later one; ignored`);
+    return;
+  }
   deps.onBaseline({
     repoFullName: payload.repository.full_name,
     installationId: payload.installation.id,
@@ -347,9 +354,8 @@ async function handlePush(
 /**
  * The workspace a repository's pull requests belong to: the one that
  * connected it in Code, when the event came through the installation the
- * connection reads through; else the one whose context source reads it (the
- * spec half alone applies then), when that workspace holds the installation.
- * Null when nobody does, and the event is ignored.
+ * connection reads through. Null otherwise, and the event is ignored: only a
+ * connected repository's pull requests are checked.
  */
 async function workspaceOfRepository(
   deps: WebhookDeps,
@@ -357,13 +363,7 @@ async function workspaceOfRepository(
   installationId: number,
 ): Promise<string | null> {
   const link = await deps.repos.getRepo(repoFullName);
-  if (link) {
-    return link.enabled && installationOf(link) === installationId ? link.workspaceOrgId : null;
-  }
-  const workspaceOrgId = await deps.sourceWorkspaceOf(repoFullName);
-  if (workspaceOrgId === null) return null;
-  const installation = await deps.store.getInstallation(installationId);
-  return installation?.workspaceOrgIds.includes(workspaceOrgId) ? workspaceOrgId : null;
+  return link?.enabled && installationOf(link) === installationId ? link.workspaceOrgId : null;
 }
 
 /**
@@ -398,7 +398,10 @@ async function handlePullRequest(deps: WebhookDeps, payload: PullRequestPayload)
     closedAt: p.closed_at === null ? null : new Date(p.closed_at).toISOString(),
     updatedAt: new Date(p.updated_at).toISOString(),
   };
-  await deps.pulls.savePullRequest(pr);
+  if (!(await deps.pulls.savePullRequest(pr))) {
+    log.info(`[github-app] ${repoFullName}#${pr.number} ${payload.action} arrived after a later event; ignored`);
+    return;
+  }
   log.info(`[github-app] ${repoFullName}#${pr.number} ${payload.action} → ${effect}`);
   deps.onPullRequest?.({ pr, installationId: payload.installation.id, effect });
 }

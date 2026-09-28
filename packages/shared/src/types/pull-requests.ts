@@ -43,6 +43,9 @@ export interface PullRequestRecord {
   updatedAt: string
 }
 
+/** How a pull request is named: `owner/name#number`. */
+export const pullRequestRef = (repoFullName: string, number: number): string => `${repoFullName}#${number}`
+
 /** A pull request is a fork's when its head lives elsewhere, or nowhere any more. */
 export function isForkPullRequest(pr: Pick<PullRequestRecord, 'repoFullName' | 'headRepoFullName'>): boolean {
   return pr.headRepoFullName === null || pr.headRepoFullName !== pr.repoFullName
@@ -71,8 +74,6 @@ export const PULL_REQUEST_CHECK_REASONS = [
   'superseded',
   /** The pull request closed, the repository disconnected, or a member cancelled. */
   'cancelled',
-  /** The workspace's balance ran out; the job paused. */
-  'credits',
   /** The job itself failed for a reason that is not the pull request's. */
   'error',
 ] as const
@@ -88,7 +89,6 @@ export const CHECK_CONCLUSION_OF_REASON: Record<PullRequestCheckReason, PullRequ
   draft: 'neutral',
   superseded: 'neutral',
   cancelled: 'neutral',
-  credits: 'neutral',
   error: 'neutral',
 }
 
@@ -154,7 +154,7 @@ export const PullRequestCheckReportSchema = z.object({
     })
     .nullable(),
   specHalf: z.enum(['ran', 'no-documents-changed', 'not-a-source']),
-  codeHalf: z.enum(['ran', 'stopped-by-conflict', 'not-connected', 'not-run']),
+  codeHalf: z.enum(['ran', 'stopped-by-conflict', 'not-run']),
 })
 export type PullRequestCheckReport = z.infer<typeof PullRequestCheckReportSchema>
 
@@ -245,8 +245,12 @@ export type PullRequestCheckPatch = Partial<
 
 /** Reading and writing pull requests and their checks. */
 export interface PullRequestStore {
-  /** Upsert by (repository, number): the webhook writes what it last saw. */
-  savePullRequest(rec: PullRequestRecord): Promise<void>
+  /**
+   * Upsert by (repository, number): the webhook writes what it last saw.
+   * False when the row already holds a later update (the provider does not
+   * deliver its events in order), which is kept.
+   */
+  savePullRequest(rec: PullRequestRecord): Promise<boolean>
   getPullRequest(repoFullName: string, number: number): Promise<PullRequestRecord | null>
   /** One repository's pull requests, newest update first. */
   listPullRequests(
@@ -278,8 +282,13 @@ export interface PullRequestStore {
     patch: Omit<PullRequestCheckPatch, 'status'>,
   ): Promise<PullRequestCheckRecord | null>
   getCheck(id: string): Promise<PullRequestCheckRecord | null>
-  /** The newest check of a pull request, whatever its status. */
-  latestCheck(repoFullName: string, number: number): Promise<PullRequestCheckRecord | null>
+  /**
+   * The newest check of each of these pull requests, whatever its status,
+   * keyed by {@link pullRequestRef}. A pull request with no check is absent.
+   */
+  latestChecks(
+    pulls: ReadonlyArray<Pick<PullRequestRecord, 'repoFullName' | 'number'>>,
+  ): Promise<Map<string, PullRequestCheckRecord>>
   /** The check still queued or running for a pull request, if any. */
   activeCheck(repoFullName: string, number: number): Promise<PullRequestCheckRecord | null>
   /**

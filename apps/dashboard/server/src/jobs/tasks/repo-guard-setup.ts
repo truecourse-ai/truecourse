@@ -50,6 +50,7 @@ import {
   checkIsOpen,
   checkLinks,
   linkStarted,
+  pauseLinkCheck,
   settleLinkCheck,
   type PullRequestCheckPort,
 } from '../pr-check-chain.js';
@@ -332,11 +333,11 @@ export function createRepoGuardSetupTask(
         }
         // A setup that ended the chain: the head could not pass it, it broke,
         // or it has nothing to generate from. A cancel was settled by
-        // whoever cancelled.
+        // whoever cancelled; a pause leaves the check open for its resume.
         if (outcome === 'failed') {
           await settleLinkCheck(port, pr, { reason: wasRefused ? 'build-failed' : 'error', report: { codeHalf: 'ran' } }, link);
         } else if (outcome === 'paused') {
-          await settleLinkCheck(port, pr, { reason: 'credits' }, link);
+          await pauseLinkCheck(port, pr, link);
         } else if (outcome === 'succeeded') {
           await settleLinkCheck(port, pr, { reason: 'clean', report: { codeHalf: 'not-run' } }, link);
         }

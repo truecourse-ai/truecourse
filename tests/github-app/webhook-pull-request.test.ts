@@ -3,9 +3,8 @@
  * the row as GitHub last saw it and tells the host what that means for the
  * check — judge the head, hold a draft, close — and a "re-run" pressed on
  * GitHub names the check (or the head) to judge again. Events for a
- * repository nobody connected or reads are acknowledged and dropped, and a
- * repository only a context source reads still gets its row, under that
- * workspace.
+ * repository Code has not connected are acknowledged and dropped, and so is
+ * one GitHub delivered after a later one.
  */
 
 import express, { type Express } from 'express';
@@ -101,6 +100,7 @@ function pullRequest(
     headSha?: string;
     title?: string;
     changes?: unknown;
+    updatedAt?: string;
   } = {},
 ) {
   const repo = over.repo ?? 'acme/api';
@@ -122,7 +122,7 @@ function pullRequest(
       base: { ref: 'main', repo: { full_name: repo } },
       created_at: '2026-09-20T10:00:00Z',
       closed_at: over.state === 'closed' ? '2026-09-21T10:00:00Z' : null,
-      updated_at: '2026-09-21T09:00:00Z',
+      updated_at: over.updatedAt ?? '2026-09-21T09:00:00Z',
     },
     ...(over.changes ? { changes: over.changes } : {}),
     repository: { full_name: repo },
@@ -215,18 +215,20 @@ describe('pull_request events', () => {
     expect(triggers).toEqual([]);
   });
 
-  it('drops a pull request of a repository nobody connected or reads', async () => {
+  it('drops a pull request of a repository nobody connected, even one a context source reads', async () => {
     await post('pull_request', pullRequest('opened', { repo: 'stranger/repo' })).expect(202);
+    await seedInstallation(store, 5, ['org_A', 'org_B']);
+    sourceWorkspaces.set('acme/handbook', 'org_B');
+    await post('pull_request', pullRequest('opened', { repo: 'acme/handbook' })).expect(202);
     expect(pulls.pullRequests).toEqual([]);
     expect(triggers).toEqual([]);
   });
 
-  it('keeps a pull request of a repository a context source reads, under that workspace', async () => {
-    await seedInstallation(store, 5, ['org_A', 'org_B']);
-    sourceWorkspaces.set('acme/handbook', 'org_B');
-    await post('pull_request', pullRequest('opened', { repo: 'acme/handbook' })).expect(202);
-    expect((await pulls.getPullRequest('acme/handbook', 7))?.workspaceOrgId).toBe('org_B');
-    expect(triggers).toHaveLength(1);
+  it('ignores an event GitHub delivered after a later one', async () => {
+    await post('pull_request', pullRequest('synchronize', { headSha: 'head-2', updatedAt: '2026-09-21T09:05:00Z' })).expect(202);
+    await post('pull_request', pullRequest('edited', { title: 'Old title', updatedAt: '2026-09-21T09:00:00Z' })).expect(202);
+    expect(await pulls.getPullRequest('acme/api', 7)).toMatchObject({ headSha: 'head-2', title: 'Add widgets' });
+    expect(triggers.map((t) => t.effect)).toEqual(['check']);
   });
 
   it('drops one whose workspace does not hold the installation it came through', async () => {

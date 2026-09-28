@@ -64,6 +64,7 @@ import {
   checkLinks,
   compareWithBase,
   linkStarted,
+  pauseLinkCheck,
   settleLinkCheck,
   worldNeverBooted,
   type CheckOutcome,
@@ -308,7 +309,7 @@ export function createRepoGuardRunTask(
           : checkLinks.runs(port.appUrl, slug);
         // A cancel was settled by whoever cancelled.
         if (decided) await settleLinkCheck(port, pr, decided, link);
-        else if (outcome === 'paused') await settleLinkCheck(port, pr, { reason: 'credits' }, link);
+        else if (outcome === 'paused') await pauseLinkCheck(port, pr, link);
         else if (outcome === 'failed') await settleLinkCheck(port, pr, { reason: 'error', report: { codeHalf: 'ran' } }, link);
         // The pull request's chain ended here: whatever the default branch was left owing starts now.
         if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, ctx.payload.commitSha ?? commitSha);

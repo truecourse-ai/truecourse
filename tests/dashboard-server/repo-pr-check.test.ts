@@ -455,8 +455,9 @@ describe('the pull request check', () => {
     const settled = await check();
     expect(settled).toMatchObject({ conclusion: 'neutral', reason: 'no-base' });
     expect(settled.report).toMatchObject({ base: { mergeBase: 'base-9', commit: null, nearestWithBase: BASE }, codeHalf: 'not-run' });
-    // Nothing of the chain ran.
+    // Nothing of the chain ran, and the head was never cloned.
     expect(await jobTypes()).toEqual(['repo.pr-check']);
+    expect(clones).toEqual([]);
     expect(lastGithubUpdate()).toMatchObject({ conclusion: 'neutral' });
     expect(lastGithubUpdate()!.details_url).toBeUndefined();
   });
@@ -501,7 +502,7 @@ describe('the pull request check', () => {
     await writeGuardOverlays(REPO, { dependencies: { version: 1, provided: {} }, externals: { version: 1, provided: {} } } as never);
     await check(pr({ number: 9, headRepoFullName: 'octocat/widgets' }));
     expect(seen.setupHadOverlays).toBe(false);
-    expect((await pulls.latestCheck(REPO, 9))?.report?.fork).toBe(true);
+    expect((await pulls.latestChecks([{ repoFullName: REPO, number: 9 }])).get(`${REPO}#9`)?.report?.fork).toBe(true);
 
     await check(pr({ number: 10 }));
     expect(seen.setupHadOverlays).toBe(true);
@@ -638,13 +639,17 @@ describe('the pull request check', () => {
     expect(settled.report).toMatchObject({ specHalf: 'no-documents-changed', codeHalf: 'ran' });
   });
 
-  it('checks a repository only a source reads for its documents alone', async () => {
-    await repos.unlinkRepo(REPO);
+  it('a check settled before its coordinator started does nothing', async () => {
     await storeBase();
-    const settled = await check();
-    expect(settled).toMatchObject({ conclusion: 'success', reason: 'clean' });
-    expect(settled.report).toMatchObject({ specHalf: 'not-a-source', codeHalf: 'not-connected', run: null });
+    await pulls.savePullRequest(pr());
+    const row = await pulls.createCheck({ repoFullName: REPO, number: 7, headSha: HEAD });
+    await pulls.settleCheck(row.id, { conclusion: 'neutral', reason: 'superseded' });
+    await jobs.enqueuePullRequestCheck({ repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG, source: 'pull-request', number: 7, headSha: HEAD, checkId: row.id, installationId: 5 });
+    await drain();
     expect(await jobTypes()).toEqual(['repo.pr-check']);
+    expect(clones).toEqual([]);
+    expect(github).toEqual([]);
+    expect((await pulls.getCheck(row.id))?.reason).toBe('superseded');
   });
 
   it('a link whose check was superseded before it started does nothing', async () => {
@@ -744,7 +749,7 @@ describe('the pull request check', () => {
     expect(prSetup).toMatchObject({ status: 'running', pullRequest: { number: 7 } });
 
     // A push to the default branch while the pull request's setup runs.
-    await repos.recordDefaultBranchSha(REPO, 'main-2');
+    await repos.recordDefaultBranchSha(REPO, 'main-2', new Date().toISOString());
     expect(await jobs.startMainChain({ repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG })).toMatchObject({ status: 'queued' });
     release();
     await drain();
@@ -753,7 +758,7 @@ describe('the pull request check', () => {
   it('the end of a pull request’s chain starts the main chain the default branch owes', async () => {
     await storeBase();
     // A push the main chain has not served yet: the pushed commit and no chain started at it.
-    await repos.recordDefaultBranchSha(REPO, 'main-2');
+    await repos.recordDefaultBranchSha(REPO, 'main-2', new Date().toISOString());
     await check();
 
     const mainSetups = (await db.select().from(schema.jobs)).filter(
@@ -838,14 +843,38 @@ describe('the pull request check', () => {
     expect(github.filter((c) => c.method === 'update' && c.params.status === 'completed')).toEqual([]);
   });
 
-  it('a link the balance stopped settles the check as credits', async () => {
+  it('a link the balance stopped leaves the check open, and its resume carries the same check on', async () => {
     await storeBase();
     engines.setup = async () => {
       throw new CreditsExhaustedError('out of credits');
     };
-    const settled = await check();
-    expect(settled).toMatchObject({ status: 'settled', conclusion: 'neutral', reason: 'credits' });
+    const open = await check();
+    expect(open.status).toBe('running');
+    expect(lastGithubUpdate()).toMatchObject({ status: 'in_progress', output: { title: 'Paused: the workspace is out of credits' } });
     const [paused] = await new JobStore(db).listPaused(ORG);
     expect(paused?.type).toBe('repo.guard-setup');
+
+    engines.setup = async () => ({ report: { ranAt: '', status: 'ok', reason: '', steps: [] }, reportPath: '', sessionsRunDirs: [] }) as never;
+    await jobs.resumePaused(paused!);
+    await drain();
+    expect(await pulls.getCheck(open.id)).toMatchObject({ status: 'settled', reason: 'clean' });
+    expect(await pulls.listChecksForHead(REPO, HEAD)).toHaveLength(1);
+  });
+
+  it('a check settled while its link was paused is not carried on, and its paused job is cancelled', async () => {
+    await storeBase();
+    let setups = 0;
+    engines.setup = async () => {
+      setups += 1;
+      throw new CreditsExhaustedError('out of credits');
+    };
+    const open = await check();
+    const [paused] = await new JobStore(db).listPaused(ORG);
+    // A newer head: the webhook settles the open check and stops its job.
+    await pulls.settleCheck(open.id, { conclusion: 'neutral', reason: 'superseded' });
+    await jobs.cancelCheckJob(ORG, paused!.id);
+    expect(await new JobStore(db).listPaused(ORG)).toEqual([]);
+    expect((await new JobStore(db).get(paused!.id))?.status).toBe('cancelled');
+    expect(setups).toBe(1);
   });
 });
