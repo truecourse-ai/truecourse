@@ -33,7 +33,7 @@
     "express": "^4.21.0",
     "posthog-node": "^5.52.4",
     "socket.io": "^4.8.0",
-    "ai": "^6.0.0"
+    "ai": "^7.0.118"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

@@ -1,10 +1,9 @@
 /**
- * Factor repeated, already-normalized schema nodes into local definitions.
- *
- * This runs AFTER strict normalization: its data-path bookkeeping must visit
- * every occurrence before any becomes a reference. Factoring changes only the
- * schema sent to the provider, never the paths used to strip injected nulls or
- * the Zod schema that validates tool arguments.
+ * Factor repeated JSON Schema nodes into local definitions without changing
+ * optional fields or constraints. When a provider requires strict-schema
+ * normalization, call this afterwards so its null-path bookkeeping visits
+ * every occurrence before any becomes a reference. Native schemas use the
+ * same factoring without normalization.
  */
 type JsonObject = Record<string, unknown>;
 
@@ -40,7 +39,7 @@ function mapChildren(node: JsonObject, visit: (child: JsonObject) => JsonObject)
   }));
 }
 
-export function compactNormalizedSchema(schema: JsonObject): JsonObject {
+export function compactSchema(schema: JsonObject): JsonObject {
   const occurrences = new Map<string, number>();
   let referenced = false;
   const count = (node: JsonObject): JsonObject => {
@@ -67,7 +66,7 @@ export function compactNormalizedSchema(schema: JsonObject): JsonObject {
     definitions[name] = rewritten;
     return { $ref: `#/$defs/${name}` };
   };
-  // The strict-output root must remain an object, rather than a root reference.
+  // The tool root must remain an object, rather than a root reference.
   const root = mapChildren(schema, factor);
   if (names.size === 0) return schema;
   const compact = { ...root, $defs: definitions };

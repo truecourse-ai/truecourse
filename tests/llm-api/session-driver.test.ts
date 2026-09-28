@@ -262,6 +262,67 @@ describe('api session driver', () => {
     expect(JSON.stringify(wire)).not.toContain('verdict');
   });
 
+  it.each(['google', 'anthropic', 'bedrock', 'openai', 'copilot'] as const)(
+    '%s sends its own optional-field contract and cleans only injected nulls', async (provider) => {
+      const normalized = provider === 'openai' || provider === 'copilot';
+      const args = normalized ? { value: 'hi', filter: null, nullable: null } : { value: 'hi', nullable: null };
+      const scripted = scriptedModel([
+        { content: [call('optional', args)] },
+        { content: [outcomeCall({ verdict: 'ok' })] },
+      ]);
+      buildModelMock.mockReturnValue(scripted.model);
+      const execute = vi.fn(async (_args: unknown) => ({ content: 'ok' }));
+      const optional = defineSessionTool({
+        name: 'optional', description: 'Probe optional fields', kind: 'probe', readOnly: true, destructive: false,
+        inputSchema: z.object({ value: z.string(), filter: z.string().min(1).optional(), nullable: z.string().nullable() }),
+        execute,
+      });
+      const { handle, events } = runSession(createApiSessionDriver({ ...cfgNoFallback, provider }), {
+        def: makeDef({ tools: [optional] }),
+      });
+      expect(await handle.done).toMatchObject({ kind: 'outcome' });
+      const tool = scripted.calls[0].tools?.find((t: any) => t.name === 'optional') as any;
+      expect(tool.inputSchema.required).toEqual(normalized ? ['value', 'filter', 'nullable'] : ['value', 'nullable']);
+      expect(tool.strict).toBe(provider === 'google' ? true : undefined);
+      expect(execute.mock.calls[0][0]).toEqual({ value: 'hi', nullable: null });
+      expect(events.find((e) => e.type === 'assistant-turn')).toMatchObject({
+        toolCall: { args: { value: 'hi', nullable: null } },
+      });
+    },
+  );
+
+  it.each([
+    ['gemini-3.8-flash', 'guard-setup.recipe-repair', true],
+    ['gemini-3-pro-preview', 'guard-interfaces.web-tasks', true],
+    ['gemini-2.5-pro', 'guard-setup.recipe-repair', false],
+    ['gemini-3.8-flash', 'spec-scan.curation', false],
+  ] as const)('sets setup thinking for %s in %s: %s', async (model, kind, high) => {
+    const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'ok' })] }]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle } = runSession(createApiSessionDriver({ provider: 'google', model, apiKey: 'test' }), {
+      def: makeDef({ kind }),
+    });
+    expect(await handle.done).toMatchObject({ kind: 'outcome' });
+    expect(scripted.calls[0].providerOptions).toEqual(high ? { google: { thinkingConfig: { thinkingLevel: 'high' } } } : {});
+  });
+
+  it('states the existing draft checkpoint before the Google setup prompt', async () => {
+    const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'ok' })] }]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle } = runSession(createApiSessionDriver({ provider: 'google', model: 'gemini-3.8-flash', apiKey: 'test' }), {
+      def: makeDef({
+        kind: 'guard-setup.recipe-repair', systemPrompt: 'Repair the recipe.',
+        draftCheckpoint: { tool: 'check_recipe', afterTurn: 8, message: 'Draft now.' },
+      }),
+    });
+    expect(await handle.done).toMatchObject({ kind: 'outcome' });
+    const system = scripted.calls[0].prompt[0] as { content: string };
+    expect(system.content).toContain('first grant is 10 turns');
+    expect(system.content).toContain('`check_recipe` by turn 8');
+    expect(system.content).toContain('call `outcome` immediately');
+    expect(system.content).toMatch(/^<session_rules>[\s\S]+Repair the recipe\.$/);
+  });
+
   it('shows the model an IMAGE the session was given, text first', async () => {
     const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'seen' })] }]);
     buildModelMock.mockReturnValue(scripted.model);
