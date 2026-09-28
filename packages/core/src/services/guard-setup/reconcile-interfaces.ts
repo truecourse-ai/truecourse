@@ -337,7 +337,7 @@ export const RECONCILE_INTERFACES_PROMPT_FINGERPRINT = promptFingerprint(
  * make a settled tree-vs-probe dispute wrong; a prompt change that fixes WRONG
  * output bumps this in the same commit.
  */
-export const RECONCILE_INTERFACES_STAGE_VERSION = 2
+export const RECONCILE_INTERFACES_STAGE_VERSION = 1
 
 /**
  * `sha256(stage version :: canonical diagnostics JSON :: recipe contract)`. The

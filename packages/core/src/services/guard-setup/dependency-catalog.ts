@@ -564,7 +564,7 @@ export interface BuildCatalogSessionOptions {
  * reclassify a dependency; a prompt change that fixes WRONG output bumps this
  * in the same commit.
  */
-const CATALOG_STAGE_VERSION = 2;
+const CATALOG_STAGE_VERSION = 1;
 
 /** {@link catalogCacheKey} as it was computed while the prompt was in it — the
  *  key a miss falls back to. Delete with the legacy hash. */

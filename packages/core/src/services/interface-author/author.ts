@@ -104,8 +104,6 @@ import { recordAuthoringLedger, registerSharedPlaces, retireAuthoredPlaces, writ
  * key: authoring had no cache before this one.
  */
 export const INTERFACE_AUTHOR_CACHE_NAME = 'guard/interfaces-author'
-/** Prompt revision included in every cached fragment. */
-const INTERFACE_AUTHOR_STAGE_VERSION = 2
 
 /**
  * A screen's cache key: its input digest and the source files it is grounded
@@ -124,7 +122,7 @@ export function fragmentCacheKey(
   const key = files.length > 0
     ? `${inputFingerprint}:${createHash('sha256').update(JSON.stringify(files)).digest('hex').slice(0, 16)}`
     : inputFingerprint
-  return `author-v${INTERFACE_AUTHOR_STAGE_VERSION}:${live ? `${key}:live` : key}`
+  return live ? `${key}:live` : key
 }
 
 /** The source files a place is grounded on: its route module and what it renders. */
