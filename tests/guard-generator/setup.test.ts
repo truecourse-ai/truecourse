@@ -864,6 +864,36 @@ describe('runGuardSetup — skip when settled', () => {
     expect(moved.detection?.database?.schemaFiles).toEqual(['prisma/schema.prisma'])
   })
 
+  // What re-opened a step is what had moved when it decided, never what its
+  // own re-run then wrote: a seed re-drafted with new fixtures moves its own
+  // recipe contract, and that did not re-open it.
+  it('names only the inputs that moved before the step ran', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    fs.mkdirSync(path.join(r, 'prisma'), { recursive: true })
+    fs.writeFileSync(path.join(r, 'prisma/schema.prisma'), 'model Link {\n  id Int @id\n}\n')
+    const mapped = interfaces({ database: { ...DATABASE, schemaFiles: ['prisma/schema.prisma'] } })
+    let drafts = 0
+    const seedSession: GuardSetupSeedSession = async (input) => {
+      drafts += 1
+      const file = recipePath(input.repoRoot)
+      const doc = JSON.parse(fs.readFileSync(file, 'utf-8')) as { api: Record<string, unknown> }
+      const fields = drafts === 1 ? ['id'] : ['id', 'pinned']
+      doc.api.seed = { command: 'node scripts/guard-seed.mjs', script: 'scripts/guard-seed.mjs', provides: { fixtures: { link: fields } } }
+      fs.mkdirSync(path.join(input.repoRoot, 'scripts'), { recursive: true })
+      fs.writeFileSync(path.join(input.repoRoot, 'scripts/guard-seed.mjs'), '// drafted\n')
+      fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n')
+      return { status: 'ok', scriptPath: 'scripts/guard-seed.mjs', command: 'node scripts/guard-seed.mjs' }
+    }
+    await runAndPersist(r, { interfaces: mapped, seedSession })
+
+    fs.writeFileSync(path.join(r, 'prisma/schema.prisma'), 'model Link {\n  id Int @id\n  pinned Boolean @default(false)\n}\n')
+    const facts: string[] = []
+    await runAndPersist(r, { interfaces: mapped, seedSession, onStepFact: (step, line) => facts.push(`${step} | ${line}`) })
+    expect(drafts).toBe(2)
+    expect(facts.filter((f) => f.startsWith('seed | re-opened'))).toEqual(['seed | re-opened: schema moved'])
+  })
+
   // A coverage rule the seed could not satisfy is a note on the seed step,
   // never a failure: the step is ok, and each unmet rule is one fact.
   it('records each coverage rule the seed did not satisfy as a fact on an ok step', async () => {
