@@ -1,26 +1,12 @@
 /**
- * PER-PROVIDER PROMPT-CACHE AND TOOL-CALL TUNING.
- *
- * The session driver resends the whole history every turn, so what the
- * provider is told about caching decides the bill, and what it is told about
- * parallel tool calls decides whether the transcript schema (ONE tool call
- * per turn) holds. Both answers are provider-specific, and both are declared
- * here as data chosen ONCE from `cfg.provider` — the call site reads a
- * strategy, it never asks which provider it is talking to.
- *
- * The two axes are one object because they are one decision per provider:
- * where a cacheable prefix ends, and what must ride the request itself.
- *
- * Names below are the AI SDK's, verified against the installed typings:
- * `@ai-sdk/anthropic@3` (`cacheControl`, `disableParallelToolUse`),
- * `@ai-sdk/openai@3` (`promptCacheKey`, `parallelToolCalls` — on both the
- * chat and the responses options; `store` on the responses options, which is
- * the model `createOpenAI()` builds),
- * `@ai-sdk/amazon-bedrock@4` (`cachePoint`, `additionalModelRequestFields`),
- * `@ai-sdk/google@3` and `@ai-sdk/openai-compatible@2`.
+ * Provider-specific schema, cache, tool-call and reasoning settings.
+ * The driver chooses this strategy once per provider. OpenAI-family tools
+ * require strict-schema normalization; other providers keep optional fields
+ * optional. Google validates the full JSON Schema sent by its SDK adapter.
  */
 
 import type { ModelMessage } from 'ai';
+import type { SessionDef } from '@truecourse/agent-loop';
 import type { LlmProviderKind } from './types.js';
 
 /**
@@ -35,6 +21,13 @@ export const COPILOT_PROVIDER_NAME = 'github-copilot';
 type ProviderOptionsBag = NonNullable<ModelMessage['providerOptions']>;
 
 export interface ProviderTuning {
+  /** Only OpenAI-family schemas require every property to be required. */
+  readonly normalizeToolSchema?: boolean;
+  /** Ask the provider to enforce the tool schema. */
+  readonly strictTools?: boolean;
+  /** Provider-specific instructions, ahead of the session's own prompt. */
+  sessionInstructions?(def: SessionDef): string;
+
   /**
    * Merged onto a message that CLOSES a cacheable prefix — the system prompt
    * and the moving tail. Absent for the providers that key their cache per
@@ -47,7 +40,7 @@ export interface ProviderTuning {
    * candidate actually being called — under Bedrock the tool option is the
    * hosted model FAMILY's native field, not one of Bedrock's own.
    */
-  callOptions(modelId: string, cacheKey: string): ProviderOptionsBag;
+  callOptions(modelId: string, cacheKey: string, sessionKind?: string): ProviderOptionsBag;
 }
 
 /**
@@ -91,6 +84,7 @@ const ANTHROPIC: ProviderTuning = {
  * turn of every session on a `gpt-4o`-class model.
  */
 const OPENAI: ProviderTuning = {
+  normalizeToolSchema: true,
   callOptions: (_modelId, cacheKey) => ({
     openai: { promptCacheKey: cacheKey, parallelToolCalls: false, store: false },
   }),
@@ -102,6 +96,7 @@ const OPENAI: ProviderTuning = {
  * WIRE names, not the camelCase the first-party openai provider translates.
  */
 const COPILOT: ProviderTuning = {
+  normalizeToolSchema: true,
   callOptions: (_modelId, cacheKey) => ({
     [COPILOT_PROVIDER_NAME]: { prompt_cache_key: cacheKey, parallel_tool_calls: false },
   }),
@@ -136,14 +131,38 @@ const BEDROCK: ProviderTuning = {
       : {},
 };
 
+/** Setup includes the web authoring sessions it dispatches per place. */
+function isSetupSession(kind: string | undefined): boolean {
+  return kind?.startsWith('guard-setup.') === true || kind === 'guard-interfaces.web-tasks';
+}
+
 /**
- * The Gemini API caches a repeated prefix IMPLICITLY and takes neither a
- * breakpoint nor a key, and its tool config has no parallel-call switch — so
- * there is nothing to send. A turn that calls more than one tool is run in
- * full by the driver, like any provider that does not honor the ask.
+ * Gemini caches prefixes implicitly and has no parallel-call switch.
+ * Gemini 3 setup sessions use high thinking; older models retain their
+ * native default because they do not accept thinkingLevel.
  */
 const GOOGLE: ProviderTuning = {
-  callOptions: () => ({}),
+  strictTools: true,
+  callOptions: (modelId, _cacheKey, sessionKind): ProviderOptionsBag =>
+    /^gemini-3[.-]/.test(modelId) && isSetupSession(sessionKind)
+      ? { google: { thinkingConfig: { thinkingLevel: 'high' } } }
+      : {},
+  sessionInstructions: (def) => {
+    if (!isSetupSession(def.kind)) return '';
+    const checkpoint = def.draftCheckpoint;
+    const check = checkpoint?.tool ?? def.outcomePrecondition?.tool;
+    return [
+      '<session_rules>',
+      `Your first grant is ${def.budget.turns} turns. Finish within it when possible; do not rely on an extension.`,
+      'Read only the evidence needed for the assigned task. Omit optional tool arguments you do not need; never fill them with empty strings or null unless the schema allows it.',
+      ...(check ? [
+        `Submit a first draft to \`${check}\` by turn ${checkpoint?.afterTurn ?? Math.max(1, Math.floor(def.budget.turns / 2))}. Use its results to revise the draft.`,
+      ] : []),
+      'Reserve turns for validation and the outcome. Once the task requirements are satisfied, call `outcome` immediately. Report unresolved findings in the permitted outcome fields; do not invent evidence or claim an unverified result.',
+      'When told to wrap up, stop exploring and submit the supported outcome using the session contract.',
+      '</session_rules>',
+    ].join('\n');
+  },
 };
 
 const TUNING: Record<LlmProviderKind, ProviderTuning> = {

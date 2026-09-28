@@ -1,15 +1,13 @@
 /**
- * What a Google (Gemini API) provider block puts on the wire.
- *
- * The session driver hands tools over as compacted JSON schemas — repeated
- * nodes factored into `$defs` and pointed at with `$ref` — and Gemini's
- * function declarations take an OpenAPI subset with no references at all. So
- * this runs the REAL `@ai-sdk/google` model over a captured fetch and reads
- * the request: where it goes, which key it carries, and that the schema
- * arrives with its references resolved.
+ * Google requests captured after the real AI SDK and provider adapter have
+ * serialized them. These tests cover the schema and thought signatures the
+ * API actually receives, including the session driver's tool construction.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { z } from 'zod';
+import { createApiSessionDriver } from '../../packages/llm-api/src/session-driver';
+import { buildAuthorTools } from '../../packages/core/src/services/interface-author/tools';
 import { buildModel, providerTuningFor } from '../../packages/llm-api/src/index';
 
 const cfg = { provider: 'google' as const, model: 'gemini-2.5-pro', apiKey: 'AIza-test' };
@@ -20,7 +18,7 @@ const REPLY = {
   usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
 };
 
-/** A tool schema as the driver sends it: one node factored into `$defs`. */
+/** A repeated tool node factored into `$defs`. */
 const TOOL_SCHEMA = {
   type: 'object',
   properties: { from: { $ref: '#/$defs/point' }, to: { $ref: '#/$defs/point' } },
@@ -40,7 +38,7 @@ interface Sent {
   url: string;
   headers: Record<string, string>;
   body: {
-    tools?: Array<{ functionDeclarations: Array<{ name: string; parameters: unknown }> }>;
+    tools?: Array<{ functionDeclarations: Array<{ name: string; parametersJsonSchema: unknown; parameters?: unknown }> }>;
   };
 }
 
@@ -82,21 +80,63 @@ describe('the google provider', () => {
     expect(sent.url).toBe('https://gateway.example.com/v1beta/models/gemini-2.5-pro:generateContent');
   });
 
-  it('sends a factored tool schema with its references resolved', async () => {
+  it('sends full JSON Schema including references', async () => {
     const sent = await sentFor();
 
     const [declaration] = sent.body.tools?.[0].functionDeclarations ?? [];
     expect(declaration.name).toBe('move');
-    const point = {
-      type: 'object',
-      properties: { x: { type: 'number' }, y: { type: 'number' } },
-      required: ['x', 'y'],
-    };
-    expect(declaration.parameters).toEqual({
-      type: 'object',
-      properties: { from: point, to: point },
-      required: ['from', 'to'],
-    });
-    expect(JSON.stringify(declaration.parameters)).not.toContain('$ref');
+    expect(declaration.parametersJsonSchema).toEqual(TOOL_SCHEMA);
+    expect(declaration.parameters).toBeUndefined();
   });
+});
+
+it('preserves optional arguments, bounds and thought signatures through the session driver', async () => {
+  const requests: any[] = [];
+  const replies = [
+    { functionCall: { name: 'search_repo', args: { query: 'not-present-in-the-fixture-928xyz' } }, thoughtSignature: 'opaque-thought-signature' },
+    { functionCall: { name: 'outcome', args: { findings: ['done'] } }, thoughtSignature: 'second-signature' },
+  ];
+  vi.stubGlobal('fetch', async (_url: unknown, init: { body: string }) => {
+    requests.push(JSON.parse(init.body));
+    const part = replies.shift();
+    if (!part) throw new Error('unexpected model call');
+    const response = {
+      candidates: [{ content: { role: 'model', parts: [part] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
+    };
+    return new Response(`data: ${JSON.stringify(response)}\n\n`, {
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  });
+  const driver = createApiSessionDriver({ ...cfg, model: 'gemini-3.8-flash' }, { retry: { attempts: 1 } });
+  const result = await driver.runSession({
+    def: {
+      kind: 'guard-setup.preparation-observations',
+      systemPrompt: 'Review the source and report findings.',
+      tools: buildAuthorTools({ repoRoot: new URL('../fixtures', import.meta.url).pathname, derived: null, authored: null, replaceable: new Set() }),
+      outcomeSchema: z.object({ findings: z.array(z.string().min(1)).min(1).max(12) }),
+      budget: { turns: 20, maxResumes: 0, tokenCeiling: 100_000 },
+    },
+    initialMessages: ['Find the evidence for the assigned task.'],
+    onEvent: () => {},
+    signal: new AbortController().signal,
+  }).done;
+
+  expect(result).toMatchObject({ kind: 'outcome', value: { findings: ['done'] } });
+  expect(requests).toHaveLength(2);
+  const declarations = requests[0].tools[0].functionDeclarations;
+  const schema = declarations.find((d: any) => d.name === 'search_repo').parametersJsonSchema;
+  expect(schema.required).toEqual(['query']);
+  expect(schema.properties.pathContains).toMatchObject({ type: 'string', minLength: 1 });
+  expect(declarations.find((d: any) => d.name === 'search_interfaces').parametersJsonSchema.properties.limit).toMatchObject({ type: 'integer', minimum: 1, maximum: 20 });
+  const outcome = declarations.find((d: any) => d.name === 'outcome').parametersJsonSchema;
+  expect(outcome.properties.findings).toMatchObject({ type: 'array', minItems: 1, maxItems: 12 });
+  expect(requests[0].toolConfig.functionCallingConfig.mode).toBe('VALIDATED');
+  expect(requests[0].generationConfig.thinkingConfig.thinkingLevel).toBe('high');
+  const replay = requests[1].contents.find((c: any) => c.role === 'model');
+  expect(replay.parts).toContainEqual({
+    functionCall: { id: expect.any(String), name: 'search_repo', args: { query: 'not-present-in-the-fixture-928xyz' } },
+    thoughtSignature: 'opaque-thought-signature',
+  });
+  expect(JSON.stringify(requests[1])).not.toContain('skip_thought_signature_validator');
 });

@@ -24,7 +24,7 @@ export const PROBE_TIMEOUT_MS = 30_000;
 export async function probeProvider(cfg: ProviderConfig): Promise<void> {
   const result = await generateText({
     model: buildModel(cfg, cfg.model),
-    system: 'You are a configuration probe.',
+    instructions: 'You are a configuration probe.',
     prompt: 'Reply with exactly {"ok": true}.',
     abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
   });

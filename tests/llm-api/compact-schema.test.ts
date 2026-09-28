@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { jsonSchemaHint } from '../../packages/shared/src/llm/index.js';
 import { AuthoredFragmentSchema } from '../../packages/core/src/services/interface-author/draft.js';
-import { compactNormalizedSchema } from '../../packages/llm-api/src/compact-schema.js';
+import { compactSchema } from '../../packages/llm-api/src/compact-schema.js';
 import { normalizeForStrictOutput, stripInjectedNulls } from '../../packages/llm-api/src/strict-schema.js';
 import { assertOpenAiStrictValid } from './strict-assert.js';
 
@@ -36,12 +36,12 @@ function expand(schema: Schema): Schema {
   return resolve(schema);
 }
 
-describe('compactNormalizedSchema', () => {
+describe('compactSchema', () => {
   it('substantially shrinks real authoring schemas while preserving every expanded constraint', () => {
     const { schema, widened } = normalizeForStrictOutput(JSON.parse(jsonSchemaHint(AuthoredFragmentSchema)));
     const before = JSON.stringify(schema);
     const pathsBefore = JSON.stringify(widened);
-    const compact = compactNormalizedSchema(schema);
+    const compact = compactSchema(schema);
 
     expect(compact.type).toBe('object');
     expect(compact.$defs).toBeDefined();
@@ -50,12 +50,23 @@ describe('compactNormalizedSchema', () => {
     assertOpenAiStrictValid(expand(compact), 'expanded compact authoring schema');
     expect(JSON.stringify(schema)).toBe(before);
     expect(JSON.stringify(widened)).toBe(pathsBefore);
-    expect(compactNormalizedSchema(schema)).toEqual(compact);
+    expect(compactSchema(schema)).toEqual(compact);
+  });
+
+  it('shrinks native authoring schemas without making optional fields required or nullable', () => {
+    const schema = JSON.parse(jsonSchemaHint(AuthoredFragmentSchema));
+    const before = JSON.stringify(schema);
+    const compact = compactSchema(schema);
+
+    expect(compact.$defs).toBeDefined();
+    expect(JSON.stringify(compact).length).toBeLessThan(before.length * 0.3);
+    expect(expand(compact)).toEqual(schema);
+    expect(JSON.stringify(schema)).toBe(before);
   });
 
   it('retains null stripping at every nested readable locator occurrence', () => {
     const { schema, widened } = normalizeForStrictOutput(JSON.parse(jsonSchemaHint(AuthoredFragmentSchema)));
-    expect(expand(compactNormalizedSchema(schema))).toEqual(schema);
+    expect(expand(compactSchema(schema))).toEqual(schema);
     const locator = () => ({
       role: 'button', name: 'Save', exact: null, pick: null,
       within: { role: 'dialog', name: 'Editor', exact: null },
@@ -94,7 +105,7 @@ describe('compactNormalizedSchema', () => {
     }).strict();
     const original = z.object({ first: item, second: item }).strict();
     const { schema, widened } = normalizeForStrictOutput(JSON.parse(jsonSchemaHint(original)));
-    expect(expand(compactNormalizedSchema(schema))).toEqual(schema);
+    expect(expand(compactSchema(schema))).toEqual(schema);
     const cleaned = stripInjectedNulls({
       first: { mode: 'save', note: null, details: { reason: 'ready', optional: null } },
       second: { mode: 'cancel', note: null, details: null },
@@ -112,7 +123,7 @@ describe('compactNormalizedSchema', () => {
       type: 'object', properties: { a: shared, b: shared, literal: { const: literal } },
       required: ['a', 'b', 'literal'], additionalProperties: false,
     };
-    const compact = compactNormalizedSchema(schema);
+    const compact = compactSchema(schema);
     expect(compact.$defs).toBeDefined();
     expect(expand(compact)).toEqual(schema);
   });
@@ -122,8 +133,8 @@ describe('compactNormalizedSchema', () => {
       type: 'object', properties: { item: { $ref: '#/$defs/item' } },
       $defs: { item: { type: 'string' } }, required: ['item'], additionalProperties: false,
     };
-    expect(compactNormalizedSchema(referenced)).toEqual(referenced);
+    expect(compactSchema(referenced)).toEqual(referenced);
     const small = { type: 'object', properties: { a: { type: 'string' }, b: { type: 'string' } } };
-    expect(compactNormalizedSchema(small)).toEqual(small);
+    expect(compactSchema(small)).toEqual(small);
   });
 });

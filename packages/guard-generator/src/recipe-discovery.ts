@@ -381,7 +381,7 @@ export interface DiscoverRecipeOptions {
  * not make a verified recipe wrong, so the prompt is not in the key; a prompt
  * change that fixes WRONG output bumps this in the same commit.
  */
-export const RECIPE_STAGE_VERSION = 1
+export const RECIPE_STAGE_VERSION = 2
 
 /**
  * The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`, plus

@@ -50,7 +50,7 @@ import type {
 } from '@truecourse/agent-loop';
 import { buildModel } from './model.js';
 import { normalizeForStrictOutput, stripInjectedNulls, type SchemaPath } from './strict-schema.js';
-import { compactNormalizedSchema } from './compact-schema.js';
+import { compactSchema } from './compact-schema.js';
 import { providerTuningFor, type ProviderTuning } from './provider-tuning.js';
 import type { ProviderConfig } from './types.js';
 import { callUsageOf, type CallUsage } from './usage.js';
@@ -332,7 +332,7 @@ async function whileRunning<T>(
 
 async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promise<DriverResult> {
   const { def, onEvent, signal } = input;
-  const { toolset, widenedByTool } = buildToolset(def);
+  const { toolset, widenedByTool } = buildToolset(def, rt.tuning);
   const toolByName = new Map(def.tools.map((t) => [t.name, t]));
   // The shell's tool wrapper ignores the driver's ctx and injects its own;
   // this stub only satisfies the call signature.
@@ -361,8 +361,8 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
         ? [
             { type: 'text', text: content },
             ...images.map((image) => ({
-              type: 'image' as const,
-              image: image.data,
+              type: 'file' as const,
+              data: image.data,
               mediaType: image.mediaType,
             })),
           ]
@@ -568,7 +568,7 @@ interface TurnResult {
   toolCalls: Awaited<StreamResult['toolCalls']>;
   usage: Awaited<StreamResult['usage']>;
   finishReason: Awaited<StreamResult['finishReason']>;
-  response: Awaited<StreamResult['response']>;
+  response: Awaited<StreamResult['finalStep']>['response'];
   /** The call the stream OPENED and never closed, with its argument text as far
    *  as it got. The SDK drops such a call before the loop sees it, so this is
    *  the only account of what the turn was writing when it stopped. */
@@ -619,7 +619,7 @@ async function callModel(
   // keys its cache per request leaves all of them unmarked.
   const breakpoint = rt.tuning.breakpoint;
   const sharedEnd = rt.sharedPrefix - 1;
-  // The system prompt rides the SDK's `system` option, never `messages`: a
+  // The system prompt rides the SDK's `instructions` option, never `messages`: a
   // system role inside `messages` earns an "…can be a security risk…" warning
   // on stderr for every call, which floods the run's logs. As a
   // `SystemModelMessage` (not a bare string) it still carries its cache
@@ -629,7 +629,7 @@ async function callModel(
   // `rebuildHistory` never emits a system message.
   const system: SystemModelMessage = {
     role: 'system',
-    content: def.systemPrompt,
+    content: [rt.tuning.sessionInstructions?.(def), def.systemPrompt].filter(Boolean).join('\n\n'),
     ...(breakpoint ? { providerOptions: breakpoint } : {}),
   };
   const prompt: ModelMessage[] = messages.map((m, i) =>
@@ -649,7 +649,7 @@ async function callModel(
     try {
       const result = streamText({
         model: candidate.model,
-        system,
+        instructions: system,
         messages: prompt,
         tools,
         abortSignal: turn.signal,
@@ -662,7 +662,7 @@ async function callModel(
         // event models ONE tool call per turn, this provider's way of asking
         // for a single call. A turn that still carries several is executed in
         // full — see the loop.
-        providerOptions: rt.tuning.callOptions(candidate.modelId, rt.cacheKey),
+        providerOptions: rt.tuning.callOptions(candidate.modelId, rt.cacheKey, def.kind),
       });
       const stream = await reportTurn(result, live, cancelTurn);
       // The guard already aborted the request; the result promises are never
@@ -685,7 +685,7 @@ async function callModel(
         result.toolCalls,
         result.usage,
         result.finishReason,
-        result.response,
+        result.finalStep.then((step) => step.response),
       ]);
       return {
         text,
@@ -776,7 +776,7 @@ async function reportTurn(
   let thinking = '';
   const out: StreamReport = {};
   try {
-    for await (const part of result.fullStream) {
+    for await (const part of result.stream) {
       switch (part.type) {
         case 'text-delta':
           text += part.text;
@@ -916,12 +916,12 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * Compile the session's tools (plus the injected outcome tool) into the AI
- * SDK toolset. Input schemas ride the same strict-subset normalization the
- * structured-output path uses; where a schema is inexpressible in the strict
- * subset it is sent as-is (the shell's Zod validation still gates `execute`).
+ * SDK toolset. Only OpenAI-family providers receive strict-subset normalization.
+ * Other providers receive the original optional fields and constraints. The
+ * shell's Zod validation still gates `execute` for every provider.
  * Tools carry no `execute` — one step per turn, the loop runs them.
  */
-function buildToolset(def: SessionDef): {
+function buildToolset(def: SessionDef, tuning: ProviderTuning): {
   toolset: ToolSet;
   widenedByTool: Map<string, readonly SchemaPath[]>;
 } {
@@ -929,16 +929,22 @@ function buildToolset(def: SessionDef): {
   const widenedByTool = new Map<string, readonly SchemaPath[]>();
   const add = (name: string, description: string, schema: ZodTypeAny): void => {
     const rawSchema = zodToJsonSchema(schema, { $refStrategy: 'none' });
-    let inputSchema: unknown = rawSchema;
+    let inputSchema: Record<string, unknown> = rawSchema;
     let widened: readonly SchemaPath[] = [];
-    try {
-      const strict = normalizeForStrictOutput(rawSchema);
-      inputSchema = compactNormalizedSchema(strict.schema);
-      widened = strict.widened;
-    } catch {
-      /* inexpressible in the strict subset — send unnormalized */
+    if (tuning.normalizeToolSchema) {
+      try {
+        const strict = normalizeForStrictOutput(rawSchema);
+        inputSchema = strict.schema;
+        widened = strict.widened;
+      } catch {
+        /* inexpressible in the strict subset — send unnormalized */
+      }
     }
-    toolset[name] = tool({ description, inputSchema: jsonSchema(inputSchema as never) });
+    toolset[name] = tool({
+      description,
+      inputSchema: jsonSchema(compactSchema(inputSchema) as never),
+      ...(tuning.strictTools ? { strict: true } : {}),
+    });
     widenedByTool.set(name, widened);
   };
   for (const t of def.tools) {
