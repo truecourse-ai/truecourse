@@ -4248,14 +4248,47 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return { hash: flowSettleDigest(components), components, catalogReads }
   }
 
+  /**
+   * An unchanged flow's committed scenarios, re-pinned to the sections the
+   * claim-diff gate judged cosmetic. A bind still at the prior fingerprint the
+   * gate settled against takes the section's current one and the file is
+   * rewritten; a review that held for the old text is re-stamped for the new,
+   * since the claims under it are byte-identical (the gate's finding). Left at
+   * the old fingerprint, the runner calls the scenario stale and never runs it.
+   */
+  const scenarioFiles = claimDiff.cosmetic.size > 0 ? scenarioFileIndex(repoRoot) : new Map<string, string>()
+  const repinCosmetic = (rows: readonly GuardManifestScenario[]): GuardManifestScenario[] =>
+    rows.map((row) => {
+      const scenario = committedScenariosById.get(row.id)
+      const file = scenarioFiles.get(row.id)
+      if (!scenario || !file) return row
+      let repinned = 0
+      const binds = scenario.binds.map((bind) => {
+        const key = flowSectionKey(bind.doc, bind.section)
+        const section = sectionByKey.get(key)
+        if (!section || claimDiff.cosmetic.get(key) !== bind.fingerprint || section.fingerprint === bind.fingerprint) return bind
+        repinned += 1
+        return { ...bind, fingerprint: section.fingerprint }
+      })
+      if (repinned === 0) return row
+      const next = { ...scenario, binds }
+      fs.writeFileSync(file, serializeScenarioYaml(next))
+      committedScenariosById.set(row.id, next)
+      fact('validate', `${row.id}: re-pinned to ${repinned} cosmetically edited section${repinned === 1 ? '' : 's'}`)
+      return row.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario)
+        ? { ...row, reviewedScenarioFingerprint: scenarioReviewFingerprint(next) }
+        : row
+    })
+
   for (const work of works) {
     if (!work.changed) {
-      // Unchanged: its committed scenarios stand, its MATCH-stage gaps are re-derived
-      // (the author-stage ones were carried forward above, since authoring does not
+      // Unchanged: its committed scenarios stand (re-pinned to any section the
+      // gate judged cosmetic), its MATCH-stage gaps are re-derived (the
+      // author-stage ones were carried forward above, since authoring does not
       // run), and its hash carries so the next generate is a no-op again.
       workingManifest.set(
         work.flow.id,
-        enforceSettleInvariant(manifestEntry(work, work.prior?.scenarios ?? [], settleRecord(work))),
+        enforceSettleInvariant(manifestEntry(work, repinCosmetic(work.prior?.scenarios ?? []), settleRecord(work))),
       )
       const carried = work.prior?.scenarios.length ?? 0
       fact(
