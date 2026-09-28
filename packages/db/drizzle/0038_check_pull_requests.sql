@@ -1,0 +1,1 @@
+ALTER TABLE "repositories" ADD COLUMN "check_pull_requests" boolean DEFAULT false NOT NULL;

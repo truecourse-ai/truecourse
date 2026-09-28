@@ -22,7 +22,27 @@
  * the Agent page and in `/api/jobs` — and starts when the running one settles,
  * in enqueue order. Nothing waits in this process, so the gate survives a
  * restart and holds across replicas; `context.sync` and `context.scan` name no
- * queue and keep running beside a heavy job.
+ * queue and keep running beside a heavy job. A pull request's check is the same
+ * three links carrying the pull request (after its coordinator, `repo.pr-check`),
+ * each keyed per pull request, in the same lane behind the main chain's.
+ *
+ * AND A PUSH TO THE DEFAULT BRANCH RUNS THE MAIN CHAIN, AFTER ITS CONTEXT,
+ * COALESCED. The chain is setup → generate → run, pinned to ONE commit: the
+ * pushed one, which the repository row remembers (`defaultBranchSha`, written
+ * by the webhook). The row also remembers the commit the newest chain was
+ * started at (`mainChainSha`), and a repository OWES a chain while the two
+ * differ. The push itself starts only the sync of the repository's own
+ * documentation; whoever settles last serves what is owed: the sync, when it
+ * changed no document and no scan is in flight, else the scan, once no
+ * follow-up scan is queued behind it. So generate always reads the corpus the
+ * push's documents produced. At most one chain runs per repository: while any
+ * heavy job of it is active nothing starts, and when a chain ends — the run
+ * settles, or an earlier link stops short — whatever is owed by then starts
+ * once. Three pushes during a chain cost one follow-up, and a chain that fails
+ * at its own commit is not started again: only a newer push starts one. A
+ * chain a server restart killed never ended, so boot makes its push owed again
+ * and restarts it — once: a restarted chain the next restart kills stays down
+ * until the next push, so a chain that takes the process with it cannot loop.
  */
 
 import {
@@ -36,6 +56,7 @@ import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
 import type { Db } from '@truecourse/db';
 import type { PausedJob } from '@truecourse/data-store';
+import { isActiveJob, type RepositoryStore } from '@truecourse/shared';
 import {
   createRepoGuardSetupTask,
   REPO_GUARD_SETUP_TASK,
@@ -54,6 +75,13 @@ import {
   type GuardRunJobRequest,
   type RepoGuardRunTaskDeps,
 } from './tasks/repo-guard-run.js';
+import {
+  createRepoPullRequestCheckTask,
+  pullRequestCheckJobKey,
+  REPO_PR_CHECK_TASK,
+  type PullRequestCheckJobRequest,
+  type RepoPullRequestCheckTaskDeps,
+} from './tasks/repo-pr-check.js';
 import {
   createContextSyncTask,
   contextSyncJobKey,
@@ -91,6 +119,20 @@ export interface JobsMount extends Jobs {
   enqueueGuardGenerate(request: GuardGenerateJobRequest): Promise<EnqueueResult>;
   enqueueGuardRun(request: GuardRunJobRequest): Promise<EnqueueResult>;
   /**
+   * Run the main chain at the pushed commit now, unless a heavy job of the
+   * repository is already active — then `busy`, and the chain that is running
+   * follows up on its own when it ends. A push reaches it through its sync
+   * (see the header); the webhook calls it directly only for a repository
+   * with no documentation source to sync.
+   */
+  startMainChain(request: MainChainRequest): Promise<EnqueueResult>;
+  /**
+   * One pull request's check, in the workspace's heavy lane behind any main
+   * chain waiting there. One check per pull request is active: a second
+   * request while one runs is `busy` (the host supersedes first).
+   */
+  enqueuePullRequestCheck(request: PullRequestCheckJobRequest): Promise<EnqueueResult>;
+  /**
    * Refresh ONE workspace context source. Keyed by the source, not the repo:
    * a source belongs to the workspace and several repositories may read it.
    */
@@ -114,6 +156,8 @@ export interface JobsMount extends Jobs {
    * settle — the caller must refuse the disconnect.
    */
   cancelRepoJobs(repoFullName: string, orgId: string): Promise<'stopped' | 'not-here'>;
+  /** Stop the job a pull request's check names: its coordinator, or the link of its chain now running. */
+  cancelCheckJob(orgId: string, jobId: string): Promise<void>;
   /**
    * Carry a paused job on: the SAME row goes back to `queued` and the queue is
    * handed the payload it paused with — the enqueue request it was created
@@ -123,6 +167,9 @@ export interface JobsMount extends Jobs {
    */
   resumePaused(job: PausedJob): Promise<string | null>;
 }
+
+/** The repository a push moved, as the webhook names it. */
+export type MainChainRequest = Pick<OnboardingJobRequest, 'repoId' | 'repoFullName' | 'workspaceOrgId' | 'recovery'>;
 
 export interface LinksChangedRequest {
   workspaceOrgId: string;
@@ -135,10 +182,27 @@ export interface LinksChangedRequest {
 export interface CreateServerJobsOptions {
   db: Db;
   connectionString: string;
+  /**
+   * The connected repositories: where the newest pushed commit is read from
+   * when a chain ends. Without it (a test that pushes nothing) no chain ever
+   * follows up.
+   */
+  repos?: RepositoryStore;
   /** Task-body seams (tests substitute the engines each job drives). */
   guardSetup?: Omit<RepoGuardSetupTaskDeps, 'chainGuardGenerate'>;
   guardGenerate?: Omit<RepoGuardGenerateTaskDeps, 'chainGuardRun'>;
   guardRun?: RepoGuardRunTaskDeps;
+  /**
+   * The pull request check's stores and GitHub client. Without them the task
+   * is not registered: a server with no GitHub App has no pull requests.
+   * `onStopped` settles the one check whose job never reached its own
+   * settle — one a disconnect stopped while it was queued or paused
+   * (`cancelled`), or one the process went down under (`error`), which boot
+   * reaps.
+   */
+  pullRequestCheck?: RepoPullRequestCheckTaskDeps & {
+    onStopped?: (checkId: string, reason: 'cancelled' | 'error') => Promise<void>;
+  };
   contextSync?: ContextSyncTaskDeps;
   contextScan?: Omit<ContextScanTaskDeps, 'ripple' | 'rescan'>;
   /** How the worker runner is started. Substituted in tests. */
@@ -154,20 +218,38 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   let jobs!: Jobs;
 
   // The three heavy jobs all enqueue through here, which is what puts every one
-  // of them in the workspace's single heavy queue.
+  // of them in the workspace's single heavy queue. A link of a pull request's
+  // check has a key of its own and waits behind the main chain; the store-wide
+  // look at the repository's running sessions is the default branch's guard,
+  // and would refuse a check whenever main is working.
   const enqueue = async (
     task: string,
     command: RepoCommand,
     request: OnboardingJobRequest,
     payload: Record<string, unknown>,
   ): Promise<EnqueueResult> => {
-    if (await repoIsWorking(request.repoFullName, command)) return { status: 'busy' };
+    const pr = request.pullRequest;
+    if (!pr && (await repoIsWorking(request.repoFullName, command))) return { status: 'busy' };
     const jobId = await jobs.singleFlightEnqueue(
       task,
       request.workspaceOrgId,
-      jobKey(task, request.repoFullName),
+      pr ? pullRequestJobKey(task, request.repoFullName, pr.number) : jobKey(task, request.repoFullName),
       payload,
-      { queue: heavyJobQueue(request.workspaceOrgId) },
+      {
+        queue: heavyJobQueue(request.workspaceOrgId),
+        priority: pr ? PULL_REQUEST_CHECK_PRIORITY : MAIN_CHAIN_PRIORITY,
+      },
+    );
+    return jobId ? { status: 'queued', jobId } : { status: 'busy' };
+  };
+
+  const enqueuePullRequestCheck = async (request: PullRequestCheckJobRequest): Promise<EnqueueResult> => {
+    const jobId = await jobs.singleFlightEnqueue(
+      REPO_PR_CHECK_TASK,
+      request.workspaceOrgId,
+      pullRequestCheckJobKey(request.repoFullName, request.number),
+      { ...request },
+      { queue: heavyJobQueue(request.workspaceOrgId), priority: PULL_REQUEST_CHECK_PRIORITY },
     );
     return jobId ? { status: 'queued', jobId } : { status: 'busy' };
   };
@@ -180,6 +262,80 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
 
   const enqueueGuardRun = (request: GuardRunJobRequest): Promise<EnqueueResult> =>
     enqueue(REPO_GUARD_RUN_TASK, 'guard-run', request, { ...request });
+
+  /** Is any link of this repository's main chain queued or running? */
+  const repoHasHeavyJob = async (request: MainChainRequest): Promise<boolean> => {
+    for (const task of MAIN_CHAIN_TASKS) {
+      if (await jobs.jobStore.getActiveByKey(request.workspaceOrgId, jobKey(task, request.repoFullName))) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const startMainChain = async (request: MainChainRequest): Promise<EnqueueResult> => {
+    if (await repoHasHeavyJob(request)) return { status: 'busy' };
+    // Pinned to the pushed commit the row remembers, so what the chain works
+    // on and what it is compared against when it ends are the same commit by
+    // construction. A fresh request from the three facts alone: never a
+    // chain's own payload, whose row id must not carry into the new chain.
+    const { repoId, repoFullName, workspaceOrgId, recovery } = request;
+    const pushed = (await opts.repos?.getRepo(repoFullName))?.defaultBranchSha ?? null;
+    const outcome = await enqueueGuardSetup({
+      repoId,
+      repoFullName,
+      workspaceOrgId,
+      source: 'push',
+      ...(pushed ? { commitSha: pushed } : {}),
+      ...(recovery ? { recovery } : {}),
+    });
+    if (outcome.status === 'queued' && pushed) await opts.repos?.recordMainChainSha(repoFullName, pushed);
+    return outcome;
+  };
+
+  /**
+   * Start the main chain for each of these repositories that owes one — a
+   * push landed that no chain was started for — unless the workspace's scan
+   * is queued or running: the chain reads the corpus, so it waits for that
+   * scan, whose settle serves what is owed then. `why` names the caller for
+   * the log, and `extra` rides on each chain's request. Never throws.
+   */
+  const serveOwedChains = async (
+    workspaceOrgId: string,
+    repoFullNames: readonly string[],
+    why: string,
+    extra: Pick<MainChainRequest, 'recovery'> = {},
+  ): Promise<void> => {
+    if (!opts.repos || repoFullNames.length === 0) return;
+    try {
+      if (await jobs.jobStore.getActiveByKey(workspaceOrgId, contextScanJobKey())) return;
+      for (const repoFullName of repoFullNames) {
+        const link = await opts.repos.getRepo(repoFullName);
+        if (!link?.enabled || link.workspaceOrgId !== workspaceOrgId) continue;
+        if (!link.defaultBranchSha || link.defaultBranchSha === link.mainChainSha) continue;
+        const outcome = await startMainChain({ repoId: link.slug, repoFullName, workspaceOrgId, ...extra });
+        log.info(
+          `[jobs] ${repoFullName} owes a chain at ${link.defaultBranchSha.slice(0, 8)} (${why}) — ${outcome.status}`,
+        );
+      }
+    } catch (err) {
+      log.warn(`[jobs] could not start the owed chains of ${workspaceOrgId}: ${(err as Error).message}`);
+    }
+  };
+
+  /**
+   * A chain ended at `commitSha`, its commit (null when it never got to
+   * clone). Whatever push landed since and is still owed starts one more
+   * chain, at the newest commit. A chain that failed at its own commit owes
+   * nothing, so it is not started again.
+   */
+  const onChainEnd = async (request: OnboardingJobRequest, commitSha: string | null): Promise<void> => {
+    await serveOwedChains(
+      request.workspaceOrgId,
+      [request.repoFullName],
+      `its chain ended at ${commitSha?.slice(0, 8) ?? 'no commit'}`,
+    );
+  };
 
   // A context source is not a repository: nothing about it is visible in the
   // session-run store, so the queue's single-flight key is the whole guard.
@@ -255,26 +411,52 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     });
   };
 
+  // What a pull request's chain reaches its check through.
+  const pullRequests = opts.pullRequestCheck
+    ? { pulls: opts.pullRequestCheck.pulls, octokitFor: opts.pullRequestCheck.octokitFor, appUrl: opts.pullRequestCheck.appUrl }
+    : undefined;
+
+  /**
+   * A link a chain asked for and the queue refused. On the default branch the
+   * link in flight is the chain; a pull request's link has a key of its own
+   * per pull request, so a refusal there means its check cannot go on.
+   */
+  const refused = (request: OnboardingJobRequest, what: string): void => {
+    if (request.pullRequest) {
+      throw new Error(`${what} for ${request.repoFullName}#${request.pullRequest.number} is still in flight from an earlier attempt`);
+    }
+    log.info(`[jobs] ${what} for ${request.repoFullName} is already in flight`);
+  };
+
   const tasks: readonly JobTask[] = [
     createRepoGuardSetupTask({
       ...opts.guardSetup,
+      onChainEnd,
+      ...(pullRequests ? { pullRequests } : {}),
       chainGuardGenerate: async (request) => {
-        const outcome = await enqueueGuardGenerate(request);
-        if (outcome.status === 'busy') {
-          log.info(`[jobs] scenario generation for ${request.repoFullName} is already in flight`);
-        }
+        if ((await enqueueGuardGenerate(request)).status === 'busy') refused(request, 'scenario generation');
       },
     }),
     createRepoGuardGenerateTask({
       ...opts.guardGenerate,
+      onChainEnd,
+      ...(pullRequests ? { pullRequests } : {}),
       chainGuardRun: async (request) => {
-        const outcome = await enqueueGuardRun(request);
-        if (outcome.status === 'busy') {
-          log.info(`[jobs] the baseline run for ${request.repoFullName} is already in flight`);
-        }
+        if ((await enqueueGuardRun(request)).status === 'busy') refused(request, 'the run');
       },
     }),
-    createRepoGuardRunTask(opts.guardRun),
+    createRepoGuardRunTask({ ...opts.guardRun, onChainEnd, ...(pullRequests ? { pullRequests } : {}) }),
+    ...(opts.pullRequestCheck
+      ? [
+          createRepoPullRequestCheckTask({
+            ...opts.pullRequestCheck,
+            chainGuardSetup: async (request) => {
+              const outcome = await enqueueGuardSetup({ ...request });
+              return { status: outcome.status };
+            },
+          }),
+        ]
+      : []),
     createContextSyncTask({
       ...opts.contextSync,
       // A repository's FIRST sync is the rest of its onboarding: Flow setup
@@ -311,6 +493,13 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
           );
         }
       },
+      // A push's documentation is read; its chain starts here unless the scan
+      // it chained (or one already in flight) is still to settle.
+      continueMainChain: async (request) => {
+        const repo = await repositoryOfSource(request.workspaceOrgId, request.sourceId);
+        if (!repo) return;
+        await serveOwedChains(request.workspaceOrgId, [repo.repoFullName], 'its documentation is synced');
+      },
     }),
     createContextScanTask({
       ...opts.contextScan,
@@ -318,13 +507,46 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
       rescan: async (request) => {
         await enqueueContextScan(request);
       },
+      serveOwedChains: async (workspaceOrgId) => {
+        const repos = (await opts.repos?.listReposForWorkspace(workspaceOrgId)) ?? [];
+        await serveOwedChains(
+          workspaceOrgId,
+          repos.map((repo) => repo.repoFullName),
+          'the document scan settled',
+        );
+      },
     }),
   ];
+
+  // The chains a restart killed, owed again by the reap and restarted once the
+  // worker is up: the reap runs before it, when nothing can be enqueued yet.
+  const interruptedChains: OnboardingJobRequest[] = [];
 
   jobs = createJobs({
     db: opts.db,
     connectionString: opts.connectionString,
     tasks,
+    onReaped: async (reaped) => {
+      for (const job of reaped) {
+        const request = job.payload as OnboardingJobRequest | null;
+        // A check whose job died with the process, the coordinator or a link
+        // of its chain: its row and GitHub's check would otherwise say
+        // "running" for ever. The check is the one the job's own payload
+        // names, never whichever attempt is newest now. It is not restarted.
+        const checkId = checkIdOf(job.type, job.payload);
+        if (checkId) {
+          await opts.pullRequestCheck?.onStopped?.(checkId, 'error');
+          continue;
+        }
+        // A link of a chain never ended, so the push it served is owed again,
+        // unless this chain was itself the restart of one.
+        if (MAIN_CHAIN_TASKS.includes(job.type) && opts.repos) {
+          if (!request?.commitSha || request.recovery) continue;
+          await opts.repos.forgetMainChainSha(request.repoFullName, request.commitSha);
+          interruptedChains.push(request);
+        }
+      }
+    },
     // The start and the finish of every job someone asked for, from the two
     // places every job passes through: its claim and its settle.
     onStarted: captureJobStarted,
@@ -333,25 +555,66 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     ...(opts.hub ? { hub: opts.hub } : {}),
   });
 
-  // Every heavy job of the repository goes, RUNNING OR QUEUED: the workspace's
-  // heavy lane means a disconnected repository can easily have one waiting its
-  // turn, and `getActiveByKey` covers both states (`jobs.cancel` settles a
-  // queued row outright — the worker that later claims its graphile job finds
-  // the row unclaimable and skips the body, freeing the lane immediately).
+  // Every heavy job of the repository goes, RUNNING, QUEUED OR PAUSED: the
+  // workspace's heavy lane means a disconnected repository can easily have one
+  // waiting its turn, and `getActiveByKey` covers both active states
+  // (`jobs.cancel` settles a queued row outright — the worker that later
+  // claims its graphile job finds the row unclaimable and skips the body,
+  // freeing the lane immediately). A paused one would otherwise be carried on
+  // by the next grant, against a repository that is gone. Its pull request
+  // checks go with it, found by their keys' prefix.
   const cancelRepoJobs = async (
     repoFullName: string,
     orgId: string,
   ): Promise<'stopped' | 'not-here'> => {
-    for (const task of [
-      REPO_GUARD_SETUP_TASK,
-      REPO_GUARD_GENERATE_TASK,
-      REPO_GUARD_RUN_TASK,
-    ]) {
-      const active = await jobs.jobStore.getActiveByKey(orgId, jobKey(task, repoFullName));
-      if (!active) continue;
-      if ((await jobs.cancel(active.id)) === 'not-here') return 'not-here';
+    const active = [];
+    for (const task of MAIN_CHAIN_TASKS) {
+      const job = await jobs.jobStore.getActiveByKey(orgId, jobKey(task, repoFullName));
+      if (job) active.push(job);
+    }
+    for (const job of active) {
+      if ((await jobs.cancel(job.id)) === 'not-here') return 'not-here';
+    }
+    // Its checks, the coordinators and the links of their chains: settled as
+    // cancelled, and their jobs stopped (a check still queued would otherwise
+    // never be settled by anyone).
+    for (const task of HEAVY_TASKS) {
+      for (const job of await jobs.jobStore.listActive(orgId, task)) {
+        const number = pullRequestOfKey(task, repoFullName, job.key);
+        if (number === null) continue;
+        await stopCheckOf(repoFullName, number);
+        if ((await jobs.cancel(job.id)) === 'not-here') return 'not-here';
+      }
+    }
+    for (const job of await jobs.jobStore.listPaused(orgId)) {
+      if (!HEAVY_TASKS.includes(job.type)) continue;
+      const number = pullRequestOfKey(job.type, repoFullName, job.key);
+      if (number === null && job.key !== jobKey(job.type, repoFullName)) continue;
+      const checkId = checkIdOf(job.type, job.payload);
+      if (checkId) await opts.pullRequestCheck?.onStopped?.(checkId, 'cancelled');
+      await jobs.jobStore.cancelPaused(job.id);
     }
     return 'stopped';
+  };
+
+  /** Settle the check still open for a pull request of a repository being disconnected. */
+  const stopCheckOf = async (repoFullName: string, number: number): Promise<void> => {
+    const check = opts.pullRequestCheck;
+    const active = await check?.pulls.activeCheck(repoFullName, number);
+    if (active) await check?.onStopped?.(active.id, 'cancelled');
+  };
+
+  /**
+   * Stop the one job a pull request's check names. Never by the pull request's
+   * keys: a newer attempt's jobs hold those same keys by the time a slow cancel
+   * gets to them. The caller settles the check's row first, so a link the
+   * stopped job still chains finds it settled and does nothing. A job paused
+   * for credits is cancelled too, so no grant carries it on.
+   */
+  const cancelCheckJob = async (orgId: string, jobId: string): Promise<void> => {
+    const job = await jobs.jobStore.get(jobId, orgId);
+    if (job?.status === 'paused') await jobs.jobStore.cancelPaused(job.id);
+    else if (job && isActiveJob(job.status)) await jobs.cancel(job.id);
   };
 
   /**
@@ -376,7 +639,13 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
         { ...(job.payload ?? {}), jobId: job.id },
         key,
         HEAVY_TASKS.includes(job.type)
-          ? { queue: heavyJobQueue(job.workspaceOrgId) }
+          ? {
+              queue: heavyJobQueue(job.workspaceOrgId),
+              priority:
+                job.type === REPO_PR_CHECK_TASK || (job.payload as OnboardingJobRequest | null)?.pullRequest
+                  ? PULL_REQUEST_CHECK_PRIORITY
+                  : MAIN_CHAIN_PRIORITY,
+            }
           : undefined,
       );
     } catch (err) {
@@ -392,24 +661,49 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     return job.id;
   };
 
+  const startJobs = jobs.start.bind(jobs);
+  const start = async (): Promise<void> => {
+    await startJobs();
+    for (const request of interruptedChains.splice(0)) {
+      await serveOwedChains(
+        request.workspaceOrgId,
+        [request.repoFullName],
+        'a restart interrupted its chain',
+        { recovery: true },
+      );
+    }
+  };
+
   return Object.assign(jobs, {
+    start,
     enqueueGuardSetup,
     enqueueGuardGenerate,
     enqueueGuardRun,
+    startMainChain,
+    enqueuePullRequestCheck,
     enqueueContextSync,
     enqueueContextScan,
     startForLinks,
     cancelRepoJobs,
+    cancelCheckJob,
     resumePaused,
   });
 }
 
-/** The three that share a workspace's one lane. */
-const HEAVY_TASKS: readonly string[] = [
-  REPO_GUARD_SETUP_TASK,
-  REPO_GUARD_GENERATE_TASK,
-  REPO_GUARD_RUN_TASK,
-];
+/** The four that share a workspace's one lane. */
+/** The three links of a repository's main chain, one key each. */
+const MAIN_CHAIN_TASKS: readonly string[] = [REPO_GUARD_SETUP_TASK, REPO_GUARD_GENERATE_TASK, REPO_GUARD_RUN_TASK];
+/** Every job that runs in the workspace's heavy lane. */
+const HEAVY_TASKS: readonly string[] = [...MAIN_CHAIN_TASKS, REPO_PR_CHECK_TASK];
+
+/**
+ * Within the lane, the main chain goes before a pull request's check waiting
+ * beside it: the default branch's state is what every check compares against.
+ * graphile claims the lower number first, with no aging — a workspace whose
+ * repositories push without pause keeps its checks waiting.
+ */
+const MAIN_CHAIN_PRIORITY = 0;
+const PULL_REQUEST_CHECK_PRIORITY = 10;
 
 /** The session-run commands the onboarding jobs run — what `repoIsWorking` reads.
  *  A run spends no sessions, so `guard-run` never has a record to find. */
@@ -417,6 +711,28 @@ type RepoCommand = 'guard-setup' | 'guard-generate' | 'guard-run';
 
 /** One active job per (workspace, repo, task) — the queue's single-flight key. */
 const jobKey = (task: string, repoFullName: string): string => `${task}:${repoFullName}`;
+
+/**
+ * A pull request's job of `task`: its check's coordinator, or a link of its
+ * chain. One per pull request each, beside the repository's own.
+ */
+const pullRequestJobKey = (task: string, repoFullName: string, number: number): string =>
+  `${task}:${repoFullName}#${number}`;
+
+/** The pull request a job key of the repository names, or null when it is not one of its checks' keys. */
+function pullRequestOfKey(task: string, repoFullName: string, key: string | null): number | null {
+  const prefix = pullRequestJobKey(task, repoFullName, 0).slice(0, -1);
+  if (!key?.startsWith(prefix)) return null;
+  const number = Number(key.slice(prefix.length));
+  return Number.isInteger(number) ? number : null;
+}
+
+/** The check a heavy job's stored payload works for: the coordinator's own, or the one a link carries. */
+function checkIdOf(type: string, payload: Record<string, unknown> | null): string | null {
+  if (!payload) return null;
+  if (type === REPO_PR_CHECK_TASK) return (payload as Partial<PullRequestCheckJobRequest>).checkId ?? null;
+  return (payload as Partial<OnboardingJobRequest>).pullRequest?.checkId ?? null;
+}
 
 /**
  * The workspace's heavy lane: setup, generation and the run of EVERY repository
@@ -433,5 +749,7 @@ const heavyJobQueue = (org: string): string => `heavy:${org}`;
  */
 async function repoIsWorking(repoFullName: string, command: RepoCommand): Promise<boolean> {
   if (command === 'guard-run') return false;
-  return (await listStoredSessionRuns(repoFullName, command)).some((run) => run.status === 'running');
+  // A pull request's check runs the same commands under its own keys; its
+  // records are stamped with the pull request and are not the repository working.
+  return (await listStoredSessionRuns(repoFullName, command)).some((run) => run.status === 'running' && !run.pullRequest);
 }

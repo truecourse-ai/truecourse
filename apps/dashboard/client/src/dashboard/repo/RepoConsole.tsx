@@ -62,7 +62,7 @@ export default function RepoConsole() {
     interfaceId?: string;
     dependencyName?: string;
   }>();
-  const { repos, llmProvider } = useDashboardState();
+  const { repos, reposLoaded, llmProvider } = useDashboardState();
   const repo = repos.find((r) => r.id === slug);
   const implied = runId
     ? 'runs'
@@ -73,6 +73,9 @@ export default function RepoConsole() {
         : undefined;
   const active = (TABS.find((t) => t.id === (tab ?? implied))?.id ?? 'runs') as TabId;
 
+  // Until the registry has been read, a slug not found yet is not a slug that
+  // names nothing: say so only once it is known.
+  if (!repo && !reposLoaded) return null;
   if (!repo) {
     return (
       <EmptyState

@@ -1,0 +1,1 @@
+ALTER TABLE "repositories" ADD COLUMN "default_branch_sha" text;

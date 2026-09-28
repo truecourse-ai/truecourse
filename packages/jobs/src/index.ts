@@ -101,6 +101,12 @@ export interface EnqueueOptions {
    * worker's own concurrency still runs them beside a queued one.
    */
   queue?: string;
+  /**
+   * graphile's priority: within a queue, a LOWER number is claimed first, and
+   * equal numbers keep enqueue order. How the main chain of a repository's
+   * push goes before a pull request's check waiting in the same lane.
+   */
+  priority?: number;
 }
 
 export interface Jobs {
@@ -174,6 +180,7 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
       jobKey,
       maxAttempts: 1,
       ...(opts?.queue ? { queueName: opts.queue } : {}),
+      ...(opts?.priority !== undefined ? { priority: opts.priority } : {}),
     });
   };
 
@@ -280,9 +287,12 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
       });
     },
     async stop() {
-      const stopping = runner;
+      // The runner drains first and is let go after: a job that finishes
+      // during the drain still enqueues what it chains, which waits in the
+      // queue for the next start (whose reap owes it again). Let go before,
+      // that enqueue failed and the chain ended with nothing to restart it.
+      await runner?.stop().catch(() => undefined);
       runner = null;
-      await stopping?.stop().catch(() => undefined);
       await hub.stop().catch(() => undefined);
     },
     routers: {
@@ -307,6 +317,8 @@ export {
   type JobSettledInfo,
   type JobStartedInfo,
   type StepDef,
+  JobCancelled,
+  wasCancelled,
 } from './harness.js';
 export {
   cancelLocalJob,

@@ -20,6 +20,7 @@ export * from './workspace-profile.js';
 export * from './llm-usage.js';
 export * from './credits.js';
 export * from './entitlements.js';
+export * from './pull-requests.js';
 
 import { providerAccounts, providerAccountLinks, repositories } from './repositories.js';
 import { llmProviderConfig } from './llm.js';
@@ -47,6 +48,7 @@ import { workspaceProfiles } from './workspace-profile.js';
 import { llmUsage } from './llm-usage.js';
 import { creditLedger, creditBalances } from './credits.js';
 import { workspaceEntitlements } from './entitlements.js';
+import { pullRequests, pullRequestChecks } from './pull-requests.js';
 
 export const schema = {
   activityRuns,
@@ -77,4 +79,6 @@ export const schema = {
   creditLedger,
   creditBalances,
   workspaceEntitlements,
+  pullRequests,
+  pullRequestChecks,
 };

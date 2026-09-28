@@ -51,6 +51,8 @@ export {
   type WebhookDeps,
   type BaselineTrigger,
   type SourcePushTrigger,
+  type PullRequestTrigger,
+  type CheckRerunTrigger,
 } from './webhook.js';
 export {
   createConnectRouter,
@@ -62,6 +64,15 @@ export {
   type OnInstallationReplaced,
 } from './connect.js';
 export { GITHUB_PROVIDER, installationOf } from './provider.js';
+export {
+  CHECK_NAME,
+  PAUSED_CHECK_OUTPUT,
+  createCheck,
+  renderCheckOutput,
+  updateCheck,
+  type CheckAnnotation,
+  type CheckOutput,
+} from './checks.js';
 export type {
   InstallationStore,
   InstallationRecord,

@@ -288,6 +288,25 @@ describe('POST /api/context/sources', () => {
     expect(again.body.error).toContain('already has a Repository source');
   });
 
+  // A repository is ONE workspace's source: the check and the add both refuse
+  // one that another workspace already reads, before anything is reached.
+  it('refuses a repository that is already another workspace\'s source, on the check and on the add', async () => {
+    appWithGithub();
+    await store.createSource('org_other', {
+      id: 'repo-other-handbook',
+      kind: 'repository',
+      title: 'other/handbook',
+      config: { repoFullName: 'other/handbook', include: [], exclude: [], branch: '' },
+    });
+    const body = { kind: 'repository', config: { repoFullName: 'other/handbook' }, installationId: INSTALLATION };
+    const checked = await request(app).post('/api/context/sources/preview').send(body).expect(409);
+    expect(checked.body.error).toContain('another workspace');
+    const added = await request(app).post('/api/context/sources').send(body).expect(409);
+    expect(added.body.error).toContain('another workspace');
+    expect(await store.listSources(TEST_ORG)).toHaveLength(0);
+    expect(trees).toEqual([]);
+  });
+
   // A repository this workspace has not connected resolves no installation from
   // a link, and there is no other way to read one, so the scope is refused.
   it('refuses a repository this workspace has not connected and named no account for', async () => {

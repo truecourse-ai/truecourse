@@ -2146,7 +2146,7 @@ describe('generateGuards — the per-flow pipeline', () => {
     expect(first.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
     const stored = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
     expect(Object.keys(stored.generationInputs ?? {})).toEqual(
-      expect.arrayContaining(['flow', 'sections', 'recipe.slice', 'roster', 'preparation']),
+      expect.arrayContaining(['flow', 'sections', 'recipe.slice', 'roster', 'preparation.run']),
     )
     // It holds its scenario, so a task moving is no input of it.
     expect(Object.keys(stored.generationInputs ?? {})).not.toContain('interfaces')

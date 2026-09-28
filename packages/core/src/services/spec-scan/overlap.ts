@@ -54,6 +54,7 @@ import {
   type DocCandidate,
   type VocabMap,
 } from '@truecourse/spec-consolidator'
+import { disputeKey, type OverlapLike } from '@truecourse/shared'
 import { promptFingerprint } from '../agent/session-cache.js'
 import { LEGACY_OVERLAP_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
@@ -182,6 +183,8 @@ When two STATED values collide and you genuinely cannot tell whether they are co
 # The candidate checklist
 
 The CANDIDATE COLLISIONS are ranked leads, not verdicts: most nominated pairs will turn out to agree or be complementary — such a pair is simply not reported. Work the checklist FIRST, top to bottom: open BOTH sides of each pair with \`read_section\` and compare. The run watches the transcript — a pair whose two sections you never both opened is recorded in the corpus as UNCHECKED, whatever else you report — so never skip a pair silently; when the budget will not cover the list, spend it top-down and let the tail be recorded honestly. A disagreement between the briefed docs that no pair nominated (you noticed it while reading) is just as reportable — the checklist directs your reading, it does not limit your findings.
+
+The briefing may also carry PREVIOUSLY FLAGGED disagreements from an earlier scan of these docs. Re-examine them like any lead: one that still stands is reported under the section pointers it had (the heading as the outline lists it now), one the docs no longer have is not reported.
 
 # The budget contract
 
@@ -438,9 +441,9 @@ export interface OverlapSessionInput {
 /**
  * One reported disagreement as a card: the note as the claim, up to two quoted
  * passages, the adjudication, and the DISPUTE IDENTITY — the unordered doc pair
- * plus each side's section anchor and verbatim quote, which is the same key a
- * `conflictResolutions` entry carries, so a verdict recorded off the card
- * matches the corpus conflict.
+ * plus each side's section anchor, which is the key a `conflictResolutions`
+ * entry is matched by, so a verdict recorded off the card matches the corpus
+ * conflict. The quotes ride along as evidence.
  */
 function presentOverlap(overlap: OverlapOutcome['overlaps'][number]): KnownDisplayBlock {
   const [docA, docB] = overlap.docs
@@ -531,7 +534,33 @@ function docBlock(doc: DocCandidate): string[] {
 
 const pairSide = (s: CollisionPair['a']): string => `${s.doc} · ${s.heading ?? '(lead)'}`
 
-export function overlapBriefing(item: OverlapWorkItem, instructions: readonly string[] = []): string {
+/**
+ * The disputes an earlier scan flagged between the briefed docs — the prior
+ * corpus's overlaps whose BOTH docs this session is briefed with. They ride
+ * the briefing and never the cache key: a cluster whose docs did not change
+ * replays its cached outcome, and one that did is asked to reconcile against
+ * what was flagged before, so a dispute keeps the section anchors that
+ * identify it (and the verdict recorded against them) across scans.
+ */
+export function priorDisputesFor(item: OverlapWorkItem, prior: readonly OverlapLike[]): OverlapLike[] {
+  const briefed = new Set(item.docs.map((d) => d.path))
+  // One line per dispute: a corpus stored before the cross-area merge carries
+  // the same dispute once per area it spanned.
+  const seen = new Set<string>()
+  return prior.filter((o) => {
+    if (!briefed.has(o.docs[0]) || !briefed.has(o.docs[1])) return false
+    const key = disputeKey(o.docs[0], o.docs[1], o.sections)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export function overlapBriefing(
+  item: OverlapWorkItem,
+  instructions: readonly string[] = [],
+  priorOverlaps: readonly OverlapLike[] = [],
+): string {
   const lines = [
     ...instructionsBriefingBlock(instructions),
     `Find the disagreements between these docs.`,
@@ -545,6 +574,24 @@ export function overlapBriefing(item: OverlapWorkItem, instructions: readonly st
   item.pairs.forEach((pair, i) => {
     lines.push(`  ${i + 1}. ${pairSide(pair.a)}  <->  ${pairSide(pair.b)}  [shared: ${pair.keys.join(', ')}]`)
   })
+  const prior = priorDisputesFor(item, priorOverlaps)
+  if (prior.length > 0) {
+    lines.push(
+      '',
+      `PREVIOUSLY FLAGGED — disagreements an earlier scan reported between these docs.`,
+      `Re-examine each one. A dispute that still stands is reported again under the`,
+      `same section pointers where those sections still exist (a section the outline`,
+      `now lists under another heading goes under that heading), which is how a`,
+      `verdict already recorded against it still applies; one the docs no longer`,
+      `have is simply not reported:`,
+    )
+    prior.forEach((o, i) => {
+      const sides = (o.sections ?? [])
+        .map((s) => `${s.doc} · ${s.heading ?? '(lead)'}`)
+        .join('  <->  ')
+      lines.push(`  ${i + 1}. ${sides || `${o.docs[0]}  <->  ${o.docs[1]}`}${o.note ? `  — ${o.note}` : ''}`)
+    })
+  }
   lines.push('', `The docs, as outlines (open sections with \`read_section\`):`)
   for (const doc of item.docs) lines.push('', ...docBlock(doc))
   lines.push(

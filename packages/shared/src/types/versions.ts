@@ -11,6 +11,19 @@
 /** The scope every read and write lands in when none is named. */
 export const DEFAULT_VERSION_SCOPE = 'default';
 
+/** A pull request's scope on a repository's series: `pr/<number>`. */
+export const pullRequestScope = (number: number): string => `pr/${number}`;
+
+/**
+ * A pull request's scope on a WORKSPACE series, where several repositories'
+ * pull requests share one table: `pr/<owner>/<repo>#<number>`.
+ */
+export const pullRequestWorkspaceScope = (repoFullName: string, number: number): string =>
+  `pr/${repoFullName}#${number}`;
+
+/** What every pull request scope of one repository starts with, on a workspace series. */
+export const pullRequestWorkspaceScopePrefix = (repoFullName: string): string => `pr/${repoFullName}#`;
+
 /** What every stored version records about itself. */
 export interface StoredVersion {
   id: string;

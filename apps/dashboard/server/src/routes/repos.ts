@@ -18,8 +18,15 @@ import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js'
  * the real store satisfies it without this module depending on where it lives.
  */
 export interface RepoLinkStore extends RepoOwnershipLookup {
-  listReposForWorkspace(workspaceOrgId: string): Promise<{ repoFullName: string }[]>;
+  getRepo(repoFullName: string): Promise<{
+    workspaceOrgId: string;
+    provider?: string;
+    location?: string | null;
+    checkPullRequests?: boolean;
+  } | null>;
+  listReposForWorkspace(workspaceOrgId: string): Promise<{ repoFullName: string; checkPullRequests?: boolean }[]>;
   unlinkRepo(repoFullName: string): Promise<void>;
+  setCheckPullRequests(repoFullName: string, enabled: boolean): Promise<void>;
 }
 
 export interface ReposRouterDeps {
@@ -50,13 +57,16 @@ async function requireVisibleEntry(
  * registry and asserted against the rows the store holds for it. No store
  * means no connected repos and an empty home — never everyone's rows.
  */
-async function visibleTo(deps: ReposRouterDeps, req: Request): Promise<RegistryEntry[]> {
+async function visibleTo(
+  deps: ReposRouterDeps,
+  req: Request,
+): Promise<Array<RegistryEntry & { checkPullRequests: boolean }>> {
   const links = deps.repoLinks;
   const org = req.user?.organizationId;
   if (!links || !org) return [];
   const entries = await readRegistry(org);
-  const mine = new Set((await links.listReposForWorkspace(org)).map((r) => r.repoFullName));
-  return entries.filter((e) => mine.has(e.name));
+  const mine = new Map((await links.listReposForWorkspace(org)).map((r) => [r.repoFullName, r.checkPullRequests === true]));
+  return entries.filter((e) => mine.has(e.name)).map((e) => ({ ...e, checkPullRequests: mine.get(e.name) === true }));
 }
 
 export function createReposRouter(deps: ReposRouterDeps = {}): Router {
@@ -78,6 +88,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
           path: e.path,
           provider: e.provider,
           defaultBranch: e.defaultBranch ?? null,
+          checkPullRequests: e.checkPullRequests,
           latestEvent: await resolveLatestEvent(e.path),
         })),
       );
@@ -116,7 +127,27 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
         branches,
         defaultBranch,
         isGitRepo,
+        checkPullRequests: (await deps.repoLinks?.getRepo(entry.name))?.checkPullRequests === true,
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // PUT /api/repos/:id/pull-request-checks - Turn checking the repository's
+  // pull requests on or off: `{ enabled: boolean }`. A check already running
+  // finishes; off, nothing new starts.
+  router.put('/:id/pull-request-checks', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const entry = await requireEntry(req);
+      const enabled = (req.body as { enabled?: unknown } | undefined)?.enabled;
+      if (typeof enabled !== 'boolean') {
+        res.status(400).json({ error: '`enabled` must be true or false.' });
+        return;
+      }
+      if (!deps.repoLinks) throw createAppError('No repositories are connected on this server', 503);
+      await deps.repoLinks.setCheckPullRequests(entry.name, enabled);
+      res.json({ checkPullRequests: enabled });
     } catch (error) {
       next(error);
     }

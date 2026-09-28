@@ -205,6 +205,65 @@ describe('materializeStoredSpec', () => {
   });
 });
 
+describe('materializeStoredSpec under a pull request’s scope', () => {
+  const PR_SCOPE = 'pr/acme/widgets#7';
+
+  it('reads the corpus and the documents from the pull request’s scope first', async () => {
+    await setContextBindings(ORG, REPO, [SRC_A]);
+    // The pull request's scan stored a corpus with a document the workspace
+    // does not have, and its own text for one it does.
+    const prCorpus: CuratedCorpus = {
+      ...corpus(),
+      docs: [
+        ...corpus().docs,
+        { ref: ref(SRC_A, 'docs/two.md'), kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SRC_A },
+      ],
+    };
+    await saveWorkspaceSpec({ workspaceOrgId: ORG, scope: PR_SCOPE }, 'corpus', prCorpus, { sourceCommit: 'head' });
+    await saveWorkspaceSpecDocs(
+      { workspaceOrgId: ORG, scope: PR_SCOPE },
+      {
+        [ref(SRC_A, 'docs/one.md')]: '# One, as the pull request wrote it\n',
+        [ref(SRC_A, 'docs/two.md')]: '# Two, new in the pull request\n',
+      },
+      { sourceCommit: 'head' },
+    );
+
+    const slice = await materializeStoredSpec({ repoKey: REPO, commitSha: 'head' }, tree, ORG, { scope: PR_SCOPE });
+
+    expect(slice.documents).toBe(2);
+    expect(fs.readFileSync(path.join(tree, 'context', SRC_A, 'docs', 'one.md'), 'utf-8')).toBe(
+      '# One, as the pull request wrote it\n',
+    );
+    expect(fs.readFileSync(path.join(tree, 'context', SRC_A, 'docs', 'two.md'), 'utf-8')).toBe(
+      '# Two, new in the pull request\n',
+    );
+    // The workspace's own decisions ride along: there is no other ledger.
+    expect(fs.existsSync(decisionsPath(tree))).toBe(true);
+  });
+
+  it('falls back to the workspace’s corpus and live text when the pull request had no scan', async () => {
+    await setContextBindings(ORG, REPO, [SRC_A]);
+    const slice = await materializeStoredSpec({ repoKey: REPO, commitSha: 'head' }, tree, ORG, { scope: PR_SCOPE });
+    expect(slice).toEqual({ hasWorkspaceCorpus: true, documents: 1 });
+    expect(fs.readFileSync(path.join(tree, 'context', SRC_A, 'docs', 'one.md'), 'utf-8')).toBe('# One\n');
+  });
+
+  it('ignores what an EARLIER head of the pull request scanned: only this head’s versions count', async () => {
+    await setContextBindings(ORG, REPO, [SRC_A]);
+    // The first head rewrote the document; the second reverted it, changed
+    // nothing in scope, and so had no scan of its own.
+    await saveWorkspaceSpec({ workspaceOrgId: ORG, scope: PR_SCOPE }, 'corpus', corpus(), { sourceCommit: 'head-1' });
+    await saveWorkspaceSpecDocs(
+      { workspaceOrgId: ORG, scope: PR_SCOPE },
+      { [ref(SRC_A, 'docs/one.md')]: '# One, as the first head wrote it\n' },
+      { sourceCommit: 'head-1' },
+    );
+    await materializeStoredSpec({ repoKey: REPO, commitSha: 'head-2' }, tree, ORG, { scope: PR_SCOPE });
+    expect(fs.readFileSync(path.join(tree, 'context', SRC_A, 'docs', 'one.md'), 'utf-8')).toBe('# One\n');
+  });
+});
+
 describe('the doc reader', () => {
   it('resolves a context ref through the workspace that owns the repository', async () => {
     expect(await readStoredRepoDoc(REPO, ref(SRC_B, 'site.md'))).toBe('# Site\n');

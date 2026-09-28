@@ -65,6 +65,7 @@ export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
 export { crossCheckClaimRefs } from './claim-refs.js'
 export type { ClaimRefSources } from './claim-refs.js'
 export { crossCheckCaptureRefs } from './capture-refs.js'
+export { expandRepeat, expandScenarioRepeats, repeatDefects, MAX_REPEAT_COUNT } from './repeat.js'
 
 export {
   loadRecipe,

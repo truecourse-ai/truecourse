@@ -33,6 +33,7 @@ import {
   overlapBriefing,
   overlapSessionCacheKey,
   overlapSessionDef,
+  priorDisputesFor,
   validateOverlapFindings,
   type OverlapOutcome,
   type OverlapWorkItem,
@@ -1181,5 +1182,54 @@ describe('overlap — each doc briefed with where it stands', () => {
     const before = overlapSessionCacheKey(item(TICKET))
     const later = TICKET.replace('2026-03-02T15:20:00.000Z', '2026-06-06T09:00:00.000Z')
     expect(overlapSessionCacheKey(item(later))).not.toBe(before)
+  })
+})
+
+describe('the prior disputes in the briefing', () => {
+  const doc = (path: string, content: string): DocCandidate => ({
+    path,
+    absPath: '',
+    content,
+    kind: 'markdown',
+    preview: content,
+    lastTouched: '2026-01-01T00:00:00.000Z',
+    contentHash: `sha-${path}`,
+    size: content.length,
+  })
+  const item = {
+    areaId: 'core/auth',
+    concern: 'auth',
+    cluster: 0,
+    docs: [doc('docs/auth.md', '# Auth\n\n## Token lifetime\n\nOne hour.\n'), doc('docs/session.md', '# Session\n\n## Token lifetime\n\nTwo hours.\n')],
+    pairs: [],
+  }
+  const prior = [
+    {
+      docs: ['docs/auth.md', 'docs/session.md'] as [string, string],
+      note: 'one hour vs two hours',
+      sections: [
+        { doc: 'docs/auth.md', heading: 'Token lifetime' },
+        { doc: 'docs/session.md', heading: 'Token lifetime' },
+      ],
+    },
+    // Between a briefed doc and one this session is not briefed with.
+    {
+      docs: ['docs/auth.md', 'docs/other.md'] as [string, string],
+      note: 'not this cluster',
+      sections: [{ doc: 'docs/auth.md', heading: null }, { doc: 'docs/other.md', heading: 'X' }],
+    },
+  ]
+
+  it('briefs only the disputes between the briefed docs, with their section pointers', () => {
+    expect(priorDisputesFor(item, prior)).toEqual([prior[0]])
+    const briefing = overlapBriefing(item, [], prior)
+    expect(briefing).toContain('PREVIOUSLY FLAGGED')
+    expect(briefing).toContain('docs/auth.md · Token lifetime  <->  docs/session.md · Token lifetime  — one hour vs two hours')
+    expect(briefing).not.toContain('not this cluster')
+  })
+
+  it('says nothing about prior disputes when there are none for these docs', () => {
+    expect(overlapBriefing(item, [], [prior[1]])).not.toContain('PREVIOUSLY FLAGGED')
+    expect(overlapBriefing(item)).not.toContain('PREVIOUSLY FLAGGED')
   })
 })

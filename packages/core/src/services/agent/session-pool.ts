@@ -70,6 +70,7 @@
 
 import os from 'node:os'
 import pLimit from 'p-limit'
+import { resolveTurnTimeoutMs } from '../../config/llm-timeouts.js'
 import { CreditsExhaustedError, isCreditsPauseFailure } from '@truecourse/shared'
 import {
   runAgentLoop,
@@ -149,6 +150,8 @@ export interface SessionPoolOptions<TItem, TOutcome> {
    */
   concurrency?: number
   signal?: AbortSignal
+  /** How long a session's model may go without finishing a turn or calling a tool; the configured default when unset. */
+  turnTimeoutMs?: number
   /** Strictly serial across items, in COMPLETION order. Writes live here. */
   fold: (item: TItem, outcome: SessionOutcome<TOutcome>, sessionId: string) => void | Promise<void>
   onProgress?: (e: SessionPoolProgress) => void
@@ -293,6 +296,7 @@ export async function runSessionPool<TItem, TOutcome>(
         ? { resume: { of: prior.of, ...(priorCursor !== undefined ? { cursor: priorCursor } : {}) } }
         : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
+      turnTimeoutMs: opts.turnTimeoutMs ?? resolveTurnTimeoutMs(),
       ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
       ...(opts.now ? { now: opts.now } : {}),
     }).outcome

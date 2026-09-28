@@ -316,6 +316,49 @@ describe('preparations', () => {
     expect(flowPreparationFingerprint(r, recipe, plain)).toBe(plainBefore)
   })
 
+  it('per flow, what the profile runs, never the evidence its qualification cites', () => {
+    const { r, recipe } = preparedRepo()
+    const prepared = [scenario({ setup: { preparation: 'pg' } as never })]
+    // One baseline check, qualified by a session that read three source ranges.
+    const qualified = (reason: string, sourceSha: string, configuration: string): Recipe => ({
+      ...recipe,
+      preparations: {
+        pg: {
+          ...recipe.preparations!.pg!,
+          baselineChecks: [
+            {
+              path: '/api/expenses',
+              counts: { expense: 0 },
+              qualification: {
+                version: 1,
+                scope: 'instance',
+                binding: 'a'.repeat(64),
+                configuration,
+                reason,
+                sources: (['handler', 'query', 'authorization'] as const).map((role, i) => ({
+                  path: `lib/${role}.ts`,
+                  start: 1,
+                  end: 10 + i,
+                  sha256: sourceSha,
+                  role,
+                })),
+              },
+            },
+          ],
+        },
+      },
+    })
+    const before = flowPreparationFingerprint(r, qualified('Handler: GET lists expenses.', 'b'.repeat(64), 'c'.repeat(64)), prepared)
+    // A session that re-read a moved file rewords the reason and re-cites the lines.
+    expect(
+      flowPreparationFingerprint(r, qualified('GET calls listExpenses(searchParams).', 'd'.repeat(64), 'c'.repeat(64)), prepared),
+    ).toBe(before)
+    // What the check was qualified against is what it runs on.
+    expect(
+      flowPreparationFingerprint(r, qualified('Handler: GET lists expenses.', 'b'.repeat(64), 'e'.repeat(64)), prepared),
+    ).not.toBe(before)
+  })
+
   it('whole, every declared profile and its script bytes', () => {
     const { r, recipe } = preparedRepo()
     const before = preparationsFingerprint(r, recipe)

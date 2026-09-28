@@ -70,6 +70,33 @@ sentence. Documentation is kept or dropped by whether it describes that product,
 so nothing connects (no repository, no documentation source, no scan) until the
 workspace has said it.
 
+## Pull request checks
+
+With the GitHub App connected, a connected repository's pull requests are
+checked once its Settings turn **Check pull requests** on (it is off by
+default). Only pull requests into the default branch are checked. Each is
+checked at its head against the default branch's stored state: the documents it
+changes are re-scanned for conflicts with the rest of the workspace, its flows
+are generated and run, and the result lands as a GitHub check (`TrueCourse`) —
+new failures, a conflict the pull request would create, a head that does not
+build, or clean. The base is
+the state stored at the pull request's merge-base commit; a pull request whose
+merge-base predates the repository's stored state is skipped as `no-base` until
+it is rebased. The check runs the repository's own Flow setup, Flow generation
+and run at the head, each with its record on the Agent page, and its report is
+in the GitHub check, which links to the run it settled on (or to the setup or
+generation it stopped in, or to Context's conflicts). The pull request is a
+column on Code › Runs, Agent and Context.
+
+A self-hosted App needs two more permissions than connecting alone — **Pull
+requests: read**, which delivers the events and reads the changed files, and
+**Checks: read and write**, which posts the check — and to subscribe to the
+**Pull request**, **Check run** and **Check suite** events. An account that
+installed the App before those were added is asked by GitHub to accept them:
+without Pull requests read nothing is checked, and without Checks write the
+checks run here and are not posted to GitHub, which Settings › Repositories
+says on the account's row.
+
 ## Telemetry
 
 TrueCourse sends usage analytics to PostHog: which actions are taken and

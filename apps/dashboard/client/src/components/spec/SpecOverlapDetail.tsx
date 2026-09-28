@@ -140,8 +140,8 @@ export function SpecOverlapDetail({
   const repoSource = useMemo(() => createRepoSpecSource(repoId), [repoId]);
   const source = ctxSource ?? repoSource;
 
-  // Build the persisted verdict from the flagged sections (heading + verbatim quote
-  // per doc), the same identity a stored verdict is keyed on.
+  // Build the persisted verdict from the flagged sections: the heading per doc
+  // is the identity a stored verdict is matched by, the quote rides as evidence.
   const buildResolution = (verdict: 'a' | 'b' | 'dismissed'): SpecConflictResolution => {
     const secOf = (d: string) => (overlap?.sections ?? []).find((s) => s.doc === d);
     return {

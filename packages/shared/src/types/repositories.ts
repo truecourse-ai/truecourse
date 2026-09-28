@@ -37,6 +37,21 @@ export interface RepositoryRecord {
   slug: string
   /** The branch the provider tracks. Null for a local folder: it has whatever is checked out. */
   defaultBranch: string | null
+  /**
+   * The newest commit the provider reported pushed to that branch. What the
+   * main chain compares its own commit against when it settles, to run once
+   * more for pushes that landed while it worked. Null until the first push
+   * the server saw; a local folder has none.
+   */
+  defaultBranchSha?: string | null
+  /**
+   * The commit the newest main chain was started at. The repository OWES a
+   * chain while `defaultBranchSha` differs from it: a push landed that no
+   * chain has been started for yet.
+   */
+  mainChainSha?: string | null
+  /** Whether its pull requests are checked. Off until someone turns it on; a connect never sets it. */
+  checkPullRequests?: boolean
   /** Where the provider finds it when the name is not enough: a local folder's absolute path. */
   location?: string | null
   /**
@@ -66,6 +81,22 @@ export interface RepositoryStore {
   linkRepo(rec: RepositoryLink): Promise<RepositoryRecord>
   /** Disconnect it. */
   unlinkRepo(repoFullName: string): Promise<void>
+  /**
+   * The provider reported a push to the default branch, made at `pushedAt`:
+   * remember its commit. False when the row already holds a later push (the
+   * provider does not deliver its events in order), which is kept.
+   */
+  recordDefaultBranchSha(repoFullName: string, commitSha: string, pushedAt: string): Promise<boolean>
+  /** A main chain was started at this commit: the push it serves is no longer owed. */
+  recordMainChainSha(repoFullName: string, commitSha: string): Promise<void>
+  /**
+   * The chain started at this commit never finished (a restart killed it): the
+   * push it served is owed again. A no-op when a newer chain's commit is
+   * recorded by now.
+   */
+  forgetMainChainSha(repoFullName: string, commitSha: string): Promise<void>
+  /** Turn checking its pull requests on or off. */
+  setCheckPullRequests(repoFullName: string, enabled: boolean): Promise<void>
   getRepo(repoFullName: string): Promise<RepositoryRecord | null>
   listReposForWorkspace(workspaceOrgId: string): Promise<RepositoryRecord[]>
   /** Every repository connected through one provider account (uninstall cleanup). */

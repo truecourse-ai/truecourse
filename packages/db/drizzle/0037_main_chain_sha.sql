@@ -1,0 +1,1 @@
+ALTER TABLE "repositories" ADD COLUMN "main_chain_sha" text;

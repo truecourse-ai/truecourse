@@ -31,6 +31,12 @@
  * diffed against for as long as it stood. The whole thing is deterministic
  * apart from that one annotation, so there is nothing expensive to salvage:
  * the resumed job runs the scenarios again and stores a board that is complete.
+ *
+ * A run that carries a pull request is its check's last link: it runs the set
+ * the pull request's generate stored, stores the run under the pull request's
+ * scope stamped with its number, compares it flow by flow with the base's, and
+ * settles the check on that — linked to the run's page. A head that does not
+ * build or whose world never comes up is the pull request's failure.
  */
 
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
@@ -44,14 +50,27 @@ import {
 } from '@truecourse/core/services/llm/guard-visual-judge';
 import { guardRunInProcess, GUARD_RUN_STEPS } from '@truecourse/core/commands/guard-in-process';
 import { buildOutputTail, runFailureMessage, type RunGuardResult } from '@truecourse/guard-runner';
-import type { GuardSummary } from '@truecourse/shared';
+import { readGuardRunFlowSummaryFromTree } from '@truecourse/core/commands/guard-read';
+import { pullRequestScope, pullRequestWorkspaceScope, type GuardLatest, type GuardSummary } from '@truecourse/shared';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { createUsageMeter, withCredits, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
 import { markWorldStateUnknown, materializeStoredGuardState, persistGuardRun } from '../materialize-guard.js';
-import { firstLine, mirrorTracker, type OnboardingJobRequest } from './onboarding.js';
+import {
+  buildFailed,
+  checkIsOpen,
+  checkLinks,
+  compareWithBase,
+  linkStarted,
+  pauseLinkCheck,
+  settleLinkCheck,
+  worldNeverBooted,
+  type CheckOutcome,
+  type PullRequestCheckPort,
+} from '../pr-check-chain.js';
+import { chainEnded, firstLine, mirrorTracker, workTreeVia, type ChainEnd, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_RUN_TASK = 'repo.guard-run';
 
@@ -70,6 +89,10 @@ export interface GuardRunJobResult {
 export interface RepoGuardRunTaskDeps {
   startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runGuard?: typeof guardRunInProcess;
+  /** The run is the chain's last link, so every settle ends it: see {@link ChainEnd}. */
+  onChainEnd?: ChainEnd;
+  /** The pull request checks a run carrying one settles. Without it such a run does nothing. */
+  pullRequests?: PullRequestCheckPort;
 }
 
 /**
@@ -91,6 +114,10 @@ export function createRepoGuardRunTask(
 ): JobDefinition<GuardRunJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runGuard = deps.runGuard ?? guardRunInProcess;
+  /** The commit each job cloned, for the settle hook. Cleared as the job settles. */
+  const commits = new Map<string, string>();
+  /** What a pull request's run decided its check settles on. Same lifetime. */
+  const outcomes = new Map<string, CheckOutcome>();
 
   return {
     type: REPO_GUARD_RUN_TASK,
@@ -101,8 +128,26 @@ export function createRepoGuardRunTask(
 
     async run(ctx) {
       const { repoFullName } = ctx.payload;
+      const pr = ctx.payload.pullRequest;
+      if (pr) {
+        // A check a newer head superseded, or a closed pull request's: nothing to do.
+        const live =
+          deps.pullRequests &&
+          (await linkStarted(
+            deps.pullRequests,
+            pr,
+            ctx.jobId,
+            checkLinks.runs(deps.pullRequests.appUrl, ctx.payload.repoId),
+            `Running the flows of #${pr.number} at ${(ctx.payload.commitSha ?? '').slice(0, 8)}.`,
+          ));
+        if (!live) return { notification: null };
+      }
       // A run has no conversation of its own; its row opens the repository's runs.
-      await ctx.notify({ level: 'started', title: 'Flow run started', data: { repoFullName } });
+      await ctx.notify({
+        level: 'started',
+        title: 'Flow run started',
+        data: { repoFullName, ...(pr ? { pullRequest: pr.number } : {}) },
+      });
       // The judge is the run's only model call and it is parked by default, so
       // the workspace's provider is resolved only when it would actually be used.
       // The meter exists either way and writes nothing when nothing spent.
@@ -117,14 +162,22 @@ export function createRepoGuardRunTask(
         : null;
 
       await ctx.phase('clone');
-      const tree = await acquireWorkTree(repoFullName);
+      const tree = await acquireWorkTree(repoFullName, workTreeVia(ctx.payload));
       try {
-        const commitSha = await resolveCommitSha(tree.dir);
-        const ref = { repoKey: repoFullName, commitSha };
+        // A pull request's link works the head it was handed, which the clone checked out.
+        const commitSha = pr && ctx.payload.commitSha ? ctx.payload.commitSha : await resolveCommitSha(tree.dir);
+        commits.set(ctx.jobId, commitSha);
+        const scope = pr ? pullRequestScope(pr.number) : undefined;
+        const ref = { repoKey: repoFullName, commitSha, ...(scope ? { scope } : {}) };
         // The documents first: a scenario binds to a `context/` ref, and the
         // runner resolves that bind by reading the document out of the clone.
-        await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
-        const baseline = await materializeStoredGuardState(repoFullName, tree.dir);
+        await materializeStoredSpec(
+          ref,
+          tree.dir,
+          ctx.payload.workspaceOrgId,
+          pr ? { scope: pullRequestWorkspaceScope(repoFullName, pr.number) } : {},
+        );
+        const baseline = await materializeStoredGuardState(repoFullName, tree.dir, scope ? { scope } : {});
         if (!baseline) {
           throw new Error(
             `${repoFullName} has no generated scenarios yet — run guard generate before running them.`,
@@ -132,7 +185,7 @@ export function createRepoGuardRunTask(
         }
         // Setup's bundle goes in LAST: its recipe and catalogs are the current
         // truth, whatever the scenario set was generated against.
-        const bundle = await loadGuardSetupBundle(repoFullName);
+        const bundle = await loadGuardSetupBundle(repoFullName, scope ? { scope } : undefined);
         if (!bundle) {
           throw new Error(
             `${repoFullName} has not been set up yet — run guard setup before running scenarios.`,
@@ -142,7 +195,8 @@ export function createRepoGuardRunTask(
         markWorldStateUnknown(tree.dir);
         // The registered instances beside it: a supplied dependency binds only
         // to what was provided, and the runner reads that from the two overlay files.
-        await materializeGuardOverlays(repoFullName, tree.dir);
+        // Never a fork's.
+        if (!pr?.fork) await materializeGuardOverlays(repoFullName, tree.dir);
 
         // The judge is the only thing here that spends, and it is annotation-only
         // — but a run that could not afford its verdicts is a run whose board is
@@ -158,14 +212,40 @@ export function createRepoGuardRunTask(
         // A stop the user asked for: the harness settles the row cancelled, and
         // a store that never saw this run is exactly what a cancel means.
         if (ctx.signal?.aborted) return { notification: null };
-        if (result.status !== 'ok') throw new Error(runFailureReason(result));
+        if (result.status !== 'ok') {
+          // A head that does not build is the pull request's failure, not the run's.
+          if (pr && buildFailed(result)) outcomes.set(ctx.jobId, { reason: 'build-failed', report: { codeHalf: 'ran' } });
+          throw new Error(runFailureReason(result));
+        }
 
         // A run opens no session record of its own; the judge's model, when
         // it was on, is the one model the stored run was on.
-        await persistGuardRun(ref, tree.dir, result.latest, {
-          producedByRun: null,
-          model: judge?.attribution.model ?? null,
-        });
+        const provenance = { producedByRun: null, model: judge?.attribution.model ?? null };
+        if (pr && deps.pullRequests) {
+          const latest: GuardLatest = { ...result.latest, run: { ...result.latest.run, pullRequest: pr.number } };
+          // A world that never came up is a head that does not boot, never a board of blocked flows.
+          if (worldNeverBooted(latest)) {
+            outcomes.set(ctx.jobId, { reason: 'build-failed', report: { codeHalf: 'ran' } });
+            return { notification: null };
+          }
+          // Its flows are derived from the head's tree; its sections are nobody's trend.
+          const headFlows = readGuardRunFlowSummaryFromTree(tree.dir, latest) ?? {};
+          await persistGuardRun(ref, tree.dir, latest, { provenance, coverage: { sections: {}, flows: headFlows } });
+          const check = await deps.pullRequests.pulls.getCheck(pr.checkId);
+          outcomes.set(
+            ctx.jobId,
+            await compareWithBase({
+              repoFullName,
+              link: pr,
+              treeDir: tree.dir,
+              latest,
+              headFlows,
+              conflictsCreated: check?.report?.conflictsCreated.length ?? 0,
+            }),
+          );
+        } else {
+          await persistGuardRun(ref, tree.dir, result.latest, { provenance });
+        }
 
         const { summary } = result.latest;
         const jobResult: GuardRunJobResult = {
@@ -205,10 +285,38 @@ export function createRepoGuardRunTask(
       data: { repoFullName: payload.repoFullName },
     }),
 
-    async onSettled(ctx) {
+    async onSettled(ctx, outcome) {
+      const commitSha = commits.get(ctx.jobId) ?? null;
+      commits.delete(ctx.jobId);
+      const decided = outcomes.get(ctx.jobId);
+      outcomes.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
-      // however the run ended. Nothing chains after the baseline run.
+      // however the run ended. Nothing chains after the run: it is the
+      // chain's end, whatever it was started by.
       await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-run');
+      const pr = ctx.payload.pullRequest;
+      if (pr) {
+        const port = deps.pullRequests;
+        // A check already settled (superseded, closed) is not this link's to
+        // settle; its chain may still have ended here.
+        if (!port || !(await checkIsOpen(port, pr))) {
+          if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, ctx.payload.commitSha ?? commitSha);
+          return;
+        }
+        const slug = ctx.payload.repoId;
+        const link = decided?.guardRunId
+          ? checkLinks.run(port.appUrl, slug, decided.guardRunId)
+          : checkLinks.runs(port.appUrl, slug);
+        // A cancel settles as one; a supersede got there first and keeps its word.
+        if (outcome === 'cancelled') await settleLinkCheck(port, pr, { reason: 'cancelled' }, link);
+        else if (decided) await settleLinkCheck(port, pr, decided, link);
+        else if (outcome === 'paused') await pauseLinkCheck(port, pr, link);
+        else if (outcome === 'failed') await settleLinkCheck(port, pr, { reason: 'error', report: { codeHalf: 'ran' } }, link);
+        // The pull request's chain ended here: whatever the default branch was left owing starts now.
+        if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, ctx.payload.commitSha ?? commitSha);
+        return;
+      }
+      if (chainEnded(outcome)) await deps.onChainEnd?.(ctx.payload, ctx.payload.commitSha ?? commitSha);
     },
   };
 }

@@ -10,6 +10,7 @@ export { ContentStore, contentScope } from './content-store.js';
 export { sha256 } from './pack.js';
 export { RepositoriesRegistryStore } from './repositories-registry-store.js';
 export { PgRepositoryStore } from './repositories-store.js';
+export { PgPullRequestStore } from './pull-requests-store.js';
 export { PgSpecStore } from './spec-store.js';
 export {
   PgContextStore,

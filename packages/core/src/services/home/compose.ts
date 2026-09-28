@@ -81,7 +81,7 @@ export interface HomeRepoView {
 export interface HomeRunRow {
   runId: string;
   command: string;
-  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'paused';
+  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'paused' | 'cancelled';
   /** `owner/repo`, or null for the workspace's own work (a Document scan). */
   repository: string | null;
   /** When it ended, else when it started. */

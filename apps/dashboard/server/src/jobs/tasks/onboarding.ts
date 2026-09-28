@@ -9,11 +9,12 @@
  */
 
 import { StepTracker } from '@truecourse/core/progress';
-import { stepBridge, type JobContext, type JobPayload } from '@truecourse/jobs';
+import { stepBridge, type JobContext, type JobOutcomeStatus, type JobPayload } from '@truecourse/jobs';
 import { emitSpecProgress } from '../../socket/handlers.js';
+import type { WorkTreeVia } from '../../services/work-tree.service.js';
 
-/** What asked for this run: a connect, a user pressing the button, or the chain. */
-export type OnboardingJobSource = 'connect' | 'manual' | 'chain';
+/** What asked for this run: a connect, a user pressing the button, the chain, a push to the default branch, or a pull request. */
+export type OnboardingJobSource = 'connect' | 'manual' | 'chain' | 'push' | 'pull-request';
 
 /** What an enqueue is asked for — the payload minus the row the queue creates. */
 export interface OnboardingJobRequest {
@@ -23,6 +24,26 @@ export interface OnboardingJobRequest {
   repoFullName: string;
   workspaceOrgId: string;
   source: OnboardingJobSource;
+  /**
+   * The commit the chain is pinned to: the tip setup cloned, carried into the
+   * generate and the run it chains so all three work the same tree. Absent
+   * means the default branch's tip when the job starts.
+   */
+  commitSha?: string;
+  /**
+   * This chain restarts one a server restart interrupted. Carried into the
+   * generate and the run it chains, so if a restart interrupts it too, boot
+   * does not restart it a second time: a chain that keeps dying with the
+   * process would otherwise restart it for ever.
+   */
+  recovery?: true;
+  /**
+   * The pull request this chain checks. Carried down every link like the
+   * commit: each works the head (`commitSha`) through the pull request's
+   * installation, reads its own scope before the base's stored state, stores
+   * under the pull request's scope, and the chain's end settles the check.
+   */
+  pullRequest?: PullRequestLink;
   /**
    * The user id of the person whose request enqueued it. Unset when nobody
    * asked directly: a chain, a webhook, the scheduler.
@@ -37,7 +58,90 @@ export interface OnboardingJobRequest {
   carryOnRunId?: string;
 }
 
+/** What a chain checking a pull request carries down its links. */
+export interface PullRequestLink {
+  number: number;
+  /** The `pull_request_checks` row the chain's end settles. */
+  checkId: string;
+  /** The installation the head is cloned through. */
+  installationId: number;
+  /** The head's branch, which the clone checks the head out under. */
+  headRef: string;
+  /** The default-branch commit whose stored state the check starts from and is compared with. */
+  baseCommit: string;
+  /** A fork's code runs without the workspace's registered instances. */
+  fork: boolean;
+}
+
 export type OnboardingJobPayload = OnboardingJobRequest & JobPayload;
+
+/** The pull request a link's run record is stamped with, which the Agent page reads it by. */
+export function runPullRequestStamp(
+  payload: OnboardingJobRequest,
+): { pullRequest?: { repoFullName: string; number: number; headSha: string; checkId: string } } {
+  const pr = payload.pullRequest;
+  return pr && payload.commitSha
+    ? { pullRequest: { repoFullName: payload.repoFullName, number: pr.number, headSha: payload.commitSha, checkId: pr.checkId } }
+    : {};
+}
+
+/**
+ * The next link's request: a fresh one, never this job's payload (the chained
+ * job gets its own row id from the enqueue), pinned to the chain's commit and
+ * carrying the restart mark and the pull request down the chain.
+ */
+export function nextLinkRequest(payload: OnboardingJobRequest, commitSha: string | null): OnboardingJobRequest {
+  const { repoId, repoFullName, workspaceOrgId, recovery, pullRequest } = payload;
+  return {
+    repoId,
+    repoFullName,
+    workspaceOrgId,
+    source: 'chain',
+    ...(commitSha ? { commitSha } : {}),
+    ...(recovery ? { recovery } : {}),
+    ...(pullRequest ? { pullRequest } : {}),
+  };
+}
+
+/**
+ * Where a job's work tree comes from: the commit its request pinned, or the
+ * default branch's tip when it pinned none (a repository's own provider, as
+ * every onboarding job clones). A pull request's links fetch its head.
+ */
+export function workTreeVia(payload: OnboardingJobRequest): WorkTreeVia | undefined {
+  // A pull request's head is fetched through its installation and checked out
+  // under its own branch name.
+  if (payload.pullRequest && payload.commitSha) {
+    return {
+      workspaceOrgId: payload.workspaceOrgId,
+      installationId: payload.pullRequest.installationId,
+      commitSha: payload.commitSha,
+      defaultBranch: payload.pullRequest.headRef,
+    };
+  }
+  return payload.commitSha
+    ? { workspaceOrgId: payload.workspaceOrgId, commitSha: payload.commitSha }
+    : undefined;
+}
+
+/**
+ * A chain ended: the settling job asked for no next link — the run always, a
+ * setup or a generate that stopped short. (A link asked for but refused as
+ * busy is not an end: the job that was busy ends the chain itself.)
+ * `commitSha` is the chain's commit — the one the job was pinned to, else the
+ * one it cloned — and null when it never got to clone. The mount uses it to
+ * run the chain once more when the default branch moved on meanwhile.
+ */
+export type ChainEnd = (request: OnboardingJobRequest, commitSha: string | null) => Promise<void>;
+
+/**
+ * Whether a settled job's chain has ENDED and may be followed up: a job that
+ * succeeded or failed. A cancelled one was stopped on purpose — a disconnect
+ * is cancelling the chain, not asking for another — and a paused one is not
+ * over: its resume carries the same chain on, and reports its end then.
+ */
+export const chainEnded = (outcome: JobOutcomeStatus): boolean =>
+  outcome === 'succeeded' || outcome === 'failed';
 
 /**
  * The ONE `StepTracker` a pipeline gets. Its phases become the inline detail of

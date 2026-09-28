@@ -81,7 +81,10 @@ durable state and must never import `packages/data-store`, which implements
 them; the server installs them at boot. Nothing is installed by default, so a
 process that never booted fails loud instead of inventing an empty store. A new
 piece of durable state is therefore three edits: the seam, the implementation,
-the installation.
+the installation. A store the engine never reads, one the server hands its
+routes, jobs and the webhook directly (`RepositoryStore`, `PullRequestStore`),
+is a contract in `packages/shared` instead of a seam in core, its
+implementation still in `packages/data-store`.
 
 **A run's work tree.** A run works on an ephemeral copy of the repository with
 a `.truecourse/` directory inside it. All of it is scratch: a job materializes

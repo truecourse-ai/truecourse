@@ -13,6 +13,7 @@ import type { JobStep, JobView, ServerEvent } from '@truecourse/shared';
 import { JobStore, NotificationStore } from '@truecourse/data-store';
 import {
   executeJob,
+  JobCancelled,
   type JobDefinition,
   type JobRuntime,
   type JobSettledInfo,
@@ -519,7 +520,7 @@ describe('executeJob — the runtime settled observer', () => {
     await executeJob(
       rt,
       observedDef(async () => {
-        stop.abort();
+        stop.abort(new JobCancelled());
         return { result: { ok: true }, notification: { level: 'success', title: 'Done' } };
       }),
       { jobId: job.id, org: ORG },
@@ -529,6 +530,31 @@ describe('executeJob — the runtime settled observer', () => {
     expect((await rt.jobStore.get(job.id))?.status).toBe('cancelled');
     expect(settled).toHaveLength(1);
     expect(settled[0]).toMatchObject({ jobId: job.id, outcome: 'cancelled' });
+  });
+
+  it('leaves a job the process stopped under running, for the next boot to reap', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:o3b' });
+    const shutdown = new AbortController();
+    const hook = vi.fn();
+
+    await executeJob(
+      rt,
+      {
+        ...observedDef(async () => {
+          shutdown.abort();
+          throw new Error('aborted');
+        }),
+        onSettled: hook,
+      },
+      { jobId: job.id, org: ORG },
+      { signal: shutdown.signal },
+    );
+
+    expect((await rt.jobStore.get(job.id))?.status).toBe('running');
+    expect(hook).not.toHaveBeenCalled();
+    expect(settled).toEqual([]);
+    expect((await rt.jobStore.interruptOrphaned()).map((j) => j.id)).toEqual([job.id]);
   });
 
   it('does not report a job whose row was never claimable', async () => {

@@ -21,6 +21,10 @@ import {
   buildDocSectionIndex,
   computeRecipeFingerprint,
   evidenceRelPath,
+  loadScenarios as loadTreeScenarios,
+  readGuardFlowsCorpus as readTreeFlowsCorpus,
+  readGuardResult as readTreeGuardResult,
+  readManifest as readTreeManifest,
   guardClaimsPath,
   dependenciesPath,
   guardFlowsPath,
@@ -520,6 +524,42 @@ export async function readGuardRunFlowSummary(
   // scenarios after synthesis retired the flow is history, not coverage, and
   // counting it would carry every corpus the repository ever had into the
   // trend. The run that last exercised it keeps its own summary.
+  for (const flowId of allFlowIds(view)) {
+    if (flowOrphaned(flowId, view.join)) continue
+    summary[flowId] = guardFlowPlainStatus(flowListItem(flowId, view))
+  }
+  return Object.keys(summary).length > 0 ? summary : null
+}
+
+/**
+ * The FLOW SUMMARY of a run derived from the WORKING TREE the run left — its
+ * manifest, scenarios, flow corpus and generate report, with `latest`'s
+ * outcomes — rather than from the store. What a pull request's check reads:
+ * its tree is the head's, and what the head generated lives under the pull
+ * request's scope, which the store's reads by commit do not look in. The same
+ * derivation as {@link readGuardRunFlowSummary}, over files.
+ */
+export function readGuardRunFlowSummaryFromTree(treeDir: string, latest: GuardLatest): GuardRunFlowSummary | null {
+  const manifest = readTreeManifest(treeDir)
+  const flowsFile = readTreeFlowsCorpus(treeDir)
+  const scenarios = loadTreeScenarios(treeDir).scenarios
+  if (!manifest && !flowsFile && scenarios.length === 0) return null
+  const result = readTreeGuardResult(treeDir)
+  const view: FlowViewSources = {
+    join: buildFlowJoin({
+      manifest,
+      latest,
+      result,
+      flows: flowsFile,
+      scenarios,
+      externals: readGuardExternalSetupIndex(treeDir, { env: {} }),
+    }),
+    flowsFile,
+    latest,
+    result,
+    scenarios,
+  }
+  const summary: GuardRunFlowSummary = {}
   for (const flowId of allFlowIds(view)) {
     if (flowOrphaned(flowId, view.join)) continue
     summary[flowId] = guardFlowPlainStatus(flowListItem(flowId, view))

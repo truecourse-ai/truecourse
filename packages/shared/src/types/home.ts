@@ -162,6 +162,7 @@ export const RUN_KIND_WORD: Record<string, string> = {
   'guard-run': 'Flow run',
   'guard-interfaces': 'Interface authoring',
   'guard-adjudicate': 'Failure adjudication',
+  'pr-check': 'Pull request check',
 };
 
 /** `spec-scan` reads `Document scan`; a kind with no word of its own reads as its id, spaced. */

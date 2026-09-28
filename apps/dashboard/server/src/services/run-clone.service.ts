@@ -104,18 +104,32 @@ export interface RunClone {
  * its workspace's run-clones dir. The caller MUST `dispose()` when the run
  * settles, however it settles; the boot sweep only covers a crash.
  *
- * The token rides a `git clone -c http.*.extraheader` flag rather than the
- * URL, so it stays out of the recorded remote, out of git's error output
- * (which quotes the URL), and out of anything that later reads the clone's
- * origin. That flag persists the header into the new repo's config, so it is
+ * The token rides a `-c http.*.extraheader` flag rather than the URL, so it
+ * stays out of the recorded remote, out of git's error output (which quotes
+ * the URL), and out of anything that later reads the clone's origin. On a
+ * `clone` that flag persists the header into the new repo's config, so it is
  * unset again right after — no credential is left at rest for the run's
  * duration. The unset is best-effort: its only failure mode is the key being
  * absent already, which must not throw away a finished multi-minute clone.
+ *
+ * With `commitSha` the tree is that commit rather than the branch's tip: an
+ * empty repository is initialised, the one commit fetched at depth 1 and
+ * checked out as a local branch of the name `defaultBranch` gives (detached
+ * when none is given), so what reads the tree's branch sees the branch the
+ * commit belongs to and not `HEAD`. GitHub serves any commit reachable from a
+ * ref, and a pull request's head is reachable from the base repository's
+ * `refs/pull/`, so a fork's head needs no access to the fork. A per-command
+ * `-c` on `fetch` persists nothing, so there is nothing to unset on that path.
  */
 export async function createRunClone(
   repoFullName: string,
   token: string,
-  opts: { workspaceOrgId: string; defaultBranch?: string | null; run?: GitRunner },
+  opts: {
+    workspaceOrgId: string;
+    defaultBranch?: string | null;
+    commitSha?: string | null;
+    run?: GitRunner;
+  },
 ): Promise<RunClone> {
   const run = opts.run ?? runGit;
   const url = cloneUrl(repoFullName);
@@ -133,6 +147,18 @@ export async function createRunClone(
   };
 
   try {
+    if (opts.commitSha) {
+      await run(['init', '--quiet', dir]);
+      await run(['remote', 'add', 'origin', url], dir);
+      await run([...cloneAuthArgs(token), 'fetch', '--depth', '1', 'origin', opts.commitSha], dir);
+      await run(
+        opts.defaultBranch
+          ? ['checkout', '--quiet', '-B', opts.defaultBranch, 'FETCH_HEAD']
+          : ['checkout', '--quiet', '--detach', 'FETCH_HEAD'],
+        dir,
+      );
+      return { dir, dispose };
+    }
     await run([
       'clone',
       ...cloneAuthArgs(token),

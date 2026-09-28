@@ -332,6 +332,16 @@ export class PgGuardStore implements GuardStore {
     }));
   }
 
+  /** One run's flow summary, read off its own row. */
+  async readGuardRunFlows(repoKey: string, runId: string): Promise<GuardRunFlowSummary | null> {
+    const rows = await this.db
+      .select({ flows: guardRuns.flows })
+      .from(guardRuns)
+      .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, runId)))
+      .limit(1);
+    return (rows[0]?.flows as GuardRunFlowSummary | null | undefined) ?? null;
+  }
+
   /** The report `at` names: one by id, the newest at a commit, or the scope's newest. */
   async readGuardResult(repoKey: string, at: VersionAt = {}): Promise<GuardGenerateReport | null> {
     const rows = await this.db

@@ -20,6 +20,7 @@ import { eq } from 'drizzle-orm';
 import { content, schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { ContextSyncRecord } from '@truecourse/shared';
 import { PgContextStore, listDueContextSources } from '../../packages/data-store/src/index';
+import { RepositorySourceTakenError } from '@truecourse/core/lib/context-store';
 
 const ORG = 'org_A';
 const OTHER = 'org_B';
@@ -99,6 +100,40 @@ describe('sources', () => {
     await store.createSource(OTHER, site('docs'));
     await store.updateSource(ORG, 'docs', { title: 'A docs' });
     expect((await store.getSource(OTHER, 'docs'))!.title).toBe('docs');
+  });
+
+  const repository = (id: string, repoFullName: string) => ({
+    id,
+    kind: 'repository' as const,
+    title: repoFullName,
+    config: { repoFullName, include: ['**/*.md'], exclude: [], branch: '' },
+  });
+
+  it('keeps a repository ONE workspace\'s source, and says whose', async () => {
+    await store.createSource(ORG, repository('repo-acme-api', 'acme/api'));
+    expect(await store.repositorySourceWorkspace('acme/api')).toBe(ORG);
+    expect(await store.repositorySourceWorkspace('acme/other')).toBeNull();
+
+    await expect(store.createSource(OTHER, repository('repo-acme-api', 'acme/api'))).rejects.toBeInstanceOf(
+      RepositorySourceTakenError,
+    );
+    expect(await store.listSources(OTHER)).toEqual([]);
+    // Sites carry no repository, so any number of workspaces may hold them.
+    await store.createSource(ORG, site('docs'));
+    await store.createSource(OTHER, site('docs'));
+    // Removing the source frees the repository for another workspace.
+    await store.removeSource(ORG, 'repo-acme-api');
+    expect(await store.repositorySourceWorkspace('acme/api')).toBeNull();
+    await store.createSource(OTHER, repository('repo-acme-api', 'acme/api'));
+  });
+
+  it('does not call a source-id collision a repository taken', async () => {
+    // Two repositories can slug to one source id; that is the primary key's
+    // refusal, not the other workspace's.
+    await store.createSource(ORG, repository('repo-acme-my-api', 'acme/my-api'));
+    await expect(store.createSource(ORG, repository('repo-acme-my-api', 'acme-my/api'))).rejects.not.toBeInstanceOf(
+      RepositorySourceTakenError,
+    );
   });
 });
 

@@ -164,7 +164,7 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     expect(moved({ prerequisiteShape: 'ps2' })).toEqual(['prerequisites.shape'])
     expect(moved({ recipeSlice: 'rs2' })).toEqual(['recipe.slice'])
     expect(moved({ roster: 'ro2' })).toEqual(['roster'])
-    expect(moved({ preparation: 'pr2' })).toEqual(['preparation'])
+    expect(moved({ preparation: 'pr2' })).toEqual(['preparation.run'])
   })
 
   it('leaves the interface catalog out of a flow that holds a scenario', () => {

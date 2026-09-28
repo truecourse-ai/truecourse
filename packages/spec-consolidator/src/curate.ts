@@ -104,16 +104,12 @@ export interface CurateResult {
  * flagged dispute again, so dropping it is deterministic and safe.
  *
  * A resolution that merely matches no CURRENT overlap flag is KEPT, dormant.
- * This function used to prune those too, on the premise that a verdict is
- * cheaply re-derivable — the next scan would flag the same dispute and the user
- * would resolve it again. The 2026-08-20 reference-corpus runs falsified that:
- * the overlap session is a stochastic judge (~50–60% pair recall run-to-run),
- * and when it DOES re-flag a pair it excerpts the quotes differently (drifted
- * quotes on 6 of 6 re-flagged pairs), so `resolutionMatchesConflict`'s
- * quote-keyed identity orphaned 16 of 20 code-verified user verdicts in one
- * scan — and deleted them. Dormant rows instead stay in `decisions.json`
- * (surfaced by `orphanedConflictResolutions` and offered as reapply hints on
- * re-flagged pairs via `dormantResolutionForPair`).
+ * The overlap session is a stochastic judge (~50–60% pair recall run-to-run),
+ * so a verdict whose dispute this scan did not re-flag is not wrong, only
+ * unexercised: the next scan may flag it again, and the verdict must still be
+ * there to match. Dormant rows stay in `decisions.json` (surfaced by
+ * `orphanedConflictResolutions` and offered as reapply hints on re-flagged
+ * pairs via `dormantResolutionForPair`).
  *
  * The returned entries are the caller's own array elements, so identity
  * filtering keeps the survivors byte-identical. Writes only when something is

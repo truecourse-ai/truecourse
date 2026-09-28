@@ -209,6 +209,11 @@
       "types": "./dist/lib/cli-binary.d.ts",
       "import": "./dist/lib/cli-binary.js"
     },
+    "./services/pr-check/compare": {
+      "truecourse-source": "./src/services/pr-check/compare.ts",
+      "types": "./dist/services/pr-check/compare.d.ts",
+      "import": "./dist/services/pr-check/compare.js"
+    },
     "./services/guard-setup/bundle": {
       "truecourse-source": "./src/services/guard-setup/bundle.ts",
       "types": "./dist/services/guard-setup/bundle.d.ts",

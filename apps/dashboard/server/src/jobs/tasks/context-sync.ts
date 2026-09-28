@@ -21,12 +21,14 @@
  * re-fetch never reads as an edit.
  *
  * The settle hook is where onboarding continues: a repository's FIRST sync
- * starts its Flow setup whatever it reconciled (setup needs no documents), and
- * a sync that reconciled something chains the workspace Document scan.
+ * starts its Flow setup whatever it reconciled (setup needs no documents), a
+ * sync that reconciled something chains the workspace Document scan, and a
+ * repository a push left owing its main chain gets it once no scan is to
+ * settle first.
  */
 
 import { log } from '@truecourse/core/lib/logger';
-import type { JobDefinition, JobPayload } from '@truecourse/jobs';
+import type { JobDefinition, JobOutcomeStatus, JobPayload } from '@truecourse/jobs';
 import {
   getContextSource,
   listContextDocuments,
@@ -88,6 +90,12 @@ export interface ContextSyncTaskDeps {
    * repository is already set up.
    */
   chainSetup?: (request: ContextSyncJobRequest, result: ContextSyncJobResult) => Promise<void>;
+  /**
+   * Start the main chain the source's repository owes, however this sync
+   * ended: a failed read leaves the corpus as it was, and the pushed code is
+   * still to be checked. The mount holds it back while a scan is to settle.
+   */
+  continueMainChain?: (request: ContextSyncJobRequest) => Promise<void>;
 }
 
 const NOTHING: Omit<ContextSyncJobResult, 'sourceId' | 'outcome'> = {
@@ -218,33 +226,50 @@ export function createContextSyncTask(
     }),
 
     async onSettled(ctx, outcome, result) {
-      // A sync that reconciled something is what makes the workspace corpus
-      // stale, so the scan follows it — one motion, exactly as a repository's
-      // scan used to chain its setup. A failed or cancelled sync chains nothing.
-      if (outcome !== 'succeeded') return;
-      const settled = result as ContextSyncJobResult | undefined;
-      if (!settled || settled.outcome !== 'synced') return;
-      // The repository's own onboarding first: it does not wait on documents,
-      // and starting it here means the ripple below finds it already working
-      // rather than racing it.
+      await chainOnwards(ctx.payload, outcome, result as ContextSyncJobResult | undefined);
+      // Last, so a scan chained above is in flight and holds the chain back.
       try {
-        await deps.chainSetup?.(ctx.payload, settled);
+        await deps.continueMainChain?.(ctx.payload);
       } catch (err) {
         log.warn(
-          `[context] could not start ${ctx.payload.sourceId}'s flow setup: ${(err as Error).message}`,
-        );
-      }
-      if (!deps.chainScan) return;
-      try {
-        await deps.chainScan(ctx.payload, settled);
-      } catch (err) {
-        // The sync already succeeded; the scan can be started by hand.
-        log.warn(
-          `[context] could not chain the document scan after ${ctx.payload.sourceId}: ${(err as Error).message}`,
+          `[context] could not continue ${ctx.payload.sourceId}'s main chain: ${(err as Error).message}`,
         );
       }
     },
   };
+
+  /**
+   * A sync that reconciled something is what makes the workspace corpus stale,
+   * so the scan follows it — one motion, exactly as a repository's scan used to
+   * chain its setup. A failed or cancelled sync chains nothing.
+   */
+  async function chainOnwards(
+    payload: ContextSyncJobPayload,
+    outcome: JobOutcomeStatus,
+    settled: ContextSyncJobResult | undefined,
+  ): Promise<void> {
+    if (outcome !== 'succeeded') return;
+    if (!settled || settled.outcome !== 'synced') return;
+    // The repository's own onboarding first: it does not wait on documents,
+    // and starting it here means the ripple below finds it already working
+    // rather than racing it.
+    try {
+      await deps.chainSetup?.(payload, settled);
+    } catch (err) {
+      log.warn(
+        `[context] could not start ${payload.sourceId}'s flow setup: ${(err as Error).message}`,
+      );
+    }
+    if (!deps.chainScan) return;
+    try {
+      await deps.chainScan(payload, settled);
+    } catch (err) {
+      // The sync already succeeded; the scan can be started by hand.
+      log.warn(
+        `[context] could not chain the document scan after ${payload.sourceId}: ${(err as Error).message}`,
+      );
+    }
+  }
 
   /** Put the source back where the failure (or the stop) leaves it. */
   async function settleFailure(

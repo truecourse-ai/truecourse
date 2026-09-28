@@ -7,7 +7,8 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { CreditsExhaustedError, isCreditsExhausted } from '@truecourse/shared'
 import { planGuardWork, type ReuseExtractionSeam, type PriorExtraction } from '@truecourse/guard-generator'
-import { readManifest, writeManifest } from '@truecourse/guard-runner'
+import { loadScenarios, readManifest, runGuard, writeManifest } from '@truecourse/guard-runner'
+import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 import {
   makeTempRepo,
   rmrf,
@@ -148,6 +149,33 @@ describe('claim-diff gate — cosmetic doc edits do not re-author', () => {
     expect(again.noChanges).toBe(true)
     expect(workerTasks).toEqual([])
   }, 90_000)
+
+  it('a cosmetic edit re-pins the kept scenario, so the next run runs it rather than calling it stale', async () => {
+    const r = seed()
+    await generate(r)
+    const [before] = loadScenarios(r).scenarios
+    const reviewed = readManifest(r)!.flows[0]!.scenarios[0]!.reviewedScenarioFingerprint
+    expect(reviewed).toBe(scenarioReviewFingerprint(before))
+
+    writeDoc(r, DOC, COSMETIC_EDIT)
+    const res = await generate(r, { seam: reuseSeam(), verdict: 'cosmetic' })
+    expect(res.written).toEqual([])
+
+    const after = readManifest(r)!
+    const [scenario] = loadScenarios(r).scenarios
+    const current = after.flows[0]!.bindings.find((b) => b.anchor === 'version')!.fingerprint
+    expect(scenario!.binds.find((b) => b.section === 'version')!.fingerprint).toBe(current)
+    // Only the pin moved: the review that held for the old text holds for this one.
+    expect({ ...scenario, binds: [] }).toEqual({ ...before, binds: [] })
+    expect(after.flows[0]!.scenarios[0]!.reviewedScenarioFingerprint).toBe(scenarioReviewFingerprint(scenario))
+
+    const run = await runGuard({ repoRoot: r })
+    expect(run.status).toBe('ok')
+    if (run.status === 'ok') expect(run.latest.scenarios.map((s) => s.outcome)).toEqual(['pass'])
+    // And the generate after is still a no-op.
+    const again = await generate(r, { seam: reuseSeam(), verdict: 'cosmetic' })
+    expect(again.noChanges).toBe(true)
+  }, 120_000)
 
   it('a `changed` verdict re-extracts and re-authors exactly as before the gate', async () => {
     const r = seed()

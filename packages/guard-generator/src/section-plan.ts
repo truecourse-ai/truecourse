@@ -314,7 +314,10 @@ export function flowGenerationInputComponents(parts: FlowGenerationInputParts): 
     policy: String(GUARD_REVIEW_POLICY_VERSION),
     'recipe.slice': digest([parts.recipeSlice]),
     roster: digest([parts.roster]),
-    preparation: digest([parts.preparation]),
+    // A NEW name for the same reason as `prerequisites.shape`: the retired
+    // `preparation` folded each profile's qualification evidence too, which the
+    // session rewrites whenever a cited file moves.
+    'preparation.run': digest([parts.preparation]),
   }
   if (parts.hasScenario) return components
   components.assignment = digest(parts.assignmentFingerprints)

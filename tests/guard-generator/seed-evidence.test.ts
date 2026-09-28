@@ -80,6 +80,41 @@ describe('apiAuthEvidence — the api surface authenticates on any signal', () =
       }),
     ).toEqual([])
   })
+
+  it('a doc section about a third party the app calls describes outbound auth, not the app’s own', () => {
+    const currencybeacon = { name: 'currencybeacon', envs: ['CURRENCYBEACON_BASE_URL', 'CURRENCYBEACON_API_KEY'] }
+    const outbound = [
+      '# Penny',
+      '',
+      'Conversion uses the external CurrencyBeacon API and requires a supplied API key.',
+      '',
+      '## CurrencyBeacon configuration',
+      '',
+      '| `CURRENCYBEACON_API_KEY` | the key |',
+      '',
+      'The backend calls `GET /v1/latest` with `Authorization: Bearer <key>`.',
+    ].join('\n')
+    expect(
+      apiAuthEvidence({
+        interfaces: [],
+        database: null,
+        docs: [{ doc: 'docs/app.md', text: outbound }],
+        securitySchemes: [],
+        externals: [currencybeacon],
+      }),
+    ).toEqual([])
+    // The same app documenting its OWN tokens in a section of its own still counts.
+    const own = `${outbound}\n\n## Authentication\n\nSend \`Authorization: Bearer <token>\` to every /api route.`
+    expect(
+      apiAuthEvidence({
+        interfaces: [],
+        database: null,
+        docs: [{ doc: 'docs/app.md', text: own }],
+        securitySchemes: [],
+        externals: [currencybeacon],
+      }).map((e) => e.kind),
+    ).toEqual(['doc'])
+  })
 })
 
 describe('probeCandidatesFromInterfaces — the cheapest operations to confirm against', () => {

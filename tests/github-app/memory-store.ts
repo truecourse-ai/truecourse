@@ -24,20 +24,28 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
   /** installation id → the workspaces attached, in attach order. */
   private links = new Map<number, string[]>();
   private repos = new Map<string, RepositoryRecord>();
+  /** When each repository's recorded push was made, as `recordDefaultBranchSha` orders them. */
+  private pushedAt = new Map<string, string>();
 
   private record(account: InstallationAccount): InstallationRecord {
-    return { ...account, workspaceOrgIds: [...(this.links.get(account.installationId) ?? [])] };
+    return {
+      ...account,
+      permissions: account.permissions ?? null,
+      workspaceOrgIds: [...(this.links.get(account.installationId) ?? [])],
+    };
   }
 
   async saveInstallation(rec: InstallationAccount): Promise<void> {
-    const { installationId, accountLogin, accountType, createdAt, updatedAt } = rec;
+    const { installationId, accountLogin, accountType, permissions, createdAt, updatedAt } = rec;
     // As the Postgres upsert does: an empty name never unnames a known row,
-    // and a row that exists keeps its createdAt.
+    // a save with no permissions keeps the known ones, and a row that exists
+    // keeps its createdAt.
     const existing = this.installations.get(installationId);
     this.installations.set(installationId, {
       installationId,
       accountLogin: accountLogin || existing?.accountLogin || '',
       accountType: accountType || existing?.accountType || '',
+      permissions: permissions ?? existing?.permissions ?? null,
       createdAt: existing?.createdAt ?? createdAt,
       updatedAt,
     });
@@ -87,13 +95,43 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
     const taken = [...this.repos.values()]
       .filter((r) => r.workspaceOrgId === rec.workspaceOrgId)
       .map((r) => r.slug);
-    const stored: RepositoryRecord = { ...rec, slug: existing?.slug ?? slugify(rec.repoFullName, taken) };
+    const stored: RepositoryRecord = {
+      ...rec,
+      slug: existing?.slug ?? slugify(rec.repoFullName, taken),
+      // As the Postgres store does: a re-link forgets the last push it saw.
+      defaultBranchSha: null,
+    };
+    this.pushedAt.delete(rec.repoFullName);
     this.repos.set(rec.repoFullName, stored);
     return stored;
   }
 
   async unlinkRepo(repoFullName: string): Promise<void> {
     this.repos.delete(repoFullName);
+  }
+
+  async recordDefaultBranchSha(repoFullName: string, commitSha: string, pushedAt: string): Promise<boolean> {
+    const repo = this.repos.get(repoFullName);
+    const held = this.pushedAt.get(repoFullName);
+    if (!repo || (held !== undefined && held > pushedAt)) return false;
+    this.repos.set(repoFullName, { ...repo, defaultBranchSha: commitSha });
+    this.pushedAt.set(repoFullName, pushedAt);
+    return true;
+  }
+
+  async recordMainChainSha(repoFullName: string, commitSha: string): Promise<void> {
+    const repo = this.repos.get(repoFullName);
+    if (repo) this.repos.set(repoFullName, { ...repo, mainChainSha: commitSha });
+  }
+
+  async forgetMainChainSha(repoFullName: string, commitSha: string): Promise<void> {
+    const repo = this.repos.get(repoFullName);
+    if (repo?.mainChainSha === commitSha) this.repos.set(repoFullName, { ...repo, mainChainSha: null });
+  }
+
+  async setCheckPullRequests(repoFullName: string, enabled: boolean): Promise<void> {
+    const repo = this.repos.get(repoFullName);
+    if (repo) this.repos.set(repoFullName, { ...repo, checkPullRequests: enabled });
   }
 
   async getRepo(repoFullName: string): Promise<RepositoryRecord | null> {

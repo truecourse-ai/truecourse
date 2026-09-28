@@ -12,11 +12,12 @@ import type {
   ContextSource,
   ContextSyncRecord,
 } from '@truecourse/shared';
-import type {
-  ContextLedgerWrite,
-  ContextSourceInput,
-  ContextSourcePatch,
-  ContextStore,
+import {
+  RepositorySourceTakenError,
+  type ContextLedgerWrite,
+  type ContextSourceInput,
+  type ContextSourcePatch,
+  type ContextStore,
 } from '@truecourse/core/lib/context-store';
 
 export type MemoryContextStore = ContextStore;
@@ -26,6 +27,13 @@ const listOf = <T>(map: Map<string, T[]>, org: string): T[] => {
   map.set(org, rows);
   return rows;
 };
+
+/** The repository a source reads, or null for any other kind. */
+function repositoryOf(source: Pick<ContextSource, 'kind' | 'config'>): string | null {
+  if (source.kind !== 'repository') return null;
+  const name = (source.config as { repoFullName?: unknown }).repoFullName;
+  return typeof name === 'string' && name !== '' ? name : null;
+}
 
 export function memoryContextStore(clock: () => string = () => new Date().toISOString()): MemoryContextStore {
   const sources = new Map<string, ContextSource[]>();
@@ -60,6 +68,10 @@ export function memoryContextStore(clock: () => string = () => new Date().toISOS
       if (rows.some((source) => source.id === input.id)) {
         throw new Error(`A context source "${input.id}" already exists in this workspace.`);
       }
+      const repoFullName = repositoryOf(input);
+      if (repoFullName && (await store.repositorySourceWorkspace(repoFullName)) !== null) {
+        throw new RepositorySourceTakenError(repoFullName);
+      }
       const now = clock();
       const source: ContextSource = {
         id: input.id,
@@ -87,6 +99,12 @@ export function memoryContextStore(clock: () => string = () => new Date().toISOS
       if (patch.lastSyncAt !== undefined) next.lastSyncAt = patch.lastSyncAt;
       rows[index] = next;
       return next;
+    },
+    async repositorySourceWorkspace(repoFullName) {
+      for (const [org, rows] of sources) {
+        if (rows.some((source) => repositoryOf(source) === repoFullName)) return org;
+      }
+      return null;
     },
     async removeSource(org, sourceId) {
       const removed = listOf(sources, org).some((source) => source.id === sourceId);

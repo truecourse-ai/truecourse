@@ -1408,10 +1408,13 @@ export function buildSeedSession(
         DEFAULT_BUILD_TIMEOUT_MS,
         opts.signal,
       );
+      // A tree whose own build fails is the recipe's defect, not the seed's:
+      // setup fails on it, and nothing chains a generate onto a head that does not build.
       if (!built.ok) {
         return {
           status: 'failed',
           reason: `the recipe \`build\` failed${built.timedOut ? ' (timed out)' : ''}: ${outputTail(built.output)}`,
+          recipeDefect: true,
         };
       }
     }
@@ -1433,6 +1436,7 @@ export function buildSeedSession(
         return {
           status: 'failed',
           reason: `the recipe \`web.build\` failed${built.timedOut ? ' (timed out)' : ''}: ${outputTail(built.output)}`,
+          recipeDefect: true,
         };
       }
     }

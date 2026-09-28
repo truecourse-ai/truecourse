@@ -17,6 +17,12 @@ export interface InstallationRecord {
   accountLogin: string;
   /** 'Organization' | 'User'. */
   accountType: string;
+  /**
+   * The permissions the account granted the App, as GitHub names them
+   * (`{ checks: 'write', pull_requests: 'read', ... }`). Null until an
+   * installation event first said; a save that carries none keeps what is known.
+   */
+  permissions: Record<string, string> | null;
   /** The TrueCourse workspaces (WorkOS orgs) this installation is attached to. */
   workspaceOrgIds: string[];
   createdAt: string;
@@ -24,13 +30,16 @@ export interface InstallationRecord {
 }
 
 /** The account half of an {@link InstallationRecord}: what a save writes. */
-export type InstallationAccount = Omit<InstallationRecord, 'workspaceOrgIds'>;
+export type InstallationAccount = Omit<InstallationRecord, 'workspaceOrgIds' | 'permissions'> & {
+  permissions?: Record<string, string> | null;
+};
 
 export interface InstallationStore {
   /**
    * Upsert the account. A row that exists keeps its `createdAt`, keeps a
    * known login or type when the save carries an empty one (a list that did
-   * not name it must not unname it), and keeps its workspace links.
+   * not name it must not unname it), keeps its permissions when the save
+   * carries none, and keeps its workspace links.
    */
   saveInstallation(rec: InstallationAccount): Promise<void>;
   getInstallation(installationId: number): Promise<InstallationRecord | null>;

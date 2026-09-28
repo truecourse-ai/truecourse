@@ -1097,6 +1097,65 @@ describe('runAgentLoop clocks', () => {
     expect(outcome.status).toBe('completed');
   });
 
+  it('stops a turn that runs past the turn clock without finishing or calling a tool', async () => {
+    // The model thinks and thinks: no turn ends, no tool is called.
+    const { driver } = fakeDriver(async ({ input }) => {
+      await untilAborted(input.signal);
+      return endedWithoutOutcome();
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: makeDef(),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+      turnTimeoutMs: 30,
+    }).outcome;
+
+    expect(outcome.status).toBe('failed');
+    if (outcome.status !== 'failed') throw new Error('unreachable');
+    expect(outcome.failure).toMatchObject({
+      kind: 'transport',
+      detail: 'a turn ran 30ms without finishing or calling a tool',
+    });
+  });
+
+  it('the turn clock waits while a tool runs, however long it takes', async () => {
+    const slowTool = defineSessionTool({
+      name: 'build',
+      description: 'runs a build',
+      kind: 'build',
+      readOnly: true,
+      destructive: false,
+      inputSchema: z.object({}),
+      // Longer than the turn clock: a tool holds the session, not the model.
+      async execute() {
+        await new Promise((r) => setTimeout(r, 80));
+        return { content: 'built' };
+      },
+    });
+    const { driver } = fakeDriver(async ({ input, emit }) => {
+      await emit({ type: 'assistant-turn', text: 'building', usage: usage(1) });
+      await input.def.tools.find((t) => t.name === 'build')!.execute({}, dummyToolCtx());
+      await emit({ type: 'assistant-turn', text: 'done', usage: usage(1) });
+      return { kind: 'outcome', value: { verdict: 'kept' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: makeDef({ tools: [slowTool] }),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+      turnTimeoutMs: 30,
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+  });
+
   it('stops a session at its wall clock however lively the stream, naming the ceiling', async () => {
     const { driver } = fakeDriver(async ({ input, emit }) => {
       while (!input.signal.aborted) {

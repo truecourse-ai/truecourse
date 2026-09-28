@@ -30,6 +30,7 @@ import {
 import { toast } from 'sonner';
 import { disconnectRealRepo, fetchRealRepos } from '@/dashboard/data/real-repos';
 import { fetchLlmConfig } from '@/dashboard/data/llm-config';
+import { putPullRequestChecks } from '@/lib/api';
 import { useAuth } from '@/auth/AuthContext';
 import { useRealRunStream, type RunFailure } from './real-runs';
 import { useActiveJobs } from './use-active-jobs';
@@ -52,6 +53,11 @@ interface DashboardStateValue {
    */
   reposLoaded: boolean;
   unlinkRepo: (id: string) => void;
+  /**
+   * Turn checking a repository's pull requests on or off. Its row changes at
+   * once and goes back when the server refuses, and the refusal rejects.
+   */
+  setCheckPullRequests: (id: string, enabled: boolean) => Promise<void>;
   /**
    * Re-read the registry, and ANSWER with what it holds now. Called once a
    * repository is linked through the GitHub App — the caller needs the fresh
@@ -174,6 +180,18 @@ export function DashboardStateProvider({ children }: { children: ReactNode }) {
     [refreshRealRepos],
   );
 
+  const setCheckPullRequests = useCallback(async (id: string, enabled: boolean) => {
+    const patch = (to: boolean) =>
+      setRepos((prev) => prev.map((r) => (r.id === id ? { ...r, checkPullRequests: to } : r)));
+    patch(enabled);
+    try {
+      await putPullRequestChecks(id, enabled);
+    } catch (err) {
+      patch(!enabled);
+      throw err;
+    }
+  }, []);
+
   // The repositories' runs, followed live. Inert without a server.
   const realRuns = useRealRunStream(repos, reposLoaded, orgId ?? undefined);
   // The workspace's jobs, where work that has not started yet is visible.
@@ -206,6 +224,7 @@ export function DashboardStateProvider({ children }: { children: ReactNode }) {
       repos: allRepos,
       reposLoaded,
       unlinkRepo,
+      setCheckPullRequests,
       refreshRealRepos,
       notifications: feed.notifications,
       notificationsReady: feed.ready,
@@ -231,6 +250,7 @@ export function DashboardStateProvider({ children }: { children: ReactNode }) {
     llmProvider,
     refreshLlmProvider,
     unlinkRepo,
+    setCheckPullRequests,
     refreshRealRepos,
   ]);
 

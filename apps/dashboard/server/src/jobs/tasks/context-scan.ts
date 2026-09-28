@@ -16,7 +16,9 @@
  *
  * The job posts ONE notification. What the corpus change means for the
  * repositories is the RIPPLE (`../context-ripple.js`), run from the settle hook
- * so the single-flight key is already free.
+ * so the single-flight key is already free. Before it, a repository a push left
+ * owing its main chain gets that chain, which waited for this corpus: the chain
+ * covers the ripple's generate, so the ripple finds it working and skips it.
  *
  * NOTHING PARTIAL IS STORED, and that is deliberate. A scan that stops
  * part-way — an empty balance, a killed process — has curated some documents
@@ -86,6 +88,12 @@ export interface ContextScanTaskDeps {
   ripple?: (org: string) => ContextRippleDeps;
   /** Queue the one coalesced follow-up run. */
   rescan?: (request: ContextScanJobRequest) => Promise<void>;
+  /**
+   * Start the main chains the workspace's repositories owe. The mount holds
+   * them back while a scan is queued, so a follow-up this settle queued serves
+   * them instead.
+   */
+  serveOwedChains?: (org: string) => Promise<void>;
   now?: () => Date;
 }
 
@@ -214,8 +222,17 @@ export function createContextScanTask(
       const input = rippleInputs.get(ctx.jobId);
       rippleInputs.delete(ctx.jobId);
       runIds.delete(ctx.jobId);
-      if (outcome !== 'succeeded') return;
-      const scan = result as ContextScanJobResult | undefined;
+      // A paused scan is not over: its resume settles again and serves then.
+      if (outcome === 'paused') return;
+      const scan = outcome === 'succeeded' ? (result as ContextScanJobResult | undefined) : undefined;
+      if (scan) await coalesceFollowUp(deps, org, scan.startedAt);
+      // A failed scan left the corpus as it was; the pushed code is still owed
+      // its check. After the follow-up, which holds the chains back if queued.
+      try {
+        await deps.serveOwedChains?.(org);
+      } catch (err) {
+        log.warn(`[context] could not start the owed chains of ${org}: ${(err as Error).message}`);
+      }
       if (!scan) return;
       // The ripple runs here, not in the body: the single-flight key is free,
       // so a repository's own job can be enqueued without fighting this one.
@@ -231,7 +248,6 @@ export function createContextScanTask(
           );
         }
       }
-      await coalesceFollowUp(deps, org, scan.startedAt);
     },
   };
 }

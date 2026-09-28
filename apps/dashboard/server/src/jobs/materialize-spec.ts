@@ -25,12 +25,25 @@
  * recipe, its dependencies and its interfaces from the CODE, and needs no
  * documents. The count comes back so the caller can decide what an empty slice
  * means for it — setup runs, generate does not.
+ *
+ * A PULL REQUEST's check names the scope its scan wrote under and the head it
+ * checks. The corpus is the version of that scope the scan wrote AT THAT HEAD,
+ * falling back to the workspace's own when the head changed no document and
+ * so had no scan (an earlier head's corpus says nothing about this one); and
+ * a document's body is read from that version's snapshot FIRST, before the
+ * live body and the workspace's snapshot — a document the pull request
+ * changed must be checked as the pull request wrote it, never as the default
+ * branch reads.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { corpusFilePath, decisionsPath, type CuratedCorpus, type DecisionsFile } from '@truecourse/spec-consolidator';
-import { loadWorkspaceSpec, loadWorkspaceSpecDoc } from '@truecourse/core/lib/spec-store';
+import {
+  listWorkspaceSpecVersions,
+  loadWorkspaceSpec,
+  loadWorkspaceSpecDoc,
+} from '@truecourse/core/lib/spec-store';
 import { contextBindings, readContextDocByRef } from '@truecourse/core/lib/context-store';
 import { sliceCorpus } from '@truecourse/core/services/context';
 import { assertSafeRel, safeJoin } from '@truecourse/core/lib/safe-path';
@@ -67,8 +80,14 @@ export async function materializeStoredSpec(
   ref: RepoRef,
   treeDir: string,
   workspaceOrgId: string,
+  opts: { scope?: string } = {},
 ): Promise<MaterializedSlice> {
-  const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId }, 'corpus');
+  // The pull request's versions at THIS head, when its scan wrote any.
+  const at = opts.scope ? await versionsAtHead(workspaceOrgId, opts.scope, ref.commitSha) : null;
+  const corpus =
+    (at?.corpus
+      ? await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId, scope: opts.scope }, 'corpus', { id: at.corpus })
+      : null) ?? (await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId }, 'corpus'));
   const sourceIds = corpus ? await contextBindings(workspaceOrgId, ref.repoKey) : [];
   const slice = corpus ? sliceCorpus(corpus, sourceIds) : null;
   // An empty slice is written as an empty corpus rather than left out: a
@@ -83,8 +102,30 @@ export async function materializeStoredSpec(
   const decisions = await loadWorkspaceSpec<DecisionsFile>({ workspaceOrgId }, 'decisions');
   if (decisions != null) writeJson(decisionsPath(treeDir), decisions);
 
-  if (slice) await materializeSliceDocuments(workspaceOrgId, treeDir, slice);
+  if (slice) {
+    await materializeSliceDocuments(
+      workspaceOrgId,
+      treeDir,
+      slice,
+      at?.docs && opts.scope ? { scope: opts.scope, id: at.docs } : undefined,
+    );
+  }
   return { hasWorkspaceCorpus: corpus != null, documents: slice?.docs.length ?? 0 };
+}
+
+/**
+ * The corpus and docs-snapshot versions a pull request's scan wrote at one
+ * head, by id — null for a head it never scanned.
+ */
+async function versionsAtHead(
+  workspaceOrgId: string,
+  scope: string,
+  commitSha: string,
+): Promise<{ corpus: string | null; docs: string | null }> {
+  const ref = { workspaceOrgId, scope };
+  const idAt = async (artifact: 'corpus' | 'docs'): Promise<string | null> =>
+    (await listWorkspaceSpecVersions(ref, artifact)).find((v) => v.sourceCommit === commitSha)?.id ?? null;
+  return { corpus: await idAt('corpus'), docs: await idAt('docs') };
 }
 
 /**
@@ -110,15 +151,18 @@ export async function storedSliceSize(
  * longer holds live is read from the scan's own snapshot — that is what the
  * snapshot is for — and one neither has is skipped: the corpus still names it,
  * and a stage that cannot read it says so rather than the job dying over one
- * document.
+ * document. For a pull request, the snapshot its scan wrote at this head
+ * comes first.
  */
 async function materializeSliceDocuments(
   workspaceOrgId: string,
   treeDir: string,
   slice: CuratedCorpus,
+  snapshot?: { scope: string; id: string },
 ): Promise<void> {
   for (const doc of slice.docs) {
     const body =
+      (snapshot ? await loadWorkspaceSpecDoc(workspaceOrgId, doc.ref, snapshot) : null) ??
       (await readContextDocByRef(workspaceOrgId, doc.ref)) ??
       (await loadWorkspaceSpecDoc(workspaceOrgId, doc.ref));
     if (body == null) continue;

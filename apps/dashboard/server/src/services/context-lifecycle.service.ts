@@ -36,28 +36,30 @@ export type ContextSyncStart = (
  * push for a connected provider, a file changing on disk for a folder. A
  * repository with no source of its own has nothing to do here.
  *
- * Fire-and-forget by contract — whatever moved the repository has already
- * happened, and a sync that could not be enqueued is a log line, not a failure.
+ * Never throws — whatever moved the repository has already happened, and a
+ * sync that could not be enqueued is a log line, not a failure. Answers whether
+ * a sync of the source is now queued or running (`true`), which is what carries
+ * a push's main chain on; `false` when there is no source or the enqueue failed.
  */
-export function syncRepositorySource(
+export async function syncRepositorySource(
   org: string,
   repoFullName: string,
   start: ContextSyncStart,
-): void {
-  void (async () => {
-    try {
-      const source = await repositoryContextSource(org, repoFullName);
-      if (!source) return;
-      const outcome = await start(org, source.id, 'push');
-      if (outcome !== 'queued') {
-        log.info(`[context] ${repoFullName} moved, context sync ${outcome}`);
-      }
-    } catch (err) {
-      log.warn(
-        `[context] could not sync ${repoFullName}'s context after a change: ${(err as Error).message}`,
-      );
+): Promise<boolean> {
+  try {
+    const source = await repositoryContextSource(org, repoFullName);
+    if (!source) return false;
+    const outcome = await start(org, source.id, 'push');
+    if (outcome !== 'queued') {
+      log.info(`[context] ${repoFullName} moved, context sync ${outcome}`);
     }
-  })();
+    return outcome !== 'failed';
+  } catch (err) {
+    log.warn(
+      `[context] could not sync ${repoFullName}'s context after a change: ${(err as Error).message}`,
+    );
+    return false;
+  }
 }
 
 /** The workspace's Repository source for this repository, or null. */

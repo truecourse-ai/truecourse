@@ -72,23 +72,43 @@ export function scopeFilter(
   return (relPath) => includes.includes(relPath) && !(excludes.active && excludes.includes(relPath));
 }
 
-export function createRepositoryDriver(deps: RepositoryDriverDeps): ContextSourceDriver {
-  /**
-   * Walk a checkout and keep what the scope selects, in discovery order. The
-   * source's own patterns are the whole scope: the repository's `spec.include`
-   * does not narrow it.
-   */
-  function scopedDocs(
-    dir: string,
-    config: ContextSourceConfig,
-    opts: { skipGit: boolean },
-  ): DocCandidate[] {
-    const { include, exclude } = repositoryConfig(config);
-    const keep = scopeFilter(include, exclude);
-    return discoverDocs(dir, { skipGit: opts.skipGit, scope: EVERYTHING }).filter((doc) =>
-      keep(doc.path),
-    );
+/**
+ * Walk a checkout and keep what the scope selects, in discovery order. The
+ * source's own patterns are the whole scope: the repository's `spec.include`
+ * does not narrow it.
+ */
+function scopedDocs(
+  dir: string,
+  config: ContextSourceConfig,
+  opts: { skipGit: boolean },
+): DocCandidate[] {
+  const { include, exclude } = repositoryConfig(config);
+  const keep = scopeFilter(include, exclude);
+  return discoverDocs(dir, { skipGit: opts.skipGit, scope: EVERYTHING }).filter((doc) =>
+    keep(doc.path),
+  );
+}
+
+/**
+ * The documents a checkout holds for a source, read the way a sync reads them
+ * — the same discovery and the same scope — with their bodies. What a pull
+ * request's check hands the scan: the head's documents for the source, no
+ * git history consulted (a pinned clone has one commit).
+ */
+export function repositoryDocumentsIn(
+  dir: string,
+  config: ContextSourceConfig,
+): Array<{ docPath: string; body: string }> {
+  const out: Array<{ docPath: string; body: string }> = [];
+  for (const doc of scopedDocs(dir, config, { skipGit: true })) {
+    const body = readBody(doc);
+    if (body === null) continue;
+    out.push({ docPath: doc.path, body });
   }
+  return out;
+}
+
+export function createRepositoryDriver(deps: RepositoryDriverDeps): ContextSourceDriver {
 
   /** Read the checkout, then always give it back. */
   async function withTree<T>(

@@ -487,10 +487,11 @@ export type GuardSetupSeedSessionResult =
       reason: string
       sessionRunId?: string
       /**
-       * The failure is the RECIPE's, not the seed's: the cold-clone proof ran
-       * the recipe's own `install`/`build` in a fresh copy and one of them
-       * failed. Setup treats that as the recipe gate giving way — the recipe
-       * row is unsettled so the next run re-derives it, and the run fails.
+       * The failure is the RECIPE's, not the seed's: the recipe's own
+       * `build` (or `web.build`) failed in the tree, or the cold-clone proof
+       * ran its `install`/`build` in a fresh copy and one of them failed.
+       * Setup treats that as the recipe gate giving way — the recipe row is
+       * unsettled so the next run re-derives it, and the run fails.
        */
       recipeDefect?: boolean
     }
@@ -573,22 +574,31 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   let detectionSnapshot = ''
   /** The files the schema parsers read, once the detect step has read them: a seed input. */
   let schemaFiles: readonly string[] = []
+  /** Each step's named inputs as they stood when it asked whether it holds:
+   *  what re-opened it, before its own writes moved anything. */
+  const decidedOn = new Map<GuardSetupTaxonomyKey, Record<string, string>>()
   /** Whether a step's settled row still holds — its named inputs when it has
    *  them, else its old fingerprint one last time. */
-  const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
-    stepSettled(repoRoot, key, settled(key), legacyFingerprint, { detectionJson: detectionSnapshot, schemaFiles })
+  const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean => {
+    const observed = { detectionJson: detectionSnapshot, schemaFiles }
+    decidedOn.set(key, stepInputComponents(repoRoot, key, observed))
+    return stepSettled(repoRoot, key, settled(key), legacyFingerprint, observed)
+  }
   /**
    * Record a step's row with its inputs BY NAME, read off the tree as the row
    * is recorded, which is the state its fingerprint was computed over. A step
-   * whose settled fingerprint no longer holds says which input moved it; a
-   * refresh re-opens every step on request, so it names none.
+   * whose settled fingerprint no longer holds says which input moved it, as
+   * the inputs stood when it decided: a step that re-ran moves inputs of its
+   * own (its preparations block is part of its recipe contract), and those
+   * did not re-open it. A refresh re-opens every step on request, so it names
+   * none.
    */
   const pushStep = (row: GuardSetupTaxonomyStep): void => {
     const inputComponents = stepInputComponents(repoRoot, row.key, { detectionJson: detectionSnapshot, schemaFiles })
     steps.push({ ...row, ...(Object.keys(inputComponents).length > 0 ? { inputComponents } : {}) })
     const settledRow = settled(row.key)
     if (settledRow === null) return
-    const moved = movedNamedInputs(settledRow.inputComponents, inputComponents)
+    const moved = movedNamedInputs(settledRow.inputComponents, decidedOn.get(row.key) ?? inputComponents)
     // A stage bump re-opens a step whose fingerprint did not move.
     if (settledRow.inputFingerprint === row.inputFingerprint && !moved?.includes(STAGE_INPUT)) return
     fact(row.key, moved ? `re-opened: ${moved.join(', ') || 'no named input'} moved` : 're-opened: the settled row names no inputs')
@@ -1290,6 +1300,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
           database,
           docs: corpusDocTexts(repoRoot),
           securitySchemes: schemes,
+          externals: Object.entries(current.api?.externals ?? {}).map(([name, external]) => ({
+            name,
+            envs: [external.baseUrlEnv, ...Object.keys(external.env ?? {})],
+          })),
         }),
         requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,

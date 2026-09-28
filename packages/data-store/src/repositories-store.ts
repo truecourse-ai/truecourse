@@ -5,7 +5,7 @@
  * `@truecourse/shared`.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, lte, or } from 'drizzle-orm';
 import type {
   RepositoryLink,
   RepositoryProviderId,
@@ -27,6 +27,9 @@ function toRecord(r: Row): RepositoryRecord {
     workspaceOrgId: r.workspaceOrgId,
     slug: r.slug,
     defaultBranch: r.defaultBranch,
+    defaultBranchSha: r.defaultBranchSha,
+    mainChainSha: r.mainChainSha,
+    checkPullRequests: r.checkPullRequests,
     location: r.location,
     blocking: r.blocking,
     enabled: r.enabled,
@@ -76,6 +79,11 @@ export class PgRepositoryStore implements RepositoryStore {
           accountId: rec.accountId,
           workspaceOrgId: rec.workspaceOrgId,
           defaultBranch: rec.defaultBranch,
+          // A reconnect starts afresh: the last push the old connection saw
+          // says nothing about the branch now.
+          defaultBranchSha: null,
+          defaultBranchPushedAt: null,
+          mainChainSha: null,
           location: rec.location ?? null,
           blocking: rec.blocking,
           enabled: rec.enabled,
@@ -91,6 +99,41 @@ export class PgRepositoryStore implements RepositoryStore {
 
   async unlinkRepo(repoFullName: string): Promise<void> {
     await this.db.delete(repositories).where(eq(repositories.repoFullName, repoFullName));
+  }
+
+  async recordDefaultBranchSha(repoFullName: string, commitSha: string, pushedAt: string): Promise<boolean> {
+    const rows = await this.db
+      .update(repositories)
+      .set({ defaultBranchSha: commitSha, defaultBranchPushedAt: pushedAt })
+      .where(
+        and(
+          eq(repositories.repoFullName, repoFullName),
+          or(isNull(repositories.defaultBranchPushedAt), lte(repositories.defaultBranchPushedAt, pushedAt)),
+        ),
+      )
+      .returning({ repoFullName: repositories.repoFullName });
+    return rows.length > 0;
+  }
+
+  async recordMainChainSha(repoFullName: string, commitSha: string): Promise<void> {
+    await this.db
+      .update(repositories)
+      .set({ mainChainSha: commitSha })
+      .where(eq(repositories.repoFullName, repoFullName));
+  }
+
+  async forgetMainChainSha(repoFullName: string, commitSha: string): Promise<void> {
+    await this.db
+      .update(repositories)
+      .set({ mainChainSha: null })
+      .where(and(eq(repositories.repoFullName, repoFullName), eq(repositories.mainChainSha, commitSha)));
+  }
+
+  async setCheckPullRequests(repoFullName: string, enabled: boolean): Promise<void> {
+    await this.db
+      .update(repositories)
+      .set({ checkPullRequests: enabled })
+      .where(eq(repositories.repoFullName, repoFullName));
   }
 
   async getRepo(repoFullName: string): Promise<RepositoryRecord | null> {

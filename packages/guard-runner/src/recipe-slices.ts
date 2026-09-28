@@ -35,6 +35,7 @@ import {
   resolvePreparationScripts,
   RecipeSchema,
   type Recipe,
+  type RecipePreparation,
 } from './recipe.js'
 import { observationSource } from './preparation-observation.js'
 import { dependenciesPath, recipePath } from './store.js'
@@ -284,7 +285,11 @@ export function flowRosterFingerprint(
 }
 
 /** One preparation profile as a key folds it: its declaration plus its scripts. */
-function preparationView(repoRoot: string, recipe: Recipe | null, name: string): unknown {
+function preparationView(
+  repoRoot: string,
+  recipe: Recipe | null,
+  name: string,
+): { profile: RecipePreparation; scripts: Record<'seed' | 'verify' | 'cleanup', string | null> } | null {
   const profile = recipe?.preparations?.[name]
   if (!profile) return null
   const script = (rel: string | undefined): string | null => {
@@ -307,10 +312,38 @@ function preparationView(repoRoot: string, recipe: Recipe | null, name: string):
 }
 
 /**
+ * One preparation profile as it RUNS: {@link preparationView} without the
+ * evidence each baseline check's qualification cites — its prose `reason` and
+ * the source lines it read (`sources`, with their hashes). The session that
+ * qualifies a profile rewrites that evidence whenever a cited file moves, a
+ * comment included; what a scenario prepared by the profile does is the rest.
+ */
+function preparationRunView(repoRoot: string, recipe: Recipe | null, name: string): unknown {
+  const view = preparationView(repoRoot, recipe, name)
+  if (!view) return null
+  return {
+    ...view,
+    profile: {
+      ...view.profile,
+      ...(view.profile.baselineChecks
+        ? {
+            baselineChecks: view.profile.baselineChecks.map(({ qualification, ...check }) =>
+              qualification
+                ? { ...check, qualification: { ...qualification, reason: undefined, sources: undefined } }
+                : check,
+            ),
+          }
+        : {}),
+    },
+  }
+}
+
+/**
  * THE PREPARATION THIS FLOW RUNS ON — the profiles its committed scenarios name
- * in `setup.preparation`, each with its declaration and the bytes of its seed,
- * verification and cleanup scripts. Editing a profile re-authors the flows
- * prepared by it and no others.
+ * in `setup.preparation`, each as it runs (see {@link preparationRunView}) with
+ * the bytes of its seed, verification and cleanup scripts. Editing what a
+ * profile does re-authors the flows prepared by it and no others; rewording
+ * its evidence re-authors none.
  */
 export function flowPreparationFingerprint(
   repoRoot: string,
@@ -320,7 +353,7 @@ export function flowPreparationFingerprint(
   const names = [
     ...new Set(scenarios.flatMap((s) => (s.setup?.preparation ? [s.setup.preparation] : []))),
   ].sort()
-  return digest(names.map((name) => [name, preparationView(repoRoot, recipe, name)]))
+  return digest(names.map((name) => [name, preparationRunView(repoRoot, recipe, name)]))
 }
 
 /**

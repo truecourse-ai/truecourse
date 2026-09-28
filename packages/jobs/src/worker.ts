@@ -20,7 +20,7 @@ import { runWithTrace, type TraceContext } from '@truecourse/llm-api';
 import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
 import { log } from '@truecourse/core/lib/logger';
 import type { JobStepTracker } from './steps.js';
-import { executeJob, type JobDefinition, type JobPayload, type JobRuntime } from './harness.js';
+import { executeJob, JobCancelled, type JobDefinition, type JobPayload, type JobRuntime } from './harness.js';
 
 /**
  * One job type the worker can run: its definition, or — when the body must read
@@ -108,7 +108,7 @@ export function registerJob<M>(
 export async function cancelLocalJob(jobId: string, timeoutMs = 30_000): Promise<boolean> {
   const entry = localRuns.get(jobId);
   if (!entry) return false;
-  entry.controller.abort();
+  entry.controller.abort(new JobCancelled());
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, timeoutMs);

@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { resetKvCacheStore } from '@truecourse/llm';
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
 import {
   resetContextStore,
   setContextStore,
@@ -39,6 +39,9 @@ import {
 import { memorySpecStore } from '../helpers/memory-spec-store';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { outcome, stubDriver, type StubCall } from './spec-scan-session-stub';
+
+/** The document a universe-mode curate briefing is about. */
+const refOf = (briefing: string): string => /^REF: (.+)$/m.exec(briefing)?.[1] ?? '';
 
 const ORG = 'org_A';
 const REPO_SOURCE = 'repo-acme-widgets';
@@ -306,6 +309,111 @@ describe('the workspace Document scan', () => {
     expect(await loadWorkspaceSpecDoc(ORG, `context/${SITE_SOURCE}/payments.md`)).toContain(
       'A charge is created',
     );
+  });
+});
+
+describe('a pull request’s scan', () => {
+  const PR = {
+    repoFullName: 'acme/widgets',
+    number: 7,
+    headSha: 'head-7',
+    checkId: 'check_1',
+    scope: 'pr/acme/widgets#7',
+    sourceId: REPO_SOURCE,
+  };
+
+  it('stores the head’s corpus under the pull request’s scope and leaves the workspace’s own alone', async () => {
+    // With a cache, so what the workspace's scan judged answers the pull
+    // request's scan for free.
+    installMemoryKvCache();
+    await seedTwoSources();
+    await setStoredDecisions(covered([REPO_SOURCE, SITE_SOURCE]));
+    // The workspace's own scan first, so there is a corpus to leave alone.
+    await workspaceContextScanInProcess({ workspaceOrgId: ORG, driver: stubDriver(keepEverything).driver });
+    const { loadWorkspaceSpecDoc, listWorkspaceSpecVersions } = await import('@truecourse/core/lib/spec-store');
+    const { contextChangedAt } = await import('@truecourse/core/lib/context-store');
+    const before = {
+      corpus: await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: ORG }, 'corpus'),
+      decisions: await loadWorkspaceSpec<DecisionsFile>({ workspaceOrgId: ORG }, 'decisions'),
+      changedAt: await contextChangedAt(ORG),
+    };
+
+    const briefed: string[] = [];
+    const result = await workspaceContextScanInProcess({
+      workspaceOrgId: ORG,
+      driver: stubDriver((call) => {
+        if (call.kind === 'spec-scan.curate-doc') briefed.push(call.briefing);
+        return keepEverything(call);
+      }).driver,
+      pullRequest: {
+        ...PR,
+        documents: [
+          // auth.md rewritten at the head, users.md dropped, a new one added.
+          { docPath: 'docs/auth.md', body: '# Auth\nSessions now authenticate with a cookie.\n' },
+          { docPath: 'docs/roles.md', body: '# Roles\nAn admin can manage every user.\n' },
+        ],
+      },
+    });
+
+    // The universe is the head's documents for that source, the live ones for every other.
+    expect(result.corpus.docs.map((d) => d.ref).sort()).toEqual([
+      `context/${REPO_SOURCE}/docs/auth.md`,
+      `context/${REPO_SOURCE}/docs/roles.md`,
+      `context/${SITE_SOURCE}/payments.md`,
+    ]);
+    // Only the head's two documents cost a session: the site's page answers
+    // from the first scan's cache, whose key the pull request's scan shares.
+    expect(briefed.map(refOf).sort()).toEqual([
+      `context/${REPO_SOURCE}/docs/auth.md`,
+      `context/${REPO_SOURCE}/docs/roles.md`,
+    ]);
+    expect(briefed.some((b) => b.includes('authenticate with a cookie'))).toBe(true);
+
+    // Stored under the pull request's scope, naming the head, with the head's text.
+    const versions = await listWorkspaceSpecVersions({ workspaceOrgId: ORG, scope: PR.scope }, 'corpus');
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toMatchObject({ scope: PR.scope, sourceCommit: 'head-7' });
+    expect(await loadWorkspaceSpecDoc(ORG, `context/${REPO_SOURCE}/docs/auth.md`, { scope: PR.scope })).toContain(
+      'with a cookie',
+    );
+
+    // The workspace's own corpus, decisions and snapshot are byte-identical.
+    expect(await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: ORG }, 'corpus')).toEqual(before.corpus);
+    expect(await loadWorkspaceSpec<DecisionsFile>({ workspaceOrgId: ORG }, 'decisions')).toEqual(before.decisions);
+    expect(await loadWorkspaceSpecDoc(ORG, `context/${REPO_SOURCE}/docs/auth.md`)).toContain('bearer token');
+    expect(await contextChangedAt(ORG)).toBe(before.changedAt);
+
+    // Its run is the workspace's, and says which pull request it judged.
+    const runs = await listStoredSessionRuns(workspaceSessionsKey(ORG), 'spec-scan');
+    // Newest first: the pull request's scan, then the workspace's own.
+    expect(runs.map((r) => r.pullRequest)).toEqual([
+      { repoFullName: PR.repoFullName, number: 7, headSha: 'head-7', checkId: 'check_1' },
+      undefined,
+    ]);
+    expect(runs[0]?.gitRef).toBe('head-7');
+  });
+});
+
+describe('a pull request’s scan', () => {
+  it('refuses a source the workspace does not have, and stores nothing', async () => {
+    await seedTwoSources();
+    await setStoredDecisions(covered([REPO_SOURCE, SITE_SOURCE]));
+    await expect(
+      workspaceContextScanInProcess({
+        workspaceOrgId: ORG,
+        driver: stubDriver(keepEverything).driver,
+        pullRequest: {
+          repoFullName: 'acme/widgets',
+          number: 8,
+          headSha: 'head-8',
+          scope: 'pr/acme/widgets#8',
+          sourceId: 'repo-nobody',
+          documents: [{ docPath: 'docs/x.md', body: '# x\n' }],
+        },
+      }),
+    ).rejects.toThrow(/context source "repo-nobody"/);
+    const { listWorkspaceSpecVersions } = await import('@truecourse/core/lib/spec-store');
+    expect(await listWorkspaceSpecVersions({ workspaceOrgId: ORG, scope: 'pr/acme/widgets#8' }, 'corpus')).toEqual([]);
   });
 });
 

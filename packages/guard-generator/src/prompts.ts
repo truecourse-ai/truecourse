@@ -1541,6 +1541,12 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     'time; assert on it by writing `${unique}` in the expectation or by capturing the',
     "server's response. Identifiers the SERVER assigns (an auto-increment id) still use",
     '`capture` + `${var}` as before.',
+    '',
+    'LONG VALUES — never spell a long value out. To send a value of a given length (a',
+    'size or length limit), write `${repeat:<count>:<text>}`: the runner replaces it with',
+    '<text> repeated <count> times before the scenario runs. `"notes": "${repeat:1001:a}"`',
+    'is a 1,001-character string; `${repeat:16001:x}` is 16,001 characters. It works in',
+    'any string of the scenario and next to other text.',
   )
   if (ctx.areaTags.length > 0) lines.push(`Area context: ${ctx.areaTags.join(', ')}`)
   lines.push(

@@ -3,11 +3,12 @@ import {
   createStoredSessionRun,
   resumeStoredSessionRun,
   SessionRunNotFoundError,
+  type CreateSessionRunOptions,
   type SessionRunStore,
 } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
 import { isCreditsExhausted } from '@truecourse/core/lib/credits-store';
-import type { JobContext } from '@truecourse/jobs';
+import { wasCancelled, type JobContext } from '@truecourse/jobs';
 import { mirrorTracker, type OnboardingJobPayload } from '../jobs/tasks/onboarding.js';
 import type { StepTracker } from '@truecourse/core/progress';
 
@@ -38,8 +39,9 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
   steps: readonly { key: string; label: string }[],
   execute: (run: SessionRunStore, tracker: StepTracker) => Promise<T>,
   credits?: CreditsGate,
+  opts: { pullRequest?: CreateSessionRunOptions['pullRequest'] } = {},
 ): Promise<T> {
-  const run = await carryOn(ctx, command);
+  const run = await carryOn(ctx, command, opts.pullRequest);
   const tracker = mirrorTracker(ctx, [{ key: 'clone', label: 'Preparing repository' }, ...steps]);
   const untap = tracker.tap(progress => {
     if (progress.steps) run.setChecklist(progress.steps);
@@ -48,14 +50,14 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
     tracker.start('clone');
     const result = await execute(run, tracker);
     credits?.assertCredits();
-    run.finish(ctx.signal?.aborted ? 'interrupted' : run.record().error ? 'failed' : 'completed');
+    run.finish(ctx.signal?.aborted ? stopped(ctx.signal) : run.record().error ? 'failed' : 'completed');
     await run.flush?.();
     return result;
   } catch (thrown) {
     const error = reasonFor(thrown, credits);
     const paused = isCreditsExhausted(error);
     const message = error instanceof Error ? error.message : String(error);
-    run.finish(paused ? 'paused' : ctx.signal?.aborted ? 'interrupted' : 'failed', {
+    run.finish(paused ? 'paused' : ctx.signal?.aborted ? stopped(ctx.signal) : 'failed', {
       error: { message, ...(paused ? { kind: 'credits' } : {}) },
     });
     await run.flush?.();
@@ -67,6 +69,7 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
 async function carryOn<P extends OnboardingJobPayload>(
   ctx: JobContext<P>,
   command: SessionCommand,
+  pullRequest?: CreateSessionRunOptions['pullRequest'],
 ): Promise<SessionRunStore> {
   const repoKey = ctx.payload.repoFullName;
   const carryOnRunId = ctx.payload.carryOnRunId;
@@ -78,7 +81,11 @@ async function carryOn<P extends OnboardingJobPayload>(
       log.warn(`[jobs] ${repoKey} has no ${command} run ${carryOnRunId} to carry on — opening a new one`);
     }
   }
-  return createStoredSessionRun(repoKey, { command, gitRef: 'unknown' });
+  return createStoredSessionRun(repoKey, {
+    command,
+    gitRef: 'unknown',
+    ...(pullRequest ? { pullRequest } : {}),
+  });
 }
 
 /** An empty balance is what stopped the run, whatever the engine called it. */
@@ -90,4 +97,9 @@ function reasonFor(thrown: unknown, credits: CreditsGate | undefined): unknown {
   } catch (exhausted) {
     return exhausted;
   }
+}
+
+/** How a run whose signal was aborted ended: cancelled on purpose, or cut off by the process shutting down. */
+function stopped(signal: AbortSignal): 'cancelled' | 'interrupted' {
+  return wasCancelled(signal) ? 'cancelled' : 'interrupted';
 }

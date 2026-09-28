@@ -66,6 +66,8 @@ export function sessionRunDir(repoKey: string, command: SessionCommand, runId: s
 export interface CreateSessionRunOptions {
   command: SessionCommand;
   gitRef: string;
+  /** The pull request the run judges, when it does (see the record's field). */
+  pullRequest?: RunRecord['pullRequest'];
   now?: () => Date;
 }
 

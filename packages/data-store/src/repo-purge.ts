@@ -19,7 +19,7 @@
  * pools (`spec:ws:<org>`, `context:ws:<org>`) are never named here.
  */
 
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, like } from 'drizzle-orm';
 import {
   activityRuns,
   contextBindings,
@@ -30,10 +30,17 @@ import {
   guardDependencyOverlays,
   decisions,
   content,
+  pullRequests,
+  pullRequestChecks,
+  workspaceSpecSets,
   type Db,
 } from '@truecourse/db';
+import { pullRequestWorkspaceScopePrefix } from '@truecourse/shared';
 import { contentScope } from './content-store.js';
 import { touchContextWorkspace } from './context-store.js';
+
+/** A string as a LIKE pattern matching itself alone: `%`, `_` and `\` escaped. */
+const likeLiteral = (text: string): string => text.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
   // The workspaces whose Context this purge changed — stamped after the
@@ -54,6 +61,14 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
     await tx.delete(guardScenarioSets).where(eq(guardScenarioSets.repoKey, repoKey));
     await tx.delete(guardSetupSets).where(eq(guardSetupSets.repoKey, repoKey));
     await tx.delete(guardDependencyOverlays).where(eq(guardDependencyOverlays.repoKey, repoKey));
+    // Its pull requests and their checks, and the corpora its checks scanned
+    // into the workspace's series under the repository's pull request scopes.
+    // The guard tables above go by repo key, which covers every scope.
+    await tx.delete(pullRequestChecks).where(eq(pullRequestChecks.repoFullName, repoKey));
+    await tx.delete(pullRequests).where(eq(pullRequests.repoFullName, repoKey));
+    await tx
+      .delete(workspaceSpecSets)
+      .where(like(workspaceSpecSets.scope, `${likeLiteral(pullRequestWorkspaceScopePrefix(repoKey))}%`));
     // The decisions ledger: the repo's guard row (the spec decisions it reads
     // are the workspace's and survive a disconnect).
     await tx.delete(decisions).where(eq(decisions.scope, `guard:${repoKey}`));
