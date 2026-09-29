@@ -1,8 +1,10 @@
 /**
  * Provider-specific schema, cache, tool-call and reasoning settings.
- * The driver chooses this strategy once per provider. OpenAI-family tools
- * require strict-schema normalization; other providers keep optional fields
- * optional. Google validates the full JSON Schema sent by its SDK adapter.
+ * The driver chooses this strategy once per provider. OpenAI and Gemini are
+ * asked to enforce every tool schema (`strict`): OpenAI's strict mode needs
+ * every property required, so its schemas are normalized first, while Gemini
+ * validates the schema as authored. Anthropic, Bedrock and Copilot are sent
+ * the schema as authored, without `strict`.
  */
 
 import type { ModelMessage } from 'ai';
@@ -82,6 +84,7 @@ const ANTHROPIC: ProviderTuning = {
  */
 const OPENAI: ProviderTuning = {
   normalizeToolSchema: true,
+  strictTools: true,
   callOptions: (_modelId, cacheKey) => ({
     openai: { promptCacheKey: cacheKey, parallelToolCalls: false, store: false },
   }),
@@ -93,7 +96,6 @@ const OPENAI: ProviderTuning = {
  * WIRE names, not the camelCase the first-party openai provider translates.
  */
 const COPILOT: ProviderTuning = {
-  normalizeToolSchema: true,
   callOptions: (_modelId, cacheKey) => ({
     [COPILOT_PROVIDER_NAME]: { prompt_cache_key: cacheKey, parallel_tool_calls: false },
   }),

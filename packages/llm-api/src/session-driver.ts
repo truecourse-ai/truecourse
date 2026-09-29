@@ -930,7 +930,7 @@ function buildToolset(def: SessionDef, tuning: ProviderTuning): {
   const toolset: ToolSet = {};
   const widenedByTool = new Map<string, readonly SchemaPath[]>();
   const add = (name: string, description: string, schema: ZodTypeAny): void => {
-    const wire = wireSchema(schema, tuning);
+    const wire = wireSchema(schema, tuning, `tool \`${name}\``);
     toolset[name] = tool({
       description,
       inputSchema: jsonSchema(wire.schema as never),

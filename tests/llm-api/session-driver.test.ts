@@ -266,7 +266,7 @@ describe('api session driver', () => {
 
   it.each(['google', 'anthropic', 'bedrock', 'openai', 'copilot'] as const)(
     '%s sends its own optional-field contract and cleans only injected nulls', async (provider) => {
-      const normalized = provider === 'openai' || provider === 'copilot';
+      const normalized = provider === 'openai';
       const args = normalized ? { value: 'hi', filter: null, nullable: null } : { value: 'hi', nullable: null };
       const scripted = scriptedModel([
         { content: [call('optional', args)] },
@@ -286,7 +286,7 @@ describe('api session driver', () => {
       expect(await handle.done).toMatchObject({ kind: 'outcome' });
       const tool = scripted.calls[0].tools?.find((t: any) => t.name === 'optional') as any;
       expect(tool.inputSchema.required).toEqual(normalized ? ['value', 'filter', 'nullable'] : ['value', 'nullable']);
-      expect(tool.strict).toBe(provider === 'google' ? true : undefined);
+      expect(tool.strict).toBe(provider === 'google' || provider === 'openai' ? true : undefined);
       expect(execute.mock.calls[0][0]).toEqual({ value: 'hi', nullable: null });
       expect(events.find((e) => e.type === 'assistant-turn')).toMatchObject({
         toolCall: { args: { value: 'hi', nullable: null } },

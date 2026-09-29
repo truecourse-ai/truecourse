@@ -50,12 +50,9 @@ describe('wireSchema', () => {
     expect(wire.schema.$defs).toHaveProperty('s0');
   });
 
-  it('sends a schema the strict subset cannot express unnormalized', () => {
-    const wire = wireSchema(z.object({ env: z.record(z.string()) }), { normalizeToolSchema: true });
-
-    expect(wire.schema.properties).toEqual({
-      env: { type: 'object', additionalProperties: { type: 'string' } },
-    });
-    expect(wire.widened).toEqual([]);
+  it('refuses a schema strict mode cannot express, naming the subject and the path', () => {
+    expect(() => wireSchema(z.object({ env: z.record(z.string()) }), { normalizeToolSchema: true }, 'tool `run`')).toThrow(
+      /for tool `run`: properties\.env is a typed record/,
+    );
   });
 });

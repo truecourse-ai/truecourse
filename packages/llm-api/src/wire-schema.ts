@@ -5,7 +5,8 @@
  * injected nulls from the reply) and whether the tool is sent strict.
  *
  * The session driver sends exactly what this returns and holds no schema logic
- * of its own.
+ * of its own. A schema the provider's strict mode cannot express throws, naming
+ * `subject` and the schema path: it is never sent unenforced.
  */
 
 import { zodToJsonSchema } from 'zod-to-json-schema';
@@ -30,19 +31,11 @@ export interface WireSchema {
   strict: boolean;
 }
 
-export function wireSchema(schema: ZodTypeAny, capabilities: SchemaCapabilities): WireSchema {
+export function wireSchema(schema: ZodTypeAny, capabilities: SchemaCapabilities, subject?: string): WireSchema {
   const rawSchema = zodToJsonSchema(schema, { $refStrategy: 'none' });
-  let inputSchema: Record<string, unknown> = rawSchema;
-  let widened: readonly SchemaPath[] = [];
-  if (capabilities.normalizeToolSchema) {
-    try {
-      const strict = normalizeForStrictOutput(rawSchema);
-      inputSchema = strict.schema;
-      widened = strict.widened;
-    } catch {
-      /* inexpressible in the strict subset — send unnormalized */
-    }
-  }
+  const { schema: inputSchema, widened } = capabilities.normalizeToolSchema
+    ? normalizeForStrictOutput(rawSchema, subject)
+    : { schema: rawSchema, widened: [] };
   return {
     schema: compactSchema(inputSchema),
     widened,

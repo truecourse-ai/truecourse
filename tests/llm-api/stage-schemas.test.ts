@@ -15,6 +15,10 @@
  * subset every provider accepts: the one schema rule is that a tool or an
  * outcome must be expressible in OpenAI's strict mode. A schema the SDK
  * refuses to build a request from at all breaks the rule `sdk-refused`.
+ *
+ * Strictness is checked on the same bodies: OpenAI and Gemini are asked to
+ * enforce every tool, with OpenAI's schemas normalized to all-required, and
+ * Anthropic, Bedrock and Copilot are sent no `strict` at all.
  */
 
 import fs from 'node:fs'
@@ -32,6 +36,7 @@ import { createApiSessionDriver } from '../../packages/llm-api/src/session-drive
 import type { LlmProviderKind, ProviderConfig } from '../../packages/llm-api/src/types'
 import { createClaudeAgentSessionDriver } from '../../packages/llm-claude-agent/src/session-driver'
 import type { SdkModule, SdkQueryOptions } from '../../packages/llm-claude-agent/src/sdk-types'
+import { assertOpenAiStrictValid } from './strict-assert'
 
 const ROOT = path.resolve(__dirname, '../..')
 
@@ -373,6 +378,24 @@ describe('the schemas every provider is sent', () => {
     expect(ids.size).toBe(registeredToolSpecs().length + registeredSessionKinds().length)
     for (const via of [...Object.keys(PROVIDERS).map((p) => `api:${p}`)]) {
       expect(sent.filter((s) => s.via === via).length, via).toBe(ids.size)
+    }
+  })
+
+  it('ask OpenAI and Gemini to enforce every tool, and no other provider', () => {
+    // What the body carries, not what was passed: the OpenAI SDK writes
+    // `strict: false` for a tool given none, so only a literal `true` counts.
+    const strictness = sent
+      .filter((s) => s.via.startsWith('api:'))
+      .map(({ via, id, wire }) => `${via} ${id} ${'refused' in wire ? 'refused' : wire.strict === ABSENT ? 'absent' : String(wire.strict)}`)
+    const expected = (via: string) =>
+      via === 'api:openai' || via === 'api:google' ? 'true' : 'absent'
+    expect(strictness).toEqual(sent.filter((s) => s.via.startsWith('api:')).map(({ via, id }) => `${via} ${id} ${expected(via)}`))
+  })
+
+  it('send OpenAI every property required, optionals widened to null', () => {
+    for (const { id, wire } of sent.filter((s) => s.via === 'api:openai')) {
+      if ('refused' in wire) throw new Error(`${id}: ${wire.refused}`)
+      assertOpenAiStrictValid(wire.schema, id)
     }
   })
 

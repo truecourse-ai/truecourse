@@ -66,6 +66,10 @@ export function assertOpenAiStrictValid(schema: unknown, label = 'schema'): void
       else visit(node.items, under('items'));
     }
 
+    if (isPlainObject(node.$defs)) {
+      for (const [name, def] of Object.entries(node.$defs)) visit(def, under(`$defs.${name}`));
+    }
+
     for (const key of ['anyOf', 'oneOf'] as const) {
       const branches = node[key];
       if (Array.isArray(branches)) {
