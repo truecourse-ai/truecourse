@@ -26,7 +26,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { isCreditsProvider, LLM_PROVIDER_CHOICES } from '@truecourse/shared';
+import { isCreditsProvider, LLM_PROVIDER_CHOICES, LLM_PROVIDER_CREDENTIALS } from '@truecourse/shared';
 import type { LlmConfigUpdate } from '@truecourse/shared';
 import type { LlmApiConfig } from '@truecourse/core/services/llm/provider-config';
 import { log } from '@truecourse/core/lib/logger';
@@ -74,7 +74,7 @@ function buildCandidate(
     ...(input.baseURL ? { baseURL: input.baseURL } : {}),
     ...(input.headers ? { headers: input.headers } : {}),
   };
-  if (input.provider === 'bedrock') {
+  if (LLM_PROVIDER_CREDENTIALS[candidate.provider] === 'aws') {
     if (input.region) candidate.region = input.region;
     const accessKeyId = input.accessKeyId ?? (sameProvider ? stored?.accessKeyId : undefined);
     if (accessKeyId) candidate.accessKeyId = accessKeyId;
@@ -141,8 +141,8 @@ router.patch('/config', async (req: Request, res: Response) => {
     return;
   }
 
-  // Bedrock may use ambient IAM credentials; every other provider needs a key.
-  if (!credits && input.provider !== 'bedrock' && !candidate.apiKey) {
+  // AWS credentials may come from the ambient chain; an api-key provider needs its key.
+  if (!credits && LLM_PROVIDER_CREDENTIALS[candidate.provider] === 'api-key' && !candidate.apiKey) {
     res.status(400).json({ error: 'An API key is required for this provider.' });
     return;
   }

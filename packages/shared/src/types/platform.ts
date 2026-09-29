@@ -249,6 +249,24 @@ export const LLM_PROVIDER_KINDS = [
 export type LlmProviderKind = (typeof LLM_PROVIDER_KINDS)[number]
 
 /**
+ * How a provider authenticates. `api-key`: one key, required. `aws`: a
+ * region, an access key id, a secret access key and an optional session
+ * token, any of which may be omitted to fall through to the ambient AWS
+ * credential chain. A stored block keeps its one secret (the key, or the
+ * secret access key) in the same column either way.
+ */
+export type LlmProviderCredentials = 'api-key' | 'aws'
+
+/** Each provider's credential shape, read wherever a provider block is built or checked. */
+export const LLM_PROVIDER_CREDENTIALS: Record<LlmProviderKind, LlmProviderCredentials> = {
+  anthropic: 'api-key',
+  openai: 'api-key',
+  bedrock: 'aws',
+  copilot: 'api-key',
+  google: 'api-key',
+}
+
+/**
  * Running on TrueCourse's own key, against a granted credit balance. It is a
  * CHOICE on the Models page, never a provider block: the workspace stores no
  * key, no model and no endpoint for it, and the platform key it runs on is
