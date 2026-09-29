@@ -20,7 +20,7 @@
  * honest fragment is a result, not a failure.
  */
 
-import type { SessionBudget, SessionDef } from '@truecourse/agent-loop'
+import { defineSessionKind, type SessionBudget, type SessionDef } from '@truecourse/agent-loop'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import { CheckedDraftReferenceSchema, resolveCheckedDraft } from './checked-draft.js'
 import { screenIdentityGuidance } from './identity.js'
@@ -49,14 +49,18 @@ export const INTERFACE_AUTHOR_BUDGET: SessionBudget = {
 /** What a session is built over — exactly what its tools read. */
 export type AuthorSessionInput = AuthorToolsInput
 
+const INTERFACE_AUTHOR_SESSION = defineSessionKind({
+  kind: INTERFACE_AUTHOR_SESSION_KIND,
+  outcomeSchema: AuthoredFragmentSchema,
+  outcomeInputSchema: CheckedDraftReferenceSchema,
+})
+
 export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef<AuthoredFragment> {
   return {
-    kind: INTERFACE_AUTHOR_SESSION_KIND,
+    ...INTERFACE_AUTHOR_SESSION,
     display: { title: 'Web tasks' },
     systemPrompt: SYSTEM_PROMPT,
     tools: buildAuthorTools(input),
-    outcomeSchema: AuthoredFragmentSchema,
-    outcomeInputSchema: CheckedDraftReferenceSchema,
     resolveOutcome: resolveCheckedDraft,
     outcomeSchemaRepairs: 2,
     budget: INTERFACE_AUTHOR_BUDGET,

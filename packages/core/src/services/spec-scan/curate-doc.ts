@@ -18,7 +18,7 @@
  */
 
 import { z } from 'zod'
-import type { KnownDisplayBlock, SessionBudget, SessionDef } from '@truecourse/agent-loop'
+import { defineSessionKind, type KnownDisplayBlock, type SessionBudget, type SessionDef } from '@truecourse/agent-loop'
 import {
   DocSubjectSchema,
   SkipCategorySchema,
@@ -272,9 +272,14 @@ function presentDocVerdict(verdict: DocVerdict): KnownDisplayBlock[] {
   return [{ kind: 'facts', lines }]
 }
 
+const CURATE_DOC_SESSION = defineSessionKind({
+  kind: CURATE_DOC_SESSION_KIND,
+  outcomeSchema: DocVerdictSchema,
+})
+
 export function curateDocSessionDef(input: CurateDocSessionInput): SessionDef<DocVerdict> {
   return {
-    kind: CURATE_DOC_SESSION_KIND,
+    ...CURATE_DOC_SESSION,
     systemPrompt: CURATE_DOC_SYSTEM_PROMPT,
     tools: [
       readChunkTool(input.doc),
@@ -282,7 +287,6 @@ export function curateDocSessionDef(input: CurateDocSessionInput): SessionDef<Do
       corpusVocabTool(input.liveVocab),
       listDocsTool(input.universe),
     ],
-    outcomeSchema: DocVerdictSchema,
     budget: CURATE_DOC_BUDGET,
     display: {
       title: 'Document curation',

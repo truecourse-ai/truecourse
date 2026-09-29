@@ -19,7 +19,7 @@
  */
 
 import { z } from 'zod'
-import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
+import { defineToolSpec, type SessionTool } from '@truecourse/agent-loop'
 import { ANONYMOUS_PRINCIPAL, GuardWebKeySchema, GuardWebLocatorSchema } from '@truecourse/shared'
 import { boundTree, hasAddressSlot } from '@truecourse/guard-runner'
 import type {
@@ -117,36 +117,42 @@ export function principalNames(live: LiveScreens): string[] {
   return own ? [own, ...names.filter((name) => name !== own)] : names
 }
 
+const OBSERVE_SCREEN = defineToolSpec({
+  name: 'observe_screen',
+  description:
+    'Open an address of the RUNNING app in the signed-in browser and return its accessibility tree — every control with the role and accessible name a step target may use — and, for every control the tree shows with no name or only an icon glyph, its tag, attributes, icon, region and a candidate css selector with its match count. Fill every {param} slot with a real value first (the briefing lists the seeded fixtures). `activate` takes up to 5 actions in order BEFORE the tree is read — clicks, key presses, hovers — which is how a menu, a dialog or a tab panel is opened for reading, or a control shown only on hover revealed; never activate anything that submits, deletes or signs out.',
+  kind: 'observe-screen',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      path: z.string().min(1).max(2000).describe('The address to open, path and query, every slot filled: `/repos/42/settings`.'),
+      activate: z
+        .array(
+          z.union([
+            z.object({ press: GuardWebKeySchema, on: GuardWebLocatorSchema.optional() }).strict(),
+            z.object({ hover: GuardWebLocatorSchema }).strict(),
+            GuardWebLocatorSchema,
+          ]),
+        )
+        .max(MAX_ACTIVATIONS)
+        .optional()
+        .describe('What to do before reading, in order: a target to click (the same locator shape a step uses), `{"press": "<key>", "on": <locator>}` (on whatever has focus without `on`), or `{"hover": <locator>}`.'),
+      principal: z.string().min(1).optional().describe('Observe as this principal instead of the session\'s own.'),
+    })
+    .strict(),
+})
+
 /** The tool: open an address in the signed-in browser and read its tree. */
 export function observeScreenTool(live: LiveScreens): SessionTool {
   const names = principalNames(live)
-  return defineSessionTool({
-    name: 'observe_screen',
+  return OBSERVE_SCREEN.bind({
+    // Another principal is worth naming only when the run can observe as one.
     description:
-      'Open an address of the RUNNING app in the signed-in browser and return its accessibility tree — every control with the role and accessible name a step target may use — and, for every control the tree shows with no name or only an icon glyph, its tag, attributes, icon, region and a candidate css selector with its match count. Fill every {param} slot with a real value first (the briefing lists the seeded fixtures). `activate` takes up to 5 actions in order BEFORE the tree is read — clicks, key presses, hovers — which is how a menu, a dialog or a tab panel is opened for reading, or a control shown only on hover revealed; never activate anything that submits, deletes or signs out.' +
+      OBSERVE_SCREEN.description +
       (names.length > 1
         ? ` \`principal\` opens it as another principal instead of this session's (${names.map((name) => `\`${name}\``).join(', ')}; \`anonymous\` is signed out).`
         : ''),
-    kind: 'observe-screen',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        path: z.string().min(1).max(2000).describe('The address to open, path and query, every slot filled: `/repos/42/settings`.'),
-        activate: z
-          .array(
-            z.union([
-              z.object({ press: GuardWebKeySchema, on: GuardWebLocatorSchema.optional() }).strict(),
-              z.object({ hover: GuardWebLocatorSchema }).strict(),
-              GuardWebLocatorSchema,
-            ]),
-          )
-          .max(MAX_ACTIVATIONS)
-          .optional()
-          .describe('What to do before reading, in order: a target to click (the same locator shape a step uses), `{"press": "<key>", "on": <locator>}` (on whatever has focus without `on`), or `{"hover": <locator>}`.'),
-        principal: z.string().min(1).optional().describe('Observe as this principal instead of the session\'s own.'),
-      })
-      .strict(),
     async execute(args) {
       const observer = observerFor(live, args.principal)
       if (!observer) {

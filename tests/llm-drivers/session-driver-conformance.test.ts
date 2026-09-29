@@ -27,7 +27,7 @@ import {
   type SessionIndexEntry,
   type SessionPersistence,
 } from '../../packages/agent-loop/src/index';
-import { defineSessionTool } from '../../packages/agent-loop/src/index';
+import { defineToolSpec } from '../../packages/agent-loop/src/index';
 
 // ---------------------------------------------------------------------------
 // the abstract scenario a backend plays
@@ -216,13 +216,14 @@ function sdkFixture(): Fixture {
 
 const outcomeSchema = z.object({ verdict: z.string() });
 
-const probeTool = defineSessionTool({
+const probeTool = defineToolSpec({
   name: 'probe',
   description: 'probe a value',
   kind: 'probe',
   readOnly: true,
   destructive: false,
   inputSchema: z.object({ value: z.string() }),
+}).bind({
   async execute(args) {
     return { content: `probed:${args.value}` };
   },

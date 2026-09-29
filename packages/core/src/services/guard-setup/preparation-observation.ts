@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { SessionDef } from '@truecourse/agent-loop';
+import { defineSessionKind, type SessionDef } from '@truecourse/agent-loop';
 import { credentialServers, resolveApiServers, resolveWebSurface, observationBinding, observationConfiguration, observationSource, RecipePreparationBaselineCheckSchema, type Recipe, type PreparationQualification } from '@truecourse/guard-runner';
 import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js';
 
@@ -74,9 +74,14 @@ export function qualifyObservations(repoRoot: string, recipe: Recipe, review: Ob
   for (const c of review.candidates) if (c.decision !== 'instance' && approvals.has(observationBinding(c.check))) throw Error('Contradictory observation decisions.');
   return approvals;
 }
+const PREPARATION_OBSERVATION_SESSION = defineSessionKind({
+  kind: 'guard-setup.preparation-observations',
+  outcomeSchema: ObservationReviewSchema,
+});
+
 export function preparationObservationSession(repoRoot: string, recipe: Recipe): SessionDef<ObservationReview> {
   return {
-    kind: 'guard-setup.preparation-observations', display: { title: 'Preparation observation review' },
+    ...PREPARATION_OBSERVATION_SESSION, display: { title: 'Preparation observation review' },
     budget: { turns: 20, maxResumes: 0, tokenCeiling: 100000 },
     systemPrompt: `Review APPLICATION BASELINE OBSERVATIONS before any seed scripts are authored or executed. This is a read-only source qualification, not script authoring.
 Find supported GET JSON observations of instance-wide business counts/totals. Follow the handler into the actual query and authorization logic. Cite handler, query and authorization ranges. Test descriptions and route names alone do not establish scope. An authenticated endpoint can be global only if its principal is demonstrably allowed to observe all records; admin labels alone prove nothing.
@@ -86,7 +91,6 @@ Execution contract: ${JSON.stringify(observationExecutionContract(recipe))}
 Use only these resolved API server names, or omit server for the default/web surface. The recipe's api property is not a server named api. For unauthenticated routes omit credential entirely; never write null, none or an explanation as a credential name. For authenticated routes use a declared seed credential available on the selected server; private preparations must mint that credential themselves. Put authentication explanations in principalSemantics. Response paths use dotted fields such as totalCount or result.data.count, never /totalCount or $.totalCount. External services are dependencies only when an observation actually calls them; merely sharing a server does not require their accounts.
 Return instance only with affirmative source evidence for the full query/authorization chain and no scope counterevidence. Do not generate or run a preparation script.`,
     tools: [readFileTool(repoRoot), readFilesTool(repoRoot), searchTool(repoRoot)],
-    outcomeSchema: ObservationReviewSchema,
     outcomeSchemaRepairs: 2,
     validateOutcome(value) {
       try { qualifyObservations(repoRoot, recipe, value); } catch (error) { return error instanceof Error ? error.message : String(error); }

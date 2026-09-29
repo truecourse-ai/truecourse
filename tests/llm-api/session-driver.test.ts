@@ -36,7 +36,7 @@ import type {
   SessionRunInput,
 } from '../../packages/agent-loop/src/index';
 import {
-  defineSessionTool,
+  defineToolSpec,
   runAgentLoop,
   SessionToolArgsError,
 } from '../../packages/agent-loop/src/index';
@@ -181,13 +181,14 @@ const outcomeCall = (value: unknown, id = 'c-outcome'): StubContent =>
 
 const outcomeSchema = z.object({ verdict: z.string() });
 
-const probeTool = defineSessionTool({
+const probeTool = defineToolSpec({
   name: 'probe',
   description: 'probe a value',
   kind: 'probe',
   readOnly: true,
   destructive: false,
   inputSchema: z.object({ value: z.string() }),
+}).bind({
   async execute(args) {
     if (args.value === 'boom') throw new SessionToolArgsError('probe', 'value rejected');
     return { content: `probed:${args.value}` };
@@ -247,8 +248,9 @@ describe('api session driver', () => {
     ]);
     buildModelMock.mockReturnValue(scripted.model);
     const artifact = { draft: 'large durable draft evidence' };
-    const check = defineSessionTool({ name: 'check', description: 'check', kind: 'check', readOnly: true,
+    const check = defineToolSpec({ name: 'check', description: 'check', kind: 'check', readOnly: true,
       destructive: false, inputSchema: z.object({ value: z.string() }),
+    }).bind({
       execute: async () => ({ content: 'draft-1', artifact }),
     });
     const { handle, events } = runSession(createApiSessionDriver(cfg), {
@@ -272,9 +274,10 @@ describe('api session driver', () => {
       ]);
       buildModelMock.mockReturnValue(scripted.model);
       const execute = vi.fn(async (_args: unknown) => ({ content: 'ok' }));
-      const optional = defineSessionTool({
+      const optional = defineToolSpec({
         name: 'optional', description: 'Probe optional fields', kind: 'probe', readOnly: true, destructive: false,
         inputSchema: z.object({ value: z.string(), filter: z.string().min(1).optional(), nullable: z.string().nullable() }),
+      }).bind({
         execute,
       });
       const { handle, events } = runSession(createApiSessionDriver({ ...cfgNoFallback, provider }), {
@@ -483,13 +486,14 @@ describe('api session driver', () => {
     let release!: () => void;
     let entered!: () => void;
     const inTool = new Promise<void>((resolve) => { entered = resolve; });
-    const slow = defineSessionTool({
+    const slow = defineToolSpec({
       name: 'slow',
       description: 'takes its time',
       kind: 'probe',
       readOnly: true,
       destructive: false,
       inputSchema: z.object({ value: z.string() }),
+    }).bind({
       execute: () =>
         new Promise((resolve) => {
           release = () => resolve({ content: 'done' });

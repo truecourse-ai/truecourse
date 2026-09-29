@@ -33,7 +33,8 @@
 
 import { z } from 'zod'
 import {
-  defineSessionTool,
+  defineSessionKind,
+  defineToolSpec,
   type DisplayDispute,
   type KnownDisplayBlock,
   type SessionBudget,
@@ -408,19 +409,22 @@ export function validateOverlapFindings(
   return errors
 }
 
+const CHECK_FINDINGS = defineToolSpec({
+  name: 'check_findings',
+  description:
+    'Check a draft findings object against the run\'s anchor discipline — every pointer\'s heading must exist in its doc and every quote must be verbatim. Call it on your complete draft (even an empty one) before you produce the outcome.',
+  kind: 'check-overlap-findings',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: 'I double-checked my findings against the docs before writing them down',
+    many: 'I double-checked my findings against the docs, {n} passes',
+  },
+  inputSchema: OverlapOutcomeSchema,
+})
+
 function checkFindingsTool(briefed: ReadonlyMap<string, DocCandidate>): SessionTool {
-  return defineSessionTool({
-    name: 'check_findings',
-    description:
-      'Check a draft findings object against the run\'s anchor discipline — every pointer\'s heading must exist in its doc and every quote must be verbatim. Call it on your complete draft (even an empty one) before you produce the outcome.',
-    kind: 'check-overlap-findings',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: 'I double-checked my findings against the docs before writing them down',
-      many: 'I double-checked my findings against the docs, {n} passes',
-    },
-    inputSchema: OverlapOutcomeSchema,
+  return CHECK_FINDINGS.bind({
     async execute(args) {
       const errors = validateOverlapFindings(args, briefed)
       if (errors.length === 0) {
@@ -499,13 +503,17 @@ function presentOverlapOutcome(outcome: OverlapOutcome): KnownDisplayBlock[] {
   return [...outcome.overlaps.map(presentOverlap), { kind: 'facts', lines }]
 }
 
+const OVERLAP_SESSION = defineSessionKind({
+  kind: OVERLAP_SESSION_KIND,
+  outcomeSchema: OverlapOutcomeSchema,
+})
+
 export function overlapSessionDef(input: OverlapSessionInput): SessionDef<OverlapOutcome> {
   const briefed = new Map(input.item.docs.map((d) => [d.path, d]))
   return {
-    kind: OVERLAP_SESSION_KIND,
+    ...OVERLAP_SESSION,
     systemPrompt: OVERLAP_SESSION_SYSTEM_PROMPT,
     tools: [readSectionTool(input.universe), readDocChunkTool(input.universe), checkFindingsTool(briefed)],
-    outcomeSchema: OverlapOutcomeSchema,
     budget: OVERLAP_SESSION_BUDGET,
     display: {
       title: 'Overlap review',

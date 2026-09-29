@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { defineSessionTool, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
+import { defineSessionKind, defineToolSpec, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
 import type {
   GuardSetupCatalogSession,
   GuardSetupCatalogSessionInput,
@@ -345,12 +345,17 @@ function suppliedRegistration(
 // The session
 // ---------------------------------------------------------------------------
 
+const DEPENDENCY_CATALOG_SESSION = defineSessionKind({
+  kind: DEPENDENCY_CATALOG_SESSION_KIND,
+  outcomeSchema: CatalogDraftSchema,
+});
+
 export function dependencyCatalogSessionDef(
   input: GuardSetupCatalogSessionInput,
   existing: GuardDependenciesFile,
 ): SessionDef<CatalogDraft> {
   return {
-    kind: DEPENDENCY_CATALOG_SESSION_KIND,
+    ...DEPENDENCY_CATALOG_SESSION,
     display: {
       title: 'Dependency catalog',
       intro: 'I\'m classifying the starting state this program needs — what a test can create, what must be seeded, and what only a user can supply.',
@@ -362,7 +367,6 @@ export function dependencyCatalogSessionDef(
       runProgramTool(),
       checkCatalogTool(input, existing),
     ],
-    outcomeSchema: CatalogDraftSchema,
     budget: DEPENDENCY_CATALOG_BUDGET,
     outcomePrecondition: {
       tool: 'check_catalog',
@@ -486,20 +490,23 @@ function corpusAreaSummary(repoRoot: string): { area: string; docs: number }[] {
   }
 }
 
+const RUN_PROGRAM = defineToolSpec({
+  name: 'run_program',
+  description:
+    'Run one argv in a FRESH throwaway sandbox (isolated HOME, allowlist env, nothing persists between calls). Observing how a program fails without its dependencies is how you name them — a missing-key error names the key.',
+  kind: 'run-program',
+  readOnly: false,
+  destructive: false,
+  inputSchema: z
+    .object({
+      argv: z.array(z.string()).min(1),
+      env: z.record(z.string(), z.string()).optional(),
+    })
+    .strict(),
+});
+
 function runProgramTool(): SessionTool {
-  return defineSessionTool({
-    name: 'run_program',
-    description:
-      'Run one argv in a FRESH throwaway sandbox (isolated HOME, allowlist env, nothing persists between calls). Observing how a program fails without its dependencies is how you name them — a missing-key error names the key.',
-    kind: 'run-program',
-    readOnly: false,
-    destructive: false,
-    inputSchema: z
-      .object({
-        argv: z.array(z.string()).min(1),
-        env: z.record(z.string(), z.string()).optional(),
-      })
-      .strict(),
+  return RUN_PROGRAM.bind({
     async execute(args, toolCtx) {
       const sandbox = createWorkingSandbox();
       try {
@@ -526,18 +533,21 @@ function runProgramTool(): SessionTool {
   });
 }
 
+const CHECK_CATALOG = defineToolSpec({
+  name: 'check_catalog',
+  description:
+    'Check a catalog draft against every rule the fold enforces — kebab-case names, the condition grammar, and every detected service accounted for. Call it on your complete draft before you produce the outcome; a draft that checks clean is a draft that lands.',
+  kind: 'check-catalog',
+  readOnly: true,
+  destructive: false,
+  inputSchema: CatalogDraftSchema,
+});
+
 function checkCatalogTool(
   input: GuardSetupCatalogSessionInput,
   existing: GuardDependenciesFile,
 ): SessionTool {
-  return defineSessionTool({
-    name: 'check_catalog',
-    description:
-      'Check a catalog draft against every rule the fold enforces — kebab-case names, the condition grammar, and every detected service accounted for. Call it on your complete draft before you produce the outcome; a draft that checks clean is a draft that lands.',
-    kind: 'check-catalog',
-    readOnly: true,
-    destructive: false,
-    inputSchema: CatalogDraftSchema,
+  return CHECK_CATALOG.bind({
     async execute(args) {
       const complaints = validateCatalogDraft(args, input, existing);
       if (complaints.length === 0) {

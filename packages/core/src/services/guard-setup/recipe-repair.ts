@@ -39,7 +39,7 @@
  */
 
 import { z } from 'zod';
-import { defineSessionTool, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
+import { defineSessionKind, defineToolSpec, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
 import {
   RECIPE_CACHE_NAME,
   NEEDS_REPAIR_FIELDS,
@@ -104,17 +104,21 @@ export interface RecipeRepairSessionInput {
   existing?: { recipe: Recipe; scope: RecipeRepairScope };
 }
 
+const RECIPE_REPAIR_SESSION = defineSessionKind({
+  kind: RECIPE_REPAIR_SESSION_KIND,
+  outcomeSchema: RecipeProposalSchema,
+});
+
 export function recipeRepairSessionDef(input: RecipeRepairSessionInput): SessionDef<RecipeProposal> {
   const standing = input.existing;
   return {
-    kind: RECIPE_REPAIR_SESSION_KIND,
+    ...RECIPE_REPAIR_SESSION,
     display: {
       title: 'Recipe repair',
       intro: 'I\'m repairing the recipe proposal the engine rejected, verifying each fix by really installing, building and booting it.',
     },
     systemPrompt: SYSTEM_PROMPT,
     tools: buildRepairTools(input),
-    outcomeSchema: RecipeProposalSchema,
     // The scope, enforced where the session can still act on it. The fold runs
     // the identical check on whatever comes back, so a session that never
     // complies costs a turn here and a refusal there, never a rewritten recipe.
@@ -279,22 +283,25 @@ function buildRepairTools(input: RecipeRepairSessionInput): SessionTool[] {
   ];
 }
 
+const SANDBOX_EXEC = defineToolSpec({
+  name: 'sandbox_exec',
+  description:
+    'Run one argv in YOUR working sandbox (no shell — a compound command needs `sandbox_shell`). The sandbox STARTS EMPTY — a scratch directory with an isolated HOME, NOT the repository checkout; repo files are only reachable through `read_file`/`search_repo`. It persists across your calls: what one call installs or builds, the next call sees. cwd is sandbox-relative.',
+  kind: 'sandbox-exec',
+  readOnly: false,
+  destructive: false,
+  inputSchema: z
+    .object({
+      argv: z.array(z.string()).min(1),
+      cwd: z.string().optional(),
+      stdin: z.string().optional(),
+      timeoutMs: z.number().int().positive().max(120_000).optional(),
+    })
+    .strict(),
+});
+
 function sandboxExecTool(sandbox: WorkingSandbox): SessionTool {
-  return defineSessionTool({
-    name: 'sandbox_exec',
-    description:
-      'Run one argv in YOUR working sandbox (no shell — a compound command needs `sandbox_shell`). The sandbox STARTS EMPTY — a scratch directory with an isolated HOME, NOT the repository checkout; repo files are only reachable through `read_file`/`search_repo`. It persists across your calls: what one call installs or builds, the next call sees. cwd is sandbox-relative.',
-    kind: 'sandbox-exec',
-    readOnly: false,
-    destructive: false,
-    inputSchema: z
-      .object({
-        argv: z.array(z.string()).min(1),
-        cwd: z.string().optional(),
-        stdin: z.string().optional(),
-        timeoutMs: z.number().int().positive().max(120_000).optional(),
-      })
-      .strict(),
+  return SANDBOX_EXEC.bind({
     async execute(args, toolCtx) {
       try {
         const capture = await sandbox.exec(args.argv, {
@@ -314,20 +321,23 @@ function sandboxExecTool(sandbox: WorkingSandbox): SessionTool {
   });
 }
 
+const SANDBOX_SHELL = defineToolSpec({
+  name: 'sandbox_shell',
+  description:
+    'Run one shell command in YOUR working sandbox (install/build class: combined output, 600s default timeout). Same persistent, STARTS-EMPTY sandbox as `sandbox_exec` — not the repository checkout.',
+  kind: 'sandbox-shell',
+  readOnly: false,
+  destructive: false,
+  inputSchema: z
+    .object({
+      command: z.string().min(1),
+      timeoutMs: z.number().int().positive().max(600_000).optional(),
+    })
+    .strict(),
+});
+
 function sandboxShellTool(sandbox: WorkingSandbox): SessionTool {
-  return defineSessionTool({
-    name: 'sandbox_shell',
-    description:
-      'Run one shell command in YOUR working sandbox (install/build class: combined output, 600s default timeout). Same persistent, STARTS-EMPTY sandbox as `sandbox_exec` — not the repository checkout.',
-    kind: 'sandbox-shell',
-    readOnly: false,
-    destructive: false,
-    inputSchema: z
-      .object({
-        command: z.string().min(1),
-        timeoutMs: z.number().int().positive().max(600_000).optional(),
-      })
-      .strict(),
+  return SANDBOX_SHELL.bind({
     async execute(args, toolCtx) {
       try {
         const result = await sandbox.shell(args.command, {
@@ -348,19 +358,22 @@ function sandboxShellTool(sandbox: WorkingSandbox): SessionTool {
   });
 }
 
+const CHECK_RECIPE = defineToolSpec({
+  name: 'check_recipe',
+  description:
+    'Statically check a recipe proposal — the schema (enforced on the arguments) plus the engine\'s own refusal rules (shell operators in an argv, dev/watch serve commands, inline-eval stand-ins, an entry-only recipe for a workspace that ships HTTP services). No execution; free. Run `verify_recipe` for the real proof.',
+  kind: 'check-recipe',
+  readOnly: true,
+  destructive: false,
+  inputSchema: RecipeProposalSchema,
+});
+
 function checkRecipeTool(
   repoRoot: string,
   apps?: readonly RecipeAppInventoryEntry[],
   composeProject?: string,
 ): SessionTool {
-  return defineSessionTool({
-    name: 'check_recipe',
-    description:
-      'Statically check a recipe proposal — the schema (enforced on the arguments) plus the engine\'s own refusal rules (shell operators in an argv, dev/watch serve commands, inline-eval stand-ins, an entry-only recipe for a workspace that ships HTTP services). No execution; free. Run `verify_recipe` for the real proof.',
-    kind: 'check-recipe',
-    readOnly: true,
-    destructive: false,
-    inputSchema: RecipeProposalSchema,
+  return CHECK_RECIPE.bind({
     async execute(args) {
       const complaints = staticProposalComplaints(args, apps, repoRoot, composeProject);
       if (complaints.length === 0) {
@@ -374,19 +387,22 @@ function checkRecipeTool(
   });
 }
 
+const VERIFY_RECIPE = defineToolSpec({
+  name: 'verify_recipe',
+  description:
+    'Run the REAL engine verification on a proposal: install → build → entry probe → services → server boot, exactly as the fold will re-run it. EXPENSIVE (minutes) — use it as your done-check on the complete proposal, not as a probe.',
+  kind: 'verify-recipe',
+  readOnly: false,
+  destructive: false,
+  inputSchema: RecipeProposalSchema,
+});
+
 function verifyRecipeTool(
   repoRoot: string,
   apps?: readonly RecipeAppInventoryEntry[],
   composeProject?: string,
 ): SessionTool {
-  return defineSessionTool({
-    name: 'verify_recipe',
-    description:
-      'Run the REAL engine verification on a proposal: install → build → entry probe → services → server boot, exactly as the fold will re-run it. EXPENSIVE (minutes) — use it as your done-check on the complete proposal, not as a probe.',
-    kind: 'verify-recipe',
-    readOnly: false,
-    destructive: false,
-    inputSchema: RecipeProposalSchema,
+  return VERIFY_RECIPE.bind({
     async execute(args) {
       try {
         const verdict = await verifyProposal(repoRoot, args, {

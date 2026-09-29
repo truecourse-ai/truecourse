@@ -14,7 +14,8 @@
 
 import { z } from 'zod'
 import {
-  defineSessionTool,
+  defineSessionKind,
+  defineToolSpec,
   type KnownDisplayBlock,
   type SessionBudget,
   type SessionDef,
@@ -482,24 +483,27 @@ function emptyDraftPushback(vocab: AreaVocabView): string {
   )
 }
 
+const CHECK_SETTLEMENT = defineToolSpec({
+  name: 'check_settlement',
+  description:
+    'Check a draft settlement against every rule the run enforces — product-verdict completeness, merge targets, subdivision assignment completeness. Call it on your complete draft before you produce the outcome.',
+  kind: 'check-settlement',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: 'I checked my settlement against the corpus before committing it',
+    many: 'I checked my settlement {n} times before committing it',
+  },
+  inputSchema: AreaSettlementSchema,
+})
+
 function checkSettlementTool(vocab: AreaVocabView, prior: readonly string[]): SessionTool {
   // One refusal cycle, mirroring the outcomePrecondition below: the FIRST
   // no-op draft on a fragmented vocabulary is pushed back with the numbers;
   // an identical resubmit passes, so a deliberate "nothing to merge" still
   // finishes inside budget.
   let pushedBack = false
-  return defineSessionTool({
-    name: 'check_settlement',
-    description:
-      'Check a draft settlement against every rule the run enforces — product-verdict completeness, merge targets, subdivision assignment completeness. Call it on your complete draft before you produce the outcome.',
-    kind: 'check-settlement',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: 'I checked my settlement against the corpus before committing it',
-      many: 'I checked my settlement {n} times before committing it',
-    },
-    inputSchema: AreaSettlementSchema,
+  return CHECK_SETTLEMENT.bind({
     async execute(args) {
       const errors = validateSettlement(args, vocab, prior)
       if (errors.length === 0) {
@@ -583,9 +587,14 @@ function presentSettlement(settlement: AreaSettlement): KnownDisplayBlock[] {
   return [{ kind: 'facts', lines }]
 }
 
+const SETTLE_AREAS_SESSION = defineSessionKind({
+  kind: SETTLE_AREAS_SESSION_KIND,
+  outcomeSchema: AreaSettlementSchema,
+})
+
 export function settleAreasSessionDef(input: SettleAreasSessionInput): SessionDef<AreaSettlement> {
   return {
-    kind: SETTLE_AREAS_SESSION_KIND,
+    ...SETTLE_AREAS_SESSION,
     systemPrompt: SETTLE_AREAS_SYSTEM_PROMPT,
     tools: [
       docsWithLabelTool(input.universe, () => labelIndex(input.vocab)),
@@ -595,7 +604,6 @@ export function settleAreasSessionDef(input: SettleAreasSessionInput): SessionDe
       }),
       checkSettlementTool(input.vocab, input.prior ?? []),
     ],
-    outcomeSchema: AreaSettlementSchema,
     budget: SETTLE_AREAS_BUDGET,
     display: {
       title: 'Area settling',

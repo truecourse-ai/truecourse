@@ -22,7 +22,7 @@
 
 import { createHash } from 'node:crypto'
 import { LEGACY_EXTRACT_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
-import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
+import { defineSessionKind, defineToolSpec, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
 import {
   verificationBoundaryProblems,
   resolveGuardPrerequisiteNormalized,
@@ -425,15 +425,18 @@ function checkedExtractionSchema(doc: GuardDoc, prerequisiteTargets: readonly Gu
   })
 }
 
+const CHECK_CLAIMS = defineToolSpec({
+  name: 'check_claims',
+  description:
+    'Check a draft extraction against the live section index — every anchor is snapped exactly as the engine will snap it — and, when the briefing carried the last extraction, against it: every prior claim of a section you extract must be kept, replaced or retired. Call it on your complete draft (claims AND untestable notes) before you produce the outcome.',
+  kind: 'check-extract-claims',
+  readOnly: true,
+  destructive: false,
+  inputSchema: ExtractOutcomeSchema,
+})
+
 function checkClaimsTool(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[], prior?: ExtractPrior): SessionTool {
-  return defineSessionTool({
-    name: 'check_claims',
-    description:
-      'Check a draft extraction against the live section index — every anchor is snapped exactly as the engine will snap it — and, when the briefing carried the last extraction, against it: every prior claim of a section you extract must be kept, replaced or retired. Call it on your complete draft (claims AND untestable notes) before you produce the outcome.',
-    kind: 'check-extract-claims',
-    readOnly: true,
-    destructive: false,
-    inputSchema: ExtractOutcomeSchema,
+  return CHECK_CLAIMS.bind({
     async execute(args) {
       const problems = validateExtractDraft(args, doc, prerequisiteTargets, prior)
       for (const c of args.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
@@ -459,9 +462,14 @@ export interface ExtractSessionInput {
   prior?: ExtractPrior
 }
 
+const EXTRACT_SESSION = defineSessionKind({
+  kind: EXTRACT_SESSION_KIND,
+  outcomeSchema: ExtractOutcomeSchema,
+})
+
 export function extractSessionDef(input: ExtractSessionInput): SessionDef<ExtractOutcome> {
   return {
-    kind: EXTRACT_SESSION_KIND,
+    ...EXTRACT_SESSION,
     display: { title: 'Claim extraction' },
     systemPrompt: EXTRACT_SESSION_SYSTEM_PROMPT,
     tools: [
@@ -470,6 +478,7 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
       readReferencedDocTool(input.universe),
       checkClaimsTool(input.doc, input.prerequisiteTargets, input.prior),
     ],
+    // The registered schema, checked against this doc and merged with its prior.
     outcomeSchema: checkedExtractionSchema(input.doc, input.prerequisiteTargets, input.prior),
     // A revised draft can still violate a verification boundary. Return the
     // terminal validation errors to the session before losing the whole doc.

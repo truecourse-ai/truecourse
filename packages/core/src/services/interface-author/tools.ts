@@ -36,7 +36,7 @@
  */
 
 import { z } from 'zod'
-import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
+import { defineToolSpec, type SessionTool } from '@truecourse/agent-loop'
 import {
   ANONYMOUS_PRINCIPAL,
   interfaceStepLocator,
@@ -98,30 +98,36 @@ export function buildAuthorTools(input: AuthorToolsInput): SessionTool[] {
   ]
 }
 
+const SEARCH_INTERFACES = defineToolSpec({
+  name: 'search_interfaces', kind: 'read-interface-catalog',
+  description: 'Search current web catalog metadata, including tasks owned by or navigating to a resource. Page with nextCursor. Fetch exact steps with get_interfaces. Unrelated catalog changes do not invalidate pages; restart only if the requested results change.',
+  readOnly: true, destructive: false,
+  inputSchema: z.object({ query: z.string().max(500), purpose: z.enum(['task', 'control']).optional(), resource: z.string().min(1).max(200).optional(), limit: z.number().int().min(1).max(20).optional(), cursor: z.string().max(1000).optional() }).strict(),
+})
+
+const GET_INTERFACES = defineToolSpec({
+  name: 'get_interfaces', kind: 'read-interface-catalog',
+  description: 'Read 1–5 exact web action definitions as compact objects. Resources/readables are optional: includeResources:true. Items carry ID, path and value; oversized objects use exact field continuations. Keep IDs and projection unchanged when paging with nextCursor. Never treat incomplete definitions as complete.',
+  readOnly: true, destructive: false,
+  inputSchema: z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(5), cursor: z.string().max(1000).optional(), includeResources: z.boolean().optional() }).strict(),
+})
+
+const catalogEntriesSpec = (kind: 'resources' | 'states') => defineToolSpec({
+  name: `get_${kind}`, kind: 'read-interface-catalog',
+  description: `Read 1–5 exact catalog ${kind} by ID. Use this for registry definitions, never source search on hidden catalog files. Continue incomplete results with the same IDs and nextCursor.`,
+  readOnly: true, destructive: false,
+  inputSchema: z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(5), cursor: z.string().max(1000).optional() }).strict(),
+})
+const GET_RESOURCES = catalogEntriesSpec('resources')
+const GET_STATES = catalogEntriesSpec('states')
+
 function catalogTools(input: AuthorToolsInput): SessionTool[] {
   const catalog = liveAuthorCatalog(input)
   return [
-    defineSessionTool({
-      name: 'search_interfaces', kind: 'read-interface-catalog',
-      description: 'Search current web catalog metadata, including tasks owned by or navigating to a resource. Page with nextCursor. Fetch exact steps with get_interfaces. Unrelated catalog changes do not invalidate pages; restart only if the requested results change.',
-      readOnly: true, destructive: false,
-      inputSchema: z.object({ query: z.string().max(500), purpose: z.enum(['task', 'control']).optional(), resource: z.string().min(1).max(200).optional(), limit: z.number().int().min(1).max(20).optional(), cursor: z.string().max(1000).optional() }).strict(),
-      async execute(args) { return catalog().search(args) },
-    }),
-    defineSessionTool({
-      name: 'get_interfaces', kind: 'read-interface-catalog',
-      description: 'Read 1–5 exact web action definitions as compact objects. Resources/readables are optional: includeResources:true. Items carry ID, path and value; oversized objects use exact field continuations. Keep IDs and projection unchanged when paging with nextCursor. Never treat incomplete definitions as complete.',
-      readOnly: true, destructive: false,
-      inputSchema: z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(5), cursor: z.string().max(1000).optional(), includeResources: z.boolean().optional() }).strict(),
-      async execute(args) { return catalog().get({ ...args, includeResources: args.includeResources ?? false }) },
-    }),
-    ...(['resources', 'states'] as const).map(kind => defineSessionTool({
-      name: `get_${kind}`, kind: 'read-interface-catalog',
-      description: `Read 1–5 exact catalog ${kind} by ID. Use this for registry definitions, never source search on hidden catalog files. Continue incomplete results with the same IDs and nextCursor.`,
-      readOnly: true, destructive: false,
-      inputSchema: z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(5), cursor: z.string().max(1000).optional() }).strict(),
-      async execute(args) { return kind === 'resources' ? catalog().getResources(args) : catalog().getStates(args) },
-    })),
+    SEARCH_INTERFACES.bind({ async execute(args) { return catalog().search(args) } }),
+    GET_INTERFACES.bind({ async execute(args) { return catalog().get({ ...args, includeResources: args.includeResources ?? false }) } }),
+    GET_RESOURCES.bind({ async execute(args) { return catalog().getResources(args) } }),
+    GET_STATES.bind({ async execute(args) { return catalog().getStates(args) } }),
   ]
 }
 
@@ -129,20 +135,23 @@ function catalogTools(input: AuthorToolsInput): SessionTool[] {
 // the catalog the draft extends
 // ---------------------------------------------------------------------------
 
+const LIST_INTERFACES = defineToolSpec({
+  name: 'list_interfaces',
+  description:
+    'List the interfaces already in the catalog. Use `surface: "api"` to find the ids `apiEffects` names, and `surface: "web"` to see which tasks are already authored (never author one twice).',
+  kind: 'list-interfaces',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      surface: z.enum(['web', 'api', 'cli']).describe('Which surface to list.'),
+      contains: z.string().min(1).optional().describe('Keep only entries whose id or title contains this text.'),
+    })
+    .strict(),
+})
+
 function interfacesTool(input: AuthorToolsInput): SessionTool {
-  return defineSessionTool({
-    name: 'list_interfaces',
-    description:
-      'List the interfaces already in the catalog. Use `surface: "api"` to find the ids `apiEffects` names, and `surface: "web"` to see which tasks are already authored (never author one twice).',
-    kind: 'list-interfaces',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        surface: z.enum(['web', 'api', 'cli']).describe('Which surface to list.'),
-        contains: z.string().min(1).optional().describe('Keep only entries whose id or title contains this text.'),
-      })
-      .strict(),
+  return LIST_INTERFACES.bind({
     async execute(args) {
       const all = [
         ...(input.derived?.interfaces ?? []).map((i) => ({ i, origin: 'derived' })),
@@ -178,6 +187,16 @@ function interfacesTool(input: AuthorToolsInput): SessionTool {
   })
 }
 
+const CHECK_DRAFT = defineToolSpec({
+  name: 'check_draft',
+  description:
+    'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. A step whose locator uses `css` or `pick` is also PROVEN on the running app: its address is opened, the task\'s clicks before it are replayed (only when every earlier step is a click and the task has no endState), and it must resolve to exactly one visible element (a `pick` position within the matches). When the task cannot be replayed, pass `proof: {"<task id>": {"steps": [{"activate": <locator>} | {"fill": <locator>, "value": "<text>"} | {"select": <locator>, "option": "<label>"}, …]}}` — never a control that submits, deletes, cancels or signs out; when the entry has a {slot}, add `"path": "<the entry with every slot filled>"`. A readable whose locator uses `css` is proven the same way at this place\'s address, after the actions a `proof` entry keyed by the place\'s id lists (the way into a dialog). What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
+  kind: 'check-draft',
+  readOnly: true,
+  destructive: false,
+  inputSchema: AuthoredFragmentSchema.extend({ proof: LiveProofReachSchema.optional() }),
+})
+
 /**
  * THE ACCEPTED DRAFT IS SESSION STATE. A tool instance belongs to one session,
  * so the draft it is building can live in this closure — and that is what turns
@@ -210,14 +229,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
     reachingByPath.set(path, known)
     return known
   }
-  return defineSessionTool({
-    name: 'check_draft',
-    description:
-      'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. A step whose locator uses `css` or `pick` is also PROVEN on the running app: its address is opened, the task\'s clicks before it are replayed (only when every earlier step is a click and the task has no endState), and it must resolve to exactly one visible element (a `pick` position within the matches). When the task cannot be replayed, pass `proof: {"<task id>": {"steps": [{"activate": <locator>} | {"fill": <locator>, "value": "<text>"} | {"select": <locator>, "option": "<label>"}, …]}}` — never a control that submits, deletes, cancels or signs out; when the entry has a {slot}, add `"path": "<the entry with every slot filled>"`. A readable whose locator uses `css` is proven the same way at this place\'s address, after the actions a `proof` entry keyed by the place\'s id lists (the way into a dialog). What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
-    kind: 'check-draft',
-    readOnly: true,
-    destructive: false,
-    inputSchema: AuthoredFragmentSchema.extend({ proof: LiveProofReachSchema.optional() }),
+  return CHECK_DRAFT.bind({
     async execute({ proof, ...sent }) {
       const piece = withObservedPrincipal(withoutProvenWords(sent), input.live)
       const unknownPrincipals = unknownPrincipalProblems(piece.interfaces, input)

@@ -59,7 +59,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { z } from 'zod';
 import {
-  defineSessionTool,
+  defineSessionKind,
+  defineToolSpec,
   type SessionDef,
   type SessionEvent,
   type SessionTool,
@@ -481,16 +482,20 @@ interface SeedSessionWorld {
   signal?: AbortSignal;
 }
 
+const SEED_SESSION = defineSessionKind({
+  kind: SEED_SESSION_KIND,
+  outcomeSchema: SeedSessionOutcomeSchema,
+});
+
 export function seedSessionDef(world: SeedSessionWorld): SessionDef<SeedSessionOutcome> {
   return {
-    kind: SEED_SESSION_KIND,
+    ...SEED_SESSION,
     display: {
       title: 'Seed',
       intro: 'I\'m authoring the seed script — the rows and the principals the tests reference — and proving each draft by running it against the live services.',
     },
     systemPrompt: SYSTEM_PROMPT,
     tools: buildSeedTools(world),
-    outcomeSchema: SeedSessionOutcomeSchema,
     budget: SEED_SESSION_BUDGET,
     // Prove-by-execution, structurally: an outcome produced before the draft
     // ever RAN is an unproven script the fold will most likely refuse minutes
@@ -1179,16 +1184,23 @@ async function bootAndProbe(
   return { ok: true, lines };
 }
 
+/** `run_seed_draft`'s description, naming the path the session's command must run. */
+const runSeedDraftDescription = (targetPath: string): string =>
+  `Execute a seed DRAFT against the live services: the script is written to your scratch directory (never the repository), your command is run from the repository root with GUARD_SEED_OUT and the server env set, and the manifest it writes is validated against the \`provides\` you pass in the SAME call — exactly the validation the fold runs. The command must name the target path \`${targetPath}\`; the scratch copy is substituted for it. Returns the verdict and the (redacted) output.`;
+
+const RUN_SEED_DRAFT = defineToolSpec({
+  name: 'run_seed_draft',
+  description: runSeedDraftDescription('<the seed script path>'),
+  kind: 'run-seed-draft',
+  readOnly: false,
+  destructive: false,
+  inputSchema: RunSeedDraftInputSchema,
+});
+
 function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
   let drafts = 0;
-  return defineSessionTool({
-    name: 'run_seed_draft',
-    description:
-      `Execute a seed DRAFT against the live services: the script is written to your scratch directory (never the repository), your command is run from the repository root with GUARD_SEED_OUT and the server env set, and the manifest it writes is validated against the \`provides\` you pass in the SAME call — exactly the validation the fold runs. The command must name the target path \`${world.targetPath}\`; the scratch copy is substituted for it. Returns the verdict and the (redacted) output.`,
-    kind: 'run-seed-draft',
-    readOnly: false,
-    destructive: false,
-    inputSchema: RunSeedDraftInputSchema,
+  return RUN_SEED_DRAFT.bind({
+    description: runSeedDraftDescription(world.targetPath),
     async execute(args, toolCtx) {
       if (!args.command.includes(world.targetPath)) {
         return {
@@ -1289,15 +1301,18 @@ function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
 
 const DbQueryInputSchema = z.object({ sql: z.string().min(1) }).strict();
 
+const DB_QUERY = defineToolSpec({
+  name: 'db_query',
+  description:
+    'Run ONE read-only SQL statement (SELECT/WITH only) against the session\'s live database — introspection, not mutation: verify what a draft actually wrote, read an enum\'s real casing, count rows. Mutating statements are refused; state changes go through your seed script, where they are reviewable.',
+  kind: 'db-query',
+  readOnly: true,
+  destructive: false,
+  inputSchema: DbQueryInputSchema,
+});
+
 function dbQueryTool(world: SeedSessionWorld): SessionTool {
-  return defineSessionTool({
-    name: 'db_query',
-    description:
-      'Run ONE read-only SQL statement (SELECT/WITH only) against the session\'s live database — introspection, not mutation: verify what a draft actually wrote, read an enum\'s real casing, count rows. Mutating statements are refused; state changes go through your seed script, where they are reviewable.',
-    kind: 'db-query',
-    readOnly: true,
-    destructive: false,
-    inputSchema: DbQueryInputSchema,
+  return DB_QUERY.bind({
     async execute(args, toolCtx) {
       const head = args.sql.trim().replace(/^\(+/, '').split(/\s+/, 1)[0]?.toUpperCase() ?? '';
       if (head !== 'SELECT' && head !== 'WITH') {
@@ -1380,15 +1395,18 @@ function connectionUrl(world: SeedSessionWorld): string | null {
   return null;
 }
 
+const CHECK_PROVIDES = defineToolSpec({
+  name: 'check_provides',
+  description:
+    'Statically check a `provides` declaration — the shape (enforced on the arguments) plus the credential-shape warnings the run-time surfaces would otherwise raise as silent 401s. Free; `run_seed_draft` is the real proof.',
+  kind: 'check-provides',
+  readOnly: true,
+  destructive: false,
+  inputSchema: SeedProvidesProposalSchema,
+});
+
 function checkProvidesTool(world: SeedSessionWorld): SessionTool {
-  return defineSessionTool({
-    name: 'check_provides',
-    description:
-      'Statically check a `provides` declaration — the shape (enforced on the arguments) plus the credential-shape warnings the run-time surfaces would otherwise raise as silent 401s. Free; `run_seed_draft` is the real proof.',
-    kind: 'check-provides',
-    readOnly: true,
-    destructive: false,
-    inputSchema: SeedProvidesProposalSchema,
+  return CHECK_PROVIDES.bind({
     async execute(args) {
       const warnings = providesWarnings(args, world.input);
       if (warnings.length === 0) {

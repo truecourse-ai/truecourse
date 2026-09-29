@@ -42,10 +42,15 @@ import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm';
 import type { SessionDriver, SessionPersistence } from '@truecourse/agent-loop';
 import { oneTurnSessionDef, runOneTurnSession, withOutcomeDelivery, type OneTurnSession } from '../agent/one-turn.js';
 import { describeSessionFailure } from '../guard-setup/session-context.js';
-import type { SessionDef } from '@truecourse/agent-loop';
+import { defineSessionKind, type SessionDef } from '@truecourse/agent-loop';
 
 /** The session kind one verdict runs as. */
 export const VISUAL_JUDGE_SESSION_KIND = 'guard-run.visual-judge';
+
+const VISUAL_JUDGE_SESSION = defineSessionKind({
+  kind: VISUAL_JUDGE_SESSION_KIND,
+  outcomeSchema: GuardVisualJudgmentSchema,
+});
 
 /** Where verdicts are cached — under `.truecourse/.cache/`, derived and disposable. */
 export const VISUAL_JUDGE_CACHE_NAME = 'guard/visual-judge';
@@ -178,10 +183,9 @@ export function buildVisualJudgeUserPrompt(ctx: VisualJudgeContext): string {
  *  adjudication session that dispatches it as a child. */
 export function visualJudgeSession(): OneTurnSession<GuardVisualJudgment> {
   return {
-    kind: VISUAL_JUDGE_SESSION_KIND,
+    ...VISUAL_JUDGE_SESSION,
     title: 'Visual judge',
     systemPrompt: withOutcomeDelivery(VISUAL_JUDGE_SYSTEM_PROMPT),
-    outcomeSchema: GuardVisualJudgmentSchema,
     tokenCeiling: VISUAL_JUDGE_TOKEN_CEILING,
   };
 }

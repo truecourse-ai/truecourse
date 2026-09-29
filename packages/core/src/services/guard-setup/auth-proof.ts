@@ -28,7 +28,8 @@
 
 import { z } from 'zod';
 import {
-  defineSessionTool,
+  defineSessionKind,
+  defineToolSpec,
   type SessionDef,
   type SessionEvent,
   type SessionTool,
@@ -136,20 +137,24 @@ interface AuthProofItem {
   instance: SuppliedInstance;
 }
 
+const AUTH_PROOF_SESSION = defineSessionKind({
+  kind: AUTH_PROOF_SESSION_KIND,
+  outcomeSchema: AuthProofOutcomeSchema,
+});
+
 export function authProofSessionDef(input: {
   repoRoot: string;
   recipe: GuardSetupAuthStepInput['recipe'];
   item: AuthProofItem;
 }): SessionDef<AuthProofOutcome> {
   return {
-    kind: AUTH_PROOF_SESSION_KIND,
+    ...AUTH_PROOF_SESSION,
     display: {
       title: 'Auth proof',
       intro: `I'm proving that the supplied dependency \`${input.item.dependency.name}\` actually authenticates on this machine.`,
     },
     systemPrompt: AUTH_PROOF_SYSTEM_PROMPT,
     tools: [runEntryTool(input)],
-    outcomeSchema: AuthProofOutcomeSchema,
     budget: AUTH_PROOF_BUDGET,
     // A proof that never ran the program proved nothing; a blocker without an
     // attempt is a guess. One observation minimum, structurally.
@@ -187,6 +192,20 @@ export function authProofBriefing(item: AuthProofItem, entry: readonly string[])
   ].join('\n');
 }
 
+const RUN_ENTRY = defineToolSpec({
+  name: 'run_entry',
+  description:
+    'Run the program under test with the given arguments, in a FRESH sandbox that already carries the materialized supplied state (env exported / files copied in). The argv is appended to the resolved entry — pass `["whoami"]`, never the binary path. Nothing persists between calls.',
+  kind: 'run-entry',
+  readOnly: false,
+  destructive: false,
+  inputSchema: z
+    .object({
+      argv: z.array(z.string()).describe('Arguments appended to the entry.'),
+    })
+    .strict(),
+});
+
 function runEntryTool(input: {
   repoRoot: string;
   recipe: GuardSetupAuthStepInput['recipe'];
@@ -201,18 +220,7 @@ function runEntryTool(input: {
     ]),
   );
   const redact = buildCredentialRedactor(new Map(), secretValues);
-  return defineSessionTool({
-    name: 'run_entry',
-    description:
-      'Run the program under test with the given arguments, in a FRESH sandbox that already carries the materialized supplied state (env exported / files copied in). The argv is appended to the resolved entry — pass `["whoami"]`, never the binary path. Nothing persists between calls.',
-    kind: 'run-entry',
-    readOnly: false,
-    destructive: false,
-    inputSchema: z
-      .object({
-        argv: z.array(z.string()).describe('Arguments appended to the entry.'),
-      })
-      .strict(),
+  return RUN_ENTRY.bind({
     async execute(args, toolCtx) {
       const sandbox = createWorkingSandbox({
         ...(input.recipe.env ? { recipeEnv: input.recipe.env } : {}),

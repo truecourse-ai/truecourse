@@ -32,7 +32,8 @@
 
 import { z } from 'zod'
 import {
-  defineSessionTool,
+  defineSessionKind,
+  defineToolSpec,
   type KnownDisplayBlock,
   type SessionBudget,
   type SessionDef,
@@ -505,19 +506,22 @@ Verbatim observations worth a human's eyes that fit no verdict — an apparently
 
 The outcome is one object: { "scopeVerdicts": [...], "instructions": [...], "findings": [...] }.`
 
+const LIST_UNIVERSE = defineToolSpec({
+  name: 'list_universe',
+  description:
+    'The doc universe as a tree: every directory with its doc count and direct doc filenames, and each source with its document count.',
+  kind: 'list-scan-universe',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: 'I looked over the doc tree to see the folders and how many docs each holds',
+    many: 'I looked over the doc tree {n} times, checking folders and doc counts',
+  },
+  inputSchema: z.object({}).strict(),
+})
+
 function listUniverseTool(scope: ScanScopeUniverse): SessionTool {
-  return defineSessionTool({
-    name: 'list_universe',
-    description:
-      'The doc universe as a tree: every directory with its doc count and direct doc filenames, and each source with its document count.',
-    kind: 'list-scan-universe',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: 'I looked over the doc tree to see the folders and how many docs each holds',
-      many: 'I looked over the doc tree {n} times, checking folders and doc counts',
-    },
-    inputSchema: z.object({}).strict(),
+  return LIST_UNIVERSE.bind({
     async execute() {
       return { content: renderUniverseTree(scope) }
     },
@@ -552,21 +556,24 @@ export function describeDocMiss(universe: ScanDocUniverse, ref: string): string 
   return `No doc \`${ref}\` in the universe — refs are full repo-relative paths; \`list_universe\` lists each directory's docs.`
 }
 
+const DOC_OUTLINE = defineToolSpec({
+  name: 'doc_outline',
+  description:
+    'One doc\'s heading outline (title structure only, no body) — sample what a directory actually holds before verdicting it.',
+  kind: 'doc-outline',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: 'I skimmed one doc outline, sampling its folder before ruling anything in or out',
+    many: 'I skimmed the outlines of {n} docs, sampling each folder before ruling anything in or out',
+  },
+  inputSchema: z
+    .object({ ref: z.string().min(1).describe('Repo-relative doc ref, e.g. `docs/api/auth.md`.') })
+    .strict(),
+})
+
 function docOutlineTool(scope: ScanScopeUniverse): SessionTool {
-  return defineSessionTool({
-    name: 'doc_outline',
-    description:
-      'One doc\'s heading outline (title structure only, no body) — sample what a directory actually holds before verdicting it.',
-    kind: 'doc-outline',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: 'I skimmed one doc outline, sampling its folder before ruling anything in or out',
-      many: 'I skimmed the outlines of {n} docs, sampling each folder before ruling anything in or out',
-    },
-    inputSchema: z
-      .object({ ref: z.string().min(1).describe('Repo-relative doc ref, e.g. `docs/api/auth.md`.') })
-      .strict(),
+  return DOC_OUTLINE.bind({
     async execute(args) {
       const doc = scope.universe.byPath.get(args.ref)
       if (!doc) {
@@ -629,12 +636,16 @@ function presentScanScope(outcome: ScanScopeOutcome): KnownDisplayBlock[] {
   return blocks
 }
 
+const ORCHESTRATE_SESSION = defineSessionKind({
+  kind: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+  outcomeSchema: ScanScopeOutcomeSchema,
+})
+
 export function orchestrateSessionDef(scope: ScanScopeUniverse): SessionDef<ScanScopeOutcome> {
   return {
-    kind: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+    ...ORCHESTRATE_SESSION,
     systemPrompt: orchestrateSystemPrompt(scope.grammar),
     tools: [listUniverseTool(scope), docOutlineTool(scope)],
-    outcomeSchema: ScanScopeOutcomeSchema,
     budget: ORCHESTRATE_BUDGET,
     display: {
       title: 'Scan scope',

@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto'
 import { LEGACY_FIDELITY_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { z } from 'zod'
 import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
-import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool, type ToolContext } from '@truecourse/agent-loop'
+import { defineSessionKind, defineToolSpec, type SessionBudget, type SessionDef, type SessionTool, type ToolContext } from '@truecourse/agent-loop'
 import {
   FIDELITY_SYSTEM_PROMPT,
   type WorkerFidelityInput,
@@ -175,21 +175,24 @@ function fidelityKeyOver(
     .digest('hex')
 }
 
+const READ_CLAIM_SECTION = defineToolSpec({
+  name: 'read_claim_section',
+  description:
+    "Re-read one claim's spec section precisely: pass the doc ref and the section anchor (or heading) as the briefing shows them.",
+  kind: 'read-claim-section',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
+      heading: z.string().min(1).describe('An anchor (or heading) of that doc, verbatim.'),
+    })
+    .strict(),
+})
+
 /** `read_claim_section {doc, heading}` — one section of the run's doc universe. */
 function readClaimSectionTool(universe: GuardDocUniverse): SessionTool {
-  return defineSessionTool({
-    name: 'read_claim_section',
-    description:
-      "Re-read one claim's spec section precisely: pass the doc ref and the section anchor (or heading) as the briefing shows them.",
-    kind: 'read-claim-section',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
-        heading: z.string().min(1).describe('An anchor (or heading) of that doc, verbatim.'),
-      })
-      .strict(),
+  return READ_CLAIM_SECTION.bind({
     async execute(args) {
       const doc = universe.byPath.get(args.doc)
       if (!doc) return { content: `No doc \`${args.doc}\` in this run's universe.`, isError: true }
@@ -216,14 +219,18 @@ function evidenceCorrection(verdict: FidelityVerdict, context?: GuardEvidencePro
   return `The faithful verdict has invalid proof references; this is an evidence-metadata repair, not a semantic rejection.\n${formatCaseEvidenceIssues(issues)}\nRecheck the selected cases and repair only the citations that the existing tagged assertions support. If eligible assertions do not prove the selected requirement, return flagged with the specific missing assertion or annotation; do not invent proof.`
 }
 
+const FIDELITY_SESSION = defineSessionKind({
+  kind: FIDELITY_SESSION_KIND,
+  outcomeSchema: FidelityVerdictSchema,
+})
+
 export function fidelitySessionDef(universe: GuardDocUniverse, proofContext?: GuardEvidenceProofContext): SessionDef<FidelityVerdict> {
   const context = proofContext ? structuredClone(proofContext) : undefined
   return {
-    kind: FIDELITY_SESSION_KIND,
+    ...FIDELITY_SESSION,
     display: { title: 'Fidelity check' },
     systemPrompt: FIDELITY_SESSION_SYSTEM_PROMPT,
     tools: [readClaimSectionTool(universe)],
-    outcomeSchema: FidelityVerdictSchema,
     validateOutcome: verdict => evidenceCorrection(verdict, context),
     budget: FIDELITY_SESSION_BUDGET,
   }

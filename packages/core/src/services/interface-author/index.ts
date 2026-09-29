@@ -81,6 +81,7 @@ export {
   type PlaceResult,
 } from './author.js'
 export {
+  STATE_RECONCILE_SESSION,
   STATE_RECONCILE_SESSION_KIND,
   StateMergeSchema,
   StateReconcileResponseSchema,

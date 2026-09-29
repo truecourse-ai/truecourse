@@ -12,7 +12,7 @@
  */
 
 import { z } from 'zod'
-import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
+import { defineToolSpec, type SessionTool } from '@truecourse/agent-loop'
 import { planDocChunks } from '@truecourse/shared'
 import { isOpenApiDoc } from '@truecourse/shared/openapi'
 import type { GuardDoc, SectionInput } from '@truecourse/guard-generator'
@@ -101,22 +101,25 @@ export function docChunkCount(doc: GuardDoc): number {
   return docPages(doc).length
 }
 
+const READ_OWN_SECTION = defineToolSpec({
+  name: 'read_section',
+  description:
+    'Read one SECTION of the doc you are extracting: the text under one heading (subsections included). Pass an anchor or heading from the outline, verbatim.',
+  kind: 'read-own-doc-section',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({ heading: z.string().min(1).describe('An anchor (or heading) from the outline, verbatim.') })
+    .strict(),
+})
+
 /**
  * `read_section` — one section of THE doc a session owns, by anchor or heading
  * (the extract session's main read beyond its briefed first chunk; OpenAPI docs
  * resolve per operation, since their sections ARE the operations).
  */
 export function readOwnSectionTool(doc: GuardDoc): SessionTool {
-  return defineSessionTool({
-    name: 'read_section',
-    description:
-      'Read one SECTION of the doc you are extracting: the text under one heading (subsections included). Pass an anchor or heading from the outline, verbatim.',
-    kind: 'read-own-doc-section',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({ heading: z.string().min(1).describe('An anchor (or heading) from the outline, verbatim.') })
-      .strict(),
+  return READ_OWN_SECTION.bind({
     async execute(args) {
       const section = resolveSection(doc, args.heading)
       if (!section) return noSectionError(doc, args.heading)
@@ -125,22 +128,40 @@ export function readOwnSectionTool(doc: GuardDoc): SessionTool {
   })
 }
 
+const READ_OWN_CHUNK = defineToolSpec({
+  name: 'read_chunk',
+  description: 'Read another chunk of THE doc you are extracting (the briefing carried chunk 1).',
+  kind: 'read-own-doc-chunk',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({ chunk: z.number().int().positive().describe('Chunk number (2 and up — 1 is in the briefing).') })
+    .strict(),
+})
+
 /** `read_chunk` — the session's OWN doc, paged (the briefing carried chunk 1). */
 export function readOwnChunkTool(doc: GuardDoc): SessionTool {
-  return defineSessionTool({
-    name: 'read_chunk',
-    description: 'Read another chunk of THE doc you are extracting (the briefing carried chunk 1).',
-    kind: 'read-own-doc-chunk',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({ chunk: z.number().int().positive().describe('Chunk number (2 and up — 1 is in the briefing).') })
-      .strict(),
+  return READ_OWN_CHUNK.bind({
     async execute(args) {
       return renderDocChunk(doc, args.chunk)
     },
   })
 }
+
+const READ_REFERENCED_DOC = defineToolSpec({
+  name: 'read_referenced_doc',
+  description:
+    'Read ANOTHER spec doc of this run, by its repo-relative ref — only to resolve an explicit reference your doc makes, never to browse. Pass `heading` for one section, omit it for the opening chunk.',
+  kind: 'read-referenced-doc',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      ref: z.string().min(1).describe('Repo-relative doc ref, as the reference names it.'),
+      heading: z.string().min(1).optional().describe('An anchor or heading of that doc, verbatim.'),
+    })
+    .strict(),
+})
 
 /**
  * `read_referenced_doc` — ANOTHER doc of the run's universe, opened only to
@@ -148,19 +169,7 @@ export function readOwnChunkTool(doc: GuardDoc): SessionTool {
  * section when `heading` is given, chunk 1 otherwise.
  */
 export function readReferencedDocTool(universe: GuardDocUniverse): SessionTool {
-  return defineSessionTool({
-    name: 'read_referenced_doc',
-    description:
-      'Read ANOTHER spec doc of this run, by its repo-relative ref — only to resolve an explicit reference your doc makes, never to browse. Pass `heading` for one section, omit it for the opening chunk.',
-    kind: 'read-referenced-doc',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        ref: z.string().min(1).describe('Repo-relative doc ref, as the reference names it.'),
-        heading: z.string().min(1).optional().describe('An anchor or heading of that doc, verbatim.'),
-      })
-      .strict(),
+  return READ_REFERENCED_DOC.bind({
     async execute(args) {
       const doc = universe.byPath.get(args.ref)
       if (!doc) {
@@ -178,25 +187,28 @@ export function readReferencedDocTool(universe: GuardDocUniverse): SessionTool {
   })
 }
 
+const READ_UNIVERSE_SECTION = defineToolSpec({
+  name: 'read_section',
+  description:
+    "Read one SECTION of one of the area's docs: the text under one heading (subsections included). Anchors come from the outlines in the briefing — copy them verbatim.",
+  kind: 'read-doc-section',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
+      heading: z.string().min(1).describe('An anchor (or heading) of that doc, verbatim.'),
+    })
+    .strict(),
+})
+
 /**
  * `read_section` (flows flavor) — one section of ANY universe doc, addressed
  * `{doc, heading}`: the synthesis session's read for a claim whose context the
  * outline alone does not settle.
  */
 export function readUniverseSectionTool(universe: GuardDocUniverse): SessionTool {
-  return defineSessionTool({
-    name: 'read_section',
-    description:
-      "Read one SECTION of one of the area's docs: the text under one heading (subsections included). Anchors come from the outlines in the briefing — copy them verbatim.",
-    kind: 'read-doc-section',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
-        heading: z.string().min(1).describe('An anchor (or heading) of that doc, verbatim.'),
-      })
-      .strict(),
+  return READ_UNIVERSE_SECTION.bind({
     async execute(args) {
       const doc = universe.byPath.get(args.doc)
       if (!doc) return { content: `No doc \`${args.doc}\` in this run's universe.`, isError: true }
