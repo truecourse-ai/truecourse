@@ -30,6 +30,19 @@
  *   POST /api/login-csrf   → /api/login, but first requires body.csrfToken to
  *                            match the `csrf` cookie (500 otherwise) — the
  *                            documenso-shaped login the csrf two-step proves
+ * Login and CSRF routes require the server's own Origin, as browser-facing
+ * auth middleware does. /api/login-refused reports a structured rejection
+ * with echoed secrets to exercise diagnostic redaction.
+ * /spa-dashboard returns the same shell for everyone. Its router fetches
+ * /api/browser-session, then redirects anonymous users to /spa-login and
+ * signed-in users to /spa-dashboard/home. /spa-broken has a failing router.
+ * /admin is the same router with its login NESTED under the route, at
+ * /admin/login. /busy-dashboard routes correctly while it polls without end
+ * and raises an unrelated page error. /api/login-refused?shape=nested wraps
+ * its error in an `error` envelope. /hash-app keeps its routes in the
+ * fragment (#/dashboard, #/login). /racy-dashboard turns a signed-in user
+ * away on the first loads of a boot, as a guard racing its own data does.
+ * /slow-dashboard decides only after a session request that takes 4s.
  */
 
 import http from 'node:http'
@@ -54,6 +67,8 @@ function read() {
   }
 }
 
+let racyLoads = 0
+
 http
   .createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost')
@@ -69,6 +84,93 @@ http
       return json(401, { error: 'unauthorized' })
     }
     if (url.pathname === '/boom') return json(500, { error: 'kaboom' })
+    if (url.pathname === '/api/browser-session') {
+      const answer = () => json(200, { signedIn: (read().sessions ?? []).includes(req.headers.cookie ?? '') })
+      return url.searchParams.has('slow') ? void setTimeout(answer, 4000) : answer()
+    }
+    if (url.pathname === '/slow-dashboard') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      return res.end(`<html><body>Dashboard<script>
+        setTimeout(() => fetch('/api/browser-session?slow').then(r => r.json()).then(session => {
+          if (!session.signedIn) location.replace('/spa-login');
+        }), 3500);
+      </script></body></html>`)
+    }
+    if (url.pathname === '/spa-dashboard' || url.pathname === '/spa-dashboard/home') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      return res.end(`<html><body><div id="app">Loading</div><script>
+        fetch('/api/browser-session').then(r => r.json()).then(session => {
+          if (!session.signedIn) { location.replace('/spa-login'); return; }
+          history.replaceState(null, '', '/spa-dashboard/home');
+          document.getElementById('app').textContent = 'Private dashboard';
+        });
+      </script></body></html>`)
+    }
+    if (url.pathname === '/admin' || url.pathname === '/admin/home' || url.pathname === '/busy-dashboard') {
+      const busy = url.pathname === '/busy-dashboard'
+      res.writeHead(200, { 'content-type': 'text/html' })
+      return res.end(`<html><body><div id="app">Loading</div><script>
+        fetch('/api/browser-session').then(r => r.json()).then(session => {
+          // A session that is present but not accepted is told why, in the
+          // query: the same login page an anonymous visitor lands on.
+          if (!session.signedIn) { location.replace('${busy ? '/spa-login' : '/admin/login'}${req.headers.cookie ? '?error=SessionExpired' : ''}'); return; }
+          ${busy ? '' : "history.replaceState(null, '', '/admin/home');"}
+          document.getElementById('app').textContent = 'Private';
+        });
+        ${busy ? "setInterval(() => fetch('/health'), 100); setTimeout(() => { throw new Error('unrelated widget failure') }, 0);" : ''}
+      </script></body></html>`)
+    }
+    if (url.pathname === '/hash-app') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      return res.end(`<html><body><div id="app">Loading</div><script>
+        const route = () => fetch('/api/browser-session').then(r => r.json()).then(session => {
+          if (location.hash.startsWith('#/dashboard') && !session.signedIn) location.hash = '#/login';
+          document.getElementById('app').textContent = location.hash;
+        });
+        addEventListener('hashchange', route);
+        route();
+      </script></body></html>`)
+    }
+    if (url.pathname === '/racy-dashboard') {
+      // The HTTP proof's credentialed request is the first load, the
+      // browser's first the second: both are turned away.
+      const signedIn = (read().sessions ?? []).includes(req.headers.cookie ?? '')
+      const turnedAway = !signedIn || ++racyLoads <= 2
+      res.writeHead(200, { 'content-type': 'text/html' })
+      return res.end(`<html><body>Dashboard<script>
+        if (${turnedAway}) location.replace('/spa-login');
+      </script></body></html>`)
+    }
+    if (url.pathname === '/admin/login') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      return res.end('<html><body><form>Sign in</form></body></html>')
+    }
+    if (url.pathname === '/spa-login') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      return res.end('<html><body><form>Sign in</form></body></html>')
+    }
+    if (url.pathname === '/spa-broken') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      return res.end('<html><body>Loading<script>throw new Error("broken router")</script></body></html>')
+    }
+    if (url.pathname === '/api/login-refused' && req.method === 'POST') {
+      let raw = ''
+      req.on('data', (chunk) => { raw += chunk })
+      req.on('end', () => {
+        const body = JSON.parse(raw)
+        const status = Number(url.searchParams.get('status'))
+        const code = { 403: 'INVALID_ORIGIN', 429: 'RATE_LIMITED', 500: 'INTERNAL_ERROR' }[status]
+        const message = `Request refused for ${body.email}: ${body.password}; ${read().sessions[0]}`
+        if (url.searchParams.get('shape') === 'nested') return json(status, { error: { code, message } })
+        json(status, { code, message, token: 'unpublished-response-token', request: body })
+      })
+      return
+    }
+    if (['/api/login', '/api/login-csrf', '/api/csrf'].includes(url.pathname)) {
+      const origin = req.headers.origin
+      if (!origin) return json(403, { code: 'MISSING_OR_NULL_ORIGIN', message: 'Missing or null Origin' })
+      if (origin !== `http://127.0.0.1:${port}`) return json(403, { code: 'INVALID_ORIGIN', message: 'Invalid origin' })
+    }
     if (url.pathname === '/api/login' && req.method === 'POST') {
       let raw = ''
       req.on('data', (chunk) => {
@@ -84,7 +186,10 @@ http
         const match = (read().users ?? []).some(
           (u) => u.email === body.email && u.password === body.password,
         )
-        if (match) return json(200, { ok: true })
+        if (match) {
+          res.setHeader('set-cookie', `${read().sessions[0]}; Path=/; HttpOnly`)
+          return json(200, { ok: true })
+        }
         return json(401, { error: 'invalid credentials' })
       })
       return

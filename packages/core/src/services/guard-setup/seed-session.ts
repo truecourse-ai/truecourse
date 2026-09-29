@@ -21,6 +21,11 @@
  *    again from a COLD CLONE of the repository (`seed-cold-proof.ts`). A gate
  *    failure restores both files byte-for-byte and the outcome is refused:
  *    the step fails with the SeedError, setup does not.
+ *  - the HTTP PROOFS use the API runner's executor, including its Origin
+ *    header. Structured server errors are redacted and retained in refusals;
+ *    a rejected request alone is not evidence of a wrong password.
+ *    Two successful HTML loads require a browser proof of the auth router;
+ *    an SPA's public shell is not its signed-in page.
  *
  * SCRATCH LIVES INSIDE THE TREE, deliberately: `.truecourse/.cache/guard/
  * seed-drafts/<id>/` (the run's scratch cache, deleted after the
@@ -77,13 +82,16 @@ import {
 } from '@truecourse/guard-generator';
 import {
   DEFAULT_BUILD_TIMEOUT_MS,
+  CookieJar,
   SeedError,
   buildCredentialRedactor,
+  executeApiRequest,
   guardSetupFindingsPath,
   guardWorldDirtyMarkerPath,
   loadDependencyCatalog,
   PORT_PLACEHOLDER,
   preflightApiServer,
+  preflightBrowser,
   recipePath,
   resolveApiServers,
   resolveEntry,
@@ -91,6 +99,7 @@ import {
   runBuild,
   runSeed,
   type Recipe,
+  type ApiStepCapture,
   type ResolvedApiServer,
   type ResolvedCredential,
   type SeedResult,
@@ -100,11 +109,12 @@ import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { proveSeedFromColdClone } from './seed-cold-proof.js';
+import { probeSeedWebPage } from './seed-web-probe.js';
 import { outputTail, servicesController } from './services-lifecycle.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
 import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
 import { DEFAULT_WEB_PRINCIPAL } from '../interface-author/principals.js';
-import { isCreditsExhausted } from '@truecourse/shared';
+import { GUARD_HTTP_METHODS, isCreditsExhausted } from '@truecourse/shared';
 
 export const SEED_SESSION_KIND = 'guard-setup.seed';
 
@@ -181,7 +191,7 @@ export type SeedLoginProbe = z.infer<typeof SeedLoginProbeSchema>;
 
 export const SeedCredentialProbeSchema = z
   .object({
-    /** HTTP method; GET when omitted. */
+    /** HTTP method, in any letter case; GET when omitted. */
     method: z.string().min(1).optional(),
     /** Request path (starts with `/`) of an endpoint that requires the credential. */
     path: z.string().min(1).regex(/^\//, 'a probe path starts with `/`'),
@@ -189,9 +199,10 @@ export const SeedCredentialProbeSchema = z
      * Which served surface the probe drives; `api` when omitted. An `api` probe
      * expects the anonymous control request to be refused with 401/403; a `web`
      * probe is an authenticated PAGE LOAD against the booted `recipe.web`
-     * surface — accepted with the credential (typically a durable session sent
-     * as the `Cookie` header), refused without it, where a web surface's
-     * refusal is 401/403 OR a redirect to its login page.
+     * surface. If HTTP serves HTML to both callers, isolated browsers prove
+     * the client-side guard: signed-in navigation ends on this path or below
+     * it, and anonymous navigation is refused over HTTP or ends on a different
+     * page than the signed-in one.
      */
     surface: z.enum(['api', 'web']).optional(),
     /**
@@ -646,7 +657,7 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
         `- **web** — ${r.why}, and the recipe prepares a web surface (\`${(input.recipe.web?.serve ?? []).join(' ')}\`). Mint a principal that can SIGN IN to the web UI:`,
         `  1. create the user with a KNOWN password and publish the login fields as a FIXTURE (e.g. \`webUser\` with \`email\` + \`password\`) — web scenarios fill the login form with \`{{fixture:webUser.email}}\` / \`{{fixture:webUser.password}}\`;`,
         `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as the credential \`${DEFAULT_WEB_PRINCIPAL}\` (\`header: "Cookie"\`), with a \`description\` as the Coverage section asks;`,
-        `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page);`,
+        `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page). When the app serves the same HTML to both (a single-page app, whose router decides after loading), the engine loads the page in a browser instead: with the cookie it must end on that path or below it, and without it on a different page. So name the route a signed-in user is sent to, never \`/\`, and never a page that shows its login form in place;`,
         `  4. when the login endpoint pairs a body token with a cookie (a CSRF double-submit — the login route compares \`body.csrfToken\` to a cookie a mint route set), add \`"csrf": {"path": "/<the csrf mint route>"}\` to the \`login\` block — the engine GETs it fresh before each login POST, carries its cookies, and injects the token into the body. NEVER publish a csrf token as a fixture: it is minted per exchange, and a static one can never validate.`,
         `  5. also create a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` (same login fields, its own stable email); credential-mutation tests burn it. It needs no credential and no probe, and a draft that omits it is refused without running.`,
         `  6. then mint the other principals the "Coverage" section below asks for, each signed in and proven the same way as this one.`,
@@ -801,6 +812,40 @@ function resolveLoginBody(
   return { ok: true, body: out };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Only structured error fields enter diagnostics, never arbitrary response
+ * bodies or headers. They are read from the body and from the envelopes
+ * frameworks nest them in: `error`, `error.json` and the first of `errors`;
+ * the outermost spelling of a field wins. Known credentials and the login's
+ * values are masked before clipping, so a truncated secret cannot escape
+ * redaction. Used by the tool and fold.
+ */
+function probeResponseDetail(response: ApiStepCapture, secrets: ReadonlyMap<string, string>): string {
+  if (!response.bodyText) return '';
+  try {
+    const body: unknown = JSON.parse(response.bodyText);
+    if (!isRecord(body)) return '';
+    const nested = isRecord(body.error) ? body.error : undefined;
+    const envelopes = [body, nested, nested?.json, Array.isArray(body.errors) ? body.errors[0] : undefined];
+    const fields: Record<string, string> = {};
+    for (const envelope of envelopes) {
+      if (!isRecord(envelope)) continue;
+      for (const key of ['code', 'message', 'error']) {
+        const value = envelope[key];
+        if (typeof value === 'string' && !(key in fields)) fields[key] = value;
+      }
+    }
+    if (Object.keys(fields).length === 0) return '';
+    return ` Server error: ${buildCredentialRedactor(secrets)(JSON.stringify(fields)).slice(0, 600)}.`;
+  } catch {
+    return ''; // HTML error pages can contain request dumps and secrets.
+  }
+}
+
 /**
  * Run one credential's LOGIN proof against the booted web surface: POST the
  * app's own login endpoint with the PUBLISHED fixture values and expect 2xx
@@ -813,6 +858,7 @@ async function probeLogin(opts: {
   name: string;
   login: SeedLoginProbe;
   fixtures: ReadonlyMap<string, Record<string, unknown>>;
+  secrets: ReadonlyMap<string, string>;
   signal?: AbortSignal;
 }): Promise<{ ok: true; line: string } | { ok: false; reason: string }> {
   const { name, login } = opts;
@@ -827,41 +873,42 @@ async function probeLogin(opts: {
         `the control corrupts one body field to prove a wrong secret is refused`,
     };
   }
-  const url = new URL(login.path, opts.baseUrl).toString();
-  const timed = async (run: (signal: AbortSignal) => Promise<Response>): Promise<Response> => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-    const onAbort = (): void => controller.abort();
-    opts.signal?.addEventListener('abort', onAbort, { once: true });
-    try {
-      return await run(controller.signal);
-    } finally {
-      clearTimeout(timer);
-      opts.signal?.removeEventListener('abort', onAbort);
-    }
+  // What a server may echo back is what the login sent it, and of that only
+  // the fields drawn from a fixture are the seed's own values. Masking more,
+  // a literal `callbackUrl: "/"` or every fixture there is, would blank
+  // ordinary words out of the paths and errors the refusal exists to show.
+  const secrets = new Map(opts.secrets);
+  for (const [field, template] of Object.entries(login.body)) {
+    const value = resolved.body[field];
+    if (template.includes('{{fixture:') && typeof value === 'string' && value) secrets.set(`login.${field}`, value);
+  }
+  const send = async (request: Parameters<typeof executeApiRequest>[0]['request'], cookies: CookieJar): Promise<ApiStepCapture> => {
+    const response = await executeApiRequest({
+      baseUrl: opts.baseUrl, request, cookies, timeoutMs: PROBE_TIMEOUT_MS, signal: opts.signal,
+    });
+    if (response.timedOut) throw new Error(`request timed out after ${PROBE_TIMEOUT_MS}ms`);
+    if (response.status === null) throw new Error(response.requestError ?? 'request cancelled');
+    return response;
   };
   // The CSRF two-step, run fresh before EACH login POST (a token and its
   // paired cookie may be single-use): GET the mint path, keep its cookies,
   // inject the token into the body, send the cookies with the POST.
-  const post = async (body: Record<string, unknown>): Promise<number> => {
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const post = async (body: Record<string, unknown>): Promise<ApiStepCapture> => {
+    // Each exchange gets fresh cookies. The control must not inherit the
+    // accepted login's session. The shared executor supplies the same Origin
+    // and HTTP behavior as API scenarios, including on the CSRF mint request.
+    const cookies = new CookieJar();
     let sent = body;
     if (login.csrf) {
       const csrf = login.csrf;
-      const mintUrl = new URL(csrf.path, opts.baseUrl).toString();
-      const mint = await timed((signal) => fetch(mintUrl, { redirect: 'manual', signal }));
-      if (mint.status < 200 || mint.status >= 300) {
-        throw new Error(`the csrf mint GET ${csrf.path} answered HTTP ${mint.status}`);
+      const mint = await send({ method: 'GET', path: csrf.path }, cookies);
+      if (mint.status! < 200 || mint.status! >= 300) {
+        throw new Error(`the csrf mint GET ${csrf.path} answered HTTP ${mint.status}.${probeResponseDetail(mint, secrets)}`);
       }
-      const cookies = mint.headers
-        .getSetCookie()
-        .map((c) => c.split(';')[0])
-        .filter((c) => c.includes('='));
-      if (cookies.length > 0) headers.cookie = cookies.join('; ');
       const field = csrf.responseField ?? 'csrfToken';
       let token: unknown;
       try {
-        const reply = (await mint.json()) as Record<string, unknown> | null;
+        const reply = JSON.parse(mint.bodyText) as Record<string, unknown> | null;
         token = reply?.[field];
       } catch {
         token = undefined;
@@ -869,50 +916,55 @@ async function probeLogin(opts: {
       if (typeof token !== 'string' || token.length === 0) {
         throw new Error(`the csrf mint GET ${csrf.path} returned no "${field}" string in its JSON reply`);
       }
+      secrets.set('csrf-token', token);
+      const cookieHeader = cookies.header(login.path);
+      if (cookieHeader) secrets.set('csrf-cookie', cookieHeader);
       sent = { ...body, [csrf.bodyField ?? 'csrfToken']: token };
     }
-    const response = await timed((signal) =>
-      fetch(url, {
-        method: 'POST',
-        redirect: 'manual',
-        headers,
-        body: JSON.stringify(sent),
-        signal,
-      }),
-    );
-    return response.status;
+    return send({ method: 'POST', path: login.path, json: sent }, cookies);
   };
-  let accepted: number;
-  let control: number;
+  let accepted: ApiStepCapture;
   try {
     accepted = await post(resolved.body);
-    control = await post({ ...resolved.body, [controlField]: `${String(resolved.body[controlField])}-wrong` });
   } catch (error) {
-    return { ok: false, reason: `login probe POST ${login.path} for "${name}" failed: ${message(error)}` };
+    return { ok: false, reason: buildCredentialRedactor(secrets)(`login probe POST ${login.path} for "${name}" failed: ${message(error)}`) };
   }
-  if (accepted < 200 || accepted >= 300) {
+  if (accepted.status! < 200 || accepted.status! >= 300) {
+    const detail = probeResponseDetail(accepted, secrets);
     return {
       ok: false,
       reason:
-        `the login endpoint refused the PUBLISHED fixture credentials: POST ${login.path} → HTTP ${accepted}. ` +
-        (accepted >= 300 && accepted < 400
+        `the login endpoint refused the PUBLISHED fixture credentials: POST ${login.path} → HTTP ${accepted.status}.${detail} ` +
+        (accepted.status! >= 300 && accepted.status! < 400
           ? `A redirecting form action cannot be judged — target the app's JSON login endpoint instead. `
-          : `The secret the world stores does not match what the seed publishes — CONVERGE it in the script (the exists path must verify and update the secret, never skip it). `) +
-        `If the endpoint pairs a body token with a cookie (a CSRF double-submit), declare \`login.csrf\` ` +
-        `({"path": "/<the app's csrf mint route>"}) — the engine GETs it fresh before each login POST, carries its ` +
-        `cookies, and injects the token into the body. A static token published as a fixture can never pass one.`,
+          : /"code":"[^"]*ORIGIN|\borigin\b/i.test(detail)
+            ? `The probe sends Origin ${new URL(opts.baseUrl).origin}; check the served app's configured URL and trusted origins. This response does not establish a password mismatch.`
+            : accepted.status === 401 || accepted.status === 403
+              ? `Unless the server error names another cause, the secret the world stores does not match what the seed publishes — CONVERGE it in the script (the exists path must verify and update the secret, never skip it). ` +
+                `If the endpoint pairs a body token with a cookie (a CSRF double-submit), declare \`login.csrf\` ` +
+                `({"path": "/<the app's csrf mint route>"}) — the engine GETs it fresh before each login POST, carries its ` +
+                `cookies, and injects the token into the body. A static token published as a fixture can never pass one.`
+              : `Check the server error before changing the seed: this status alone does not establish a password mismatch. If the endpoint requires a CSRF token paired with a cookie, declare \`login.csrf\` with its mint path.`),
     };
   }
-  if (control >= 200 && control < 300) {
+  let control: ApiStepCapture;
+  const wrongSecret = `${String(resolved.body[controlField])}-wrong`;
+  secrets.set('login-control', wrongSecret);
+  try {
+    control = await post({ ...resolved.body, [controlField]: wrongSecret });
+  } catch (error) {
+    return { ok: false, reason: buildCredentialRedactor(secrets)(`login control POST ${login.path} for "${name}" failed: ${message(error)}`) };
+  }
+  if (control.status! >= 200 && control.status! < 300) {
     return {
       ok: false,
       reason:
-        `POST ${login.path} answers HTTP ${control} with a corrupted \`${controlField}\` — it does not verify the secret, so it proves nothing about "${name}". Target the endpoint that actually checks the login.`,
+        `POST ${login.path} answers HTTP ${control.status} with a corrupted \`${controlField}\` — it does not verify the secret, so it proves nothing about "${name}". Target the endpoint that actually checks the login.`,
     };
   }
   return {
     ok: true,
-    line: `${name}: login POST ${login.path} → ${accepted} with the published fixture, ${control} with a corrupted ${controlField}`,
+    line: `${name}: login POST ${login.path} → ${accepted.status} with the published fixture, ${control.status} with a corrupted ${controlField}`,
   };
 }
 
@@ -931,7 +983,8 @@ function uncoveredCredentials(
  * are sent VERBATIM, exactly as the runner will inject them. What "refused"
  * means depends on the surface: an api refuses with 401/403; a web surface also
  * refuses by REDIRECTING the anonymous page load to its login page, so 3xx
- * counts there (requests never follow redirects).
+ * counts there. When both responses are successful HTML, browser navigation
+ * proves a client-side guard; the two shell responses alone prove nothing.
  */
 async function probeCredentials(opts: {
   baseUrl: string;
@@ -943,6 +996,7 @@ async function probeCredentials(opts: {
   signal?: AbortSignal;
 }): Promise<{ ok: true; lines: string[] } | { ok: false; reason: string }> {
   const lines: string[] = [];
+  const secrets = new Map([...opts.credentials].map(([name, cred]) => [name, cred.value]));
   // The login-proof semantics, mirrored: the CREDENTIALED request must be
   // ACCEPTED (2xx — a 3xx on web is the login redirect, a 5xx is not an
   // authenticated answer), and the anonymous control must NOT be — any non-2xx
@@ -962,58 +1016,76 @@ async function probeCredentials(opts: {
         name,
         login: probe.login,
         fixtures: opts.fixtures,
+        secrets,
         ...(opts.signal ? { signal: opts.signal } : {}),
       });
       if (!login.ok) return login;
       lines.push(login.line);
     }
-    const method = probe.method ?? 'GET';
-    const url = new URL(probe.path, opts.baseUrl).toString();
-    const request = async (withCredential: boolean): Promise<number> => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-      const onAbort = (): void => controller.abort();
-      opts.signal?.addEventListener('abort', onAbort, { once: true });
-      try {
-        const response = await fetch(url, {
+    const declared = (probe.method ?? 'GET').toUpperCase();
+    const method = GUARD_HTTP_METHODS.find((known) => known === declared);
+    if (!method) {
+      return {
+        ok: false,
+        reason: `the probe for "${name}" declares method "${probe.method}" — use one of ${GUARD_HTTP_METHODS.join(', ')}`,
+      };
+    }
+    const request = async (withCredential: boolean): Promise<ApiStepCapture> => {
+      const response = await executeApiRequest({
+        baseUrl: opts.baseUrl,
+        request: {
           method,
-          redirect: 'manual',
+          path: probe.path,
           headers: withCredential ? { [cred.header]: cred.value } : {},
-          signal: controller.signal,
-        });
-        return response.status;
-      } finally {
-        clearTimeout(timer);
-        opts.signal?.removeEventListener('abort', onAbort);
-      }
+        },
+        timeoutMs: PROBE_TIMEOUT_MS,
+        signal: opts.signal,
+      });
+      if (response.timedOut) throw new Error(`request timed out after ${PROBE_TIMEOUT_MS}ms`);
+      if (response.status === null) throw new Error(response.requestError ?? 'request cancelled');
+      return response;
     };
-    let authed: number;
-    let control: number;
+    let authed: ApiStepCapture;
+    let control: ApiStepCapture;
     try {
       authed = await request(true);
       control = await request(false);
     } catch (error) {
-      return { ok: false, reason: `probe ${method} ${probe.path} for "${name}" failed: ${message(error)}` };
+      return { ok: false, reason: buildCredentialRedactor(secrets)(`probe ${method} ${probe.path} for "${name}" failed: ${message(error)}`) };
     }
-    if (!accepted(authed)) {
+    if (!accepted(authed.status!)) {
+      return {
+        ok: false,
+        reason:
+          `credential "${name}" was refused at ${method} ${probe.path}: HTTP ${authed.status} WITH the ${cred.header} header.` +
+          probeResponseDetail(authed, secrets) +
+          (opts.surface === 'web' && authed.status! >= 300 && authed.status! < 400
+            ? ` A 3xx here is the login redirect: the value did not sign in. It is sent verbatim as the ${cred.header} header — a web principal is the FULL Cookie header value of a durable session the app's own validator accepts.`
+            : ` Check the server error and the credential's value and shape; a non-2xx status alone does not establish which is wrong.`),
+      };
+    }
+    if (accepted(control.status!)) {
+      // HTTP 200 can be only an SPA shell. Let the browser execute its auth
+      // router before judging a pair of successful HTML page loads. API and
+      // non-HTML probes keep their HTTP contract.
+      if (opts.surface === 'web' && method === 'GET' &&
+          [authed, control].every((r) => /^text\/html\b/i.test(r.headers['content-type'] ?? ''))) {
+        const browser = await probeSeedWebPage({
+          baseUrl: opts.baseUrl, path: probe.path, name, credential: cred, signal: opts.signal,
+        });
+        if (!browser.ok) return { ok: false, reason: buildCredentialRedactor(secrets)(browser.reason) };
+        lines.push(buildCredentialRedactor(secrets)(browser.line));
+        continue;
+      }
       return {
         ok: false,
         reason:
           opts.surface === 'web'
-            ? `credential "${name}" did not authenticate the web surface: ${method} ${probe.path} answered HTTP ${authed} WITH the credential (a 3xx here is the login redirect). The minted value is sent verbatim as the ${cred.header} header — a web principal is the FULL Cookie header value of a durable session the app's own validator accepts.`
-            : `credential "${name}" was refused (HTTP ${authed}) at ${method} ${probe.path} — the minted value, sent verbatim in the ${cred.header} header, does not authenticate. Fix the value (or its shape: prefix, casing) in the script.`,
+            ? `probe ${method} ${probe.path} answers HTTP ${control.status} WITHOUT the credential — it does not gate, so it proves nothing about "${name}". Pick a page that requires a signed-in user (its anonymous load is refused with 401/403 or a redirect to the login page, or, for a single-page app, its browser load ends on a different page).`
+            : `probe ${method} ${probe.path} answers HTTP ${control.status} WITHOUT the credential — it does not gate on auth, so it proves nothing about "${name}". Pick an endpoint that requires it.`,
       };
     }
-    if (accepted(control)) {
-      return {
-        ok: false,
-        reason:
-          opts.surface === 'web'
-            ? `probe ${method} ${probe.path} answers HTTP ${control} WITHOUT the credential — it does not gate, so it proves nothing about "${name}". Pick a page that requires a signed-in user (its anonymous load is refused with 401/403 or a redirect to the login page).`
-            : `probe ${method} ${probe.path} answers HTTP ${control} WITHOUT the credential — it does not gate on auth, so it proves nothing about "${name}". Pick an endpoint that requires it.`,
-      };
-    }
-    lines.push(`${name}: ${method} ${probe.path} → ${authed} with the credential, ${control} without`);
+    lines.push(`${name}: ${method} ${probe.path} → ${authed.status} with the credential, ${control.status} without`);
   }
   return { ok: true, lines };
 }
@@ -1423,7 +1495,15 @@ export function buildSeedSession(
     // is the cal.diy incident again, one surface over. Only when a web
     // principal is actually required — a cli/api-only seed never pays for it.
     const webSurface = resolveWebSurface(input.recipe);
-    if (webSurface?.build && requiredPrincipalSurfaces(input).some((s) => s.surface === 'web')) {
+    const provesWebPrincipal = requiredPrincipalSurfaces(input).some((s) => s.surface === 'web');
+    // A web principal may have to be proved in a browser, and a machine with
+    // none is no fault of any draft: it is judged once, here, before a session
+    // is spent on a seed the model could never get past the proof.
+    if (provesWebPrincipal) {
+      const browser = await preflightBrowser();
+      if (!browser.ok) return { status: 'failed', reason: browser.reason };
+    }
+    if (webSurface?.build && provesWebPrincipal) {
       input.onPhase?.(`building the web surface (\`${webSurface.build}\`)`, 'web build');
       const built = await runBuild(
         input.repoRoot,
@@ -1771,7 +1851,7 @@ Data and auth are ONE artifact on purpose: a login token cannot be minted withou
 - AN API PRINCIPAL IS REQUIRED BY EVIDENCE, NOT BY DOC FORMAT: when the briefing's "Runnable surfaces" names \`api\` — a declared scheme, a credential header on a mapped operation, a token table in the schema, or docs describing a bearer/api-key header — mint the API credential the way the app issues it (its own token-issuing service or the row + hash its verifier reads), scoped to the seeded principal's team/organisation when the app scopes tokens, and publish it with the exact header value the verifier expects. A web session cookie is NOT an api principal: the API refuses it.
 - SEED THE RESOURCES THE ROUTES REFERENCE: the briefing lists the resources the route surface takes by id or handle. Create ONE of each through the app's own service path, owned by the seeded principal, and publish its id and handles as fixture fields — a flow that reads, updates or acts on an existing record has nothing to act on otherwise. A resource that needs a real artifact (a document needs a PDF) still has a service path: write the artifact the way the app's own tests do and call the app's create function.
 - Principals: one per kind of user the briefing's Coverage section has you decide; mint the secret the way the APP would (its own token issuance, or the same signing secret and algorithm it verifies with); the value must survive the seed process (stateless token or a session row — a secret held in memory authenticates nothing); the header value is injected VERBATIM ("Bearer <token>" ONLY if that is what the API's own verifier expects — read the verifier, do not assume the prefix).
-- A WEB SURFACE AUTHENTICATES BY SESSION, NOT HEADER: when the briefing requires a web principal, create the user with a known password and publish the login fields as a FIXTURE (scenarios fill the login form from them), mint a DURABLE session the app's own validator accepts, publish its full Cookie header value as a credential, and probe it with \`{"surface": "web", "path": …, "login": {…}}\` — the engine proves the LOGIN (the app's own JSON login endpoint must accept the published fixture values and refuse a corrupted password) and then the authenticated page load, refused anonymously (401/403 or a login redirect). The login proof is what catches a secret the world stored under an earlier run: a cookie that validates proves nothing about the password the fixture advertises. A login endpoint that pairs a body token with a cookie (CSRF double-submit) takes \`"csrf": {"path": "/<mint route>"}\` inside \`login\` — the engine runs the two-step itself; never publish a csrf token as a fixture, a static one can never validate.
+- A WEB SURFACE AUTHENTICATES BY SESSION, NOT HEADER: when the briefing requires a web principal, create the user with a known password and publish the login fields as a FIXTURE (scenarios fill the login form from them), mint a DURABLE session the app's own validator accepts, publish its full Cookie header value as a credential, and probe it with \`{"surface": "web", "path": …, "login": {…}}\` — the engine proves the LOGIN (the app's own JSON login endpoint must accept the published fixture values and refuse a corrupted password) and then the authenticated page load, refused anonymously (401/403 or a login redirect). When the app serves the same HTML to both (a single-page app, whose router decides after loading), the engine loads the page in a browser instead: with the cookie it must end on that path or below it, and without it on a different page. So name the route a signed-in user is sent to, never \`/\`, and never a page that shows its login form in place. The login proof is what catches a secret the world stored under an earlier run: a cookie that validates proves nothing about the password the fixture advertises. A login endpoint that pairs a body token with a cookie (CSRF double-submit) takes \`"csrf": {"path": "/<mint route>"}\` inside \`login\` — the engine runs the two-step itself; never publish a csrf token as a fixture, a static one can never validate.
 - IDEMPOTENCE CONVERGES SECRETS: an exists path that merely skips creation leaves an OLDER run's password live while your manifest publishes a new one — look up AND update the secret (with the app's own hashing) so the published value is always the live one; the login probe refuses exactly this drift.
 - MINT A SACRIFICIAL PRINCIPAL whenever the briefing requires a web principal — it is a requirement, not a judgement call, and a draft without it is refused before it runs: one extra sign-in-capable user beside the other principals, published as the fixture \`sacrificialUser\` with the same login fields as the primary web principal and its own stable email, its description stating it is DISPOSABLE. Credential-mutation tests (password change, session revocation, account deletion) burn IT instead of a shared principal, and your converging exists path restores it every run — without one, those tests have only the shared principal to mutate, and one such mutation once locked an entire run out of sign-in. No credential or probe needed: it is a fixture, and scenarios log in through the form.
 - CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one endpoint that REQUIRES it. The engine boots the credential's surface, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Probe endpoints are a LOOKUP, not a search: the briefing lists spec-derived candidates whose security requires a scheme — confirm one; do not spend turns hunting the route surface.
