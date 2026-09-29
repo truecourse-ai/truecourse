@@ -35,6 +35,7 @@ import {
   type SessionDriver,
 } from '@truecourse/agent-loop'
 import { createApiSessionDriver } from '../../packages/llm-api/src/session-driver'
+import { registeredProviders } from '../../packages/llm-api/src/providers/index'
 import type { LlmProviderKind, ProviderConfig } from '../../packages/llm-api/src/types'
 import { createClaudeAgentSessionDriver } from '../../packages/llm-claude-agent/src/session-driver'
 import type { SdkModule, SdkQueryOptions } from '../../packages/llm-claude-agent/src/sdk-types'
@@ -145,7 +146,8 @@ const WIRE_TOOLS: Record<LlmProviderKind, (body: Json) => WireTool[]> = {
   },
 }
 
-const PROVIDERS: Record<LlmProviderKind, ProviderConfig> = {
+/** A config each registered provider is exercised with; no key is ever real. */
+const CONFIGS: Record<LlmProviderKind, ProviderConfig> = {
   anthropic: { provider: 'anthropic', model: 'claude-opus-5-5', apiKey: 'test' },
   openai: { provider: 'openai', model: 'gpt-6-sol', apiKey: 'test' },
   copilot: { provider: 'copilot', model: 'gpt-6-sol', apiKey: 'test' },
@@ -346,8 +348,8 @@ beforeAll(async () => {
     } satisfies SessionDef,
   }))
 
-  for (const [provider, cfg] of Object.entries(PROVIDERS) as Array<[LlmProviderKind, ProviderConfig]>) {
-    const driver = createApiSessionDriver(cfg, { retry: { attempts: 1 } })
+  for (const { kind: provider } of registeredProviders()) {
+    const driver = createApiSessionDriver(CONFIGS[provider], { retry: { attempts: 1 } })
     const via = `api:${provider}`
     const wireTool = async (id: string, def: SessionDef, name: string): Promise<void> => {
       const request = await requestBody(driver, def)
@@ -407,7 +409,7 @@ describe('the schemas every provider is sent', () => {
   it('cover every registered tool and session kind on every provider', () => {
     const ids = new Set(sent.map((s) => s.id))
     expect(ids.size).toBe(registeredToolSpecs().length + registeredSessionKinds().length)
-    for (const via of [...Object.keys(PROVIDERS).map((p) => `api:${p}`)]) {
+    for (const via of registeredProviders().map((p) => `api:${p.kind}`)) {
       expect(sent.filter((s) => s.via === via).length, via).toBe(ids.size)
     }
   })

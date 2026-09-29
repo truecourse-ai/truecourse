@@ -14,9 +14,12 @@ export {
 export { buildModel } from './model.js';
 export { wireSchema, type SchemaCapabilities, type WireSchema } from './wire-schema.js';
 export {
-  providerTuningFor,
+  providerFor,
+  registeredProviders,
+  defineProvider,
   COPILOT_PROVIDER_NAME,
-  type ProviderTuning,
-} from './provider-tuning.js';
+  type ProviderDefinition,
+  type ProviderOptionsBag,
+} from './providers/index.js';
 export { runWithTrace, currentTrace, type TraceContext } from './trace-context.js';
 export type { ProviderConfig, LlmProviderKind } from './types.js';

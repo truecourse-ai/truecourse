@@ -3,7 +3,7 @@
  * on the AI SDK's `streamText` — tools declared without `execute` so the
  * model's tool call comes back unrun (one step per turn), the FULL message
  * history resent every turn under the configured provider's cache strategy
- * (`provider-tuning.ts` — breakpoints on the system prompt, a cluster's shared
+ * (its definition in `providers/` — breakpoints on the system prompt, a cluster's shared
  * prefix and the moving tail, or a per-request cluster key), and a per-turn
  * fallback-model retry.
  *
@@ -49,8 +49,8 @@ import type {
 } from '@truecourse/agent-loop';
 import { buildModel } from './model.js';
 import { stripInjectedNulls, type SchemaPath } from './strict-schema.js';
-import { requestCapabilities, wireSchema } from './wire-schema.js';
-import { providerTuningFor, type ProviderTuning } from './provider-tuning.js';
+import { requestCapabilities, wireSchema, type SchemaCapabilities } from './wire-schema.js';
+import { providerFor, type ProviderDefinition } from './providers/index.js';
 import type { ProviderConfig } from './types.js';
 import { callUsageOf, type CallUsage } from './usage.js';
 
@@ -226,7 +226,7 @@ export function createApiSessionDriver(
     : undefined;
   const retry = { ...DEFAULT_API_RETRY, ...opts.retry };
   // Declared once, from the config — never re-decided at a call site.
-  const tuning = providerTuningFor(cfg.provider);
+  const provider = providerFor(cfg.provider);
 
   return {
     capabilities: { steering: 'turn-boundary', structuredOutcome: 'tool', resumeAtMessage: false },
@@ -249,7 +249,7 @@ export function createApiSessionDriver(
         fallback,
         pricing: opts.pricing,
         retry,
-        tuning,
+        provider,
         cacheKey:
           input.sharedPrefix?.cacheKey ??
           (typeof opts.cacheKey === 'function'
@@ -291,8 +291,8 @@ interface SessionRuntime {
   fallback?: { model: LanguageModel; modelId: string };
   pricing?: ApiSessionDriverOptions['pricing'];
   retry: ApiRetryPolicy;
-  /** The configured provider's cache + tool-call strategy. */
-  tuning: ProviderTuning;
+  /** The configured provider's definition: schema, cache and tool-call strategy. */
+  provider: ProviderDefinition;
   /** Resolved once per session — the cluster the request-keyed providers cache under. */
   cacheKey: string;
   /** How many leading messages are the cluster's shared prefix; 0 = none. */
@@ -335,7 +335,7 @@ async function whileRunning<T>(
 
 async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promise<DriverResult> {
   const { def, onEvent, signal } = input;
-  const { toolset, widenedByTool } = buildToolset(def, rt.tuning);
+  const { toolset, widenedByTool } = buildToolset(def, rt.provider.capabilities);
   const toolByName = new Map(def.tools.map((t) => [t.name, t]));
   // The shell's tool wrapper ignores the driver's ctx and injects its own;
   // this stub only satisfies the call signature.
@@ -620,7 +620,7 @@ async function callModel(
   // breakpoint of its own it would only ever be cached as part of one session's
   // tail, which the next session of the cluster cannot read. A provider that
   // keys its cache per request leaves all of them unmarked.
-  const breakpoint = rt.tuning.breakpoint;
+  const breakpoint = rt.provider.breakpoint;
   const sharedEnd = rt.sharedPrefix - 1;
   // The system prompt rides the SDK's `instructions` option, never `messages`: a
   // system role inside `messages` earns an "…can be a security risk…" warning
@@ -666,8 +666,8 @@ async function callModel(
         // for a single call. A turn that still carries several is executed in
         // full — see the loop.
         providerOptions: mergeOptions(
-          rt.tuning.callOptions(candidate.modelId, rt.cacheKey),
-          def.reasoning ? rt.tuning.reasoning?.(candidate.modelId, def.reasoning) : undefined,
+          rt.provider.callOptions(candidate.modelId, rt.cacheKey),
+          def.reasoning ? rt.provider.reasoning?.(candidate.modelId, def.reasoning) : undefined,
         ),
       });
       const stream = await reportTurn(result, live, cancelTurn);
@@ -926,14 +926,14 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
  * The shell's Zod validation still gates `execute` for every provider.
  * Tools carry no `execute` — one step per turn, the loop runs them.
  */
-function buildToolset(def: SessionDef, tuning: ProviderTuning): {
+function buildToolset(def: SessionDef, providerCapabilities: SchemaCapabilities): {
   toolset: ToolSet;
   widenedByTool: Map<string, readonly SchemaPath[]>;
 } {
   const toolset: ToolSet = {};
   const widenedByTool = new Map<string, readonly SchemaPath[]>();
   const capabilities = requestCapabilities(
-    tuning,
+    providerCapabilities,
     def.largeOutcomeSchema === true || def.tools.some((t) => t.largeInputSchema === true),
   );
   const add = (name: string, description: string, schema: ZodTypeAny): void => {

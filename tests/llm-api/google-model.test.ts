@@ -8,7 +8,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { z } from 'zod';
 import { createApiSessionDriver } from '../../packages/llm-api/src/session-driver';
 import { buildAuthorTools } from '../../packages/core/src/services/interface-author/tools';
-import { buildModel, providerTuningFor } from '../../packages/llm-api/src/index';
+import { buildModel, providerFor } from '../../packages/llm-api/src/index';
 
 const cfg = { provider: 'google' as const, model: 'gemini-2.5-pro', apiKey: 'AIza-test' };
 
@@ -56,7 +56,7 @@ async function sentFor(overrides: { baseURL?: string } = {}): Promise<Sent> {
   await (model as { doGenerate: (o: unknown) => Promise<unknown> }).doGenerate({
     prompt: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }],
     tools: [{ type: 'function', name: 'move', description: 'Move.', inputSchema: TOOL_SCHEMA }],
-    providerOptions: providerTuningFor('google').callOptions(cfg.model, 'k'),
+    providerOptions: providerFor('google').callOptions(cfg.model, 'k'),
   });
   if (!sent) throw new Error('nothing was sent');
   return sent;
