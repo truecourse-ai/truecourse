@@ -29,7 +29,7 @@
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "@workos-inc/node": "^7.0.0",
-    "ai": "^7.0.118",
+    "ai": "7.0.118",
     "chokidar": "^4.0.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",

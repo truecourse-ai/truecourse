@@ -57,7 +57,7 @@
     "js-yaml": "^4.1.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.1",
-    "ai": "^7.0.118",
+    "ai": "7.0.118",
     "@truecourse/agent-loop": "workspace:*"
   },
   "devDependencies": {

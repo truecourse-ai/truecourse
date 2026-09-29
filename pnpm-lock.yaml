@@ -75,7 +75,7 @@ importers:
         specifier: ^4.3.4
         version: 4.7.0(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
       ai:
-        specifier: ^7.0.118
+        specifier: 7.0.118
         version: 7.0.118(zod@3.25.76)
       drizzle-orm:
         specifier: ^0.45.2
@@ -268,7 +268,7 @@ importers:
         specifier: ^7.0.0
         version: 7.82.0(express@4.22.1)
       ai:
-        specifier: ^7.0.118
+        specifier: 7.0.118
         version: 7.0.118(zod@3.25.76)
       chokidar:
         specifier: ^4.0.0
@@ -749,19 +749,19 @@ importers:
   packages/llm-api:
     dependencies:
       '@ai-sdk/amazon-bedrock':
-        specifier: ^5.0.97
+        specifier: 5.0.97
         version: 5.0.97(zod@3.25.76)
       '@ai-sdk/anthropic':
-        specifier: ^4.0.65
+        specifier: 4.0.65
         version: 4.0.65(zod@3.25.76)
       '@ai-sdk/google':
-        specifier: ^4.0.82
+        specifier: 4.0.82
         version: 4.0.82(zod@3.25.76)
       '@ai-sdk/openai':
-        specifier: ^4.0.78
+        specifier: 4.0.78
         version: 4.0.78(zod@3.25.76)
       '@ai-sdk/openai-compatible':
-        specifier: ^3.0.57
+        specifier: 3.0.57
         version: 3.0.57(zod@3.25.76)
       '@truecourse/agent-loop':
         specifier: workspace:*
@@ -770,7 +770,7 @@ importers:
         specifier: workspace:*
         version: link:../shared
       ai:
-        specifier: ^7.0.118
+        specifier: 7.0.118
         version: 7.0.118(zod@3.25.76)
       zod:
         specifier: ^3.23.8
@@ -817,7 +817,7 @@ importers:
         specifier: workspace:*
         version: link:../agent-loop
       ai:
-        specifier: ^7.0.118
+        specifier: 7.0.118
         version: 7.0.118(zod@3.25.76)
       ignore:
         specifier: ^7.0.5
