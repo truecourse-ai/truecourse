@@ -131,7 +131,10 @@ it('preserves optional arguments, bounds and thought signatures through the sess
   expect(declarations.find((d: any) => d.name === 'search_interfaces').parametersJsonSchema.properties.limit).toMatchObject({ type: 'integer', minimum: 1, maximum: 20 });
   const outcome = declarations.find((d: any) => d.name === 'outcome').parametersJsonSchema;
   expect(outcome.properties.findings).toMatchObject({ type: 'array', minItems: 1, maxItems: 12 });
-  expect(requests[0].toolConfig.functionCallingConfig.mode).toBe('VALIDATED');
+  // The author tools carry `check_draft`, a schema declared too large for
+  // Gemini to enforce, so the whole request goes without VALIDATED.
+  expect(requests[0].toolConfig?.functionCallingConfig?.mode).not.toBe('VALIDATED');
+  expect(declarations.every((d: any) => d.parametersJsonSchema)).toBe(true);
   expect(requests[0].generationConfig.thinkingConfig.thinkingLevel).toBe('high');
   const replay = requests[1].contents.find((c: any) => c.role === 'model');
   expect(replay.parts).toContainEqual({

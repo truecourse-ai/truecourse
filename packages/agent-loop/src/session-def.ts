@@ -64,6 +64,12 @@ export interface ToolSpecFields<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
   /** How a call to this tool reads in a transcript. Absent ⇒ the reader
    *  phrases it from the name. */
   readonly display?: ToolDisplay;
+  /**
+   * The input schema is too large for a provider that compiles a schema into
+   * a constrained decoder with a size limit. Declared by the tool's owner; the
+   * provider decides what it does with a request carrying one.
+   */
+  readonly largeInputSchema?: true;
 }
 
 /**
@@ -130,6 +136,9 @@ export interface SessionKindSpec<TOutcome = unknown> {
   readonly kind: string;
   readonly outcomeSchema: z.ZodType<TOutcome, z.ZodTypeDef, unknown>;
   readonly outcomeInputSchema?: z.ZodTypeAny;
+  /** The schema the model answers in is too large for a size-limited
+   *  constrained decoder; see `ToolSpecFields.largeInputSchema`. */
+  readonly largeOutcomeSchema?: true;
 }
 
 /** Declare a session kind at module level and register it. A def spreads it. */
@@ -172,6 +181,9 @@ export interface SessionDef<TOutcome = unknown> {
   outcomeSchema: z.ZodType<TOutcome, z.ZodTypeDef, unknown>;
   /** Optional compact wire representation; the shell still validates the resolved outcome. */
   outcomeInputSchema?: z.ZodTypeAny;
+  /** The schema the model answers in is too large for a size-limited
+   *  constrained decoder (declared on the session kind). */
+  largeOutcomeSchema?: true;
   resolveOutcome?(value: unknown, events: readonly SessionEvent[]): unknown;
   /** Opt-in bounded repair of malformed terminal objects, under the same budget. */
   outcomeSchemaRepairs?: number;

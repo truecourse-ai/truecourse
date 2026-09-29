@@ -16,9 +16,11 @@
  * outcome must be expressible in OpenAI's strict mode. A schema the SDK
  * refuses to build a request from at all breaks the rule `sdk-refused`.
  *
- * Strictness is checked on the same bodies: OpenAI and Gemini are asked to
- * enforce every tool, with OpenAI's schemas normalized to all-required, and
- * Anthropic, Bedrock and Copilot are sent no `strict` at all.
+ * Strictness is checked on the same bodies: OpenAI is asked to enforce every
+ * tool, its schemas normalized to all-required; Gemini every tool except in a
+ * request carrying a schema its owner declared large (Gemini cannot compile
+ * those, see its provider tuning); Anthropic, Bedrock and Copilot are sent no
+ * `strict` at all.
  */
 
 import fs from 'node:fs'
@@ -297,13 +299,42 @@ interface Sent {
 }
 
 const sent: Sent[] = []
+/** The ids of the schemas their owners declare large. */
+const declaredLarge = new Set<string>()
+
+/**
+ * The schemas Gemini refuses to enforce, by id. It compiles a strict schema
+ * into a constrained decoder whose size limit is undocumented, so this set is
+ * what was measured live, and growing it is a decision to verify live too.
+ */
+const LARGE_SCHEMAS = ['outcome:guard-generate.flow-worker', 'tool:check_draft']
+
+/** The smallest schema Gemini is known to refuse, in bytes with local refs inlined. */
+const SMALLEST_REFUSED_BYTES = 87_916
+
+/** A schema's size with every local `$ref` inlined, the way a decoder compiles it. */
+function expandedBytes(root: Json): number {
+  const defs = isJson(root.$defs) ? root.$defs : {}
+  const inline = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(inline)
+    if (!isJson(node)) return node
+    if (typeof node.$ref === 'string' && node.$ref.startsWith('#/$defs/')) {
+      return inline(defs[node.$ref.slice('#/$defs/'.length)])
+    }
+    return Object.fromEntries(Object.entries(node).filter(([key]) => key !== '$defs').map(([key, value]) => [key, inline(value)]))
+  }
+  return JSON.stringify(inline(root)).length
+}
 
 beforeAll(async () => {
   for (const module of MODULES) await import(path.join(ROOT, module))
 
   const kinds = numbered(registeredSessionKinds(), (k) => `outcome:${k.kind}`)
+  for (const { id, item } of kinds) if (item.largeOutcomeSchema) declaredLarge.add(id)
   // One tool per request, so a tool the SDK refuses is named by its own refusal.
-  const tools = numbered(registeredToolSpecs(), (s) => `tool:${s.name}`).map(({ id, item }) => ({
+  const specs = numbered(registeredToolSpecs(), (s) => `tool:${s.name}`)
+  for (const { id, item } of specs) if (item.largeInputSchema) declaredLarge.add(id)
+  const tools = specs.map(({ id, item }) => ({
     id,
     name: item.name,
     def: {
@@ -381,15 +412,31 @@ describe('the schemas every provider is sent', () => {
     }
   })
 
-  it('ask OpenAI and Gemini to enforce every tool, and no other provider', () => {
+  it('ask OpenAI to enforce every tool, Gemini every tool short of a declared-large schema, and no other provider', () => {
     // What the body carries, not what was passed: the OpenAI SDK writes
     // `strict: false` for a tool given none, so only a literal `true` counts.
     const strictness = sent
       .filter((s) => s.via.startsWith('api:'))
       .map(({ via, id, wire }) => `${via} ${id} ${'refused' in wire ? 'refused' : wire.strict === ABSENT ? 'absent' : String(wire.strict)}`)
-    const expected = (via: string) =>
-      via === 'api:openai' || via === 'api:google' ? 'true' : 'absent'
-    expect(strictness).toEqual(sent.filter((s) => s.via.startsWith('api:')).map(({ via, id }) => `${via} ${id} ${expected(via)}`))
+    const expected = (via: string, id: string) =>
+      via === 'api:openai' || (via === 'api:google' && !declaredLarge.has(id)) ? 'true' : 'absent'
+    expect(strictness).toEqual(sent.filter((s) => s.via.startsWith('api:')).map(({ via, id }) => `${via} ${id} ${expected(via, id)}`))
+  })
+
+  it('declare large exactly the schemas Gemini is known to refuse', () => {
+    expect([...declaredLarge].sort()).toEqual(LARGE_SCHEMAS)
+  })
+
+  it('declare large every schema as big as one Gemini is known to refuse', () => {
+    const undeclared = sent
+      .filter((s) => s.via === 'api:google' && !('refused' in s.wire) && !declaredLarge.has(s.id))
+      .map(({ id, wire }) => ({ id, bytes: 'refused' in wire ? 0 : expandedBytes(json(wire.schema, id)) }))
+      .filter(({ bytes }) => bytes >= SMALLEST_REFUSED_BYTES)
+      .map(({ id, bytes }) => `${id}: ${bytes} bytes with refs inlined`)
+    expect(
+      undeclared,
+      'declare these large (largeInputSchema / largeOutcomeSchema), verify live that Gemini refuses them in VALIDATED, and add them to LARGE_SCHEMAS',
+    ).toEqual([])
   })
 
   it('send OpenAI every property required, optionals widened to null', () => {

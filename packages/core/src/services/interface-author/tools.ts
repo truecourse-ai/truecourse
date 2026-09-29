@@ -199,6 +199,9 @@ const CHECK_DRAFT = defineToolSpec({
   readOnly: true,
   destructive: false,
   inputSchema: CheckDraftInputWire.schema,
+  // A whole draft fragment with every step and locator form: the largest
+  // tool schema the product sends.
+  largeInputSchema: true,
 })
 
 /**

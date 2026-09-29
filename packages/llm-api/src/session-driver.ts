@@ -49,7 +49,7 @@ import type {
 } from '@truecourse/agent-loop';
 import { buildModel } from './model.js';
 import { stripInjectedNulls, type SchemaPath } from './strict-schema.js';
-import { wireSchema } from './wire-schema.js';
+import { requestCapabilities, wireSchema } from './wire-schema.js';
 import { providerTuningFor, type ProviderTuning } from './provider-tuning.js';
 import type { ProviderConfig } from './types.js';
 import { callUsageOf, type CallUsage } from './usage.js';
@@ -929,8 +929,12 @@ function buildToolset(def: SessionDef, tuning: ProviderTuning): {
 } {
   const toolset: ToolSet = {};
   const widenedByTool = new Map<string, readonly SchemaPath[]>();
+  const capabilities = requestCapabilities(
+    tuning,
+    def.largeOutcomeSchema === true || def.tools.some((t) => t.largeInputSchema === true),
+  );
   const add = (name: string, description: string, schema: ZodTypeAny): void => {
-    const wire = wireSchema(schema, tuning, `tool \`${name}\``);
+    const wire = wireSchema(schema, capabilities, `tool \`${name}\``);
     toolset[name] = tool({
       description,
       inputSchema: jsonSchema(wire.schema as never),

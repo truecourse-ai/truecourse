@@ -85,6 +85,7 @@ const ANTHROPIC: ProviderTuning = {
 const OPENAI: ProviderTuning = {
   normalizeToolSchema: true,
   strictTools: true,
+  enforcesLargeSchemas: true,
   callOptions: (_modelId, cacheKey) => ({
     openai: { promptCacheKey: cacheKey, parallelToolCalls: false, store: false },
   }),
@@ -142,6 +143,24 @@ function isSetupSession(kind: string | undefined): boolean {
  */
 const GOOGLE: ProviderTuning = {
   strictTools: true,
+  // Gemini compiles a strict tool schema into a constrained decoder, and that
+  // compilation has an undocumented size limit. Past it, a request in mode
+  // VALIDATED (what the SDK sends when any tool is strict) fails with a generic
+  // 400 "Request contains an invalid argument"; the same request in mode AUTO
+  // is accepted. No keyword causes it: stripping bounds, patterns, formats,
+  // descriptions, `additionalProperties`, `const` or `$schema`, or inlining
+  // the `$ref`s, changes nothing. It is size alone. With local refs inlined,
+  // the two schemas refused on gemini-3.8-flash are the `check_draft` input
+  // (217,550 bytes, 1,733 `anyOf` branches) and the flow-worker outcome
+  // (87,916 bytes, 688 branches); the largest accepted is the
+  // `observe_screen` input (62,353 bytes, 507 branches), and the next largest
+  // is about 6 KB. Their owners declare them large, and a request carrying
+  // one is sent with no tool strict, so it runs in AUTO. The mode is per
+  // request, not per tool: every call of such a session goes unenforced by
+  // Gemini. The shell's Zod validation still checks every call and outcome,
+  // so what the session loses is a re-ask on a malformed call, not
+  // correctness.
+  enforcesLargeSchemas: false,
   callOptions: (modelId, _cacheKey, sessionKind): ProviderOptionsBag =>
     /^gemini-3[.-]/.test(modelId) && isSetupSession(sessionKind)
       ? { google: { thinkingConfig: { thinkingLevel: 'high' } } }

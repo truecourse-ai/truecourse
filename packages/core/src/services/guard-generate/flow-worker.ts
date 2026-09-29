@@ -397,6 +397,9 @@ export interface FlowWorkerSessionInput {
 const FLOW_WORKER_SESSION = defineSessionKind({
   kind: FLOW_WORKER_SESSION_KIND,
   outcomeSchema: GuardFlowWorkerOutcomeSchema,
+  // A settled outcome carries whole scenarios and their expected reds: the
+  // largest outcome schema the product sends.
+  largeOutcomeSchema: true,
 })
 
 export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<GuardFlowWorkerOutcome> {

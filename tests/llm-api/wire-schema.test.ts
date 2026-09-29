@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { wireSchema } from '../../packages/llm-api/src/wire-schema.js';
+import { requestCapabilities, wireSchema } from '../../packages/llm-api/src/wire-schema.js';
 
 const input = z.object({ query: z.string().min(1), limit: z.number().int().max(20).optional() });
 
@@ -54,5 +54,13 @@ describe('wireSchema', () => {
     expect(() => wireSchema(z.object({ env: z.record(z.string()) }), { normalizeToolSchema: true }, 'tool `run`')).toThrow(
       /for tool `run`: properties\.env is a typed record/,
     );
+  });
+});
+
+describe('requestCapabilities', () => {
+  it('drops strictness for a request carrying a declared-large schema the provider cannot enforce', () => {
+    expect(requestCapabilities({ strictTools: true }, true).strictTools).toBe(false);
+    expect(requestCapabilities({ strictTools: true }, false).strictTools).toBe(true);
+    expect(requestCapabilities({ strictTools: true, enforcesLargeSchemas: true }, true).strictTools).toBe(true);
   });
 });

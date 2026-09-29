@@ -20,6 +20,27 @@ export interface SchemaCapabilities {
   readonly normalizeToolSchema?: boolean;
   /** Ask the provider to enforce the tool schema. */
   readonly strictTools?: boolean;
+  /**
+   * Whether the provider can enforce a schema its owner declared large
+   * (`largeInputSchema`, `largeOutcomeSchema`). When it cannot, a request
+   * carrying one is sent with no tool strict.
+   */
+  readonly enforcesLargeSchemas?: boolean;
+}
+
+/**
+ * What one request asks of its schemas: the provider's capabilities, with
+ * strictness dropped when the request carries a schema declared too large for
+ * the provider to enforce. Strictness is per request, so one such schema
+ * decides it for every tool the request carries.
+ */
+export function requestCapabilities(
+  capabilities: SchemaCapabilities,
+  carriesLargeSchema: boolean,
+): SchemaCapabilities {
+  return carriesLargeSchema && !capabilities.enforcesLargeSchemas
+    ? { ...capabilities, strictTools: false }
+    : capabilities;
 }
 
 export interface WireSchema {
