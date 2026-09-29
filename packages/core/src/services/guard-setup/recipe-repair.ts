@@ -39,7 +39,7 @@
  */
 
 import { z } from 'zod';
-import { defineSessionKind, defineToolSpec, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
+import { defineSessionKind, defineToolSpec, toolArgs, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
 import {
   RECIPE_CACHE_NAME,
   NEEDS_REPAIR_FIELDS,
@@ -50,6 +50,7 @@ import {
   staticProposalComplaints,
   verifyProposal,
   RecipeProposalSchema,
+  RecipeProposalWire,
   type RecipeProposal,
   type RecipeAppInventoryEntry,
   type RecipeRepairContext,
@@ -107,12 +108,14 @@ export interface RecipeRepairSessionInput {
 const RECIPE_REPAIR_SESSION = defineSessionKind({
   kind: RECIPE_REPAIR_SESSION_KIND,
   outcomeSchema: RecipeProposalSchema,
+  outcomeInputSchema: RecipeProposalWire.schema,
 });
 
 export function recipeRepairSessionDef(input: RecipeRepairSessionInput): SessionDef<RecipeProposal> {
   const standing = input.existing;
   return {
     ...RECIPE_REPAIR_SESSION,
+    resolveOutcome: RecipeProposalWire.resolve,
     display: {
       title: 'Recipe repair',
       intro: 'I\'m repairing the recipe proposal the engine rejected, verifying each fix by really installing, building and booting it.',
@@ -365,7 +368,7 @@ const CHECK_RECIPE = defineToolSpec({
   kind: 'check-recipe',
   readOnly: true,
   destructive: false,
-  inputSchema: RecipeProposalSchema,
+  inputSchema: RecipeProposalWire.schema,
 });
 
 function checkRecipeTool(
@@ -374,7 +377,8 @@ function checkRecipeTool(
   composeProject?: string,
 ): SessionTool {
   return CHECK_RECIPE.bind({
-    async execute(args) {
+    async execute(sent) {
+      const args = toolArgs(CHECK_RECIPE.name, RecipeProposalWire.safeParse(sent));
       const complaints = staticProposalComplaints(args, apps, repoRoot, composeProject);
       if (complaints.length === 0) {
         return {
@@ -394,7 +398,7 @@ const VERIFY_RECIPE = defineToolSpec({
   kind: 'verify-recipe',
   readOnly: false,
   destructive: false,
-  inputSchema: RecipeProposalSchema,
+  inputSchema: RecipeProposalWire.schema,
 });
 
 function verifyRecipeTool(
@@ -403,7 +407,8 @@ function verifyRecipeTool(
   composeProject?: string,
 ): SessionTool {
   return VERIFY_RECIPE.bind({
-    async execute(args) {
+    async execute(sent) {
+      const args = toolArgs(VERIFY_RECIPE.name, RecipeProposalWire.safeParse(sent));
       try {
         const verdict = await verifyProposal(repoRoot, args, {
           ...(apps ? { apps } : {}),
@@ -560,13 +565,13 @@ Repair to green: change what the briefing proves wrong, keep what it does not. T
 
 # The shape you produce
 
-One JSON object: optional \`install\` (shell), \`build\` (shell), optional \`entry\` (argv array — a CLI entrypoint), optional \`api\` (\`serve\` argv + optional \`healthPath\`/\`env\`/\`app\`/\`cwd\`/\`services\`, or a \`servers\` map + \`defaultServer\` for a multi-service workspace), optional \`web\` (the browser surface — see below), optional \`ownHosts\` (the product's OWN hostnames — "acme.com", "api.acme.com" — so detection stops reporting the app's own domains as external services; declare them when the repo's docs or env make them plain). A repo whose server needs a datastore declares the repo's OWN bring-up under \`api.services\` — \`{"up": "docker compose -p <project> -f <repo compose file> up -d --wait …", "down": "docker compose -p <project> -f … stop", "reset": "docker compose -p <project> -f … down -v"}\` — never inside \`build\`; the runner owns that lifecycle. \`reset\` is REQUIRED beside a compose-managed \`up\` (the static rules refuse its absence): it is the full wipe, volumes included, the runner restores the world with after a \`world: mutates\` test — without it every world-mutating scenario (credential changes, account deletion, global config) is barred. Namespace EVERY \`docker compose\` invocation with \`-p <project>\`, the same project in every one of them — the one the briefing names when it names one, and any dedicated name of your own when it does not: without \`-p\` compose attaches to the project the working directory or the file's own \`name:\` gives, i.e. the developer's own running stack, and both that and a project other than the one you were given are refused statically; a name or port collision with a running container is resolved by NAMESPACING YOUR OWN WORLD, never by touching theirs. When the app pins a SQL datastore, run the repo's schema/migration step inside \`api.services.up\` after the bring-up — a compose that only starts an empty database boots a server with no schema behind a green health probe. At least one of \`entry\`/\`api\`. \`\${PORT}\` in serve argv/env is substituted at boot. An argv is spawned WITHOUT a shell — no \`&&\`, no pipes; shell composition belongs in \`install\`/\`build\`. Never a dev/watch command as a server. A serve boots in a THROWAWAY directory by default — a workspace-mediated argv (\`yarn workspace …\`, \`npm run -w …\`) needs \`"cwd": "repo"\` to run from the repo root, never an argv hack.
+One JSON object: optional \`install\` (shell), \`build\` (shell), optional \`entry\` (argv array — a CLI entrypoint), optional \`api\` (\`serve\` argv + optional \`healthPath\`/\`env\`/\`app\`/\`cwd\`/\`services\`, or a \`servers\` list of \`{"name", "server"}\` entries + \`defaultServer\` for a multi-service workspace), optional \`web\` (the browser surface — see below), optional \`ownHosts\` (the product's OWN hostnames — "acme.com", "api.acme.com" — so detection stops reporting the app's own domains as external services; declare them when the repo's docs or env make them plain). A repo whose server needs a datastore declares the repo's OWN bring-up under \`api.services\` — \`{"up": "docker compose -p <project> -f <repo compose file> up -d --wait …", "down": "docker compose -p <project> -f … stop", "reset": "docker compose -p <project> -f … down -v"}\` — never inside \`build\`; the runner owns that lifecycle. \`reset\` is REQUIRED beside a compose-managed \`up\` (the static rules refuse its absence): it is the full wipe, volumes included, the runner restores the world with after a \`world: mutates\` test — without it every world-mutating scenario (credential changes, account deletion, global config) is barred. Namespace EVERY \`docker compose\` invocation with \`-p <project>\`, the same project in every one of them — the one the briefing names when it names one, and any dedicated name of your own when it does not: without \`-p\` compose attaches to the project the working directory or the file's own \`name:\` gives, i.e. the developer's own running stack, and both that and a project other than the one you were given are refused statically; a name or port collision with a running container is resolved by NAMESPACING YOUR OWN WORLD, never by touching theirs. When the app pins a SQL datastore, run the repo's schema/migration step inside \`api.services.up\` after the bring-up — a compose that only starts an empty database boots a server with no schema behind a green health probe. At least one of \`entry\`/\`api\`. \`\${PORT}\` in serve argv/env is substituted at boot. Every \`env\` is a list of \`{"name", "value"}\` entries. An argv is spawned WITHOUT a shell — no \`&&\`, no pipes; shell composition belongs in \`install\`/\`build\`. Never a dev/watch command as a server. A serve boots in a THROWAWAY directory by default — a workspace-mediated argv (\`yarn workspace …\`, \`npm run -w …\`) needs \`"cwd": "repo"\` to run from the repo root, never an argv hack.
 
 Everything the recipe runs must be something THIS REPOSITORY ships. A hand-written stand-in — an inline \`node -e\` server, an entry that merely loads a module and exits, a build that builds nothing — is a WRONG answer even when verification passes: the point of the recipe is the app under test, and green on a stand-in tests nothing. When the workspace inventory lists apps with HTTP route prefixes, the recipe declares their server(s); when the real server will not boot, keep working THAT failure — a session that ends without a green proposal is an honest result the engine reports, while a green stand-in poisons every scenario built on it.
 
 # The web surface
 
-When the repository ships a BROWSER app (a next/remix/react-router app in the inventory or the root manifest — the static rules refuse a webless proposal for one), declare \`web\`: a \`serve\` argv (for a fullstack app this is usually the SAME server command the \`api\` block boots — one process serves both the endpoints and the screens), a \`healthPath\` naming a page that actually RENDERS for an anonymous visitor (a login/sign-in page beats \`/\`, which often redirects), \`env\` for whatever the app needs to address itself (\`\${PORT}\` is substituted at boot — e.g. \`"APP_URL": "http://127.0.0.1:\${PORT}"\`), \`"cwd": "repo"\` for a workspace-mediated serve, an optional \`build\` when the top-level build does not produce the client assets, and — in a monorepo — \`app\` naming the served workspace app's directory (the one app under test; without it every app's screens enter the catalog). Never bend \`api\` into serving a docs site or demo to stand in for the product's web app. \`verify_recipe\` boots the web surface and polls its healthPath exactly as it boots the api servers.
+When the repository ships a BROWSER app (a next/remix/react-router app in the inventory or the root manifest — the static rules refuse a webless proposal for one), declare \`web\`: a \`serve\` argv (for a fullstack app this is usually the SAME server command the \`api\` block boots — one process serves both the endpoints and the screens), a \`healthPath\` naming a page that actually RENDERS for an anonymous visitor (a login/sign-in page beats \`/\`, which often redirects), \`env\` for whatever the app needs to address itself (\`\${PORT}\` is substituted at boot — e.g. \`{"name": "APP_URL", "value": "http://127.0.0.1:\${PORT}"}\`), \`"cwd": "repo"\` for a workspace-mediated serve, an optional \`build\` when the top-level build does not produce the client assets, and — in a monorepo — \`app\` naming the served workspace app's directory (the one app under test; without it every app's screens enter the catalog). Never bend \`api\` into serving a docs site or demo to stand in for the product's web app. \`verify_recipe\` boots the web surface and polls its healthPath exactly as it boots the api servers.
 
 # How to work
 

@@ -284,7 +284,7 @@ function curateVerdict(tagging: Tagging, docPath: string): DriverResult {
 
 const EMPTY_SETTLEMENT: DriverResult = {
   kind: 'outcome',
-  value: { concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] },
+  value: { concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] },
 }
 
 /** Run the scan with a script that only has to answer the OVERLAP sessions. */

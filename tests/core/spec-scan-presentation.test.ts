@@ -376,7 +376,7 @@ describe('spec scan run record — the checklist block', () => {
     const driver = stubDriver(async (call) => {
       if (call.kind === 'spec-scan.settle-areas') {
         await call.emit(toolResult('check_settlement', 'valid'))
-        return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] })
+        return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] })
       }
       if (call.kind === 'spec-scan.overlap') {
         await call.emit(toolResult('check_findings', 'valid'))
@@ -459,7 +459,7 @@ describe('spec scan progress — the overlap step says what it counts', () => {
     const driver = stubDriver(async (call) => {
       if (call.kind === 'spec-scan.settle-areas') {
         await call.emit(toolResult('check_settlement', 'valid'))
-        return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] })
+        return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] })
       }
       if (call.kind === 'spec-scan.overlap') {
         await call.emit(toolResult('check_findings', 'valid'))

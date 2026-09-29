@@ -451,6 +451,7 @@ export {
 export {
   TestabilityVerdictSchema,
   RecipeProposalSchema,
+  RecipeProposalWire,
   RecipeApiProposalSchema,
   RecipeApiServerProposalSchema,
   SeedProposalSchema,

@@ -122,7 +122,7 @@ const KEEP = (concern: string): unknown => ({
 })
 
 /** A settlement that changes nothing — the settle session is not what these cases test. */
-const NO_SETTLEMENT = { concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] }
+const NO_SETTLEMENT = { concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] }
 
 /**
  * Wrap a curate-doc script so the settle-areas barrier answers cleanly

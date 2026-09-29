@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { namedEntries, wireShape } from '@truecourse/shared/llm';
 import { defineSessionKind, type SessionDef } from '@truecourse/agent-loop';
 import { credentialServers, resolveApiServers, resolveWebSurface, observationBinding, observationConfiguration, observationSource, RecipePreparationBaselineCheckSchema, type Recipe, type PreparationQualification } from '@truecourse/guard-runner';
 import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js';
@@ -10,9 +11,11 @@ const NumericPathSchema = z.string().regex(
   'Use a dotted response field path such as totalCount or result.data.count, not /totalCount or $.totalCount.',
 );
 const CheckSchema = RecipePreparationBaselineCheckSchema.omit({ qualification: true }).extend({
-  counts: z.record(NumericPathSchema, z.number().int().nonnegative()).refine(v => Object.keys(v).length > 0, 'declare at least one global record count'),
-  totals: z.record(NumericPathSchema, z.number().finite()).optional(),
+  counts: namedEntries(z.record(NumericPathSchema, z.number().int().nonnegative()), 'path', 'count').refine(v => Object.keys(v).length > 0, 'declare at least one global record count'),
+  totals: namedEntries(z.record(NumericPathSchema, z.number().finite()), 'path', 'total').optional(),
 });
+/** A qualified observation as a model writes it, for the briefings that hand one on. */
+export const ObservationCheckWire = wireShape(CheckSchema);
 export const ObservationReviewSchema = z.object({
   candidates: z.array(z.object({
     check: CheckSchema,
@@ -74,14 +77,19 @@ export function qualifyObservations(repoRoot: string, recipe: Recipe, review: Ob
   for (const c of review.candidates) if (c.decision !== 'instance' && approvals.has(observationBinding(c.check))) throw Error('Contradictory observation decisions.');
   return approvals;
 }
+/** The review as the model writes it: every map a list of named entries. */
+export const ObservationReviewWire = wireShape(ObservationReviewSchema);
+
 const PREPARATION_OBSERVATION_SESSION = defineSessionKind({
   kind: 'guard-setup.preparation-observations',
   outcomeSchema: ObservationReviewSchema,
+  outcomeInputSchema: ObservationReviewWire.schema,
 });
 
 export function preparationObservationSession(repoRoot: string, recipe: Recipe): SessionDef<ObservationReview> {
   return {
     ...PREPARATION_OBSERVATION_SESSION, display: { title: 'Preparation observation review' },
+    resolveOutcome: ObservationReviewWire.resolve,
     budget: { turns: 20, maxResumes: 0, tokenCeiling: 100000 },
     systemPrompt: `Review APPLICATION BASELINE OBSERVATIONS before any seed scripts are authored or executed. This is a read-only source qualification, not script authoring.
 Find supported GET JSON observations of instance-wide business counts/totals. Follow the handler into the actual query and authorization logic. Cite handler, query and authorization ranges. Test descriptions and route names alone do not establish scope. An authenticated endpoint can be global only if its principal is demonstrably allowed to observe all records; admin labels alone prove nothing.

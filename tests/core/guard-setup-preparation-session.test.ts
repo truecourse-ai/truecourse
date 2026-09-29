@@ -15,8 +15,10 @@ import {
   buildPreparationSession,
   PreparationDraftSchema,
   PREPARATION_PROMPT,
+  PreparationDraftWire,
   type PreparationDraft,
 } from '../../packages/core/src/services/guard-setup/preparation-session';
+import { ObservationCheckWire, ObservationReviewWire } from '../../packages/core/src/services/guard-setup/preparation-observation';
 import {
   collectGuardSetupBundle,
   materializeGuardSetupBundle,
@@ -30,7 +32,7 @@ import {
 } from '@truecourse/guard-runner';
 
 const stubDriver: typeof rawStubDriver = script => rawStubDriver(call => {
-  if (call.def.kind === 'guard-setup.preparation-observations') return outcome(fixtureReview);
+  if (call.def.kind === 'guard-setup.preparation-observations') return outcome(ObservationReviewWire.write(fixtureReview));
   return script(call);
 });
 
@@ -176,7 +178,7 @@ describe('targeted preparation authoring and hosted bundle protocol', () => {
 });
 
 describe('preparation authoring session completion gate', () => {
-  function contextFor(stub = stubDriver(() => outcome({ profiles: [], findings: ['No private state needed by this fixture'] }))) {
+  function contextFor(stub = stubDriver(() => outcome(PreparationDraftWire.write({ profiles: [], findings: ['No private state needed by this fixture'] })))) {
     const persistence = memoryPersistence();
     const acquire = vi.fn(async () => ({ runId: 'preparation-run', driver: stub.driver, persistence: persistence.persistence }));
     const context: GuardSetupSessionContext = {
@@ -201,23 +203,23 @@ describe('preparation authoring session completion gate', () => {
             ...review.candidates[0].check, server: 'api',
             credential: 'none — route is unauthenticated', counts: { '/count': 0 },
           } as typeof review.candidates[0]['check'];
-          return outcome(review);
+          return outcome(ObservationReviewWire.write(review));
         }
         expect(call.input.initialMessages.join(' ')).toContain('dotted response field path');
-        return outcome(review);
+        return outcome(ObservationReviewWire.write(review));
       }
       expect(reviews).toBe(2);
       const briefing = JSON.parse(call.briefing);
       expect(briefing.dependencyAvailability.services).toContainEqual(expect.objectContaining({name:'currencybeacon',state:'unprovided'}));
-      expect(briefing.qualifiedObservations).toEqual([fixtureReview.candidates[0].check]);
+      expect(briefing.qualifiedObservations).toEqual([ObservationCheckWire.write(fixtureReview.candidates[0].check)]);
       const tool = call.def.tools.find(tool => tool.name === 'verify_preparations')!;
-      const result = await tool.execute(draft, {
+      const result = await tool.execute(PreparationDraftWire.write(draft), {
         workItem: 'preparations', signal: new AbortController().signal,
         dispatchChild: async () => { throw new Error('no child'); },
       });
       expect(result.isError, result.content).not.toBe(true);
       verified = true;
-      return outcome(draft);
+      return outcome(PreparationDraftWire.write(draft));
     });
     const { context } = contextFor(stub);
     const result = await buildPreparationSession(context)({...input,onPhase:(_label,phase)=>phases.push(phase)});
@@ -246,7 +248,7 @@ describe('preparation authoring session completion gate', () => {
       expect(briefing.recipe.api.env.NEXT_PUBLIC_UPLOAD_TRANSPORT).toBe('database');
       expect(call.briefing).not.toContain('secret-briefing-test');
       expect(call.def.systemPrompt).toContain('read its IMPLEMENTATION');
-      return outcome({ profiles: [], findings: ['No isolation required'] });
+      return outcome(PreparationDraftWire.write({ profiles: [], findings: ['No isolation required'] }));
     });
     const { context } = contextFor(stub);
     expect(await buildPreparationSession(context)(input)).toMatchObject({ status: 'skipped' });
@@ -269,7 +271,7 @@ describe('preparation authoring session completion gate', () => {
     const phases: string[] = [];
     const { context, acquire } = contextFor(stubDriver(() => {
       expect(fs.readFileSync(path.join(root, 'built'), 'utf8')).toBe('ok');
-      return outcome({ profiles: [], findings: ['No private state needed by this fixture'] });
+      return outcome(PreparationDraftWire.write({ profiles: [], findings: ['No private state needed by this fixture'] }));
     }));
     expect(fs.existsSync(path.join(root, 'node_modules'))).toBe(false);
     const result = await buildPreparationSession(context)({ ...input, onPhase: (_running, done) => phases.push(done) });
@@ -313,14 +315,14 @@ describe('preparation authoring session completion gate', () => {
     let calls = 0;
     const stub = stubDriver(async (call) => {
       calls++;
-      if (calls === 1) return outcome(draft);
+      if (calls === 1) return outcome(PreparationDraftWire.write(draft));
       expect(call.input.initialMessages.join(' ')).toContain(
         'verify_preparations',
       );
       const tool = call.def.tools.find(
         (tool) => tool.name === 'verify_preparations',
       )!;
-      const checked = await tool.execute(draft, {
+      const checked = await tool.execute(PreparationDraftWire.write(draft), {
         workItem: 'preparations',
         signal: new AbortController().signal,
         dispatchChild: async () => {
@@ -333,7 +335,7 @@ describe('preparation authoring session completion gate', () => {
           path.join(root, '.truecourse/scenarios/preparations/ledger/seed.mjs'),
         ),
       ).toBe(false);
-      return outcome(draft);
+      return outcome(PreparationDraftWire.write(draft));
     });
     const context: GuardSetupSessionContext = {
       acquire: async () => ({
@@ -366,13 +368,13 @@ describe('preparation authoring session completion gate', () => {
       const tool = call.def.tools.find(tool => tool.name === 'verify_preparations')!;
       const toolContext = { workItem: 'preparations', signal: new AbortController().signal, dispatchChild: async () => { throw new Error('no child'); } };
       if (++calls === 1) {
-        const result = await tool.execute(draft, toolContext);
+        const result = await tool.execute(PreparationDraftWire.write(draft), toolContext);
         expect(result).toMatchObject({ isError: true, content: expect.stringContaining('peer credential lookup failed') });
-        if (emptyToolCall) expect(await tool.execute(empty, toolContext)).toMatchObject({ isError: true });
+        if (emptyToolCall) expect(await tool.execute(PreparationDraftWire.write(empty), toolContext)).toMatchObject({ isError: true });
       } else {
         expect(call.input.initialMessages.join(' ')).toContain('peer credential lookup failed');
       }
-      return outcome(empty);
+      return outcome(PreparationDraftWire.write(empty));
     });
     const { context } = contextFor(stub);
     expect(await buildPreparationSession(context)(input)).toMatchObject({ status: 'failed', reason: expect.stringContaining('peer credential lookup failed') });
@@ -387,10 +389,10 @@ describe('preparation authoring session completion gate', () => {
     const stub = stubDriver(async call => {
       if (++calls === 1) {
         const tool = call.def.tools.find(tool => tool.name === 'verify_preparations')!;
-        const checked = await tool.execute(draft, { workItem: 'preparations', signal: new AbortController().signal, dispatchChild: async () => { throw new Error('no child'); } });
+        const checked = await tool.execute(PreparationDraftWire.write(draft), { workItem: 'preparations', signal: new AbortController().signal, dispatchChild: async () => { throw new Error('no child'); } });
         expect(checked.isError).not.toBe(true);
       }
-      return outcome({ profiles: [], findings: ['Discarded profiles'] });
+      return outcome(PreparationDraftWire.write({ profiles: [], findings: ['Discarded profiles'] }));
     });
     const { context } = contextFor(stub);
     expect(await buildPreparationSession(context)(input)).toMatchObject({ status: 'failed' });
@@ -407,11 +409,11 @@ describe('preparation authoring session completion gate', () => {
       if (++calls === 1) {
         const broken = structuredClone(draft);
         broken.profiles[0].verify = "throw new Error('missing peer credential')";
-        expect(await tool.execute(broken, toolContext)).toMatchObject({ isError: true });
-        return outcome({ profiles: [], findings: ['Unable to verify'] });
+        expect(await tool.execute(PreparationDraftWire.write(broken), toolContext)).toMatchObject({ isError: true });
+        return outcome(PreparationDraftWire.write({ profiles: [], findings: ['Unable to verify'] }));
       }
-      expect((await tool.execute(draft, toolContext)).isError).not.toBe(true);
-      return outcome(draft);
+      expect((await tool.execute(PreparationDraftWire.write(draft), toolContext)).isError).not.toBe(true);
+      return outcome(PreparationDraftWire.write(draft));
     });
     const { context } = contextFor(stub);
     expect(await buildPreparationSession(context)(input)).toMatchObject({ status: 'ok' });

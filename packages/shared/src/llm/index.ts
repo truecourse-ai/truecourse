@@ -15,6 +15,7 @@ import type { ZodTypeAny } from 'zod';
 // Re-exported here so every output-only prompt reaches it through the same
 // `@truecourse/shared/llm` entry it already imports the rest from.
 export { OUTPUT_ONLY_GUARDRAIL } from './guardrail.js';
+export { namedEntries, wireShape, type WireShape } from './wire-shape.js';
 export {
   StageTransportTallySchema,
   LlmStageFailureError,

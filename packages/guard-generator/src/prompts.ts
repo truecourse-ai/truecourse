@@ -15,7 +15,7 @@ import type { GuardVerification } from '@truecourse/shared'
  * that could drift from the engine. `GENERATE_SYSTEM_PROMPT` embeds
  * `RawGeneratedScenarioSchema` (the behavioral fields the model authors — engine-
  * owned fields like `id`/`binds`/`guard` are not in the model's vocabulary at
- * all); `RECIPE_SYSTEM_PROMPT` the proposal (`RecipeProposalSchema`).
+ * all); `RECIPE_SYSTEM_PROMPT` the proposal (`RecipeProposalWire`, the proposal schema as the model writes it).
  * Hand-written prose that can drift from the schema is exactly what burned the
  * contract prompts; here the schema IS the documentation.
  *
@@ -40,7 +40,7 @@ import {
 } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
-  RecipeProposalSchema,
+  RecipeProposalWire,
   SeedProposalSchema,
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
@@ -70,7 +70,7 @@ const WEB_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedWebScenarioObjectSch
   matcher: GuardStreamMatcherSchema,
 })
 /** The extraction + recipe-proposal JSON Schemas, from the runner's Zod source. */
-const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
+const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalWire.schema)
 /** The seed-draft JSON Schema, from the engine's own Zod source. */
 const SEED_JSON_SCHEMA = jsonSchemaHint(SeedProposalSchema)
 /** The fidelity-review verdict JSON Schema, from the runner's Zod source. */
@@ -1931,7 +1931,7 @@ Concretely:
     number belongs — the engine substitutes the allocated port into every
     api.serve argument and every api.env value at start time (e.g.
     "serve": ["uvicorn","app.main:app","--port","\${PORT}"], or
-    "env": { "ASPNETCORE_URLS": "http://127.0.0.1:\${PORT}" }).
+    "env": [{ "name": "ASPNETCORE_URLS", "value": "http://127.0.0.1:\${PORT}" }]).
 - web (browser apps) is how to START the browser surface. When the repository
   ships a browser app (a next/remix/react-router app — the workspace list names
   each app's framework), declare it: web.serve (for a fullstack app usually the
@@ -1939,7 +1939,7 @@ Concretely:
   web.healthPath naming a page that RENDERS for an anonymous visitor (a login or
   sign-in page beats "/", which often redirects), web.env for whatever the app
   needs to address itself (\${PORT} substituted, e.g.
-  "APP_URL": "http://127.0.0.1:\${PORT}"), "cwd": "repo" for a
+  { "name": "APP_URL", "value": "http://127.0.0.1:\${PORT}" }), "cwd": "repo" for a
   workspace-mediated serve, and — in a monorepo — web.app naming the served
   workspace app's directory. A proposal with no web block for a repo that ships
   a browser app is refused statically.
@@ -1961,11 +1961,11 @@ Concretely:
   them asks the wrong server and fails for the wrong reason. Use api.serve for a
   single-service repository and api.servers for a multi-service one — never both.
   Example:
-    "api": { "servers": {
-                "web":    { "serve": ["yarn","workspace","@acme/web","start"],
-                            "healthPath": "/api/health", "app": "apps/web" },
-                "api-v2": { "serve": ["yarn","workspace","@acme/api-v2","start"],
-                            "healthPath": "/v2/health", "app": "apps/api/v2" } },
+    "api": { "servers": [
+                { "name": "web",    "server": { "serve": ["yarn","workspace","@acme/web","start"],
+                                                "healthPath": "/api/health", "app": "apps/web" } },
+                { "name": "api-v2", "server": { "serve": ["yarn","workspace","@acme/api-v2","start"],
+                                                "healthPath": "/v2/health", "app": "apps/api/v2" } } ],
              "defaultServer": "web" }
 - Propose entry for a command-line program, api for an HTTP server, or BOTH when
   the repository ships both. At least one of them is required.

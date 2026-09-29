@@ -86,7 +86,7 @@ async function curateByPath(call: StubCall): Promise<DriverResult> {
   return outcome({ keep: true, reason: 'spec source', areas: [{ product: 'core', concern }] })
 }
 
-const EMPTY_SETTLEMENT = { concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] }
+const EMPTY_SETTLEMENT = { concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] }
 
 /** The full chain's script: every kind answered, preconditions satisfied. */
 async function anyKind(call: StubCall): Promise<DriverResult> {

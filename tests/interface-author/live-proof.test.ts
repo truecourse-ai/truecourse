@@ -12,7 +12,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { recipePath } from '@truecourse/guard-runner'
 import type { InterfacesFile } from '../../packages/shared/src/index'
-import { buildAuthorTools } from '../../packages/core/src/services/interface-author/tools'
+import { buildAuthorTools, CheckDraftInputWire } from '../../packages/core/src/services/interface-author/tools'
 import type { LiveScreenObserver } from '../../packages/core/src/services/interface-author/live-screen'
 import type { LocatorProbeRequest, LocatorReading } from '@truecourse/guard-runner'
 
@@ -59,7 +59,7 @@ function checkDraft(observer?: LiveScreenObserver) {
     ...(observer ? { live: { observer } } : {}),
   })
   const tool = tools.find((t) => t.name === 'check_draft')!
-  return (args: unknown) => tool.execute(args, toolContext)
+  return (args: unknown) => tool.execute(CheckDraftInputWire.write(args), toolContext)
 }
 
 const sortStep = {
@@ -290,7 +290,7 @@ describe('a css readable', () => {
       ...(observer ? { live: { observer } } : {}),
     })
     const tool = tools.find((t) => t.name === 'check_draft')!
-    return (args: unknown) => tool.execute(args, toolContext)
+    return (args: unknown) => tool.execute(CheckDraftInputWire.write(args), toolContext)
   }
   const cards = { within: { css: 'main .cards' }, item: 'generic', template: '<title>', slots: [{ name: 'title', kind: 'text' }], why: 'the card list is plain divs with no list role' }
   const screen = (rows: unknown[]) => ({
@@ -303,9 +303,8 @@ describe('a css readable', () => {
 
   it('needs a `why`', async () => {
     const { observer } = probingObserver({ matches: 1, visible: true })
-    const result = await checkLinksDraft(observer)({ interfaces: [], resources: [screen([{ ...cards, why: undefined }])] })
-    expect(result.isError).toBe(true)
-    expect(result.content).toContain('must say `why`')
+    // The schema's own rule: the call is refused as invalid arguments and re-asked.
+    await expect(checkLinksDraft(observer)({ interfaces: [], resources: [screen([{ ...cards, why: undefined }])] })).rejects.toThrow('must say `why`')
   })
 
   it('is refused when the run has no live screen to prove it on', async () => {
@@ -354,7 +353,7 @@ describe('a css readable', () => {
     })
     expect(result.isError).toBe(true)
     expect(result.content).toContain('matches nothing on /links')
-    expect(result.content).toContain('proof: {"delete-link": {"steps": [...]}}')
+    expect(result.content).toContain('proof: [{"id": "delete-link", "reach": {"steps": [...]}}]')
   })
 })
 
@@ -388,7 +387,7 @@ describe('a screen no principal reaches', () => {
       replaceable: new Set(),
       live: { observer, principals: new Map([['webSession', observer], ['anonymous', anonymous.observer]]) },
     })
-    const result = await tools.find((t) => t.name === 'check_draft')!.execute({ interfaces: [linksTask([sortStep])] }, toolContext)
+    const result = await tools.find((t) => t.name === 'check_draft')!.execute(CheckDraftInputWire.write({ interfaces: [linksTask([sortStep])] }), toolContext)
     expect(result.isError, String(result.content)).toBeFalsy()
     // The task's own proof, then every principal asked whether it reaches the address.
     expect(probes.map((probe) => probe.steps.length)).toEqual([1, 0])
@@ -438,7 +437,7 @@ describe('a task performed by another principal', () => {
       live: { observer: own, principals: new Map(Object.entries(principals)) },
     })
     const tool = tools.find((t) => t.name === 'check_draft')!
-    return (args: unknown) => tool.execute(args, toolContext)
+    return (args: unknown) => tool.execute(CheckDraftInputWire.write(args), toolContext)
   }
 
   it('is proven as that principal', async () => {
@@ -500,7 +499,7 @@ describe('a task performed by another principal', () => {
         },
       }))
       const tools = buildAuthorTools({ repoRoot: repo, derived: DERIVED, authored: null, replaceable: new Set() })
-      const check = (args: unknown) => tools.find((t) => t.name === 'check_draft')!.execute(args, toolContext)
+      const check = (args: unknown) => tools.find((t) => t.name === 'check_draft')!.execute(CheckDraftInputWire.write(args), toolContext)
       const task = { ...linksTask([{ kind: 'activate', target: { role: 'button', name: 'Sort' } }]), principal: 'rootSession' }
       const refused = await check({ interfaces: [task] })
       expect(refused.isError).toBe(true)

@@ -64,6 +64,8 @@ export interface OneTurnSession<TOutcome> {
   /** Compact wire shape, when the answer's own schema is not one a provider's
    *  structured output can express. */
   outcomeInputSchema?: z.ZodTypeAny
+  /** The answer, from the wire shape back into the one `outcomeSchema` reads. */
+  resolveOutcome?: (value: unknown) => unknown
   /** Refuse a schema-valid answer that does not hold against the real task;
    *  the session is told why and answers again on the same transcript. */
   validateOutcome?: (outcome: TOutcome) => string | undefined | Promise<string | undefined>
@@ -85,6 +87,7 @@ export function oneTurnSessionDef<TOutcome>(session: OneTurnSession<TOutcome>): 
     tools: [],
     outcomeSchema: session.outcomeSchema,
     ...(session.outcomeInputSchema ? { outcomeInputSchema: session.outcomeInputSchema } : {}),
+    ...(session.resolveOutcome ? { resolveOutcome: session.resolveOutcome } : {}),
     outcomeSchemaRepairs: reasks,
     ...(session.validateOutcome ? { validateOutcome: session.validateOutcome } : {}),
     ...(session.presentOutcome ? { presentOutcome: session.presentOutcome } : {}),

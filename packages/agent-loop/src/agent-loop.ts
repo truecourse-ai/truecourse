@@ -51,6 +51,16 @@ export class SessionToolArgsError extends Error {
   }
 }
 
+/**
+ * The arguments a tool reads, from its own parse of what the model sent (a
+ * tool whose model-facing schema differs from the shape it reads parses the
+ * rest itself). A mismatch is an invalid call, re-asked like any other.
+ */
+export function toolArgs<T>(toolName: string, parsed: z.SafeParseReturnType<unknown, T>): T {
+  if (!parsed.success) throw new SessionToolArgsError(toolName, parsed.error.message);
+  return parsed.data;
+}
+
 export interface AgentLoopInput<TOutcome> {
   def: SessionDef<TOutcome>;
   /** The work item this session serves (a doc path, an area, a flow id). */

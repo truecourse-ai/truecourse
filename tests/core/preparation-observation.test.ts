@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { assertObservationQualification, preparationCatalog, prepareScenario, computePreparationFingerprint, type Recipe } from '@truecourse/guard-runner';
-import { qualifyObservations, observationExecutionContract, type ObservationReview } from '../../packages/core/src/services/guard-setup/preparation-observation';
-import { buildPreparationSession } from '../../packages/core/src/services/guard-setup/preparation-session';
+import { qualifyObservations, observationExecutionContract, ObservationCheckWire, ObservationReviewWire, type ObservationReview } from '../../packages/core/src/services/guard-setup/preparation-observation';
+import { buildPreparationSession, PreparationDraftWire } from '../../packages/core/src/services/guard-setup/preparation-session';
 import { collectGuardSetupBundle, materializeGuardSetupBundle } from '../../packages/core/src/services/guard-setup/bundle';
 import { preparationContext } from '../../packages/core/src/services/guard-setup/preparation-context';
 import { fixtureReview } from '../guard-runner/preparation-qualification-fixture';
@@ -88,15 +88,15 @@ describe('baseline observation qualification',()=>{
      if(defect==='server') invalid.candidates[0].check.server='api';
      if(defect==='credential') invalid.candidates[0].check.credential='none, unauthenticated';
      if(defect==='path') invalid.candidates[0].check.counts={'/count':0};
-     return outcome(invalid);
+     return outcome(ObservationReviewWire.write(invalid));
     }
     const expected={server:'Available API servers: default',credential:'Available seed credentials: owner',path:'dotted response field path'};
     expect(call.input.initialMessages.join(' ')).toContain(expected[defect]);
-    return outcome(review);
+    return outcome(ObservationReviewWire.write(review));
    }
    expect(reviews).toBe(2);
-   expect(JSON.parse(call.briefing).qualifiedObservations).toEqual([review.candidates[0].check]);
-   return outcome({profiles:[],findings:['No private profile requested by this fixture']});
+   expect(JSON.parse(call.briefing).qualifiedObservations).toEqual([ObservationCheckWire.write(review.candidates[0].check)]);
+   return outcome(PreparationDraftWire.write({profiles:[],findings:['No private profile requested by this fixture']}));
   });
   const persistence=memoryPersistence();
   const result=await buildPreparationSession({acquire:async()=>({runId:'r',driver:stub.driver,persistence:persistence.persistence}),note:()=>{},addSpend:()=>{},runId:()=> 'r',usageTotals:()=>null,finish:()=>{}})({repoRoot:root,recipe,specExcerpts:[],fingerprint:'f'});
@@ -129,7 +129,7 @@ describe('baseline observation qualification',()=>{
   const {root,recipe,review}=fixture();recipe.install="node -e \"require('fs').writeFileSync('install-ran','yes')\"";
   fs.writeFileSync(path.join(root,'should-never-run.cjs'),"require('fs').writeFileSync('build-ran','yes')");
   review.candidates[0].decision=decision;
-  const stub=stubDriver(call=>{expect(call.def.kind).toBe('guard-setup.preparation-observations');return outcome(review);});
+  const stub=stubDriver(call=>{expect(call.def.kind).toBe('guard-setup.preparation-observations');return outcome(ObservationReviewWire.write(review));});
   const persistence=memoryPersistence();
   const result=await buildPreparationSession({acquire:async()=>({runId:'r',driver:stub.driver,persistence:persistence.persistence}),note:()=>{},addSpend:()=>{},runId:()=> 'r',usageTotals:()=>null,finish:()=>{}})({repoRoot:root,recipe,specExcerpts:[],fingerprint:'f'});
   expect(result.status).toBe('skipped');expect(result.reason).toContain('No instance-wide');
@@ -170,7 +170,7 @@ describe('baseline observation qualification',()=>{
   review.candidates[0].decision='unknown';
   const stub=stubDriver(call=>{
    for(const secret of ['inline-test-secret','server-test-secret','db-password','postgres://user']) expect(call.briefing).not.toContain(secret);
-   return outcome(review);
+   return outcome(ObservationReviewWire.write(review));
   });
   const persistence=memoryPersistence();
   const result=await buildPreparationSession({acquire:async()=>({runId:'r',driver:stub.driver,persistence:persistence.persistence}),note:()=>{},addSpend:()=>{},runId:()=> 'r',usageTotals:()=>null,finish:()=>{}})({repoRoot:root,recipe,specExcerpts:[],fingerprint:'f'});

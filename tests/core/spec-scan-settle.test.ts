@@ -16,6 +16,7 @@ import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-s
 import {
   BRIEFED_DOCS_PER_LABEL_MAX,
   FRAGMENTED_CONCERNS_MIN,
+  AreaSettlementWire,
   SETTLE_AREAS_SESSION_KIND,
   SUBDIVISION_DOC_THRESHOLD,
   applySettlement,
@@ -44,6 +45,9 @@ import {
   toolResult,
   type StubCall,
 } from './spec-scan-session-stub'
+
+/** A settlement outcome, stated in the kept shape and sent in the wire's. */
+const settled = (value: unknown) => outcome(AreaSettlementWire.write(value))
 
 // ---------------------------------------------------------------------------
 // the gate + the vocabulary view (pure)
@@ -419,12 +423,12 @@ describe('check_settlement — one pushback on a no-op draft over a fragmented v
 
   it('refuses the FIRST empty draft with the vocabulary shape, passes the deliberate resubmit', async () => {
     const tool = checkTool(fragmented(FRAGMENTED_CONCERNS_MIN))
-    const first = await tool.execute(EMPTY, {} as never)
+    const first = await tool.execute(AreaSettlementWire.write(EMPTY), {} as never)
     expect(first.isError).toBe(true)
     expect(first.content).toContain('under-merged')
     expect(first.content).toContain(`${FRAGMENTED_CONCERNS_MIN} concerns`)
     // Same empty draft again — a deliberate "nothing to merge" still finishes.
-    const second = await tool.execute(EMPTY, {} as never)
+    const second = await tool.execute(AreaSettlementWire.write(EMPTY), {} as never)
     expect(second.isError).toBeUndefined()
     expect(second.content).toContain('Produce it as the outcome')
   })
@@ -433,13 +437,13 @@ describe('check_settlement — one pushback on a no-op draft over a fragmented v
     const vocab = fragmented(FRAGMENTED_CONCERNS_MIN)
     const tool = checkTool(vocab)
     const merged: AreaSettlement = { ...EMPTY, concernMerges: { 'topic-1': 'topic-0' } }
-    const res = await tool.execute(merged, {} as never)
+    const res = await tool.execute(AreaSettlementWire.write(merged), {} as never)
     expect(res.isError).toBeUndefined()
   })
 
   it('a small vocabulary passes an empty draft immediately', async () => {
     const tool = checkTool(fragmented(3))
-    const res = await tool.execute(EMPTY, {} as never)
+    const res = await tool.execute(AreaSettlementWire.write(EMPTY), {} as never)
     expect(res.isError).toBeUndefined()
   })
 
@@ -449,9 +453,9 @@ describe('check_settlement — one pushback on a no-op draft over a fragmented v
     const tool = checkTool(collectAreaVocab(tagMap(rows)))
     const collapsing: AreaSettlement = {
       ...EMPTY,
-      productVerdicts: [{ product: 'booking', verdict: 'collapse-to-core' }],
+      productVerdicts: [{ product: 'booking', verdict: 'collapse-to-core', reason: 'a feature, not an app' }],
     }
-    const res = await tool.execute(collapsing, {} as never)
+    const res = await tool.execute(AreaSettlementWire.write(collapsing), {} as never)
     expect(res.isError).toBeUndefined()
   })
 
@@ -477,7 +481,7 @@ describe('check_settlement — one pushback on a no-op draft over a fragmented v
     }
     for (let i = 0; i < FRAGMENTED_CONCERNS_MIN; i += 1) rows[`docs/d${i}.md`] = [['core', `topic-${i}`]]
     const tool = checkTool(collectAreaVocab(tagMap(rows)))
-    const res = await tool.execute(EMPTY, {} as never)
+    const res = await tool.execute(AreaSettlementWire.write(EMPTY), {} as never)
     expect(res.isError).toBe(true)
     expect(res.content).toContain('booking-attendees  ↔  bookings-attendees')
   })
@@ -655,7 +659,7 @@ describe('spec-scan.settle-areas — through the run', () => {
     const stub = stubDriver(async (call) => {
       if (call.kind === SETTLE_AREAS_SESSION_KIND) {
         await call.emit(toolResult('check_settlement', 'valid'))
-        return outcome({
+        return settled({
           concernMerges: {},
           productMerges: {},
           productVerdicts: [
@@ -696,7 +700,7 @@ describe('spec-scan.settle-areas — through the run', () => {
       // Never calls the validator — the first outcome must be handed back.
       settleRuns += 1
       if (settleRuns > 1) refusals.push(...call.input.initialMessages)
-      return outcome(settlement)
+      return settled(settlement)
     })
 
     const result = await runScan(async () => stub.driver)
@@ -716,7 +720,7 @@ describe('spec-scan.settle-areas — through the run', () => {
     const script = (concernForCore: string) => async (call: StubCall) => {
       if (call.kind === SETTLE_AREAS_SESSION_KIND) {
         await call.emit(toolResult('check_settlement', 'valid'))
-        return outcome({
+        return settled({
           concernMerges: {},
           productMerges: {},
           productVerdicts: [{ product: 'booking', verdict: 'justified', reason: 'separate app' }],
@@ -779,7 +783,7 @@ describe('spec-scan.settle-areas — the prior corpus through the run', () => {
       if (call.kind === SETTLE_AREAS_SESSION_KIND) {
         briefings.push(...call.input.initialMessages)
         await call.emit(toolResult('check_settlement', 'valid'))
-        return outcome({ concernMerges: { login: 'sessions' }, productMerges: {}, productVerdicts: [], subdivisions: [] })
+        return settled({ concernMerges: { login: 'sessions' }, productMerges: {}, productVerdicts: [], subdivisions: [] })
       }
       return outcome(keep('core', 'login'))
     })
@@ -829,7 +833,7 @@ describe('spec-scan.settle-areas — the prior corpus through the run', () => {
     const stub = stubDriver(async (call) => {
       if (call.kind === SETTLE_AREAS_SESSION_KIND) {
         await call.emit(toolResult('check_settlement', 'valid'))
-        return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] })
+        return settled({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] })
       }
       return outcome(keep('core', 'billing'))
     })

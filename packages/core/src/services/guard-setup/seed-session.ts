@@ -58,9 +58,11 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { z } from 'zod';
+import { namedEntries, wireShape } from '@truecourse/shared/llm';
 import {
   defineSessionKind,
   defineToolSpec,
+  toolArgs,
   type SessionDef,
   type SessionEvent,
   type SessionTool,
@@ -160,7 +162,7 @@ export const SeedLoginProbeSchema = z
      * `{{fixture:<name>.<field>}}` (e.g. the login email and password), resolved
      * from the manifest at probe time. The engine sends it as application/json.
      */
-    body: z.record(z.string(), z.string()),
+    body: namedEntries(z.record(z.string(), z.string()), 'field', 'value'),
     /**
      * The body key the CONTROL request corrupts to prove the endpoint refuses a
      * wrong secret; defaults to `password` when the body has that key.
@@ -232,7 +234,7 @@ export const SeedSessionOutcomeSchema = z
     command: z.string().min(1),
     provides: SeedProvidesProposalSchema,
     /** Required (by the fold) for every declared credential; see the probe schema. */
-    probes: z.record(z.string(), SeedCredentialProbeSchema).optional(),
+    probes: namedEntries(z.record(z.string(), SeedCredentialProbeSchema), 'credential', 'probe').optional(),
     findings: z.array(z.string()),
     /** Each coverage rule the seed could not satisfy, with why; omitted when every one is met. */
     unmet: z
@@ -482,14 +484,19 @@ interface SeedSessionWorld {
   signal?: AbortSignal;
 }
 
+/** The seed outcome as the model writes it: every map a list of named entries. */
+export const SeedSessionOutcomeWire = wireShape(SeedSessionOutcomeSchema);
+
 const SEED_SESSION = defineSessionKind({
   kind: SEED_SESSION_KIND,
   outcomeSchema: SeedSessionOutcomeSchema,
+  outcomeInputSchema: SeedSessionOutcomeWire.schema,
 });
 
 export function seedSessionDef(world: SeedSessionWorld): SessionDef<SeedSessionOutcome> {
   return {
     ...SEED_SESSION,
+    resolveOutcome: SeedSessionOutcomeWire.resolve,
     display: {
       title: 'Seed',
       intro: 'I\'m authoring the seed script — the rows and the principals the tests reference — and proving each draft by running it against the live services.',
@@ -662,7 +669,7 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
         `- **web** — ${r.why}, and the recipe prepares a web surface (\`${(input.recipe.web?.serve ?? []).join(' ')}\`). Mint a principal that can SIGN IN to the web UI:`,
         `  1. create the user with a KNOWN password and publish the login fields as a FIXTURE (e.g. \`webUser\` with \`email\` + \`password\`) — web scenarios fill the login form with \`{{fixture:webUser.email}}\` / \`{{fixture:webUser.password}}\`;`,
         `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as the credential \`${DEFAULT_WEB_PRINCIPAL}\` (\`header: "Cookie"\`), with a \`description\` as the Coverage section asks;`,
-        `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page). When the app serves the same HTML to both (a single-page app, whose router decides after loading), the engine loads the page in a browser instead: with the cookie it must end on that path or below it, and without it on a different page. So name the route a signed-in user is sent to, never \`/\`, and never a page that shows its login form in place;`,
+        `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": [{"field": "email", "value": "{{fixture:webUser.email}}"}, {"field": "password", "value": "{{fixture:webUser.password}}"}]}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page). When the app serves the same HTML to both (a single-page app, whose router decides after loading), the engine loads the page in a browser instead: with the cookie it must end on that path or below it, and without it on a different page. So name the route a signed-in user is sent to, never \`/\`, and never a page that shows its login form in place;`,
         `  4. when the login endpoint pairs a body token with a cookie (a CSRF double-submit — the login route compares \`body.csrfToken\` to a cookie a mint route set), add \`"csrf": {"path": "/<the csrf mint route>"}\` to the \`login\` block — the engine GETs it fresh before each login POST, carries its cookies, and injects the token into the body. NEVER publish a csrf token as a fixture: it is minted per exchange, and a static one can never validate.`,
         `  5. also create a SECOND sign-in-capable user published as the fixture \`${SACRIFICIAL_FIXTURE}\` (same login fields, its own stable email); credential-mutation tests burn it. It needs no credential and no probe, and a draft that omits it is refused without running.`,
         `  6. then mint the other principals the "Coverage" section below asks for, each signed in and proven the same way as this one.`,
@@ -767,7 +774,7 @@ const RunSeedDraftInputSchema = z
     /** The provides the manifest is validated against, in the same call. */
     provides: SeedProvidesProposalSchema,
     /** One per declared credential — see {@link SeedCredentialProbeSchema}. */
-    probes: z.record(z.string(), SeedCredentialProbeSchema).optional(),
+    probes: namedEntries(z.record(z.string(), SeedCredentialProbeSchema), 'credential', 'probe').optional(),
   })
   .strict();
 
@@ -1188,20 +1195,23 @@ async function bootAndProbe(
 const runSeedDraftDescription = (targetPath: string): string =>
   `Execute a seed DRAFT against the live services: the script is written to your scratch directory (never the repository), your command is run from the repository root with GUARD_SEED_OUT and the server env set, and the manifest it writes is validated against the \`provides\` you pass in the SAME call — exactly the validation the fold runs. The command must name the target path \`${targetPath}\`; the scratch copy is substituted for it. Returns the verdict and the (redacted) output.`;
 
+export const RunSeedDraftInputWire = wireShape(RunSeedDraftInputSchema);
+
 const RUN_SEED_DRAFT = defineToolSpec({
   name: 'run_seed_draft',
   description: runSeedDraftDescription('<the seed script path>'),
   kind: 'run-seed-draft',
   readOnly: false,
   destructive: false,
-  inputSchema: RunSeedDraftInputSchema,
+  inputSchema: RunSeedDraftInputWire.schema,
 });
 
 function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
   let drafts = 0;
   return RUN_SEED_DRAFT.bind({
     description: runSeedDraftDescription(world.targetPath),
-    async execute(args, toolCtx) {
+    async execute(sent, toolCtx) {
+      const args = toolArgs(RUN_SEED_DRAFT.name, RunSeedDraftInputWire.safeParse(sent));
       if (!args.command.includes(world.targetPath)) {
         return {
           content: `the command must run the script at its target path \`${world.targetPath}\` (the fold writes it there); got: ${args.command}`,
@@ -1395,6 +1405,8 @@ function connectionUrl(world: SeedSessionWorld): string | null {
   return null;
 }
 
+export const SeedProvidesWire = wireShape(SeedProvidesProposalSchema);
+
 const CHECK_PROVIDES = defineToolSpec({
   name: 'check_provides',
   description:
@@ -1402,12 +1414,13 @@ const CHECK_PROVIDES = defineToolSpec({
   kind: 'check-provides',
   readOnly: true,
   destructive: false,
-  inputSchema: SeedProvidesProposalSchema,
+  inputSchema: SeedProvidesWire.schema,
 });
 
 function checkProvidesTool(world: SeedSessionWorld): SessionTool {
   return CHECK_PROVIDES.bind({
-    async execute(args) {
+    async execute(sent) {
+      const args = toolArgs(CHECK_PROVIDES.name, SeedProvidesWire.safeParse(sent));
       const warnings = providesWarnings(args, world.input);
       if (warnings.length === 0) {
         return { content: 'The declaration is statically clean. Prove it with `run_seed_draft`.' };
@@ -1872,7 +1885,7 @@ Data and auth are ONE artifact on purpose: a login token cannot be minted withou
 - A WEB SURFACE AUTHENTICATES BY SESSION, NOT HEADER: when the briefing requires a web principal, create the user with a known password and publish the login fields as a FIXTURE (scenarios fill the login form from them), mint a DURABLE session the app's own validator accepts, publish its full Cookie header value as a credential, and probe it with \`{"surface": "web", "path": …, "login": {…}}\` — the engine proves the LOGIN (the app's own JSON login endpoint must accept the published fixture values and refuse a corrupted password) and then the authenticated page load, refused anonymously (401/403 or a login redirect). When the app serves the same HTML to both (a single-page app, whose router decides after loading), the engine loads the page in a browser instead: with the cookie it must end on that path or below it, and without it on a different page. So name the route a signed-in user is sent to, never \`/\`, and never a page that shows its login form in place. The login proof is what catches a secret the world stored under an earlier run: a cookie that validates proves nothing about the password the fixture advertises. A login endpoint that pairs a body token with a cookie (CSRF double-submit) takes \`"csrf": {"path": "/<mint route>"}\` inside \`login\` — the engine runs the two-step itself; never publish a csrf token as a fixture, a static one can never validate.
 - IDEMPOTENCE CONVERGES SECRETS: an exists path that merely skips creation leaves an OLDER run's password live while your manifest publishes a new one — look up AND update the secret (with the app's own hashing) so the published value is always the live one; the login probe refuses exactly this drift.
 - MINT A SACRIFICIAL PRINCIPAL whenever the briefing requires a web principal — it is a requirement, not a judgement call, and a draft without it is refused before it runs: one extra sign-in-capable user beside the other principals, published as the fixture \`sacrificialUser\` with the same login fields as the primary web principal and its own stable email, its description stating it is DISPOSABLE. Credential-mutation tests (password change, session revocation, account deletion) burn IT instead of a shared principal, and your converging exists path restores it every run — without one, those tests have only the shared principal to mutate, and one such mutation once locked an entire run out of sign-in. No credential or probe needed: it is a fixture, and scenarios log in through the form.
-- CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one endpoint that REQUIRES it. The engine boots the credential's surface, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Probe endpoints are a LOOKUP, not a search: the briefing lists spec-derived candidates whose security requires a scheme — confirm one; do not spend turns hunting the route surface.
+- CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one entry \`{"credential": <name>, "probe": …}\` naming an endpoint that REQUIRES it. The engine boots the credential's surface, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Probe endpoints are a LOOKUP, not a search: the briefing lists spec-derived candidates whose security requires a scheme — confirm one; do not spend turns hunting the route surface.
 
 # Your tools
 

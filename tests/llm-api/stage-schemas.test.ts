@@ -68,69 +68,6 @@ const MODULES = [
   'packages/core/src/services/spec-scan/tools.ts',
 ]
 
-/**
- * Schemas that break a rule today, as `<schema id> <rule>`. The gate fails on
- * any violation not listed here and on any entry that no longer occurs.
- */
-const KNOWN_OFFENDERS: readonly string[] = [
-  'outcome:guard-generate.extract format-uri',
-  'outcome:guard-setup.preparation-observations open-object',
-  'outcome:guard-setup.preparation-observations open-schema',
-  'outcome:guard-setup.preparation-observations pattern-lookaround',
-  'outcome:guard-setup.preparation-observations propertyNames',
-  'outcome:guard-setup.preparation-observations sdk-refused',
-  'outcome:guard-setup.preparations open-object',
-  'outcome:guard-setup.preparations open-schema',
-  'outcome:guard-setup.preparations pattern-lookaround',
-  'outcome:guard-setup.preparations propertyNames',
-  'outcome:guard-setup.preparations sdk-refused',
-  'outcome:guard-setup.recipe-propose open-object',
-  'outcome:guard-setup.recipe-propose open-schema',
-  'outcome:guard-setup.recipe-propose pattern-lookaround',
-  'outcome:guard-setup.recipe-propose propertyNames',
-  'outcome:guard-setup.recipe-propose sdk-refused',
-  'outcome:guard-setup.recipe-repair open-object',
-  'outcome:guard-setup.recipe-repair open-schema',
-  'outcome:guard-setup.recipe-repair pattern-lookaround',
-  'outcome:guard-setup.recipe-repair propertyNames',
-  'outcome:guard-setup.recipe-repair sdk-refused',
-  'outcome:guard-setup.seed open-object',
-  'outcome:guard-setup.seed open-schema',
-  'outcome:guard-setup.seed propertyNames',
-  'outcome:guard-setup.seed sdk-refused',
-  'outcome:spec-scan.settle-areas open-object',
-  'tool:check_claims format-uri',
-  'tool:check_draft open-object',
-  'tool:check_draft open-schema',
-  'tool:check_draft propertyNames',
-  'tool:check_draft sdk-refused',
-  'tool:check_provides open-object',
-  'tool:check_provides open-schema',
-  'tool:check_provides propertyNames',
-  'tool:check_provides sdk-refused',
-  'tool:check_recipe open-object',
-  'tool:check_recipe open-schema',
-  'tool:check_recipe pattern-lookaround',
-  'tool:check_recipe propertyNames',
-  'tool:check_recipe sdk-refused',
-  'tool:check_settlement open-object',
-  'tool:run_program open-object',
-  'tool:run_seed_draft open-object',
-  'tool:run_seed_draft open-schema',
-  'tool:run_seed_draft propertyNames',
-  'tool:run_seed_draft sdk-refused',
-  'tool:verify_preparations open-object',
-  'tool:verify_preparations open-schema',
-  'tool:verify_preparations pattern-lookaround',
-  'tool:verify_preparations propertyNames',
-  'tool:verify_preparations sdk-refused',
-  'tool:verify_recipe open-object',
-  'tool:verify_recipe open-schema',
-  'tool:verify_recipe pattern-lookaround',
-  'tool:verify_recipe propertyNames',
-  'tool:verify_recipe sdk-refused',
-]
-
 // ---------------------------------------------------------------------------
 // what each provider's request body carries
 // ---------------------------------------------------------------------------
@@ -439,22 +376,12 @@ describe('the schemas every provider is sent', () => {
     }
   })
 
-  it('break no rule beyond the known offenders', () => {
-    const detail = new Map<string, string[]>()
-    for (const { via, id, wire } of sent) {
-      const broken = 'refused' in wire ? [{ rule: 'sdk-refused', at: wire.refused }] : violations(wire.schema)
-      for (const { rule, at } of broken) {
-        const key = `${id} ${rule}`
-        detail.set(key, [...(detail.get(key) ?? []), `${via} ${at}`])
-      }
-    }
-    const known = new Set(KNOWN_OFFENDERS)
-    const unexpected = [...detail].filter(([key]) => !known.has(key))
-    const fixed = KNOWN_OFFENDERS.filter((key) => !detail.has(key))
-    expect(
-      unexpected.map(([key, where]) => `${key}\n    ${where.slice(0, 4).join('\n    ')}`),
-      'new violations',
-    ).toEqual([])
-    expect(fixed, 'known offenders that no longer occur: remove them').toEqual([])
+  it('break no rule', () => {
+    const broken = sent.flatMap(({ via, id, wire }) =>
+      ('refused' in wire ? [{ rule: 'sdk-refused', at: wire.refused }] : violations(wire.schema)).map(
+        ({ rule, at }) => `${id} ${rule} (${via} at ${at})`,
+      ),
+    )
+    expect(broken).toEqual([])
   })
 })

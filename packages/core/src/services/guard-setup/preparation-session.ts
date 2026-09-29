@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
-import { defineSessionKind, defineToolSpec, type SessionDef } from '@truecourse/agent-loop';
+import { defineSessionKind, defineToolSpec, toolArgs, type SessionDef } from '@truecourse/agent-loop';
+import { wireShape } from '@truecourse/shared/llm';
 import type {
   GuardSetupPreparationSession,
   GuardSetupPreparationSessionInput,
@@ -29,7 +30,7 @@ import {
 import { isCreditsExhausted } from '@truecourse/shared';
 import { runSessionPool } from '../agent/session-pool.js';
 import { preparationContext } from './preparation-context.js';
-import { preparationObservationSession, qualifyObservations, type ObservationReview } from './preparation-observation.js';
+import { ObservationCheckWire, preparationObservationSession, qualifyObservations, type ObservationReview } from './preparation-observation.js';
 import { preparationDiagnostic, preparationDiagnosticTool } from './preparation-diagnostics.js';
 import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js';
 import {
@@ -74,9 +75,13 @@ export const PreparationDraftSchema = z
   );
 export type PreparationDraft = z.infer<typeof PreparationDraftSchema>;
 
+/** The preparation draft as the model writes it: every map a list of named entries. */
+export const PreparationDraftWire = wireShape(PreparationDraftSchema);
+
 const PREPARATION_SESSION = defineSessionKind({
   kind: PREPARATION_SESSION_KIND,
   outcomeSchema: PreparationDraftSchema,
+  outcomeInputSchema: PreparationDraftWire.schema,
 });
 
 const VERIFY_PREPARATIONS = defineToolSpec({
@@ -84,7 +89,7 @@ const VERIFY_PREPARATIONS = defineToolSpec({
   description:
     'Run proposed private preparation scripts against two app worlds, without changing saved setup.',
   kind: 'verify-preparations',
-  inputSchema: PreparationDraftSchema,
+  inputSchema: PreparationDraftWire.schema,
   readOnly: false,
   destructive: false,
 });
@@ -287,6 +292,7 @@ export function buildPreparationSession(
       input.onPhase?.('authoring and verifying private starting states', 'preparations');
       const def: SessionDef<PreparationDraft> = {
         ...PREPARATION_SESSION,
+        resolveOutcome: PreparationDraftWire.resolve,
         display: { title: 'Preparations' },
         systemPrompt: PREPARATION_PROMPT,
         budget: PREPARATION_SESSION_BUDGET,
@@ -296,7 +302,8 @@ export function buildPreparationSession(
           searchTool(input.repoRoot),
           preparationDiagnosticTool(),
           VERIFY_PREPARATIONS.bind({
-            async execute(draft) {
+            async execute(sent) {
+              let draft = toolArgs(VERIFY_PREPARATIONS.name, PreparationDraftWire.safeParse(sent));
               if (!draft.profiles.length)
                 return { isError: true, content: 'verify_preparations requires at least one profile; an empty draft cannot resolve a verification failure.' };
               try {
@@ -347,7 +354,7 @@ export function buildPreparationSession(
             specExcerpts: input.specExcerpts,
             repoRoot: input.repoRoot,
             runtimeContext,
-            qualifiedObservations: review.output.candidates.filter(c => c.decision === 'instance').map(c => c.check),
+            qualifiedObservations: review.output.candidates.filter(c => c.decision === 'instance').map(c => ObservationCheckWire.write(c.check)),
           })),
         ],
         driver,

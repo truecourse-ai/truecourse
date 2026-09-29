@@ -23,7 +23,7 @@ import { z } from 'zod'
 import { defineSessionKind } from '@truecourse/agent-loop'
 import {
   RECIPE_SYSTEM_PROMPT,
-  RecipeProposalSchema,
+  RecipeProposalWire,
   buildRecipeUserPrompt,
   type RecipeRunner,
 } from '@truecourse/guard-generator'
@@ -32,12 +32,12 @@ import { withOutcomeDelivery } from '../agent/one-turn.js'
 
 export const RECIPE_PROPOSE_SESSION_KIND = 'guard-setup.recipe-propose'
 
-/** The model answers in the proposal's shape; the raw answer is handed back
- *  for the engine to validate. */
+/** The model answers in the proposal's wire shape; the answer, back in the
+ *  proposal's own shape, is handed over raw for the engine to validate. */
 const RECIPE_PROPOSE_SESSION = defineSessionKind({
   kind: RECIPE_PROPOSE_SESSION_KIND,
   outcomeSchema: z.unknown(),
-  outcomeInputSchema: RecipeProposalSchema,
+  outcomeInputSchema: RecipeProposalWire.schema,
 })
 
 export interface RecipeProposeSeam {
@@ -67,6 +67,7 @@ export function createRecipeProposeSession(opts: CreateRecipeProposeOptions): Re
       seam.ask<unknown>({
         session: {
           ...RECIPE_PROPOSE_SESSION,
+          resolveOutcome: RecipeProposalWire.convert,
           title: 'Recipe proposal',
           systemPrompt: withOutcomeDelivery(RECIPE_SYSTEM_PROMPT),
           reasks: 0,

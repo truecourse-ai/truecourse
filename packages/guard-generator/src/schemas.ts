@@ -17,6 +17,7 @@
  */
 
 import { z } from 'zod'
+import { namedEntries, wireShape } from '@truecourse/shared/llm'
 import {
   GuardVerificationSchema,
   GuardSetupSchema,
@@ -62,7 +63,7 @@ export const RecipeApiServerProposalSchema = z
     /** Health endpoint polled until 2xx (defaults to `/` in the runner). */
     healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
     /** Extra env for this service's process; values may carry `${PORT}`. */
-    env: z.record(z.string(), z.string()).optional(),
+    env: namedEntries(z.record(z.string(), z.string()), 'name', 'value').optional(),
     /** Repo-relative dir of the workspace package this service serves (`apps/api/v2`). */
     app: z.string().min(1).optional(),
     /**
@@ -84,7 +85,7 @@ export const RecipeApiProposalSchema = z
     /** Health endpoint polled until 2xx (defaults to `/` in the runner). */
     healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
     /** Extra env for the server process; values may carry `${PORT}`. */
-    env: z.record(z.string(), z.string()).optional(),
+    env: namedEntries(z.record(z.string(), z.string()), 'name', 'value').optional(),
     /** Boot in the repo root — required for a workspace-mediated serve. */
     cwd: z.literal('repo').optional(),
     /** Repo-relative dir of the workspace package the single serve drives. */
@@ -109,7 +110,7 @@ export const RecipeApiProposalSchema = z
      * BOTH — declaring only one leaves every documented endpoint of the other
      * untestable, which is exactly how a run ends up asking the wrong server.
      */
-    servers: z.record(z.string().min(1), RecipeApiServerProposalSchema).optional(),
+    servers: namedEntries(z.record(z.string().min(1), RecipeApiServerProposalSchema), 'name', 'server').optional(),
     /** The `servers` key a scenario runs against when it names none. */
     defaultServer: z.string().min(1).optional(),
   })
@@ -159,9 +160,13 @@ export const RecipeProposalSchema = z
       .min(1)
       .refine((e) => !isNoOpEntry(e), { message: NO_OP_ENTRY_MESSAGE })
       .optional(),
-    env: z.record(z.string(), z.string()).optional(),
+    env: namedEntries(z.record(z.string(), z.string()), 'name', 'value').optional(),
     api: RecipeApiProposalSchema.optional(),
-    preparations: z.record(z.string().regex(/^[a-z0-9][a-z0-9._-]*$/), RecipePreparationSchema).optional(),
+    preparations: namedEntries(
+      z.record(z.string().regex(/^[a-z0-9][a-z0-9._-]*$/), RecipePreparationSchema),
+      'name',
+      'preparation',
+    ).optional(),
     /**
      * The BROWSER surface — the runner's own `web` block, verbatim (serve argv,
      * healthPath, env, `app` naming the served workspace app in a monorepo).
@@ -188,6 +193,9 @@ export const RecipeProposalSchema = z
   })
 export type RecipeProposal = z.infer<typeof RecipeProposalSchema>
 
+/** The recipe proposal as the model writes it: every map a list of named entries. */
+export const RecipeProposalWire = wireShape(RecipeProposalSchema)
+
 // ---------------------------------------------------------------------------
 // Seed drafting (one call per repo)
 // ---------------------------------------------------------------------------
@@ -205,8 +213,8 @@ export type RecipeProposal = z.infer<typeof RecipeProposalSchema>
 export const SeedProvidesProposalSchema = z
   .object({
     /** Credentials the script mints: name → the request header it is injected as. */
-    credentials: z
-      .record(
+    credentials: namedEntries(
+      z.record(
         z.string().min(1),
         z
           .object({
@@ -217,10 +225,12 @@ export const SeedProvidesProposalSchema = z
             satisfies: z.string().min(1).optional(),
           })
           .strict(),
-      )
-      .optional(),
+      ),
+      'name',
+      'credential',
+    ).optional(),
     /** Fixtures the script emits: name → the field names scenarios may reference. */
-    fixtures: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
+    fixtures: namedEntries(z.record(z.string().min(1), z.array(z.string().min(1)).min(1)), 'name', 'fields').optional(),
   })
   .strict()
   .refine(

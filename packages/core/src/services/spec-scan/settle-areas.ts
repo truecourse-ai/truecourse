@@ -13,9 +13,11 @@
  */
 
 import { z } from 'zod'
+import { namedEntries, wireShape } from '@truecourse/shared/llm'
 import {
   defineSessionKind,
   defineToolSpec,
+  toolArgs,
   type KnownDisplayBlock,
   type SessionBudget,
   type SessionDef,
@@ -78,9 +80,9 @@ const BRIEFED_DOC_LINE_BUDGET = 600
 export const AreaSettlementSchema = z
   .object({
     /** drifted concern label → canonical concern label (both from the briefing). */
-    concernMerges: z.record(z.string(), z.string()),
+    concernMerges: namedEntries(z.record(z.string(), z.string()), 'drifted', 'canonical'),
     /** drifted product label → canonical product label, or "core" (to-core is LEGAL here). */
-    productMerges: z.record(z.string(), z.string()),
+    productMerges: namedEntries(z.record(z.string(), z.string()), 'drifted', 'canonical'),
     /** One verdict REQUIRED per non-core product: does the product axis earn its keep? */
     productVerdicts: z.array(
       z.object({
@@ -95,7 +97,7 @@ export const AreaSettlementSchema = z
         label: z.string().min(1),
         into: z.array(z.string().min(1)).min(2),
         /** doc ref → the member of `into` it belongs to. Complete over the label's docs. */
-        assignments: z.record(z.string(), z.string()),
+        assignments: namedEntries(z.record(z.string(), z.string()), 'doc', 'target'),
       }),
     ),
   })
@@ -185,7 +187,7 @@ PRIOR AREAS. When the briefing lists the areas the LAST scan settled, they are t
 
 VALIDATE BEFORE YOU FINISH: call \`check_settlement\` with your complete draft. It runs the exact checks the run applies — missing product verdicts, merge targets not in the briefing, incomplete subdivision assignments — and a problem it finds costs one turn here instead of your whole settlement at the outcome.
 
-The outcome is one object: { "concernMerges": {...}, "productMerges": {...}, "productVerdicts": [...], "subdivisions": [...] }. Empty containers are fine where there is truly nothing to do, but judge the GRAIN before you decide that: docs cluster into a handful of areas, so a vocabulary of dozens of concerns over a few dozen docs — most labels carrying one or two docs — is UNDER-MERGED, not settled. An empty settlement on such a vocabulary is almost always wrong; read a few docs and fold the subtopics into their umbrellas first.`
+The outcome is one object: { "concernMerges": [...], "productMerges": [...], "productVerdicts": [...], "subdivisions": [...] }. Each merge is one entry { "drifted": <label>, "canonical": <label> }, and a subdivision's \`assignments\` are entries { "doc": <ref>, "target": <new concern> }. Empty containers are fine where there is truly nothing to do, but judge the GRAIN before you decide that: docs cluster into a handful of areas, so a vocabulary of dozens of concerns over a few dozen docs — most labels carrying one or two docs — is UNDER-MERGED, not settled. An empty settlement on such a vocabulary is almost always wrong; read a few docs and fold the subtopics into their umbrellas first.`
 
 /** Exported for the step-7 estimate rework (probe the REAL keys). */
 export const SETTLE_AREAS_PROMPT_FINGERPRINT = promptFingerprint(SETTLE_AREAS_SYSTEM_PROMPT)
@@ -483,6 +485,9 @@ function emptyDraftPushback(vocab: AreaVocabView): string {
   )
 }
 
+/** The settlement as the model writes it: every map a list of entries. */
+export const AreaSettlementWire = wireShape(AreaSettlementSchema)
+
 const CHECK_SETTLEMENT = defineToolSpec({
   name: 'check_settlement',
   description:
@@ -494,7 +499,7 @@ const CHECK_SETTLEMENT = defineToolSpec({
     one: 'I checked my settlement against the corpus before committing it',
     many: 'I checked my settlement {n} times before committing it',
   },
-  inputSchema: AreaSettlementSchema,
+  inputSchema: AreaSettlementWire.schema,
 })
 
 function checkSettlementTool(vocab: AreaVocabView, prior: readonly string[]): SessionTool {
@@ -504,7 +509,8 @@ function checkSettlementTool(vocab: AreaVocabView, prior: readonly string[]): Se
   // finishes inside budget.
   let pushedBack = false
   return CHECK_SETTLEMENT.bind({
-    async execute(args) {
+    async execute(sent) {
+      const args = toolArgs(CHECK_SETTLEMENT.name, AreaSettlementWire.safeParse(sent))
       const errors = validateSettlement(args, vocab, prior)
       if (errors.length === 0) {
         if (!pushedBack && isNoOpSettlement(args) && fragmentedVocab(vocab)) {
@@ -590,11 +596,13 @@ function presentSettlement(settlement: AreaSettlement): KnownDisplayBlock[] {
 const SETTLE_AREAS_SESSION = defineSessionKind({
   kind: SETTLE_AREAS_SESSION_KIND,
   outcomeSchema: AreaSettlementSchema,
+  outcomeInputSchema: AreaSettlementWire.schema,
 })
 
 export function settleAreasSessionDef(input: SettleAreasSessionInput): SessionDef<AreaSettlement> {
   return {
     ...SETTLE_AREAS_SESSION,
+    resolveOutcome: AreaSettlementWire.resolve,
     systemPrompt: SETTLE_AREAS_SYSTEM_PROMPT,
     tools: [
       docsWithLabelTool(input.universe, () => labelIndex(input.vocab)),

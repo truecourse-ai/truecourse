@@ -20,6 +20,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { z } from 'zod'
+import { namedEntries } from '@truecourse/shared/llm'
 import { GuardPreparationNameSchema, GuardPreparationBaselineSchema, GUARD_HTTP_METHODS } from '@truecourse/shared'
 import { dependenciesPath, recipePath } from './store.js'
 
@@ -186,9 +187,9 @@ export const RecipeApiSeedSchema = z
     provides: z
       .object({
         /** Credentials the seed mints: name → the header it is injected as (+ role). */
-        credentials: z.record(z.string().min(1), RecipeApiSeedCredentialSchema).optional(),
+        credentials: namedEntries(z.record(z.string().min(1), RecipeApiSeedCredentialSchema), 'name', 'credential').optional(),
         /** Fixtures the seed emits: name → the field names available for `{{fixture:…}}`. */
-        fixtures: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
+        fixtures: namedEntries(z.record(z.string().min(1), z.array(z.string().min(1)).min(1)), 'name', 'fields').optional(),
       })
       .strict(),
   })
@@ -202,12 +203,13 @@ export const RecipePreparationScriptSchema = z.object({
  * not values captured from the application response being checked. */
 export const RecipePreparationBaselineCheckSchema = z.object({
   qualification: PreparationQualificationSchema.optional(),
-  path: z.string().regex(/^\/(?!\/)/).refine(p => !/[?#[\]\\\s]/.test(p), 'baseline paths must omit query/fragment; use query for transport parameters'),
-  query: z.record(z.string().min(1), z.string()).optional(),
+  // One leading slash, never two: written without lookaround, which strict tool schemas refuse.
+  path: z.string().regex(/^\/(?:[^/]|$)/).refine(p => !/[?#[\]\\\s]/.test(p), 'baseline paths must omit query/fragment; use query for transport parameters'),
+  query: namedEntries(z.record(z.string().min(1), z.string()), 'parameter', 'value').optional(),
   server: z.string().min(1).optional(),
   credential: z.string().min(1).optional(),
-  counts: z.record(z.string().min(1), z.number().int().nonnegative()).refine(v => Object.keys(v).length > 0, 'declare at least one global record count'),
-  totals: z.record(z.string().min(1), z.number().finite()).optional(),
+  counts: namedEntries(z.record(z.string().min(1), z.number().int().nonnegative()), 'path', 'count').refine(v => Object.keys(v).length > 0, 'declare at least one global record count'),
+  totals: namedEntries(z.record(z.string().min(1), z.number().finite()), 'path', 'total').optional(),
 }).strict()
 export const RecipePreparationSchema = z.object({
   baseline: GuardPreparationBaselineSchema,
@@ -222,7 +224,7 @@ export const RecipePreparationSchema = z.object({
       .refine(key => !key.startsWith('GUARD_'), 'GUARD_ bindings are runner-owned')).min(1)
       .refine(keys => new Set(keys).size === keys.length, 'Postgres URL bindings must be unique'),
   }).strict().optional(),
-  env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((key) => !key.startsWith('GUARD_'), 'GUARD_ bindings are runner-owned'), z.string().min(1))
+  env: namedEntries(z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((key) => !key.startsWith('GUARD_'), 'GUARD_ bindings are runner-owned'), z.string().min(1)), 'name', 'value')
     .refine((env) => Object.values(env).every((v) => /\$\{(?:directory|namespace)\}/.test(v) &&
       !/\$\{(?!directory\}|namespace\})/.test(v)), 'every binding must use ${directory} or ${namespace}, with no other references'),
   seed: RecipeApiSeedSchema.omit({ command: true }).extend({ script: RecipePreparationScriptSchema.shape.script }),
@@ -612,7 +614,7 @@ export const RecipeWebSchema = z
     /** Wall-clock budget for the surface to become ready. Defaults to 60s. */
     readyTimeoutMs: z.number().int().positive().optional(),
     /** Extra env for the web surface process, on top of the recipe-level `env`. */
-    env: z.record(z.string(), z.string()).optional(),
+    env: namedEntries(z.record(z.string(), z.string()), 'name', 'value').optional(),
     /**
      * Repo-relative directory of the workspace app this surface serves
      * (`apps/web`). The web analog of {@link RecipeApiServerSchema}.app, and the

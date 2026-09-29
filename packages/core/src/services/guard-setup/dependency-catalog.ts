@@ -500,7 +500,7 @@ const RUN_PROGRAM = defineToolSpec({
   inputSchema: z
     .object({
       argv: z.array(z.string()).min(1),
-      env: z.record(z.string(), z.string()).optional(),
+      env: z.array(z.object({ name: z.string(), value: z.string() }).strict()).optional(),
     })
     .strict(),
 });
@@ -511,7 +511,7 @@ function runProgramTool(): SessionTool {
       const sandbox = createWorkingSandbox();
       try {
         const capture = await sandbox.exec(args.argv, {
-          ...(args.env ? { env: args.env } : {}),
+          ...(args.env ? { env: Object.fromEntries(args.env.map(({ name, value }) => [name, value])) } : {}),
           timeoutMs: 60_000,
           ...(toolCtx.signal ? { signal: toolCtx.signal } : {}),
         });

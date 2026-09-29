@@ -36,7 +36,8 @@
  */
 
 import { z } from 'zod'
-import { defineToolSpec, type SessionTool } from '@truecourse/agent-loop'
+import { defineToolSpec, toolArgs, type SessionTool } from '@truecourse/agent-loop'
+import { wireShape } from '@truecourse/shared/llm'
 import {
   ANONYMOUS_PRINCIPAL,
   interfaceStepLocator,
@@ -187,14 +188,17 @@ function interfacesTool(input: AuthorToolsInput): SessionTool {
   })
 }
 
+/** A draft piece with its proofs, the proofs as a list of `{ id, reach }` entries on the wire. */
+export const CheckDraftInputWire = wireShape(AuthoredFragmentSchema.extend({ proof: LiveProofReachSchema.optional() }))
+
 const CHECK_DRAFT = defineToolSpec({
   name: 'check_draft',
   description:
-    'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. A step whose locator uses `css` or `pick` is also PROVEN on the running app: its address is opened, the task\'s clicks before it are replayed (only when every earlier step is a click and the task has no endState), and it must resolve to exactly one visible element (a `pick` position within the matches). When the task cannot be replayed, pass `proof: {"<task id>": {"steps": [{"activate": <locator>} | {"fill": <locator>, "value": "<text>"} | {"select": <locator>, "option": "<label>"}, …]}}` — never a control that submits, deletes, cancels or signs out; when the entry has a {slot}, add `"path": "<the entry with every slot filled>"`. A readable whose locator uses `css` is proven the same way at this place\'s address, after the actions a `proof` entry keyed by the place\'s id lists (the way into a dialog). What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
+    'Check ONE interface, a few, or the whole draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the target policy, reachability, all four readable kinds stated on every place you declare, and the catalog schema. A step whose locator uses `css` or `pick` is also PROVEN on the running app: its address is opened, the task\'s clicks before it are replayed (only when every earlier step is a click and the task has no endState), and it must resolve to exactly one visible element (a `pick` position within the matches). When the task cannot be replayed, pass `proof: [{"id": "<task id>", "reach": {"steps": [{"activate": <locator>} | {"fill": <locator>, "value": "<text>"} | {"select": <locator>, "option": "<label>"}, …]}}]` — never a control that submits, deletes, cancels or signs out; when the entry has a {slot}, add `"path": "<the entry with every slot filled>"` to its `reach`. A readable whose locator uses `css` is proven the same way at this place\'s address, after the actions a `proof` entry whose `id` is the place\'s id lists (the way into a dialog). What passes is KEPT for the rest of this session and checked against by every later call, so check as you go: your first task or two, then each piece as you finish it. NEVER resend an interface that was already accepted — send an id again only to CORRECT that entry. Call `outcome` with the draftId of your last accepted check; acceptance checks the current catalog again and returns any new conflicts for correction.',
   kind: 'check-draft',
   readOnly: true,
   destructive: false,
-  inputSchema: AuthoredFragmentSchema.extend({ proof: LiveProofReachSchema.optional() }),
+  inputSchema: CheckDraftInputWire.schema,
 })
 
 /**
@@ -230,7 +234,8 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
     return known
   }
   return CHECK_DRAFT.bind({
-    async execute({ proof, ...sent }) {
+    async execute(args) {
+      const { proof, ...sent } = toolArgs(CHECK_DRAFT.name, CheckDraftInputWire.safeParse(args))
       const piece = withObservedPrincipal(withoutProvenWords(sent), input.live)
       const unknownPrincipals = unknownPrincipalProblems(piece.interfaces, input)
       if (unknownPrincipals.length > 0) {
