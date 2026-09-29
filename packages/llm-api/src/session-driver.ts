@@ -30,7 +30,6 @@ import {
   type SystemModelMessage,
   type ToolSet,
 } from 'ai';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
 import { sessionImageRef } from '@truecourse/agent-loop';
 import type {
@@ -49,8 +48,8 @@ import type {
   RawPayload,
 } from '@truecourse/agent-loop';
 import { buildModel } from './model.js';
-import { normalizeForStrictOutput, stripInjectedNulls, type SchemaPath } from './strict-schema.js';
-import { compactSchema } from './compact-schema.js';
+import { stripInjectedNulls, type SchemaPath } from './strict-schema.js';
+import { wireSchema } from './wire-schema.js';
 import { providerTuningFor, type ProviderTuning } from './provider-tuning.js';
 import type { ProviderConfig } from './types.js';
 import { callUsageOf, type CallUsage } from './usage.js';
@@ -920,9 +919,8 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * Compile the session's tools (plus the injected outcome tool) into the AI
- * SDK toolset. Only OpenAI-family providers receive strict-subset normalization.
- * Other providers receive the original optional fields and constraints. The
- * shell's Zod validation still gates `execute` for every provider.
+ * SDK toolset, each with the wire schema `wireSchema` makes for this provider.
+ * The shell's Zod validation still gates `execute` for every provider.
  * Tools carry no `execute` — one step per turn, the loop runs them.
  */
 function buildToolset(def: SessionDef, tuning: ProviderTuning): {
@@ -932,24 +930,13 @@ function buildToolset(def: SessionDef, tuning: ProviderTuning): {
   const toolset: ToolSet = {};
   const widenedByTool = new Map<string, readonly SchemaPath[]>();
   const add = (name: string, description: string, schema: ZodTypeAny): void => {
-    const rawSchema = zodToJsonSchema(schema, { $refStrategy: 'none' });
-    let inputSchema: Record<string, unknown> = rawSchema;
-    let widened: readonly SchemaPath[] = [];
-    if (tuning.normalizeToolSchema) {
-      try {
-        const strict = normalizeForStrictOutput(rawSchema);
-        inputSchema = strict.schema;
-        widened = strict.widened;
-      } catch {
-        /* inexpressible in the strict subset — send unnormalized */
-      }
-    }
+    const wire = wireSchema(schema, tuning);
     toolset[name] = tool({
       description,
-      inputSchema: jsonSchema(compactSchema(inputSchema) as never),
-      ...(tuning.strictTools ? { strict: true } : {}),
+      inputSchema: jsonSchema(wire.schema as never),
+      ...(wire.strict ? { strict: true } : {}),
     });
-    widenedByTool.set(name, widened);
+    widenedByTool.set(name, wire.widened);
   };
   for (const t of def.tools) {
     if (t.name === OUTCOME_TOOL_NAME) {

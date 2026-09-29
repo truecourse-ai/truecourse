@@ -8,6 +8,7 @@
 import type { ModelMessage } from 'ai';
 import type { SessionDef } from '@truecourse/agent-loop';
 import type { LlmProviderKind } from './types.js';
+import type { SchemaCapabilities } from './wire-schema.js';
 
 /**
  * The provider-options namespace GitHub Copilot answers to. The
@@ -20,11 +21,7 @@ export const COPILOT_PROVIDER_NAME = 'github-copilot';
 /** One `providerOptions` bag: namespace → options, as the AI SDK takes it. */
 type ProviderOptionsBag = NonNullable<ModelMessage['providerOptions']>;
 
-export interface ProviderTuning {
-  /** Only OpenAI-family schemas require every property to be required. */
-  readonly normalizeToolSchema?: boolean;
-  /** Ask the provider to enforce the tool schema. */
-  readonly strictTools?: boolean;
+export interface ProviderTuning extends SchemaCapabilities {
   /** Provider-specific instructions, ahead of the session's own prompt. */
   sessionInstructions?(def: SessionDef): string;
 

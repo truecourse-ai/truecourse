@@ -12,6 +12,7 @@ export {
   type ApiSessionDriverOptions,
 } from './session-driver.js';
 export { buildModel } from './model.js';
+export { wireSchema, type SchemaCapabilities, type WireSchema } from './wire-schema.js';
 export {
   providerTuningFor,
   COPILOT_PROVIDER_NAME,
