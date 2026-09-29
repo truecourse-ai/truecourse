@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { namedEntries, wireShape } from '@truecourse/shared/llm';
 import { defineSessionKind, type SessionDef } from '@truecourse/agent-loop';
+import { withSessionRules } from '../agent/session-rules.js';
 import { credentialServers, resolveApiServers, resolveWebSurface, observationBinding, observationConfiguration, observationSource, RecipePreparationBaselineCheckSchema, type Recipe, type PreparationQualification } from '@truecourse/guard-runner';
 import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js';
 
@@ -87,7 +88,8 @@ const PREPARATION_OBSERVATION_SESSION = defineSessionKind({
 });
 
 export function preparationObservationSession(repoRoot: string, recipe: Recipe): SessionDef<ObservationReview> {
-  return {
+  return withSessionRules({
+    reasoning: 'high',
     ...PREPARATION_OBSERVATION_SESSION, display: { title: 'Preparation observation review' },
     resolveOutcome: ObservationReviewWire.resolve,
     budget: { turns: 20, maxResumes: 0, tokenCeiling: 100000 },
@@ -104,5 +106,5 @@ Return instance only with affirmative source evidence for the full query/authori
       try { qualifyObservations(repoRoot, recipe, value); } catch (error) { return error instanceof Error ? error.message : String(error); }
       return undefined;
     },
-  };
+  });
 }

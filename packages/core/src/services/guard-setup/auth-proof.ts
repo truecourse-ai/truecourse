@@ -34,6 +34,7 @@ import {
   type SessionEvent,
   type SessionTool,
 } from '@truecourse/agent-loop';
+import { withSessionRules } from '../agent/session-rules.js';
 import type { GuardSetupAuthStep, GuardSetupAuthStepInput } from '@truecourse/guard-generator';
 import {
   createWorkingSandbox,
@@ -147,7 +148,8 @@ export function authProofSessionDef(input: {
   recipe: GuardSetupAuthStepInput['recipe'];
   item: AuthProofItem;
 }): SessionDef<AuthProofOutcome> {
-  return {
+  return withSessionRules({
+    reasoning: 'high',
     ...AUTH_PROOF_SESSION,
     display: {
       title: 'Auth proof',
@@ -163,7 +165,7 @@ export function authProofSessionDef(input: {
       message:
         'Outcome refused: you never ran `run_entry` in this session. A proof must show the program accepting the supplied state, and a blocker must show what the attempt hit — run it, then call `outcome` again.',
     },
-  };
+  });
 }
 
 export function authProofBriefing(item: AuthProofItem, entry: readonly string[]): string {

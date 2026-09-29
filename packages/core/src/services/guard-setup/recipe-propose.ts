@@ -69,6 +69,7 @@ export function createRecipeProposeSession(opts: CreateRecipeProposeOptions): Re
           ...RECIPE_PROPOSE_SESSION,
           resolveOutcome: RecipeProposalWire.convert,
           title: 'Recipe proposal',
+          reasoning: 'high',
           systemPrompt: withOutcomeDelivery(RECIPE_SYSTEM_PROMPT),
           reasks: 0,
           tokenCeiling: 150_000,

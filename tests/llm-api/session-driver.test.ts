@@ -295,35 +295,28 @@ describe('api session driver', () => {
   );
 
   it.each([
-    ['gemini-3.8-flash', 'guard-setup.recipe-repair', true],
-    ['gemini-3-pro-preview', 'guard-interfaces.web-tasks', true],
-    ['gemini-2.5-pro', 'guard-setup.recipe-repair', false],
-    ['gemini-3.8-flash', 'spec-scan.curation', false],
-  ] as const)('sets setup thinking for %s in %s: %s', async (model, kind, high) => {
+    ['gemini-3.8-flash', 'high', 'high'],
+    ['gemini-3-pro-preview', 'medium', 'medium'],
+    ['gemini-2.5-pro', 'high', undefined],
+    ['gemini-3.8-flash', undefined, undefined],
+  ] as const)('maps %s at reasoning %s to thinking level %s', async (model, reasoning, level) => {
     const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'ok' })] }]);
     buildModelMock.mockReturnValue(scripted.model);
     const { handle } = runSession(createApiSessionDriver({ provider: 'google', model, apiKey: 'test' }), {
-      def: makeDef({ kind }),
+      def: makeDef(reasoning ? { reasoning } : {}),
     });
     expect(await handle.done).toMatchObject({ kind: 'outcome' });
-    expect(scripted.calls[0].providerOptions).toEqual(high ? { google: { thinkingConfig: { thinkingLevel: 'high' } } } : {});
+    expect(scripted.calls[0].providerOptions).toEqual(level ? { google: { thinkingConfig: { thinkingLevel: level } } } : {});
   });
 
-  it('states the existing draft checkpoint before the Google setup prompt', async () => {
+  it('sends the session\'s own system prompt and nothing ahead of it', async () => {
     const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'ok' })] }]);
     buildModelMock.mockReturnValue(scripted.model);
     const { handle } = runSession(createApiSessionDriver({ provider: 'google', model: 'gemini-3.8-flash', apiKey: 'test' }), {
-      def: makeDef({
-        kind: 'guard-setup.recipe-repair', systemPrompt: 'Repair the recipe.',
-        draftCheckpoint: { tool: 'check_recipe', afterTurn: 8, message: 'Draft now.' },
-      }),
+      def: makeDef({ kind: 'guard-setup.recipe-repair', systemPrompt: 'Repair the recipe.' }),
     });
     expect(await handle.done).toMatchObject({ kind: 'outcome' });
-    const system = scripted.calls[0].prompt[0] as { content: string };
-    expect(system.content).toContain('first grant is 10 turns');
-    expect(system.content).toContain('`check_recipe` by turn 8');
-    expect(system.content).toContain('call `outcome` immediately');
-    expect(system.content).toMatch(/^<session_rules>[\s\S]+Repair the recipe\.$/);
+    expect((scripted.calls[0].prompt[0] as { content: string }).content).toBe('Repair the recipe.');
   });
 
   it('shows the model an IMAGE the session was given, text first', async () => {

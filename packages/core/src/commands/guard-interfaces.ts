@@ -321,6 +321,7 @@ function stateReconcileComplete(
       session: {
         ...STATE_RECONCILE_SESSION,
         title: 'State reconcile',
+        reasoning: 'high',
         systemPrompt: withOutcomeDelivery(prompt.system),
         tokenCeiling: 300_000,
       },

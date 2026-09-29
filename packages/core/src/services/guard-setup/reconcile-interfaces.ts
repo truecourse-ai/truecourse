@@ -51,6 +51,7 @@ import {
   type SessionPersistence,
   type SessionTool,
 } from '@truecourse/agent-loop'
+import { withSessionRules } from '../agent/session-rules.js'
 import {
   createSandboxProbeExec,
   type CliProbeExec,
@@ -164,7 +165,8 @@ const RECONCILE_INTERFACES_SESSION = defineSessionKind({
 export function reconcileInterfacesSessionDef(
   input: ReconcileSessionInput,
 ): SessionDef<ReconcileResolutions> {
-  return {
+  return withSessionRules({
+    reasoning: 'high',
     ...RECONCILE_INTERFACES_SESSION,
     display: { title: 'Interface reconcile' },
     systemPrompt: RECONCILE_INTERFACES_SYSTEM_PROMPT,
@@ -179,7 +181,7 @@ export function reconcileInterfacesSessionDef(
       message:
         'Outcome refused: you never ran `check_resolutions` in this session. Call it on your complete resolution list now — it runs the exact validation the fold will run (every briefed subject answered exactly once). Fix anything it reports, then call `outcome` again.',
     },
-  }
+  })
 }
 
 /** Caps — a tool result is context, and context is the budget. */

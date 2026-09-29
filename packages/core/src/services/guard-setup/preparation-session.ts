@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import { defineSessionKind, defineToolSpec, toolArgs, type SessionDef } from '@truecourse/agent-loop';
+import { withSessionRules } from '../agent/session-rules.js';
 import { wireShape } from '@truecourse/shared/llm';
 import type {
   GuardSetupPreparationSession,
@@ -290,8 +291,9 @@ export function buildPreparationSession(
         servicesStarted = true;
       }
       input.onPhase?.('authoring and verifying private starting states', 'preparations');
-      const def: SessionDef<PreparationDraft> = {
+      const def: SessionDef<PreparationDraft> = withSessionRules({
         ...PREPARATION_SESSION,
+        reasoning: 'high',
         resolveOutcome: PreparationDraftWire.resolve,
         display: { title: 'Preparations' },
         systemPrompt: PREPARATION_PROMPT,
@@ -337,7 +339,7 @@ export function buildPreparationSession(
             ? 'Run verify_preparations on this exact draft and repair every refusal before ending.'
             : undefined;
         },
-      };
+      });
       const results = await runSessionPool<
         GuardSetupPreparationSessionInput,
         PreparationDraft

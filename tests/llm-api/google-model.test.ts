@@ -112,6 +112,7 @@ it('preserves optional arguments, bounds and thought signatures through the sess
   const result = await driver.runSession({
     def: {
       kind: 'guard-setup.preparation-observations',
+      reasoning: 'high',
       systemPrompt: 'Review the source and report findings.',
       tools: buildAuthorTools({ repoRoot: new URL('../fixtures', import.meta.url).pathname, derived: null, authored: null, replaceable: new Set() }),
       outcomeSchema: z.object({ findings: z.array(z.string().min(1)).min(1).max(12) }),

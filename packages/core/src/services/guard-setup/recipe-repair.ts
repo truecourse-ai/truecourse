@@ -40,6 +40,7 @@
 
 import { z } from 'zod';
 import { defineSessionKind, defineToolSpec, toolArgs, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
+import { withSessionRules } from '../agent/session-rules.js';
 import {
   RECIPE_CACHE_NAME,
   NEEDS_REPAIR_FIELDS,
@@ -113,7 +114,8 @@ const RECIPE_REPAIR_SESSION = defineSessionKind({
 
 export function recipeRepairSessionDef(input: RecipeRepairSessionInput): SessionDef<RecipeProposal> {
   const standing = input.existing;
-  return {
+  return withSessionRules({
+    reasoning: 'high',
     ...RECIPE_REPAIR_SESSION,
     resolveOutcome: RecipeProposalWire.resolve,
     display: {
@@ -149,7 +151,7 @@ export function recipeRepairSessionDef(input: RecipeRepairSessionInput): Session
       message:
         '[checkpoint] You have spent more than half your first turn grant without drafting. Run `check_recipe` on your best current proposal NOW — it is free and static, and its refusals steer better than more reading. Iterate from the draft; do not return to open-ended exploration.',
     },
-  };
+  });
 }
 
 /**

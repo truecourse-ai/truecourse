@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { defineSessionKind, defineToolSpec, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
+import { withSessionRules } from '../agent/session-rules.js';
 import type {
   GuardSetupCatalogSession,
   GuardSetupCatalogSessionInput,
@@ -354,7 +355,8 @@ export function dependencyCatalogSessionDef(
   input: GuardSetupCatalogSessionInput,
   existing: GuardDependenciesFile,
 ): SessionDef<CatalogDraft> {
-  return {
+  return withSessionRules({
+    reasoning: 'high',
     ...DEPENDENCY_CATALOG_SESSION,
     display: {
       title: 'Dependency catalog',
@@ -383,7 +385,7 @@ export function dependencyCatalogSessionDef(
       message:
         '[checkpoint] You have spent more than half your first turn grant without drafting. Call `check_catalog` on your best current draft NOW — the briefing already carries the detection, the corpus areas and the grain guidance, and the checker\'s complaints steer better than more reading. Iterate from the draft; do not return to open-ended exploration.',
     },
-  };
+  });
 }
 
 /** The opening message: the rich detection, the recipe, the existing catalog,

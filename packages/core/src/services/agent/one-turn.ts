@@ -23,6 +23,7 @@
 import {
   runAgentLoop,
   type KnownDisplayBlock,
+  type ReasoningLevel,
   type SessionDef,
   type SessionDriver,
   type SessionImage,
@@ -64,6 +65,8 @@ export interface OneTurnSession<TOutcome> {
   /** Compact wire shape, when the answer's own schema is not one a provider's
    *  structured output can express. */
   outcomeInputSchema?: z.ZodTypeAny
+  /** Declared reasoning effort; see `SessionDef.reasoning`. */
+  reasoning?: ReasoningLevel
   /** The answer, from the wire shape back into the one `outcomeSchema` reads. */
   resolveOutcome?: (value: unknown) => unknown
   /** Refuse a schema-valid answer that does not hold against the real task;
@@ -88,6 +91,7 @@ export function oneTurnSessionDef<TOutcome>(session: OneTurnSession<TOutcome>): 
     outcomeSchema: session.outcomeSchema,
     ...(session.outcomeInputSchema ? { outcomeInputSchema: session.outcomeInputSchema } : {}),
     ...(session.resolveOutcome ? { resolveOutcome: session.resolveOutcome } : {}),
+    ...(session.reasoning ? { reasoning: session.reasoning } : {}),
     outcomeSchemaRepairs: reasks,
     ...(session.validateOutcome ? { validateOutcome: session.validateOutcome } : {}),
     ...(session.presentOutcome ? { presentOutcome: session.presentOutcome } : {}),

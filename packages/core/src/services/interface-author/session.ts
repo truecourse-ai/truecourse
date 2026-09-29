@@ -21,6 +21,7 @@
  */
 
 import { defineSessionKind, type SessionBudget, type SessionDef } from '@truecourse/agent-loop'
+import { withSessionRules } from '../agent/session-rules.js'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import { CheckedDraftReferenceSchema, resolveCheckedDraft } from './checked-draft.js'
 import { screenIdentityGuidance } from './identity.js'
@@ -56,7 +57,8 @@ const INTERFACE_AUTHOR_SESSION = defineSessionKind({
 })
 
 export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef<AuthoredFragment> {
-  return {
+  return withSessionRules({
+    reasoning: 'high',
     ...INTERFACE_AUTHOR_SESSION,
     display: { title: 'Web tasks' },
     systemPrompt: SYSTEM_PROMPT,
@@ -77,7 +79,7 @@ export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef
       message:
         'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` with the draftId of the accepted check.',
     },
-  }
+  })
 }
 
 /** The work item, as the session index and the transcript record it. */

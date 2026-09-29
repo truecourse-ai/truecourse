@@ -8,7 +8,7 @@
  */
 
 import type { ModelMessage } from 'ai';
-import type { SessionDef } from '@truecourse/agent-loop';
+import type { ReasoningLevel } from '@truecourse/agent-loop';
 import type { LlmProviderKind } from './types.js';
 import type { SchemaCapabilities } from './wire-schema.js';
 
@@ -24,8 +24,6 @@ export const COPILOT_PROVIDER_NAME = 'github-copilot';
 type ProviderOptionsBag = NonNullable<ModelMessage['providerOptions']>;
 
 export interface ProviderTuning extends SchemaCapabilities {
-  /** Provider-specific instructions, ahead of the session's own prompt. */
-  sessionInstructions?(def: SessionDef): string;
 
   /**
    * Merged onto a message that CLOSES a cacheable prefix — the system prompt
@@ -39,7 +37,12 @@ export interface ProviderTuning extends SchemaCapabilities {
    * candidate actually being called — under Bedrock the tool option is the
    * hosted model FAMILY's native field, not one of Bedrock's own.
    */
-  callOptions(modelId: string, cacheKey: string, sessionKind?: string): ProviderOptionsBag;
+  callOptions(modelId: string, cacheKey: string): ProviderOptionsBag;
+  /**
+   * A session's declared reasoning level, as this provider's own setting for
+   * `modelId`. Absent ⇒ the provider's default for every level.
+   */
+  reasoning?(modelId: string, level: ReasoningLevel): ProviderOptionsBag;
 }
 
 /**
@@ -131,15 +134,10 @@ const BEDROCK: ProviderTuning = {
       : {},
 };
 
-/** Setup includes the web authoring sessions it dispatches per place. */
-function isSetupSession(kind: string | undefined): boolean {
-  return kind?.startsWith('guard-setup.') === true || kind === 'guard-interfaces.web-tasks';
-}
-
 /**
- * Gemini caches prefixes implicitly and has no parallel-call switch.
- * Gemini 3 setup sessions use high thinking; older models retain their
- * native default because they do not accept thinkingLevel.
+ * Gemini caches prefixes implicitly and has no parallel-call switch. Gemini 3
+ * models take a session's reasoning level as their thinking level; older
+ * models keep their native default because they do not accept thinkingLevel.
  */
 const GOOGLE: ProviderTuning = {
   strictTools: true,
@@ -161,26 +159,9 @@ const GOOGLE: ProviderTuning = {
   // so what the session loses is a re-ask on a malformed call, not
   // correctness.
   enforcesLargeSchemas: false,
-  callOptions: (modelId, _cacheKey, sessionKind): ProviderOptionsBag =>
-    /^gemini-3[.-]/.test(modelId) && isSetupSession(sessionKind)
-      ? { google: { thinkingConfig: { thinkingLevel: 'high' } } }
-      : {},
-  sessionInstructions: (def) => {
-    if (!isSetupSession(def.kind)) return '';
-    const checkpoint = def.draftCheckpoint;
-    const check = checkpoint?.tool ?? def.outcomePrecondition?.tool;
-    return [
-      '<session_rules>',
-      `Your first grant is ${def.budget.turns} turns. Finish within it when possible; do not rely on an extension.`,
-      'Read only the evidence needed for the assigned task. Omit optional tool arguments you do not need; never fill them with empty strings or null unless the schema allows it.',
-      ...(check ? [
-        `Submit a first draft to \`${check}\` by turn ${checkpoint?.afterTurn ?? Math.max(1, Math.floor(def.budget.turns / 2))}. Use its results to revise the draft.`,
-      ] : []),
-      'Reserve turns for validation and the outcome. Once the task requirements are satisfied, call `outcome` immediately. Report unresolved findings in the permitted outcome fields; do not invent evidence or claim an unverified result.',
-      'When told to wrap up, stop exploring and submit the supported outcome using the session contract.',
-      '</session_rules>',
-    ].join('\n');
-  },
+  callOptions: () => ({}),
+  reasoning: (modelId, level): ProviderOptionsBag =>
+    /^gemini-3[.-]/.test(modelId) ? { google: { thinkingConfig: { thinkingLevel: level } } } : {},
 };
 
 const TUNING: Record<LlmProviderKind, ProviderTuning> = {

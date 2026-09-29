@@ -68,6 +68,7 @@ import {
   type SessionTool,
   type SessionToolResult,
 } from '@truecourse/agent-loop';
+import { withSessionRules } from '../agent/session-rules.js';
 import {
   SEED_CACHE_NAME,
   SEED_STAGE_VERSION,
@@ -494,7 +495,8 @@ const SEED_SESSION = defineSessionKind({
 });
 
 export function seedSessionDef(world: SeedSessionWorld): SessionDef<SeedSessionOutcome> {
-  return {
+  return withSessionRules({
+    reasoning: 'high',
     ...SEED_SESSION,
     resolveOutcome: SeedSessionOutcomeWire.resolve,
     display: {
@@ -521,7 +523,7 @@ export function seedSessionDef(world: SeedSessionWorld): SessionDef<SeedSessionO
       message:
         '[checkpoint] You have spent more than half your first turn grant without running a draft. Write your best current seed script and call `run_seed_draft` NOW — its real execution errors (imports, constraints, enum casing) steer better than more reading. Iterate from the draft; do not return to open-ended exploration.',
     },
-  };
+  });
 }
 
 /** How many seed-machinery files the briefing carries, and how much of each. */

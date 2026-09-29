@@ -169,6 +169,9 @@ export interface SessionBudget {
   tokenCeiling: number;
 }
 
+/** How hard the model should think per turn; each provider maps it to its own setting. */
+export type ReasoningLevel = 'low' | 'medium' | 'high';
+
 export interface SessionDef<TOutcome = unknown> {
   /** Session type, `<command>.<task>` (e.g. `spec-scan.curation`). */
   kind: string;
@@ -192,6 +195,8 @@ export interface SessionDef<TOutcome = unknown> {
    * `wrappingUp` says the budget is spent and only the wrap-up turns remain. */
   validateOutcome?(outcome: TOutcome, context: { wrappingUp: boolean }): string | undefined | Promise<string | undefined>;
   budget: SessionBudget;
+  /** Declared reasoning effort. Absent ⇒ the provider's default. */
+  reasoning?: ReasoningLevel;
   /** May wait on user input. Non-interactive runs never block. */
   interactive?: boolean;
   /** The short name of this KIND of work ("Scenario author") and the session's

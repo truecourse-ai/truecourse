@@ -632,7 +632,7 @@ async function callModel(
   // `rebuildHistory` never emits a system message.
   const system: SystemModelMessage = {
     role: 'system',
-    content: [rt.tuning.sessionInstructions?.(def), def.systemPrompt].filter(Boolean).join('\n\n'),
+    content: def.systemPrompt,
     ...(breakpoint ? { providerOptions: breakpoint } : {}),
   };
   const prompt: ModelMessage[] = messages.map((m, i) =>
@@ -665,7 +665,10 @@ async function callModel(
         // event models ONE tool call per turn, this provider's way of asking
         // for a single call. A turn that still carries several is executed in
         // full — see the loop.
-        providerOptions: rt.tuning.callOptions(candidate.modelId, rt.cacheKey, def.kind),
+        providerOptions: mergeOptions(
+          rt.tuning.callOptions(candidate.modelId, rt.cacheKey),
+          def.reasoning ? rt.tuning.reasoning?.(candidate.modelId, def.reasoning) : undefined,
+        ),
       });
       const stream = await reportTurn(result, live, cancelTurn);
       // The guard already aborted the request; the result promises are never
@@ -954,6 +957,16 @@ function buildToolset(def: SessionDef, tuning: ProviderTuning): {
     (def.outcomeInputSchema ?? def.outcomeSchema) as unknown as ZodTypeAny,
   );
   return { toolset, widenedByTool };
+}
+
+type ProviderOptions = NonNullable<ModelMessage['providerOptions']>;
+
+/** Two provider-options bags as one, namespace by namespace. */
+function mergeOptions(base: ProviderOptions, extra: ProviderOptions | undefined): ProviderOptions {
+  if (!extra) return base;
+  const merged: ProviderOptions = { ...base };
+  for (const [namespace, options] of Object.entries(extra)) merged[namespace] = { ...merged[namespace], ...options };
+  return merged;
 }
 
 /** Drop the nulls the strict-schema widening introduced before anything
