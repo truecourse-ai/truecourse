@@ -2052,6 +2052,31 @@ describe('live outcome validation', () => {
     expect(result).toMatchObject({ status: 'failed', failure: { kind: 'malformed' } });
     expect(runs).toHaveLength(3);
   });
+  it('corrects a wire outcome with the issues its resolver found in the wire shape', async () => {
+    const wire = z.object({ pair: z.object({ a: z.string(), b: z.string() }) });
+    const { driver, runs } = fakeDriver(async ({ input, emit }) => {
+      await emit({ type: 'assistant-turn', text: 'finish', usage: usage(1) });
+      return { kind: 'outcome', value: input.resume ? { pair: { a: 'x', b: 'y' } } : { pair: { a: 'x' } } };
+    });
+    const { persistence } = memoryPersistence();
+    const result = await runAgentLoop({
+      def: {
+        kind: 'spec-scan.overlap',
+        systemPrompt: 'compare docs',
+        tools: [],
+        outcomeSchema: z.object({ pair: z.tuple([z.string(), z.string()]) }),
+        outcomeInputSchema: wire,
+        resolveOutcome: (value) => {
+          const { pair } = wire.parse(value);
+          return { pair: [pair.a, pair.b] };
+        },
+        outcomeSchemaRepairs: 1,
+        budget: { turns: 10, maxResumes: 0, tokenCeiling: 1_000_000 },
+      },
+      workItem: 'flow', initialMessages: ['go'], driver, persistence, sessionId: 'wire-repair' }).outcome;
+    expect(result).toMatchObject({ status: 'completed', output: { pair: ['x', 'y'] } });
+    expect(runs[1].initialMessages[0]).toContain('pair.b: Required');
+  });
   it('continues a refused completion over the same transcript and cumulative usage', async () => {
     let accepted = false
     const { driver, runs } = fakeDriver(async ({ input, emit }) => {

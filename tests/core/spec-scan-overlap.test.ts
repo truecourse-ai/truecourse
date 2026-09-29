@@ -17,6 +17,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
+import type { z } from 'zod'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -36,8 +37,12 @@ import {
   priorDisputesFor,
   validateOverlapFindings,
   type OverlapOutcome,
+  type OverlapOutcomeWireSchema,
   type OverlapWorkItem,
 } from '../../packages/core/src/services/spec-scan/overlap'
+
+/** An overlap outcome as the session writes it. */
+type WireOverlapOutcome = z.infer<typeof OverlapOutcomeWireSchema>
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
 import { buildScanUniverse } from '../../packages/core/src/services/spec-scan/tools'
@@ -409,10 +414,10 @@ describe('the fold re-verifies every pointer', () => {
     coverScope()
   })
 
-  const flag = (headingForAuth: string | null): OverlapOutcome => ({
+  const flag = (headingForAuth: string | null): WireOverlapOutcome => ({
     overlaps: [
       {
-        docs: ['docs/auth.md', 'docs/session.md'],
+        docs: { a: 'docs/auth.md', b: 'docs/session.md' },
         note: 'docs/auth.md says access tokens expire after 15 minutes; docs/session.md says 60 minutes',
         sections: [
           { doc: 'docs/auth.md', heading: headingForAuth, quote: 'every access token is minted here' },
@@ -462,7 +467,7 @@ describe('the fold re-verifies every pointer', () => {
         value: {
           overlaps: [
             {
-              docs: ['docs/auth.md', 'docs/invented.md'],
+              docs: { a: 'docs/auth.md', b: 'docs/invented.md' },
               note: 'nope',
               sections: [{ doc: 'docs/auth.md', heading: null, quote: 'x' }],
               review: {
@@ -665,10 +670,10 @@ describe('cross-area dedup and the confidence auto-apply', () => {
     ],
   }
 
-  const flagWith = (confidence: 'low' | 'medium' | 'high', action: 'pick-a' | 'fix-doc'): OverlapOutcome => ({
+  const flagWith = (confidence: 'low' | 'medium' | 'high', action: 'pick-a' | 'fix-doc'): WireOverlapOutcome => ({
     overlaps: [
       {
-        docs: ['docs/auth.md', 'docs/session.md'],
+        docs: { a: 'docs/auth.md', b: 'docs/session.md' },
         note: 'docs/auth.md says access tokens expire after 15 minutes; docs/session.md says 60 minutes',
         sections: [
           { doc: 'docs/auth.md', heading: 'Token lifetime', quote: 'Access tokens expire after 15 minutes.' },

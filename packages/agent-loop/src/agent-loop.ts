@@ -618,6 +618,9 @@ function startSession<TOutcome>(
           : value;
         return def.outcomeSchema.safeParse(resolved);
       } catch (error) {
+        // A resolver that parses the wire shape reports its own issues, so the
+        // correction names fields the session actually wrote.
+        if (error instanceof z.ZodError) return { success: false as const, error };
         return { success: false as const, error: new z.ZodError([{
           code: 'custom', path: [], message: error instanceof Error ? error.message : String(error),
         }]) };
