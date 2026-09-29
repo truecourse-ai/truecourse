@@ -142,6 +142,33 @@ describe('a leaf judgement is one session, with no tools and one turn', () => {
     expect(stub.calls[0].input.initialMessages).toHaveLength(1);
     expect(stub.calls[0].briefing).toContain('signin');
   });
+
+  it('shares the catalog at the system cache boundary across flows and corrections', async () => {
+    const { stub, leaves } = seams((kind) => outcome(ANSWERS[kind]));
+    const base = {
+      surface: 'web',
+      interfaces: [{ id: 'web:login', title: 'Sign in', entry: '/login', steps: ['click Sign in'], context: ['requires state: anonymous'] }],
+      capabilities: ['browser'],
+      flow: { id: 'login', title: 'Log in', goal: 'Access the account' },
+      milestones: [{ order: 1, claim: 'Users can log in' }],
+    };
+    await leaves.matchRunner(base);
+    await leaves.matchRunner({ ...base, flow: { id: 'logout', title: 'Log out', goal: 'End the session' },
+      milestones: [{ order: 1, claim: 'Users can log out' }],
+      correction: { invalidOutput: 'invalid previous reply' } });
+
+    expect(stub.calls[0].def.systemPrompt).toBe(stub.calls[1].def.systemPrompt);
+    expect(stub.calls[0].def.systemPrompt).toContain('requires state: anonymous');
+    expect(stub.calls[0].def.systemPrompt).toContain('click Sign in');
+    expect(stub.calls[0].def.systemPrompt).not.toContain('Users can log in');
+    expect(stub.calls[0].briefing).toContain('Users can log in');
+    expect(stub.calls[1].briefing).toContain('Users can log out');
+    expect(stub.calls[1].briefing).toContain('invalid previous reply');
+    expect(stub.calls[0].briefing).not.toContain('INTERFACE CATALOG');
+
+    await leaves.matchRunner({ ...base, interfaces: [{ ...base.interfaces[0], entry: '/sign-in' }] });
+    expect(stub.calls[2].def.systemPrompt).not.toBe(stub.calls[0].def.systemPrompt);
+  });
 });
 
 describe('a lost ask', () => {

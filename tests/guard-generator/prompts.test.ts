@@ -16,7 +16,8 @@ import {
   flowGenerationInputComponents,
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
-  buildMatchUserPrompt,
+  buildMatchCatalogPrompt,
+  buildMatchTaskPrompt,
   buildRecipeUserPrompt,
   RawGeneratedCliScenarioSchema,
   type AuthorMilestone,
@@ -1214,15 +1215,22 @@ describe('guard-generator prompts', () => {
     expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('7d11763dc27a1073')
   })
 
-  it('buildMatchUserPrompt renders the milestones and the catalog digest (ids, entries, steps)', () => {
-    const p = buildMatchUserPrompt(matchCtx())
+  it('buildMatchTaskPrompt renders the flow and its milestones, and no catalog', () => {
+    const p = buildMatchTaskPrompt(matchCtx())
     expect(p).toContain('Surface: cli')
     expect(p).toContain(`FLOW: ${FLOW.title}`)
     expect(p).toContain('MILESTONES — the path to walk, in order:')
     expect(p).toContain('  1. `add <title>` creates a task')
     // Synthesis' note rides next to the claim.
     expect(p).toContain('  (observe the completion)')
+    expect(p).not.toContain('INTERFACE CATALOG')
+    expect(p).not.toContain('CORRECTION —')
+  })
+
+  it('buildMatchCatalogPrompt renders the catalog digest (ids, entries, steps), and no flow', () => {
+    const p = buildMatchCatalogPrompt(matchCtx())
     expect(p).toContain('INTERFACE CATALOG for cli')
+    expect(p).not.toContain(FLOW.title)
     // Each interface: its id, title, entry descriptor, and one line per step.
     expect(p).toContain('--- id: cli:tasks-add')
     expect(p).toContain('title: Add a task')
@@ -1232,11 +1240,10 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('  writes: tasks.json')
     expect(p).toContain('--- id: cli:tasks-done')
     expect(p).toContain('entry: tasks done')
-    expect(p).not.toContain('CORRECTION —')
   })
 
-  it('buildMatchUserPrompt renders an interface with no steps as id/title/entry only', () => {
-    const p = buildMatchUserPrompt(
+  it('buildMatchCatalogPrompt renders an interface with no steps as id/title/entry only', () => {
+    const p = buildMatchCatalogPrompt(
       matchCtx({ interfaces: [{ id: 'cli:version', title: 'Print the version', entry: 'version', steps: [] }] }),
     )
     expect(p).toContain('--- id: cli:version')
@@ -1244,8 +1251,8 @@ describe('guard-generator prompts', () => {
     expect(p).not.toContain('steps:')
   })
 
-  it('buildMatchUserPrompt quotes back the unknown interfaces and the milestone gaps', () => {
-    const p = buildMatchUserPrompt(
+  it('buildMatchTaskPrompt quotes back the unknown interfaces and the milestone gaps', () => {
+    const p = buildMatchTaskPrompt(
       matchCtx({
         issues: {
           unknownInterfaces: ['cli:tasks-archive'],
@@ -1268,8 +1275,8 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('Return the COMPLETE answer again as one JSON object matching the schema.')
   })
 
-  it('buildMatchUserPrompt appends a CORRECTION block quoting the invalid output', () => {
-    const p = buildMatchUserPrompt(matchCtx({ correction: { invalidOutput: 'here is my plan: …' } }))
+  it('buildMatchTaskPrompt appends a CORRECTION block quoting the invalid output', () => {
+    const p = buildMatchTaskPrompt(matchCtx({ correction: { invalidOutput: 'here is my plan: …' } }))
     expect(p).toContain('CORRECTION — your previous response was NOT valid. You returned:')
     expect(p).toContain('here is my plan: …')
     expect(p).toContain('{ "plan": [ { "interfaceId", "milestone" }, … ] }')
