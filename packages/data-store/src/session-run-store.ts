@@ -1,3 +1,11 @@
+/**
+ * Postgres run snapshots and their ordered activity journal. Tool output can
+ * reach both transcripts and run metadata (checklist facts, titles, errors),
+ * so both are stored as serialized JSON strings inside JSONB envelopes. This
+ * preserves NUL and lone UTF-16 surrogates that JSONB cannot hold directly.
+ * Status/start time and transcript sequence stay searchable outside the
+ * payload. Readers also accept existing inline records and journal entries.
+ */
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, sql, getTableColumns } from 'drizzle-orm';
@@ -15,13 +23,24 @@ type Command = Record['command'];
 type Event = ReturnType<Store['persistence']['readEvents']>[number];
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
-/** JSONB cannot represent NUL or lone UTF-16 surrogates from tool/provider
- * output. Store the transcript as serialized JSON text inside the envelope,
- * keeping only the sequence searchable. Decoding restores the exact event.
- * Existing inline events remain readable without rewriting stored history.
- */
+/** Only the fields queried by SQL remain outside the lossless payload. */
+function encodeRunRecord(record: Record): { [key: string]: unknown } {
+  return {
+    status: record.status, startedAt: record.startedAt,
+    recordEncoding: 'json-v1', recordJson: JSON.stringify(toPublicRunRecord(record)),
+  };
+}
+
+function decodeRunRecord(record: { [key: string]: unknown }): Record {
+  if (record.recordEncoding === 'json-v1') {
+    if (typeof record.recordJson !== 'string') throw new Error('Invalid stored activity run');
+    return JSON.parse(record.recordJson) as Record;
+  }
+  return clone(record) as Record;
+}
+
 function encodeActivityBody(body: ActivityEventBody): { [key: string]: unknown } {
-  if (body.kind === 'run') return body;
+  if (body.kind === 'run') return { kind: body.kind, run: encodeRunRecord(body.run) };
   return {
     kind: body.kind, sessionId: body.sessionId, event: { seq: body.event.seq },
     eventEncoding: 'json-v1', eventJson: JSON.stringify(body.event),
@@ -29,6 +48,9 @@ function encodeActivityBody(body: ActivityEventBody): { [key: string]: unknown }
 }
 
 function decodeActivityEvent(body: { [key: string]: unknown }, cursor: number): ActivityEvent {
+  if (body.kind === 'run' && body.run && typeof body.run === 'object') {
+    return ActivityEventSchema.parse({ ...body, run: decodeRunRecord(body.run as { [key: string]: unknown }), cursor });
+  }
   if (body.kind === 'session-event' && body.eventEncoding === 'json-v1') {
     if (typeof body.eventJson !== 'string') throw new Error('Invalid stored activity transcript');
     return ActivityEventSchema.parse({ ...body, event: JSON.parse(body.eventJson), cursor });
@@ -138,10 +160,10 @@ export class PgSessionRunStore implements SessionRunBackend {
     };
     await this.db.transaction(async tx => {
       await tx.insert(activityRuns).values({
-        runId: record.runId, repoKey, command: record.command, record, nextCursor: 1,
+        runId: record.runId, repoKey, command: record.command, record: encodeRunRecord(record), nextCursor: 1,
         owner: this.owner, leaseUntil: sql`CURRENT_TIMESTAMP + interval '60 seconds'`,
       });
-      await tx.insert(activityEvents).values({ runId: record.runId, cursor: 0, body: { kind: 'run', run: record } });
+      await tx.insert(activityEvents).values({ runId: record.runId, cursor: 0, body: encodeActivityBody({ kind: 'run', run: record }) });
       await tx.execute(sql`SELECT pg_notify('truecourse_activity', ${JSON.stringify({ repoKey, runId: record.runId, owner: this.owner })})`);
     });
     const run = this.handle(repoKey, record);
@@ -163,14 +185,14 @@ export class PgSessionRunStore implements SessionRunBackend {
     const resumed = await this.db.transaction(async tx => {
       const [row] = await tx.select().from(activityRuns).where(and(eq(activityRuns.repoKey, repoKey), eq(activityRuns.command, command), eq(activityRuns.runId, runId))).for('update');
       if (!row) throw new SessionRunNotFoundError();
-      const record = clone(row.record) as Record;
+      const record = decodeRunRecord(row.record);
       record.status = 'running';
       delete record.finishedAt; delete record.error;
       await tx.update(activityRuns).set({
-        record, nextCursor: row.nextCursor + 1,
+        record: encodeRunRecord(record), nextCursor: row.nextCursor + 1,
         owner: this.owner, leaseUntil: sql`CURRENT_TIMESTAMP + interval '60 seconds'`,
       }).where(eq(activityRuns.runId, runId));
-      await tx.insert(activityEvents).values({ runId, cursor: row.nextCursor, body: { kind: 'run', run: toPublicRunRecord(record) } });
+      await tx.insert(activityEvents).values({ runId, cursor: row.nextCursor, body: encodeActivityBody({ kind: 'run', run: record }) });
       await tx.execute(sql`SELECT pg_notify('truecourse_activity', ${JSON.stringify({ repoKey, runId, owner: this.owner })})`);
       return { record, cursor: row.nextCursor };
     });
@@ -189,13 +211,13 @@ export class PgSessionRunStore implements SessionRunBackend {
     const live = this.live.get(runId);
     if (live && (row.record.status === 'running' || live.record().status === row.record.status)) { await live.flush?.(); return live; }
     if (live) this.live.delete(runId);
-    return this.handle(repoKey, clone(row.record) as Record, false);
+    return this.handle(repoKey, decodeRunRecord(row.record), false);
   }
 
   async list(repoKey: string, command?: Command): Promise<Record[]> {
     await this.reconcile([repoKey]);
     const rows = await this.db.select().from(activityRuns).where(and(eq(activityRuns.repoKey, repoKey), command ? eq(activityRuns.command, command) : undefined));
-    return rows.map(row => clone(row.record) as Record).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    return rows.map(row => decodeRunRecord(row.record)).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
 
   /**
@@ -224,7 +246,7 @@ export class PgSessionRunStore implements SessionRunBackend {
       opts.status ? sql`${activityRuns.record}->>'status' = ${opts.status}` : undefined,
       before ? sql`(${startedAt} < ${before.startedAt} OR (${startedAt} = ${before.startedAt} AND ${activityRuns.runId} > ${before.runId}))` : undefined,
     )).orderBy(sql`${startedAt} desc`, asc(activityRuns.runId)).limit(opts.limit);
-    return rows.map(row => ({ ...(clone(row.record) as Record), repoKey: row.repoKey }));
+    return rows.map(row => ({ ...decodeRunRecord(row.record), repoKey: row.repoKey }));
   }
 
   /**
@@ -250,12 +272,12 @@ export class PgSessionRunStore implements SessionRunBackend {
         sql`${activityRuns.leaseUntil} < CURRENT_TIMESTAMP`,
       )).for('update');
       for (const row of rows) {
-        const record = clone(row.record) as Record;
+        const record = decodeRunRecord(row.record);
         record.status = 'interrupted'; record.finishedAt = new Date().toISOString();
         delete record.endpoint; delete record.pid;
         for (const session of record.sessions) if (session.status === 'running' || session.status === 'waiting') session.status = 'parked';
-        await tx.update(activityRuns).set({ record, owner: null, leaseUntil: null, nextCursor: row.nextCursor + 1 }).where(eq(activityRuns.runId, row.runId));
-        await tx.insert(activityEvents).values({ runId: row.runId, cursor: row.nextCursor, body: { kind: 'run', run: record } });
+        await tx.update(activityRuns).set({ record: encodeRunRecord(record), owner: null, leaseUntil: null, nextCursor: row.nextCursor + 1 }).where(eq(activityRuns.runId, row.runId));
+        await tx.insert(activityEvents).values({ runId: row.runId, cursor: row.nextCursor, body: encodeActivityBody({ kind: 'run', run: record }) });
         await tx.execute(sql`SELECT pg_notify('truecourse_activity', ${JSON.stringify({ repoKey: row.repoKey, runId: row.runId, owner: this.owner })})`);
         recovered.push({ repoKey: row.repoKey, event: { cursor: row.nextCursor, kind: 'run', run: record } });
       }
@@ -373,7 +395,7 @@ export class PgSessionRunStore implements SessionRunBackend {
           await tx.insert(activityEvents).values({ runId: record.runId, cursor: row.nextCursor, body: encodeActivityBody(value) });
           await tx.update(activityRuns).set({
             nextCursor: row.nextCursor + 1,
-            ...(state ? { record: state } : {}),
+            ...(state ? { record: encodeRunRecord(state) } : {}),
             ...(state && state.status !== 'running' ? { owner: null, leaseUntil: null } : {}),
           }).where(eq(activityRuns.runId, record.runId));
           await tx.execute(sql`SELECT pg_notify('truecourse_activity', ${JSON.stringify({ repoKey, runId: record.runId, owner: this.owner })})`);

@@ -105,7 +105,88 @@ describe('Postgres activity storage', () => {
     await expect(readStoredActivityPage(run, 900, 100, true)).rejects.toThrow('boundary');
   });
 
-  const arbitraryText = 'before\u0000after \\u0000 lone \ud800 emoji 🎉';
+  const arbitraryText = 'before\u0000after \\u0000 lone \ud800 and \udc00 emoji 🎉';
+
+  it('persists PDF output in progress, session metadata and errors without stopping the writer', async () => {
+    const run = await create('guard-generate');
+    const fact = `offline PDF assertion failed: %PDF-1.3 stream ${arbitraryText} endstream`;
+    const checklist = [{ key: 'validate', label: 'Settling flows', status: 'active' as const, detail: fact, facts: [fact] }];
+    run.setChecklist(checklist);
+    await run.flush!();
+    run.persistence.updateIndex({ sessionId: 'pdf', kind: 'test', workItem: 'pdf', title: arbitraryText, status: 'completed', spent: { turns: 1, tokens: 2, costUsd: 0 } });
+    const transcript = { ...event(), content: arbitraryText };
+    run.persistence.appendEvent('pdf', transcript);
+    run.setError({ message: fact });
+    run.finish('failed');
+    await run.flush!();
+
+    const other = new PgSessionRunStore(db);
+    const reopened = await other.open(REPO, 'guard-generate', run.runId);
+    expect(reopened.record()).toEqual(run.record());
+    expect(await other.list(REPO)).toEqual([run.record()]);
+    expect(await other.listForRepos([REPO], { limit: 1, status: 'failed' })).toEqual([{ ...run.record(), repoKey: REPO }]);
+    const history = await reopened.readActivity!(-1);
+    expect(history[1]).toMatchObject({ kind: 'run', run: { status: 'running', display: { blocks: [{ items: checklist }] } } });
+    expect(history.at(-1)).toMatchObject({ kind: 'run', run: run.record() });
+    expect((await readStoredActivityPage(reopened, -1, 100, true)).events).toEqual([
+      expect.objectContaining({ kind: 'session-event', event: transcript }),
+      history.at(-1),
+    ]);
+    const reader = createActivityStream(reopened, -1, new AbortController().signal).getReader();
+    const streamed = [];
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (next.value.type === 'data-activity') streamed.push(next.value.data);
+    }
+    expect(streamed).toContainEqual(history.at(-1));
+  });
+
+  it('recovers and resumes a run with arbitrary progress text intact', async () => {
+    const run = await create('guard-generate');
+    run.setChecklist([{ key: 'validate', label: 'Settling flows', status: 'active', facts: [arbitraryText] }]);
+    run.persistence.updateIndex({ sessionId: 'pdf', kind: 'test', workItem: 'pdf', title: arbitraryText, status: 'waiting', spent: { turns: 0, tokens: 0, costUsd: 0 } });
+    await run.flush!();
+    await db.update(activityRuns).set({ leaseUntil: '2000-01-01T00:00:00Z' }).where(eq(activityRuns.runId, run.runId));
+    const other = new PgSessionRunStore(db);
+    await other.reconcileAll();
+    const [interrupted] = await other.listForRepos([REPO], { limit: 1, status: 'interrupted' });
+    expect(interrupted).toMatchObject({ display: run.record().display, sessions: [{ title: arbitraryText, status: 'parked' }] });
+    const resumed = await other.resume(REPO, 'guard-generate', run.runId);
+    live.push(resumed);
+    expect(resumed.record()).toMatchObject({ status: 'running', display: run.record().display });
+    resumed.finish('completed');
+    await resumed.flush!();
+    const history = await resumed.readActivity!(-1);
+    expect(history.filter(e => e.kind === 'run').slice(-3)).toMatchObject([
+      { run: { status: 'interrupted', display: run.record().display } },
+      { run: { status: 'running', display: run.record().display } },
+      { run: { status: 'completed', display: run.record().display } },
+    ]);
+    // The old writer cannot overwrite a resumed run, even with valid text.
+    run.setChecklist([]);
+    await expect(run.flush!()).rejects.toThrow('lost its lease');
+  });
+
+  it('reads and resumes existing inline run records and journal snapshots', async () => {
+    const run = await create('guard-generate');
+    run.finish('interrupted');
+    await run.flush!();
+    const legacy = JSON.parse(JSON.stringify(run.record()));
+    await db.update(activityRuns).set({ record: legacy }).where(eq(activityRuns.runId, run.runId));
+    await db.update(activityEvents).set({ body: { kind: 'run', run: legacy } }).where(eq(activityEvents.cursor, 1));
+    const other = new PgSessionRunStore(db);
+    expect((await other.open(REPO, 'guard-generate', run.runId)).record()).toEqual(legacy);
+    expect(await other.list(REPO)).toEqual([legacy]);
+    const resumed = await other.resume(REPO, 'guard-generate', run.runId);
+    live.push(resumed);
+    resumed.setChecklist([{ key: 'validate', label: 'Settling flows', status: 'done', facts: [arbitraryText] }]);
+    resumed.finish('completed');
+    await resumed.flush!();
+    const history = await resumed.readActivity!(-1);
+    expect(history[1]).toMatchObject({ kind: 'run', run: legacy });
+    expect(history.at(-1)).toMatchObject({ kind: 'run', run: resumed.record() });
+  });
 
   it('round-trips arbitrary transcript text alongside existing inline events', async () => {
     const run = await create();
