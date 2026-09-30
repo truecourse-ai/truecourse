@@ -28,7 +28,7 @@
  * theirs is the shell's single schema repair.
  */
 
-import type { SessionDriver, SessionPersistence } from '@truecourse/agent-loop'
+import { defineSessionKind, type SessionDriver, type SessionPersistence } from '@truecourse/agent-loop'
 import { z } from 'zod'
 import {
   CLAIM_DIFF_SYSTEM_PROMPT,
@@ -53,6 +53,16 @@ import { withOutcomeDelivery } from '../agent/one-turn.js'
 export const MATCH_SESSION_KIND = 'guard-generate.match'
 export const CLAIM_DIFF_SESSION_KIND = 'guard-generate.claim-diff'
 export const WORLD_CLASSIFY_SESSION_KIND = 'guard-generate.world-classify'
+
+const MATCH_SESSION = defineSessionKind({
+  kind: MATCH_SESSION_KIND,
+  // The shape the model is asked for, and the raw answer handed back: the
+  // engine validates and re-asks itself (see above).
+  outcomeSchema: z.unknown(),
+  outcomeInputSchema: RealizationMatchSchema,
+})
+const CLAIM_DIFF_SESSION = defineSessionKind({ kind: CLAIM_DIFF_SESSION_KIND, outcomeSchema: ClaimDiffSchema })
+const WORLD_CLASSIFY_SESSION = defineSessionKind({ kind: WORLD_CLASSIFY_SESSION_KIND, outcomeSchema: WorldClassifySchema })
 
 /** The driver + journal a leaf session runs on, built on first use. */
 export type AcquireLeafSession = () => Promise<{
@@ -93,15 +103,11 @@ export function createGuardGenerateLeafSessions(opts: CreateLeafSessionsOptions)
     matchRunner: (ctx) =>
       match.ask<unknown>({
         session: {
-          kind: MATCH_SESSION_KIND,
+          ...MATCH_SESSION,
           title: 'Realization match',
           // The catalog is identical across this surface's matches. Give it
           // the system cache boundary; per-flow text must not precede it.
           systemPrompt: `${withOutcomeDelivery(MATCH_SYSTEM_PROMPT)}\n\n${buildMatchCatalogPrompt(ctx)}`,
-          // The shape the model is asked for, and the raw answer handed back:
-          // the engine validates and re-asks itself (see above).
-          outcomeSchema: z.unknown(),
-          outcomeInputSchema: RealizationMatchSchema,
           reasks: 0,
           tokenCeiling: 200_000,
         },
@@ -114,10 +120,9 @@ export function createGuardGenerateLeafSessions(opts: CreateLeafSessionsOptions)
     claimDiffRunner: (section) =>
       claimDiff.ask<ClaimDiff>({
         session: {
-          kind: CLAIM_DIFF_SESSION_KIND,
+          ...CLAIM_DIFF_SESSION,
           title: 'Claim diff',
           systemPrompt: withOutcomeDelivery(CLAIM_DIFF_SYSTEM_PROMPT),
-          outcomeSchema: ClaimDiffSchema,
           tokenCeiling: 100_000,
         },
         workItem: `${section.doc}#${section.anchor}`,
@@ -127,10 +132,9 @@ export function createGuardGenerateLeafSessions(opts: CreateLeafSessionsOptions)
     worldClassifyRunner: (flows) =>
       worldClassify.ask<WorldClassify>({
         session: {
-          kind: WORLD_CLASSIFY_SESSION_KIND,
+          ...WORLD_CLASSIFY_SESSION,
           title: 'World classification',
           systemPrompt: withOutcomeDelivery(WORLD_CLASSIFY_SYSTEM_PROMPT),
-          outcomeSchema: WorldClassifySchema,
           tokenCeiling: 100_000,
         },
         workItem: `${flows.length} flow${flows.length === 1 ? '' : 's'}`,

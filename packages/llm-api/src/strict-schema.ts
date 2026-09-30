@@ -1,12 +1,10 @@
 /**
- * Rewriting a caller's JSON-schema into the subset providers accept for STRICT
- * structured output, so `generateObject` enforces the shape instead of the
- * provider rejecting the request.
+ * Rewriting a tool's JSON Schema into the subset OpenAI's strict mode accepts,
+ * so the provider enforces the shape instead of rejecting the request.
  *
- * OpenAI-family strict output (`response_format: json_schema`, `strict: true` —
- * OpenAI, Azure OpenAI, Copilot) validates the SCHEMA before it reads the prompt
- * and fails the WHOLE call on any of these, none of which the pipeline's Zod
- * definitions naturally satisfy:
+ * OpenAI strict tools (`strict: true` — OpenAI and Azure OpenAI) validate the
+ * SCHEMA before they read the prompt and fail the WHOLE call on any of these,
+ * none of which the pipeline's Zod definitions naturally satisfy:
  *  - `required` must list EVERY key of `properties`. `z.optional()` /
  *    `z.nullish()` / `z.default()` all omit the key, so the request is rejected
  *    ("'required' is required to be supplied and to be an array including every
@@ -24,18 +22,16 @@
  * that was already nullable keeps its nulls; only the nullability added here is
  * undone.
  *
- * Three shapes have no strict equivalent at all — a typed/open record
+ * Four shapes have no strict equivalent at all — a typed/open record
  * (`additionalProperties` other than `false`), an open `{}` sub-schema
- * (`z.unknown()`), and a non-object root. Those THROW
- * {@link SchemaNotEnforceableError}: a call site whose schema is inexpressible
- * must say so explicitly with `enforceSchema: false` (the schema then rides as a
- * prompt hint and the reply is validated by the caller's Zod), never degrade
- * silently at runtime.
+ * (`z.unknown()`), a positional tuple, and a non-object root. Those THROW
+ * {@link SchemaNotEnforceableError}, naming the path: every schema a model is
+ * sent must be expressible, and a schema that is not is a defect to fix at its
+ * definition, never a request to send unenforced.
  *
- * The object root is the one rule the opt-out does NOT buy its way out of: JSON
- * mode returns an object too, so a non-object root throws
- * {@link NonObjectRootSchemaError} on that path as well ({@link isObjectRootedSchema}
- * is the shared check).
+ * A non-object root is refused for JSON mode as well
+ * ({@link NonObjectRootSchemaError}; {@link isObjectRootedSchema} is the shared
+ * check).
  *
  * Both zod-to-json-schema flavors the codebase emits are handled: the default
  * draft-07 target (`type: ["string","null"]` for nullables) and the `openApi3`
@@ -67,12 +63,11 @@ export class SchemaNotEnforceableError extends Error {
   constructor(
     readonly schemaPath: string,
     readonly reason: string,
-    stage: string | undefined,
+    subject: string | undefined,
   ) {
     super(
-      `[llm-api] schema not enforceable${stage ? ` for stage ${stage}` : ''}: ` +
-        `${schemaPath} ${reason}. Pass enforceSchema: false on the request to send the ` +
-        `schema as a prompt hint only (JSON mode, validated by the caller's Zod).`,
+      `[llm-api] schema not expressible in strict mode${subject ? ` for ${subject}` : ''}: ` +
+        `${schemaPath} ${reason}. Reshape it where it is defined.`,
     );
     this.name = 'SchemaNotEnforceableError';
   }
@@ -172,38 +167,31 @@ function isObjectNode(node: JsonObject): boolean {
 }
 
 interface Ctx {
-  stage: string | undefined;
+  subject: string | undefined;
   widened: SchemaPath[];
 }
 
-/**
- * Normalize one array's `items`. A tuple (`items: [A, B]`, what `z.tuple()`
- * emits) has no strict equivalent — strict output takes a single element schema —
- * so the positional branches collapse into one element schema (a union when they
- * differ). `minItems`/`maxItems` already pin the length, and the caller's Zod
- * re-checks each position.
- */
+/** Normalize one array's `items`: one element schema, never a positional tuple. */
 function normalizeItems(items: unknown, dataPath: string[], schemaPath: string, ctx: Ctx): unknown {
-  const elementPath = [...dataPath, ARRAY_ELEMENTS];
   if (Array.isArray(items)) {
-    const branches = items.map((b, i) =>
-      normalizeNode(b, elementPath, under(schemaPath, `items[${i}]`), ctx),
+    throw new SchemaNotEnforceableError(
+      label(schemaPath),
+      'is a positional tuple (strict output takes one element schema; name the positions as object fields)',
+      ctx.subject,
     );
-    const distinct = [...new Map(branches.map((b) => [JSON.stringify(b), b])).values()];
-    return distinct.length === 1 ? distinct[0] : { anyOf: distinct };
   }
-  return normalizeNode(items, elementPath, under(schemaPath, 'items'), ctx);
+  return normalizeNode(items, [...dataPath, ARRAY_ELEMENTS], under(schemaPath, 'items'), ctx);
 }
 
 function normalizeNode(node: unknown, dataPath: string[], schemaPath: string, ctx: Ctx): JsonObject {
   if (!isPlainObject(node)) {
-    throw new SchemaNotEnforceableError(label(schemaPath), 'is not a schema object', ctx.stage);
+    throw new SchemaNotEnforceableError(label(schemaPath), 'is not a schema object', ctx.subject);
   }
   if (Object.keys(node).length === 0) {
     throw new SchemaNotEnforceableError(
       label(schemaPath),
       'is an open `{}` sub-schema accepting any JSON (strict output has no equivalent)',
-      ctx.stage,
+      ctx.subject,
     );
   }
 
@@ -229,7 +217,7 @@ function normalizeNode(node: unknown, dataPath: string[], schemaPath: string, ct
       isPlainObject(node.additionalProperties)
         ? 'is a typed record (strict output requires additionalProperties: false)'
         : 'allows additional properties (strict output requires additionalProperties: false)',
-      ctx.stage,
+      ctx.subject,
     );
   }
 
@@ -263,18 +251,18 @@ function normalizeNode(node: unknown, dataPath: string[], schemaPath: string, ct
 
 /**
  * Rewrite `schema` into the strict-output subset, recording which properties were
- * widened to accept `null`. Throws {@link SchemaNotEnforceableError} when the
- * schema contains a construct strict output cannot express.
+ * widened to accept `null`. Throws {@link SchemaNotEnforceableError}, naming
+ * `subject`, when the schema contains a construct strict output cannot express.
  */
-export function normalizeForStrictOutput(schema: unknown, stage?: string): StrictSchema {
+export function normalizeForStrictOutput(schema: unknown, subject?: string): StrictSchema {
   if (!isObjectRootedSchema(schema)) {
     throw new SchemaNotEnforceableError(
       '(root)',
       'is not an object-rooted schema (strict output only accepts an object root)',
-      stage,
+      subject,
     );
   }
-  const ctx: Ctx = { stage, widened: [] };
+  const ctx: Ctx = { subject, widened: [] };
   return { schema: normalizeNode(schema, [], '', ctx), widened: ctx.widened };
 }
 

@@ -11,7 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { Minimatch } from 'minimatch'
-import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
+import { defineToolSpec, type SessionTool } from '@truecourse/agent-loop'
 import { DOC_DISCOVERY_SKIP_DIRS, hasInlineFlagGroup } from '@truecourse/shared'
 import { MAX_SOURCE_FILE_BYTES, MAX_SOURCE_RESULT_BYTES, readHint, readSource, resolveSourcePath, sourceLines, sourceView } from './source-view.js'
 
@@ -40,22 +40,25 @@ export function renderFileView({ path, lines, start, total }: FileViewInput): st
   return `${path} (${total} lines)\n${body}${tail}`
 }
 
+const READ_FILE = defineToolSpec({
+  name: 'read_file',
+  description:
+    'Read source in pages of at most 400 lines and 24,000 UTF-8 bytes. Follow the returned start/startColumn continuation to recover omitted text, including long lines. Columns count Unicode code points from 1.',
+  kind: 'read-file',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      path: z.string().min(1).describe('Repo-relative path, e.g. `apps/dashboard/client/src/pages/Repo.tsx`'),
+      start: z.number().int().positive().optional().describe('First line (1-based). Defaults to 1.'),
+      startColumn: z.number().int().positive().optional().describe('One-based Unicode code-point column on the first requested line.'),
+      lines: z.number().int().positive().optional().describe(`How many lines (max ${MAX_READ_LINES}).`),
+    })
+    .strict(),
+})
+
 export function readFileTool(repoRoot: string): SessionTool {
-  return defineSessionTool({
-    name: 'read_file',
-    description:
-      'Read source in pages of at most 400 lines and 24,000 UTF-8 bytes. Follow the returned start/startColumn continuation to recover omitted text, including long lines. Columns count Unicode code points from 1.',
-    kind: 'read-file',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        path: z.string().min(1).describe('Repo-relative path, e.g. `apps/dashboard/client/src/pages/Repo.tsx`'),
-        start: z.number().int().positive().optional().describe('First line (1-based). Defaults to 1.'),
-        startColumn: z.number().int().positive().optional().describe('One-based Unicode code-point column on the first requested line.'),
-        lines: z.number().int().positive().optional().describe(`How many lines (max ${MAX_READ_LINES}).`),
-      })
-      .strict(),
+  return READ_FILE.bind({
     async execute(args) {
       let target: string
       try {
@@ -101,18 +104,21 @@ export function readFileTool(repoRoot: string): SessionTool {
   })
 }
 
+const READ_FILES = defineToolSpec({
+  name: 'read_files',
+  description: 'Read up to 8 independent source files/ranges in one call, sharing a 24,000-byte result budget equally. Each result has an exact read_file continuation when partial. Use this for dependencies or several omitted source ranges. Directories use read_file.',
+  kind: 'read-file', readOnly: true, destructive: false,
+  inputSchema: z.object({ files: z.array(z.object({
+    path: z.string().min(1).max(1_024),
+    start: z.number().int().positive().optional(),
+    startColumn: z.number().int().positive().optional(),
+    lines: z.number().int().positive().max(MAX_READ_LINES).optional(),
+  }).strict()).min(1).max(8) }).strict(),
+})
+
 /** Read independent source ranges together without multiplying the context budget. */
 export function readFilesTool(repoRoot: string): SessionTool {
-  return defineSessionTool({
-    name: 'read_files',
-    description: 'Read up to 8 independent source files/ranges in one call, sharing a 24,000-byte result budget equally. Each result has an exact read_file continuation when partial. Use this for dependencies or several omitted source ranges. Directories use read_file.',
-    kind: 'read-file', readOnly: true, destructive: false,
-    inputSchema: z.object({ files: z.array(z.object({
-      path: z.string().min(1).max(1_024),
-      start: z.number().int().positive().optional(),
-      startColumn: z.number().int().positive().optional(),
-      lines: z.number().int().positive().max(MAX_READ_LINES).optional(),
-    }).strict()).min(1).max(8) }).strict(),
+  return READ_FILES.bind({
     async execute(args) {
       // Each slot includes its separators and errors. Long paths cannot consume another slot.
       const perFile = Math.floor(MAX_SOURCE_RESULT_BYTES / args.files.length) - 2
@@ -135,26 +141,29 @@ export function readFilesTool(repoRoot: string): SessionTool {
   })
 }
 
+const SEARCH_REPO = defineToolSpec({
+  name: 'search_repo',
+  description:
+    'Search source with a regular expression. Returns up to 60 match-centered excerpts within 24,000 UTF-8 bytes, with one-based line/Unicode column and read_file hints. glob matches repo-relative paths; pathContains is a literal substring filter. Hidden catalog files are not searched; use catalog tools for catalog entries.',
+  kind: 'search-repo',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      query: z.string().min(1).describe('JavaScript regular expression source, without /delimiters/ or inline flag groups like (?i).'),
+      ignoreCase: z.boolean().optional().describe('Match regardless of letter case. Omitted = case-sensitive.'),
+      glob: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Repo-relative glob: **/*.tsx, packages/ui/**/*.tsx, or **/*.{ts,tsx}. A glob without / matches basenames anywhere. Use pathContains for literal fragments.'),
+      pathContains: z.string().min(1).optional().describe('Literal substring of the repo-relative path, e.g. packages/ui/ or .tsx. Combined with glob when both are supplied.'),
+    })
+    .strict(),
+})
+
 export function searchTool(repoRoot: string): SessionTool {
-  return defineSessionTool({
-    name: 'search_repo',
-    description:
-      'Search source with a regular expression. Returns up to 60 match-centered excerpts within 24,000 UTF-8 bytes, with one-based line/Unicode column and read_file hints. glob matches repo-relative paths; pathContains is a literal substring filter. Hidden catalog files are not searched; use catalog tools for catalog entries.',
-    kind: 'search-repo',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        query: z.string().min(1).describe('JavaScript regular expression source, without /delimiters/ or inline flag groups like (?i).'),
-        ignoreCase: z.boolean().optional().describe('Match regardless of letter case. Omitted = case-sensitive.'),
-        glob: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Repo-relative glob: **/*.tsx, packages/ui/**/*.tsx, or **/*.{ts,tsx}. A glob without / matches basenames anywhere. Use pathContains for literal fragments.'),
-        pathContains: z.string().min(1).optional().describe('Literal substring of the repo-relative path, e.g. packages/ui/ or .tsx. Combined with glob when both are supplied.'),
-      })
-      .strict(),
+  return SEARCH_REPO.bind({
     async execute(args) {
       let pattern: RegExp
       try {

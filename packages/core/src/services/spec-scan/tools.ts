@@ -13,7 +13,7 @@
 
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
-import { defineSessionTool, type SessionTool, type ToolDisplay } from '@truecourse/agent-loop'
+import { defineToolSpec, type SessionTool, type ToolDisplay } from '@truecourse/agent-loop'
 import {
   classifyStatusValue,
   docBody,
@@ -183,21 +183,25 @@ function renderChunk(doc: DocCandidate, chunk: number): { content: string; isErr
  * reference/deferral; the settle session reads samples of a label's docs — a
  * different purpose, so it passes its own `display`.
  */
+const READ_DOC = defineToolSpec({
+  name: 'read_doc',
+  description:
+    'Read any doc of the universe by its repo-relative ref. Long docs come one chunk at a time — pass `chunk` to page (1-based).',
+  kind: 'read-doc',
+  readOnly: true,
+  destructive: false,
+  display: { one: 'I read the doc in full', many: 'I read the doc in full, {n} passes' },
+  inputSchema: z
+    .object({
+      ref: z.string().min(1).describe('Repo-relative doc ref, as listed by `list_docs`.'),
+      chunk: z.number().int().positive().optional().describe('Chunk number (default 1).'),
+    })
+    .strict(),
+})
+
 export function readDocTool(universe: ScanDocUniverse, display?: ToolDisplay): SessionTool {
-  return defineSessionTool({
-    name: 'read_doc',
-    description:
-      'Read any doc of the universe by its repo-relative ref. Long docs come one chunk at a time — pass `chunk` to page (1-based).',
-    kind: 'read-doc',
-    readOnly: true,
-    destructive: false,
-    display: display ?? { one: 'I read the doc in full', many: 'I read the doc in full, {n} passes' },
-    inputSchema: z
-      .object({
-        ref: z.string().min(1).describe('Repo-relative doc ref, as listed by `list_docs`.'),
-        chunk: z.number().int().positive().optional().describe('Chunk number (default 1).'),
-      })
-      .strict(),
+  return READ_DOC.bind({
+    display,
     async execute(args) {
       const doc = universe.byPath.get(args.ref)
       if (!doc) return { content: `No doc \`${args.ref}\` in the universe — \`list_docs\` shows what exists.`, isError: true }
@@ -210,17 +214,20 @@ export function readDocTool(universe: ScanDocUniverse, display?: ToolDisplay): S
  * `read_chunk` — the session's OWN doc, paged. The briefing already carries
  * chunk 1; this fetches the rest under the same chunk plan.
  */
+const READ_CHUNK = defineToolSpec({
+  name: 'read_chunk',
+  description: 'Read another chunk of THE doc you are curating (the briefing carried chunk 1).',
+  kind: 'read-own-doc-chunk',
+  readOnly: true,
+  destructive: false,
+  display: { one: 'I read one chunk of the doc', many: 'I read {n} chunks of the doc' },
+  inputSchema: z
+    .object({ chunk: z.number().int().positive().describe('Chunk number (2 and up — 1 is in the briefing).') })
+    .strict(),
+})
+
 export function readChunkTool(doc: DocCandidate): SessionTool {
-  return defineSessionTool({
-    name: 'read_chunk',
-    description: 'Read another chunk of THE doc you are curating (the briefing carried chunk 1).',
-    kind: 'read-own-doc-chunk',
-    readOnly: true,
-    destructive: false,
-    display: { one: 'I read one chunk of the doc', many: 'I read {n} chunks of the doc' },
-    inputSchema: z
-      .object({ chunk: z.number().int().positive().describe('Chunk number (2 and up — 1 is in the briefing).') })
-      .strict(),
+  return READ_CHUNK.bind({
     async execute(args) {
       return renderChunk(doc, args.chunk)
     },
@@ -232,21 +239,24 @@ export function readChunkTool(doc: DocCandidate): SessionTool {
  * on purpose: a session that is about to mint a new label looks here first and
  * reuses the peer's wording, which is what keeps one concept in one area.
  */
+const CORPUS_VOCAB = defineToolSpec({
+  name: 'corpus_vocab',
+  description:
+    'The product and concern labels this scan has already assigned to other docs. Call it BEFORE minting a new label — reuse an existing label that names the same thing.',
+  kind: 'corpus-vocab',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: "I checked the corpus's area vocabulary so I reuse existing labels instead of minting new ones",
+    many: "I checked the corpus's area vocabulary {n} times",
+  },
+  inputSchema: z.object({}).strict(),
+})
+
 export function corpusVocabTool(
   liveVocab: () => { products: readonly string[]; concerns: readonly string[] },
 ): SessionTool {
-  return defineSessionTool({
-    name: 'corpus_vocab',
-    description:
-      'The product and concern labels this scan has already assigned to other docs. Call it BEFORE minting a new label — reuse an existing label that names the same thing.',
-    kind: 'corpus-vocab',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: "I checked the corpus's area vocabulary so I reuse existing labels instead of minting new ones",
-      many: "I checked the corpus's area vocabulary {n} times",
-    },
-    inputSchema: z.object({}).strict(),
+  return CORPUS_VOCAB.bind({
     async execute() {
       const { products, concerns } = liveVocab()
       if (products.length === 0 && concerns.length === 0) {
@@ -263,21 +273,24 @@ export function corpusVocabTool(
 }
 
 /** `list_docs` — paths + titles only, optionally under one directory prefix. */
+const LIST_DOCS = defineToolSpec({
+  name: 'list_docs',
+  description:
+    'List the docs of the universe — path and title only. Narrow with `dir` (a path prefix) when resolving a reference whose exact path you do not know.',
+  kind: 'list-docs',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: 'I looked over the docs already in the corpus',
+    many: 'I looked over the docs already in the corpus {n} times',
+  },
+  inputSchema: z
+    .object({ dir: z.string().min(1).optional().describe('Keep only refs under this path prefix, e.g. `docs/api`.') })
+    .strict(),
+})
+
 export function listDocsTool(universe: ScanDocUniverse): SessionTool {
-  return defineSessionTool({
-    name: 'list_docs',
-    description:
-      'List the docs of the universe — path and title only. Narrow with `dir` (a path prefix) when resolving a reference whose exact path you do not know.',
-    kind: 'list-docs',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: 'I looked over the docs already in the corpus',
-      many: 'I looked over the docs already in the corpus {n} times',
-    },
-    inputSchema: z
-      .object({ dir: z.string().min(1).optional().describe('Keep only refs under this path prefix, e.g. `docs/api`.') })
-      .strict(),
+  return LIST_DOCS.bind({
     async execute(args) {
       const prefix = args.dir?.replace(/\/+$/, '')
       const matched = universe.ordered.filter(
@@ -302,22 +315,25 @@ export function listDocsTool(universe: ScanDocUniverse): SessionTool {
  * one label whose briefed list was cut short (an oversized subdivision
  * candidate), not the way to read the map.
  */
+const DOCS_WITH_LABEL = defineToolSpec({
+  name: 'docs_with_label',
+  description:
+    'The FULL doc list of one canonical product or concern label (path + title). The briefing already lists every label with its docs — call this only for a label whose briefed list was cut short, e.g. before assigning every doc of an oversized label you are subdividing.',
+  kind: 'docs-with-label',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: 'I pulled up the docs behind one label to see whether it earns its own area',
+    many: 'I pulled up the docs behind {n} labels to see whether each earns its own area',
+  },
+  inputSchema: z.object({ label: z.string().min(1).describe('A canonical label from the briefing.') }).strict(),
+})
+
 export function docsWithLabelTool(
   universe: ScanDocUniverse,
   docsByLabel: () => ReadonlyMap<string, readonly string[]>,
 ): SessionTool {
-  return defineSessionTool({
-    name: 'docs_with_label',
-    description:
-      'The FULL doc list of one canonical product or concern label (path + title). The briefing already lists every label with its docs — call this only for a label whose briefed list was cut short, e.g. before assigning every doc of an oversized label you are subdividing.',
-    kind: 'docs-with-label',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: 'I pulled up the docs behind one label to see whether it earns its own area',
-      many: 'I pulled up the docs behind {n} labels to see whether each earns its own area',
-    },
-    inputSchema: z.object({ label: z.string().min(1).describe('A canonical label from the briefing.') }).strict(),
+  return DOCS_WITH_LABEL.bind({
     async execute(args) {
       const byLabel = docsByLabel()
       const refs = byLabel.get(args.label)
@@ -345,27 +361,30 @@ export function docsWithLabelTool(
  * session opens only the sections where topics collide. The fold counts calls
  * to THIS tool off the transcript as the area's `sectionsOpened`.
  */
+const READ_SECTION = defineToolSpec({
+  name: 'read_section',
+  description:
+    'Read one SECTION of a doc: the text under one heading (subsections included), or the lead when `heading` is null. Headings come from the outlines in the briefing — copy them verbatim.',
+  kind: 'read-doc-section',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: 'I read one section, collecting what the doc claims',
+    many: 'I read through {n} sections, collecting what each doc claims',
+  },
+  inputSchema: z
+    .object({
+      doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
+      heading: z
+        .string()
+        .nullable()
+        .describe('One of the doc\'s headings, verbatim — or null for the lead (text above the first heading).'),
+    })
+    .strict(),
+})
+
 export function readSectionTool(universe: ScanDocUniverse): SessionTool {
-  return defineSessionTool({
-    name: 'read_section',
-    description:
-      'Read one SECTION of a doc: the text under one heading (subsections included), or the lead when `heading` is null. Headings come from the outlines in the briefing — copy them verbatim.',
-    kind: 'read-doc-section',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: 'I read one section, collecting what the doc claims',
-      many: 'I read through {n} sections, collecting what each doc claims',
-    },
-    inputSchema: z
-      .object({
-        doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
-        heading: z
-          .string()
-          .nullable()
-          .describe('One of the doc\'s headings, verbatim — or null for the lead (text above the first heading).'),
-      })
-      .strict(),
+  return READ_SECTION.bind({
     async execute(args) {
       const doc = universe.byPath.get(args.doc)
       if (!doc) return { content: `No doc \`${args.doc}\` in the universe.`, isError: true }
@@ -390,24 +409,27 @@ export function readSectionTool(universe: ScanDocUniverse): SessionTool {
 
 /** `read_doc_chunk` — a whole-doc page for the overlap session (a doc whose
  *  structure the outline does not carry, e.g. heading-free prose). */
+const READ_DOC_CHUNK = defineToolSpec({
+  name: 'read_doc_chunk',
+  description:
+    'Read one chunk of a whole doc (1-based). Use it for a doc whose outline is too thin to pick sections from; prefer `read_section` everywhere else.',
+  kind: 'read-doc-chunk',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: 'I read a doc straight through where its outline was too thin to pick sections from',
+    many: 'I read {n} doc chunks straight through where outlines were too thin',
+  },
+  inputSchema: z
+    .object({
+      doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
+      chunk: z.number().int().positive().describe('Chunk number, 1-based.'),
+    })
+    .strict(),
+})
+
 export function readDocChunkTool(universe: ScanDocUniverse): SessionTool {
-  return defineSessionTool({
-    name: 'read_doc_chunk',
-    description:
-      'Read one chunk of a whole doc (1-based). Use it for a doc whose outline is too thin to pick sections from; prefer `read_section` everywhere else.',
-    kind: 'read-doc-chunk',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: 'I read a doc straight through where its outline was too thin to pick sections from',
-      many: 'I read {n} doc chunks straight through where outlines were too thin',
-    },
-    inputSchema: z
-      .object({
-        doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
-        chunk: z.number().int().positive().describe('Chunk number, 1-based.'),
-      })
-      .strict(),
+  return READ_DOC_CHUNK.bind({
     async execute(args) {
       const doc = universe.byPath.get(args.doc)
       if (!doc) return { content: `No doc \`${args.doc}\` in the universe.`, isError: true }

@@ -8,7 +8,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { z } from 'zod';
 import { createApiSessionDriver } from '../../packages/llm-api/src/session-driver';
 import { buildAuthorTools } from '../../packages/core/src/services/interface-author/tools';
-import { buildModel, providerTuningFor } from '../../packages/llm-api/src/index';
+import { buildModel, providerFor } from '../../packages/llm-api/src/index';
 
 const cfg = { provider: 'google' as const, model: 'gemini-2.5-pro', apiKey: 'AIza-test' };
 
@@ -56,7 +56,7 @@ async function sentFor(overrides: { baseURL?: string } = {}): Promise<Sent> {
   await (model as { doGenerate: (o: unknown) => Promise<unknown> }).doGenerate({
     prompt: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }],
     tools: [{ type: 'function', name: 'move', description: 'Move.', inputSchema: TOOL_SCHEMA }],
-    providerOptions: providerTuningFor('google').callOptions(cfg.model, 'k'),
+    providerOptions: providerFor('google').callOptions(cfg.model, 'k'),
   });
   if (!sent) throw new Error('nothing was sent');
   return sent;
@@ -112,6 +112,7 @@ it('preserves optional arguments, bounds and thought signatures through the sess
   const result = await driver.runSession({
     def: {
       kind: 'guard-setup.preparation-observations',
+      reasoning: 'high',
       systemPrompt: 'Review the source and report findings.',
       tools: buildAuthorTools({ repoRoot: new URL('../fixtures', import.meta.url).pathname, derived: null, authored: null, replaceable: new Set() }),
       outcomeSchema: z.object({ findings: z.array(z.string().min(1)).min(1).max(12) }),
@@ -131,7 +132,10 @@ it('preserves optional arguments, bounds and thought signatures through the sess
   expect(declarations.find((d: any) => d.name === 'search_interfaces').parametersJsonSchema.properties.limit).toMatchObject({ type: 'integer', minimum: 1, maximum: 20 });
   const outcome = declarations.find((d: any) => d.name === 'outcome').parametersJsonSchema;
   expect(outcome.properties.findings).toMatchObject({ type: 'array', minItems: 1, maxItems: 12 });
-  expect(requests[0].toolConfig.functionCallingConfig.mode).toBe('VALIDATED');
+  // The author tools carry `check_draft`, a schema declared too large for
+  // Gemini to enforce, so the whole request goes without VALIDATED.
+  expect(requests[0].toolConfig?.functionCallingConfig?.mode).not.toBe('VALIDATED');
+  expect(declarations.every((d: any) => d.parametersJsonSchema)).toBe(true);
   expect(requests[0].generationConfig.thinkingConfig.thinkingLevel).toBe('high');
   const replay = requests[1].contents.find((c: any) => c.role === 'model');
   expect(replay.parts).toContainEqual({

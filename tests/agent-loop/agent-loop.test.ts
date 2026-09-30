@@ -3,7 +3,7 @@ import { z } from 'zod';
 import {
   ChecklistItemSchema,
   KnownDisplayBlockSchema,
-  defineSessionTool,
+  defineToolSpec,
   resumeGrantMessage,
   runAgentLoop,
   RunRecordSchema,
@@ -627,13 +627,14 @@ describe('runAgentLoop attribution', () => {
 // ---------------------------------------------------------------------------
 
 describe('runAgentLoop tool wrapping', () => {
-  const echoTool = defineSessionTool({
+  const echoTool = defineToolSpec({
     name: 'echo',
     description: 'echo a value',
     kind: 'echo',
     readOnly: true,
     destructive: false,
     inputSchema: z.object({ value: z.string() }),
+  }).bind({
     async execute(args, ctx) {
       return { content: `${ctx.workItem}:${args.value}` };
     },
@@ -674,13 +675,15 @@ describe('runAgentLoop tool wrapping', () => {
 describe('runAgentLoop sub-sessions', () => {
   const childDef = makeDef({ kind: 'spec-scan.overlap' });
 
-  const delegate = defineSessionTool({
+  const delegateSpec = defineToolSpec({
     name: 'delegate',
     description: 'run the overlap child',
     kind: 'dispatch',
     readOnly: true,
     destructive: false,
     inputSchema: z.object({}),
+  });
+  const delegate = delegateSpec.bind({
     async execute(_args, ctx) {
       const out = await ctx.dispatchChild(childDef, ['child go']);
       return { content: JSON.stringify(out) };
@@ -785,21 +788,21 @@ describe('runAgentLoop sub-sessions', () => {
   });
 
   it('a child dispatching its own child gets a structured failure, not a session', async () => {
-    const deeper = defineSessionTool({
+    const deeper = defineToolSpec({
       name: 'deeper',
       description: 'illegally dispatch a grandchild',
       kind: 'dispatch',
       readOnly: true,
       destructive: false,
       inputSchema: z.object({}),
+    }).bind({
       async execute(_args, ctx) {
         const out = await ctx.dispatchChild(makeDef({ kind: 'grandchild' }), []);
         return { content: JSON.stringify(out) };
       },
     });
     const nestedChildDef = makeDef({ kind: 'spec-scan.overlap', tools: [deeper] });
-    const delegateNested = defineSessionTool({
-      ...delegate,
+    const delegateNested = delegateSpec.bind({
       async execute(_args, ctx) {
         const out = await ctx.dispatchChild(nestedChildDef, []);
         return { content: JSON.stringify(out) };
@@ -1123,13 +1126,14 @@ describe('runAgentLoop clocks', () => {
   });
 
   it('the turn clock waits while a tool runs, however long it takes', async () => {
-    const slowTool = defineSessionTool({
+    const slowTool = defineToolSpec({
       name: 'build',
       description: 'runs a build',
       kind: 'build',
       readOnly: true,
       destructive: false,
       inputSchema: z.object({}),
+    }).bind({
       // Longer than the turn clock: a tool holds the session, not the model.
       async execute() {
         await new Promise((r) => setTimeout(r, 80));
@@ -1645,7 +1649,7 @@ describe('runAgentLoop draft checkpoint', () => {
 // ---------------------------------------------------------------------------
 
 describe('runAgentLoop presentation', () => {
-  const readDoc = defineSessionTool({
+  const readDoc = defineToolSpec({
     name: 'read_doc',
     description: 'read a doc',
     kind: 'read-doc',
@@ -1653,15 +1657,17 @@ describe('runAgentLoop presentation', () => {
     destructive: false,
     inputSchema: z.object({ path: z.string() }),
     display: { one: 'I read a doc.', many: 'I read {n} docs.' },
+  }).bind({
     execute: async () => ({ content: 'ok' }),
   });
-  const unnamedTool = defineSessionTool({
+  const unnamedTool = defineToolSpec({
     name: 'check_draft',
     description: 'validate a draft',
     kind: 'validate',
     readOnly: true,
     destructive: false,
     inputSchema: z.object({}),
+  }).bind({
     execute: async () => ({ content: 'ok' }),
   });
 
@@ -2045,6 +2051,31 @@ describe('live outcome validation', () => {
       workItem: 'flow', initialMessages: [], driver, persistence, sessionId: 'schema-bound' }).outcome;
     expect(result).toMatchObject({ status: 'failed', failure: { kind: 'malformed' } });
     expect(runs).toHaveLength(3);
+  });
+  it('corrects a wire outcome with the issues its resolver found in the wire shape', async () => {
+    const wire = z.object({ pair: z.object({ a: z.string(), b: z.string() }) });
+    const { driver, runs } = fakeDriver(async ({ input, emit }) => {
+      await emit({ type: 'assistant-turn', text: 'finish', usage: usage(1) });
+      return { kind: 'outcome', value: input.resume ? { pair: { a: 'x', b: 'y' } } : { pair: { a: 'x' } } };
+    });
+    const { persistence } = memoryPersistence();
+    const result = await runAgentLoop({
+      def: {
+        kind: 'spec-scan.overlap',
+        systemPrompt: 'compare docs',
+        tools: [],
+        outcomeSchema: z.object({ pair: z.tuple([z.string(), z.string()]) }),
+        outcomeInputSchema: wire,
+        resolveOutcome: (value) => {
+          const { pair } = wire.parse(value);
+          return { pair: [pair.a, pair.b] };
+        },
+        outcomeSchemaRepairs: 1,
+        budget: { turns: 10, maxResumes: 0, tokenCeiling: 1_000_000 },
+      },
+      workItem: 'flow', initialMessages: ['go'], driver, persistence, sessionId: 'wire-repair' }).outcome;
+    expect(result).toMatchObject({ status: 'completed', output: { pair: ['x', 'y'] } });
+    expect(runs[1].initialMessages[0]).toContain('pair.b: Required');
   });
   it('continues a refused completion over the same transcript and cumulative usage', async () => {
     let accepted = false

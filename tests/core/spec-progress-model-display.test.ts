@@ -61,7 +61,7 @@ describe('spec scan progress', () => {
             case 'spec-scan.settle-areas':
               return {
                 kind: 'outcome',
-                value: { concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] },
+                value: { concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] },
               };
             case 'spec-scan.overlap':
               input.onEvent({ type: 'tool-result', toolName: 'check_findings', content: 'ok', isError: false });

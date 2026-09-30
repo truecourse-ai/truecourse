@@ -34,7 +34,7 @@
 
 import { createHash } from 'node:crypto'
 import { LEGACY_FLOWS_SESSION_PROMPT_FINGERPRINT, LEGACY_FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
-import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
+import { defineSessionKind, defineToolSpec, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
 import { isRunnableDriver, type GuardFlow, type GuardNoFlowClaim } from '@truecourse/shared'
 import {
   FlowSetSchema,
@@ -243,20 +243,23 @@ export interface FlowsCheckerContext {
   catalogNames: ReadonlySet<string>
 }
 
+const CHECK_FLOWS = defineToolSpec({
+  name: 'check_flows',
+  description:
+    "Check a draft flow set against the engine's rules — every milestone must snap onto a given claim, every required claim must be accounted for, and near-duplicates / unbound needs are reported. Call it on your complete draft before you produce the outcome.",
+  kind: 'check-flow-set',
+  readOnly: true,
+  destructive: false,
+  inputSchema: FlowSetSchema,
+})
+
 function checkFlowsTool(
   area: FlowSynthesisArea,
   checker: FlowsCheckerContext,
   prior: readonly GuardFlow[],
   priorNoFlow: readonly GuardNoFlowClaim[] = [],
 ): SessionTool {
-  return defineSessionTool({
-    name: 'check_flows',
-    description:
-      "Check a draft flow set against the engine's rules — every milestone must snap onto a given claim, every required claim must be accounted for, and near-duplicates / unbound needs are reported. Call it on your complete draft before you produce the outcome.",
-    kind: 'check-flow-set',
-    readOnly: true,
-    destructive: false,
-    inputSchema: FlowSetSchema,
+  return CHECK_FLOWS.bind({
     async execute(args) {
       const report = checkFlowSet(args, {
         area,
@@ -270,15 +273,18 @@ function checkFlowsTool(
   })
 }
 
+const CHECK_EPICS = defineToolSpec({
+  name: 'check_flows',
+  description:
+    "Check a draft epic set against the engine's rules — every composedOf ref must name a listed flow and every milestone must be copied verbatim from one of that epic's composed flows. Call it on your complete draft (even an empty one) before you produce the outcome.",
+  kind: 'check-epic-set',
+  readOnly: true,
+  destructive: false,
+  inputSchema: EpicSynthesisSchema,
+})
+
 function checkEpicsTool(digests: readonly FlowDigest[], claims: readonly FlowClaimInput[], prior: readonly GuardFlow[]): SessionTool {
-  return defineSessionTool({
-    name: 'check_flows',
-    description:
-      "Check a draft epic set against the engine's rules — every composedOf ref must name a listed flow and every milestone must be copied verbatim from one of that epic's composed flows. Call it on your complete draft (even an empty one) before you produce the outcome.",
-    kind: 'check-epic-set',
-    readOnly: true,
-    destructive: false,
-    inputSchema: EpicSynthesisSchema,
+  return CHECK_EPICS.bind({
     async execute(args) {
       const { unknownReferences, notes } = checkEpicSet(args, digests, claims, prior)
       if (unknownReferences.length > 0) {
@@ -309,13 +315,17 @@ export interface FlowsSessionInput {
   priorNoFlow?: readonly GuardNoFlowClaim[]
 }
 
+const FLOWS_SESSION = defineSessionKind({
+  kind: FLOWS_SESSION_KIND,
+  outcomeSchema: FlowSetSchema,
+})
+
 export function flowsSessionDef(input: FlowsSessionInput): SessionDef<FlowSet> {
   return {
-    kind: FLOWS_SESSION_KIND,
+    ...FLOWS_SESSION,
     display: { title: 'Flow synthesis' },
     systemPrompt: FLOWS_SESSION_SYSTEM_PROMPT,
     tools: [readUniverseSectionTool(input.universe), checkFlowsTool(input.area, input.checker, input.prior ?? [], input.priorNoFlow ?? [])],
-    outcomeSchema: FlowSetSchema,
     budget: FLOWS_SESSION_BUDGET,
     outcomePrecondition: {
       tool: 'check_flows',
@@ -333,13 +343,17 @@ export interface FlowsEpicSessionInput {
   prior?: readonly GuardFlow[]
 }
 
+const FLOWS_EPIC_SESSION = defineSessionKind({
+  kind: FLOWS_SESSION_KIND,
+  outcomeSchema: EpicSynthesisSchema,
+})
+
 export function flowsEpicSessionDef(input: FlowsEpicSessionInput): SessionDef<EpicSynthesis> {
   return {
-    kind: FLOWS_SESSION_KIND,
+    ...FLOWS_EPIC_SESSION,
     display: { title: 'Flow synthesis' },
     systemPrompt: FLOWS_EPIC_SESSION_SYSTEM_PROMPT,
     tools: [checkEpicsTool(input.digests, input.claims, input.prior ?? [])],
-    outcomeSchema: EpicSynthesisSchema,
     budget: FLOWS_SESSION_BUDGET,
     outcomePrecondition: {
       tool: 'check_flows',

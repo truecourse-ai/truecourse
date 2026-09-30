@@ -48,6 +48,7 @@
  */
 
 import { z } from 'zod'
+import { defineSessionKind } from '@truecourse/agent-loop'
 import {
   InterfacesFileSchema,
   isCreditsExhausted,
@@ -86,6 +87,12 @@ export type StateMerge = z.infer<typeof StateMergeSchema>
 export const StateReconcileResponseSchema = z
   .object({ groups: z.array(StateMergeSchema) })
   .strict()
+
+/** The reconciliation's session kind: one turn, the groups out. */
+export const STATE_RECONCILE_SESSION = defineSessionKind({
+  kind: STATE_RECONCILE_SESSION_KIND,
+  outcomeSchema: StateReconcileResponseSchema,
+})
 
 /**
  * The one ask this pass needs: a prompt in, the model's structured answer out.

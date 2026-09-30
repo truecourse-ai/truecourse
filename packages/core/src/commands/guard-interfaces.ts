@@ -25,8 +25,7 @@ import {
   authorWebInterfaces,
   planWorkItems,
   reconcileAuthoredStates,
-  STATE_RECONCILE_SESSION_KIND,
-  StateReconcileResponseSchema,
+  STATE_RECONCILE_SESSION,
   type AuthorProgress,
   type AuthorRunResult,
   type LiveScreens,
@@ -320,10 +319,10 @@ function stateReconcileComplete(
   return async (prompt) => {
     const outcome = await runOneTurnSession({
       session: {
-        kind: STATE_RECONCILE_SESSION_KIND,
+        ...STATE_RECONCILE_SESSION,
         title: 'State reconcile',
+        reasoning: 'high',
         systemPrompt: withOutcomeDelivery(prompt.system),
-        outcomeSchema: StateReconcileResponseSchema,
         tokenCeiling: 300_000,
       },
       workItem: 'state registry',

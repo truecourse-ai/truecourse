@@ -120,8 +120,8 @@ describe('spec-scan.settle-areas', () => {
     ]);
     expect(def.outcomeSchema).toBe(AreaSettlementSchema);
     expect(def.tools.map((t) => t.name).sort()).toEqual(['check_settlement', 'docs_with_label', 'read_doc']);
-    // The validator's INPUT schema is the outcome schema — one definition of valid.
-    expect(def.tools.find((t) => t.name === 'check_settlement')!.inputSchema).toBe(AreaSettlementSchema);
+    // The validator's INPUT schema is the outcome's wire schema — one definition of valid.
+    expect(def.tools.find((t) => t.name === 'check_settlement')!.inputSchema).toBe(def.outcomeInputSchema);
   });
 
   it('fingerprints the cache on the prompt constant alone', () => {

@@ -148,7 +148,7 @@ const KEEP_DOC: DriverResult = {
 }
 const EMPTY_SETTLEMENT: DriverResult = {
   kind: 'outcome',
-  value: { concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] },
+  value: { concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] },
 }
 const NO_OVERLAPS: DriverResult = { kind: 'outcome', value: { overlaps: [], notReached: [] } }
 

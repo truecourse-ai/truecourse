@@ -3,7 +3,7 @@
  * on the AI SDK's `streamText` — tools declared without `execute` so the
  * model's tool call comes back unrun (one step per turn), the FULL message
  * history resent every turn under the configured provider's cache strategy
- * (`provider-tuning.ts` — breakpoints on the system prompt, a cluster's shared
+ * (its definition in `providers/` — breakpoints on the system prompt, a cluster's shared
  * prefix and the moving tail, or a per-request cluster key), and a per-turn
  * fallback-model retry.
  *
@@ -30,7 +30,6 @@ import {
   type SystemModelMessage,
   type ToolSet,
 } from 'ai';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
 import { sessionImageRef } from '@truecourse/agent-loop';
 import type {
@@ -49,9 +48,9 @@ import type {
   RawPayload,
 } from '@truecourse/agent-loop';
 import { buildModel } from './model.js';
-import { normalizeForStrictOutput, stripInjectedNulls, type SchemaPath } from './strict-schema.js';
-import { compactSchema } from './compact-schema.js';
-import { providerTuningFor, type ProviderTuning } from './provider-tuning.js';
+import { stripInjectedNulls, type SchemaPath } from './strict-schema.js';
+import { requestCapabilities, wireSchema, type SchemaCapabilities } from './wire-schema.js';
+import { providerFor, type ProviderDefinition } from './providers/index.js';
 import type { ProviderConfig } from './types.js';
 import { callUsageOf, type CallUsage } from './usage.js';
 
@@ -227,7 +226,7 @@ export function createApiSessionDriver(
     : undefined;
   const retry = { ...DEFAULT_API_RETRY, ...opts.retry };
   // Declared once, from the config — never re-decided at a call site.
-  const tuning = providerTuningFor(cfg.provider);
+  const provider = providerFor(cfg.provider);
 
   return {
     capabilities: { steering: 'turn-boundary', structuredOutcome: 'tool', resumeAtMessage: false },
@@ -250,7 +249,7 @@ export function createApiSessionDriver(
         fallback,
         pricing: opts.pricing,
         retry,
-        tuning,
+        provider,
         cacheKey:
           input.sharedPrefix?.cacheKey ??
           (typeof opts.cacheKey === 'function'
@@ -292,8 +291,8 @@ interface SessionRuntime {
   fallback?: { model: LanguageModel; modelId: string };
   pricing?: ApiSessionDriverOptions['pricing'];
   retry: ApiRetryPolicy;
-  /** The configured provider's cache + tool-call strategy. */
-  tuning: ProviderTuning;
+  /** The configured provider's definition: schema, cache and tool-call strategy. */
+  provider: ProviderDefinition;
   /** Resolved once per session — the cluster the request-keyed providers cache under. */
   cacheKey: string;
   /** How many leading messages are the cluster's shared prefix; 0 = none. */
@@ -336,7 +335,7 @@ async function whileRunning<T>(
 
 async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promise<DriverResult> {
   const { def, onEvent, signal } = input;
-  const { toolset, widenedByTool } = buildToolset(def, rt.tuning);
+  const { toolset, widenedByTool } = buildToolset(def, rt.provider.capabilities);
   const toolByName = new Map(def.tools.map((t) => [t.name, t]));
   // The shell's tool wrapper ignores the driver's ctx and injects its own;
   // this stub only satisfies the call signature.
@@ -621,7 +620,7 @@ async function callModel(
   // breakpoint of its own it would only ever be cached as part of one session's
   // tail, which the next session of the cluster cannot read. A provider that
   // keys its cache per request leaves all of them unmarked.
-  const breakpoint = rt.tuning.breakpoint;
+  const breakpoint = rt.provider.breakpoint;
   const sharedEnd = rt.sharedPrefix - 1;
   // The system prompt rides the SDK's `instructions` option, never `messages`: a
   // system role inside `messages` earns an "…can be a security risk…" warning
@@ -633,7 +632,7 @@ async function callModel(
   // `rebuildHistory` never emits a system message.
   const system: SystemModelMessage = {
     role: 'system',
-    content: [rt.tuning.sessionInstructions?.(def), def.systemPrompt].filter(Boolean).join('\n\n'),
+    content: def.systemPrompt,
     ...(breakpoint ? { providerOptions: breakpoint } : {}),
   };
   const prompt: ModelMessage[] = messages.map((m, i) =>
@@ -666,7 +665,10 @@ async function callModel(
         // event models ONE tool call per turn, this provider's way of asking
         // for a single call. A turn that still carries several is executed in
         // full — see the loop.
-        providerOptions: rt.tuning.callOptions(candidate.modelId, rt.cacheKey, def.kind),
+        providerOptions: mergeOptions(
+          rt.provider.callOptions(candidate.modelId, rt.cacheKey),
+          def.reasoning ? rt.provider.reasoning?.(candidate.modelId, def.reasoning) : undefined,
+        ),
       });
       const stream = await reportTurn(result, live, cancelTurn);
       // The guard already aborted the request; the result promises are never
@@ -920,36 +922,28 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * Compile the session's tools (plus the injected outcome tool) into the AI
- * SDK toolset. Only OpenAI-family providers receive strict-subset normalization.
- * Other providers receive the original optional fields and constraints. The
- * shell's Zod validation still gates `execute` for every provider.
+ * SDK toolset, each with the wire schema `wireSchema` makes for this provider.
+ * The shell's Zod validation still gates `execute` for every provider.
  * Tools carry no `execute` — one step per turn, the loop runs them.
  */
-function buildToolset(def: SessionDef, tuning: ProviderTuning): {
+function buildToolset(def: SessionDef, providerCapabilities: SchemaCapabilities): {
   toolset: ToolSet;
   widenedByTool: Map<string, readonly SchemaPath[]>;
 } {
   const toolset: ToolSet = {};
   const widenedByTool = new Map<string, readonly SchemaPath[]>();
+  const capabilities = requestCapabilities(
+    providerCapabilities,
+    def.largeOutcomeSchema === true || def.tools.some((t) => t.largeInputSchema === true),
+  );
   const add = (name: string, description: string, schema: ZodTypeAny): void => {
-    const rawSchema = zodToJsonSchema(schema, { $refStrategy: 'none' });
-    let inputSchema: Record<string, unknown> = rawSchema;
-    let widened: readonly SchemaPath[] = [];
-    if (tuning.normalizeToolSchema) {
-      try {
-        const strict = normalizeForStrictOutput(rawSchema);
-        inputSchema = strict.schema;
-        widened = strict.widened;
-      } catch {
-        /* inexpressible in the strict subset — send unnormalized */
-      }
-    }
+    const wire = wireSchema(schema, capabilities, `tool \`${name}\``);
     toolset[name] = tool({
       description,
-      inputSchema: jsonSchema(compactSchema(inputSchema) as never),
-      ...(tuning.strictTools ? { strict: true } : {}),
+      inputSchema: jsonSchema(wire.schema as never),
+      ...(wire.strict ? { strict: true } : {}),
     });
-    widenedByTool.set(name, widened);
+    widenedByTool.set(name, wire.widened);
   };
   for (const t of def.tools) {
     if (t.name === OUTCOME_TOOL_NAME) {
@@ -963,6 +957,16 @@ function buildToolset(def: SessionDef, tuning: ProviderTuning): {
     (def.outcomeInputSchema ?? def.outcomeSchema) as unknown as ZodTypeAny,
   );
   return { toolset, widenedByTool };
+}
+
+type ProviderOptions = NonNullable<ModelMessage['providerOptions']>;
+
+/** Two provider-options bags as one, namespace by namespace. */
+function mergeOptions(base: ProviderOptions, extra: ProviderOptions | undefined): ProviderOptions {
+  if (!extra) return base;
+  const merged: ProviderOptions = { ...base };
+  for (const [namespace, options] of Object.entries(extra)) merged[namespace] = { ...merged[namespace], ...options };
+  return merged;
 }
 
 /** Drop the nulls the strict-schema widening introduced before anything

@@ -170,23 +170,6 @@ describe('normalizeForStrictOutput — required + nullability', () => {
     expect(widened).toEqual([]);
   });
 
-  it('collapses a positional tuple into a single element schema', () => {
-    const { schema } = normalizeForStrictOutput({
-      type: 'object',
-      properties: {
-        lines: { type: 'array', minItems: 2, maxItems: 2, items: [{ type: 'integer' }, { type: 'integer' }] },
-        pair: { type: 'array', items: [{ type: 'integer' }, { type: 'string' }] },
-      },
-      required: ['lines', 'pair'],
-      additionalProperties: false,
-    });
-
-    assertOpenAiStrictValid(schema);
-    const props = schema.properties as Record<string, Record<string, unknown>>;
-    expect(props.lines).toEqual({ type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer' } });
-    expect(props.pair.items).toEqual({ anyOf: [{ type: 'integer' }, { type: 'string' }] });
-  });
-
   it('never mutates the input schema', () => {
     const input = {
       type: 'object',
@@ -211,7 +194,7 @@ describe('normalizeForStrictOutput — inexpressible schemas throw', () => {
         },
         'guard.recipe',
       ),
-    ).toThrow(/guard\.recipe: properties\.env is a typed record/);
+    ).toThrow(/for guard\.recipe: properties\.env is a typed record/);
   });
 
   it('rejects an open `{}` sub-schema', () => {
@@ -235,6 +218,17 @@ describe('normalizeForStrictOutput — inexpressible schemas throw', () => {
     ).toThrow(/allows additional properties/);
   });
 
+  it('rejects a positional tuple', () => {
+    expect(() =>
+      normalizeForStrictOutput({
+        type: 'object',
+        properties: { pair: { type: 'array', items: [{ type: 'integer' }, { type: 'string' }] } },
+        required: ['pair'],
+        additionalProperties: false,
+      }),
+    ).toThrow(/properties\.pair is a positional tuple/);
+  });
+
   it('rejects an array root', () => {
     expect(() => normalizeForStrictOutput({ type: 'array', items: { type: 'object' } })).toThrow(
       /is not an object-rooted schema/,
@@ -246,14 +240,8 @@ describe('normalizeForStrictOutput — inexpressible schemas throw', () => {
     expect(() => normalizeForStrictOutput({ anyOf: [{ type: 'object' }] })).toThrow(/object-rooted/);
   });
 
-  it('throws SchemaNotEnforceableError and points at the opt-out', () => {
-    try {
-      normalizeForStrictOutput({ type: 'string' }, 'spec.vocab');
-      expect.unreachable('should have thrown');
-    } catch (err) {
-      expect(err).toBeInstanceOf(SchemaNotEnforceableError);
-      expect((err as Error).message).toContain('enforceSchema: false');
-    }
+  it('throws SchemaNotEnforceableError', () => {
+    expect(() => normalizeForStrictOutput({ type: 'string' }, 'spec.vocab')).toThrow(SchemaNotEnforceableError);
   });
 });
 

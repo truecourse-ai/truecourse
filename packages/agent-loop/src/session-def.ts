@@ -3,12 +3,18 @@
  * prompt, tools, outcome schema, and the
  * three numbers (turn budget, maxResumes, token ceiling). Consumed by the
  * policy shell (`runAgentLoop`) and realized by a `SessionDriver`.
+ *
+ * Tools and session kinds are declared at module level and register
+ * themselves on import (`defineToolSpec`, `defineSessionKind`), so every
+ * schema a model can be sent is enumerable without running a session. A def
+ * holds only tools bound from a registered spec.
  */
 
 import type { z } from 'zod';
 import type { BudgetSpent, SessionFailure, UserInputQuestion, SessionEvent } from './session-events.js';
 import type { KnownDisplayBlock, ToolDisplay } from './session-presentation.js';
 import type { SessionImage } from './session-driver.js';
+import { BOUND_TOOL } from './tool-brand.js';
 
 /** What a tool hands back to the model. An error result is an observation
  *  the session ingests and revises on — never a session failure. */
@@ -41,44 +47,114 @@ export interface ToolContext {
 }
 
 /**
- * One tool a session may call. Identity is DECLARED — `kind` plus the
- * read-only/destructive hints — never inferred from the name downstream.
- * One definition compiles to both the api driver's toolset and the SDK
- * driver's in-process MCP server; the shell validates args against
- * `inputSchema` before `execute` runs in either driver.
+ * What a tool IS, independent of any one session: the fields a module declares
+ * once, at load. Identity is DECLARED — `kind` plus the read-only/destructive
+ * hints — never inferred from the name downstream. `inputSchema` is always
+ * static, so every schema a model can be sent is known without running a
+ * session.
  */
-export interface SessionTool {
-  name: string;
-  description: string;
+export interface ToolSpecFields<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
+  readonly name: string;
+  readonly description: string;
   /** What the tool IS (e.g. `read-doc-section`, `run-scenario`). */
-  kind: string;
-  readOnly: boolean;
-  destructive: boolean;
-  inputSchema: z.ZodTypeAny;
-  /** How a call to this tool reads in a transcript. Colocated with the tool
-   *  because tools are factory-built per def, so wording can differ per def
-   *  for the same tool. Absent ⇒ the reader phrases it from the name. */
-  display?: ToolDisplay;
-  execute(args: unknown, ctx: ToolContext): Promise<SessionToolResult>;
+  readonly kind: string;
+  readonly readOnly: boolean;
+  readonly destructive: boolean;
+  readonly inputSchema: TSchema;
+  /** How a call to this tool reads in a transcript. Absent ⇒ the reader
+   *  phrases it from the name. */
+  readonly display?: ToolDisplay;
+  /**
+   * The input schema is too large for a provider that compiles a schema into
+   * a constrained decoder with a size limit. Declared by the tool's owner; the
+   * provider decides what it does with a request carrying one.
+   */
+  readonly largeInputSchema?: true;
 }
 
 /**
- * Builder that ties `execute`'s argument type to `inputSchema` so tool
- * authors get inference without casts (method bivariance makes the erased
- * `SessionTool` assignment sound in practice: args are schema-validated
- * before dispatch).
+ * What one session supplies when it binds a spec: the `execute` that closes
+ * over the session's own state, and the wording, when it depends on that
+ * state, in place of the spec's.
  */
-export function defineSessionTool<TSchema extends z.ZodTypeAny>(tool: {
-  name: string;
-  description: string;
-  kind: string;
-  readOnly: boolean;
-  destructive: boolean;
-  inputSchema: TSchema;
-  display?: ToolDisplay;
+export interface ToolBinding<TSchema extends z.ZodTypeAny> {
   execute(args: z.infer<TSchema>, ctx: ToolContext): Promise<SessionToolResult>;
-}): SessionTool {
-  return tool;
+  description?: string;
+  display?: ToolDisplay;
+}
+
+/** A registered tool spec; `bind` makes the tool a session runs. */
+export interface ToolSpec<TSchema extends z.ZodTypeAny = z.ZodTypeAny> extends ToolSpecFields<TSchema> {
+  bind(binding: ToolBinding<TSchema>): SessionTool;
+}
+
+/**
+ * One tool a session may call: a spec bound to one session. One tool compiles
+ * to both the api driver's toolset and the SDK driver's in-process MCP server;
+ * the shell validates args against `inputSchema` before `execute` runs in
+ * either driver. Only {@link ToolSpec.bind} makes one.
+ */
+export interface SessionTool extends ToolSpecFields {
+  execute(args: unknown, ctx: ToolContext): Promise<SessionToolResult>;
+  readonly [BOUND_TOOL]: true;
+}
+
+const toolSpecs: ToolSpec[] = [];
+const sessionKinds: SessionKindSpec[] = [];
+
+/**
+ * Declare a tool at module level and register it. `bind` ties `execute`'s
+ * argument type to `inputSchema`, so tool authors get inference without casts
+ * (method bivariance makes the erased `SessionTool` sound in practice: args
+ * are schema-validated before dispatch).
+ */
+export function defineToolSpec<TSchema extends z.ZodTypeAny>(fields: ToolSpecFields<TSchema>): ToolSpec<TSchema> {
+  const spec: ToolSpec<TSchema> = {
+    ...fields,
+    bind: (binding) => {
+      const display = binding.display ?? fields.display;
+      return {
+        ...fields,
+        description: binding.description ?? fields.description,
+        ...(display ? { display } : {}),
+        execute: binding.execute,
+        [BOUND_TOOL]: true,
+      };
+    },
+  };
+  toolSpecs.push(spec);
+  return spec;
+}
+
+/**
+ * A session kind as the model sees it: its name and the schema its outcome is
+ * validated against, plus the compact wire shape when the model answers in a
+ * different one (`SessionDef.outcomeInputSchema`). Two specs may share a
+ * `kind` when one kind answers in two shapes.
+ */
+export interface SessionKindSpec<TOutcome = unknown> {
+  readonly kind: string;
+  readonly outcomeSchema: z.ZodType<TOutcome, z.ZodTypeDef, unknown>;
+  readonly outcomeInputSchema?: z.ZodTypeAny;
+  /** The schema the model answers in is too large for a size-limited
+   *  constrained decoder; see `ToolSpecFields.largeInputSchema`. */
+  readonly largeOutcomeSchema?: true;
+}
+
+/** Declare a session kind at module level and register it. A def spreads it. */
+export function defineSessionKind<TOutcome>(spec: SessionKindSpec<TOutcome>): SessionKindSpec<TOutcome> {
+  sessionKinds.push(spec);
+  return spec;
+}
+
+/** Every tool spec registered by the modules loaded so far. */
+export function registeredToolSpecs(): readonly ToolSpec[] {
+  return toolSpecs;
+}
+
+/** Every session kind registered by the modules loaded so far. */
+export function registeredSessionKinds(): readonly SessionKindSpec[] {
+  return sessionKinds;
 }
 
 /**
@@ -93,6 +169,9 @@ export interface SessionBudget {
   tokenCeiling: number;
 }
 
+/** How hard the model should think per turn; each provider maps it to its own setting. */
+export type ReasoningLevel = 'low' | 'medium' | 'high';
+
 export interface SessionDef<TOutcome = unknown> {
   /** Session type, `<command>.<task>` (e.g. `spec-scan.curation`). */
   kind: string;
@@ -105,6 +184,9 @@ export interface SessionDef<TOutcome = unknown> {
   outcomeSchema: z.ZodType<TOutcome, z.ZodTypeDef, unknown>;
   /** Optional compact wire representation; the shell still validates the resolved outcome. */
   outcomeInputSchema?: z.ZodTypeAny;
+  /** The schema the model answers in is too large for a size-limited
+   *  constrained decoder (declared on the session kind). */
+  largeOutcomeSchema?: true;
   resolveOutcome?(value: unknown, events: readonly SessionEvent[]): unknown;
   /** Opt-in bounded repair of malformed terminal objects, under the same budget. */
   outcomeSchemaRepairs?: number;
@@ -113,6 +195,8 @@ export interface SessionDef<TOutcome = unknown> {
    * `wrappingUp` says the budget is spent and only the wrap-up turns remain. */
   validateOutcome?(outcome: TOutcome, context: { wrappingUp: boolean }): string | undefined | Promise<string | undefined>;
   budget: SessionBudget;
+  /** Declared reasoning effort. Absent ⇒ the provider's default. */
+  reasoning?: ReasoningLevel;
   /** May wait on user input. Non-interactive runs never block. */
   interactive?: boolean;
   /** The short name of this KIND of work ("Scenario author") and the session's

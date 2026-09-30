@@ -25,7 +25,8 @@ export const GuardVerificationCaseSchema = z.object({
   /** Traffic named by a request-count/inspection claim, independent of fixture setup. */
   requestBoundary: z.enum(['browser-to-app', 'app-to-provider']).optional(),
   /** Exact server-startup contract for a web/HTTP proof; ordinary CLI steps carry their own commands. */
-  invocation: z.object({ command: z.string().min(1), address: z.string().url().optional() }).strict().optional(),
+  // The address is checked as a URL here, never sent as `format: uri`, which strict tool schemas refuse.
+  invocation: z.object({ command: z.string().min(1), address: z.string().refine((v) => URL.canParse(v), 'Invalid url').optional() }).strict().optional(),
   /** Required scenario baseline, independent of observation capabilities. */
   preparation: z.enum(['empty', 'controlled']).optional(),
   /** Conditions to arrange, not evidence that must be read from a database. */

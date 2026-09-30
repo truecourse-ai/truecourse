@@ -266,7 +266,7 @@ function warmDriver(): { driver: SessionDriver; kinds: string[] } {
           case SETTLE_AREAS_SESSION_KIND:
             return {
               kind: 'outcome',
-              value: { concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] },
+              value: { concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] },
             };
           case OVERLAP_SESSION_KIND:
             input.onEvent({

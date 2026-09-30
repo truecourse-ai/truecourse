@@ -18,14 +18,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/amazon-bedrock": "^5.0.97",
-    "@ai-sdk/anthropic": "^4.0.65",
-    "@ai-sdk/google": "^4.0.82",
-    "@ai-sdk/openai": "^4.0.78",
-    "@ai-sdk/openai-compatible": "^3.0.57",
+    "@ai-sdk/amazon-bedrock": "5.0.97",
+    "@ai-sdk/anthropic": "4.0.65",
+    "@ai-sdk/google": "4.0.82",
+    "@ai-sdk/openai": "4.0.78",
+    "@ai-sdk/openai-compatible": "3.0.57",
     "@truecourse/agent-loop": "workspace:*",
     "@truecourse/shared": "workspace:*",
-    "ai": "^7.0.118",
+    "ai": "7.0.118",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.1"
   },

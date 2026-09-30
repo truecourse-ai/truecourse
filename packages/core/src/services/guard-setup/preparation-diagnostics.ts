@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { defineSessionTool } from '@truecourse/agent-loop';
+import { defineToolSpec } from '@truecourse/agent-loop';
 import { SeedError, type SeedDiagnostic } from '@truecourse/guard-runner';
 import { z } from 'zod';
 
@@ -17,11 +17,15 @@ export function preparationDiagnostic(error: unknown, redact: (s: string) => str
   const output = redact(diagnostics.map((d, i) => `Diagnostic ${i + 1}: exit=${d.exitCode} signal=${d.signal} timedOut=${d.timedOut}, totalBytes=${d.totalBytes} retainedBytes=${d.retainedBytes} omittedBytes=${d.omittedBytes}\n${d.output}`).join('\n') || message);
   return { kind: 'preparation-diagnostic' as const, id: randomUUID(), message, output };
 }
+
+const READ_PREPARATION_DIAGNOSTIC = defineToolSpec({
+  name: 'read_preparation_diagnostic', kind: 'read-diagnostic', readOnly: true, destructive: false,
+  description: 'Read a retained, redacted preparation diagnostic page from this session. Offsets count Unicode characters. Masking never changes executed source.',
+  inputSchema: z.object({ id: z.string().uuid(), offset: z.number().int().nonnegative().default(0) }).strict(),
+});
+
 export function preparationDiagnosticTool() {
-  return defineSessionTool({
-    name: 'read_preparation_diagnostic', kind: 'read-diagnostic', readOnly: true, destructive: false,
-    description: 'Read a retained, redacted preparation diagnostic page from this session. Offsets count Unicode characters. Masking never changes executed source.',
-    inputSchema: z.object({ id: z.string().uuid(), offset: z.number().int().nonnegative().default(0) }).strict(),
+  return READ_PREPARATION_DIAGNOSTIC.bind({
     async execute({id, offset}, ctx) {
       for (const event of [...(ctx.readEvents?.() ?? [])].reverse()) {
         if (event.type !== 'tool-result' || event.toolName !== 'verify_preparations') continue;

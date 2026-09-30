@@ -38,7 +38,7 @@ import {
   type CatalogDraft,
   type GuardSetupSessionContext,
 } from '../../packages/core/src/services/guard-setup/index.js';
-import { promptFingerprint } from '../../packages/core/src/services/agent/session-cache.js';
+import { LEGACY_DEPENDENCY_CATALOG_PROMPT_FINGERPRINT } from '../../packages/core/src/services/legacy-prompt-fingerprints.js';
 import { memoryPersistence, outcome, stubDriver, toolResult } from './spec-scan-session-stub.js';
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 
@@ -574,12 +574,11 @@ describe('buildCatalogSession', () => {
     expect(fs.readFileSync(guardSetupFindingsPath(r), 'utf-8')).toBe(ledger);
   });
 
-  // A pre-seeded entry under the session's own key is a hit — the key folds the
-  // prompt fingerprint, so editing the prompt invalidates exactly this kind.
+  // A pre-seeded entry under the key the prompt fingerprint once formed is a
+  // hit: that legacy key is the one a miss falls back to.
   it('reads a pre-seeded cache entry under `guard/dependency-catalog`', async () => {
     const r = repo();
-    const def = dependencyCatalogSessionDef(input(r), { dependencies: [] });
-    const key = keyFor(def.systemPrompt, 'fp-1');
+    const key = keyFor(LEGACY_DEPENDENCY_CATALOG_PROMPT_FINGERPRINT, 'fp-1');
     await setCacheEntry(r, DEPENDENCY_CATALOG_CACHE_NAME, key, {
       entries: [{ name: 'seeded', class: 'seedable', evidence: 'pre-seeded' }],
       findings: [],
@@ -610,9 +609,9 @@ describe('buildCatalogSession', () => {
 });
 
 /** The seam's own key: sha256(promptFingerprint :: step fingerprint). */
-function keyFor(systemPrompt: string, stepFingerprint: string): string {
+function keyFor(promptFingerprint: string, stepFingerprint: string): string {
   return createHash('sha256')
-    .update(`${promptFingerprint(systemPrompt)}::${stepFingerprint}`)
+    .update(`${promptFingerprint}::${stepFingerprint}`)
     .digest('hex');
 }
 

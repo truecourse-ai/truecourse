@@ -26,7 +26,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop';
+import { defineToolSpec, type SessionTool } from '@truecourse/agent-loop';
 import { evidenceScenarioDir } from '@truecourse/guard-runner';
 import { readGuardEvidenceAt } from '../../lib/guard-store.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
@@ -96,17 +96,20 @@ export function buildAdjudicationTools(input: AdjudicationToolsInput): SessionTo
 // read_evidence — the bundle, one contained file at a time
 // ---------------------------------------------------------------------------
 
+const READ_EVIDENCE = defineToolSpec({
+  name: 'read_evidence',
+  description:
+    'Read one file of THIS failure\'s evidence bundle (the briefing lists the file names). ' +
+    'Text files only — screenshots and video are answered through `visual_judge`, never as bytes.',
+  kind: 'read-evidence',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z.object({ file: z.string().min(1) }).strict(),
+});
+
 function readEvidenceTool(input: AdjudicationToolsInput): SessionTool {
   const { repoRoot, item } = input;
-  return defineSessionTool({
-    name: 'read_evidence',
-    description:
-      'Read one file of THIS failure\'s evidence bundle (the briefing lists the file names). ' +
-      'Text files only — screenshots and video are answered through `visual_judge`, never as bytes.',
-    kind: 'read-evidence',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z.object({ file: z.string().min(1) }).strict(),
+  return READ_EVIDENCE.bind({
     async execute(args) {
       if (!item.evidenceDir) {
         return { content: 'this failure carries no evidence bundle on this machine.', isError: true };
@@ -140,17 +143,20 @@ function readEvidenceTool(input: AdjudicationToolsInput): SessionTool {
 // rerun_scoped — the flake discriminator
 // ---------------------------------------------------------------------------
 
+const RERUN_SCOPED = defineToolSpec({
+  name: 'rerun_scoped',
+  description:
+    `Re-execute THIS scenario verbatim, once, in a fresh disposable world (nothing persisted). ` +
+    `The flake discriminator: does the recorded failure reproduce right now? At most ${RERUN_MAX} calls per session.`,
+  kind: 'rerun-scoped',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z.object({}).strict(),
+});
+
 function rerunScopedTool(input: AdjudicationToolsInput): SessionTool {
   const { item, exec, state } = input;
-  return defineSessionTool({
-    name: 'rerun_scoped',
-    description:
-      `Re-execute THIS scenario verbatim, once, in a fresh disposable world (nothing persisted). ` +
-      `The flake discriminator: does the recorded failure reproduce right now? At most ${RERUN_MAX} calls per session.`,
-    kind: 'rerun-scoped',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z.object({}).strict(),
+  return RERUN_SCOPED.bind({
     async execute() {
       if (state.reruns >= RERUN_MAX) {
         return {
@@ -171,17 +177,20 @@ function rerunScopedTool(input: AdjudicationToolsInput): SessionTool {
 // visual_judge — the cached vision verdict over one step's screenshot
 // ---------------------------------------------------------------------------
 
+const VISUAL_JUDGE = defineToolSpec({
+  name: 'visual_judge',
+  description:
+    'Ask the vision judge what one web step\'s screenshot shows against its expectation. ' +
+    'Cached per failure identity, so repeating a question is free. Only steps that left a screenshot answer.',
+  kind: 'visual-judge',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z.object({ step: z.number().int().positive() }).strict(),
+});
+
 function visualJudgeTool(input: AdjudicationToolsInput): SessionTool {
   const { repoRoot, item } = input;
-  return defineSessionTool({
-    name: 'visual_judge',
-    description:
-      'Ask the vision judge what one web step\'s screenshot shows against its expectation. ' +
-      'Cached per failure identity, so repeating a question is free. Only steps that left a screenshot answer.',
-    kind: 'visual-judge',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z.object({ step: z.number().int().positive() }).strict(),
+  return VISUAL_JUDGE.bind({
     async execute(args, ctx) {
       if (!item.evidenceDir) {
         return { content: 'this failure carries no evidence bundle on this machine.', isError: true };
@@ -240,25 +249,28 @@ function visualJudgeTool(input: AdjudicationToolsInput): SessionTool {
 // verify_bug — dispatch the control child (step 22)
 // ---------------------------------------------------------------------------
 
+const VERIFY_BUG = defineToolSpec({
+  name: 'verify_bug',
+  description:
+    'Run the INDEPENDENT CONTROL EXPERIMENT for a suspected code bug (required before any `bug` verdict at ' +
+    'medium-or-better confidence). State the mechanism and the discriminating question — what result would ' +
+    'DISPROVE the bug. A fresh control session designs and runs the experiment; its conclusion comes back with ' +
+    'the reference your outcome\'s `control.transcriptRef` must cite. A `refutes` conclusion means your verdict ' +
+    'must NOT be `bug` — downgrade it.',
+  kind: 'verify-bug',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      mechanism: z.string().min(1).describe('The suspected mechanism, precisely (file:line when you have it).'),
+      disprove: z.string().min(1).describe('The discriminating question: what result would disprove the bug?'),
+    })
+    .strict(),
+});
+
 function verifyBugTool(input: AdjudicationToolsInput): SessionTool {
   const { item, exec, state } = input;
-  return defineSessionTool({
-    name: 'verify_bug',
-    description:
-      'Run the INDEPENDENT CONTROL EXPERIMENT for a suspected code bug (required before any `bug` verdict at ' +
-      'medium-or-better confidence). State the mechanism and the discriminating question — what result would ' +
-      'DISPROVE the bug. A fresh control session designs and runs the experiment; its conclusion comes back with ' +
-      'the reference your outcome\'s `control.transcriptRef` must cite. A `refutes` conclusion means your verdict ' +
-      'must NOT be `bug` — downgrade it.',
-    kind: 'verify-bug',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        mechanism: z.string().min(1).describe('The suspected mechanism, precisely (file:line when you have it).'),
-        disprove: z.string().min(1).describe('The discriminating question: what result would disprove the bug?'),
-      })
-      .strict(),
+  return VERIFY_BUG.bind({
     async execute(args, ctx) {
       if (!item.scenarioYaml) {
         return { content: 'the committed scenario yaml is unavailable — no control can run.', isError: true };

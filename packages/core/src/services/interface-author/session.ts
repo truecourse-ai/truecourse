@@ -20,7 +20,8 @@
  * honest fragment is a result, not a failure.
  */
 
-import type { SessionBudget, SessionDef } from '@truecourse/agent-loop'
+import { defineSessionKind, type SessionBudget, type SessionDef } from '@truecourse/agent-loop'
+import { withSessionRules } from '../agent/session-rules.js'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import { CheckedDraftReferenceSchema, resolveCheckedDraft } from './checked-draft.js'
 import { screenIdentityGuidance } from './identity.js'
@@ -49,14 +50,19 @@ export const INTERFACE_AUTHOR_BUDGET: SessionBudget = {
 /** What a session is built over — exactly what its tools read. */
 export type AuthorSessionInput = AuthorToolsInput
 
+const INTERFACE_AUTHOR_SESSION = defineSessionKind({
+  kind: INTERFACE_AUTHOR_SESSION_KIND,
+  outcomeSchema: AuthoredFragmentSchema,
+  outcomeInputSchema: CheckedDraftReferenceSchema,
+})
+
 export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef<AuthoredFragment> {
-  return {
-    kind: INTERFACE_AUTHOR_SESSION_KIND,
+  return withSessionRules({
+    reasoning: 'high',
+    ...INTERFACE_AUTHOR_SESSION,
     display: { title: 'Web tasks' },
     systemPrompt: SYSTEM_PROMPT,
     tools: buildAuthorTools(input),
-    outcomeSchema: AuthoredFragmentSchema,
-    outcomeInputSchema: CheckedDraftReferenceSchema,
     resolveOutcome: resolveCheckedDraft,
     outcomeSchemaRepairs: 2,
     budget: INTERFACE_AUTHOR_BUDGET,
@@ -73,7 +79,7 @@ export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef
       message:
         'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` with the draftId of the accepted check.',
     },
-  }
+  })
 }
 
 /** The work item, as the session index and the transcript record it. */
@@ -481,7 +487,7 @@ Each task carries:
    - **CSS, last** — \`{"css": "button[data-testid=\"sort\"]"}\` or \`{"css": "main button:has(svg[data-icon=\"close\"])"}\`: only when neither of the above reaches the control (an icon-only button with no label, two controls sharing one tooltip). A step with \`css\` in its target or its \`within\` is NON-CANONICAL: it carries \`"why"\` on the step — one line saying what the control is and why nothing accessible reaches it ("icon-only button, no aria-label; SortDropdown.tsx renders an <svg data-icon=\"sort\">") — it is proven on the live screen by \`check_draft\`, and it is recorded as a non-canonical locator. Within css, prefer a stable attribute (\`title\`, \`data-*\`, \`aria-*\`, the icon's class), then position inside a landmark or named region (\`main …\`, \`nav[aria-label="Sidebar"] …\`), then bare position; NEVER a generated utility class (Tailwind utilities, CSS-module hashes). Copy a selector from the observation's list of unnamed controls rather than composing one. With no live screen, \`css\` is refused: name the control in \`unresolved\` instead.
    - \`pick\` resolves a KNOWN ambiguity by position: \`"first"\` when any of the matches serves, or a 1-based number (\`"pick": 2\`) for the one you mean. It keeps a locator canonical, and \`check_draft\` proves the position exists on the live screen — use it only when you know which match is the intended control (the unnamed-controls list says \`this is #n\`).
    - \`within\` scopes a step to one container and takes any handle, a role always with its name: \`{"role": "dialog", "name": "Delete expense"}\`, \`{"role": "navigation", "name": "Sidebar"}\`, or \`{"css": "main"}\` (non-canonical, so \`why\` is needed). **An unnamed container is still a container**: a modal drawn with no \`role="dialog"\` and no name, a card, a panel made of plain \`div\`s is scoped with \`within: {"css": "<selector>"}\` and a \`why\` — copy the selector from the observation's list of overlays with no dialog role. A modal's Cancel, Confirm and close steps are scoped this way, never left unscoped or unauthored because the modal has no role.
-   - **How \`check_draft\` reaches a control it proves** (a \`css\` or \`pick\` step): it opens the task's entry and, when every step before the proven one is a click and the task leaves the world as it found it (no \`endState\`), replays those clicks. Otherwise — an \`input\` comes first, or the task changes the world — it cannot replay the task, and you pass \`proof: {"<task id>": {"steps": [...]}}\`: the actions, in order, that bring the page to the control — \`{"activate": <locator>}\`, \`{"fill": <locator>, "value": "<text>"}\`, \`{"select": <locator>, "option": "<visible label>"}\`. A proven control is resolved right before the list acts on it, else once the list ends. **Never list a control that submits, deletes, cancels or signs out**: the world is the seed's and the tests need it intact. When the entry carries a \`{slot}\`, add \`"path"\` with every slot filled from a seeded fixture — the same route, filled.
+   - **How \`check_draft\` reaches a control it proves** (a \`css\` or \`pick\` step): it opens the task's entry and, when every step before the proven one is a click and the task leaves the world as it found it (no \`endState\`), replays those clicks. Otherwise — an \`input\` comes first, or the task changes the world — it cannot replay the task, and you pass \`proof: [{"id": "<task id>", "reach": {"steps": [...]}}]\`: the actions, in order, that bring the page to the control — \`{"activate": <locator>}\`, \`{"fill": <locator>, "value": "<text>"}\`, \`{"select": <locator>, "option": "<visible label>"}\`. A proven control is resolved right before the list acts on it, else once the list ends. **Never list a control that submits, deletes, cancels or signs out**: the world is the seed's and the tests need it intact. When the entry carries a \`{slot}\`, add \`"path"\` to its \`reach\` with every slot filled from a seeded fixture — the same route, filled.
    **When the briefing carries THE LIVE SCREEN, its accessibility tree is the authority on names**: a control the tree lists as \`button "Save"\` is authorable as exactly that pair whatever the source spells (an \`aria-label\`, a value-built name, a translated string all resolve there), and a control the source renders that the tree does not list is conditional — observe the state that shows it, or say in \`unresolved\` which state you could not reach. A control the tree lists with no name (\`button ""\`, or a lone icon glyph) is still a control: target it by the next handle down this list, never skip it.
 2. **A task is reachable.** Either it says where it happens (\`at\`), or its first step navigates to its entry address.
 3. **The entry is the address the task starts at.** When the first step navigates, \`entry.path\` equals that route; when the task is \`at\` a place, \`entry.path\` is the address of the screen that place sits on.
@@ -500,7 +506,7 @@ Use the shared readable and locator schemas supplied in the outcome:
 - \`controls\`: states the source exposes, e.g. {"id":"include-archived","control":{"role":"checkbox","name":"Include archived"},"states":["checked"]}. State names are checked, pressed, selected, expanded, disabled. Declare exposure, never a presumed state value. Read the component implementation to establish native or ARIA state support.
 - \`rows\`: the repeated item's actual rendered text as a template, e.g. {"id":"document-row","item":"row","template":"<title> <status>","slots":[{"name":"title","kind":"text"},{"name":"status","kind":"enum","values":["Draft","Signed"]}],"when":"documents exist"}. Name every varying slot; use count only for numeric counts and enum only when source establishes the whole rendered set. Use the real item role, not row for an arbitrary div: repeated items that are plain \`div\`s (cards, member rows) are \`"item": "generic"\` inside a \`within\` that reaches their container. Add \`within\` only for a container you observed or read. Do not invent a table name for an unnamed table.
 
-Readable locators use the same order of preference as step targets: role/name first, then label, placeholder, text, title or alt, and \`css\` LAST — never XPath or a test id as a handle. A readable that uses \`css\` (in its locator or its \`within\`) is NON-CANONICAL exactly like a step: it carries \`"why"\` on the fact, \`check_draft\` proves it on the live screen at this place's address (a fact of a dialog or panel is read after the actions you list in \`proof: {"<place id>": {"steps": [...]}}\` that open it), and it is recorded as a non-canonical locator. An unnamed checkbox, an icon-only toggle that exposes a state, a card list with no list role are declared this way rather than left out. Use \`when\` to state source conditions, including permissions, loading, empty states and selected tabs. Readable ids are optional; reuse existing ids and keep new names stable within the owning resource.
+Readable locators use the same order of preference as step targets: role/name first, then label, placeholder, text, title or alt, and \`css\` LAST — never XPath or a test id as a handle. A readable that uses \`css\` (in its locator or its \`within\`) is NON-CANONICAL exactly like a step: it carries \`"why"\` on the fact, \`check_draft\` proves it on the live screen at this place's address (a fact of a dialog or panel is read after the actions you list in \`proof: [{"id": "<place id>", "reach": {"steps": [...]}}]\` that open it), and it is recorded as a non-canonical locator. An unnamed checkbox, an icon-only toggle that exposes a state, a card list with no list role are declared this way rather than left out. Use \`when\` to state source conditions, including permissions, loading, empty states and selected tabs. Readable ids are optional; reuse existing ids and keep new names stable within the owning resource.
 
 Every place you declare states ALL FOUR kinds: \`markers\`, \`elements\`, \`controls\`, \`rows\`. An explicit [] means you established that it has none of that kind, and the write path REFUSES a place that leaves a kind unstated — nothing returns to this screen once your outcome is accepted until its source changes, so an omitted kind stays unknown. Read the place well enough to answer for each kind; where you truly cannot, say what you could not inspect in \`unresolved\` and still state the kind. Never fill arrays just to populate a table, and never mark uninspected content empty. Existing kinds established by an earlier session of this screen are preserved when you omit them; a supplied kind replaces that kind, so include its surviving established facts. Readables alone are a valid outcome with \`interfaces: []\`. They do not require a new task or changed task steps.
 

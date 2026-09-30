@@ -67,8 +67,9 @@ const EMPTY_DECISIONS: DecisionsFile = {
 /** The area a `spec-scan.overlap` briefing is about. */
 const areaOf = (briefing: string): string => /^Area: (.+)$/m.exec(briefing)?.[1] ?? '';
 
+/** One flag as the session writes it. */
 type OverlapFlag = {
-  docs: [string, string];
+  docs: { a: string; b: string };
   note: string;
   sections: Array<{ doc: string; heading: string | null; quote: string }>;
   review: unknown;
@@ -81,7 +82,7 @@ const REVIEW = {
 
 /** An overlap flag pinned at both docs' leads (heading-free bodies). */
 const flag = (a: string, b: string, review: unknown = REVIEW): OverlapFlag => ({
-  docs: [a, b],
+  docs: { a, b },
   note: `${a} vs ${b}`,
   sections: [
     { doc: a, heading: null, quote: `body of ${a}` },
@@ -110,7 +111,7 @@ function scanScript(opts: {
   return async (call) => {
     if (call.kind === 'spec-scan.settle-areas') {
       await call.emit(toolResult('check_settlement', 'valid'));
-      return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] });
+      return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] });
     }
     if (call.kind === 'spec-scan.overlap') {
       const areaId = areaOf(call.briefing);

@@ -17,6 +17,7 @@ import { eq, sql } from 'drizzle-orm';
 import { llmProviderConfig, type Db } from '@truecourse/db';
 import {
   isCreditsProvider,
+  LLM_PROVIDER_CREDENTIALS,
   type LlmConfigUpdate,
   type LlmProviderChoice,
   type LlmProviderConfigView,
@@ -93,7 +94,7 @@ export class PgLlmConfigStore {
       ...(row.baseUrl ? { baseURL: row.baseUrl } : {}),
       ...(row.headers ? { headers: row.headers } : {}),
     };
-    if (provider === 'bedrock') {
+    if (LLM_PROVIDER_CREDENTIALS[provider] === 'aws') {
       if (row.region) config.region = row.region;
       if (row.accessKeyId) config.accessKeyId = row.accessKeyId;
       if (secret) config.secretAccessKey = secret;

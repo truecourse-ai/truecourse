@@ -33,7 +33,8 @@
 
 import { z } from 'zod'
 import {
-  defineSessionTool,
+  defineSessionKind,
+  defineToolSpec,
   type DisplayDispute,
   type KnownDisplayBlock,
   type SessionBudget,
@@ -115,23 +116,23 @@ const CandidatePairOutcomeSchema = z.object({
   keys: z.array(z.string()),
 })
 
+const OverlapFindingSchema = z.object({
+  /** The two docs that disagree, by ref (both from the briefing). */
+  docs: z.tuple([z.string(), z.string()]),
+  /** What differs, naming each doc by FILENAME — shown to the user. */
+  note: z.string(),
+  /** Where each side's disputed claim lives. Quote REQUIRED — it is the
+   *  verbatim evidence the fold re-anchors by. */
+  sections: z
+    .array(z.object({ doc: z.string(), heading: z.string().nullable(), quote: z.string() }))
+    .min(1),
+  /** The adjudication: explanation + recommended action (reused shape). */
+  review: OverlapReviewSchema,
+})
+
 export const OverlapOutcomeSchema = z
   .object({
-    overlaps: z.array(
-      z.object({
-        /** The two docs that disagree, by ref (both from the briefing). */
-        docs: z.tuple([z.string(), z.string()]),
-        /** What differs, naming each doc by FILENAME — shown to the user. */
-        note: z.string(),
-        /** Where each side's disputed claim lives. Quote REQUIRED — it is the
-         *  verbatim evidence the fold re-anchors by. */
-        sections: z
-          .array(z.object({ doc: z.string(), heading: z.string().nullable(), quote: z.string() }))
-          .min(1),
-        /** The adjudication: explanation + recommended action (reused shape). */
-        review: OverlapReviewSchema,
-      }),
-    ),
+    overlaps: z.array(OverlapFindingSchema),
     /** Briefed docs this session did not (fully) read. */
     notReached: z.array(z.string()),
     /**
@@ -153,6 +154,30 @@ export const OverlapOutcomeSchema = z
   })
   .strict()
 export type OverlapOutcome = z.infer<typeof OverlapOutcomeSchema>
+
+/**
+ * The outcome as the model writes it: the two docs of a finding named `a` and
+ * `b`, the sides `pick-a` and `pick-b` choose between. A positional pair has
+ * no JSON Schema form every provider accepts, so the pair is a tuple only once
+ * {@link overlapOutcomeFromWire} has read it.
+ */
+export const OverlapOutcomeWireSchema = OverlapOutcomeSchema.extend({
+  overlaps: z.array(
+    OverlapFindingSchema.extend({
+      docs: z
+        .object({
+          a: z.string().describe('The doc `pick-a` names, by ref.'),
+          b: z.string().describe('The doc `pick-b` names, by ref.'),
+        })
+        .strict(),
+    }),
+  ),
+})
+
+/** The outcome the run keeps, from what the model wrote. */
+export function overlapOutcomeFromWire(wire: z.infer<typeof OverlapOutcomeWireSchema>): OverlapOutcome {
+  return { ...wire, overlaps: wire.overlaps.map((o) => ({ ...o, docs: [o.docs.a, o.docs.b] })) }
+}
 
 export const OVERLAP_SESSION_SYSTEM_PROMPT = `You find the DISAGREEMENTS between the docs of ONE comparison group of a documentation corpus. The briefing opens with CANDIDATE COLLISIONS — section pairs a deterministic pass nominated because they share concrete signals (an endpoint segment, a field name, an enum member, a header name, or the same heading) — followed by each doc as a heading OUTLINE. You open the nominated sections, compare what they state, and report every genuine disagreement — adjudicated, with the evidence pinned.
 
@@ -205,7 +230,7 @@ In the \`note\`, refer to each doc by its FILENAME ("users.md uses auth0_id; ide
 
 Each reported disagreement carries its resolution brief, read by a human beside the two named documents:
   - \`explanation\`: 2–4 sentences naming the EXACT disagreement and QUOTING both sides' incompatible values verbatim, attributing each quote to its document BY NAME.
-  - \`recommendation.action\`: EXACTLY ONE of "pick-a" (the FIRST doc of \`docs\` is right; the second should change), "pick-b" (the second is right), "fix-doc" (neither stated value is simply right — a named doc needs an edit), "dismiss" (on reflection the two can coexist).
+  - \`recommendation.action\`: EXACTLY ONE of "pick-a" (\`docs.a\` is right; \`docs.b\` should change), "pick-b" (\`docs.b\` is right), "fix-doc" (neither stated value is simply right — a named doc needs an edit), "dismiss" (on reflection the two can coexist).
   - \`recommendation.rationale\`: ONE sentence on why, naming the documents.
   - \`recommendation.fix\`: only for "fix-doc" — which doc, what to change.
   - \`recommendation.confidence\`: "low" | "medium" | "high". A "high" pick-a/pick-b/dismiss is APPLIED AUTOMATICALLY with no human review — grade "high" only when you would act on it unsupervised (a single stated value, one side clearly authoritative). When in doubt between two grades, give the LOWER. A "fix-doc" never auto-applies but still carries its confidence.
@@ -408,21 +433,24 @@ export function validateOverlapFindings(
   return errors
 }
 
+const CHECK_FINDINGS = defineToolSpec({
+  name: 'check_findings',
+  description:
+    'Check a draft findings object against the run\'s anchor discipline — every pointer\'s heading must exist in its doc and every quote must be verbatim. Call it on your complete draft (even an empty one) before you produce the outcome.',
+  kind: 'check-overlap-findings',
+  readOnly: true,
+  destructive: false,
+  display: {
+    one: 'I double-checked my findings against the docs before writing them down',
+    many: 'I double-checked my findings against the docs, {n} passes',
+  },
+  inputSchema: OverlapOutcomeWireSchema,
+})
+
 function checkFindingsTool(briefed: ReadonlyMap<string, DocCandidate>): SessionTool {
-  return defineSessionTool({
-    name: 'check_findings',
-    description:
-      'Check a draft findings object against the run\'s anchor discipline — every pointer\'s heading must exist in its doc and every quote must be verbatim. Call it on your complete draft (even an empty one) before you produce the outcome.',
-    kind: 'check-overlap-findings',
-    readOnly: true,
-    destructive: false,
-    display: {
-      one: 'I double-checked my findings against the docs before writing them down',
-      many: 'I double-checked my findings against the docs, {n} passes',
-    },
-    inputSchema: OverlapOutcomeSchema,
+  return CHECK_FINDINGS.bind({
     async execute(args) {
-      const errors = validateOverlapFindings(args, briefed)
+      const errors = validateOverlapFindings(overlapOutcomeFromWire(args), briefed)
       if (errors.length === 0) {
         return {
           content: `The draft is valid: ${args.overlaps.length} disagreement(s), ${args.notReached.length} doc(s) notReached. Produce it as the outcome.`,
@@ -499,13 +527,19 @@ function presentOverlapOutcome(outcome: OverlapOutcome): KnownDisplayBlock[] {
   return [...outcome.overlaps.map(presentOverlap), { kind: 'facts', lines }]
 }
 
+const OVERLAP_SESSION = defineSessionKind({
+  kind: OVERLAP_SESSION_KIND,
+  outcomeSchema: OverlapOutcomeSchema,
+  outcomeInputSchema: OverlapOutcomeWireSchema,
+})
+
 export function overlapSessionDef(input: OverlapSessionInput): SessionDef<OverlapOutcome> {
   const briefed = new Map(input.item.docs.map((d) => [d.path, d]))
   return {
-    kind: OVERLAP_SESSION_KIND,
+    ...OVERLAP_SESSION,
+    resolveOutcome: (value) => overlapOutcomeFromWire(OverlapOutcomeWireSchema.parse(value)),
     systemPrompt: OVERLAP_SESSION_SYSTEM_PROMPT,
     tools: [readSectionTool(input.universe), readDocChunkTool(input.universe), checkFindingsTool(briefed)],
-    outcomeSchema: OverlapOutcomeSchema,
     budget: OVERLAP_SESSION_BUDGET,
     display: {
       title: 'Overlap review',

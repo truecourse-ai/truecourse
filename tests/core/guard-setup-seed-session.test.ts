@@ -53,10 +53,13 @@ import {
   seedSessionCacheKey,
   seedSessionDef,
   providesWarnings,
+  RunSeedDraftInputWire,
+  SeedProvidesWire,
+  SeedSessionOutcomeWire,
 } from '../../packages/core/src/services/guard-setup/seed-session';
 import { seedColdCopiesDir } from '../../packages/core/src/services/guard-setup/seed-cold-proof';
 import type { GuardSetupSessionContext } from '../../packages/core/src/services/guard-setup/session-context';
-import { memoryPersistence, stubDriver, outcome, malformedFailure } from './spec-scan-session-stub';
+import { memoryPersistence, stubDriver, outcome as stubOutcome, malformedFailure } from './spec-scan-session-stub';
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
@@ -222,13 +225,19 @@ function nonIdempotentScript(): string {
 }
 
 const PROVIDES = { fixtures: { org: ['id', 'slug'] } };
+
+/** The session's outcome, stated in the kept shape and sent in the wire's. */
+const outcome = (value: unknown) => stubOutcome(SeedSessionOutcomeWire.write(value));
+/** A tool's arguments, stated in the kept shape and sent in the wire's. */
+const wireArgs = (name: string, args: unknown): unknown =>
+  name === 'run_seed_draft' ? RunSeedDraftInputWire.write(args) : name === 'check_provides' ? SeedProvidesWire.write(args) : args;
 const COMMAND = `node ${TARGET}`;
 
 /** Call a session tool the way a driver does — the tool-result event is what the
  *  shell's outcome precondition reads off the transcript. */
 async function callTool(input: SessionRunInput, name: string, args: unknown): Promise<{ content: string; isError?: boolean }> {
   const tool = input.def.tools.find((t) => t.name === name)!;
-  const result = await tool.execute(args, {
+  const result = await tool.execute(wireArgs(name, args), {
     workItem: 'seed',
     signal: input.signal,
     dispatchChild: () => {

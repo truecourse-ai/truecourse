@@ -36,7 +36,7 @@ import type {
   SessionRunInput,
 } from '../../packages/agent-loop/src/index';
 import {
-  defineSessionTool,
+  defineToolSpec,
   runAgentLoop,
   SessionToolArgsError,
 } from '../../packages/agent-loop/src/index';
@@ -181,13 +181,14 @@ const outcomeCall = (value: unknown, id = 'c-outcome'): StubContent =>
 
 const outcomeSchema = z.object({ verdict: z.string() });
 
-const probeTool = defineSessionTool({
+const probeTool = defineToolSpec({
   name: 'probe',
   description: 'probe a value',
   kind: 'probe',
   readOnly: true,
   destructive: false,
   inputSchema: z.object({ value: z.string() }),
+}).bind({
   async execute(args) {
     if (args.value === 'boom') throw new SessionToolArgsError('probe', 'value rejected');
     return { content: `probed:${args.value}` };
@@ -247,8 +248,9 @@ describe('api session driver', () => {
     ]);
     buildModelMock.mockReturnValue(scripted.model);
     const artifact = { draft: 'large durable draft evidence' };
-    const check = defineSessionTool({ name: 'check', description: 'check', kind: 'check', readOnly: true,
+    const check = defineToolSpec({ name: 'check', description: 'check', kind: 'check', readOnly: true,
       destructive: false, inputSchema: z.object({ value: z.string() }),
+    }).bind({
       execute: async () => ({ content: 'draft-1', artifact }),
     });
     const { handle, events } = runSession(createApiSessionDriver(cfg), {
@@ -264,7 +266,7 @@ describe('api session driver', () => {
 
   it.each(['google', 'anthropic', 'bedrock', 'openai', 'copilot'] as const)(
     '%s sends its own optional-field contract and cleans only injected nulls', async (provider) => {
-      const normalized = provider === 'openai' || provider === 'copilot';
+      const normalized = provider === 'openai';
       const args = normalized ? { value: 'hi', filter: null, nullable: null } : { value: 'hi', nullable: null };
       const scripted = scriptedModel([
         { content: [call('optional', args)] },
@@ -272,9 +274,10 @@ describe('api session driver', () => {
       ]);
       buildModelMock.mockReturnValue(scripted.model);
       const execute = vi.fn(async (_args: unknown) => ({ content: 'ok' }));
-      const optional = defineSessionTool({
+      const optional = defineToolSpec({
         name: 'optional', description: 'Probe optional fields', kind: 'probe', readOnly: true, destructive: false,
         inputSchema: z.object({ value: z.string(), filter: z.string().min(1).optional(), nullable: z.string().nullable() }),
+      }).bind({
         execute,
       });
       const { handle, events } = runSession(createApiSessionDriver({ ...cfgNoFallback, provider }), {
@@ -283,7 +286,7 @@ describe('api session driver', () => {
       expect(await handle.done).toMatchObject({ kind: 'outcome' });
       const tool = scripted.calls[0].tools?.find((t: any) => t.name === 'optional') as any;
       expect(tool.inputSchema.required).toEqual(normalized ? ['value', 'filter', 'nullable'] : ['value', 'nullable']);
-      expect(tool.strict).toBe(provider === 'google' ? true : undefined);
+      expect(tool.strict).toBe(provider === 'google' || provider === 'openai' ? true : undefined);
       expect(execute.mock.calls[0][0]).toEqual({ value: 'hi', nullable: null });
       expect(events.find((e) => e.type === 'assistant-turn')).toMatchObject({
         toolCall: { args: { value: 'hi', nullable: null } },
@@ -292,35 +295,28 @@ describe('api session driver', () => {
   );
 
   it.each([
-    ['gemini-3.8-flash', 'guard-setup.recipe-repair', true],
-    ['gemini-3-pro-preview', 'guard-interfaces.web-tasks', true],
-    ['gemini-2.5-pro', 'guard-setup.recipe-repair', false],
-    ['gemini-3.8-flash', 'spec-scan.curation', false],
-  ] as const)('sets setup thinking for %s in %s: %s', async (model, kind, high) => {
+    ['gemini-3.8-flash', 'high', 'high'],
+    ['gemini-3-pro-preview', 'medium', 'medium'],
+    ['gemini-2.5-pro', 'high', undefined],
+    ['gemini-3.8-flash', undefined, undefined],
+  ] as const)('maps %s at reasoning %s to thinking level %s', async (model, reasoning, level) => {
     const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'ok' })] }]);
     buildModelMock.mockReturnValue(scripted.model);
     const { handle } = runSession(createApiSessionDriver({ provider: 'google', model, apiKey: 'test' }), {
-      def: makeDef({ kind }),
+      def: makeDef(reasoning ? { reasoning } : {}),
     });
     expect(await handle.done).toMatchObject({ kind: 'outcome' });
-    expect(scripted.calls[0].providerOptions).toEqual(high ? { google: { thinkingConfig: { thinkingLevel: 'high' } } } : {});
+    expect(scripted.calls[0].providerOptions).toEqual(level ? { google: { thinkingConfig: { thinkingLevel: level } } } : {});
   });
 
-  it('states the existing draft checkpoint before the Google setup prompt', async () => {
+  it('sends the session\'s own system prompt and nothing ahead of it', async () => {
     const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'ok' })] }]);
     buildModelMock.mockReturnValue(scripted.model);
     const { handle } = runSession(createApiSessionDriver({ provider: 'google', model: 'gemini-3.8-flash', apiKey: 'test' }), {
-      def: makeDef({
-        kind: 'guard-setup.recipe-repair', systemPrompt: 'Repair the recipe.',
-        draftCheckpoint: { tool: 'check_recipe', afterTurn: 8, message: 'Draft now.' },
-      }),
+      def: makeDef({ kind: 'guard-setup.recipe-repair', systemPrompt: 'Repair the recipe.' }),
     });
     expect(await handle.done).toMatchObject({ kind: 'outcome' });
-    const system = scripted.calls[0].prompt[0] as { content: string };
-    expect(system.content).toContain('first grant is 10 turns');
-    expect(system.content).toContain('`check_recipe` by turn 8');
-    expect(system.content).toContain('call `outcome` immediately');
-    expect(system.content).toMatch(/^<session_rules>[\s\S]+Repair the recipe\.$/);
+    expect((scripted.calls[0].prompt[0] as { content: string }).content).toBe('Repair the recipe.');
   });
 
   it('shows the model an IMAGE the session was given, text first', async () => {
@@ -483,13 +479,14 @@ describe('api session driver', () => {
     let release!: () => void;
     let entered!: () => void;
     const inTool = new Promise<void>((resolve) => { entered = resolve; });
-    const slow = defineSessionTool({
+    const slow = defineToolSpec({
       name: 'slow',
       description: 'takes its time',
       kind: 'probe',
       readOnly: true,
       destructive: false,
       inputSchema: z.object({ value: z.string() }),
+    }).bind({
       execute: () =>
         new Promise((resolve) => {
           release = () => resolve({ content: 'done' });

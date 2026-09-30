@@ -29,6 +29,7 @@
  */
 
 import { z } from 'zod'
+import { namedEntries } from '@truecourse/shared/llm'
 import {
   ANONYMOUS_PRINCIPAL,
   GuardWebKeySchema,
@@ -64,16 +65,20 @@ type ProofAction = z.infer<typeof ProofActionSchema>
  * (required when the entry carries a slot, and a filling of that entry), and
  * the actions to take on it in place of replaying the task's own steps.
  */
-export const LiveProofReachSchema = z.record(
-  z.string().min(1),
-  z
-    .object({
-      path: z.string().min(1).max(2000).optional(),
-      steps: z.array(ProofActionSchema).min(1).max(MAX_PROOF_STEPS).optional(),
-      /** Whom a place's readables are proven as; a task is proven as its own `principal`. */
-      principal: z.string().min(1).optional(),
-    })
-    .strict(),
+export const LiveProofReachSchema = namedEntries(
+  z.record(
+    z.string().min(1),
+    z
+      .object({
+        path: z.string().min(1).max(2000).optional(),
+        steps: z.array(ProofActionSchema).min(1).max(MAX_PROOF_STEPS).optional(),
+        /** Whom a place's readables are proven as; a task is proven as its own `principal`. */
+        principal: z.string().min(1).optional(),
+      })
+      .strict(),
+  ),
+  'id',
+  'reach',
 )
 export type LiveProofReach = z.infer<typeof LiveProofReachSchema>
 
@@ -218,7 +223,7 @@ export async function proveReadables(
       continue
     }
     if (hasAddressSlot(path)) {
-      refused(`its screen's address \`${path}\` carries a slot — pass \`proof: {"${place.id}": {"path": "<the address with every slot filled from a seeded fixture>"}}\` so it can be proven live`)
+      refused(`its screen's address \`${path}\` carries a slot — pass \`proof: [{"id": "${place.id}", "reach": {"path": "<the address with every slot filled from a seeded fixture>"}}]\` so it can be proven live`)
       continue
     }
     const actions = reach[place.id]?.steps ?? []
@@ -236,7 +241,7 @@ export async function proveReadables(
     if (!probed.ok && probed.unreached) {
       const reachers = await reaching(probed.unreached)
       if (reachers.length === 0) unproven.add(place.id)
-      else problems.push(sentAway(`\`${place.id}\`'s readables`, probed.unreached, principalOf(observer), reachers, `pass \`proof: {"${place.id}": {"principal": "<name>"}}\` for the one that sees them`))
+      else problems.push(sentAway(`\`${place.id}\`'s readables`, probed.unreached, principalOf(observer), reachers, `pass \`proof: [{"id": "${place.id}", "reach": {"principal": "<name>"}}]\` for the one that sees them`))
       continue
     }
     owed.forEach((readable, i) => {
@@ -250,7 +255,7 @@ export async function proveReadables(
         problems.push(
           `${where(readable)} ${problem} ${at}${
             actions.length === 0 && place.kind !== 'screen'
-              ? ` — a fact of a ${place.kind} is read once it is open: pass \`proof: {"${place.id}": {"steps": [...]}}\` listing the actions that open it`
+              ? ` — a fact of a ${place.kind} is read once it is open: pass \`proof: [{"id": "${place.id}", "reach": {"steps": [...]}}]\` listing the actions that open it`
               : ''
           }`,
         )
@@ -275,7 +280,7 @@ function proofPlan(task: AuthoredTask, owed: readonly OwedStep[], reach: LivePro
   }
   if (hasAddressSlot(plan.path)) {
     return refuseAll(
-      `its entry \`${plan.path}\` carries a slot — pass \`proof: {"${task.id}": {"path": "<the address with every slot filled from a seeded fixture>"}}\` so it can be proven live`,
+      `its entry \`${plan.path}\` carries a slot — pass \`proof: [{"id": "${task.id}", "reach": {"path": "<the address with every slot filled from a seeded fixture>"}}]\` so it can be proven live`,
     )
   }
   return reach?.steps ? listedWalk(plan, owed, reach.steps) : replayWalk(plan, task, owed)
@@ -387,7 +392,7 @@ function pageState(path: string, after: readonly string[]): string {
 }
 
 function cannotReplay(task: AuthoredTask, reason: string): string {
-  return `${reason} — pass \`proof: {"${task.id}": {"steps": [...]}}\` listing, in order, the actions that bring the page to it (\`{"activate": <locator>}\`, \`{"fill": <locator>, "value": "<text>"}\`, \`{"select": <locator>, "option": "<label>"}\`, \`{"press": "<key>", "on": <locator>}\`, \`{"hover": <locator>}\`), and never a control that submits, deletes, cancels or signs out`
+  return `${reason} — pass \`proof: [{"id": "${task.id}", "reach": {"steps": [...]}}]\` listing, in order, the actions that bring the page to it (\`{"activate": <locator>}\`, \`{"fill": <locator>, "value": "<text>"}\`, \`{"select": <locator>, "option": "<label>"}\`, \`{"press": "<key>", "on": <locator>}\`, \`{"hover": <locator>}\`), and never a control that submits, deletes, cancels or signs out`
 }
 
 /** What is wrong with what the locator resolved to, or nothing when it held. */

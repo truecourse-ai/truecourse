@@ -25,7 +25,7 @@ import type {
   SessionProgress,
   SessionRunInput,
 } from '../../packages/agent-loop/src/index';
-import { defineSessionTool } from '../../packages/agent-loop/src/index';
+import { defineToolSpec } from '../../packages/agent-loop/src/index';
 
 // ---------------------------------------------------------------------------
 // fake SDK
@@ -124,13 +124,14 @@ const success = (structured_output?: unknown): SdkMessage => ({
 
 const outcomeSchema = z.object({ verdict: z.string() });
 
-const probeTool = defineSessionTool({
+const probeTool = defineToolSpec({
   name: 'probe',
   description: 'probe a value',
   kind: 'probe',
   readOnly: true,
   destructive: false,
   inputSchema: z.object({ value: z.string() }),
+}).bind({
   async execute(args) {
     return { content: `probed:${args.value}` };
   },
@@ -929,7 +930,7 @@ describe('claude agent session driver provider retries', () => {
 
 describe('claude agent session driver tool schemas', () => {
   /** A tool whose schema is a refined strict object — a ZodEffects, not a ZodObject. */
-  const proposeTool = defineSessionTool({
+  const proposeTool = defineToolSpec({
     name: 'propose',
     description: 'propose a recipe',
     kind: 'probe',
@@ -939,19 +940,21 @@ describe('claude agent session driver tool schemas', () => {
       .object({ build: z.string(), entry: z.array(z.string()).optional() })
       .strict()
       .refine((r) => r.entry !== undefined, { message: 'entry required' }),
+  }).bind({
     async execute(args) {
       return { content: `build=${args.build}` };
     },
   });
 
   /** A tool with no object root at all. */
-  const echoTool = defineSessionTool({
+  const echoTool = defineToolSpec({
     name: 'echo',
     description: 'echo a string',
     kind: 'probe',
     readOnly: true,
     destructive: false,
     inputSchema: z.string(),
+  }).bind({
     async execute(args) {
       return { content: `echo:${args}` };
     },

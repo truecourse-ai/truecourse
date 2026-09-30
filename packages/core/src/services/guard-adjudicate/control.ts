@@ -17,7 +17,7 @@
 
 import { z } from 'zod';
 import yaml from 'js-yaml';
-import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop';
+import { defineSessionKind, defineToolSpec, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop';
 import { GuardScenarioSchema, firstInvalidMatchPattern, guardExecutionSteps, regexLiteral } from '@truecourse/shared';
 import { executeOneScenario, type AdjudicationExecution } from './execute.js';
 
@@ -94,6 +94,20 @@ export function controlBriefing(input: {
   ].join('\n');
 }
 
+const RUN_CONTROL = defineToolSpec({
+  name: 'run_control',
+  description:
+    `Run a MODIFIED scenario once in a fresh disposable world (never persisted, never entering the corpus). ` +
+    `Pass the FULL scenario YAML (edit the committed one you were briefed with). ` +
+    `A parse defect returns as an error without an execution. At most ${CONTROL_MAX_EXECUTIONS} executions per session.`,
+  kind: 'run-control',
+  // Executes the program under test in a disposable sandbox; repo and store
+  // state are never written — persist:false is structural, not advisory.
+  readOnly: true,
+  destructive: false,
+  inputSchema: z.object({ yaml: z.string().min(1) }).strict(),
+});
+
 /**
  * `run_control` — parse-gate then one persist-nothing execution. The parse
  * gate is the loader's: the full scenario schema (the child edits the
@@ -101,18 +115,7 @@ export function controlBriefing(input: {
  * malformed experiment costs a turn, never a sandbox.
  */
 function runControlTool(exec: AdjudicationExecution, state: { executions: number }): SessionTool {
-  return defineSessionTool({
-    name: 'run_control',
-    description:
-      `Run a MODIFIED scenario once in a fresh disposable world (never persisted, never entering the corpus). ` +
-      `Pass the FULL scenario YAML (edit the committed one you were briefed with). ` +
-      `A parse defect returns as an error without an execution. At most ${CONTROL_MAX_EXECUTIONS} executions per session.`,
-    kind: 'run-control',
-    // Executes the program under test in a disposable sandbox; repo and store
-    // state are never written — persist:false is structural, not advisory.
-    readOnly: true,
-    destructive: false,
-    inputSchema: z.object({ yaml: z.string().min(1) }).strict(),
+  return RUN_CONTROL.bind({
     async execute(args) {
       if (state.executions >= CONTROL_MAX_EXECUTIONS) {
         return {
@@ -146,14 +149,18 @@ function runControlTool(exec: AdjudicationExecution, state: { executions: number
   });
 }
 
+const CONTROL_SESSION = defineSessionKind({
+  kind: CONTROL_SESSION_KIND,
+  outcomeSchema: GuardControlOutcomeSchema,
+});
+
 export function controlSessionDef(exec: AdjudicationExecution): SessionDef<GuardControlOutcome> {
   const state = { executions: 0 };
   return {
-    kind: CONTROL_SESSION_KIND,
+    ...CONTROL_SESSION,
     display: { title: 'Board adjudication' },
     systemPrompt: CONTROL_SYSTEM_PROMPT,
     tools: [runControlTool(exec, state)],
-    outcomeSchema: GuardControlOutcomeSchema,
     budget: CONTROL_BUDGET,
     // A conclusion from a control that never ran anything is no control at all.
     outcomePrecondition: {

@@ -51,6 +51,16 @@ export class SessionToolArgsError extends Error {
   }
 }
 
+/**
+ * The arguments a tool reads, from its own parse of what the model sent (a
+ * tool whose model-facing schema differs from the shape it reads parses the
+ * rest itself). A mismatch is an invalid call, re-asked like any other.
+ */
+export function toolArgs<T>(toolName: string, parsed: z.SafeParseReturnType<unknown, T>): T {
+  if (!parsed.success) throw new SessionToolArgsError(toolName, parsed.error.message);
+  return parsed.data;
+}
+
 export interface AgentLoopInput<TOutcome> {
   def: SessionDef<TOutcome>;
   /** The work item this session serves (a doc path, an area, a flow id). */
@@ -618,6 +628,9 @@ function startSession<TOutcome>(
           : value;
         return def.outcomeSchema.safeParse(resolved);
       } catch (error) {
+        // A resolver that parses the wire shape reports its own issues, so the
+        // correction names fields the session actually wrote.
+        if (error instanceof z.ZodError) return { success: false as const, error };
         return { success: false as const, error: new z.ZodError([{
           code: 'custom', path: [], message: error instanceof Error ? error.message : String(error),
         }]) };

@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import { LEGACY_ADJUDICATE_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import type { SessionBudget, SessionDef } from '@truecourse/agent-loop';
+import { defineSessionKind, type SessionBudget, type SessionDef } from '@truecourse/agent-loop';
 import { extractSectionTexts, nodeRefContext } from '@truecourse/guard-runner';
 import { GuardAdjudicationSchema, type GuardAdjudication, type GuardScenario } from '@truecourse/shared';
 import { promptFingerprint } from '../agent/session-cache.js';
@@ -282,13 +282,17 @@ export interface AdjudicationSessionInput {
   state: AdjudicationSessionState;
 }
 
+const ADJUDICATE_SESSION = defineSessionKind({
+  kind: ADJUDICATE_SESSION_KIND,
+  outcomeSchema: GuardAdjudicationSchema,
+});
+
 export function adjudicationSessionDef(input: AdjudicationSessionInput): SessionDef<GuardAdjudication> {
   return {
-    kind: ADJUDICATE_SESSION_KIND,
+    ...ADJUDICATE_SESSION,
     display: { title: 'Failure adjudication' },
     systemPrompt: ADJUDICATE_SYSTEM_PROMPT,
     tools: buildAdjudicationTools(input),
-    outcomeSchema: GuardAdjudicationSchema,
     budget: ADJUDICATE_BUDGET,
     // A verdict from a session that never opened the evidence is a guess in a
     // verdict's clothing — refused once, then the session continues.

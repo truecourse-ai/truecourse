@@ -59,7 +59,7 @@ const scanDriver = (keep: (docPath: string) => boolean = () => true) =>
   stubDriver(async (call) => {
     if (call.kind === 'spec-scan.settle-areas') {
       await call.emit(toolResult('check_settlement', 'valid'));
-      return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] });
+      return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] });
     }
     const p = docPathOf(call.briefing);
     return outcome(

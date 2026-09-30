@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { buildModel, providerTuningFor } from '../../packages/llm-api/src/index';
+import { buildModel, providerFor } from '../../packages/llm-api/src/index';
 
 const cfg = { provider: 'openai' as const, model: 'gpt-5.6-sol', apiKey: 'test' };
 
@@ -86,7 +86,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('openai reasoning replay', () => {
   it('sends the reasoning item whole, never a reference the endpoint must be holding', async () => {
-    const body = await requestBodyFor(providerTuningFor('openai').callOptions('gpt-5.6-sol', 'k'));
+    const body = await requestBodyFor(providerFor('openai').callOptions('gpt-5.6-sol', 'k'));
 
     expect(body.store).toBe(false);
     expect(body.include).toContain('reasoning.encrypted_content');
@@ -112,7 +112,7 @@ describe('openai reasoning replay', () => {
   it.each(['gpt-4o', 'gpt-4.1', 'gpt-5-chat-latest'])(
     'asks a non-reasoning model (%s) for no encrypted content',
     async (modelId) => {
-      const body = await requestBodyFor(providerTuningFor('openai').callOptions(modelId, 'k'), modelId);
+      const body = await requestBodyFor(providerFor('openai').callOptions(modelId, 'k'), modelId);
 
       expect(body.store).toBe(false);
       expect(body.include ?? []).not.toContain('reasoning.encrypted_content');

@@ -41,7 +41,8 @@ import { createHash } from 'node:crypto'
 import { LEGACY_RECONCILE_INTERFACES_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { z } from 'zod'
 import {
-  defineSessionTool,
+  defineSessionKind,
+  defineToolSpec,
   runAgentLoop,
   type SessionDef,
   type SessionDriver,
@@ -50,6 +51,7 @@ import {
   type SessionPersistence,
   type SessionTool,
 } from '@truecourse/agent-loop'
+import { withSessionRules } from '../agent/session-rules.js'
 import {
   createSandboxProbeExec,
   type CliProbeExec,
@@ -155,15 +157,20 @@ export interface ReconcileSessionInput {
   exec?: CliProbeExec
 }
 
+const RECONCILE_INTERFACES_SESSION = defineSessionKind({
+  kind: RECONCILE_INTERFACES_SESSION_KIND,
+  outcomeSchema: ReconcileResolutionsSchema,
+})
+
 export function reconcileInterfacesSessionDef(
   input: ReconcileSessionInput,
 ): SessionDef<ReconcileResolutions> {
-  return {
-    kind: RECONCILE_INTERFACES_SESSION_KIND,
+  return withSessionRules({
+    reasoning: 'high',
+    ...RECONCILE_INTERFACES_SESSION,
     display: { title: 'Interface reconcile' },
     systemPrompt: RECONCILE_INTERFACES_SYSTEM_PROMPT,
     tools: buildReconcileTools(input),
-    outcomeSchema: ReconcileResolutionsSchema,
     budget: RECONCILE_INTERFACES_BUDGET,
     // The structural half of "check before you produce": the validator is the
     // exact check the fold runs, and a subject dropped on the way to the
@@ -174,27 +181,42 @@ export function reconcileInterfacesSessionDef(
       message:
         'Outcome refused: you never ran `check_resolutions` in this session. Call it on your complete resolution list now — it runs the exact validation the fold will run (every briefed subject answered exactly once). Fix anything it reports, then call `outcome` again.',
     },
-  }
+  })
 }
 
 /** Caps — a tool result is context, and context is the budget. */
 const MAX_STREAM_CHARS = 6_000
 
+const RUN_ENTRY = defineToolSpec({
+  name: 'run_entry',
+  description:
+    'Run the program under test with the given arguments, in a fresh sandbox. The argv is appended to the resolved entry the briefing states — pass `["add", "--help"]`, never the binary path. Returns the exit code and both streams. Each call is a fresh world: nothing persists between calls.',
+  kind: 'run-entry',
+  readOnly: false,
+  destructive: false,
+  inputSchema: z
+    .object({
+      argv: z.array(z.string()).describe('Arguments appended to the entry, e.g. `["add", "--help"]`.'),
+    })
+    .strict(),
+})
+
+const CHECK_RESOLUTIONS = defineToolSpec({
+  name: 'check_resolutions',
+  description:
+    'Check a complete resolution list against the rule the fold enforces: every briefed subject answered exactly once (`unknown` is a legal answer), and nothing answered that was not briefed. Call it before you produce the outcome.',
+  kind: 'check-resolutions',
+  readOnly: true,
+  destructive: false,
+  // The validator-as-tool pattern: this IS the outcome schema, and the
+  // check is the exact one the fold runs — clean here cannot be refused there.
+  inputSchema: ReconcileResolutionsSchema,
+})
+
 function buildReconcileTools(input: ReconcileSessionInput): SessionTool[] {
   const exec = input.exec ?? createSandboxProbeExec()
   return [
-    defineSessionTool({
-      name: 'run_entry',
-      description:
-        'Run the program under test with the given arguments, in a fresh sandbox. The argv is appended to the resolved entry the briefing states — pass `["add", "--help"]`, never the binary path. Returns the exit code and both streams. Each call is a fresh world: nothing persists between calls.',
-      kind: 'run-entry',
-      readOnly: false,
-      destructive: false,
-      inputSchema: z
-        .object({
-          argv: z.array(z.string()).describe('Arguments appended to the entry, e.g. `["add", "--help"]`.'),
-        })
-        .strict(),
+    RUN_ENTRY.bind({
       async execute(args) {
         try {
           const capture = await exec([...input.entry, ...args.argv])
@@ -212,16 +234,7 @@ function buildReconcileTools(input: ReconcileSessionInput): SessionTool[] {
         }
       },
     }),
-    defineSessionTool({
-      name: 'check_resolutions',
-      description:
-        'Check a complete resolution list against the rule the fold enforces: every briefed subject answered exactly once (`unknown` is a legal answer), and nothing answered that was not briefed. Call it before you produce the outcome.',
-      kind: 'check-resolutions',
-      readOnly: true,
-      destructive: false,
-      // The validator-as-tool pattern: this IS the outcome schema, and the
-      // check is the exact one the fold runs — clean here cannot be refused there.
-      inputSchema: ReconcileResolutionsSchema,
+    CHECK_RESOLUTIONS.bind({
       async execute(args) {
         const problems = validateResolutions(input.diagnostics, args.resolutions)
         if (problems.length > 0) {

@@ -25,7 +25,7 @@
  */
 
 import { z } from 'zod'
-import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool, type ToolContext } from '@truecourse/agent-loop'
+import { defineSessionKind, defineToolSpec, type SessionBudget, type SessionDef, type SessionTool, type ToolContext } from '@truecourse/agent-loop'
 import {
   GuardCaseEvidenceSchema,
   GUARD_REVIEW_POLICY_VERSION,
@@ -295,84 +295,95 @@ export function cacheableWorkerOutcome(outcome: GuardFlowWorkerOutcome): boolean
   return outcome.kind === 'settled'
 }
 
+const RUN_SCENARIO = defineToolSpec({
+  name: 'run_scenario',
+  description:
+    'Run a draft scenario ONCE in a fresh sandbox. Pass the scenario as YAML (title, setup?, steps, normalize? — never id/flow/interface/binds). A deterministic pre-flight defect returns as an error WITHOUT an execution; otherwise you get the condensed run result (outcome, failing step, expected vs actual, output excerpts).',
+  kind: 'run-scenario',
+  // Executes the program under test in a disposable sandbox; repo and store
+  // state are never written, which is what these two flags declare.
+  readOnly: true,
+  destructive: false,
+  inputSchema: z.object({ yaml: z.string().min(1) }).strict(),
+})
+
 const runScenarioTool = (task: FlowWorkerTask): SessionTool =>
-  defineSessionTool({
-    name: 'run_scenario',
-    description:
-      'Run a draft scenario ONCE in a fresh sandbox. Pass the scenario as YAML (title, setup?, steps, normalize? — never id/flow/interface/binds). A deterministic pre-flight defect returns as an error WITHOUT an execution; otherwise you get the condensed run result (outcome, failing step, expected vs actual, output excerpts).',
-    kind: 'run-scenario',
-    // Executes the program under test in a disposable sandbox; repo and store
-    // state are never written, which is what these two flags declare.
-    readOnly: true,
-    destructive: false,
-    inputSchema: z.object({ yaml: z.string().min(1) }).strict(),
+  RUN_SCENARIO.bind({
     async execute(args) {
       return task.runScenario(args.yaml)
     },
   })
 
+const SUBMIT_SCENARIO = defineToolSpec({
+  name: 'submit_scenario',
+  description:
+    'Submit the finished scenario for acceptance. The engine re-runs it in a FRESH sandbox: a green is audited by an independent fidelity judge; a red is accepted only when `expectedReds` declares the failing step with the observed actual, a doc-drift|code-drift verdict, and a brief. Acceptance names the sha your `settled` outcome must reference.',
+  kind: 'submit-scenario',
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      yaml: z.string().min(1),
+      expectedReds: z.array(GuardExpectedRedSchema.omit({ observation: true })).default([]),
+      /** Edit mode: the prior scenario this submission replaces (keeps its id). */
+      replaces: z.string().min(1).optional(),
+    })
+    .strict(),
+})
+
 const submitScenarioTool = (
   task: FlowWorkerTask,
   judgeWith: (ctx: ToolContext) => WorkerFidelityJudge,
 ): SessionTool =>
-  defineSessionTool({
-    name: 'submit_scenario',
-    description:
-      'Submit the finished scenario for acceptance. The engine re-runs it in a FRESH sandbox: a green is audited by an independent fidelity judge; a red is accepted only when `expectedReds` declares the failing step with the observed actual, a doc-drift|code-drift verdict, and a brief. Acceptance names the sha your `settled` outcome must reference.',
-    kind: 'submit-scenario',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        yaml: z.string().min(1),
-        expectedReds: z.array(GuardExpectedRedSchema.omit({ observation: true })).default([]),
-        /** Edit mode: the prior scenario this submission replaces (keeps its id). */
-        replaces: z.string().min(1).optional(),
-      })
-      .strict(),
+  SUBMIT_SCENARIO.bind({
     async execute(args, ctx) {
       return task.submitScenario(args.yaml, args.expectedReds, judgeWith(ctx), args.replaces)
     },
   })
 
+const DROP_SCENARIO = defineToolSpec({
+  name: 'drop_scenario',
+  description:
+    'Edit mode only: delete a PRIOR scenario (by the id the PRIOR SCENARIOS block names) whose obligation VANISHED from the current spec text. The reason must name the vanished obligation. A scenario you merely rewrote is replaced via `submit_scenario` with `replaces`, never dropped.',
+  kind: 'drop-scenario',
+  // Records an intent the engine applies at persist; nothing is deleted here.
+  readOnly: true,
+  destructive: false,
+  inputSchema: z
+    .object({
+      id: z.string().min(1),
+      reason: z.string().min(1),
+    })
+    .strict(),
+})
+
 const dropScenarioTool = (task: FlowWorkerTask): SessionTool =>
-  defineSessionTool({
-    name: 'drop_scenario',
-    description:
-      'Edit mode only: delete a PRIOR scenario (by the id the PRIOR SCENARIOS block names) whose obligation VANISHED from the current spec text. The reason must name the vanished obligation. A scenario you merely rewrote is replaced via `submit_scenario` with `replaces`, never dropped.',
-    kind: 'drop-scenario',
-    // Records an intent the engine applies at persist; nothing is deleted here.
-    readOnly: true,
-    destructive: false,
-    inputSchema: z
-      .object({
-        id: z.string().min(1),
-        reason: z.string().min(1),
-      })
-      .strict(),
+  DROP_SCENARIO.bind({
     async execute(args) {
       return task.dropScenario(args.id, args.reason)
     },
   })
 
+const SEARCH_INTERFACES = defineToolSpec({
+  name: 'search_interfaces', kind: 'read-interface-catalog',
+  description: 'Search eligible browser action metadata. Results omit action details; fetch IDs with get_interfaces. Continue using nextCursor.',
+  readOnly: true, destructive: false,
+  inputSchema: z.object({ query: z.string().max(500), purpose: z.enum(['task', 'control']).optional(), resource: z.string().min(1).max(200).optional(), limit: z.number().int().min(1).max(20).optional(), cursor: z.string().max(1000).optional() }).strict(),
+})
+
+const GET_INTERFACES = defineToolSpec({
+  name: 'get_interfaces', kind: 'read-interface-catalog',
+  description: 'Read authoritative fields of 1–5 browser actions and resources. Items carry action ID, JSON field path and exact value. Partial pages require nextCursor with the same IDs; never infer absence from incomplete retrieval.',
+  readOnly: true, destructive: false,
+  inputSchema: z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(5), cursor: z.string().max(1000).optional() }).strict(),
+})
+
 function catalogTools(task: FlowWorkerTask): SessionTool[] {
   if (task.surface !== 'web' || !task.catalog) return []
   const catalog = task.catalog
   return [
-    defineSessionTool({
-      name: 'search_interfaces', kind: 'read-interface-catalog',
-      description: 'Search eligible browser action metadata. Results omit action details; fetch IDs with get_interfaces. Continue using nextCursor.',
-      readOnly: true, destructive: false,
-      inputSchema: z.object({ query: z.string().max(500), purpose: z.enum(['task', 'control']).optional(), resource: z.string().min(1).max(200).optional(), limit: z.number().int().min(1).max(20).optional(), cursor: z.string().max(1000).optional() }).strict(),
-      async execute(args) { return catalog.search(args) },
-    }),
-    defineSessionTool({
-      name: 'get_interfaces', kind: 'read-interface-catalog',
-      description: 'Read authoritative fields of 1–5 browser actions and resources. Items carry action ID, JSON field path and exact value. Partial pages require nextCursor with the same IDs; never infer absence from incomplete retrieval.',
-      readOnly: true, destructive: false,
-      inputSchema: z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(5), cursor: z.string().max(1000).optional() }).strict(),
-      async execute(args) { return catalog.get(args) },
-    }),
+    SEARCH_INTERFACES.bind({ async execute(args) { return catalog.search(args) } }),
+    GET_INTERFACES.bind({ async execute(args) { return catalog.get(args) } }),
   ]
 }
 
@@ -383,14 +394,21 @@ export interface FlowWorkerSessionInput {
   judgeWith: (ctx: ToolContext) => WorkerFidelityJudge
 }
 
+const FLOW_WORKER_SESSION = defineSessionKind({
+  kind: FLOW_WORKER_SESSION_KIND,
+  outcomeSchema: GuardFlowWorkerOutcomeSchema,
+  // A settled outcome carries whole scenarios and their expected reds: the
+  // largest outcome schema the product sends.
+  largeOutcomeSchema: true,
+})
+
 export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<GuardFlowWorkerOutcome> {
   const { task } = input
   return {
-    kind: FLOW_WORKER_SESSION_KIND,
+    ...FLOW_WORKER_SESSION,
     display: { title: 'Scenario author' },
     systemPrompt: flowWorkerSystemPrompt(task.surface),
     tools: [...catalogTools(task), runScenarioTool(task), submitScenarioTool(task, input.judgeWith), dropScenarioTool(task)],
-    outcomeSchema: GuardFlowWorkerOutcomeSchema,
     validateOutcome: (outcome, context) => task.validateOutcome(outcome, context),
     outcomeSchemaRepairs: 2,
     budget: FLOW_WORKER_BUDGET,

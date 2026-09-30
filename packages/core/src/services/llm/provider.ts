@@ -10,7 +10,7 @@
  */
 
 import type { ProviderConfig } from '@truecourse/llm-api';
-import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
+import { LLM_PROVIDER_CREDENTIALS, LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type { LlmApiConfig } from './provider-config.js';
 import {
   costOfCall,
@@ -51,7 +51,7 @@ export function buildProviderConfig(api: LlmApiConfig | undefined): ProviderConf
     baseURL: api.baseURL?.trim() || undefined,
     headers: api.headers,
   };
-  if (api.provider === 'bedrock') {
+  if (LLM_PROVIDER_CREDENTIALS[api.provider] === 'aws') {
     // Any omitted credential falls through to the ambient AWS chain.
     cfg.region = api.region?.trim() || undefined;
     cfg.accessKeyId = api.accessKeyId?.trim() || undefined;

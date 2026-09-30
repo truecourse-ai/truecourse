@@ -6,7 +6,10 @@ import {
   SessionFailureSchema,
   RunRecordSchema,
   SessionProgressSchema,
-  defineSessionTool,
+  defineSessionKind,
+  defineToolSpec,
+  registeredSessionKinds,
+  registeredToolSpecs,
   type SessionEvent,
   type ToolContext,
 } from '../../packages/agent-loop/src/index';
@@ -271,24 +274,44 @@ describe('run record', () => {
   });
 });
 
-describe('defineSessionTool', () => {
-  it('infers execute args from the input schema without casts', async () => {
-    const tool = defineSessionTool({
-      name: 'read-doc-section',
-      description: 'Read one section of a doc',
-      kind: 'read-doc-section',
-      readOnly: true,
-      destructive: false,
-      inputSchema: z.object({ path: z.string(), heading: z.string().nullable() }),
+describe('tool specs', () => {
+  const spec = defineToolSpec({
+    name: 'read_section',
+    description: 'Read one section of a doc',
+    kind: 'read-doc-section',
+    readOnly: true,
+    destructive: false,
+    inputSchema: z.object({ path: z.string(), heading: z.string().nullable() }),
+    display: { one: 'I read a section', many: 'I read {n} sections' },
+  });
+  const ctx = { workItem: 'x', signal: new AbortController().signal } as ToolContext;
+
+  it('register themselves when defined', () => {
+    expect(registeredToolSpecs()).toContain(spec);
+  });
+
+  it('bind an execute whose args are inferred from the input schema', async () => {
+    const tool = spec.bind({
       async execute(args) {
         // args is typed from the schema; exercising it proves the inference.
         return { content: `${args.path}#${args.heading ?? 'lead'}` };
       },
     });
-    const result = await tool.execute(
-      { path: 'docs/a.md', heading: null },
-      { workItem: 'x', signal: new AbortController().signal } as ToolContext,
-    );
+    const result = await tool.execute({ path: 'docs/a.md', heading: null }, ctx);
     expect(result.content).toBe('docs/a.md#lead');
+    expect(tool).toMatchObject({ name: 'read_section', inputSchema: spec.inputSchema, display: spec.display });
+  });
+
+  it('take the wording one session gives at bind in place of the spec\'s', () => {
+    const display = { one: 'I opened a doc', many: 'I opened {n} docs' };
+    const tool = spec.bind({ description: 'Read a section of THIS doc', display, execute: async () => ({ content: '' }) });
+    expect(tool).toMatchObject({ description: 'Read a section of THIS doc', display, inputSchema: spec.inputSchema });
+  });
+});
+
+describe('session kinds', () => {
+  it('register themselves when defined', () => {
+    const kind = defineSessionKind({ kind: 'test.kind', outcomeSchema: z.object({ ok: z.boolean() }) });
+    expect(registeredSessionKinds()).toContain(kind);
   });
 });
