@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreditsExhaustedError, flowFingerprint, isCreditsExhausted, type GuardFlow, type GuardFlowMilestone, type Interface } from '@truecourse/shared'
 import { buildSurfaceCatalogs, matchFlow, planFlowMatching, readCachedMatch } from '../../packages/guard-generator/src/match.js'
-import { MATCH_SYSTEM_PROMPT, buildMatchUserPrompt } from '../../packages/guard-generator/src/prompts.js'
+import { MATCH_SYSTEM_PROMPT, buildMatchTaskPrompt } from '../../packages/guard-generator/src/prompts.js'
 import { makeTempRepo, rmrf } from './helpers.js'
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
@@ -90,7 +90,7 @@ describe('matching incomplete catalogs and verification capabilities', () => {
     }).mockImplementationOnce(async (ctx) => {
       expect(ctx.issues.gapErrors).toContain('milestone 1 appears in both plan and gaps; use one disposition')
       expect(ctx.issues.uncoveredMilestones).toEqual([])
-      expect(buildMatchUserPrompt(ctx)).toContain('milestone 1 appears in both plan and gaps')
+      expect(buildMatchTaskPrompt(ctx)).toContain('milestone 1 appears in both plan and gaps')
       return { plan: [1, 2].map((milestone) => ({ interfaceId: control.id, milestone })) }
     })
     expect(await matchFlow(repo(), flow(), catalog, runner)).toMatchObject({ kind: 'plan', calls: 2, gaps: [] })
@@ -327,7 +327,7 @@ describe('runner-owned provider matching', () => {
     const runner = vi.fn().mockImplementationOnce(async ctx => {
       expect(ctx.capabilities).toContain('provider-control')
       expect(ctx.providerControls).toEqual(providerControls)
-      expect(buildMatchUserPrompt(ctx)).toContain('CURRENCYBEACON_BASE_URL')
+      expect(buildMatchTaskPrompt(ctx)).toContain('CURRENCYBEACON_BASE_URL')
       return { gaps: [{ milestone: 1, checks: ['pending'], kind: 'capability', reason: 'The web browser driver has no request interception or provider-control capability to delay that response' }] }
     }).mockImplementationOnce(async ctx => {
       expect(ctx.issues.gapErrors.join()).toContain('contradicts the runner registry')

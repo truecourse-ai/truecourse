@@ -14,6 +14,11 @@
  * under still names the prompt it always did, and a repo's warm cache survives
  * the move.
  *
+ * THE MATCH CATALOG RIDES THE SYSTEM PROMPT, after the matching instructions,
+ * so it is the prefix every match against one surface shares. Providers cache
+ * by prefix: each flow's obligations, fixtures and corrections arrive in the
+ * user turn, after it, and separate sessions reuse the catalog.
+ *
  * ONE RE-ASK PER LEAF, AND IT IS THE ENGINE'S WHERE THE ENGINE HAS ONE. The
  * match keeps its own corrective loop (it quotes the invalid answer back with
  * the catalog issues it found), so its session takes exactly one turn and
@@ -33,7 +38,8 @@ import {
   WORLD_CLASSIFY_SYSTEM_PROMPT,
   WorldClassifySchema,
   buildClaimDiffUserPrompt,
-  buildMatchUserPrompt,
+  buildMatchCatalogPrompt,
+  buildMatchTaskPrompt,
   buildWorldClassifyUserPrompt,
   type ClaimDiff,
   type ClaimDiffRunner,
@@ -89,7 +95,9 @@ export function createGuardGenerateLeafSessions(opts: CreateLeafSessionsOptions)
         session: {
           kind: MATCH_SESSION_KIND,
           title: 'Realization match',
-          systemPrompt: withOutcomeDelivery(MATCH_SYSTEM_PROMPT),
+          // The catalog is identical across this surface's matches. Give it
+          // the system cache boundary; per-flow text must not precede it.
+          systemPrompt: `${withOutcomeDelivery(MATCH_SYSTEM_PROMPT)}\n\n${buildMatchCatalogPrompt(ctx)}`,
           // The shape the model is asked for, and the raw answer handed back:
           // the engine validates and re-asks itself (see above).
           outcomeSchema: z.unknown(),
@@ -100,7 +108,7 @@ export function createGuardGenerateLeafSessions(opts: CreateLeafSessionsOptions)
         // A re-ask after an invalid answer is a separate ask about the same
         // pair — the work item says which, so the run reads honestly.
         workItem: `${ctx.flow.id}:${ctx.surface}${ctx.correction ? ' (re-ask)' : ''}`,
-        briefing: buildMatchUserPrompt(ctx),
+        briefing: buildMatchTaskPrompt(ctx),
       }),
 
     claimDiffRunner: (section) =>

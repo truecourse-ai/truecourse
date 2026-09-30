@@ -349,7 +349,7 @@ export {
 } from './web/observe.js'
 export { MAX_UNNAMED_CONTROLS, type UnnamedContainer, type UnnamedControl } from './web/unnamed-controls.js'
 export { addressFillsTemplate, hasAddressSlot } from './web/address.js'
-export { openPage, samePage, OPEN_PAGE_RETRIES, type OpenPageResult, type PageReachedBy } from './web/open-page.js'
+export { openPage, samePage, settlePage, OPEN_PAGE_RETRIES, type OpenPageResult, type PageReachedBy } from './web/open-page.js'
 export type {
   CreateWebObserverOptions,
   LocatorProbeRequest,
@@ -371,6 +371,7 @@ export {
   BROWSER_MISSING_MESSAGE,
   PLAYWRIGHT_MISSING_MESSAGE,
   WEB_VIEWPORT,
+  WEB_CONTEXT_OPTIONS,
   WEB_VIDEO_FILE,
 } from './web/browser.js'
 export type { WebBrowserHandle, LaunchWebBrowserOptions, ArmedFileChooser, BrowserPreflight } from './web/browser.js'

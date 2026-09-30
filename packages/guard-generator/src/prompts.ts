@@ -2910,7 +2910,29 @@ export interface MatchUserContext {
   correction?: OutputCorrection
 }
 
-export function buildMatchUserPrompt(ctx: MatchUserContext): string {
+/** The surface's catalog, identical for every match against one surface. The
+ * session sends it in the system prompt, ahead of anything about one flow, so
+ * providers can cache it once for the many matches against that surface. */
+export function buildMatchCatalogPrompt(ctx: Pick<MatchUserContext, 'surface' | 'interfaces'>): string {
+  const lines: string[] = [
+    `INTERFACE CATALOG for ${ctx.surface} — the executable actions currently mapped. Copy an \`id\``,
+    'verbatim into every plan entry:',
+  ]
+  for (const j of ctx.interfaces) {
+    lines.push('', `--- id: ${j.id}`, `title: ${j.title}`, `entry: ${j.entry}`)
+    if (j.context?.length) lines.push(...j.context)
+    if (j.steps.length > 0) {
+      lines.push('steps:')
+      for (const s of j.steps) lines.push(`  ${s}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+/** One flow's side of a match, sent as the user turn: its obligations and
+ * fixtures, then what the previous answer got wrong. It varies independently
+ * of the catalog. */
+export function buildMatchTaskPrompt(ctx: Omit<MatchUserContext, 'interfaces'>): string {
   const lines: string[] = [
     `Surface: ${ctx.surface}`,
     `Runner observation capabilities: ${JSON.stringify(ctx.capabilities ?? [])}`,
@@ -2923,19 +2945,6 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
   ]
   for (const m of ctx.milestones) {
     lines.push(`  ${m.order}. ${m.claim}${m.note ? `  (${m.note})` : ''}${m.verification ? `  [${m.verification.method}: ${m.verification.observable}; cases: ${JSON.stringify(m.verification.cases ?? [])}]` : ''}`)
-  }
-  lines.push(
-    '',
-    `INTERFACE CATALOG for ${ctx.surface} — the executable actions currently mapped. Copy an \`id\``,
-    'verbatim into every plan entry:',
-  )
-  for (const j of ctx.interfaces) {
-    lines.push('', `--- id: ${j.id}`, `title: ${j.title}`, `entry: ${j.entry}`)
-    if (j.context?.length) lines.push(...j.context)
-    if (j.steps.length > 0) {
-      lines.push('steps:')
-      for (const s of j.steps) lines.push(`  ${s}`)
-    }
   }
   if (ctx.issues) {
     if (ctx.issues.unknownInterfaces.length > 0) {

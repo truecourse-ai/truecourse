@@ -1023,7 +1023,7 @@ const WEB_LOGIN = {
 const WEB_PROBES = { webSession: { surface: 'web', path: '/dashboard', login: WEB_LOGIN } };
 
 describe('buildSeedSession — web principals prove themselves by an authenticated page load', () => {
-  it('proves the session cookie against the booted web surface, in-session and at the fold', async () => {
+  it('proves an Origin-checked login and session cookie in-session and at the fresh-world fold', async () => {
     const r = fixtureRepo();
     writeRecipe(r, {}, webBlock(r));
     const stub = stubDriver(async (call) => {
@@ -1050,6 +1050,179 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       credentials: ['webSession'],
       fixtures: ['org', 'sacrificialUser', 'webUser'],
     });
+  }, 60_000);
+
+  it.each([403, 429, 500])('reports HTTP %s without inventing a password mismatch or leaking response secrets', async (status) => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const probes = {
+      webSession: { surface: 'web', path: '/dashboard', login: { ...WEB_LOGIN, path: `/api/login-refused?status=${status}` } },
+    };
+    const code = { 403: 'INVALID_ORIGIN', 429: 'RATE_LIMITED', 500: 'INTERNAL_ERROR' }[status];
+    const checkReason = (reason: string) => {
+      expect(reason).toContain(`HTTP ${status}`);
+      expect(reason).toContain(code);
+      expect(reason).toContain('Request refused');
+      expect(reason).not.toMatch(/secret the world stores does not match|CONVERGE/);
+      for (const secret of ['pw-guard-1', 'owner@acme.test', 'session=tok-web-1', 'unpublished-response-token']) {
+        expect(reason).not.toContain(secret);
+      }
+    };
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(verdict.isError).toBe(true);
+      checkReason(verdict.content);
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
+    });
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r, { database: PRINCIPAL_DATABASE }));
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') checkReason(result.reason);
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+  }, 60_000);
+
+  it('proves an SPA shell through browser auth navigation, in-session and in the fresh-world fold', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const probes = { webSession: { ...WEB_PROBES.webSession, path: '/spa-dashboard' } };
+    const stub = stubDriver(async (call) => {
+      // The login proof mints a valid cookie, but that must never leak into
+      // either browser or rescue the invalid cookie the seed published.
+      const refused = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript('session=tok-web-1', 'session=WRONG'),
+        command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(refused.isError, refused.content).toBe(true);
+      expect(refused.content).toContain('landed on /spa-login');
+      const verified = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(verified.isError, verified.content).toBeUndefined();
+      expect(verified.content).toContain('/spa-dashboard/home with the credential, /spa-login');
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
+    });
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r, { database: PRINCIPAL_DATABASE }));
+    expect(result).toMatchObject({ status: 'ok', credentials: ['webSession'] });
+
+    // The stored draft still declares /spa-dashboard. Re-prove that same
+    // output without paying for another authoring session.
+    fs.rmSync(path.join(r, TARGET));
+    writeRecipe(r, {}, webBlock(r));
+    const cached = harness(null);
+    const again = await seedSession(cached.context)(seedInput(r, { database: PRINCIPAL_DATABASE }));
+    expect(again).toMatchObject({ status: 'ok', fromCache: true });
+    expect(cached.acquires()).toBe(0);
+  }, 60_000);
+
+  it('reads an error nested in an envelope, and leaves ordinary fixture words in the refusal', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    // `acme` is the org fixture's slug: a published value, but no secret.
+    const loginPath = '/api/login-refused?status=403&shape=nested&org=acme';
+    // A literal body value is no secret either: masking it would blank every
+    // slash out of the refusal.
+    const login = { ...WEB_LOGIN, path: loginPath, body: { ...WEB_LOGIN.body, callbackUrl: '/' } };
+    const probes = { webSession: { surface: 'web', path: '/dashboard', login } };
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(verdict.isError).toBe(true);
+      expect(verdict.content).toContain('INVALID_ORIGIN');
+      expect(verdict.content).toContain('The probe sends Origin');
+      expect(verdict.content).toContain(loginPath);
+      expect(verdict.content).not.toContain('pw-guard-1');
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
+    });
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r, { database: PRINCIPAL_DATABASE }));
+    expect(result.status).toBe('failed');
+  }, 60_000);
+
+  it('tells a login nested under the route from the route, for a method in any case', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const probes = { webSession: { ...WEB_PROBES.webSession, path: '/admin', method: 'get' } };
+    const stub = stubDriver(async (call) => {
+      // A bad cookie lands on /admin/login?error=SessionExpired, a child of
+      // /admin: only comparing it with the anonymous landing, query aside,
+      // shows it never signed in.
+      const refused = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript('session=tok-web-1', 'session=WRONG'),
+        command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(refused.isError, refused.content).toBe(true);
+      expect(refused.content).toContain('lands on /admin/login both WITH and WITHOUT');
+      const verified = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(verified.isError, verified.content).toBeUndefined();
+      expect(verified.content).toContain('/admin/home with the credential, /admin/login');
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
+    });
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r, { database: PRINCIPAL_DATABASE }));
+    expect(result).toMatchObject({ status: 'ok', credentials: ['webSession'] });
+  }, 60_000);
+
+  it.each([
+    ['a route kept in the fragment', '/hash-app#/dashboard', '/hash-app#/dashboard with the credential, /hash-app#/login'],
+    ['a route kept in the fragment, declared with a query', '/hash-app#/dashboard?tab=1', '/hash-app#/dashboard with the credential, /hash-app#/login'],
+    ['a guard that turns the first load away', '/racy-dashboard', '/racy-dashboard with the credential, /spa-login'],
+    ['a guard that decides long after the page settled', '/slow-dashboard', '/slow-dashboard with the credential, /spa-login'],
+  ])('proves %s', async (_case, probePath, proved) => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const probes = { webSession: { ...WEB_PROBES.webSession, path: probePath } };
+    const stub = stubDriver(async (call) => {
+      const refused = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript('session=tok-web-1', 'session=WRONG'),
+        command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(refused.isError, refused.content).toBe(true);
+      expect(refused.content).toMatch(/did not reach the protected route|was sent away from the protected route/);
+      const verified = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(verified.isError, verified.content).toBeUndefined();
+      expect(verified.content).toContain(proved);
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
+    });
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r, { database: PRINCIPAL_DATABASE }));
+    expect(result).toMatchObject({ status: 'ok', credentials: ['webSession'] });
+  }, 180_000);
+
+  it('proves a page that polls without end and raises an unrelated error', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const probes = { webSession: { ...WEB_PROBES.webSession, path: '/busy-dashboard' } };
+    const stub = stubDriver(async (call) => {
+      const verified = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(verified.isError, verified.content).toBeUndefined();
+      expect(verified.content).toContain('/busy-dashboard with the credential, /spa-login');
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
+    });
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r, { database: PRINCIPAL_DATABASE }));
+    expect(result).toMatchObject({ status: 'ok', credentials: ['webSession'] });
+  }, 90_000);
+
+  it('refuses an SPA whose auth router crashes instead of accepting its HTML shell', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const probes = { webSession: { ...WEB_PROBES.webSession, path: '/spa-broken' } };
+    const stub = stubDriver(async (call) => {
+      const refused = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes,
+      });
+      expect(refused.isError, refused.content).toBe(true);
+      expect(refused.content).toContain('load raised a JavaScript error');
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
+    });
+    const result = await seedSession(harness(stub.driver).context)(seedInput(r, { database: PRINCIPAL_DATABASE }));
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') expect(result.reason).toContain('load raised a JavaScript error');
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
   }, 60_000);
 
   // The documenso idiom: session routes answer an ANONYMOUS request with HTTP
@@ -1149,6 +1322,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       });
       expect(refusal.isError).toBe(true);
       expect(refusal.content).toMatch(/refused the PUBLISHED fixture credentials/);
+      expect(refusal.content).toMatch(/invalid credentials/);
       expect(refusal.content).toMatch(/CONVERGE/);
       await callTool(call.input, 'run_seed_draft', {
         script: webMintingScript(),
@@ -1230,7 +1404,8 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
         probes: WEB_PROBES,
       });
       expect(refusal.isError).toBe(true);
-      expect(refusal.content).toMatch(/did not authenticate the web surface/);
+      expect(refusal.content).toMatch(/HTTP 302 WITH the Cookie header/);
+      expect(refusal.content).toMatch(/FULL Cookie header value/);
       await callTool(call.input, 'run_seed_draft', {
         script: webMintingScript(),
         command: COMMAND,
