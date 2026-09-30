@@ -931,7 +931,8 @@ describe('api session driver provider cache strategy', () => {
     expect(messageOptions(calls[0].prompt).every((o) => o === undefined)).toBe(true);
     expect(calls[0].providerOptions).toEqual({
       openai: {
-        promptCacheKey: expect.any(String),
+        // The session's kind: what every session with this prefix sends.
+        promptCacheKey: 'spec-scan.curation',
         parallelToolCalls: false,
         // The driver resends the whole history every turn, so a replayed
         // reasoning part must carry itself rather than point at an item the
@@ -942,7 +943,6 @@ describe('api session driver provider cache strategy', () => {
         store: false,
       },
     });
-    expect(calls[0].providerOptions?.openai?.promptCacheKey).not.toBe('');
   });
 
   it('copilot: the same two settings under its own namespace, in WIRE names', async () => {
@@ -952,7 +952,7 @@ describe('api session driver provider cache strategy', () => {
     // The openai-compatible provider forwards what it does not own verbatim
     // into the body, so camelCase here would reach the API as camelCase.
     expect(calls[0].providerOptions).toEqual({
-      'github-copilot': { prompt_cache_key: expect.any(String), parallel_tool_calls: false },
+      'github-copilot': { prompt_cache_key: 'spec-scan.curation', parallel_tool_calls: false },
     });
   });
 
@@ -1003,19 +1003,28 @@ describe('api session driver provider cache strategy', () => {
     expect(calls[0].providerOptions).toEqual({});
   });
 
-  it('holds the cache key steady across a session and apart between sessions', async () => {
+  /**
+   * Sessions of one kind open on the same tools and system prompt. A provider
+   * that scopes its cache by the request's key lets them read that prefix back
+   * only under ONE key: a key per session writes it again for every session.
+   */
+  it('keys the cache by session kind: one key for every session of a kind, another per kind', async () => {
     const twoTurns: StubTurn[] = [
       { content: [text('thinking')] },
       { content: [outcomeCall({ verdict: 'keep' })] },
     ];
     const openai: ProviderConfig = { provider: 'openai', model: 'gpt-5', apiKey: 't' };
     const first = await callsFor(openai, twoTurns);
-    const second = await callsFor(openai, [{ content: [outcomeCall({ verdict: 'keep' })] }]);
+    const second = await callsFor(openai);
+    const otherKind = await callsFor(openai, undefined, undefined, {
+      def: makeDef({ kind: 'guard-generate.match' }),
+    });
 
     const keyOf = (call: (typeof first)[number]) => call.providerOptions?.openai?.promptCacheKey;
     expect(first).toHaveLength(2);
     expect(keyOf(first[0])).toBe(keyOf(first[1]));
-    expect(keyOf(second[0])).not.toBe(keyOf(first[0]));
+    expect(keyOf(second[0])).toBe(keyOf(first[0]));
+    expect(keyOf(otherKind[0])).toBe('guard-generate.match');
   });
 
   it('lets a caller pin the cluster key, by value or from the session id', async () => {
@@ -1068,7 +1077,7 @@ describe('api session driver provider cache strategy', () => {
 
     // Where the cache is keyed per request, the cluster is what it is keyed on.
     const openai = await callsFor({ provider: 'openai', model: 'gpt-5', apiKey: 't' }, undefined, {
-      cacheKey: 'per-session-default',
+      cacheKey: 'pinned-by-the-caller',
     }, { sharedPrefix });
     expect(openai[0].providerOptions?.openai?.promptCacheKey).toBe('cluster/settings');
   });

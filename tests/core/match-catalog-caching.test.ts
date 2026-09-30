@@ -111,6 +111,28 @@ function response(): Response {
   });
 }
 
+type OpenAiRequest = {
+  prompt_cache_key?: string;
+  tools: unknown[];
+  input: Array<{ role: string; content: string }>;
+};
+
+/** An OpenAI Responses SSE stream ending in the driver's outcome tool. */
+function openAiResponse(): Response {
+  const item = { id: 'fc_test', type: 'function_call', call_id: 'call_test', name: 'outcome' };
+  const args = JSON.stringify(answer);
+  const events = [
+    { type: 'response.created', response: { id: 'resp_test', created_at: 0, model: 'gpt-5.6-sol' } },
+    { type: 'response.output_item.added', output_index: 0, item: { ...item, status: 'in_progress', arguments: '' } },
+    { type: 'response.function_call_arguments.delta', output_index: 0, item_id: item.id, delta: args },
+    { type: 'response.output_item.done', output_index: 0, item: { ...item, status: 'completed', arguments: args } },
+    { type: 'response.completed', response: { incomplete_details: null, usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } },
+  ];
+  return new Response(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), {
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
 describe('matching provider boundaries', () => {
   it('sends an explicit system cache_control through the real Anthropic API driver', async () => {
     const requests: ApiRequest[] = [];
@@ -134,6 +156,32 @@ describe('matching provider boundaries', () => {
     expect(requests[1].system).toEqual(requests[0].system);
     expect(requests[2].system).toEqual(requests[0].system);
     expect(requests[3].system).not.toEqual(requests[0].system);
+  });
+
+  // OpenAI caches a repeated prefix on its own, but only among requests that
+  // carry the same prompt cache key: a key per session and no two matches read
+  // the catalog back, however identical their prefix.
+  it('sends every match under one prompt cache key through the real OpenAI API driver', async () => {
+    const requests: OpenAiRequest[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)));
+      return openAiResponse();
+    });
+    const driver = createApiSessionDriver({ provider: 'openai', model: 'gpt-5.6-sol', apiKey: 'test' });
+    const { persistence } = memoryPersistence();
+    const leaves = createGuardGenerateLeafSessions({ acquire: async () => ({ driver, persistence }) });
+    for (const ctx of contexts) await expect(leaves.matchRunner(ctx)).resolves.toEqual(answer);
+    expect(requests).toHaveLength(4);
+    for (const [i, request] of requests.entries()) {
+      expect(request.prompt_cache_key).toBe('guard-generate.match');
+      // Tools, then the instructions and the catalog, lead the request; the
+      // flow's own text follows them.
+      expect(request.tools).toEqual(requests[0].tools);
+      expect(request.input[0].content.endsWith(buildMatchCatalogPrompt(contexts[i]))).toBe(true);
+      expect(JSON.stringify(request.input.slice(1))).toContain(JSON.stringify(buildMatchTaskPrompt(contexts[i])).slice(1, -1));
+    }
+    expect(requests[1].input[0]).toEqual(requests[0].input[0]);
+    expect(requests[2].input[0]).toEqual(requests[0].input[0]);
   });
 
   it('passes the same full system prompt to separate Agent SDK sessions, with only the task in streaming input', async () => {

@@ -198,9 +198,13 @@ export interface ApiSessionDriverOptions {
    * REQUEST (openai, copilot) — calls sharing a key share a warm prefix.
    * A string pins one cluster across every session this driver runs; a
    * function is handed the driver's per-session id and returns the key.
-   * Default: that session id, so one session's turns cluster together and
-   * separate sessions never collide. Ignored by anthropic and bedrock, which
-   * key their cache by the prefix content itself.
+   * Default: the session KIND. Sessions of one kind open on the same tools
+   * and system prompt, and these providers read a cached prefix back only
+   * among requests carrying the same key, so a key per session writes that
+   * prefix again for every session. Under one key the cache still matches on
+   * content, so each session reads its own growing history back as well.
+   * Ignored by anthropic and bedrock, which key their cache by the prefix
+   * content itself.
    *
    * A run that declares a `sharedPrefix` per session names its cluster
    * there instead, and that key wins: it is the one the shared prefix is
@@ -251,7 +255,7 @@ export function createApiSessionDriver(
           input.sharedPrefix?.cacheKey ??
           (typeof opts.cacheKey === 'function'
             ? opts.cacheKey(sessionId)
-            : (opts.cacheKey ?? sessionId)),
+            : (opts.cacheKey ?? input.def.kind)),
         sharedPrefix: input.sharedPrefix?.messages.length ?? 0,
         sleep: opts.sleep ?? delay,
         random: opts.random ?? Math.random,
