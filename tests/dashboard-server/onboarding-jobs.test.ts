@@ -1389,13 +1389,13 @@ describe('the guard generate job', () => {
     await Promise.all(running);
     expect(checked).toBe(true);
     const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
-    expect(run).toMatchObject({ status: 'failed', error: { message: 'result persistence failed' } });
+    expect(run).toMatchObject({ status: 'failed', error: { message: "Generation finished, but we couldn't save all its results." } });
     const opened = await openStoredSessionRun(REPO, 'guard-generate', run.runId);
     const events = await opened.readActivity!(-1);
     expect(events.some(e => e.kind === 'run' && e.run.status === 'completed')).toBe(false);
   });
 
-  it('summarizes database failures in the job, activity and notification and chains nothing', async () => {
+  it('describes generation save failures in the job, activity and notification and chains nothing', async () => {
     await saveSetupBundle();
     const cause = Object.assign(new Error('unsupported Unicode escape sequence'), { code: '22P05', severity: 'ERROR' });
     class FailingResults extends PgGuardStore {
@@ -1406,7 +1406,7 @@ describe('the guard generate job', () => {
     setGuardStore(new FailingResults(db));
     await jobs.enqueueGuardGenerate(request);
     await Promise.all(running);
-    const summary = 'Database error (22P05): unsupported Unicode escape sequence';
+    const summary = "Generation finished, but we couldn't save all its results.";
     expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({ status: 'failed', error: summary });
     expect((await listStoredSessionRuns(REPO, 'guard-generate'))[0]).toMatchObject({ status: 'failed', error: { message: summary } });
     expect((await new NotificationStore(db).listForOrg(ORG))[0]).toMatchObject({ level: 'error', body: summary });

@@ -3,8 +3,8 @@
  * the adapter layer (Express). The dashboard server's error middleware
  * inspects `statusCode` to map this to a response. Core itself never imports
  * any framework.
- * User-facing exception summaries omit database query payloads. The original
- * exception remains the caller's to report and rethrow.
+ * User-facing exception summaries omit database details. Operation-specific
+ * errors retain their original exception as the cause for diagnostics.
  */
 export interface AppError extends Error {
   statusCode?: number;
@@ -16,12 +16,18 @@ export function createAppError(message: string, statusCode: number): AppError {
   return error;
 }
 
+/** An operation's public failure message, with its underlying exception as cause. */
+export class UserFacingError extends Error {
+  override name = 'UserFacingError';
+}
+
 const ERROR_SUMMARY_LIMIT = 2_000;
 const bound = (message: string): string => message.length <= ERROR_SUMMARY_LIMIT
   ? message : message.slice(0, ERROR_SUMMARY_LIMIT - 3) + '...';
 
 /** Recognize driver errors structurally, without depending on a database library. */
 export function summarizeError(error: unknown): string {
+  if (error instanceof UserFacingError) return bound(error.message);
   const visited = new Set<object>();
   let current: unknown = error;
   let queryFailure = false;
@@ -36,10 +42,10 @@ export function summarizeError(error: unknown): string {
     const driverError = ('severity' in current && typeof current.severity === 'string') ||
       ('routine' in current && typeof current.routine === 'string');
     if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) && typeof message === 'string' && (driverError || queryFailure)) {
-      return bound(`Database error (${code}): ${message}`);
+      return 'An internal error prevented this operation from completing.';
     }
     current = 'cause' in current ? current.cause : undefined;
   }
-  if (queryFailure) return 'Database query failed.';
+  if (queryFailure) return 'An internal error prevented this operation from completing.';
   return bound(error instanceof Error ? error.message : String(error));
 }

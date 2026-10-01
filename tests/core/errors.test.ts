@@ -1,7 +1,7 @@
-/** Exception summaries keep useful reasons without exposing database parameters. */
+/** Exception summaries describe the failed operation without exposing database details. */
 import { describe, expect, it } from 'vitest';
 import { DrizzleQueryError } from 'drizzle-orm/errors';
-import { createAppError, summarizeError } from '../../packages/core/src/lib/errors';
+import { createAppError, summarizeError, UserFacingError } from '../../packages/core/src/lib/errors';
 
 describe('summarizeError', () => {
   it('summarizes wrapped driver errors without SQL, parameters or driver context', () => {
@@ -9,18 +9,27 @@ describe('summarizeError', () => {
       code: '22P05', severity: 'ERROR', detail: 'secret detail', where: 'secret PDF output',
     });
     const error = new DrizzleQueryError('insert into guard_results values ($1)', ['secret PDF output'], cause);
-    expect(summarizeError(error)).toBe('Database error (22P05): unsupported Unicode escape sequence');
+    expect(summarizeError(error)).toBe('An internal error prevented this operation from completing.');
     expect(error.cause).toBe(cause);
     expect(error.message).toContain('secret PDF output');
   });
 
   it('handles a driver error without a wrapper', () => {
     const error = Object.assign(new Error('connection limit exceeded'), { code: '53300', severity: 'FATAL' });
-    expect(summarizeError(error)).toBe('Database error (53300): connection limit exceeded');
+    expect(summarizeError(error)).toBe('An internal error prevented this operation from completing.');
   });
 
   it('omits a query wrapper with no recognizable driver cause', () => {
-    expect(summarizeError(new DrizzleQueryError('secret SQL', ['secret'], new Error('secret context')))).toBe('Database query failed.');
+    expect(summarizeError(new DrizzleQueryError('secret SQL', ['secret'], new Error('secret context')))).toBe('An internal error prevented this operation from completing.');
+  });
+
+  it('uses an explicit operation message while retaining the database exception for diagnostics', () => {
+    const cause = new DrizzleQueryError('secret SQL', ['secret payload'], new Error('secret context'));
+    const message = "Generation finished, but we couldn't save all its results.";
+    const error = new UserFacingError(message, { cause });
+    expect(summarizeError(error)).toBe(message);
+    expect(error.cause).toBe(cause);
+    expect(cause.message).toContain('secret payload');
   });
 
   it('retains ordinary application messages instead of following an unrelated cause', () => {
@@ -34,7 +43,7 @@ describe('summarizeError', () => {
     const error = new Error('x'.repeat(3_000));
     expect(summarizeError(error)).toHaveLength(2_000);
     expect(summarizeError(error)).toBe('x'.repeat(1_997) + '...');
-    expect(summarizeError(Object.assign(error, { code: '22P05', severity: 'ERROR' }))).toHaveLength(2_000);
+    expect(summarizeError(new UserFacingError(error.message))).toBe('x'.repeat(1_997) + '...');
   });
 
   it('handles cycles and non-Error throws', () => {

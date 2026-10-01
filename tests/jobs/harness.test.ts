@@ -12,6 +12,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { JobStep, JobView, ServerEvent } from '@truecourse/shared';
 import { JobStore, NotificationStore } from '@truecourse/data-store';
+import { summarizeError, UserFacingError } from '@truecourse/core/lib/errors';
 import {
   executeJob,
   JobCancelled,
@@ -76,7 +77,7 @@ const progressEvents = (): JobView[] =>
 const stepPairs = (steps: JobStep[] | undefined) => (steps ?? []).map((s) => [s.key, s.status]);
 
 describe('executeJob — shared lifecycle envelope', () => {
-  it('stores a database summary while reporting and rethrowing the original exception', async () => {
+  it('stores a neutral database failure message while reporting and rethrowing the original exception', async () => {
     const rt = runtime();
     const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:database' });
     const cause = Object.assign(new Error('unsupported Unicode escape sequence'), { code: '22P05', severity: 'ERROR' });
@@ -88,9 +89,27 @@ describe('executeJob — shared lifecycle envelope', () => {
       onError: err => { notified = err; return { level: 'error', title: 'Failed' }; },
     };
     await expect(executeJob(rt, def, { jobId: job.id, org: ORG })).rejects.toBe(error);
-    expect((await rt.jobStore.get(job.id))?.error).toBe('Database error (22P05): unsupported Unicode escape sequence');
+    expect((await rt.jobStore.get(job.id))?.error).toBe('An internal error prevented this operation from completing.');
     expect(notified).toBe(error);
     expect(captured[0]?.err).toBe(error);
+  });
+
+  it('uses the operation message in the job and notification while preserving the diagnostic cause', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:save' });
+    const cause = new DrizzleQueryError('secret query', ['secret payload'], new Error('driver detail'));
+    const message = "Generation finished, but we couldn't save all its results.";
+    const error = new UserFacingError(message, { cause });
+    const def: JobDefinition<Payload, ErrorMeta> = {
+      type: 'test.job', title: 'Testing', steps: [], org: p => p.org,
+      run: async () => { throw error; },
+      onError: err => ({ level: 'error', title: 'Failed', body: summarizeError(err) }),
+    };
+    await expect(executeJob(rt, def, { jobId: job.id, org: ORG })).rejects.toBe(error);
+    expect((await rt.jobStore.get(job.id))?.error).toBe(message);
+    expect((await rt.notifications.listForOrg(ORG))[0]?.body).toBe(message);
+    expect(captured[0]?.err).toBe(error);
+    expect((captured[0]?.err as Error).cause).toBe(cause);
   });
 
   it('seeds the full checklist, advances it, succeeds, and posts a success notification', async () => {
