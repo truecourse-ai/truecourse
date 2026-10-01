@@ -7,7 +7,9 @@
  * filter row of Add filter, dimension, value, then a one-line table), and a row
  * opens the flow as its own page at '/flows/:flowId?repo=<id>'.
  *
- * Status, Driver and Repository live in the address (`?status=&driver=&repo=`),
+ * Blocked flows are excluded unless Settings > Workspace or an explicit
+ * blocked status filter includes them. Status, Driver and Repository live in
+ * the address (`?status=&driver=&repo=`),
  * so a narrowed page is a place: the repository console's jumps link straight
  * to `?repo=<id>`, and a run's flow link opens the flow itself.
  *
@@ -147,10 +149,12 @@ export default function FlowsPage({ flowId }: { flowId?: string }) {
 
 function FlowsIndex() {
   const navigate = useNavigate();
-  const { repos } = useDashboardState();
+  const { repos, showBlocked: includeBlocked } = useDashboardState();
   const { rows: all, loading } = useWorkspaceFlows(repos);
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState('');
+  const showBlocked = includeBlocked || params.getAll('status').includes('blocked');
+  const visible = useMemo(() => all.filter((r) => showBlocked || guardFlowPlainStatus(r.flow) !== 'blocked'), [all, showBlocked]);
 
   const selected = useMemo(
     () => DIMENSION_KEYS.flatMap((d) => params.getAll(PARAM[d]).map((value) => filterKey(d, value))),
@@ -180,14 +184,14 @@ function FlowsIndex() {
     const statuses = selectedValues(selected, 'status');
     const drivers = selectedValues(selected, 'driver');
     const repoIds = selectedValues(selected, 'repo');
-    return all.filter(
+    return visible.filter(
       (r) =>
         matchesQuery(r) &&
         (statuses.length === 0 || statuses.includes(guardFlowPlainStatus(r.flow))) &&
         (drivers.length === 0 || (r.flow.drivers ?? []).some((d) => drivers.includes(d))) &&
         (repoIds.length === 0 || repoIds.includes(r.repo.id)),
     );
-  }, [all, matchesQuery, selected]);
+  }, [visible, matchesQuery, selected]);
 
   const tally = useMemo(
     () =>
@@ -280,7 +284,7 @@ function FlowsIndex() {
     [],
   );
 
-  const narrowed = query.trim() !== '' || selected.length > 0;
+  const narrowed = query.trim() !== '' || selected.length > 0 || (!showBlocked && all.length > 0);
   const empty = loading ? (
     'Loading…'
   ) : narrowed ? (
@@ -298,6 +302,7 @@ function FlowsIndex() {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader title="Flows" />
+      {!showBlocked && <p className="px-6 py-2 text-xs text-muted-foreground">Excluding blocked flows</p>}
       <div className="min-h-0 flex-1">
         <IndexTable
           label="Flows"
@@ -313,7 +318,7 @@ function FlowsIndex() {
           onSelect={onSelect}
           filterAriaLabel="Filter flows"
           tally={tally}
-          total={all.length}
+          total={visible.length}
           empty={empty}
         />
       </div>

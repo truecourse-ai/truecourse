@@ -277,7 +277,7 @@ describe('the local workspace saying what its product is', () => {
     const app = localApp();
 
     const before = await request(app).get('/api/workspace/profile').expect(200);
-    expect(before.body).toEqual({ description: null, updatedAt: null });
+    expect(before.body).toEqual({ description: null, updatedAt: null, showBlocked: false });
     expect(await contextChangedAt(LOCAL_ORG_ID)).toBeNull();
 
     const saved = await request(app)
@@ -301,6 +301,24 @@ describe('the local workspace saying what its product is', () => {
     ]);
     const after = await request(app).get('/api/workspace/profile').expect(200);
     expect(after.body.description).toBe('Orders API, a fulfilment service for online shops.');
+  });
+
+  it('saves display preferences without changing the description or invalidating scans', async () => {
+    const app = localApp();
+    await profiles.save(LOCAL_ORG_ID, 'Orders API, a fulfilment service for online shops.');
+    const before = await request(app).get('/api/workspace/profile').expect(200);
+    const saved = await request(app).put('/api/workspace/display').send({ showBlocked: true }).expect(200);
+    expect(saved.body).toEqual({ ...before.body, showBlocked: true });
+    expect(await contextChangedAt(LOCAL_ORG_ID)).toBeNull();
+    const read = await request(app).get('/api/workspace/profile').expect(200);
+    expect(read.body.showBlocked).toBe(true);
+    await request(app).put('/api/workspace/display').send({ showBlocked: 'true' }).expect(400);
+  });
+
+  it('does not create a product profile through a display setting', async () => {
+    const app = localApp();
+    await request(app).put('/api/workspace/display').send({ showBlocked: true }).expect(409);
+    expect(profiles.all()).toEqual([]);
   });
 
   it('refuses a sentence that says nothing, and stores nothing', async () => {

@@ -10,11 +10,13 @@
  * the identity provider's.
  */
 
-import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean } from 'drizzle-orm/pg-core';
 
 export const workspaceProfiles = pgTable('workspace_profiles', {
   workspaceOrgId: text('workspace_org_id').primaryKey(),
   /** What the product is, in one sentence. The Document scan attributes against it. */
   description: text('description').notNull(),
+  /** The workspace-wide display preference for Home and Flows. */
+  showBlocked: boolean('show_blocked').notNull().default(false),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'string' }).notNull(),
 });

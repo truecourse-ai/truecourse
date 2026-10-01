@@ -1,6 +1,6 @@
 /**
  * Settings › Workspace — the one sentence saying what this workspace's product
- * is.
+ * is, and whether Home and Flows include blocked results for its members.
  *
  * It is not a label. Every document the workspace holds is kept or dropped by
  * whether it describes THIS product, and this sentence is the whole of what
@@ -13,11 +13,13 @@
  */
 
 import { useEffect, useState } from 'react';
+import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { StatusWord } from '@/dashboard/ui/status-word';
 import { Facts } from '@/dashboard/ui/bits';
 import {
   fetchWorkspaceProfile,
   saveWorkspaceDescription,
+  saveWorkspaceShowBlocked,
 } from '@/dashboard/data/workspace-profile';
 import {
   PRODUCT_DESCRIPTION_MAX_CHARS,
@@ -30,6 +32,9 @@ const FIELD =
   'mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary';
 
 export function WorkspaceTab() {
+  const { refreshDisplayPreferences } = useDashboardState();
+  const [displayBusy, setDisplayBusy] = useState(false);
+  const [displayError, setDisplayError] = useState<string | null>(null);
   const [profile, setProfile] = useState<WorkspaceProfileResponse | null>(null);
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +96,30 @@ export function WorkspaceTab() {
           },
         ]}
       />
+
+      <section className="border-b border-border px-6 py-5" aria-label="Display preferences">
+        <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+          <input type="checkbox" checked={profile?.showBlocked ?? false}
+            disabled={!profile?.description || displayBusy}
+            aria-describedby="blocked-display-help"
+            onChange={(event) => {
+              const showBlocked = event.target.checked;
+              setDisplayBusy(true);
+              setDisplayError(null);
+              void saveWorkspaceShowBlocked(showBlocked).then(async (next) => {
+                setProfile(next);
+                await refreshDisplayPreferences();
+              }).catch((e: unknown) => setDisplayError(e instanceof Error ? e.message : String(e)))
+                .finally(() => setDisplayBusy(false));
+            }} />
+          Show blocked results
+        </label>
+        <p id="blocked-display-help" className="mt-1 text-[11px] text-muted-foreground">
+          Include blocked results on Home and Flows for everyone in this workspace.
+        </p>
+        {displayBusy && <p role="status" className="mt-1 text-[11px] text-muted-foreground">Saving…</p>}
+        {displayError && <p role="alert" className="mt-1 text-[11px] text-destructive">{displayError}</p>}
+      </section>
 
       <form onSubmit={submit} className="max-w-xl space-y-2 px-6 py-5">
         <label className="block text-[11px] font-medium text-muted-foreground">

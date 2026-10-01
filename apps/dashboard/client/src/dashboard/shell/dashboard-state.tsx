@@ -1,6 +1,6 @@
 /**
  * The shell's session state: the workspace, its connected repositories, and
- * what their runs are doing right now.
+ * its display preference, and what their runs are doing right now.
  *
  * Everything here is the server's. The WORKSPACE is the organization the
  * session is in (its name and initial come from the auth user, and there is no
@@ -30,6 +30,7 @@ import {
 import { toast } from 'sonner';
 import { disconnectRealRepo, fetchRealRepos } from '@/dashboard/data/real-repos';
 import { fetchLlmConfig } from '@/dashboard/data/llm-config';
+import { fetchWorkspaceProfile } from '@/dashboard/data/workspace-profile';
 import { putPullRequestChecks } from '@/lib/api';
 import { useAuth } from '@/auth/AuthContext';
 import { useRealRunStream, type RunFailure } from './real-runs';
@@ -39,6 +40,8 @@ import type { JobView, NotificationView } from '@truecourse/shared';
 import type { JobChain, Repo, Workspace } from '@/dashboard/data/types';
 
 interface DashboardStateValue {
+  showBlocked: boolean;
+  refreshDisplayPreferences: () => Promise<void>;
   /** The organization of the session. Null until the session probe answers. */
   workspace: Workspace | null;
   /**
@@ -109,6 +112,19 @@ export function DashboardStateProvider({ children }: { children: ReactNode }) {
   const { status, user } = useAuth();
   const orgName = status === 'authed' ? user?.organizationName : undefined;
   const orgId = status === 'authed' ? user?.organizationId : undefined;
+  const [showBlocked, setShowBlocked] = useState(false);
+  const refreshDisplayPreferences = useCallback(async () => {
+    const profile = await fetchWorkspaceProfile();
+    setShowBlocked(profile.showBlocked ?? false);
+  }, []);
+  useEffect(() => {
+    let live = true;
+    setShowBlocked(false);
+    void fetchWorkspaceProfile().then((profile) => {
+      if (live) setShowBlocked(profile.showBlocked ?? false);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [orgId]);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [reposLoaded, setReposLoaded] = useState(false);
   const [llmProvider, setLlmProvider] = useState<LlmProviderState>('unknown');
@@ -220,6 +236,8 @@ export function DashboardStateProvider({ children }: { children: ReactNode }) {
       };
     });
     return {
+      showBlocked,
+      refreshDisplayPreferences,
       workspace,
       repos: allRepos,
       reposLoaded,
@@ -240,6 +258,8 @@ export function DashboardStateProvider({ children }: { children: ReactNode }) {
       refreshLlmProvider,
     };
   }, [
+    showBlocked,
+    refreshDisplayPreferences,
     orgId,
     orgName,
     repos,

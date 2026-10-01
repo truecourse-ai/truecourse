@@ -194,6 +194,7 @@ function json(body: unknown, status = 200): Response {
 
 interface World {
   home: HomeResponse;
+  showBlocked: boolean;
   /** The registry, as `/api/repos` answers it. */
   repos: unknown[];
   /** The workspace's context sources. */
@@ -202,12 +203,17 @@ interface World {
 }
 
 function serve(over: Partial<World> = {}) {
-  const state: World = { home: HOME, repos: [REPO], sources: [SOURCE], calls: [], ...over };
+  const state: World = { home: HOME, showBlocked: true, repos: [REPO], sources: [SOURCE], calls: [], ...over };
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
     const method = (init?.method ?? 'GET').toUpperCase();
     state.calls.push(method === 'GET' ? `${url.pathname}${url.search}` : `${method} ${url.pathname}`);
+    if (url.pathname === '/api/workspace/profile') return json({ description: 'Acme store', updatedAt: null, showBlocked: state.showBlocked });
+    if (url.pathname === '/api/workspace/display') {
+      state.showBlocked = JSON.parse(String(init?.body)).showBlocked;
+      return json({ description: 'Acme store', updatedAt: null, showBlocked: state.showBlocked });
+    }
     if (url.pathname === '/api/home') return json(state.home);
     if (url.pathname === '/api/repos') return json(state.repos);
     if (url.pathname === '/api/llm/config') {
@@ -262,6 +268,38 @@ afterEach(() => {
 });
 
 describe('Home', () => {
+  it('excludes blocked flows by default and restores them with the control', async () => {
+    serve({ showBlocked: false, home: {
+      ...HOME,
+      attention: [...HOME.attention, { id: 'blocked-doc', kind: 'blocked-document', title: 'Blocked document', status: 'Blocked', fact: 'Needs recipe', at: null, href: '/context' }],
+      areas: [...HOME.areas, { area: 'blocked-only', total: 1, byStatus: { proved: 0, failed: 0, blocked: 1, 'not-testable': 0, 'not-run': 0 } }],
+      changed: [...HOME.changed, { ref: 'blocked-change', title: 'Blocked change', event: 'Blocked', at: new Date().toISOString(), href: '/context' }],
+    } });
+    renderHome('/');
+    const strip = await screen.findByRole('list', { name: 'Today' });
+    expect(within(strip).getByText('50%')).toBeInTheDocument();
+    expect(within(strip).getByText('2 of 4 flows succeeded, excluding blocked')).toBeInTheDocument();
+    expect(within(strip).queryByRole('listitem', { name: '1 Blocked' })).toBeNull();
+    expect(within(chart()).queryByRole('button', { name: 'Blocked' })).toBeNull();
+    expect(screen.queryByText('Blocked document')).toBeNull();
+    expect(screen.queryByText('blocked-only')).toBeNull();
+    expect(screen.queryByText('Blocked change')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Show blocked' })).toBeNull();
+    await userEvent.click(screen.getByRole('link', { name: 'Settings' }));
+    const setting = await screen.findByRole('checkbox', { name: 'Show blocked results' });
+    await waitFor(() => expect(setting).toBeEnabled());
+    await userEvent.click(setting);
+    await waitFor(() => expect(setting).toBeChecked());
+    await waitFor(() => expect(setting).toBeEnabled());
+    await userEvent.click(screen.getByRole('link', { name: 'Home' }));
+    const restoredStrip = await screen.findByRole('list', { name: 'Today' });
+    expect(screen.getByText('Blocked document')).toBeInTheDocument();
+    expect(screen.getByText('blocked-only')).toBeInTheDocument();
+    expect(screen.getByText('Blocked change')).toBeInTheDocument();
+    expect(within(restoredStrip).getByText('40%')).toBeInTheDocument();
+    expect(within(restoredStrip).getByRole('listitem', { name: '1 Blocked' })).toBeInTheDocument();
+  });
+
   it('draws today’s FLOWS in the strip above the chart, the succeeded share first', async () => {
     serve();
     renderHome();
