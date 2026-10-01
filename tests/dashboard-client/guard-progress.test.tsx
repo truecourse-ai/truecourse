@@ -7,7 +7,7 @@ import type { Repo } from '@/dashboard/data/types';
 
 const state = vi.hoisted(() => ({ flows: [] as unknown[] }));
 vi.mock('@/dashboard/shell/dashboard-state', () => ({
-  useDashboardState: () => ({ repos: [{ id: 'repo', fullName: 'acme/repo' } as Repo] }),
+  useDashboardState: () => ({ showBlocked: true, repos: [{ id: 'repo', fullName: 'acme/repo' } as Repo] }),
 }));
 vi.mock('@/lib/api', () => ({ getGuardFlows: async () => ({ flows: state.flows }) }));
 vi.mock('@/lib/socket', () => ({ connectSocket: () => ({ on: () => {}, off: () => {} }) }));
