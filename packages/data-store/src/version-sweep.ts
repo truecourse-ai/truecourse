@@ -27,6 +27,7 @@ import {
   type Db,
 } from '@truecourse/db';
 import { ContentStore, contentScope } from './content-store.js';
+import { guardEvidenceContentSha } from './guard-evidence-text.js';
 import { VERSION_RETENTION, retentionCutoff, sweepCutoff } from './retention.js';
 
 /** A version id: time-sortable, and a plain segment so it can name a route. */
@@ -126,7 +127,7 @@ export async function sweepRepoContent(db: Db, repoKey: string): Promise<Record<
       .where(eq(table.repoKey, repoKey));
     for (const row of rows) {
       for (const sha of Object.values((row.evidence as Record<string, string> | null) ?? {})) {
-        evidence.add(sha);
+        evidence.add(guardEvidenceContentSha(sha));
       }
     }
   }

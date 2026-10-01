@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
@@ -75,6 +76,23 @@ const progressEvents = (): JobView[] =>
 const stepPairs = (steps: JobStep[] | undefined) => (steps ?? []).map((s) => [s.key, s.status]);
 
 describe('executeJob — shared lifecycle envelope', () => {
+  it('stores a database summary while reporting and rethrowing the original exception', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:database' });
+    const cause = Object.assign(new Error('unsupported Unicode escape sequence'), { code: '22P05', severity: 'ERROR' });
+    const error = new DrizzleQueryError('secret query', ['secret payload'], cause);
+    let notified: Error | undefined;
+    const def: JobDefinition<Payload, ErrorMeta> = {
+      type: 'test.job', title: 'Testing', steps: [], org: p => p.org,
+      run: async () => { throw error; },
+      onError: err => { notified = err; return { level: 'error', title: 'Failed' }; },
+    };
+    await expect(executeJob(rt, def, { jobId: job.id, org: ORG })).rejects.toBe(error);
+    expect((await rt.jobStore.get(job.id))?.error).toBe('Database error (22P05): unsupported Unicode escape sequence');
+    expect(notified).toBe(error);
+    expect(captured[0]?.err).toBe(error);
+  });
+
   it('seeds the full checklist, advances it, succeeds, and posts a success notification', async () => {
     const rt = runtime();
     const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:1' });

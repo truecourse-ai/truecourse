@@ -50,6 +50,10 @@
  * two pools when that took a version.
  *
  * The `repoPath` argument is the stable repo key, never an on-disk path.
+ * Reports and run snapshots carry arbitrary captured output, stored as JSON
+ * strings inside JSONB envelopes to preserve NUL and lone UTF-16 surrogates.
+ * Readers also accept older inline objects; searchable metadata stays in columns.
+ * Text evidence uses tagged content references; visuals retain plain hashes.
  */
 
 import os from 'node:os';
@@ -103,12 +107,33 @@ import {
   type LoadedScenarios,
 } from '@truecourse/guard-runner';
 import { ContentStore, contentScope } from './content-store.js';
+import { putGuardEvidenceText, readGuardEvidenceText } from './guard-evidence-text.js';
 import { iso } from './iso.js';
 import { assertSafeRel, mapLimit, safeJoin, sha256, sortKeys } from './pack.js';
 import { newVersionId, sweepGuardSeries } from './version-sweep.js';
 import { WORK_TREE_DIR, scenariosDir } from '@truecourse/shared/work-tree';
 
 const OBJECT_CONCURRENCY = 16;
+
+function encodeGuardOutput(value: GuardGenerateReport | GuardLatest): object {
+  return { guardEncoding: 'json-v1', guardJson: JSON.stringify(value) };
+}
+
+function decodeGuardOutput<T>(value: unknown): T {
+  if (value && typeof value === 'object' && 'guardEncoding' in value) {
+    if (value.guardEncoding !== 'json-v1' || !('guardJson' in value) || typeof value.guardJson !== 'string') {
+      throw new Error('Invalid stored guard output');
+    }
+    try {
+      const decoded: unknown = JSON.parse(value.guardJson);
+      if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) throw new Error();
+      return decoded as T;
+    } catch {
+      throw new Error('Invalid stored guard output');
+    }
+  }
+  return value as T;
+}
 
 /** Reject an empty commit on the per-commit writes. */
 function requireCommit(ref: RepoRef, what: string): string {
@@ -221,7 +246,7 @@ export class PgGuardStore implements GuardStore {
       .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.scope, scope)))
       .orderBy(desc(guardRuns.ranAt), desc(guardRuns.runId))
       .limit(1);
-    return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
+    return rows[0] ? decodeGuardOutput<GuardLatest>(rows[0].snapshot) : null;
   }
 
   async writeGuardLatest(repoKey: string, latest: GuardLatest, opts: GuardRunWriteOptions = {}): Promise<void> {
@@ -244,7 +269,7 @@ export class PgGuardStore implements GuardStore {
       .from(guardRuns)
       .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, runId)))
       .limit(1);
-    return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
+    return rows[0] ? decodeGuardOutput<GuardLatest>(rows[0].snapshot) : null;
   }
 
   /** The newest run at an exact commit in a scope. */
@@ -265,7 +290,7 @@ export class PgGuardStore implements GuardStore {
       )
       .orderBy(desc(guardRuns.ranAt), desc(guardRuns.runId))
       .limit(1);
-    return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
+    return rows[0] ? decodeGuardOutput<GuardLatest>(rows[0].snapshot) : null;
   }
 
   /**
@@ -283,7 +308,7 @@ export class PgGuardStore implements GuardStore {
           : and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.scope, scopeOf(opts))),
       )
       .orderBy(asc(guardRuns.ranAt), asc(guardRuns.runId));
-    const runs: GuardHistoryEntry[] = rows.map((r) => guardHistoryEntryOf(r.snapshot as GuardLatest));
+    const runs: GuardHistoryEntry[] = rows.map((r) => guardHistoryEntryOf(decodeGuardOutput<GuardLatest>(r.snapshot)));
     return { runs };
   }
 
@@ -350,7 +375,7 @@ export class PgGuardStore implements GuardStore {
       .where(this.versionWhere(guardResults, repoKey, at))
       .orderBy(desc(guardResults.createdAt), desc(guardResults.id))
       .limit(1);
-    return rows[0] ? (rows[0].report as GuardGenerateReport) : null;
+    return rows[0] ? decodeGuardOutput<GuardGenerateReport>(rows[0].report) : null;
   }
 
   async writeGuardResult(
@@ -374,7 +399,7 @@ export class PgGuardStore implements GuardStore {
       id: newVersionId(now),
       repoKey: ref.repoKey,
       commitSha,
-      report,
+      report: encodeGuardOutput(report),
       scope,
       producedByRun: provenance.producedByRun ?? null,
       model: provenance.model ?? null,
@@ -426,7 +451,7 @@ export class PgGuardStore implements GuardStore {
         commitSha,
         branch: latest.run.branch,
         runId: latest.run.runId,
-        snapshot: latest,
+        snapshot: encodeGuardOutput(latest),
         summary: latest.summary,
         evidence: {},
         scope: scopeOf(opts),
@@ -440,7 +465,7 @@ export class PgGuardStore implements GuardStore {
         set: {
           commitSha,
           branch: latest.run.branch,
-          snapshot: latest,
+          snapshot: encodeGuardOutput(latest),
           summary: latest.summary,
           ranAt: latest.run.ranAt,
         },
@@ -481,7 +506,7 @@ export class PgGuardStore implements GuardStore {
   /**
    * Store a scenario's evidence files under the repo's evidence pool and return
    * the manifest entries (`<scenarioSeg>/<file>` → sha). A text body is stored as
-   * text; a `Buffer` — a screenshot, the session video — as bytes, and the file's
+   * serialized text; a `Buffer` — a screenshot, the session video — as bytes, and the file's
    * NAME says which it was when it is read back (see `readGuardEvidenceBytesAt`).
    */
   private async putEvidenceFiles(
@@ -497,7 +522,9 @@ export class PgGuardStore implements GuardStore {
       }
       const sha = Buffer.isBuffer(body)
         ? await this.content.putBytes(scope, body)
-        : await this.content.putText(scope, body);
+        : guardEvidenceVisual(file)
+          ? await this.content.putText(scope, body)
+          : await putGuardEvidenceText(this.content, scope, body);
       entries[`${scenarioSeg}/${file}`] = sha;
     }
     return entries;
@@ -552,7 +579,7 @@ export class PgGuardStore implements GuardStore {
   ): Promise<string | null> {
     if (!SAFE_SEGMENT.test(file)) return null;
     const located = await this.locateEvidenceSha(repoKey, evidenceDir, file);
-    return located ? this.content.get(contentScope.guardEvidence(repoKey), located) : null;
+    return located ? readGuardEvidenceText(this.content, contentScope.guardEvidence(repoKey), located) : null;
   }
 
   async listGuardEvidenceAt(repoKey: string, evidenceDir: string): Promise<string[]> {
@@ -577,7 +604,7 @@ export class PgGuardStore implements GuardStore {
     const scope = contentScope.guardEvidence(repoKey);
     // A visual artifact was stored as bytes; everything else is text, read as UTF-8.
     if (guardEvidenceVisual(file)) return this.content.getBytes(scope, sha);
-    const text = await this.content.get(scope, sha);
+    const text = await readGuardEvidenceText(this.content, scope, sha);
     return text == null ? null : Buffer.from(text, 'utf-8');
   }
 
@@ -634,7 +661,7 @@ export class PgGuardStore implements GuardStore {
     const manifest = await this.runEvidenceManifest(repoKey, runId);
     const sha = manifest?.[manifestKey];
     if (!sha) return null;
-    return this.content.get(contentScope.guardEvidence(repoKey), sha);
+    return readGuardEvidenceText(this.content, contentScope.guardEvidence(repoKey), sha);
   }
 
   /**

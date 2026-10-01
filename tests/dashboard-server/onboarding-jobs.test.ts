@@ -29,6 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import type { Runner } from 'graphile-worker';
@@ -1081,6 +1082,29 @@ describe('the guard generate job', () => {
     expect(enqueuedPayloads[1]).toMatchObject({ repoFullName: REPO, workspaceOrgId: ORG, source: 'chain' });
   });
 
+  it('persists PDF output in the report and birth transcript before completing and chaining once', async () => {
+    await saveSetupBundle();
+    const output = '%PDF-1.7\nstream\n\u0000\nendstream';
+    generateImpl = async (repoRoot, options) => {
+      const result = await authoring(repoRoot, options);
+      const report = JSON.parse(fs.readFileSync(path.join(repoRoot, '.truecourse', 'guard', 'result.json'), 'utf-8')) as GuardGenerateReport;
+      report.coverageGaps = [{ doc: 'docs/orgs.md', anchor: 'create', kind: 'no-interface', reason: output }];
+      report.birthFindings[0].stdout = output;
+      fs.writeFileSync(path.join(repoRoot, report.birthFindings[0].evidencePath!, 'transcript.txt'), output);
+      writeCloneGuardResult(repoRoot, report);
+      return result;
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({ status: 'succeeded', error: null });
+    const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(run.status).toBe('completed');
+    expect(await readGuardResult(REPO)).toMatchObject({ coverageGaps: [{ reason: output }], birthFindings: [{ stdout: output }] });
+    expect((await loadScenarios({ repoKey: REPO, commitSha: (await readGuardBaselineCommit(REPO))! })).scenarios).toHaveLength(1);
+    expect(await new PgGuardStore(db).readGuardEvidenceAt(REPO, '.truecourse/guard/evidence/birth1/a1', 'transcript.txt')).toBe(output);
+    expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
+  });
+
   // A seed that crashed refuses every flow: the engine still ends `ok`, the
   // report carries the refusal and NOTHING is authored. Chaining the baseline
   // run on that hands it an empty scenario set to fail on seconds later, which
@@ -1371,6 +1395,24 @@ describe('the guard generate job', () => {
     expect(events.some(e => e.kind === 'run' && e.run.status === 'completed')).toBe(false);
   });
 
+  it('summarizes database failures in the job, activity and notification and chains nothing', async () => {
+    await saveSetupBundle();
+    const cause = Object.assign(new Error('unsupported Unicode escape sequence'), { code: '22P05', severity: 'ERROR' });
+    class FailingResults extends PgGuardStore {
+      override async writeGuardResult(): Promise<void> {
+        throw new DrizzleQueryError('insert into guard_results values ($1)', ['secret PDF'.repeat(20_000)], cause);
+      }
+    }
+    setGuardStore(new FailingResults(db));
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+    const summary = 'Database error (22P05): unsupported Unicode escape sequence';
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({ status: 'failed', error: summary });
+    expect((await listStoredSessionRuns(REPO, 'guard-generate'))[0]).toMatchObject({ status: 'failed', error: { message: summary } });
+    expect((await new NotificationStore(db).listForOrg(ORG))[0]).toMatchObject({ level: 'error', body: summary });
+    expect(enqueued).toEqual(['repo.guard-generate']);
+  });
+
   it('a cancelled generate leaves the store exactly as it found it', async () => {
     await saveSetupBundle();
     let reached = false;
@@ -1470,6 +1512,26 @@ describe('the guard run job', () => {
       ReturnType<RunEngine>
     >;
   };
+
+  it('persists baseline assertion output and transcript containing NUL', async () => {
+    await storeGeneratedSet();
+    await saveSetupBundle();
+    const output = '%PDF-1.7\n\u0000\nendstream';
+    runImpl = async (repoRoot, options) => {
+      const result = await failingRun(repoRoot, options);
+      if (result.latest) {
+        result.latest.scenarios[0].failure!.actual = output;
+        result.latest.scenarios[0].failure!.stdout = output;
+        fs.writeFileSync(path.join(repoRoot, result.latest.scenarios[0].evidencePath!, 'transcript.txt'), output);
+      }
+      return result;
+    };
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+    expect((await jobsOfType('repo.guard-run'))[0]).toMatchObject({ status: 'succeeded', error: null });
+    expect(await readGuardLatest(REPO)).toMatchObject({ scenarios: [{ failure: { actual: output, stdout: output } }] });
+    expect(await new PgGuardStore(db).readGuardEvidenceAt(REPO, `.truecourse/guard/evidence/${RUN_ID}/a1`, 'transcript.txt')).toBe(output);
+  });
 
   function installWorkTree(): void {
     clone = path.join(makeTmpDir('tc-onboarding-run-clone-'), 'widgets');

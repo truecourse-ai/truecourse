@@ -43,6 +43,7 @@ import type { Db } from '@truecourse/db';
 import type { JobStore, NotificationStore } from '@truecourse/data-store';
 import type { JobStep, JobView, NotificationLevel, ServerEvent } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
+import { summarizeError } from '@truecourse/core/lib/errors';
 import { isCreditsExhausted } from '@truecourse/core/lib/credits-store';
 import { JobStepTracker, type StepEmit } from './steps.js';
 
@@ -407,7 +408,7 @@ export async function executeJob<P extends JobPayload, M>(
       await settleCancelled();
     } else {
       outcomeStatus = 'failed';
-      const message = (err as Error).message;
+      const message = summarizeError(err);
       stampDuration();
       const failed = await rt.jobStore.markFailed(jobId, message);
       if (failed) await publishProgress(failed);
