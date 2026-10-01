@@ -16,6 +16,11 @@ Nothing deploys on merge. Production only ever ships commits reachable from `mai
 Both workflows use one [shared action](../../../.github/actions/deploy-vm/action.yml). It reads the provisioned settings from Azure, builds the checked-out source in the environment's ACR (tagged `pr-<n>-<sha>` or `<branch>-<sha>`), resolves the immutable digest and runs the release on the VM through Run Command. On the VM the release helper:
 
 1. Unpacks the image's `/app` and Node runtime into `/opt/truecourse/releases/<digest>` (skipped when that digest is already staged).
+   Installs the runner's Chromium and its OS dependencies from the final release
+   location, with browsers in that release's `browsers/` directory. The browser
+   install also runs for an already staged digest to restore missing binaries.
+   The server's `PLAYWRIGHT_BROWSERS_PATH` points there; repository build and
+   scenario environments exclude it, keeping their browser caches separate.
 2. Reads the app's secrets from Key Vault into `/etc/truecourse/app.json`.
 3. Points `/opt/truecourse/current` at the new release.
 4. Restarts the `truecourse` systemd unit.

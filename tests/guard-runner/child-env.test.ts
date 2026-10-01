@@ -54,6 +54,22 @@ describe('constructChildEnv — sandbox path', () => {
 })
 
 describe('constructChildEnv — passthrough path', () => {
+  it('keeps the runner browser cache out of repository installs and scenario processes', () => {
+    const saved = process.env.PLAYWRIGHT_BROWSERS_PATH
+    process.env.PLAYWRIGHT_BROWSERS_PATH = '/opt/truecourse/releases/version/browsers'
+    try {
+      expect(constructChildEnv({ passthrough: BUILD_PASSTHROUGH }).PLAYWRIGHT_BROWSERS_PATH).toBeUndefined()
+      expect(constructChildEnv({ sandbox: { home: '/sb/home', tmp: '/sb/tmp' } }).PLAYWRIGHT_BROWSERS_PATH).toBeUndefined()
+      expect(constructChildEnv({
+        passthrough: BUILD_PASSTHROUGH,
+        recipeEnv: { PLAYWRIGHT_BROWSERS_PATH: '/repo/browsers' },
+      }).PLAYWRIGHT_BROWSERS_PATH).toBe('/repo/browsers')
+    } finally {
+      if (saved === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH
+      else process.env.PLAYWRIGHT_BROWSERS_PATH = saved
+    }
+  })
+
   it('excludes host secrets and platform config even when passed through by allowlist', async () => {
     await withPlantedSecrets(() => {
       const env = constructChildEnv({ passthrough: BUILD_PASSTHROUGH })
