@@ -1,11 +1,12 @@
 /**
- * The WORKSPACE PROFILE store — what a workspace says its product is.
+ * The WORKSPACE PROFILE store: its product description and display preference.
  *
  * A workspace's name and its people are the identity provider's; this is the
- * one thing about a workspace that is ours, and it exists because the Document
+ * product description is ours, and it exists because the Document
  * scan has to attribute every document to a product or to somebody else's. The
  * sentence stored here is the whole of that subject: the scan's identity block
- * is built from it and nothing else.
+ * is built from it and nothing else. The display preference affects only Home
+ * and Flows and does not change the profile update stamp used by scans.
  *
  * One seam, ONE implementation: the Postgres store (`@truecourse/data-store`),
  * installed at boot. Nothing is installed by default, and a read that arrives
@@ -19,10 +20,13 @@ export interface WorkspaceProfile {
   workspaceOrgId: string;
   /** What the product is, in one sentence. Never empty: a row exists only once it is set. */
   description: string;
+  showBlocked?: boolean;
   updatedAt: string;
 }
 
 export interface WorkspaceProfileStore {
+  /** Update display preferences without changing the scan subject. Null if no profile exists. */
+  setShowBlocked(workspaceOrgId: string, showBlocked: boolean): Promise<WorkspaceProfile | null>;
   /** The workspace's profile, or null while it has never said what its product is. */
   get(workspaceOrgId: string): Promise<WorkspaceProfile | null>;
   /** Set it, or replace what is there. The store stamps `updatedAt`. */
@@ -51,6 +55,9 @@ const NOT_INSTALLED = 'No workspace profile store installed (boot did not run in
 class UninstalledWorkspaceProfileStore implements WorkspaceProfileStore {
   private fail(): never {
     throw new Error(NOT_INSTALLED);
+  }
+  setShowBlocked(): Promise<WorkspaceProfile | null> {
+    this.fail();
   }
   get(): Promise<WorkspaceProfile | null> {
     this.fail();
@@ -92,3 +99,6 @@ export async function requireWorkspaceDescription(workspaceOrgId: string): Promi
   if (!profile?.description) throw new WorkspaceDescriptionRequiredError();
   return profile.description;
 }
+
+export const setWorkspaceShowBlocked = (workspaceOrgId: string, showBlocked: boolean): Promise<WorkspaceProfile | null> =>
+  active.setShowBlocked(workspaceOrgId, showBlocked);

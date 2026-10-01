@@ -65,3 +65,11 @@ export function toldToDescribeWorkspace(err: unknown, navigate: (to: string) => 
   toastDescribeWorkspace(navigate, typeof detail === 'string' ? detail : undefined);
   return true;
 }
+
+/** Save the workspace-wide Home and Flows display preference. */
+export function saveWorkspaceShowBlocked(showBlocked: boolean): Promise<WorkspaceProfileResponse> {
+  return fetchApi<WorkspaceProfileResponse>('/api/workspace/display', {
+    method: 'PUT',
+    body: JSON.stringify({ showBlocked }),
+  });
+}

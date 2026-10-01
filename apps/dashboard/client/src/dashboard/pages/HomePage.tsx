@@ -22,8 +22,8 @@
  * run): the vocabulary follows the UNIT, so no number on this page says a
  * different word than the page it opens. Each widget names what it counts.
  *
- * Nothing is composed here: the server folded every number and computed every
- * address, so this page draws what it was told and invents no row. It re-reads
+ * The server folds every number and computes every address. The default view
+ * excludes blocked results unless Settings > Workspace includes them. It re-reads
  * on the workspace's change signal, which a settled job bumps too.
  *
  * Before any of that, ONBOARDING: a workspace without both a context source and
@@ -55,6 +55,7 @@ import { EntityList, type EntityListGroup } from '@/dashboard/ui/entity-list';
 import { StackedArea, type StackedSeries } from '@/dashboard/ui/stacked-area';
 import { CONTEXT_DOC_TONE, StatusWord, type StatusTone } from '@/dashboard/ui/status-word';
 import { SegmentedControl } from '@/dashboard/ui/segmented-control';
+import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { useOnboarding } from '@/dashboard/shell/use-onboarding';
 import { documentsHref } from './context-hrefs';
 import { flowsStatusHref } from './flow-hrefs';
@@ -270,8 +271,28 @@ function dayOf(iso: string): 'today' | 'yesterday' | 'earlier' {
 function Dashboard({ signal }: { signal: number }) {
   const navigate = useNavigate();
   const [period, setPeriod] = useState<HomePeriod>('30d');
-  const { home, error } = useHome(period, signal);
-
+  const { home: fullHome, error } = useHome(period, signal);
+  const { showBlocked } = useDashboardState();
+  const home = useMemo(() => {
+    if (!fullHome || showBlocked) return fullHome;
+    return {
+      ...fullHome,
+      today: {
+        total: fullHome.today.total - fullHome.today.byStatus.blocked,
+        byStatus: { ...fullHome.today.byStatus, blocked: 0 },
+      },
+      trend: fullHome.trend.map((point) => ({
+        ...point, byStatus: { ...point.byStatus, blocked: 0 },
+      })),
+      areas: fullHome.areas.map((area) => ({
+        ...area,
+        total: area.total - area.byStatus.blocked,
+        byStatus: { ...area.byStatus, blocked: 0 },
+      })).filter((area) => area.total > 0),
+      attention: fullHome.attention.filter((row) => row.kind !== 'blocked-document' && row.status !== 'Blocked'),
+      changed: fullHome.changed.filter((row) => row.event !== 'Blocked'),
+    };
+  }, [fullHome, showBlocked]);
   const today = home?.today ?? null;
 
   // The chart's points are the baseline runs; its right edge is today's
@@ -325,17 +346,17 @@ function Dashboard({ signal }: { signal: number }) {
             it. */}
         {today && (
           <div
-            className="grid grid-cols-2 border-b border-border sm:grid-cols-3 lg:grid-cols-6 [&>*]:border-b [&>*]:border-r [&>*]:border-border lg:[&>*]:border-b-0 [&>*:nth-child(2n)]:border-r-0 sm:[&>*:nth-child(2n)]:border-r sm:[&>*:nth-child(3n)]:border-r-0 lg:[&>*:nth-child(3n)]:border-r lg:[&>*:last-child]:border-r-0"
+            className={`grid grid-cols-2 border-b border-border sm:grid-cols-3 ${showBlocked ? 'lg:grid-cols-6' : 'lg:grid-cols-5'} [&>*]:border-b [&>*]:border-r [&>*]:border-border lg:[&>*]:border-b-0 [&>*:nth-child(2n)]:border-r-0 sm:[&>*:nth-child(2n)]:border-r sm:[&>*:nth-child(3n)]:border-r-0 lg:[&>*:nth-child(3n)]:border-r lg:[&>*:last-child]:border-r-0`}
             role="list"
             aria-label="Today"
           >
             <div role="listitem" className="bg-background px-6 py-4">
               <span className="block text-2xl font-semibold tabular-nums text-foreground">{provenShare}%</span>
               <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                {`${today.byStatus.succeeded} of ${today.total} ${today.total === 1 ? 'flow' : 'flows'} succeeded`}
+                {`${today.byStatus.succeeded} of ${today.total} ${today.total === 1 ? 'flow' : 'flows'} succeeded${showBlocked ? '' : ', excluding blocked'}`}
               </span>
             </div>
-            {HOME_FLOW_STATUS_ORDER.map((status) => (
+            {HOME_FLOW_STATUS_ORDER.filter((status) => showBlocked || status !== 'blocked').map((status) => (
               <button
                 key={status}
                 type="button"
@@ -363,7 +384,7 @@ function Dashboard({ signal }: { signal: number }) {
           ) : (
             <StackedArea<HomeFlowStatus>
               label="Flows over time"
-              series={SERIES}
+              series={showBlocked ? SERIES : SERIES.filter((series) => series.key !== 'blocked')}
               points={points}
               numbersAtRest={false}
               onPickSeries={(status) => navigate(flowsStatusHref(status))}
@@ -381,7 +402,7 @@ function Dashboard({ signal }: { signal: number }) {
         <div className="border-b border-border">
           <Widget title="Needs attention" to={'/agent'} toWord="Agent">
             {attention.length === 0 ? (
-              <Nothing>Nothing is waiting on you.</Nothing>
+              <Nothing>{!showBlocked && (fullHome?.attention.length ?? 0) > 0 ? 'No attention items match this view.' : 'Nothing is waiting on you.'}</Nothing>
             ) : (
               <ul className="divide-y divide-border/60" aria-label="Needs attention">
                 {attention.map((row) => (
@@ -401,7 +422,7 @@ function Dashboard({ signal }: { signal: number }) {
         <div className="grid grid-cols-1 border-b border-border lg:grid-cols-2 [&>*]:border-b [&>*]:border-border lg:[&>*]:border-b-0 lg:[&>*]:border-r lg:[&>*:last-child]:border-r-0">
           <Widget title="Areas" unit="by section" to={documentsHref({})} toWord="Documents">
             {(home?.areas ?? []).length === 0 ? (
-              <Nothing>No document is read by a repository yet.</Nothing>
+              <Nothing>{!showBlocked && (fullHome?.areas.length ?? 0) > 0 ? 'No sections match this view.' : 'No document is read by a repository yet.'}</Nothing>
             ) : (
               <ul className="divide-y divide-border/60" aria-label="Areas">
                 {(home?.areas ?? []).map((area) => (

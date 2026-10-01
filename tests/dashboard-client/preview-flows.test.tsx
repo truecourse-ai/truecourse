@@ -107,8 +107,9 @@ const CHECKOUT = flow({
 });
 
 /** Two connected repositories, one flow each. */
-function serve(options: { cliFlows?: unknown[]; webFlows?: unknown[] } = {}) {
+function serve(options: { cliFlows?: unknown[]; webFlows?: unknown[]; showBlocked?: boolean } = {}) {
   const state = {
+    showBlocked: options.showBlocked ?? true,
     calls: [] as string[],
     cli: options.cliFlows ?? [WRITE_READ],
     web: options.webFlows ?? [CHECKOUT],
@@ -118,6 +119,11 @@ function serve(options: { cliFlows?: unknown[]; webFlows?: unknown[] } = {}) {
     const url = new URL(href, window.location.origin);
     const method = (init?.method ?? 'GET').toUpperCase();
     state.calls.push(method === 'GET' ? `${url.pathname}${url.search}` : `${method} ${url.pathname}`);
+    if (url.pathname === '/api/workspace/profile') return json({ description: 'Acme store', updatedAt: null, showBlocked: state.showBlocked });
+    if (url.pathname === '/api/workspace/display') {
+      state.showBlocked = JSON.parse(String(init?.body)).showBlocked;
+      return json({ description: 'Acme store', updatedAt: null, showBlocked: state.showBlocked });
+    }
     if (url.pathname === '/api/repos') return json([CLI, WEB]);
     if (url.pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     if (url.pathname === `/api/repos/${CLI.id}/guard/flows`) return json({ recipe: null, flows: state.cli });
@@ -166,6 +172,30 @@ afterEach(() => {
 });
 
 describe('Flows, the index', () => {
+  it('uses the workspace preference and removes the page control', async () => {
+    serve({ showBlocked: false });
+    renderAt('/flows');
+    await screen.findByText('Writes a file and reads it back');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(screen.queryByText('Checks out with a saved card')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Show blocked' })).toBeNull();
+    await userEvent.click(screen.getByRole('link', { name: 'Settings' }));
+    const setting = await screen.findByRole('checkbox', { name: 'Show blocked results' });
+    await waitFor(() => expect(setting).toBeEnabled());
+    await userEvent.click(setting);
+    await waitFor(() => expect(setting).toBeChecked());
+    await waitFor(() => expect(setting).toBeEnabled());
+    await userEvent.click(screen.getByRole('link', { name: 'Flows' }));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+  });
+
+  it('honors a link to blocked flows even when the workspace excludes them', async () => {
+    serve({ showBlocked: false });
+    renderAt('/flows?status=blocked');
+    expect(await screen.findByText('Checks out with a saved card')).toBeInTheDocument();
+    expect(rows()).toHaveLength(1);
+  });
+
   it('lists the flows of every connected repository, each naming the repository it belongs to', async () => {
     const state = serve();
     renderAt('/flows');

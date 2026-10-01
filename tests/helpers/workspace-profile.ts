@@ -36,6 +36,13 @@ export interface MemoryWorkspaceProfiles extends WorkspaceProfileStore {
 export function memoryWorkspaceProfiles(): MemoryWorkspaceProfiles {
   const rows = new Map<string, WorkspaceProfile>();
   return {
+    async setShowBlocked(workspaceOrgId, showBlocked) {
+      const profile = rows.get(workspaceOrgId);
+      if (!profile) return null;
+      const next = { ...profile, showBlocked };
+      rows.set(workspaceOrgId, next);
+      return next;
+    },
     async get(workspaceOrgId) {
       return rows.get(workspaceOrgId) ?? null;
     },
@@ -43,6 +50,7 @@ export function memoryWorkspaceProfiles(): MemoryWorkspaceProfiles {
       const profile: WorkspaceProfile = {
         workspaceOrgId,
         description,
+        showBlocked: rows.get(workspaceOrgId)?.showBlocked ?? false,
         updatedAt: new Date().toISOString(),
       };
       rows.set(workspaceOrgId, profile);
@@ -78,6 +86,9 @@ export function installDescribedWorkspaces(
   description: string = TEST_WORKSPACE_DESCRIPTION,
 ): void {
   const store: WorkspaceProfileStore = {
+    async setShowBlocked(workspaceOrgId, showBlocked) {
+      return { workspaceOrgId, description, showBlocked, updatedAt: new Date().toISOString() };
+    },
     async get(workspaceOrgId) {
       return { workspaceOrgId, description, updatedAt: '2026-01-01T00:00:00.000Z' };
     },

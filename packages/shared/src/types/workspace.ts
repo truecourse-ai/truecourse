@@ -187,6 +187,8 @@ export function normalizeWorkspaceDescription(raw: unknown): string | null {
 
 /** Settings › Workspace: what this workspace says its product is. */
 export interface WorkspaceProfileResponse {
+  /** Include blocked results on Home and Flows. Defaults to false. */
+  showBlocked?: boolean
   /** Null until it has been set — which no route that connects anything allows. */
   description: string | null
   updatedAt: string | null

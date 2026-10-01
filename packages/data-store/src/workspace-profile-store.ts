@@ -20,12 +20,21 @@ function toProfile(row: Row): WorkspaceProfile {
   return {
     workspaceOrgId: row.workspaceOrgId,
     description: row.description,
+    showBlocked: row.showBlocked,
     updatedAt: iso(row.updatedAt),
   };
 }
 
 export class PgWorkspaceProfileStore implements WorkspaceProfileStore {
   constructor(private readonly db: Db) {}
+
+  async setShowBlocked(workspaceOrgId: string, showBlocked: boolean): Promise<WorkspaceProfile | null> {
+    const [row] = await this.db.update(workspaceProfiles)
+      .set({ showBlocked })
+      .where(eq(workspaceProfiles.workspaceOrgId, workspaceOrgId))
+      .returning();
+    return row ? toProfile(row) : null;
+  }
 
   async get(workspaceOrgId: string): Promise<WorkspaceProfile | null> {
     const rows = await this.db
