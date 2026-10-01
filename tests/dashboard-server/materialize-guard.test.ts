@@ -16,6 +16,8 @@ import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { guardFlowsPath, guardClaimsPath, scenariosDir } from '@truecourse/shared/work-tree';
 import { PgGuardStore } from '../../packages/data-store/src/index';
 import { setGuardStore, resetGuardStore, saveScenarios } from '@truecourse/core/lib/guard-store';
+import { writeGuardResult } from '@truecourse/core/lib/guard-store';
+import { readGuardResult } from '@truecourse/guard-runner';
 import { materializeStoredGuardState } from '../../apps/dashboard/server/src/jobs/materialize-guard';
 
 const REPO = 'acme/api';
@@ -56,6 +58,18 @@ async function storeSet(): Promise<void> {
 }
 
 describe('materializeStoredGuardState', () => {
+  it('decodes captured report text before writing it into the next work tree', async () => {
+    await storeSet();
+    const report = {
+      generatedAt: '2026-01-01T00:00:00Z', status: 'ok' as const, sectionsTotal: 1, sectionsChanged: 1,
+      skippedUnchanged: 0, noChanges: false, written: [], birthFindings: [], errors: [], extractionFailures: [], orphaned: [],
+      coverageGaps: [{ doc: 'README.md', anchor: 'download', kind: 'no-interface' as const, reason: '%PDF\u0000\ud800' }],
+    };
+    await writeGuardResult({ repoKey: REPO, commitSha: COMMIT }, report);
+    await materializeStoredGuardState(REPO, treeDir);
+    expect(readGuardResult(treeDir)).toEqual(report);
+  });
+
   it('puts the committed flows and claims into the clone beside the scenario yaml', async () => {
     await storeSet();
 

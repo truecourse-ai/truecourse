@@ -32,6 +32,7 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  */
 
 import { log } from '@truecourse/core/lib/logger';
+import { summarizeError, UserFacingError } from '@truecourse/core/lib/errors';
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { loadGuardSetupBundle, writeGuardResult } from '@truecourse/core/lib/guard-store';
@@ -307,7 +308,11 @@ export function createRepoGuardGenerateTask(
             // The report the engine left in the tree is what gets stored, so the
             // row's counts come from it too — never from a result it could differ from.
             const report = readGeneratedReport(tree.dir) ?? buildGuardReport(guard, new Date().toISOString());
-            await persistGeneratedGuard(ref, tree.dir, report, provenance);
+            try {
+              await persistGeneratedGuard(ref, tree.dir, report, provenance);
+            } catch (cause) {
+              throw new UserFacingError("Generation finished, but we couldn't save all its results.", { cause });
+            }
 
             // Keep successful documents and the failure report, but do not present
             // an incomplete extraction as success or chain its baseline run.
@@ -397,7 +402,7 @@ export function createRepoGuardGenerateTask(
       return {
         level: 'error',
         title: 'Flow generation failed',
-        body: firstLine(err.message),
+        body: firstLine(summarizeError(err)),
         data: { repoFullName: payload.repoFullName, ...(runId ? { runId } : {}) },
       };
     },

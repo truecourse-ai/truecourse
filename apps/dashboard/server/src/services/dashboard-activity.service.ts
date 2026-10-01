@@ -7,6 +7,7 @@ import {
   type SessionRunStore,
 } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
+import { summarizeError } from '@truecourse/core/lib/errors';
 import { isCreditsExhausted } from '@truecourse/core/lib/credits-store';
 import { wasCancelled, type JobContext } from '@truecourse/jobs';
 import { mirrorTracker, type OnboardingJobPayload } from '../jobs/tasks/onboarding.js';
@@ -56,7 +57,7 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
   } catch (thrown) {
     const error = reasonFor(thrown, credits);
     const paused = isCreditsExhausted(error);
-    const message = error instanceof Error ? error.message : String(error);
+    const message = summarizeError(error);
     run.finish(paused ? 'paused' : ctx.signal?.aborted ? stopped(ctx.signal) : 'failed', {
       error: { message, ...(paused ? { kind: 'credits' } : {}) },
     });

@@ -14,7 +14,9 @@
  *                         (denormalized counts) + `branch` are lifted out for
  *                         cheap trend queries without parsing it. `evidence` is
  *                         the per-run manifest `{ "<scenarioId>/<file>":
- *                         contentSha }` into the content pool (scope guard-evidence).
+ *                         contentRef }` into the content pool (scope guard-evidence).
+ *                         Serialized transcript text uses `json-v1:<sha>` refs;
+ *                         legacy text and visual bytes use plain hashes.
  *   guard_results       — one row per `guard generate`: the report the
  *                         dashboard reads back, newest of the scope first.
  *   guard_scenario_sets — one row per generate: the content-addressed manifest
@@ -62,7 +64,7 @@ export const guardRuns = pgTable(
     snapshot: jsonb('snapshot').$type<unknown>().notNull(),
     /** Denormalized `GuardSummary` counts for the run trend (avoids parsing `snapshot`). */
     summary: jsonb('summary').$type<unknown>().notNull(),
-    /** Per-run evidence manifest `{ "<scenarioId>/<file>": 'sha256-…' }` into `content`. */
+    /** Per-run evidence manifest: content hashes, tagged `json-v1:` for serialized text. */
     evidence: jsonb('evidence').$type<unknown>().notNull().default({}),
     /**
      * The run's SECTION SUMMARY `{ "<docRef>#<anchor>": status }`, what every
@@ -98,7 +100,7 @@ export const guardResults = pgTable(
     /** Full `GuardGenerateReport` — one `guard generate` run-result. */
     report: jsonb('report').$type<unknown>().notNull(),
     /**
-     * Birth-finding evidence manifest `{ "<scenarioSeg>/<file>": 'sha256-…' }` into
+     * Birth-finding evidence manifest `{ "<scenarioSeg>/<file>": contentRef }` into
      * `content` (scope guard-evidence). A birth run is `persist: false`, so it never
      * creates a `guard_runs` row — its transcripts hang off the generate report here,
      * copied out of the ephemeral clone by the `repo.guard-generate` job.
