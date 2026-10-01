@@ -8,6 +8,10 @@ as "interrupted by server restart". Rolling back is deploying the previous diges
 
 Mutating commands require root and a nonblocking flock. Azure credentials stay in
 memory; the app's env file is written 0640 root:truecourse.
+
+Each release owns its Playwright cache. Installation uses the final package path
+so browser ownership records survive staging; repository builds never inherit
+the runner's cache path.
 """
 import argparse
 import contextlib
@@ -157,14 +161,29 @@ def activate_link(release):
     os.replace(temp, ROOT / 'current')
 
 
+def install_browser(release):
+    """Provision the runner's Chromium in this release, outside repository caches."""
+    node = release / 'runtime/bin/node'
+    cli = release / 'app/packages/guard-runner/node_modules/playwright-core/cli.js'
+    browsers = release / 'browsers'
+    browsers.mkdir(mode=0o755, exist_ok=True)
+    shutil.chown(browsers, user='truecourse', group='truecourse')
+    run([str(node), str(cli), 'install-deps', 'chromium'])
+    run(['runuser', '-u', 'truecourse', '--', 'env', 'HOME=/var/lib/truecourse/home',
+         f'PLAYWRIGHT_BROWSERS_PATH={browsers}',
+         str(node), str(cli), 'install', 'chromium'])
+
+
 def stage(config, image):
     """Unpack the image's /app and Node runtime into its release directory (idempotent)."""
     target = release_path(config, image)
     if target.exists():
         if read_json(target / 'release.json')['image'] != image:
             raise RuntimeError('Existing release metadata does not match image')
+        install_browser(target)
         return target
     temporary = Path(tempfile.mkdtemp(prefix='.install-', dir=ROOT / 'releases'))
+    complete = False
     registry = config['registryLoginServer']
     try:
         # Dedicated Docker config avoids persisting registry credentials in root's home.
@@ -198,17 +217,16 @@ def stage(config, image):
                 shim.unlink()
         run([str(node), str(temporary / 'runtime/lib/node_modules/corepack/dist/corepack.js'),
              'enable', '--install-directory', str(temporary / 'runtime/bin')])
-        cli = temporary / 'app/packages/guard-runner/node_modules/playwright-core/cli.js'
-        run([str(node), str(cli), 'install-deps', 'chromium'])
         # mkdtemp defaults to 0700; the service user needs access for Playwright.
         temporary.chmod(0o755)
-        run(['runuser', '-u', 'truecourse', '--', 'env', 'HOME=/var/lib/truecourse/home',
-             str(node), str(cli), 'install', 'chromium'])
-        atomic_json(temporary / 'release.json', {'image': image, 'installedAt': utc_now()}, mode=0o644)
         temporary.rename(target)
+        temporary = target
+        install_browser(target)
+        atomic_json(target / 'release.json', {'image': image, 'installedAt': utc_now()}, mode=0o644)
+        complete = True
         return target
     finally:
-        if temporary.exists():
+        if not complete and temporary.exists():
             shutil.rmtree(temporary)
 
 
@@ -307,6 +325,7 @@ def launch():
     if not release:
         raise RuntimeError('No installed application release')
     env['PATH'] = str(release / 'runtime/bin') + ':/usr/local/bin:/usr/bin:/bin'
+    env['PLAYWRIGHT_BROWSERS_PATH'] = str(release / 'browsers')
     os.execve(str(release / 'runtime/bin/node'),
               ['node', str(release / 'app/apps/dashboard/server/dist/index.js')], env)
 

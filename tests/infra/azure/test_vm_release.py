@@ -18,7 +18,7 @@ IMAGE = 'registry.azurecr.io/truecourse@sha256:' + DIGEST
 OLD_IMAGE = 'registry.azurecr.io/truecourse@sha256:' + 'b' * 64
 CONFIG = {'registryLoginServer': 'registry.azurecr.io', 'databaseServerName': 'managed-dev',
           'keyVaultName': 'vault-dev', 'fqdn': 'example.test', 'environment': 'dev',
-          'subscriptionId': 'test', 'resourceGroup': 'dev'}
+          'subscriptionId': 'test', 'resourceGroup': 'dev', 'tenantId': 'test'}
 
 
 class ReleaseTests(unittest.TestCase):
@@ -35,6 +35,7 @@ class ReleaseTests(unittest.TestCase):
         (vm.ROOT / 'releases').mkdir()
         # Avoid host ownership changes. Keep real atomic files/symlinks for tests.
         self.stack.enter_context(patch.object(vm.os, 'chown'))
+        self.stack.enter_context(patch.object(vm.shutil, 'chown'))
         self.stack.enter_context(patch.object(vm.grp, 'getgrnam', return_value=Mock(gr_gid=1)))
 
     def artifact(self, image):
@@ -62,6 +63,71 @@ class ReleaseTests(unittest.TestCase):
                         IMAGE + '; touch bad', IMAGE.upper(), IMAGE[:-1]]:
             with self.subTest(image=invalid), self.assertRaises(ValueError):
                 vm.validate_image(CONFIG, invalid)
+
+    def unpacked_image(self, args, **kwargs):
+        if 'create' in args:
+            return Mock(stdout='container-id')
+        if 'cp' in args and args[-2] == 'container-id:/app':
+            app = Path(args[-1])
+            for relative in ('apps/dashboard/server/dist/index.js',
+                             'packages/guard-runner/node_modules/playwright-core/cli.js'):
+                file = app / relative
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.touch()
+        if 'cp' in args and args[-2] == 'container-id:/usr/local/.':
+            node = Path(args[-1]) / 'bin/node'
+            node.parent.mkdir(parents=True)
+            node.touch()
+        if args[:1] == ['runuser']:
+            cli = Path(args[-3])
+            self.assertTrue(cli.exists())
+            self.assertNotIn('.install-', str(cli))
+            cache = Path(next(arg.split('=', 1)[1] for arg in args
+                              if arg.startswith('PLAYWRIGHT_BROWSERS_PATH=')))
+            links = cache / '.links'
+            links.mkdir()
+            (links / 'owner').write_text(str(cli.parent))
+        return Mock()
+
+    def stage_image(self, installer=None):
+        with patch.object(vm, 'azure_token', return_value='token'), \
+             patch.object(vm, 'fetch_json', return_value={'refresh_token': 'token'}), \
+             patch.object(vm, 'run', side_effect=installer or self.unpacked_image):
+            return vm.stage(CONFIG, IMAGE)
+
+    def test_browser_owner_survives_staging_in_release_specific_cache(self):
+        release = self.stage_image()
+        owner = Path((release / 'browsers/.links/owner').read_text())
+        self.assertTrue((owner / 'cli.js').is_file())
+        self.assertTrue(owner.is_relative_to(release))
+        self.assertEqual(vm.read_json(release / 'release.json')['image'], IMAGE)
+        self.assertEqual(list((vm.ROOT / 'releases').iterdir()), [release])
+
+    def test_browser_install_failure_removes_incomplete_release(self):
+        def fail(args, **kwargs):
+            if args[:1] == ['runuser']:
+                raise RuntimeError('browser download failed')
+            return self.unpacked_image(args, **kwargs)
+        with self.assertRaisesRegex(RuntimeError, 'browser download failed'):
+            self.stage_image(fail)
+        self.assertEqual(list((vm.ROOT / 'releases').iterdir()), [])
+
+    def test_existing_digest_restores_browser_without_unpacking_image(self):
+        release = self.artifact(IMAGE)
+        with patch.object(vm, 'run') as run:
+            self.assertEqual(vm.stage(CONFIG, IMAGE), release)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(len(commands), 2)
+        self.assertIn(f'PLAYWRIGHT_BROWSERS_PATH={release / "browsers"}', commands[1])
+        self.assertEqual(commands[1][-2:], ['install', 'chromium'])
+
+    def test_launch_uses_active_release_browser_even_with_host_override(self):
+        release = self.existing()
+        with patch.dict(vm.os.environ, {'PLAYWRIGHT_BROWSERS_PATH': '/shared/cache'}), \
+             patch.object(vm.os, 'execve') as execute:
+            vm.launch()
+        self.assertEqual(execute.call_args.args[2]['PLAYWRIGHT_BROWSERS_PATH'],
+                         str(release / 'browsers'))
 
     def test_ready_means_the_new_release_answers(self):
         health = {'status': 'ok', 'release': DIGEST}
