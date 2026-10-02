@@ -8,6 +8,13 @@
  * asserts comes from the documents; the product is only where the session
  * finds out how to reach each step.
  *
+ * The product is brought up bare (`world.ts`), so a test that starts from
+ * anything (an account, a project, a record) has a SEED: a module beside the
+ * spec whose one function creates that starting state, uniquely named, each
+ * time the test runs. Seed and spec are written together, proven together and
+ * stored together, and no test reads what another's seed made. A seed that
+ * does not hold is the test's own defect and never a finding.
+ *
  * A test is kept in one of two states. `passing`: the product does what the
  * documents say. `failing`: the test asserts what the documents say, the
  * product does something else, and the test fails at exactly that point, which
@@ -56,7 +63,11 @@ export const FlowTestResultSchema = z.object({
   flowId: z.string().min(1),
   /** The spec's file name inside the tests directory. */
   file: z.string().min(1),
-  outcome: z.enum(['pass', 'fail', 'skipped']),
+  /**
+   * `seed-failed`: the flow's seed threw or ran out of time, so the test never
+   * started. It says nothing about the product.
+   */
+  outcome: z.enum(['pass', 'fail', 'seed-failed', 'skipped']),
   durationMs: z.number().nonnegative(),
   /** The failing assertion or error, as Playwright printed it. */
   error: z.string().optional(),
@@ -73,6 +84,8 @@ export const FlowTestRecordSchema = z.object({
   status: FlowTestStatusSchema,
   /** The spec's file name; absent for a `blocked` flow, which has none. */
   file: z.string().min(1).optional(),
+  /** The seed's file name, for a test that starts from data of its own. */
+  seed: z.string().min(1).optional(),
   summary: z.string().min(1),
   disagreement: FlowTestDisagreementSchema.optional(),
   blockedBy: z.string().min(1).optional(),

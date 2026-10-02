@@ -8,10 +8,14 @@
  * those scripts and the engine that runs them: the environment the scripts are
  * given, and the file `up.sh` writes back to say what is now running.
  *
+ * The world is BARE: the product installed and answering, holding nothing put
+ * there for a test. The data a test starts from is that test's own seed
+ * (`flow-tests.ts`), created when the test runs, so no two tests share any.
+ *
  * The scripts own everything about HOW: package managers, containers,
- * migrations, seeding, how many processes there are. The engine owns only what
- * must not collide between two worlds on one host, and hands it in as
- * environment: a name for containers and volumes, and ports nobody else holds.
+ * migrations, how many processes there are. The engine owns only what must not
+ * collide between two worlds on one host, and hands it in as environment: a
+ * name for containers and volumes, and ports nobody else holds.
  */
 
 import { z } from 'zod';
@@ -36,9 +40,13 @@ export const WORLD_ENV = {
 /** How many free ports a world is handed. */
 export const WORLD_PORT_COUNT = 8;
 
-/** A principal the product was seeded with, for a test to act as. */
+/**
+ * An account the product's own installation made (an installer's admin, a
+ * default root user). Never one created for tests: a seed may use it to create
+ * what its test needs, and nothing changes it.
+ */
 export const WorldAccountSchema = z.object({
-  /** How tests refer to it (`admin`, `member`, `second-user`). */
+  /** How seeds and tests refer to it (`admin`, `root`). */
   name: z.string().min(1),
   /** What it may do in the product, in the product's own words. */
   role: z.string().optional(),
@@ -59,8 +67,12 @@ export const ProductWorldSchema = z.object({
   baseUrl: z.string().url(),
   /** Every other address the product answers on, by name (`api`, `mail`). */
   urls: z.record(z.string().url()).default({}),
+  /** Empty for a product whose installation creates no account. */
   accounts: z.array(WorldAccountSchema).default([]),
-  /** Anything a test author must know that the above cannot say. */
+  /**
+   * What a seed author must know that the above cannot say: how an account
+   * comes to exist in this product, how a command reaches its datastore.
+   */
   notes: z.string().optional(),
 });
 export type ProductWorld = z.infer<typeof ProductWorldSchema>;

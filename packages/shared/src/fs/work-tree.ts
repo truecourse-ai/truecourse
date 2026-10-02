@@ -40,9 +40,10 @@
  *   world/build.sh                 install and build the product, once per checkout
  *   world/up.sh                    bring the whole product up and write world.json
  *   world/down.sh                  stop the product and discard its data
- *   world/world.json               the running product: its URL and accounts
+ *   world/world.json               the running product: its URL and what its installation made
  *   world/logs/                    what the three scripts and their servers printed
  *   scenarios/tests/<flow>.spec.ts   one Playwright test per flow
+ *   scenarios/tests/<flow>.seed.ts   the data that test starts from, created when it runs
  *   scenarios/tests/tests.json       flow → test map, with what each one proved
  *   scenarios/tests/results/         a test run's report, traces and videos
  *   scenarios/dependencies.local.json  this run's registered instances
@@ -95,6 +96,7 @@ const EXTERNALS_LOCAL_FILE = 'externals.local.json';
 const WORLD_STATE_FILE = 'world.json';
 const TESTS_INDEX_FILE = 'tests.json';
 const FLOW_TEST_SUFFIX = '.spec.ts';
+const FLOW_SEED_SUFFIX = '.seed.ts';
 
 /** `<workDir>/.truecourse` — the root of one run's tree. */
 export function workTreeDir(workDir: string): string {
@@ -303,10 +305,11 @@ export function flowTestsDir(workDir: string): string {
   return path.join(scenariosDir(workDir), TESTS_DIR);
 }
 
-/** Whether `rel`, a path inside the scenario corpus, is a flow test or the flow → test map. */
+/** Whether `rel`, a path inside the scenario corpus, is a flow test, its seed, or the flow → test map. */
 export function isFlowTestCorpusFile(rel: string): boolean {
   const [dir, name, ...rest] = rel.split('/');
-  return dir === TESTS_DIR && rest.length === 0 && name !== undefined && (name === TESTS_INDEX_FILE || name.endsWith(FLOW_TEST_SUFFIX));
+  if (dir !== TESTS_DIR || rest.length > 0 || name === undefined) return false;
+  return name === TESTS_INDEX_FILE || name.endsWith(FLOW_TEST_SUFFIX) || name.endsWith(FLOW_SEED_SUFFIX);
 }
 
 /** The Playwright spec that proves one flow. */
@@ -317,6 +320,15 @@ export function flowTestPath(workDir: string, flowId: string): string {
 /** A flow's spec file name, which is also how a test run's report names it. */
 export function flowTestFileName(flowId: string): string {
   return `${sanitizeSegment(flowId)}${FLOW_TEST_SUFFIX}`;
+}
+
+/** The module that creates what one flow's test starts from. */
+export function flowSeedPath(workDir: string, flowId: string): string {
+  return path.join(flowTestsDir(workDir), flowSeedFileName(flowId));
+}
+
+export function flowSeedFileName(flowId: string): string {
+  return `${sanitizeSegment(flowId)}${FLOW_SEED_SUFFIX}`;
 }
 
 export function flowTestsIndexPath(workDir: string): string {

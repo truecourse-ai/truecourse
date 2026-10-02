@@ -64,9 +64,11 @@ your PATH and signed in. Everything runs on `claude-opus-5-5`; set
 
 On Claude Code, a repository's product is brought up by a session that has a
 shell in the clone: it installs and builds the repository, starts its servers and
-containers on this machine, and leaves three scripts that do it again. Tests are
-then written as Playwright specs against the running product, which needs
-`@playwright/test` and its browser:
+containers on this machine, and leaves three scripts that do it again. The
+product comes up empty. Tests are then written as Playwright specs against the
+running product, each with a seed of its own that creates the accounts and data
+its flow starts from, so no two tests share any. That needs `@playwright/test`
+and its browser:
 
 ```bash
 pnpm --filter @truecourse/guard-runner exec playwright install chromium

@@ -82,8 +82,9 @@ export interface GuardSetupInProcessOptions {
   tracker?: StepTracker;
   /**
    * Set the repository up as a PRODUCT WORLD: one session with a shell in the
-   * checkout gets the product running and writes the scripts that bring it up,
-   * and none of the recipe, dependency, seed or interface steps run. The
+   * checkout gets the product running and writes the scripts that bring it up
+   * bare, and none of the recipe, dependency, seed or interface steps run:
+   * what a test starts from is seeded by that test, when generate writes it. The
    * checklist is {@link WORLD_SETUP_STEPS}. Needs the Claude Code backend.
    */
   productWorld?: boolean;
@@ -256,8 +257,7 @@ async function worldSetupInProcess(
     const sessionRunId = context.runId();
     const reason = result.status === 'failed' ? result.reason : undefined;
     if (result.status === 'ok') {
-      const { world } = result;
-      tracker?.fact('world', `${result.outcome === 'kept' ? 'the scripts in the tree still hold' : 'scripts written'}: the product answers at its own address with ${world.accounts.length} seeded account${world.accounts.length === 1 ? '' : 's'}`);
+      tracker?.fact('world', `${result.outcome === 'kept' ? 'the scripts in the tree still hold' : 'scripts written'}: the product comes up bare and answers at its own address`);
       for (const line of result.notRunning) tracker?.fact('world', `not running: ${line}`);
       tracker?.done('world', result.outcome === 'kept' ? 'scripts kept' : 'scripts written');
     } else {
