@@ -9,18 +9,20 @@
  * the headline: a section is worth the worst thing in it, so one blocked
  * scenario would erase every proof beside it.
  *
- * Beneath it three equal widgets, each one question with its own rows and its
- * own door:
+ * Beneath it the widgets, each one question with its own rows and its own
+ * door:
  *
  *   Needs attention    the conversations that ended badly, the open conflicts,
  *                      the blocked documents, the failed syncs, the provider
- *   Areas              one composition strip per area, over its SECTIONS
- *   Recently changed   the DOCUMENTS a run moved, grouped by day
+ *   Findings           the flows whose test fails: what the product did where
+ *                      its documents say otherwise. A row opens the flow
+ *   Blocked on         what the blocked flows wait on, one row per missing
+ *                      thing, most flows first
+ *   Documents          one composition strip per document, over its FLOWS
  *
- * The two of them that count documentation keep the Documents view's words
- * (Proved, Not run) while the headline keeps the Flows page's (Succeeded, Never
- * run): the vocabulary follows the UNIT, so no number on this page says a
- * different word than the page it opens. Each widget names what it counts.
+ * Every count on the page is a count of flows, in the Flows page's words
+ * (Succeeded, Never run), so no number here says a different word than the
+ * page it opens.
  *
  * The server folds every number and computes every address. The default view
  * excludes blocked results unless Settings > Workspace includes them. It re-reads
@@ -42,23 +44,20 @@ import {
   HOME_STATUS_ORDER,
   HOME_STATUS_WORD,
   type HomeAttentionRow,
-  type HomeChangeRow,
+  type HomeDocumentFlowsRow,
   type HomeFlowStatus,
   type HomePeriod,
   type HomeResponse,
-  type HomeStatus,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { fetchHome } from '@/lib/api';
 import { PageHeader, SectionTitle } from '@/dashboard/ui/bits';
-import { EntityList, type EntityListGroup } from '@/dashboard/ui/entity-list';
 import { StackedArea, type StackedSeries } from '@/dashboard/ui/stacked-area';
 import { CONTEXT_DOC_TONE, StatusWord, type StatusTone } from '@/dashboard/ui/status-word';
 import { SegmentedControl } from '@/dashboard/ui/segmented-control';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { useOnboarding } from '@/dashboard/shell/use-onboarding';
-import { documentsHref } from './context-hrefs';
-import { flowsStatusHref } from './flow-hrefs';
+import { FLOWS_BASE, flowsStatusHref } from './flow-hrefs';
 
 /**
  * The fills the five states wear: green, red, amber, grey, blue. ONE colour per
@@ -71,14 +70,6 @@ const FLOW_FILL: Record<HomeFlowStatus, { fill: string; dot: string }> = {
   blocked: { fill: 'fill-amber-500', dot: 'bg-amber-500' },
   'not-testable': { fill: 'fill-slate-400', dot: 'bg-slate-400' },
   'never-run': { fill: 'fill-sky-400', dot: 'bg-sky-400' },
-};
-
-const SECTION_FILL: Record<HomeStatus, { fill: string; dot: string }> = {
-  proved: FLOW_FILL.succeeded,
-  failed: FLOW_FILL.failed,
-  blocked: FLOW_FILL.blocked,
-  'not-testable': FLOW_FILL['not-testable'],
-  'not-run': FLOW_FILL['never-run'],
 };
 
 /** Bottom first: what is proved is the ground, the worst news sits on top. */
@@ -144,6 +135,7 @@ function Widget({
   unit,
   to,
   toWord = 'All',
+  stacked = false,
   children,
 }: {
   title: string;
@@ -151,12 +143,14 @@ function Widget({
   unit?: string;
   to?: string;
   toWord?: string;
+  /** Share a column with another widget instead of taking the row's full height. */
+  stacked?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <section
       aria-label={title}
-      className="flex h-80 min-w-0 flex-col overflow-hidden bg-background"
+      className={`flex min-w-0 flex-col overflow-hidden bg-background ${stacked ? 'min-h-0 flex-1' : 'h-80'}`}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-6 py-2">
         <span className="flex min-w-0 items-baseline gap-1.5">
@@ -208,33 +202,27 @@ function Nothing({ children }: { children: string }) {
   return <p className="px-4 py-6 text-center text-xs text-muted-foreground">{children}</p>;
 }
 
-/** One area's composition, full width: the name left, the dot counts right. */
-function AreaBar({
-  area,
-  onOpen,
-}: {
-  area: { area: string; total: number; byStatus: Record<HomeStatus, number> };
-  onOpen: () => void;
-}) {
-  const shown = HOME_STATUS_ORDER.filter((status) => area.byStatus[status] > 0);
+/** One document's flows as a composition, full width: the name left, the dot counts right. */
+function DocumentBar({ row, onOpen }: { row: HomeDocumentFlowsRow; onOpen: () => void }) {
+  const shown = HOME_FLOW_STATUS_ORDER.filter((status) => row.byStatus[status] > 0);
   return (
     <button
       type="button"
       onClick={onOpen}
-      aria-label={`${area.area || 'No area'}: ${shown
-        .map((status) => `${area.byStatus[status]} ${HOME_STATUS_WORD[status].toLowerCase()}`)
+      aria-label={`${row.doc}: ${shown
+        .map((status) => `${row.byStatus[status]} ${HOME_FLOW_STATUS_WORD[status].toLowerCase()}`)
         .join(', ')}`}
       className={`${ROW} group`}
     >
       <span className="flex w-full items-center gap-3">
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-          {area.area || 'No area'}
+        <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground" title={row.doc}>
+          {row.doc.split('/').slice(-2).join('/')}
         </span>
         <span className="flex shrink-0 items-center gap-x-2.5">
           {shown.map((status) => (
             <span key={status} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-              <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${SECTION_FILL[status].dot}`} />
-              <span className="tabular-nums text-foreground">{area.byStatus[status]}</span>
+              <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${FLOW_FILL[status].dot}`} />
+              <span className="tabular-nums text-foreground">{row.byStatus[status]}</span>
             </span>
           ))}
         </span>
@@ -244,8 +232,8 @@ function AreaBar({
         {shown.map((status) => (
           <span
             key={status}
-            className={`${SECTION_FILL[status].dot} min-w-[4px]`}
-            style={{ flexGrow: area.byStatus[status], flexBasis: 0 }}
+            className={`${FLOW_FILL[status].dot} min-w-[4px]`}
+            style={{ flexGrow: row.byStatus[status], flexBasis: 0 }}
           />
         ))}
       </span>
@@ -259,12 +247,6 @@ function when(iso: string | null): string {
   return Number.isNaN(at.getTime())
     ? ''
     : at.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-/** Today, Yesterday, Earlier: the day a change happened, from the reader's clock. */
-function dayOf(iso: string): 'today' | 'yesterday' | 'earlier' {
-  const hours = (Date.now() - new Date(iso).getTime()) / 3_600_000;
-  return hours < 24 ? 'today' : hours < 48 ? 'yesterday' : 'earlier';
 }
 
 /** The dashboard itself, drawn once the workspace has both of its halves. */
@@ -291,6 +273,14 @@ function Dashboard({ signal }: { signal: number }) {
       })).filter((area) => area.total > 0),
       attention: fullHome.attention.filter((row) => row.kind !== 'blocked-document' && row.status !== 'Blocked'),
       changed: fullHome.changed.filter((row) => row.event !== 'Blocked'),
+      blockedOn: [],
+      documents: fullHome.documents
+        .map((row) => ({
+          ...row,
+          total: row.total - row.byStatus.blocked,
+          byStatus: { ...row.byStatus, blocked: 0 },
+        }))
+        .filter((row) => row.total > 0),
     };
   }, [fullHome, showBlocked]);
   const today = home?.today ?? null;
@@ -306,23 +296,10 @@ function Dashboard({ signal }: { signal: number }) {
     }));
   }, [home, today]);
 
-  const changed = useMemo<EntityListGroup<HomeChangeRow>[]>(() => {
-    const buckets: Record<'today' | 'yesterday' | 'earlier', HomeChangeRow[]> = {
-      today: [],
-      yesterday: [],
-      earlier: [],
-    };
-    for (const row of home?.changed ?? []) buckets[dayOf(row.at)].push(row);
-    return (
-      [
-        { key: 'today', label: 'Today', items: buckets.today },
-        { key: 'yesterday', label: 'Yesterday', items: buckets.yesterday },
-        { key: 'earlier', label: 'Earlier', items: buckets.earlier },
-      ] as EntityListGroup<HomeChangeRow>[]
-    ).filter((group) => (group.items?.length ?? 0) > 0);
-  }, [home]);
-
   const attention: HomeAttentionRow[] = home?.attention ?? [];
+  const findings = home?.findings ?? [];
+  const blockedOn = home?.blockedOn ?? [];
+  const documents = home?.documents ?? [];
 
   if (error) {
     return (
@@ -420,53 +397,68 @@ function Dashboard({ signal }: { signal: number }) {
           </Widget>
         </div>
         <div className="grid grid-cols-1 border-b border-border lg:grid-cols-2 [&>*]:border-b [&>*]:border-border lg:[&>*]:border-b-0 lg:[&>*]:border-r lg:[&>*:last-child]:border-r-0">
-          <Widget title="Areas" unit="by section" to={documentsHref({})} toWord="Documents">
-            {(home?.areas ?? []).length === 0 ? (
-              <Nothing>{!showBlocked && (fullHome?.areas.length ?? 0) > 0 ? 'No sections match this view.' : 'No document is read by a repository yet.'}</Nothing>
+          <Widget
+            title="Findings"
+            unit="the product does not do what the document says"
+            to={flowsStatusHref('failed')}
+            toWord={findings.length > 0 ? `All ${findings.length}` : 'Flows'}
+          >
+            {findings.length === 0 ? (
+              <Nothing>No flow test fails.</Nothing>
             ) : (
-              <ul className="divide-y divide-border/60" aria-label="Areas">
-                {(home?.areas ?? []).map((area) => (
-                  <li key={area.area}>
-                    <AreaBar area={area} onOpen={() => navigate(documentsHref({ area: area.area }))} />
+              <ul className="divide-y divide-border/60" aria-label="Findings">
+                {findings.map((row) => (
+                  <li key={row.id}>
+                    <button type="button" onClick={() => navigate(row.href)} className={ROW} title={row.documented}>
+                      <span className="w-full truncate text-[13px] font-medium text-foreground">{row.title}</span>
+                      <span className="w-full truncate text-[11px] text-muted-foreground">{row.observed}</span>
+                    </button>
                   </li>
                 ))}
               </ul>
             )}
           </Widget>
 
-          <Widget
-            title="Recently changed"
-            unit="documents"
-            to={documentsHref({ status: 'failed' })}
-            toWord="Failed"
-          >
-            <EntityList<HomeChangeRow>
-              variant="embedded"
-              label="Recently changed"
-              groups={changed}
-              itemId={(row) => row.ref}
-              activeId={null}
-              onOpen={(id) => {
-                const row = (home?.changed ?? []).find((candidate) => candidate.ref === id);
-                if (row) navigate(row.href);
-              }}
-              emptyText="Nothing has changed."
-              renderRow={(row) => (
-                <>
-                  <span className="flex w-full items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                      {row.title}
-                    </span>
-                    <StatusWord tone={toneOf(row.event)} word={row.event} />
-                  </span>
-                  <span className="flex w-full items-center gap-2 text-[11px] text-muted-foreground">
-                    <span className="min-w-0 truncate">{row.ref}</span>
-                    <span className="ml-auto shrink-0">{when(row.at)}</span>
-                  </span>
-                </>
+          <div className="flex h-80 min-w-0 flex-col divide-y divide-border">
+            {showBlocked && (
+              <Widget title="Blocked on" to={flowsStatusHref('blocked')} toWord="Blocked" stacked>
+                {blockedOn.length === 0 ? (
+                  <Nothing>No flow is blocked.</Nothing>
+                ) : (
+                  <ul className="divide-y divide-border/60" aria-label="Blocked on">
+                    {blockedOn.map((row) => (
+                      <li key={row.reason}>
+                        <button
+                          type="button"
+                          onClick={() => navigate(row.href)}
+                          className="flex w-full items-center gap-3 px-6 py-2 text-left text-[13px] transition-colors hover:bg-muted/30"
+                          title={row.reason}
+                        >
+                          <span className="min-w-0 flex-1 truncate text-foreground">{row.reason}</span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {row.flows === 1 ? '1 flow' : `${row.flows} flows`}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Widget>
+            )}
+            <Widget title="Documents" unit="by flow" to={FLOWS_BASE} toWord="Flows" stacked>
+              {documents.length === 0 ? (
+                <Nothing>No flow cites a document yet.</Nothing>
+              ) : (
+                <ul className="divide-y divide-border/60" aria-label="Documents">
+                  {documents.map((row) => (
+                    <li key={row.doc}>
+                      <DocumentBar row={row} onOpen={() => navigate(row.href)} />
+                    </li>
+                  ))}
+                </ul>
               )}
-            />
-          </Widget>
+            </Widget>
+          </div>
         </div>
       </div>
     </div>

@@ -40,6 +40,8 @@ import {
   type HomeFlowStatus,
   type HomeFlowTally,
   type HomePeriod,
+  type HomeBlockedOnRow,
+  type HomeFindingRow,
   type HomeResponse,
   type HomeStatus,
   type HomeTally,
@@ -71,10 +73,28 @@ export interface HomeRepoView {
    * Statuses only: Home counts them and names none.
    */
   flows: readonly HomeFlowStatus[];
+  /**
+   * The same flows as rows, with the repository's id as the client routes it:
+   * what the findings, the blocked-on groups and the per-document counts are
+   * folded from. Absent on a view that only counts.
+   */
+  flowRows?: { repoId: string; items: readonly HomeFlowRow[] };
   /** Per document, the reasons its blocked sections give, in document order. */
   blockedReasons?: ReadonlyMap<string, readonly string[]>;
   /** The repository's baseline runs that carry a summary, oldest first. */
   history: readonly HomeHistoryRun[];
+}
+
+/** One flow as Home folds it: its word, the documents it cites, and what its test says. */
+export interface HomeFlowRow {
+  flowId: string;
+  title: string;
+  status: HomeFlowStatus;
+  docs: readonly string[];
+  /** A failing test's disagreement. */
+  finding?: { documented: string; observed: string };
+  /** A blocked flow's missing thing, in a few words. */
+  blockedOn?: string;
 }
 
 /** One agent run, as an attention row reads it. */
@@ -450,6 +470,52 @@ export function composeHomeAttention(
 }
 
 /** The whole page, in one answer. */
+/** One flow, read through the repository it belongs to. */
+function homeFlowHref(flowId: string, repoId: string): string {
+  return `/flows/${encodeURIComponent(flowId)}?repo=${encodeURIComponent(repoId)}`;
+}
+
+/**
+ * What the flows' own tests say, folded three ways: each failing test as a
+ * finding, the blocked flows grouped by the thing they wait on, and each
+ * document's flows counted under the five words, worst share first.
+ */
+export function composeHomeFlowFacts(
+  input: Pick<HomeInput, 'repos'>,
+): Pick<HomeResponse, 'findings' | 'blockedOn' | 'documents'> {
+  const findings: HomeFindingRow[] = [];
+  const blocked = new Map<string, number>();
+  const byDoc = new Map<string, HomeFlowStatus[]>();
+  for (const repo of input.repos) {
+    if (!repo.flowRows) continue;
+    for (const flow of repo.flowRows.items) {
+      if (flow.finding) {
+        findings.push({
+          id: `${repo.repository}:${flow.flowId}`,
+          title: flow.title,
+          ...flow.finding,
+          href: homeFlowHref(flow.flowId, repo.flowRows.repoId),
+        });
+      }
+      if (flow.status === 'blocked' && flow.blockedOn) {
+        blocked.set(flow.blockedOn, (blocked.get(flow.blockedOn) ?? 0) + 1);
+      }
+      for (const doc of flow.docs) byDoc.set(doc, [...(byDoc.get(doc) ?? []), flow.status]);
+    }
+  }
+  const share = (row: HomeFlowTally): number =>
+    row.total === 0 ? 0 : (row.byStatus.failed + row.byStatus.blocked) / row.total;
+  return {
+    findings,
+    blockedOn: [...blocked]
+      .map(([reason, flows]) => ({ reason, flows, href: '/flows?status=blocked' }))
+      .sort((a, b) => b.flows - a.flows || a.reason.localeCompare(b.reason)),
+    documents: [...byDoc]
+      .map(([doc, statuses]) => ({ doc, href: `/flows?doc=${encodeURIComponent(doc)}`, ...flowTally(statuses) }))
+      .sort((a, b) => share(b) - share(a) || b.total - a.total || a.doc.localeCompare(b.doc)),
+  };
+}
+
 export function composeHome(input: HomeInput): HomeResponse {
   const { today, areas, sections } = composeHomeToday(input);
   const { trend, changed } = composeHomeTrend(input);
@@ -460,5 +526,6 @@ export function composeHome(input: HomeInput): HomeResponse {
     areas,
     attention: composeHomeAttention(input, sections),
     changed,
+    ...composeHomeFlowFacts(input),
   };
 }

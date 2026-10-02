@@ -24,8 +24,8 @@
 
 import { useState, type ReactNode } from 'react';
 
-/** The two artifact formats the guard stores use, and the raw mode's label. */
-export type ArtifactFormat = 'YAML' | 'JSON';
+/** The artifact formats the guard stores use, and the raw mode's label. */
+export type ArtifactFormat = 'YAML' | 'JSON' | 'TS';
 
 /** Which reading is on screen. The format IS the mode name, so there are two. */
 export type ArtifactMode = 'View' | ArtifactFormat;

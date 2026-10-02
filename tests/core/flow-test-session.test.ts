@@ -23,8 +23,7 @@ const FAILING: FlowTestOutcome = {
 }
 const BLOCKED: FlowTestOutcome = { status: 'blocked', summary: 'Needs a payment provider.', blockedBy: 'no Stripe account' }
 
-const SPEC_HEAD = `import { expect } from '@playwright/test'
-import { flowTest } from './flow'
+const SPEC_HEAD = `import { expect, flowTest } from './flow'
 import { seed } from './see-invoices.seed'
 
 const test = flowTest(seed)
@@ -105,7 +104,7 @@ describe('the flow-test session gate', () => {
 
   it('refuses a seed its spec does not run', async () => {
     write({
-      spec: `import { test, expect } from '@playwright/test'\n\n${SEES_HEADING}`,
+      spec: `import { test, expect } from './flow'\n\n${SEES_HEADING}`,
       seed: seedOf('  return { owner: `owner-${unique}` }'),
     })
     expect(await judge(PASSING)).toContain('the spec does not run it')

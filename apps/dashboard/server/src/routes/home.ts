@@ -29,6 +29,7 @@ import { composeContextDocumentRows, corpusDocSourceId } from '@truecourse/core/
 import {
   composeHome,
   type HomeConflictRow,
+  type HomeFlowRow,
   type HomeRepoView,
   type HomeRunRow,
   type HomeSourceRow,
@@ -156,10 +157,12 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
           if (words.doc) docWords.set(ref, words.doc);
         }
         coverage.set(repoFullName, docWords);
+        const flowRows = await readRepoFlows(visible.get(repoFullName)!);
         repos.push({
           repository: repoFullName,
           sections,
-          flows: await readRepoFlows(visible.get(repoFullName)!.path),
+          flows: flowRows.items.map((flow) => flow.status),
+          flowRows,
           blockedReasons,
           history: await readGuardCoverageHistory(visible.get(repoFullName)!.path),
         });
@@ -169,12 +172,18 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
       // drawing: the headline is the workspace's proving, not its documentation.
       for (const [repoFullName, entry] of visible) {
         if (refsByRepo.has(repoFullName)) continue;
-        const [flows, history] = await Promise.all([
-          readRepoFlows(entry.path),
+        const [flowRows, history] = await Promise.all([
+          readRepoFlows(entry),
           readGuardCoverageHistory(entry.path),
         ]);
-        if (flows.length === 0 && history.length === 0) continue;
-        repos.push({ repository: repoFullName, sections: new Map(), flows, history });
+        if (flowRows.items.length === 0 && history.length === 0) continue;
+        repos.push({
+          repository: repoFullName,
+          sections: new Map(),
+          flows: flowRows.items.map((flow) => flow.status),
+          flowRows,
+          history,
+        });
       }
 
       const documents = corpus
@@ -225,13 +234,26 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
 }
 
 /**
- * ONE repository's flows today, as the words they wear on the Flows page — the
- * same read that page makes, so Home's headline and the list it opens can only
- * ever agree. A repository with nothing generated yet answers an empty list.
+ * ONE repository's flows today, each with the word it wears on the Flows page
+ * and what its test says — the same read that page makes, so Home's headline
+ * and the list it opens can only ever agree. A repository with nothing
+ * generated yet answers an empty list.
  */
-async function readRepoFlows(repoPath: string): Promise<GuardCoveragePlainStatus[]> {
-  const { flows } = await listGuardFlows(repoPath);
-  return flows.map((flow) => guardFlowPlainStatus(flow));
+async function readRepoFlows(entry: RegistryEntry): Promise<NonNullable<HomeRepoView['flowRows']>> {
+  const { flows } = await listGuardFlows(entry.path);
+  return {
+    repoId: entry.slug,
+    items: flows.map((flow): HomeFlowRow => ({
+      flowId: flow.flowId,
+      title: flow.title,
+      status: guardFlowPlainStatus(flow),
+      docs: flow.docs,
+      ...(flow.test?.documented && flow.test.observed
+        ? { finding: { documented: flow.test.documented, observed: flow.test.observed } }
+        : {}),
+      ...(flow.test?.blockedOn ? { blockedOn: flow.test.blockedOn } : {}),
+    })),
+  };
 }
 
 /**

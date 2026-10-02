@@ -46,7 +46,12 @@ import {
   GUARD_SETUP_INTERFACES_FILE,
 } from '../services/guard-setup/bundle.js'
 import { CuratedCorpusSchema, type CuratedCorpus } from '@truecourse/spec-consolidator'
+import { flowTestsDir, flowTestsIndexPath } from '@truecourse/shared/work-tree'
 import {
+  FlowTestsFileSchema,
+  flowTestCoverageStatus,
+  type FlowTestRecord,
+  type GuardFlowTestMark,
   GUARD_COVERAGE_PLAIN_ORDER,
   guardSectionRef,
   type GuardRunFlowSummary,
@@ -560,6 +565,8 @@ export function readGuardRunFlowSummaryFromTree(treeDir: string, latest: GuardLa
     latest,
     result,
     scenarios,
+    // A run's summary counts what the run executed, which is scenarios.
+    tests: new Map(),
     dismissals: new Map(readTreeGuardDecisions(treeDir).dismissedFlows.map((d) => [d.flowId, d])),
   }
   const summary: GuardRunFlowSummary = {}
@@ -1384,6 +1391,56 @@ export async function readGuardFlowsFile(
   return result.success ? result.data : null
 }
 
+/**
+ * The flow tests of the scenario set at `commit`, by flow id: what each flow's
+ * Playwright test proved. Empty for a repository whose flows are proven by
+ * scenarios, and for a set written before any test was.
+ */
+async function readFlowTestRecords(repoKey: string, commit?: string): Promise<Map<string, FlowTestRecord>> {
+  const rel = path.relative(repoKey, flowTestsIndexPath(repoKey)).split(path.sep).join('/')
+  const raw = await readScenarioFile(repoKey, rel, at(commit))
+  if (raw == null) return new Map()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return new Map()
+  }
+  const index = FlowTestsFileSchema.safeParse(parsed)
+  return new Map(index.success ? index.data.tests.map((test) => [test.flowId, test]) : [])
+}
+
+/** One file of a flow's test (its spec or its seed), as stored beside the tests index. */
+async function readFlowTestFile(
+  repoKey: string,
+  file: string | undefined,
+  commit?: string,
+): Promise<{ file: string; content: string } | undefined> {
+  if (!file) return undefined
+  const rel = path.relative(repoKey, path.join(flowTestsDir(repoKey), file)).split(path.sep).join('/')
+  const content = await readScenarioFile(repoKey, rel, at(commit))
+  return content == null ? undefined : { file: rel, content }
+}
+
+/** What a flow's test says about it, as a list row carries it. */
+function flowTestMark(test: FlowTestRecord): GuardFlowTestMark {
+  return {
+    status: test.status,
+    seeded: test.seed !== undefined,
+    ...(test.disagreement ? { documented: test.disagreement.documented, observed: test.disagreement.observed } : {}),
+    ...(test.blockedOn ? { blockedOn: test.blockedOn } : {}),
+    ...(test.blockedBy ? { blockedBy: test.blockedBy } : {}),
+  }
+}
+
+/**
+ * The status and bucket a flow wears when a Playwright test proves it: the
+ * test's own verdict, in the wire ids every flow surface already reads.
+ */
+function flowTestStanding(test: FlowTestRecord): { status: GuardSectionCoverageStatus; bucket: GuardFlowBucket } {
+  return { status: flowTestCoverageStatus(test.status), bucket: test.status === 'blocked' ? 'blocked' : 'guarded' }
+}
+
 /** The flow corpus a (possibly commit-pinned) view reads — baseline fallback included. */
 export function readGuardFlowsForView(repoKey: string, ref?: string): Promise<GuardFlowsFile | null> {
   return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardFlowsFile(repoKey, c))
@@ -1397,6 +1454,8 @@ interface FlowViewSources {
   latest: GuardLatest | null
   result: GuardGenerateReport | null
   scenarios: GuardScenario[]
+  /** The flows a Playwright test proves, by flow id. */
+  tests: Map<string, FlowTestRecord>
   /** The decisions ledger's flow dismissals, by flow id. */
   dismissals: Map<string, GuardDismissedFlow>
 }
@@ -1427,8 +1486,9 @@ async function loadFlowView(
 ): Promise<FlowViewSources | null> {
   const corpus = await loadGuardCorpusForView(repoKey, ref)
   if (!corpus) return null
-  const [flowsFile, storedRun, result, decisions] = await Promise.all([
+  const [flowsFile, tests, storedRun, result, decisions] = await Promise.all([
     readGuardFlowsFile(repoKey, corpus.commit),
+    readFlowTestRecords(repoKey, corpus.commit),
     runOverride ? Promise.resolve(runOverride) : readGuardRunForView(repoKey, ref),
     readGuardResultForView(repoKey, ref),
     readGuardDecisionsStore(repoKey),
@@ -1448,6 +1508,7 @@ async function loadFlowView(
     latest,
     result,
     scenarios: corpus.scenarios,
+    tests,
     dismissals: new Map(decisions.dismissedFlows.map((d) => [d.flowId, d])),
   }
 }
@@ -1713,13 +1774,13 @@ function flowListItem(
   const flow = join.corpus.get(flowId)
   const surfaces = flowSurfaces(flowId, join)
   const sections = flowSections(flowId, join)
+  const test = view.tests.get(flowId)
   return {
     flowId,
     progress: flowProgress(flowId, view, surfaces),
     title: flowTitle(flowId, join),
     goal: flow?.goal ?? '',
-    status: rollUpFlow(surfaces).status,
-    bucket: flowBucket(flowId, join),
+    ...(test ? flowTestStanding(test) : { status: rollUpFlow(surfaces).status, bucket: flowBucket(flowId, join) }),
     epic: (flow?.composedOf.length ?? 0) > 0,
     composedOf: flow?.composedOf ?? [],
     manual: isManualFlowId(flowId),
@@ -1737,6 +1798,7 @@ function flowListItem(
     interfaceDrifted: surfaces.some((s) => s.interfaceDrifted === true),
     ...(flowOrphaned(flowId, join) ? { orphaned: true } : {}),
     ...dismissalMark(flowId, view),
+    ...(test ? { test: flowTestMark(test) } : {}),
   }
 }
 
@@ -1942,13 +2004,20 @@ export async function readGuardFlowDetail(
     s.gap && s.surface ? [{ ...s.gap, surface: s.surface }] : [],
   )
 
+  const test = view.tests.get(flowId)
+  const [spec, seed] = test
+    ? await Promise.all([
+        readFlowTestFile(repoKey, test.file, view.commit),
+        readFlowTestFile(repoKey, test.seed, view.commit),
+      ])
+    : []
+
   return {
     flowId,
     progress: flowProgress(flowId, view, surfaces),
     title: flowTitle(flowId, join),
     goal: flow?.goal ?? '',
-    status: rollUpFlow(surfaces).status,
-    bucket: flowBucket(flowId, join),
+    ...(test ? flowTestStanding(test) : { status: rollUpFlow(surfaces).status, bucket: flowBucket(flowId, join) }),
     epic: (flow?.composedOf.length ?? 0) > 0,
     manual: isManualFlowId(flowId),
     composedOf: flow?.composedOf ?? [],
@@ -1971,6 +2040,20 @@ export async function readGuardFlowDetail(
     generatedAt: view.result?.generatedAt ?? null,
     runId: view.latest?.run.runId ?? null,
     ranAt: view.latest?.run.ranAt ?? null,
+    ...(test
+      ? {
+          test: {
+            status: test.status,
+            summary: test.summary,
+            ...(test.disagreement ? { disagreement: test.disagreement } : {}),
+            ...(test.blockedBy ? { blockedBy: test.blockedBy } : {}),
+            ...(test.blockedOn ? { blockedOn: test.blockedOn } : {}),
+            ...(spec ? { spec } : {}),
+            ...(seed ? { seed } : {}),
+            ...(test.run ? { run: test.run } : {}),
+          },
+        }
+      : {}),
   }
 }
 

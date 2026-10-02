@@ -3,13 +3,21 @@
  * over '/api/repos/:id/guard/flows'.
  *
  * A flow is what the product proves, and it stopped being a tab of one
- * repository: the index is the platform's index shape (search full width, ONE
- * filter row of Add filter, dimension, value, then a one-line table), and a row
- * opens the flow as its own page at '/flows/:flowId?repo=<id>'.
+ * repository: the index keeps the platform's chrome (search full width, ONE
+ * filter row of Add filter, dimension, value, the tally under the list) over
+ * one table PER STATUS, worst news first, and a row opens the flow as its own
+ * page at '/flows/:flowId?repo=<id>'.
+ *
+ * Each status has the columns its rows have something to say in. A failed flow
+ * says what the product did instead of what its documents promise. Blocked
+ * flows collapse to one row per thing they wait on, which opens to the flows
+ * themselves: eighteen flows blocked on one missing key are one fact, not
+ * eighteen. A thing only one flow waits on names that flow and opens it. The
+ * rest say whether their test seeds its own data.
  *
  * Blocked flows are excluded unless Settings > Workspace or an explicit
- * blocked status filter includes them. Status, Driver and Repository live in
- * the address (`?status=&driver=&repo=`),
+ * blocked status filter includes them. Status, Document, Driver and Repository
+ * live in the address (`?status=&doc=&driver=&repo=`),
  * so a narrowed page is a place: the repository console's jumps link straight
  * to `?repo=<id>`, and a run's flow link opens the flow itself.
  *
@@ -18,22 +26,22 @@
  * same two signals the Agent page listens to.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { GuardFlowListItem } from '@truecourse/shared';
 import { guardDriver } from '@truecourse/shared';
 import { connectSocket } from '@/lib/socket';
 import { CHIP_CLASS, PageHeader } from '@/dashboard/ui/bits';
-import { filterKey, selectedValues, type FilterDimension } from '@/dashboard/ui/filter-builder';
+import { FilterBuilder, filterKey, selectedValues, type FilterDimension } from '@/dashboard/ui/filter-builder';
 import { facetDimensions } from '@/dashboard/ui/filter-facets';
-import { IndexTable, type IndexColumn } from '@/dashboard/ui/index-table';
-import { GUARD_COVERAGE_TONE, tallyOf } from '@/dashboard/ui/status-word';
-import { GuardFlowStatusChip } from '@/components/guard/GuardStatusBadge';
+import { GUARD_COVERAGE_TONE, StatusTally, StatusWord, tallyOf } from '@/dashboard/ui/status-word';
 import * as api from '@/lib/api';
 import {
   GUARD_FLOW_STATUS_ORDER,
   GUARD_FLOW_STATUS_WORD,
   guardFlowPlainStatus,
+  guardWhyNoTest,
+  type GuardFlowPlainStatus,
 } from '@/lib/guard-flow-status';
 import type { Repo } from '@/dashboard/data/types';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
@@ -137,11 +145,97 @@ function useWorkspaceFlows(repos: Repo[]): { rows: FlowRow[]; loading: boolean }
 }
 
 /** The filter dimensions, in the order the Add filter menu offers them. */
-const DIMENSION_KEYS = ['status', 'driver', 'repo'] as const;
+const DIMENSION_KEYS = ['status', 'doc', 'driver', 'repo'] as const;
 type DimensionKey = (typeof DIMENSION_KEYS)[number];
 
 /** The URL parameter each dimension is spelled with. */
-const PARAM: Record<DimensionKey, string> = { status: 'status', driver: 'driver', repo: 'repo' };
+const PARAM: Record<DimensionKey, string> = { status: 'status', doc: 'doc', driver: 'driver', repo: 'repo' };
+
+/** The documents a flow cites, as one cell: the first one's file name, and how many more. */
+function documentCell(docs: readonly string[]): string {
+  if (docs.length === 0) return '';
+  const name = docs[0].split('/').pop() ?? docs[0];
+  return docs.length === 1 ? name : `${name} +${docs.length - 1}`;
+}
+
+/**
+ * What a blocked flow waits on, the phrase blocked flows group by: the few
+ * words its test gave the missing thing, else the test's own explanation, else
+ * what the flow's gap needs.
+ */
+function blockedReason({ flow }: FlowRow): string {
+  return (
+    flow.test?.blockedOn ??
+    flow.test?.blockedBy ??
+    guardWhyNoTest(flow.surfaces.find((surface) => surface.gap)?.gap, { attempted: flow.errors > 0 })
+  );
+}
+
+const TABLE = 'w-full table-fixed border-collapse text-[13px]';
+const HEAD_ROW = 'border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground';
+const ROW = 'cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none';
+const FIRST = 'truncate py-2.5 pl-6 pr-3';
+const CELL = 'truncate px-3 py-2.5';
+const LAST = 'truncate py-2.5 pl-3 pr-6 font-mono text-[12px] text-muted-foreground';
+
+/** What makes a table row a door: a click, or Enter on it. */
+function opening(open: () => void) {
+  return {
+    tabIndex: 0,
+    onClick: open,
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.key === 'Enter') open();
+    },
+  };
+}
+
+/** One status's table: the word and its count, then the rows under their own columns. */
+function StatusGroup({
+  status,
+  count,
+  columns,
+  children,
+}: {
+  status: GuardFlowPlainStatus;
+  count: number;
+  /** Each column's heading and width; the first takes what the others leave. */
+  columns: readonly { label: string; width?: string }[];
+  children: ReactNode;
+}) {
+  return (
+    <section aria-label={GUARD_FLOW_STATUS_WORD[status]}>
+      <div className="px-6 pb-2 pt-5">
+        <StatusWord tone={GUARD_COVERAGE_TONE[status]} word={GUARD_FLOW_STATUS_WORD[status]} count={count} />
+      </div>
+      <table className={TABLE} aria-label={`${GUARD_FLOW_STATUS_WORD[status]} flows`}>
+        <thead>
+          <tr className={HEAD_ROW}>
+            {columns.map((column, i) => (
+              <th
+                key={column.label}
+                {...(column.width ? { style: { width: column.width } } : {})}
+                className={`truncate py-2 text-left font-semibold ${i === 0 ? 'pl-6 pr-3' : i === columns.length - 1 ? 'pl-3 pr-6' : 'px-3'}`}
+              >
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </section>
+  );
+}
+
+/** A flow's name as a first cell, with the mark a hand-written one wears. */
+function FlowName({ flow }: { flow: GuardFlowListItem }) {
+  return (
+    <span className="flex items-center gap-2 text-foreground">
+      <span className="min-w-0 truncate">{flow.title}</span>
+      {flow.manual && <span className={CHIP_CLASS}>hand-written</span>}
+    </span>
+  );
+}
 
 export default function FlowsPage({ flowId }: { flowId?: string }) {
   return flowId ? <FlowRoute flowId={flowId} /> : <FlowsIndex />;
@@ -182,12 +276,14 @@ function FlowsIndex() {
 
   const rows = useMemo(() => {
     const statuses = selectedValues(selected, 'status');
+    const docs = selectedValues(selected, 'doc');
     const drivers = selectedValues(selected, 'driver');
     const repoIds = selectedValues(selected, 'repo');
     return visible.filter(
       (r) =>
         matchesQuery(r) &&
         (statuses.length === 0 || statuses.includes(guardFlowPlainStatus(r.flow))) &&
+        (docs.length === 0 || r.flow.docs.some((d) => docs.includes(d))) &&
         (drivers.length === 0 || (r.flow.drivers ?? []).some((d) => drivers.includes(d))) &&
         (repoIds.length === 0 || repoIds.includes(r.repo.id)),
     );
@@ -204,6 +300,7 @@ function FlowsIndex() {
 
   const dimensions = useMemo<FilterDimension[]>(() => {
     const drivers = [...new Set(all.flatMap((r) => r.flow.drivers ?? []))];
+    const docs = [...new Set(all.flatMap((r) => r.flow.docs))].sort();
     return facetDimensions<FlowRow>({
       rows: all,
       selected,
@@ -220,6 +317,13 @@ function FlowsIndex() {
           hideEmpty: true,
         },
         {
+          key: 'doc',
+          label: 'Document',
+          valuesOf: (r) => r.flow.docs,
+          values: docs.map((doc) => ({ value: doc, label: doc })),
+          hideEmpty: true,
+        },
+        {
           key: 'driver',
           label: 'Driver',
           valuesOf: (r) => r.flow.drivers ?? [],
@@ -227,6 +331,7 @@ function FlowsIndex() {
             value: driver,
             label: guardDriver(driver)?.label ?? driver,
           })),
+          hideEmpty: true,
         },
         {
           key: 'repo',
@@ -239,50 +344,39 @@ function FlowsIndex() {
     });
   }, [all, matchesQuery, repos, selected]);
 
-  const columns = useMemo<IndexColumn<FlowRow>[]>(
-    () => [
-      {
-        key: 'flow',
-        label: 'Flow',
-        cell: ({ flow }) => (
-          <span className="flex items-center gap-2 text-foreground">
-            <span className="min-w-0 truncate">{flow.title}</span>
-            {flow.manual && <span className={CHIP_CLASS}>hand-written</span>}
-          </span>
-        ),
-      },
-      { key: 'status', label: 'Status', width: '7rem', cell: ({ flow }) => <GuardFlowStatusChip status={guardFlowPlainStatus(flow)} /> },
-      {
-        key: 'drivers',
-        label: 'Drivers', width: '8rem', wrap: true,
-        cell: ({ flow }) => (
-          <span className="flex flex-wrap gap-1">
-            {(flow.drivers ?? []).map((d) => (
-              <span key={d} className={CHIP_CLASS}>
-                {guardDriver(d)?.label ?? d}
-              </span>
-            ))}
-          </span>
-        ),
-      },
-      {
-        key: 'repository',
-        label: 'Repository', width: '14rem',
-        className: 'font-mono text-[12px] text-muted-foreground',
-        cell: ({ repo }) => repo.fullName,
-      },
-      {
-        key: 'sections',
-        label: 'Sections', width: '7.5rem',
-        align: 'right',
-        className: 'text-foreground',
-        // The sections this flow covers, when it binds any: a flow bound to
-        // nothing says nothing rather than a zero.
-        cell: ({ flow }) => (flow.sectionCount > 0 ? flow.sectionCount : ''),
-      },
-    ],
-    [],
-  );
+  /** The shown rows by status, each status's by title. */
+  const byStatus = useMemo(() => {
+    const groups = new Map<GuardFlowPlainStatus, FlowRow[]>();
+    for (const row of rows) {
+      const status = guardFlowPlainStatus(row.flow);
+      groups.set(status, [...(groups.get(status) ?? []), row]);
+    }
+    for (const group of groups.values()) group.sort((a, b) => a.flow.title.localeCompare(b.flow.title));
+    return groups;
+  }, [rows]);
+
+  /** The blocked rows by what they wait on, most flows first. */
+  const blockedOn = useMemo(() => {
+    const reasons = new Map<string, FlowRow[]>();
+    for (const row of byStatus.get('blocked') ?? []) {
+      const reason = blockedReason(row);
+      reasons.set(reason, [...(reasons.get(reason) ?? []), row]);
+    }
+    return [...reasons].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  }, [byStatus]);
+  /** The reasons whose flows are listed under them. */
+  const [openReasons, setOpenReasons] = useState<ReadonlySet<string>>(new Set());
+  const toggleReason = (reason: string): void =>
+    setOpenReasons((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(reason)) next.add(reason);
+      return next;
+    });
+
+  const open = ({ repo, flow }: FlowRow): void => {
+    void navigate(flowHref(flow.flowId, repo.id));
+  };
+  const idOf = ({ repo, flow }: FlowRow): string => `${repo.id}:${flow.flowId}`;
 
   const narrowed = query.trim() !== '' || selected.length > 0 || (!showBlocked && all.length > 0);
   const empty = loading ? (
@@ -303,25 +397,106 @@ function FlowsIndex() {
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader title="Flows" />
       {!showBlocked && <p className="px-6 py-2 text-xs text-muted-foreground">Excluding blocked flows</p>}
-      <div className="min-h-0 flex-1">
-        <IndexTable
-          label="Flows"
-          rows={rows}
-          rowId={({ repo, flow }) => `${repo.id}:${flow.flowId}`}
-          columns={columns}
-          onOpen={({ repo, flow }) => navigate(flowHref(flow.flowId, repo.id))}
-          query={query}
-          onQuery={setQuery}
-          searchPlaceholder="Search flows"
-          dimensions={dimensions}
-          selected={selected}
-          onSelect={onSelect}
-          filterAriaLabel="Filter flows"
-          tally={tally}
-          total={visible.length}
-          empty={empty}
+      <div className="border-b border-border px-3 py-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search flows"
+          placeholder="Search flows"
+          className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
       </div>
+      <FilterBuilder label="Filter" ariaLabel="Filter flows" dimensions={dimensions} selected={selected} onChange={onSelect} />
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-6">
+        {rows.length === 0 && <p className="px-6 py-8 text-center text-[13px] text-muted-foreground">{empty}</p>}
+        {GUARD_FLOW_STATUS_ORDER.map((status) => {
+          const group = byStatus.get(status) ?? [];
+          if (group.length === 0) return null;
+          if (status === 'failed') {
+            return (
+              <StatusGroup
+                key={status}
+                status={status}
+                count={group.length}
+                columns={[{ label: 'Flow', width: '28%' }, { label: 'Observed' }, { label: 'Document', width: '14rem' }]}
+              >
+                {group.map((row) => (
+                  <tr key={idOf(row)} {...opening(() => open(row))} className={ROW}>
+                    <td className={FIRST}>
+                      <FlowName flow={row.flow} />
+                    </td>
+                    <td className={`${CELL} text-foreground`} title={row.flow.test?.observed}>
+                      {row.flow.test?.observed ?? ''}
+                    </td>
+                    <td className={LAST}>{documentCell(row.flow.docs)}</td>
+                  </tr>
+                ))}
+              </StatusGroup>
+            );
+          }
+          if (status === 'blocked') {
+            return (
+              <StatusGroup
+                key={status}
+                status={status}
+                count={group.length}
+                columns={[{ label: 'Blocked on' }, { label: 'Flows', width: '14rem' }]}
+              >
+                {blockedOn.map(([reason, flows]) => (
+                  <Fragment key={reason}>
+                    {flows.length === 1 ? (
+                      <tr {...opening(() => open(flows[0]))} className={ROW}>
+                        <td className={`${FIRST} text-foreground`} title={reason}>
+                          {reason}
+                        </td>
+                        <td className="truncate py-2.5 pl-3 pr-6" title={flows[0].flow.title}>
+                          <FlowName flow={flows[0].flow} />
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr {...opening(() => toggleReason(reason))} aria-expanded={openReasons.has(reason)} className={ROW}>
+                        <td className={`${FIRST} text-foreground`} title={reason}>
+                          {reason}
+                        </td>
+                        <td className="truncate py-2.5 pl-3 pr-6 tabular-nums text-foreground">{flows.length} flows</td>
+                      </tr>
+                    )}
+                    {flows.length > 1 &&
+                      openReasons.has(reason) &&
+                      flows.map((row) => (
+                        <tr key={idOf(row)} {...opening(() => open(row))} className={ROW}>
+                          <td className="truncate py-2 pl-10 pr-3">
+                            <FlowName flow={row.flow} />
+                          </td>
+                          <td className={LAST}>{documentCell(row.flow.docs)}</td>
+                        </tr>
+                      ))}
+                  </Fragment>
+                ))}
+              </StatusGroup>
+            );
+          }
+          return (
+            <StatusGroup
+              key={status}
+              status={status}
+              count={group.length}
+              columns={[{ label: 'Flow' }, { label: 'Data', width: '8rem' }, { label: 'Document', width: '14rem' }]}
+            >
+              {group.map((row) => (
+                <tr key={idOf(row)} {...opening(() => open(row))} className={ROW}>
+                  <td className={FIRST}>
+                    <FlowName flow={row.flow} />
+                  </td>
+                  <td className={`${CELL} text-muted-foreground`}>{row.flow.test?.seeded ? 'Seeded' : ''}</td>
+                  <td className={LAST}>{documentCell(row.flow.docs)}</td>
+                </tr>
+              ))}
+            </StatusGroup>
+          );
+        })}
+      </div>
+      <StatusTally label="Flows" items={tally} total={visible.length} />
     </div>
   );
 }

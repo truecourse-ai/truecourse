@@ -756,6 +756,7 @@ export async function guardGenerateInProcess(
       const flowTests = await runFlowTestStage({
         repoRoot,
         worldId: composeProjectName(options.productWorld.worldKey ?? path.basename(path.resolve(repoRoot))),
+        runId: run.runId,
         acquire: acquireSessionContext,
         ...(options.signal ? { signal: options.signal } : {}),
         onPhase: (phase) => {

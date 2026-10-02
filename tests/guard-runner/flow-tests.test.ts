@@ -10,7 +10,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { runFlowTests, type FlowTestWorld } from '@truecourse/guard-runner'
+import { flowSpecStepTitles, keepFlowTestRun, runFlowTests, type FlowTestWorld } from '@truecourse/guard-runner'
 import { flowTestsDir, worldDir, worldStatePath } from '@truecourse/shared/work-tree'
 
 const PAGE = '<html><body><h1>Invoices</h1><p>Signed in as <span data-testid="who">admin@example.com</span></p></body></html>'
@@ -55,7 +55,7 @@ afterAll(async () => {
 function spec(name: string, body: string): void {
   fs.writeFileSync(
     path.join(flowTestsDir(root), name),
-    `import { test, expect } from '@playwright/test'\nimport { account } from './flow'\n\n${body}\n`,
+    `import { test, expect, account } from './flow'\n\n${body}\n`,
   )
 }
 
@@ -67,7 +67,7 @@ function seeded(flow: string, seedBody: string, testBody: string): void {
   )
   fs.writeFileSync(
     path.join(flowTestsDir(root), `${flow}.spec.ts`),
-    `import { expect } from '@playwright/test'\nimport { flowTest } from './flow'\nimport { seed } from './${flow}.seed'\n\nconst test = flowTest(seed)\n\n${testBody}\n`,
+    `import { expect, flowTest } from './flow'\nimport { seed } from './${flow}.seed'\n\nconst test = flowTest(seed)\n\n${testBody}\n`,
   )
 }
 
@@ -164,6 +164,40 @@ describe('running flow tests', () => {
     expect(seedThrows).toMatchObject({ flowId: 'seed-throws', outcome: 'seed-failed' })
     expect(seedThrows.error).toContain('creating the team answered 200 with a page, not a team')
     expect(testFails).toMatchObject({ flowId: 'test-fails', outcome: 'fail' })
+  }, 120_000)
+
+  it('records each step, a picture as it ends, and keeps the run as an evidence bundle', async () => {
+    const source = `test('the invoices page offers an export', async ({ page }) => {
+  await test.step('The invoices page opens', async () => {
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Invoices' })).toBeVisible()
+  })
+  await test.step('It offers an "Export" button', async () => {
+    await expect(page.getByRole('button', { name: 'Export' })).toBeVisible({ timeout: 1000 })
+  })
+  await test.step('Exporting downloads a file', async () => {
+    await page.getByRole('button', { name: 'Export' }).click()
+  })
+})`
+    spec('export-steps.spec.ts', source)
+    const run = await runFlowTests(root, { world, tests: [{ flowId: 'export-steps', file: 'export-steps.spec.ts' }], label: 'steps' })
+    if (!run.ok) throw new Error(run.reason)
+    const [result] = run.results
+    expect(result.steps.map((s) => [s.order, s.title, s.outcome])).toEqual([
+      [1, 'The invoices page opens', 'passed'],
+      [2, 'It offers an "Export" button', 'failed'],
+    ])
+    expect(result.steps[1].error).toContain("getByRole('button', { name: 'Export' })")
+
+    expect(flowSpecStepTitles(source)).toEqual([
+      'The invoices page opens',
+      'It offers an "Export" button',
+      'Exporting downloads a file',
+    ])
+    const kept = keepFlowTestRun(root, { runId: 'run-1', result, specSource: source, ranAt: '2026-10-02T12:00:00.000Z' })
+    expect(kept.steps.map((s) => s.outcome)).toEqual(['passed', 'failed', 'not-reached'])
+    expect(kept.evidencePath).toBe('.truecourse/guard/evidence/run-1/export-steps')
+    expect(fs.readdirSync(path.join(root, kept.evidencePath!)).sort()).toEqual(['session.webm', 'step-1.png', 'step-2.png'])
   }, 120_000)
 
   it('runs only the specs it was asked for', async () => {
