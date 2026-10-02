@@ -95,7 +95,7 @@ export function collectGuardSetupBundle(repoRoot: string): Record<string, string
   }
 
   // The world scripts and whatever they use beside them (a compose override, an
-  // env file, a seed script). Never what a run of them left: the world file
+  // env file). Never what a run of them left: the world file
   // and the logs describe one boot, on one host.
   for (const abs of worldFiles(repoRoot)) {
     const body = readIfFile(abs);

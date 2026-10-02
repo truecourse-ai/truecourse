@@ -546,4 +546,4 @@ export {
 export type { RunningWorld, WorldBoot, WorldBootFailure, WorldRunOptions, WorldScriptResult, WorldSlot } from './product-world.js'
 
 export { FLOW_TEST_ENV, flowTestEnv, prepareFlowTestsDir, runFlowTests } from './flow-tests.js'
-export type { FlowTestsRun, RunFlowTestsOptions } from './flow-tests.js'
+export type { FlowTestsRun, FlowTestWorld, RunFlowTestsOptions } from './flow-tests.js'

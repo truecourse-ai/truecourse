@@ -175,7 +175,8 @@ export const GUARD_GENERATE_STEPS = [
  */
 /**
  * The checklist of a product-world generate: the spec side, then the product
- * brought up once, then one flow-test session per flow against it.
+ * brought up once, bare, then one session per flow that writes the flow's test
+ * and the seed it starts from against it.
  */
 export const WORLD_GENERATE_STEPS = [
   { key: 'index', label: 'Indexing sections' },
@@ -222,8 +223,8 @@ export interface GuardGenerateInProcessOptions {
   /**
    * Generate against a PRODUCT WORLD: after flows are synthesized, the
    * repository's world scripts bring the product up and one session per flow
-   * writes its Playwright test against it. No recipe is read, no interface is
-   * mapped and no scenario is authored. `worldKey` is the world's identity on
+   * writes its Playwright test, and the seed that test starts from, against
+   * it. No recipe is read, no interface is mapped and no scenario is authored. `worldKey` is the world's identity on
    * this host, the same one setup proved the scripts under. The checklist is
    * {@link WORLD_GENERATE_STEPS}. Needs the Claude Code backend.
    */
@@ -747,8 +748,8 @@ export async function guardGenerateInProcess(
     }
 
     // A product world: the spec side is done, now the tests. The product comes
-    // up once, one session per flow writes that flow's test against it, and it
-    // goes down again. The report describes the spec side; the tests are in
+    // up once, one session per flow writes that flow's test and seed against
+    // it, and it goes down again. The report describes the spec side; the tests are in
     // the tree's tests directory with their own index.
     if (options.productWorld) {
       advanceTo('world');

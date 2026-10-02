@@ -5,9 +5,13 @@
  * source and leaves behind the three scripts that do it again without a model:
  * `world/build.sh`, `world/up.sh`, `world/down.sh` (the contract is
  * `@truecourse/shared`'s `guard/world.ts`). How a product is installed, what it
- * needs beside it, how it is migrated and seeded and how many processes it is
- * are all the session's to find out, the way an engineer new to the repository
- * would: by reading it and trying.
+ * needs beside it, how it is migrated and how many processes it is are all the
+ * session's to find out, the way an engineer new to the repository would: by
+ * reading it and trying.
+ *
+ * The world it leaves is BARE. No test account and no sample data: flows are
+ * synthesized after setup, so nobody yet knows what a test will start from,
+ * and each test's own seed creates that when the test is written.
  *
  * The engine holds the result to one thing, `verify_world`: its own build and
  * boot of those scripts (`@truecourse/guard-runner`'s `product-world.ts`), the
@@ -171,17 +175,13 @@ function verifyWorldTool(input: WorldSessionInput, record: (verified: Verified |
         return { content: `The product came up and answered, then world/down.sh exited ${down.exitCode ?? 'without a code'}:\n\n${down.output}`, isError: true };
       }
       const { world } = boot.running;
-      if (world.accounts.length === 0 && !world.notes) {
-        return {
-          content: `The product came up at ${world.baseUrl} and went down cleanly, but the world file lists no accounts. A product people sign in to needs at least one seeded account there. A product with no sign-in at all says so in "notes".`,
-          isError: true,
-        };
-      }
       record({ scripts, world });
       return {
         content: [
           `PASSED. build, up, answer at ${world.baseUrl}, down.`,
-          `accounts: ${world.accounts.map((a) => `${a.name}${a.role ? ` (${a.role})` : ''}`).join(', ')}`,
+          ...(world.accounts.length > 0
+            ? [`accounts the installation made: ${world.accounts.map((a) => `${a.name}${a.role ? ` (${a.role})` : ''}`).join(', ')}`]
+            : []),
           ...(Object.keys(world.urls).length > 0 ? [`urls: ${Object.entries(world.urls).map(([k, v]) => `${k}=${v}`).join(', ')}`] : []),
         ].join('\n'),
       };
@@ -215,8 +215,16 @@ You have a real shell in the checkout. Work the way a capable engineer new to th
 Three POSIX sh scripts, run from the repository root:
 
 - \`${WORLD_REL}/build.sh\`: install dependencies and build. Runs once per fresh checkout. Everything slow and repeatable belongs here.
-- \`${WORLD_REL}/up.sh\`: bring the WHOLE product up, from a built checkout, to the point where a person could use it: backing services, schema and migrations, seed data, every server the product is made of. It must not exit until the product answers, and then it writes the world file.
+- \`${WORLD_REL}/up.sh\`: bring the WHOLE product up, from a built checkout, to the point where a first person could start using it: backing services, schema and migrations, every server the product is made of. It must not exit until the product answers, and then it writes the world file.
 - \`${WORLD_REL}/down.sh\`: stop everything \`up.sh\` started and DISCARD its data (containers, volumes, database files), so the next \`up.sh\` starts from nothing. Safe to run when nothing is up.
+
+# A bare product
+
+\`up.sh\` leaves the product installed and EMPTY. It creates no test account, no sample data and no demo content, and it does not run the repository's development seed.
+
+Nobody knows yet what the tests will need: each test is written later, from one documented flow, together with a seed of its own that creates exactly what that flow starts from. Data put in here would be shared by every test, and shared data is how tests break each other.
+
+What \`up.sh\` does do is whatever the product needs before anyone can use it at all: its migrations, the reference data it cannot work without (the roles, plans or defaults its own installer or migrations create), and a one-time installation step if it has one. Where that installation itself makes an account (a default admin, a root user), that account exists and you report it; you do not make one otherwise.
 
 # The contract the scripts are held to
 
@@ -231,7 +239,7 @@ Servers left running by \`up.sh\` are started in the background with their outpu
 
 Run the product the way it is meant to be deployed where that is practical (a production build and start), not a watch-mode dev server: tests need it stable, not hot-reloading.
 
-The scripts take their configuration from what they set themselves. Whatever the product reads (database URLs, its own public URL, secrets it needs to start) the scripts export or write, with the ports from \`TC_PORTS\`.
+The scripts take their configuration from what they set themselves. Whatever the product reads (database URLs, its own public URL, secrets it needs to start) the scripts export or write, with the ports from \`TC_PORTS\`. Configure it so that a test can make its own accounts: sign-up open where the product has a switch for it, mail going to a local catcher.
 
 # The world file
 
@@ -242,20 +250,20 @@ JSON, written by \`up.sh\` to \`$TC_WORLD_FILE\` once the product answers:
   "baseUrl": "http://localhost:<port>",
   "urls": { "api": "http://localhost:<port>", "mail": "http://localhost:<port>" },
   "accounts": [
-    { "name": "admin", "role": "owner of the seeded workspace", "email": "admin@example.com", "password": "…" },
-    { "name": "member", "role": "ordinary member", "email": "member@example.com", "password": "…", "token": "…", "tokenUsage": "Authorization: Bearer <token>" }
+    { "name": "admin", "role": "the administrator the installer creates", "email": "admin@example.com", "password": "…" }
   ],
-  "notes": "anything a test author must know that the fields above cannot say"
+  "notes": "what whoever writes a test's seed must know and the fields above cannot say"
 }
 \`\`\`
 
 - \`baseUrl\` is where a person opens the product. \`urls\` names every other address it answers on.
-- \`accounts\` are principals \`up.sh\` SEEDED, with credentials that really sign in. Seed what the product's roles call for: its most privileged role and an ordinary one at least, and a second ordinary one when the product is about people sharing things. Where the product issues API tokens, mint one and report it. Create them through the product's own paths (its sign-up or admin API, its CLI, its seed command) in preference to writing rows by hand, so they are accounts the product itself would have made. A product with no sign-in at all reports \`"accounts": []\` and says so in \`notes\`.
+- \`accounts\` lists ONLY accounts the product's own installation made, with credentials that really sign in. Most products make none: \`"accounts": []\`.
+- \`notes\` is for the sessions that will write each test's seed. Say what you learned while bringing the product up that they would otherwise have to rediscover: how an account comes to exist (open sign-up, an invitation, a command), whether a new account must be verified and where that mail lands, and the exact command that reaches the datastore, written with the variable and not its value (\`docker compose -p "$TC_WORLD_ID" -f ${WORLD_REL}/compose.yml exec -T db psql -U app app\`). Tests run with \`TC_WORLD_ID\` set to this world's.
 - If the product sends mail (verification, invitations, resets), run a local mail catcher beside it, point the product at it, and report its address as \`urls.mail\`.
 
 # Limits
 
-- Change nothing the repository ships. Your files live under \`${WORLD_REL}/\`: the three scripts, and any compose override, env file or seed script they use.
+- Change nothing the repository ships. Your files live under \`${WORLD_REL}/\`: the three scripts, and any compose override or env file they use.
 - Install nothing on the host: no global package installs, no \`sudo\`, nothing outside the checkout except containers and their volumes. If the product needs a toolchain the host lacks, run that part in a container.
 - A third-party service that needs an account nobody has given you stays unconfigured. Bring up everything that does not depend on it, and name it in \`notRunning\`.
 - The product is the one the documents describe. A repository often also holds a documentation site, a marketing site or examples: those are not it.
@@ -264,7 +272,7 @@ JSON, written by \`up.sh\` to \`$TC_WORLD_FILE\` once the product answers:
 
 1. Find out what the product is made of and how its own developers run it.
 2. Get it running by hand in your shell. Your shell has the same \`TC_*\` variables the scripts get, so what works by hand works in the script.
-3. Write the three scripts, run them yourself, and sign in as each account you seeded to see that the credentials work (\`curl\` against the product's own sign-in is enough).
+3. Write the three scripts and run them yourself. See that the product answers, that an account the installation made really signs in, and that the datastore command in your notes really reaches it.
 4. Stop what you started by hand, then call \`verify_world\`. It is the engine building and booting your scripts exactly as every later run will, and it reports the stage that failed with that script's own output. Fix and repeat until it passes.
 5. Give the outcome: what the product is and how the scripts run it, and anything that is not running.
 
