@@ -1,16 +1,22 @@
 /**
  * THE FLOW-TEST STAGE — what generate does after flows are synthesized when
- * the product runs from its world scripts: bring the product up ONCE, run one
- * flow-test session per flow against it, record what each one proved, and take
- * the product down.
+ * the product runs from its world scripts: bring the product up ONCE, bare,
+ * run one flow-test session per flow against it, record what each one proved,
+ * and take the product down.
+ *
+ * Nothing is seeded ahead of the sessions. Each one writes its flow's seed
+ * beside its spec, so the data a test starts from is decided by the flow it
+ * proves, is created under names of its own each time it runs, and is shared
+ * with no other test. That is what lets the sessions, and later the tests,
+ * run side by side against the one product.
  *
  * A flow whose test was written against the flow as it still is keeps that
  * test: only new and changed flows get a session. A session that ends without
- * an accepted outcome leaves no spec behind, so every spec in the tests
- * directory is one the engine saw behave the way its record says.
+ * an accepted outcome leaves no spec and no seed behind, so every one in the
+ * tests directory is one the engine saw behave the way its record says.
  *
- * The record of the stage is `tests/tests.json`; the specs beside it are the
- * tests. Storing both is the caller's.
+ * The record of the stage is `tests/tests.json`; the specs and seeds beside it
+ * are the tests. Storing them is the caller's.
  */
 
 import fs from 'node:fs';
@@ -35,7 +41,14 @@ import {
   type GuardClaim,
   type GuardFlow,
 } from '@truecourse/shared';
-import { flowTestFileName, flowTestPath, flowTestsDir, flowTestsIndexPath } from '@truecourse/shared/work-tree';
+import {
+  flowSeedFileName,
+  flowSeedPath,
+  flowTestFileName,
+  flowTestPath,
+  flowTestsDir,
+  flowTestsIndexPath,
+} from '@truecourse/shared/work-tree';
 import { runSessionPool } from '../agent/session-pool.js';
 import { describeSessionFailure } from '../guard-setup/session-context.js';
 import {
@@ -98,13 +111,14 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
   if (flows.length === 0) return { status: 'no-flows' };
 
   // A record stands while the flow it was written for is unchanged and, for a
-  // flow that has a test, the spec is still there.
+  // flow that has a test, the spec and its seed are still there.
   const prior = new Map(readFlowTests(repoRoot).tests.map((t) => [t.flowId, t]));
   const kept = new Map<string, FlowTestRecord>();
   for (const flow of flows) {
     const record = prior.get(flow.id);
     if (!record || record.flowFingerprint !== flow.fingerprint) continue;
-    if (record.file && !fs.existsSync(path.join(flowTestsDir(repoRoot), record.file))) continue;
+    const files = [record.file, record.seed].flatMap((file) => (file ? [file] : []));
+    if (files.some((file) => !fs.existsSync(path.join(flowTestsDir(repoRoot), file)))) continue;
     kept.set(flow.id, record);
   }
   const work = flows.filter((flow) => !kept.has(flow.id));
@@ -131,7 +145,7 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
 
       try {
         input.onPhase?.('tests');
-        const { world } = boot.running;
+        const world = { id: slot.id, world: boot.running.world };
         const steps = flowStepReader(repoRoot);
         const tally = (): FlowTestStageProgress => {
           const records = [...written.values()];
@@ -171,6 +185,7 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
             spent.tokens += outcome.spent.tokens;
             spent.costUsd += outcome.spent.costUsd;
             const specPath = flowTestPath(repoRoot, flow.id);
+            const seedPath = flowSeedPath(repoRoot, flow.id);
             if (outcome.status === 'completed') {
               const { status, summary, disagreement, blockedBy } = outcome.output;
               written.set(flow.id, {
@@ -178,13 +193,15 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
                 flowFingerprint: flow.fingerprint,
                 status,
                 ...(status === 'blocked' ? {} : { file: flowTestFileName(flow.id) }),
+                ...(status !== 'blocked' && fs.existsSync(seedPath) ? { seed: flowSeedFileName(flow.id) } : {}),
                 summary,
                 ...(disagreement ? { disagreement } : {}),
                 ...(blockedBy ? { blockedBy } : {}),
               });
             } else {
-              // Nobody accepted this spec: whatever is on disk is unproven.
+              // Nobody accepted this spec or its seed: whatever is on disk is unproven.
               fs.rmSync(specPath, { force: true });
+              fs.rmSync(seedPath, { force: true });
               unsettled.push({ flowId: flow.id, reason: describeSessionFailure(outcome.failure) });
             }
             input.onProgress?.(tally());
@@ -206,13 +223,13 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
   return { status: 'ok', tests, authored: work.length, unsettled, spent };
 }
 
-/** Write the flow → test map, and drop every spec it does not name. */
+/** Write the flow → test map, and drop every spec and seed it does not name. */
 function writeFlowTests(repoRoot: string, tests: readonly FlowTestRecord[]): void {
   const dir = flowTestsDir(repoRoot);
   fs.mkdirSync(dir, { recursive: true });
-  const named = new Set(tests.flatMap((t) => (t.file ? [t.file] : [])));
+  const named = new Set(tests.flatMap((t) => [t.file, t.seed].flatMap((file) => (file ? [file] : []))));
   for (const entry of fs.readdirSync(dir)) {
-    if (entry.endsWith('.spec.ts') && !named.has(entry)) fs.rmSync(path.join(dir, entry), { force: true });
+    if (/\.(?:spec|seed)\.ts$/.test(entry) && !named.has(entry)) fs.rmSync(path.join(dir, entry), { force: true });
   }
   fs.rmSync(path.join(dir, 'scratch'), { recursive: true, force: true });
   const file: FlowTestsFile = { version: 1, generatedAt: new Date().toISOString(), tests: [...tests] };

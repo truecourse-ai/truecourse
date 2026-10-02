@@ -9,11 +9,16 @@
  * run of the stored tests, so a test that proved itself when it was written is
  * judged the same way every time after.
  *
+ * A spec that starts from data runs its own SEED first (`<flow>.seed.ts`,
+ * through `flowTest` below), inside the same Playwright test. A seed that does
+ * not hold is reported apart from a test that fails: the first is the test's
+ * own defect, the second is a finding.
+ *
  * What the engine owns in the tests directory, and rewrites on every run:
  *   playwright.config.ts   where the product is, what to record
- *   world.ts               the running product's URL and accounts, for a spec to import
+ *   flow.ts                the running product, and `flowTest`, which binds a spec to its seed
  *   node_modules/@playwright/test   a link to this install, so specs resolve it
- * Everything else there is the specs.
+ * Everything else there is the specs and their seeds.
  *
  * `@playwright/test` is an optional peer, like the browser it drives: a repo
  * with no tests never needs it, and one that does is told what to install.
@@ -23,7 +28,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import type { FlowTestResult, ProductWorld } from '@truecourse/shared'
+import { WORLD_ENV, type FlowTestResult, type ProductWorld } from '@truecourse/shared'
 import { flowTestResultsDir, flowTestsDir, sanitizeSegment, worldStatePath } from '@truecourse/shared/work-tree'
 import { buildOutputTail } from './build.js'
 import { BUILD_PASSTHROUGH, constructChildEnv } from './child-env.js'
@@ -34,13 +39,32 @@ const DEFAULT_RUN_TIMEOUT_MS = 30 * 60_000
 const TEST_TIMEOUT_MS = 120_000
 const DEFAULT_WORKERS = 4
 
+/** A seed's own budget, outside the test's: a sign-up, a few requests, a command or two. */
+const SEED_TIMEOUT_MS = 120_000
+
 const CONFIG_FILE = 'playwright.config.ts'
-const WORLD_MODULE_FILE = 'world.ts'
+const FLOW_MODULE_FILE = 'flow.ts'
 const REPORT_FILE = 'report.json'
 const ARTIFACTS_DIR = 'artifacts'
 
-/** The variables a spec and the configuration read. */
-export const FLOW_TEST_ENV = { baseUrl: 'TC_BASE_URL', worldFile: 'TC_WORLD_FILE', repoRoot: 'TC_REPO_ROOT' } as const
+/**
+ * The variables a spec, a seed and the configuration read. A seed that runs a
+ * command against the world's containers names them by the world id, the way
+ * the world scripts do.
+ */
+export const FLOW_TEST_ENV = {
+  baseUrl: 'TC_BASE_URL',
+  worldFile: 'TC_WORLD_FILE',
+  worldId: WORLD_ENV.id,
+  repoRoot: 'TC_REPO_ROOT',
+} as const
+
+/**
+ * How a test says where its seed got to, as a Playwright annotation: pushed as
+ * `failed` before the seed runs and turned to `ok` once it returned, so a seed
+ * that threw and one that ran out of time read the same.
+ */
+const SEED_ANNOTATION = { type: 'seed', failed: 'failed', ok: 'ok' } as const
 
 const PLAYWRIGHT_TEST_MISSING =
   'Running flow tests needs @playwright/test and its browser. Install them with:\n' +
@@ -68,7 +92,9 @@ export default defineConfig({
 })
 `
 
-const WORLD_MODULE_SOURCE = `import { readFileSync } from 'node:fs'
+const FLOW_MODULE_SOURCE = `import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { test as base, type APIRequestContext } from '@playwright/test'
 
 export interface WorldAccount {
   name: string
@@ -86,6 +112,7 @@ export interface World {
   baseUrl: string
   /** Every other address the product answers on, by name. */
   urls: Record<string, string>
+  /** Accounts the product's own installation made. None was created for a test. */
   accounts: WorldAccount[]
   notes?: string
 }
@@ -93,11 +120,48 @@ export interface World {
 /** The running product this test run is pointed at. */
 export const world: World = { urls: {}, accounts: [], ...JSON.parse(readFileSync(process.env.${FLOW_TEST_ENV.worldFile}!, 'utf-8')) }
 
-/** A seeded account by name; throws when the product was not seeded with it. */
+/** An account the product's installation made, by name; throws when there is none. */
 export function account(name: string): WorldAccount {
   const found = world.accounts.find((a) => a.name === name)
   if (!found) throw new Error(\`no account "\${name}" in this world (has: \${world.accounts.map((a) => a.name).join(', ') || 'none'})\`)
   return found
+}
+
+/** What a flow's seed is handed. */
+export interface SeedContext {
+  world: World
+  /** HTTP against the product, relative to \`world.baseUrl\`. Closed when the seed returns. */
+  request: APIRequestContext
+  /**
+   * A token no other run of any seed has, lowercase letters and digits. Every
+   * name, email and slug the seed creates carries it.
+   */
+  unique: string
+}
+
+/**
+ * A flow's \`test\`, bound to its seed: the seed runs before the test body,
+ * every time, and what it returns is the test's \`seeded\` fixture.
+ */
+export function flowTest<Seeded>(seed: (context: SeedContext) => Promise<Seeded>) {
+  return base.extend<{ seeded: Seeded }>({
+    seeded: [
+      async ({ playwright }, use, testInfo) => {
+        const mark = { type: '${SEED_ANNOTATION.type}', description: '${SEED_ANNOTATION.failed}' }
+        testInfo.annotations.push(mark)
+        const request = await playwright.request.newContext({ baseURL: world.baseUrl })
+        let seeded: Seeded
+        try {
+          seeded = await seed({ world, request, unique: Date.now().toString(36) + randomBytes(3).toString('hex') })
+        } finally {
+          await request.dispose()
+        }
+        mark.description = '${SEED_ANNOTATION.ok}'
+        await use(seeded)
+      },
+      { auto: true, timeout: ${SEED_TIMEOUT_MS} },
+    ],
+  })
 }
 `
 
@@ -120,18 +184,24 @@ export function prepareFlowTestsDir(repoRoot: string): { ok: true; cli: string }
   const dir = flowTestsDir(repoRoot)
   fs.mkdirSync(path.join(dir, 'node_modules', '@playwright'), { recursive: true })
   fs.writeFileSync(path.join(dir, CONFIG_FILE), CONFIG_SOURCE)
-  fs.writeFileSync(path.join(dir, WORLD_MODULE_FILE), WORLD_MODULE_SOURCE)
+  fs.writeFileSync(path.join(dir, FLOW_MODULE_FILE), FLOW_MODULE_SOURCE)
   const link = path.join(dir, 'node_modules', '@playwright', 'test')
   fs.rmSync(link, { recursive: true, force: true })
   fs.symlinkSync(installed, link, 'dir')
   return { ok: true, cli: path.join(installed, 'cli.js') }
 }
 
+/** The world a test run is pointed at: what `up.sh` reported, and the id it was brought up under. */
+export interface FlowTestWorld {
+  id: string
+  world: ProductWorld
+}
+
 /**
  * The environment a test run has: the build's allowlist of host variables,
  * where the product is, and where this install keeps its browsers.
  */
-export function flowTestEnv(repoRoot: string, world: ProductWorld): Record<string, string> {
+export function flowTestEnv(repoRoot: string, { id, world }: FlowTestWorld): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [name, value] of Object.entries(constructChildEnv({ passthrough: BUILD_PASSTHROUGH }))) {
     if (value !== undefined) env[name] = value
@@ -142,12 +212,13 @@ export function flowTestEnv(repoRoot: string, world: ProductWorld): Record<strin
     ...(browsers ? { PLAYWRIGHT_BROWSERS_PATH: browsers } : {}),
     [FLOW_TEST_ENV.baseUrl]: world.baseUrl,
     [FLOW_TEST_ENV.worldFile]: worldStatePath(repoRoot),
+    [FLOW_TEST_ENV.worldId]: id,
     [FLOW_TEST_ENV.repoRoot]: repoRoot,
   }
 }
 
 export interface RunFlowTestsOptions {
-  world: ProductWorld
+  world: FlowTestWorld
   /** The specs to run, each with the flow it proves. */
   tests: ReadonlyArray<{ flowId: string; file: string }>
   /** How many specs run at once against the one world. */
@@ -307,7 +378,11 @@ interface PwSuite {
 }
 interface PwSpec {
   file?: string
-  tests?: Array<{ results?: PwResult[] }>
+  tests?: Array<{ annotations?: PwAnnotation[]; results?: PwResult[] }>
+}
+interface PwAnnotation {
+  type?: string
+  description?: string
 }
 interface PwResult {
   status?: 'passed' | 'failed' | 'timedOut' | 'skipped' | 'interrupted'
@@ -327,9 +402,13 @@ function readReport(reportPath: string): PwReport | undefined {
 
 type FileResult = Omit<FlowTestResult, 'flowId' | 'file'>
 
-/** Fold the report into one result per spec file: it passes when every test in it did. */
+/**
+ * Fold the report into one result per spec file: it passes when every test in
+ * it did, and a test whose seed did not hold makes it `seed-failed`.
+ */
 function collectByFile(report: PwReport, repoRoot: string): Map<string, FileResult> {
   const byFile = new Map<string, PwResult[]>()
+  const seedFailed = new Set<string>()
   const walk = (suite: PwSuite): void => {
     for (const spec of suite.specs ?? []) {
       const file = path.basename(spec.file ?? suite.file ?? '')
@@ -338,7 +417,10 @@ function collectByFile(report: PwReport, repoRoot: string): Map<string, FileResu
       // The LAST result of a test is the one that stands (earlier ones are retries).
       for (const test of spec.tests ?? []) {
         const last = test.results?.at(-1)
-        if (last) results.push(last)
+        if (!last) continue
+        results.push(last)
+        const seed = test.annotations?.find((a) => a.type === SEED_ANNOTATION.type)
+        if (seed?.description === SEED_ANNOTATION.failed) seedFailed.add(file)
       }
       byFile.set(file, results)
     }
@@ -363,7 +445,7 @@ function collectByFile(report: PwReport, repoRoot: string): Map<string, FileResu
       .filter(Boolean)
       .join('\n\n')
     folded.set(file, {
-      outcome: failed.length > 0 ? 'fail' : ran.length === 0 ? 'skipped' : 'pass',
+      outcome: seedFailed.has(file) ? 'seed-failed' : failed.length > 0 ? 'fail' : ran.length === 0 ? 'skipped' : 'pass',
       durationMs: results.reduce((sum, r) => sum + (r.duration ?? 0), 0),
       ...(failed.length > 0 ? { error: error || `ended ${failed[0].status ?? 'without a status'}` } : {}),
       attachments: results.flatMap((r) =>
