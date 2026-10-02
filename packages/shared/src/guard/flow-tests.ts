@@ -47,6 +47,12 @@ export const FlowTestOutcomeSchema = z
     disagreement: FlowTestDisagreementSchema.optional(),
     /** Required when `blocked`: the one thing that stood in the way. */
     blockedBy: z.string().min(1).optional(),
+    /**
+     * Required when `blocked`: the missing thing as a short noun phrase
+     * (`CurrencyBeacon API key`). Flows blocked on the same thing say the same
+     * phrase, which is what a reader groups them by.
+     */
+    blockedOn: z.string().min(1).optional(),
   })
   .superRefine((outcome, ctx) => {
     if (outcome.status === 'failing' && !outcome.disagreement) {
@@ -55,8 +61,24 @@ export const FlowTestOutcomeSchema = z
     if (outcome.status === 'blocked' && !outcome.blockedBy) {
       ctx.addIssue({ code: 'custom', path: ['blockedBy'], message: 'a blocked flow says what blocked it' });
     }
+    if (outcome.status === 'blocked' && !outcome.blockedOn) {
+      ctx.addIssue({ code: 'custom', path: ['blockedOn'], message: 'a blocked flow names the missing thing in a few words' });
+    }
   });
 export type FlowTestOutcome = z.infer<typeof FlowTestOutcomeSchema>;
+
+/** One `test.step` of a spec, as one run of it went. */
+export const FlowTestStepSchema = z.object({
+  /** 1-based position among the spec's top-level steps. */
+  order: z.number().int().positive(),
+  title: z.string(),
+  /** `not-reached`: an earlier step failed, so this one never started. */
+  outcome: z.enum(['passed', 'failed', 'not-reached']),
+  durationMs: z.number().nonnegative().optional(),
+  /** What the failing assertion said. */
+  error: z.string().optional(),
+});
+export type FlowTestStep = z.infer<typeof FlowTestStepSchema>;
 
 /** One execution of one flow's test. */
 export const FlowTestResultSchema = z.object({
@@ -71,10 +93,31 @@ export const FlowTestResultSchema = z.object({
   durationMs: z.number().nonnegative(),
   /** The failing assertion or error, as Playwright printed it. */
   error: z.string().optional(),
-  /** Tree-relative paths of what the run recorded (trace, video, screenshots). */
+  /** The spec's top-level steps that started, in order. A step never reached is not here. */
+  steps: z.array(FlowTestStepSchema).default([]),
+  /**
+   * Tree-relative paths of what the run recorded: the trace, the video, and one
+   * `step-<n>` screenshot per browser step, taken as the step ended.
+   */
   attachments: z.array(z.object({ name: z.string(), path: z.string() })).default([]),
 });
 export type FlowTestResult = z.infer<typeof FlowTestResultSchema>;
+
+/**
+ * The run a test's status stands on: how each step went, and where its
+ * pictures are. `evidencePath` is a guard evidence directory holding one
+ * `step-<n>.png` per browser step and the session video; absent when the run
+ * drove no browser.
+ */
+export const FlowTestRunSchema = z.object({
+  ranAt: z.string(),
+  durationMs: z.number().nonnegative(),
+  /** Every top-level step of the spec, the ones never reached included. */
+  steps: z.array(FlowTestStepSchema),
+  error: z.string().optional(),
+  evidencePath: z.string().optional(),
+});
+export type FlowTestRun = z.infer<typeof FlowTestRunSchema>;
 
 /** One flow's entry in `tests/tests.json`. */
 export const FlowTestRecordSchema = z.object({
@@ -89,6 +132,9 @@ export const FlowTestRecordSchema = z.object({
   summary: z.string().min(1),
   disagreement: FlowTestDisagreementSchema.optional(),
   blockedBy: z.string().min(1).optional(),
+  blockedOn: z.string().min(1).optional(),
+  /** The engine's run the status was accepted on. Absent on a `blocked` flow. */
+  run: FlowTestRunSchema.optional(),
 });
 export type FlowTestRecord = z.infer<typeof FlowTestRecordSchema>;
 

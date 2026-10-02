@@ -40,11 +40,13 @@ import {
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
 import {
+  FlowTestsFileSchema,
   guardEvidencePaths,
   guardEvidenceVisual,
   type GuardGenerateReport,
   type GuardLatest,
 } from '@truecourse/shared';
+import { flowTestsIndexPath } from '@truecourse/shared/work-tree';
 import {
   readGuardBaselineCommit,
   readGuardDecisions,
@@ -166,15 +168,21 @@ export async function persistGeneratedGuard(
  * `ref`'s commit. The paths are enumerated from both stores that carry them —
  * the report's findings AND the manifest's durable diagnoses — because a
  * no-op generate re-derives its committed rows and only the manifest still
- * points at their transcripts. A pointer whose dir holds nothing is skipped: it
- * may name a run whose tree is long gone.
+ * points at their transcripts. A flow test's accepted run is evidence of the
+ * same kind (its step pictures and session video), pointed at by the tests
+ * index. A pointer whose dir holds nothing is skipped: it may name a run whose
+ * tree is long gone, which is every test this generate kept rather than wrote.
  */
 async function persistBirthEvidence(
   ref: RepoRef,
   treeDir: string,
   report: GuardGenerateReport,
 ): Promise<void> {
-  for (const evidencePath of guardEvidencePaths({ report, manifest: readCloneManifest(treeDir) })) {
+  const paths = new Set([
+    ...guardEvidencePaths({ report, manifest: readCloneManifest(treeDir) }),
+    ...flowTestEvidencePaths(treeDir),
+  ]);
+  for (const evidencePath of paths) {
     const files = collectEvidenceFiles(treeDir, evidencePath);
     if (!files) continue;
     const scenarioSeg = evidencePath.split('/').pop()!;
@@ -271,6 +279,19 @@ export async function recordGuardRunCoverage(
     );
     return false;
   }
+}
+
+/** The evidence dirs the tree's flow tests point at; none when it has no tests index. */
+function flowTestEvidencePaths(treeDir: string): string[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(flowTestsIndexPath(treeDir), 'utf-8'));
+  } catch {
+    return [];
+  }
+  const index = FlowTestsFileSchema.safeParse(raw);
+  if (!index.success) return [];
+  return index.data.tests.flatMap((test) => (test.run?.evidencePath ? [test.run.evidencePath] : []));
 }
 
 /**

@@ -1,3 +1,9 @@
+import {
+  FlowTestDisagreementSchema,
+  FlowTestRunSchema,
+  FlowTestStatusSchema,
+  type FlowTestStatus,
+} from './flow-tests.js'
 import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
 /**
  * Derived guard read-surface DTOs the dashboard renders — the per-section
@@ -773,6 +779,46 @@ export const GuardFlowProgressSchema = z.object({
 }).strict()
 export type GuardFlowProgress = z.infer<typeof GuardFlowProgressSchema>
 
+/**
+ * The wire status a flow wears for what its Playwright test says, so a flow
+ * proven by a test reads through the same five words as every other flow.
+ */
+export function flowTestCoverageStatus(status: FlowTestStatus): GuardSectionCoverageStatus {
+  return status === 'passing' ? 'pass' : status === 'failing' ? 'fail' : 'blocked-on'
+}
+
+/** What a flow's Playwright test says about it, as far as a list row tells it. */
+export const GuardFlowTestMarkSchema = z
+  .object({
+    status: FlowTestStatusSchema,
+    /** True when the test creates its own starting data through a seed. */
+    seeded: z.boolean(),
+    /** A failing test: what the documents say, and what the product did instead. */
+    documented: z.string().optional(),
+    observed: z.string().optional(),
+    /** A blocked flow: the missing thing in a few words, the key blocked flows group by. */
+    blockedOn: z.string().optional(),
+    /** A blocked flow: the same thing as its test's session explained it, in full. */
+    blockedBy: z.string().optional(),
+  })
+  .strict()
+export type GuardFlowTestMark = z.infer<typeof GuardFlowTestMarkSchema>
+
+/** A flow's Playwright test, whole: what it proved, its files, and the run that stands. */
+export const GuardFlowTestViewSchema = z
+  .object({
+    status: FlowTestStatusSchema,
+    summary: z.string(),
+    disagreement: FlowTestDisagreementSchema.optional(),
+    blockedBy: z.string().optional(),
+    blockedOn: z.string().optional(),
+    spec: z.object({ file: z.string(), content: z.string() }).optional(),
+    seed: z.object({ file: z.string(), content: z.string() }).optional(),
+    run: FlowTestRunSchema.optional(),
+  })
+  .strict()
+export type GuardFlowTestView = z.infer<typeof GuardFlowTestViewSchema>
+
 export const GuardFlowListItemSchema = z
   .object({
     flowId: z.string(),
@@ -841,6 +887,8 @@ export const GuardFlowListItemSchema = z
     dismissed: z.boolean().default(false),
     /** Why it was dismissed, when the person who did it said. */
     dismissalNote: z.string().optional(),
+    /** Present when the flow is proven by a Playwright test rather than scenarios. */
+    test: GuardFlowTestMarkSchema.optional(),
   })
   .strict()
 export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
@@ -1080,6 +1128,8 @@ export const GuardFlowDetailSchema = z
     generatedAt: z.string().nullable(),
     runId: z.string().nullable(),
     ranAt: z.string().nullable(),
+    /** Present when the flow is proven by a Playwright test rather than scenarios. */
+    test: GuardFlowTestViewSchema.optional(),
   })
   .strict()
 export type GuardFlowDetail = z.infer<typeof GuardFlowDetailSchema>

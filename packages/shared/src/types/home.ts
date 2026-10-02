@@ -137,6 +137,35 @@ export interface HomeChangeRow {
   href: string;
 }
 
+/** One finding: a flow whose test fails where the product and its documents part ways. */
+export interface HomeFindingRow {
+  /** `<owner/repo>:<flowId>`. */
+  id: string;
+  title: string;
+  /** What the documents say happens. */
+  documented: string;
+  /** What the product did instead. */
+  observed: string;
+  /** Opens the flow. */
+  href: string;
+}
+
+/** The flows blocked on one missing thing. */
+export interface HomeBlockedOnRow {
+  /** The missing thing, in the words the flows' tests gave it. */
+  reason: string;
+  flows: number;
+  href: string;
+}
+
+/** One document's flows, counted under the five words. */
+export interface HomeDocumentFlowsRow extends HomeFlowTally {
+  /** The document as the flows cite it. */
+  doc: string;
+  /** Opens Flows narrowed to this document. */
+  href: string;
+}
+
 /** `GET /api/home?period=`, the whole page in one answer. */
 export interface HomeResponse {
   period: HomePeriod;
@@ -149,6 +178,12 @@ export interface HomeResponse {
   attention: HomeAttentionRow[];
   /** Newest first. */
   changed: HomeChangeRow[];
+  /** The failing flow tests, in flow order. */
+  findings: HomeFindingRow[];
+  /** What blocked flows wait on, most flows first. */
+  blockedOn: HomeBlockedOnRow[];
+  /** Worst share first: Failed plus Blocked over the document's FLOWS. */
+  documents: HomeDocumentFlowsRow[];
 }
 
 /**

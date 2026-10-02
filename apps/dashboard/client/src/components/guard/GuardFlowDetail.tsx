@@ -49,6 +49,10 @@
  * a test (the artifact a developer actually opens), and the flow's own
  * `scenarios/flows.json` entry when it has none, a flow always has a stored truth
  * to show, and it is whichever one exists ({@link ArtifactModeSwitch}).
+ *
+ * A FLOW PROVEN BY A PLAYWRIGHT TEST keeps the header and the milestones and
+ * swaps the workspace under them for that test's own ({@link GuardFlowTestBody}):
+ * verdict, filmstrip, steps, with the spec and its seed as the other reading.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -68,6 +72,7 @@ import {
   useArtifactMode,
 } from "@/dashboard/ui/artifact-view";
 import { HoverPopover } from "@/dashboard/ui/hover-popover";
+import { GuardFlowTestBody } from "@/components/guard/GuardFlowTestBody";
 import { useGuardArtifactRaw } from "@/hooks/useGuardArtifactRaw";
 import type { GuardDecisionsState } from "@/hooks/useGuardDecisions";
 import { collapseAuthoringAttempts } from "@/lib/guard-report";
@@ -604,12 +609,16 @@ export function GuardFlowDetail({
   // The flow's TRUTH ON DISK: its test's YAML when it has one, else its own entry
   // in the flow corpus. One switch, whichever artifact exists.
   const test = rows.find((r) => r.scenarioId != null) ?? null;
-  const { mode, setMode, raw } = useArtifactMode(test ? "YAML" : "JSON");
+  // A flow proven by a Playwright test: its files are the artifact, and its
+  // body takes the place of the scenario workspace.
+  const flowTest = detail.test ?? null;
+  const format = flowTest ? "TS" : test ? "YAML" : "JSON";
+  const { mode, setMode, raw } = useArtifactMode(format);
   const flowRaw = useGuardArtifactRaw(
     repoId,
     "flow",
     detail.flowId,
-    raw && !test,
+    raw && !test && !flowTest,
   );
 
   // Every stored test on the flow as its scenario model, by id. Keyed rather
@@ -685,7 +694,7 @@ export function GuardFlowDetail({
             {detail.flowId}
           </span>
           <ArtifactModeSwitch
-            format={test ? "YAML" : "JSON"}
+            format={format}
             mode={mode}
             onSelect={setMode}
             className="ml-auto"
@@ -711,7 +720,9 @@ export function GuardFlowDetail({
       <div className="flex min-w-0 flex-1 flex-col gap-5 px-6 py-4">
         {raw ? (
           // The stored artifact, whichever one this flow has.
-          test ? (
+          flowTest ? (
+            <GuardFlowTestBody repoId={repoId} test={flowTest} raw />
+          ) : test ? (
             <GuardScenarioBody
               repoId={repoId}
               test={models.get(test.scenarioId!)!}
@@ -737,9 +748,28 @@ export function GuardFlowDetail({
               </div>
             )}
 
+            {flowTest && (
+              <GuardFlowTestBody
+                repoId={repoId}
+                test={flowTest}
+                {...(decisions
+                  ? {
+                      rulings: (
+                        <DismissFlowAction
+                          flowId={detail.flowId}
+                          dismissed={detail.dismissed}
+                          {...(detail.dismissalNote ? { note: detail.dismissalNote } : {})}
+                          decisions={decisions}
+                        />
+                      ),
+                    }
+                  : {})}
+              />
+            )}
+
             {/* ONE block per surface. With the single surface the corpus produces
                 today there is no label at all, the page IS the test. */}
-            {rows.map((row, i) => {
+            {!flowTest && rows.map((row, i) => {
               const model = row.scenarioId
                 ? models.get(row.scenarioId)
                 : undefined;
@@ -822,7 +852,7 @@ export function GuardFlowDetail({
             {/* A flow with no test still has a realization plan, the interfaces it
                 WOULD walk. With a test, its own Interface section above says it
                 (and draws each one), so this never renders twice. */}
-            {!test && detail.interfaceIds.length > 0 && (
+            {!test && !flowTest && detail.interfaceIds.length > 0 && (
               <div>
                 <div className={LABEL}>Interfaces</div>
                 <div className="flex flex-col items-start gap-1">
@@ -845,7 +875,7 @@ export function GuardFlowDetail({
                 row, where the decision follows the evidence it is made on. A flow
                 with none has no such row, the ruling stays the page's last
                 block, exactly as it reads today. */}
-            {decisions && !test && (
+            {decisions && !test && !flowTest && (
               <DismissFlowAction
                 flowId={detail.flowId}
                 dismissed={detail.dismissed}

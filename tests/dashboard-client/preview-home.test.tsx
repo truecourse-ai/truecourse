@@ -149,6 +149,30 @@ const HOME: HomeResponse = {
       href: `/context/doc/${encodeURIComponent(SHIPPING)}`,
     },
   ],
+  findings: [
+    {
+      id: 'acme/web:refund-an-order',
+      title: 'Refund an order',
+      documented: 'A refund is issued within 30 days of delivery.',
+      observed: 'The refund button is gone after 14 days.',
+      href: '/flows/refund-an-order?repo=web',
+    },
+  ],
+  blockedOn: [{ reason: 'Stripe test account', flows: 2, href: '/flows?status=blocked' }],
+  documents: [
+    {
+      doc: 'docs/refunds.md',
+      total: 3,
+      byStatus: { succeeded: 1, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 0 },
+      href: '/flows?doc=docs%2Frefunds.md',
+    },
+    {
+      doc: 'docs/shipping.md',
+      total: 2,
+      byStatus: { succeeded: 2, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
+      href: '/flows?doc=docs%2Fshipping.md',
+    },
+  ],
 };
 
 /** What makes the workspace a dashboard: one source and one repository. */
@@ -183,6 +207,9 @@ const EMPTY: HomeResponse = {
   areas: [],
   attention: [],
   changed: [],
+  findings: [],
+  blockedOn: [],
+  documents: [],
 };
 
 function json(body: unknown, status = 200): Response {
@@ -272,8 +299,7 @@ describe('Home', () => {
     serve({ showBlocked: false, home: {
       ...HOME,
       attention: [...HOME.attention, { id: 'blocked-doc', kind: 'blocked-document', title: 'Blocked document', status: 'Blocked', fact: 'Needs recipe', at: null, href: '/context' }],
-      areas: [...HOME.areas, { area: 'blocked-only', total: 1, byStatus: { proved: 0, failed: 0, blocked: 1, 'not-testable': 0, 'not-run': 0 } }],
-      changed: [...HOME.changed, { ref: 'blocked-change', title: 'Blocked change', event: 'Blocked', at: new Date().toISOString(), href: '/context' }],
+      documents: [...HOME.documents, { doc: 'docs/blocked-only.md', total: 1, byStatus: { succeeded: 0, failed: 0, blocked: 1, 'not-testable': 0, 'never-run': 0 }, href: '/flows?doc=docs%2Fblocked-only.md' }],
     } });
     renderHome('/');
     const strip = await screen.findByRole('list', { name: 'Today' });
@@ -282,8 +308,8 @@ describe('Home', () => {
     expect(within(strip).queryByRole('listitem', { name: '1 Blocked' })).toBeNull();
     expect(within(chart()).queryByRole('button', { name: 'Blocked' })).toBeNull();
     expect(screen.queryByText('Blocked document')).toBeNull();
-    expect(screen.queryByText('blocked-only')).toBeNull();
-    expect(screen.queryByText('Blocked change')).toBeNull();
+    expect(screen.queryByText('docs/blocked-only.md')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Blocked on' })).toBeNull();
     expect(screen.queryByRole('checkbox', { name: 'Show blocked' })).toBeNull();
     await userEvent.click(screen.getByRole('link', { name: 'Settings' }));
     const setting = await screen.findByRole('checkbox', { name: 'Show blocked results' });
@@ -294,8 +320,8 @@ describe('Home', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Home' }));
     const restoredStrip = await screen.findByRole('list', { name: 'Today' });
     expect(screen.getByText('Blocked document')).toBeInTheDocument();
-    expect(screen.getByText('blocked-only')).toBeInTheDocument();
-    expect(screen.getByText('Blocked change')).toBeInTheDocument();
+    expect(screen.getByText('docs/blocked-only.md')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Blocked on' })).getByText('Stripe test account')).toBeInTheDocument();
     expect(within(restoredStrip).getByText('40%')).toBeInTheDocument();
     expect(within(restoredStrip).getByRole('listitem', { name: '1 Blocked' })).toBeInTheDocument();
   });
@@ -353,7 +379,7 @@ describe('Home', () => {
     await waitFor(() => expect(homeCalls(state)).toContain('/api/home?period=7d'));
   });
 
-  it('draws the three widgets the server filled', async () => {
+  it('draws the widgets the server filled', async () => {
     serve();
     renderHome();
 
@@ -364,17 +390,20 @@ describe('Home', () => {
     expect(within(attention).getByText('refund window disagrees')).toBeInTheDocument();
     expect(within(attention).getByText('Needs setup')).toBeInTheDocument();
 
-    const areas = screen.getByRole('region', { name: 'Areas' });
-    expect(within(areas).getByText('acme/payments')).toBeInTheDocument();
-    expect(within(areas).getByText('acme/logistics')).toBeInTheDocument();
+    // A finding names the flow and what the product did instead.
+    const findings = screen.getByRole('region', { name: 'Findings' });
+    expect(within(findings).getByText('Refund an order')).toBeInTheDocument();
+    expect(within(findings).getByText('The refund button is gone after 14 days.')).toBeInTheDocument();
 
-    const changed = screen.getByRole('region', { name: 'Recently changed' });
-    expect(within(changed).getByText('Refunds')).toBeInTheDocument();
-    expect(within(changed).getByText('Proved')).toBeInTheDocument();
-    expect(within(changed).getByText('First read')).toBeInTheDocument();
-    // Grouped by day, as the feed reads.
-    expect(within(changed).getByText('Today')).toBeInTheDocument();
-    expect(within(changed).getByText('Earlier')).toBeInTheDocument();
+    const blockedOn = screen.getByRole('region', { name: 'Blocked on' });
+    expect(within(blockedOn).getByText('Stripe test account')).toBeInTheDocument();
+    expect(within(blockedOn).getByText('2 flows')).toBeInTheDocument();
+
+    const documents = screen.getByRole('region', { name: 'Documents' });
+    expect(
+      within(documents).getByRole('button', { name: 'docs/refunds.md: 1 succeeded, 1 failed, 1 blocked' }),
+    ).toBeInTheDocument();
+    expect(within(documents).getByRole('button', { name: 'docs/shipping.md: 2 succeeded' })).toBeInTheDocument();
   });
 
   it('opens an attention row where the server addressed it', async () => {
@@ -387,24 +416,24 @@ describe('Home', () => {
     expect(address()).toBe('/agent/run-1');
   });
 
-  it('opens the document a change is about', async () => {
+  it('opens the flow a finding is about', async () => {
     serve();
     renderHome();
 
-    const changed = await screen.findByRole('region', { name: 'Recently changed' });
-    await userEvent.click(await within(changed).findByText('Refunds'));
+    const findings = await screen.findByRole('region', { name: 'Findings' });
+    await userEvent.click(await within(findings).findByText('Refund an order'));
 
-    expect(address()).toBe(`/context/doc/${encodeURIComponent(REFUNDS)}`);
+    expect(address()).toBe('/flows/refund-an-order?repo=web');
   });
 
-  it('narrows Documents to an area from its strip', async () => {
+  it('narrows Flows to a document from its strip', async () => {
     serve();
     renderHome();
 
-    const areas = await screen.findByRole('region', { name: 'Areas' });
-    await userEvent.click(await within(areas).findByText('acme/payments'));
+    const documents = await screen.findByRole('region', { name: 'Documents' });
+    await userEvent.click(await within(documents).findByText('docs/refunds.md'));
 
-    expect(address()).toBe('/context/documents?area=acme%2Fpayments');
+    expect(address()).toBe('/flows?doc=docs%2Frefunds.md');
   });
 
   it('says what an empty workspace has, and draws no chart', async () => {
@@ -412,8 +441,8 @@ describe('Home', () => {
     renderHome();
 
     expect(await screen.findByText('Nothing is waiting on you.')).toBeInTheDocument();
-    expect(screen.getByText('No document is read by a repository yet.')).toBeInTheDocument();
-    expect(screen.getByText('Nothing has changed.')).toBeInTheDocument();
+    expect(screen.getByText('No flow test fails.')).toBeInTheDocument();
+    expect(screen.getByText('No flow cites a document yet.')).toBeInTheDocument();
     expect(screen.getByText('Nothing has run yet, so there is nothing to draw.')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Sections over time' })).not.toBeInTheDocument();
   });
