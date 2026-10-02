@@ -14,9 +14,14 @@
  * not hold is reported apart from a test that fails: the first is the test's
  * own defect, the second is a finding.
  *
+ * A run is recorded as it goes: the session video, and a screenshot as each
+ * top-level `test.step` of a browser test ends, which is why a spec takes its
+ * `test` from the engine's module and not from Playwright directly.
+ *
  * What the engine owns in the tests directory, and rewrites on every run:
  *   playwright.config.ts   where the product is, what to record
- *   flow.ts                the running product, and `flowTest`, which binds a spec to its seed
+ *   flow.ts                `test` and `expect`, the running product, and `flowTest`,
+ *                          which binds a spec to its seed
  *   node_modules/@playwright/test   a link to this install, so specs resolve it
  * Everything else there is the specs and their seeds.
  *
@@ -28,8 +33,21 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import { WORLD_ENV, type FlowTestResult, type ProductWorld } from '@truecourse/shared'
-import { flowTestResultsDir, flowTestsDir, sanitizeSegment, worldStatePath } from '@truecourse/shared/work-tree'
+import {
+  WORLD_ENV,
+  type FlowTestResult,
+  type FlowTestRun,
+  type FlowTestStep,
+  type ProductWorld,
+} from '@truecourse/shared'
+import {
+  evidenceRelPath,
+  evidenceScenarioDir,
+  flowTestResultsDir,
+  flowTestsDir,
+  sanitizeSegment,
+  worldStatePath,
+} from '@truecourse/shared/work-tree'
 import { buildOutputTail } from './build.js'
 import { BUILD_PASSTHROUGH, constructChildEnv } from './child-env.js'
 import { armChildKill } from './child-kill.js'
@@ -66,6 +84,11 @@ export const FLOW_TEST_ENV = {
  */
 const SEED_ANNOTATION = { type: 'seed', failed: 'failed', ok: 'ok' } as const
 
+/** The attachment a step's screenshot is reported under, and the evidence file it becomes. */
+const STEP_SHOT = /^step-(\d+)$/
+/** What the session video is called in an evidence bundle. */
+const EVIDENCE_VIDEO_FILE = 'session.webm'
+
 const PLAYWRIGHT_TEST_MISSING =
   'Running flow tests needs @playwright/test and its browser. Install them with:\n' +
   '  npm install @playwright/test@1.62.1\n' +
@@ -94,7 +117,9 @@ export default defineConfig({
 
 const FLOW_MODULE_SOURCE = `import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { test as base, type APIRequestContext } from '@playwright/test'
+import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test'
+
+export { expect }
 
 export interface WorldAccount {
   name: string
@@ -139,12 +164,69 @@ export interface SeedContext {
   unique: string
 }
 
+// The test this worker is running: its page once it asked for one, how deep in
+// steps it is, and how many top-level steps it has started.
+let current: Page | undefined
+let depth = 0
+let started = 0
+
+const recorded = base.extend<{ stepCount: void }>({
+  page: async ({ page }, use) => {
+    current = page
+    await use(page)
+    current = undefined
+  },
+  stepCount: [
+    async ({}, use) => {
+      depth = 0
+      started = 0
+      await use()
+    },
+    { auto: true },
+  ],
+})
+
+/**
+ * Make \`t.step\` leave a picture: as each top-level step of a browser test
+ * ends, pass or fail, the page is captured and attached as \`step-<n>\`.
+ */
+function picturing<T extends Pick<typeof base, 'step' | 'info'>>(t: T): T {
+  const step = t.step.bind(t)
+  const pictured = ((title, body, options) =>
+    step(
+      title,
+      async (...args) => {
+        depth += 1
+        const order = depth === 1 ? ++started : 0
+        try {
+          return await body(...args)
+        } finally {
+          depth -= 1
+          if (order > 0 && current && !current.isClosed()) {
+            const info = t.info()
+            const file = info.outputPath(\`step-\${order}.png\`)
+            await current.screenshot({ path: file }).then(
+              () => info.attachments.push({ name: \`step-\${order}\`, path: file, contentType: 'image/png' }),
+              () => {},
+            )
+          }
+        }
+      },
+      options,
+    )) as typeof t.step
+  t.step = Object.assign(pictured, { skip: t.step.skip })
+  return t
+}
+
+/** Playwright's \`test\`, recording a picture per step. A flow with no seed uses it as it is. */
+export const test = picturing(recorded)
+
 /**
  * A flow's \`test\`, bound to its seed: the seed runs before the test body,
  * every time, and what it returns is the test's \`seeded\` fixture.
  */
 export function flowTest<Seeded>(seed: (context: SeedContext) => Promise<Seeded>) {
-  return base.extend<{ seeded: Seeded }>({
+  return picturing(recorded.extend<{ seeded: Seeded }>({
     seeded: [
       async ({ playwright }, use, testInfo) => {
         const mark = { type: '${SEED_ANNOTATION.type}', description: '${SEED_ANNOTATION.failed}' }
@@ -161,7 +243,7 @@ export function flowTest<Seeded>(seed: (context: SeedContext) => Promise<Seeded>
       },
       { auto: true, timeout: ${SEED_TIMEOUT_MS} },
     ],
-  })
+  }))
 }
 `
 
@@ -287,7 +369,7 @@ export async function runFlowTests(repoRoot: string, opts: RunFlowTestsOptions):
       ok: true,
       results: opts.tests.map(
         ({ flowId, file }) =>
-          restByFile.get(file) ?? { flowId, file, outcome: 'fail', durationMs: 0, error: broken.get(file)!, attachments: [] },
+          restByFile.get(file) ?? { flowId, file, outcome: 'fail', durationMs: 0, error: broken.get(file)!, steps: [], attachments: [] },
       ),
     }
   }
@@ -305,6 +387,7 @@ export async function runFlowTests(repoRoot: string, opts: RunFlowTestsOptions):
         outcome: 'fail' as const,
         durationMs: 0,
         error: broken.get(file) ?? (loadErrors || `the run did not report ${file}:\n${run.output}`),
+        steps: [],
         attachments: [],
       }
     }),
@@ -384,11 +467,18 @@ interface PwAnnotation {
   type?: string
   description?: string
 }
+interface PwStep {
+  title?: string
+  duration?: number
+  error?: { message?: string }
+}
 interface PwResult {
   status?: 'passed' | 'failed' | 'timedOut' | 'skipped' | 'interrupted'
   duration?: number
   error?: { message?: string }
   errors?: Array<{ message?: string }>
+  /** The test's own `test.step` calls, top level, in the order they started. */
+  steps?: PwStep[]
   attachments?: Array<{ name?: string; path?: string }>
 }
 
@@ -448,6 +538,15 @@ function collectByFile(report: PwReport, repoRoot: string): Map<string, FileResu
       outcome: seedFailed.has(file) ? 'seed-failed' : failed.length > 0 ? 'fail' : ran.length === 0 ? 'skipped' : 'pass',
       durationMs: results.reduce((sum, r) => sum + (r.duration ?? 0), 0),
       ...(failed.length > 0 ? { error: error || `ended ${failed[0].status ?? 'without a status'}` } : {}),
+      steps: results
+        .flatMap((r) => r.steps ?? [])
+        .map((step, index): FlowTestStep => ({
+          order: index + 1,
+          title: step.title ?? '',
+          outcome: step.error ? 'failed' : 'passed',
+          ...(step.duration !== undefined ? { durationMs: step.duration } : {}),
+          ...(step.error?.message ? { error: stripAnsi(step.error.message) } : {}),
+        })),
       attachments: results.flatMap((r) =>
         (r.attachments ?? []).flatMap((a) =>
           a.name && a.path ? [{ name: a.name, path: treeRelative(a.path) }] : [],
@@ -456,6 +555,63 @@ function collectByFile(report: PwReport, repoRoot: string): Map<string, FileResu
     })
   }
   return folded
+}
+
+// -- a run, as it is kept ------------------------------------------------------
+
+/** The titles of a spec's `test.step` calls, in source order. */
+export function flowSpecStepTitles(source: string): string[] {
+  const titles: string[] = []
+  for (const match of source.matchAll(/\btest\.step\(\s*(['"`])((?:\\[\s\S]|(?!\1)[^\\])*)\1/g)) {
+    titles.push(match[2].replace(/\\([\s\S])/g, '$1'))
+  }
+  return titles
+}
+
+/**
+ * Keep what a run recorded as a guard evidence bundle (`step-<n>.png` per
+ * browser step, the session video) under `runId`, and return the run as a
+ * test's record carries it: every step of the spec, the ones this run never
+ * reached included. A run that drove no browser leaves no bundle.
+ */
+export function keepFlowTestRun(
+  repoRoot: string,
+  opts: { runId: string; result: FlowTestResult; specSource: string; ranAt: string },
+): FlowTestRun {
+  const { result } = opts
+  const visuals = result.attachments.flatMap((attachment) => {
+    const shot = STEP_SHOT.exec(attachment.name)
+    if (shot) return [{ from: attachment.path, file: `step-${shot[1]}.png` }]
+    return attachment.name === 'video' ? [{ from: attachment.path, file: EVIDENCE_VIDEO_FILE }] : []
+  })
+  let evidencePath: string | undefined
+  if (visuals.length > 0) {
+    const dir = evidenceScenarioDir(repoRoot, opts.runId, result.flowId)
+    fs.rmSync(dir, { recursive: true, force: true })
+    fs.mkdirSync(dir, { recursive: true })
+    let kept = 0
+    for (const visual of visuals) {
+      try {
+        fs.copyFileSync(path.resolve(repoRoot, visual.from), path.join(dir, visual.file))
+        kept += 1
+      } catch {
+        /* a recording Playwright named and did not finish writing */
+      }
+    }
+    if (kept > 0) evidencePath = evidenceRelPath(opts.runId, result.flowId)
+  }
+
+  const titles = flowSpecStepTitles(opts.specSource)
+  const unreached = titles.slice(result.steps.length).map(
+    (title, index): FlowTestStep => ({ order: result.steps.length + index + 1, title, outcome: 'not-reached' }),
+  )
+  return {
+    ranAt: opts.ranAt,
+    durationMs: result.durationMs,
+    steps: [...result.steps, ...unreached],
+    ...(result.error ? { error: result.error } : {}),
+    ...(evidencePath ? { evidencePath } : {}),
+  }
 }
 
 function stripAnsi(text: string): string {

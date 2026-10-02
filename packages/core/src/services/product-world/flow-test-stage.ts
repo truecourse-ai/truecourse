@@ -11,7 +11,10 @@
  * run side by side against the one product.
  *
  * A flow whose test was written against the flow as it still is keeps that
- * test: only new and changed flows get a session. A session that ends without
+ * test: only new and changed flows get a session. A record that lacks what a
+ * record carries (the run its status was accepted on, or the few words a
+ * blocked flow waits on) was written before the engine kept those, and is
+ * written again. A session that ends without
  * an accepted outcome leaves no spec and no seed behind, so every one in the
  * tests directory is one the engine saw behave the way its record says.
  *
@@ -26,6 +29,7 @@ import {
   bootProductWorld,
   buildProductWorld,
   extractSectionTexts,
+  keepFlowTestRun,
   prepareFlowTestsDir,
   readGuardClaimsCorpus,
   readGuardFlowsCorpus,
@@ -55,6 +59,7 @@ import {
   FLOW_TEST_SESSION_TIMEOUT_MS,
   flowTestBriefing,
   flowTestSessionDef,
+  type FlowTestSessionState,
   type FlowTestStep,
 } from './flow-test-session.js';
 
@@ -62,6 +67,8 @@ export interface FlowTestStageInput {
   repoRoot: string;
   /** The world's identity on this host (the compose project name). */
   worldId: string;
+  /** The generate run this stage is part of; what each test's evidence is kept under. */
+  runId: string;
   /** The run's driver and transcript store, built on first use. */
   acquire: () => Promise<{ driver: SessionDriver; persistence: SessionPersistence }>;
   signal?: AbortSignal;
@@ -110,13 +117,15 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
   const flows = readGuardFlowsCorpus(repoRoot)?.flows ?? [];
   if (flows.length === 0) return { status: 'no-flows' };
 
-  // A record stands while the flow it was written for is unchanged and, for a
-  // flow that has a test, the spec and its seed are still there.
+  // A record stands while the flow it was written for is unchanged, the record
+  // is whole, and, for a flow that has a test, the spec and its seed are still
+  // there.
   const prior = new Map(readFlowTests(repoRoot).tests.map((t) => [t.flowId, t]));
   const kept = new Map<string, FlowTestRecord>();
   for (const flow of flows) {
     const record = prior.get(flow.id);
     if (!record || record.flowFingerprint !== flow.fingerprint) continue;
+    if (record.status === 'blocked' ? !record.blockedOn : !record.run) continue;
     const files = [record.file, record.seed].flatMap((file) => (file ? [file] : []));
     if (files.some((file) => !fs.existsSync(path.join(flowTestsDir(repoRoot), file)))) continue;
     kept.set(flow.id, record);
@@ -160,18 +169,24 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
         };
         input.onProgress?.(tally());
 
+        // Each flow's session, kept so the fold can read the engine's run the
+        // outcome was accepted on.
+        const sessions = new Map<string, FlowTestSessionState>();
         const { driver, persistence } = await input.acquire();
         await runSessionPool<GuardFlow, FlowTestOutcome>({
           items: work,
           workItem: (flow) => `flow:${flow.id}`,
-          session: (flow) =>
-            flowTestSessionDef({
+          session: (flow) => {
+            const { def, state } = flowTestSessionDef({
               repoRoot,
               flow,
               steps: steps(flow),
               world,
               ...(input.signal ? { signal: input.signal } : {}),
-            }).def,
+            });
+            sessions.set(flow.id, state);
+            return def;
+          },
           briefing: (flow) => [flowTestBriefing({ repoRoot, flow, steps: steps(flow), world })],
           driver,
           persistence,
@@ -187,7 +202,8 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
             const specPath = flowTestPath(repoRoot, flow.id);
             const seedPath = flowSeedPath(repoRoot, flow.id);
             if (outcome.status === 'completed') {
-              const { status, summary, disagreement, blockedBy } = outcome.output;
+              const { status, summary, disagreement, blockedBy, blockedOn } = outcome.output;
+              const accepted = status === 'blocked' ? undefined : sessions.get(flow.id)?.lastRun();
               written.set(flow.id, {
                 flowId: flow.id,
                 flowFingerprint: flow.fingerprint,
@@ -197,6 +213,17 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
                 summary,
                 ...(disagreement ? { disagreement } : {}),
                 ...(blockedBy ? { blockedBy } : {}),
+                ...(blockedOn ? { blockedOn } : {}),
+                ...(accepted
+                  ? {
+                      run: keepFlowTestRun(repoRoot, {
+                        runId: input.runId,
+                        result: accepted,
+                        specSource: fs.readFileSync(specPath, 'utf-8'),
+                        ranAt: new Date().toISOString(),
+                      }),
+                    }
+                  : {}),
               });
             } else {
               // Nobody accepted this spec or its seed: whatever is on disk is unproven.

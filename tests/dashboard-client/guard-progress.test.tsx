@@ -22,17 +22,18 @@ describe('execution and coverage presentation', () => {
     state.flows = [flow('Search', { ...progress, coverage: 'complete', verified: 2, generation: 'ready' }), flow('Delete', { ...progress, coverage: 'complete', verified: 2, generation: 'ready' }), flow('Create', progress), flow('Validation', progress), flow('SQLite layout', { ...progress, scenarios: 0, passed: 0, execution: 'not-generated', verified: 0, coverage: 'unverified', category: 'system', generation: 'unsupported' })];
     render(<MemoryRouter><FlowsPage /></MemoryRouter>);
     const user = userEvent.setup();
-    const table = screen.getByRole('table', { name: 'Flows' });
-    await waitFor(() => expect(within(table).getAllByText('Succeeded')).toHaveLength(2));
-    expect(within(table).getAllByText('Blocked')).toHaveLength(3);
-    expect(within(table).queryByText('1/1 scenarios passed')).not.toBeInTheDocument();
-    expect(within(table).queryByRole('columnheader', { name: 'Execution' })).not.toBeInTheDocument();
-    expect(within(table).getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
+    // One table per status: the two complete flows succeeded, and the three
+    // that are partial or ungenerated are blocked however many tests passed.
+    const succeeded = await screen.findByRole('table', { name: 'Succeeded flows' });
+    expect(within(succeeded).getAllByRole('row').slice(1)).toHaveLength(2);
+    expect(screen.getByRole('region', { name: 'Blocked' })).toHaveTextContent(/Blocked\s*3/);
+    expect(screen.queryByText('1/1 scenarios passed')).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Execution' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Status/ }));
     await user.click(await screen.findByRole('option', { name: /Succeeded/ }));
-    await waitFor(() => expect(within(table).queryByText('Validation')).not.toBeInTheDocument());
-    expect(within(table).getByText('Search')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Blocked' })).not.toBeInTheDocument());
+    expect(within(screen.getByRole('table', { name: 'Succeeded flows' })).getByText('Search')).toBeInTheDocument();
   });
 });

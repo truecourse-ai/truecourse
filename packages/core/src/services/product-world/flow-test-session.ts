@@ -169,7 +169,9 @@ export function flowTestSessionDef(input: FlowTestSessionInput): {
  * or narrowed to part of itself.
  */
 function specDefect(source: string): string | undefined {
-  if (!/from ['"]@playwright\/test['"]/.test(source)) return 'The spec does not import from `@playwright/test`.';
+  if (!/from ['"]\.\/flow['"]/.test(source)) {
+    return "The spec does not import from './flow'. Its `test` comes from there (`test`, or `flowTest(seed)`), which is what records each step.";
+  }
   if (!/\bexpect\s*[.(]/.test(source)) return 'The spec asserts nothing: it has no `expect`.';
   const banned = source.match(/\b(?:test|it|describe)\.(?:skip|fixme|fail|only)\b|\.describe\.(?:skip|fixme|only)\b/);
   if (banned) {
@@ -337,11 +339,10 @@ A flow that starts from nothing at all (a public page) has no seed file.
 
 # The test
 
-One file, at the path the briefing gives, plain \`@playwright/test\` TypeScript:
+One file, at the path the briefing gives, plain Playwright TypeScript:
 
 \`\`\`ts
-import { expect } from '@playwright/test'
-import { flowTest, world } from './flow'
+import { expect, flowTest, world } from './flow'
 import { seed } from './<flow>.seed'
 
 const test = flowTest(seed)
@@ -353,9 +354,9 @@ test('<the flow, as a sentence>', async ({ page, request, seeded }) => {
 })
 \`\`\`
 
-- \`flowTest(seed)\` is Playwright's \`test\` bound to your seed: \`seeded\` is what the seed returned, typed as you returned it. A flow with no seed imports \`test\` from \`@playwright/test\` instead.
+- \`flowTest(seed)\` is Playwright's \`test\` bound to your seed: \`seeded\` is what the seed returned, typed as you returned it. A flow with no seed takes \`test\` itself from \`./flow\` (\`import { test, expect } from './flow'\`). Never import \`test\` from \`@playwright/test\`: the one from \`./flow\` is what records each step for whoever reads the result.
 - \`./flow\` also has \`world\` (\`world.baseUrl\`, \`world.urls\`). Never hard-code a URL, port or credential.
-- One \`test.step\` per step of the flow, in order, named by what the document claims. Each has at least one \`expect\` on something the user can observe.
+- One \`test.step\` per step of the flow, in order, at the top level of the test, named by what the document claims. Each has at least one \`expect\` on something the user can observe. A reader sees these steps as a list, green or red, each with a picture of the page as the step ended: end a browser step with the page showing what the step proved.
 - Drive whatever the claim is about: \`page\` for what a person does in the browser, \`request\` for an HTTP API, \`node:child_process\` (from \`process.env.TC_REPO_ROOT\`) for a command-line tool. A flow can mix them.
 - Locate things the way a person finds them: by role and name, label, placeholder, visible text. A CSS selector only when nothing else identifies the control.
 - Rely on Playwright's own waiting (\`expect(...).toBeVisible()\`, \`toHaveURL\`). No fixed sleeps.
@@ -383,6 +384,6 @@ Other tests run against this same product, at the same time and after yours, eac
 
 - \`passing\`: the engine's run of your seed and spec passes. The product does what the documents say along this flow.
 - \`failing\`: the spec asserts what the documents say and fails because the product does otherwise. Name the disagreement: \`documented\` (what the document says, and which one) and \`observed\` (what the product did). Be sure it is the product and not your test: reproduce it by hand first. A seed that fails is never this.
-- \`blocked\`: no honest test can be written here, because the flow needs something this world does not have (a third-party account, a second machine, hardware) or its starting state cannot be created in this world by any means. Say what, in \`blockedBy\`, and leave no spec and no seed behind. A step that is merely hard to reach, or data that is merely tedious to create, is not blocked.
+- \`blocked\`: no honest test can be written here, because the flow needs something this world does not have (a third-party account, a second machine, hardware) or its starting state cannot be created in this world by any means. Say what, in \`blockedBy\`, and name the missing thing in \`blockedOn\` as a short noun phrase in the product's own words (\`CurrencyBeacon API key\`, \`A product no other test is using\`): every flow blocked on the same thing is listed under that phrase, so use the plainest name for it. Leave no spec and no seed behind. A step that is merely hard to reach, or data that is merely tedious to create, is not blocked.
 
 The engine runs your seed and spec once more when you give the outcome and holds you to it: \`passing\` must pass, \`failing\` must fail in the test.`;
