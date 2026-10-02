@@ -359,6 +359,10 @@ export function looksWorldMutating(flow: { title: string; milestones: readonly s
  * section planning, interface mapping, realization matching, the build) are not
  * steps either — they run as needed to feed the chosen one.
  */
+/** What the spec side keys on in place of a recipe fingerprint when the product
+ *  runs from its world scripts: how it starts is not an input to its claims. */
+const PRODUCT_WORLD_RECIPE_FINGERPRINT = 'product-world'
+
 export const GENERATE_SESSION_STEPS = ['extract', 'flows', 'worker'] as const
 export type GenerateStep = (typeof GENERATE_SESSION_STEPS)[number]
 
@@ -639,6 +643,14 @@ export interface GenerateGuardsOptions {
    * Defaults to false for a caller that wants the engine self-sufficient.
    */
   requireExistingRecipe?: boolean
+  /**
+   * The product is operated by its WORLD SCRIPTS and its tests are written
+   * against it running, so nothing here needs to know how it starts or what
+   * its interfaces are. Generate then does the spec side and stops: claims are
+   * extracted, flows are synthesized, both corpora are written, and no recipe
+   * is read, derived or required.
+   */
+  productWorld?: boolean
   /**
    * INTERNAL test seam: stop after flow synthesis, before interface matching and
    * authoring. Not a user-facing option — flow curation is `dismissedFlows` and
@@ -1133,7 +1145,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let mappedInterfaces: Promise<MappedSurface> | null = null
   const interfacesOnce = (): Promise<MappedSurface> => (mappedInterfaces ??= mapInterfacesSafely(repoRoot, options.interfaces))
 
-  const recipeResult = await discoverRecipe(repoRoot, recipeRunner, {
+  const recipeResult = options.productWorld ? null : await discoverRecipe(repoRoot, recipeRunner, {
     routes: async () => routesFromInterfaces((await interfacesOnce()).interfaces),
     // The datastore half of the SAME memoized pass — read only when a boot
     // verification failed, so the failure can name the dependency it died on.
@@ -1145,30 +1157,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // repo, the proposer derives one from them.
     datastores: async () => (await interfacesOnce()).datastoreUrls,
   })
-  if (recipeResult.status === 'verify-failed') {
+  if (recipeResult?.status === 'verify-failed') {
     // A failed proposal call already aborts the run loudly through this channel, so
     // the recipe stage needs no systemic check of its own; the tally rides along.
     return emptyResult('recipe-failed', { reason: recipeResult.reason, llmFailures: leafTallies() })
   }
-  const recipe: Recipe = recipeResult.recipe
-  const recipeFingerprint = recipeResult.fingerprint
-  // The recipe material a flow's key folds, constant for the run: computed
-  // once here, not once per flow and again per authoring task.
-  const recipeSlices = new Map<GuardDriverId, string>()
-  const recipeSliceOf = (surface: GuardDriverId): string => {
-    let slice = recipeSlices.get(surface)
-    if (slice === undefined) recipeSlices.set(surface, (slice = flowRecipeSliceFingerprint(recipe, surface)))
-    return slice
-  }
-  const seedRoster = seedRosterFingerprint(recipe)
-  const preparationsOffer = preparationsFingerprint(repoRoot, recipe)
+  // No recipe on the product-world path: the spec side keys on the documents
+  // alone, and the run stops at flows, before anything would need one.
+  const recipe: Recipe | null = recipeResult ? recipeResult.recipe : null
+  const recipeFingerprint = recipeResult ? recipeResult.fingerprint : PRODUCT_WORLD_RECIPE_FINGERPRINT
   fact(
     'index',
-    recipeResult.status === 'exists'
-      ? `recipe: loaded ${path.relative(repoRoot, recipePath(repoRoot))}`
-      : `recipe: discovered from ${recipeResult.source}, written to ${recipeResult.wrotePath}`,
+    !recipeResult
+      ? 'recipe: none, the product runs from its world scripts'
+      : recipeResult.status === 'exists'
+        ? `recipe: loaded ${path.relative(repoRoot, recipePath(repoRoot))}`
+        : `recipe: discovered from ${recipeResult.source}, written to ${recipeResult.wrotePath}`,
   )
-  const recipeMeta: NonNullable<GuardGenerateResult['recipe']> = {
+  const recipeMeta: GuardGenerateResult['recipe'] = !recipe || !recipeResult ? undefined : {
     status: recipeResult.status,
     ...(recipe.entry ? { entry: recipe.entry } : {}),
     // Either recipe shape reports the DEFAULT server's argv — the report
@@ -1183,15 +1189,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         }
       : {}),
   }
-
-  // Which workspace app serves which path, joined to the recipe's declared
-  // servers. Derived from the working tree alone (no LLM, nothing persisted, nothing
-  // fingerprinted), so it costs a directory walk and answers, per flow, "does this
-  // path's app even have a server?". A repo with one package yields an empty join
-  // and every gate below degrades to the behaviour guard had before it existed.
-  const serverIndex = buildServerRouteIndex(buildRouteManifest(repoRoot), recipe)
-  /** The server a scenario means when it stamps none — the stamping baseline. */
-  const defaultApiServer = resolveApiServers(recipe).defaultServer
 
   // 2. Index — the deterministic section universe + spec-side change detection.
   const plan = planGuardWork(repoRoot, recipeFingerprint)
@@ -1286,7 +1283,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // the document to extraction exactly as before.
   // Every document's text, remembered under its content hash: the next
   // generate's gate reads an edited document's OLD text from here.
-  const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe.api?.externals)
+  const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe?.api?.externals)
   await rememberDocTexts(repoRoot, docs)
   const priorManifestForExtract = readManifest(repoRoot)
   const claimDiff = options.reuseExtraction
@@ -1325,11 +1322,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // a recipe defect, so it stops the run HERE: before the first (paid) extraction
   // call, and reported through the same `recipe-failed` channel a discovery failure
   // uses. A key present in SOME doc is fine (schemes resolve per doc).
-  const satisfiesCheck = validateCredentialSatisfies(recipeAuthCredentials(recipe), docs)
-  if (satisfiesCheck.errors.length > 0) {
-    return emptyResult('recipe-failed', { reason: satisfiesCheck.errors.join(' '), llmFailures: leafTallies() })
+  if (recipe && recipeMeta) {
+    const satisfiesCheck = validateCredentialSatisfies(recipeAuthCredentials(recipe), docs)
+    if (satisfiesCheck.errors.length > 0) {
+      return emptyResult('recipe-failed', { reason: satisfiesCheck.errors.join(' '), llmFailures: leafTallies() })
+    }
+    if (satisfiesCheck.warnings.length > 0) recipeMeta.warnings = satisfiesCheck.warnings
   }
-  if (satisfiesCheck.warnings.length > 0) recipeMeta.warnings = satisfiesCheck.warnings
 
   // The POOLED kinds' failure tallies, appended to every `llmFailures` list
   // this run reports beside the leaves' (fail-open stays visible either way).
@@ -1439,7 +1438,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           coverageGaps.push({ doc: s.doc, anchor: s.anchor, kind: 'awaiting-driver', driver: c.driver, reason: c.reason })
           continue
         }
-        if (!proofDrivers.some((driver) => isRunnableDriver(driver) && driverPrepared(recipe, driver))) {
+        // A product world serves whatever the product is; a recipe prepares only what it declares.
+        if (recipe && !proofDrivers.some((driver) => isRunnableDriver(driver) && driverPrepared(recipe, driver))) {
           // A runnable claim whose driver has no recipe preparation is an honest
           // blocked-on gap — never composed into a flow that could only die.
           coverageGaps.push({
@@ -1590,11 +1590,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // The repo's own third-party dependencies, from the same pass. They name
   // the third party in an api authoring prompt and in every blocked-on gap reason.
   const externalServices = mapped.externalServices
-  // Recipe declarations supply canonical wiring for every service, including
-  // unprovided services the source detector did not identify. Account availability
-  // comes from the same resolver used for eligibility and execution.
-  const providedExternals = prerequisiteResolution.externals.filter(e => e.state === 'provided')
-  const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals, recipe, prerequisiteResolution.targets)
   // The code-truth grounding. The inbound half needs no plumbing at all: what a
   // handler reads off the request lives ON its operation in the catalog, so it
   // is read per flow from the interfaces the plan walks. The
@@ -1608,7 +1603,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // not itself walk when a SETUP step needs one (sign up, then sign in, then test
   // favorites). Empty for a repo with no api interfaces — the block simply renders not.
   const apiInterfaces = catalogs.get('api')?.interfaces ?? []
-  const authorCatalog = buildWebAuthorCatalog(catalogs.get('web')?.interfaces ?? [], serverIndex, recipe.web?.app, mapped.resources)
   // The counts describe what this run GROUNDED ON — the surface catalogs, not the
   // catalog file — which is why the total is their sum. They are read when flows
   // settle unrealized, and an entry the matcher never sees (an RPC-derived
@@ -1745,19 +1739,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     },
   }
 
-  const committedScenariosById = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]))
-  const priorProofCurrent = (work: FlowWork, prior: GuardManifestScenario): boolean => {
-    const scenario = committedScenariosById.get(prior.id)
-    if (scenario && scenarioReviewFingerprint(bindScenarioPrerequisites(work.flow, scenario, prerequisiteResolution.targets)) !== scenarioReviewFingerprint(scenario)) return false
-    if (!scenario || scenarioFullFlowDefect(work.flow.milestones, scenario.steps) || prior.reviewed === false || work.prior?.flowFingerprint !== work.flow.fingerprint ||
-      scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(work.flow, recipe, scenario) || scenarioCasePrerequisiteProblems(work.flow, scenario, prerequisiteResolution.targets, scenario.setup?.preparation ? recipe.preparations?.[scenario.setup.preparation]?.env : undefined, recipe).length) return false
-    if (!work.flow.bindings.every(b => scenario.binds.some(s =>
-      s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) return false
-    return !work.flow.milestones.some(m => m.verification?.cases) ||
-      (prior.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION &&
-        prior.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) &&
-        !scenarioFullFlowDefect(work.flow.milestones, scenario.steps, prior.caseEvidence ?? []))
-  }
 
   const priorManifest = readManifest(repoRoot)
   const priorFlows = new Map((priorManifest?.flows ?? []).map((f) => [f.flowId, f]))
@@ -1792,7 +1773,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // The flows stop — the internal `stopAfterFlows` test seam and single-step
   // mode's `only: 'flows'` share it: everything spec-side ran, nothing was
   // written (single-step mode also suppressed the `flows.json` write above).
-  if (options.stopAfterFlows || options.only === 'flows') {
+  if (options.stopAfterFlows || options.only === 'flows' || recipe === null) {
     return {
       status: 'ok',
       recipe: recipeMeta,
@@ -1821,6 +1802,45 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       externalServices,
       ...(options.only === 'flows' ? { stoppedAfter: 'flows' as const } : {}),
     }
+  }
+
+  // The recipe material a flow's key folds, constant for the run: computed
+  // once here, not once per flow and again per authoring task.
+  const recipeSlices = new Map<GuardDriverId, string>()
+  const recipeSliceOf = (surface: GuardDriverId): string => {
+    let slice = recipeSlices.get(surface)
+    if (slice === undefined) recipeSlices.set(surface, (slice = flowRecipeSliceFingerprint(recipe, surface)))
+    return slice
+  }
+  const seedRoster = seedRosterFingerprint(recipe)
+  const preparationsOffer = preparationsFingerprint(repoRoot, recipe)
+  // Which workspace app serves which path, joined to the recipe's declared
+  // servers. Derived from the working tree alone (no LLM, nothing persisted, nothing
+  // fingerprinted), so it costs a directory walk and answers, per flow, "does this
+  // path's app even have a server?". A repo with one package yields an empty join
+  // and every gate below degrades to the behaviour guard had before it existed.
+  const serverIndex = buildServerRouteIndex(buildRouteManifest(repoRoot), recipe)
+  /** The server a scenario means when it stamps none — the stamping baseline. */
+  const defaultApiServer = resolveApiServers(recipe).defaultServer
+
+  // Recipe declarations supply canonical wiring for every service, including
+  // unprovided services the source detector did not identify. Account availability
+  // comes from the same resolver used for eligibility and execution.
+  const providedExternals = prerequisiteResolution.externals.filter(e => e.state === 'provided')
+  const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals, recipe, prerequisiteResolution.targets)
+  const authorCatalog = buildWebAuthorCatalog(catalogs.get('web')?.interfaces ?? [], serverIndex, recipe.web?.app, mapped.resources)
+  const committedScenariosById = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]))
+  const priorProofCurrent = (work: FlowWork, prior: GuardManifestScenario): boolean => {
+    const scenario = committedScenariosById.get(prior.id)
+    if (scenario && scenarioReviewFingerprint(bindScenarioPrerequisites(work.flow, scenario, prerequisiteResolution.targets)) !== scenarioReviewFingerprint(scenario)) return false
+    if (!scenario || scenarioFullFlowDefect(work.flow.milestones, scenario.steps) || prior.reviewed === false || work.prior?.flowFingerprint !== work.flow.fingerprint ||
+      scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(work.flow, recipe, scenario) || scenarioCasePrerequisiteProblems(work.flow, scenario, prerequisiteResolution.targets, scenario.setup?.preparation ? recipe.preparations?.[scenario.setup.preparation]?.env : undefined, recipe).length) return false
+    if (!work.flow.bindings.every(b => scenario.binds.some(s =>
+      s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) return false
+    return !work.flow.milestones.some(m => m.verification?.cases) ||
+      (prior.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION &&
+        prior.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) &&
+        !scenarioFullFlowDefect(work.flow.milestones, scenario.steps, prior.caseEvidence ?? []))
   }
 
   // 6. Match only drivers that can verify a milestone of this flow. Recipe

@@ -335,6 +335,18 @@ async function whileRunning<T>(
 
 async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promise<DriverResult> {
   const { def, onEvent, signal } = input;
+  // A per-turn loop against a model API has no shell to hand a session.
+  if (def.computer) {
+    return {
+      kind: 'failure',
+      failure: {
+        kind: 'transport',
+        detail: `session \`${def.kind}\` works with a shell in the checkout, which only the Claude Code backend provides`,
+        class: 'validation',
+        retryability: 'blocked',
+      },
+    };
+  }
   const { toolset, widenedByTool } = buildToolset(def, rt.provider.capabilities);
   const toolByName = new Map(def.tools.map((t) => [t.name, t]));
   // The shell's tool wrapper ignores the driver's ctx and injects its own;
