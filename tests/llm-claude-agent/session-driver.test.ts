@@ -408,6 +408,82 @@ describe('claude agent session driver', () => {
     delete process.env.TC_TEST_ISOLATION_MARKER;
   });
 
+  it('hands a session its computer: the named harness tools, rooted at its cwd', async () => {
+    process.env.TC_TEST_HOST_SECRET = 'not-for-a-strangers-build';
+    process.env.ANTHROPIC_TEST_AUTH = 'the-harness-reads-this';
+    const { sdk, captured } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      yield success({ verdict: 'keep' });
+    });
+    const def = makeDef({
+      computer: { cwd: '/work/tree', tools: ['Bash', 'Read'], env: { PATH: '/usr/bin', BASE_URL: 'http://localhost:3000' } },
+    });
+    await runSession(sdk, { def }).handle.done;
+    delete process.env.TC_TEST_HOST_SECRET;
+    delete process.env.ANTHROPIC_TEST_AUTH;
+    const o = captured.options;
+    if (!o) throw new Error('query never invoked');
+
+    expect(o.tools).toEqual(['Bash', 'Read']);
+    expect(o.allowedTools).toEqual([`mcp__${SESSION_MCP_SERVER_NAME}__probe`, 'Bash', 'Read']);
+    expect(o.cwd).toBe('/work/tree');
+    // The shell's environment is the def's, not this process's: only what the
+    // harness authenticates with comes along.
+    expect(o.env?.BASE_URL).toBe('http://localhost:3000');
+    expect(o.env?.PATH).toBe('/usr/bin');
+    expect(o.env?.ANTHROPIC_TEST_AUTH).toBe('the-harness-reads-this');
+    expect(o.env?.TC_TEST_HOST_SECRET).toBeUndefined();
+    // Everything else about the isolation stands.
+    expect(o.settingSources).toEqual([]);
+    expect(o.permissionMode).toBe('dontAsk');
+  });
+
+  it('records what the computer returned, each result after the turn that asked and with its call', async () => {
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      // Two calls in one turn; the harness replays both results.
+      yield assistant([
+        { type: 'tool_use', id: 'tu-1', name: 'Bash', input: { command: 'pnpm build' } },
+        { type: 'tool_use', id: 'tu-2', name: 'Read', input: { file_path: 'package.json' } },
+      ]);
+      yield {
+        type: 'user',
+        parent_tool_use_id: null,
+        message: {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'tu-1', content: [{ type: 'text', text: 'built' }] },
+            { type: 'tool_result', tool_use_id: 'tu-2', content: 'ENOENT', is_error: true },
+            // A session tool's own result is replayed too; its handler already recorded it.
+            { type: 'tool_result', tool_use_id: 'tu-mcp', content: 'probed:hi' },
+          ],
+        },
+      };
+      yield success({ verdict: 'keep' });
+    });
+    const def = makeDef({ computer: { cwd: '/work/tree', tools: ['Bash', 'Read'], env: {} } });
+    const { handle, events } = runSession(sdk, { def });
+    await handle.done;
+
+    expect(events.map((e) => e.type)).toEqual(['user-message', 'assistant-turn', 'tool-result', 'tool-result']);
+    expect(events[1]).toMatchObject({ toolCall: { name: 'Bash', args: { command: 'pnpm build' } } });
+    expect(events[2]).toEqual({
+      type: 'tool-result',
+      toolName: 'Bash',
+      content: 'built',
+      artifact: { input: { command: 'pnpm build' } },
+    });
+    expect(events[3]).toEqual({
+      type: 'tool-result',
+      toolName: 'Read',
+      content: 'ENOENT',
+      isError: true,
+      artifact: { input: { file_path: 'package.json' } },
+    });
+  });
+
   it('a success result missing structured_output is a malformed failure', async () => {
     const { sdk } = fakeSdk(async function* (ctx) {
       await ctx.nextUserMessage();

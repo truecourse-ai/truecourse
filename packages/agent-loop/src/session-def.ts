@@ -172,11 +172,57 @@ export interface SessionBudget {
 /** How hard the model should think per turn; each provider maps it to its own setting. */
 export type ReasoningLevel = 'low' | 'medium' | 'high';
 
+/**
+ * The backend's own shell and file tools a session may be handed. `TaskOutput`
+ * and `TaskStop` read and stop a command `Bash` started in the background,
+ * which is how a session keeps a server running while it works against it.
+ */
+export const COMPUTER_TOOLS = [
+  'Bash',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'TaskOutput',
+  'TaskStop',
+] as const;
+export type ComputerTool = (typeof COMPUTER_TOOLS)[number];
+
+/**
+ * A COMPUTER for the session: a real shell and the files under `cwd`, through
+ * the backend's own tools rather than tools this product defines. The session
+ * runs whatever commands it decides to, with this process's privileges, so a
+ * def carries one only when its work is to operate a checkout: boot a product,
+ * write a test and run it.
+ *
+ * Only a backend that HAS such tools can run the session; one that does not
+ * refuses it before spending anything. Calls to these tools never pass through
+ * `SessionTool.execute`, so the clocks that wait on a running tool do not see
+ * them: bound such a session by `timeoutMs`, not by the stall or turn clock.
+ */
+export interface SessionComputer {
+  /** Where the shell starts and relative paths resolve. */
+  cwd: string;
+  tools: readonly ComputerTool[];
+  /**
+   * The WHOLE environment the shell's commands run in, `PATH` and `HOME`
+   * included. Nothing of this process's own environment is inherited beyond
+   * it, except what the backend needs to reach its model: the commands are a
+   * stranger's install scripts and servers, and this process's secrets are not
+   * theirs to read.
+   */
+  env: Readonly<Record<string, string>>;
+}
+
 export interface SessionDef<TOutcome = unknown> {
   /** Session type, `<command>.<task>` (e.g. `spec-scan.curation`). */
   kind: string;
   systemPrompt: string;
   tools: readonly SessionTool[];
+  /** The shell and files this session works with; see {@link SessionComputer}.
+   *  Absent ⇒ the session has `tools` and nothing else. */
+  computer?: SessionComputer;
   /** A session cannot end without an outcome this schema accepts. Typed on
    *  what it PRODUCES, not on what it takes: a schema that coerces or fills
    *  defaults reads a shape of its own, and the shell only ever hands it the

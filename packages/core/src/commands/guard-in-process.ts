@@ -14,6 +14,9 @@
  * to Flow setup: derivation now exists in exactly one place.
  */
 
+import { composeProjectName } from '@truecourse/guard-generator';
+import type { FlowTestStatus } from '@truecourse/shared';
+import { FLOW_TEST_SESSION_KIND, runFlowTestStage, type FlowTestStageResult } from '../services/product-world/index.js';
 import {
   generateGuards,
   corpusOpenApiDocs,
@@ -170,6 +173,18 @@ export const GUARD_GENERATE_STEPS = [
  * deterministic and owns no session. A kind no step claims is shown under its
  * own raw id, after the list.
  */
+/**
+ * The checklist of a product-world generate: the spec side, then the product
+ * brought up once, then one flow-test session per flow against it.
+ */
+export const WORLD_GENERATE_STEPS = [
+  { key: 'index', label: 'Indexing sections' },
+  { key: 'extract', label: 'Extracting claims' },
+  { key: 'flows', label: 'Synthesizing flows' },
+  { key: 'world', label: 'Bringing the product up' },
+  { key: 'author', label: 'Writing tests' },
+] as const;
+
 const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   index: [],
   extract: [CLAIM_DIFF_SESSION_KIND, EXTRACT_SESSION_KIND],
@@ -178,6 +193,15 @@ const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   match: [MATCH_SESSION_KIND],
   author: [WORLD_CLASSIFY_SESSION_KIND, FLOW_WORKER_SESSION_KIND, FIDELITY_SESSION_KIND],
   validate: [],
+};
+
+/** The same, for {@link WORLD_GENERATE_STEPS}: the flow-test sessions are the author step's. */
+const WORLD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
+  index: [],
+  extract: [CLAIM_DIFF_SESSION_KIND, EXTRACT_SESSION_KIND],
+  flows: [FLOWS_SESSION_KIND],
+  world: [],
+  author: [FLOW_TEST_SESSION_KIND],
 };
 
 /**
@@ -195,6 +219,15 @@ const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
 
 export interface GuardGenerateInProcessOptions {
   tracker?: StepTracker;
+  /**
+   * Generate against a PRODUCT WORLD: after flows are synthesized, the
+   * repository's world scripts bring the product up and one session per flow
+   * writes its Playwright test against it. No recipe is read, no interface is
+   * mapped and no scenario is authored. `worldKey` is the world's identity on
+   * this host, the same one setup proved the scripts under. The checklist is
+   * {@link WORLD_GENERATE_STEPS}. Needs the Claude Code backend.
+   */
+  productWorld?: { worldKey?: string };
   /** Restore this interrupted run's completed stages without repeating their LLM work. */
   resume?: GuardGenerateResume;
   /**
@@ -309,6 +342,8 @@ export async function estimateGuard(
 
 export interface GuardGenerateInProcessResult {
   guard: GuardGenerateResult;
+  /** What the flow-test stage did, on a product-world generate that reached it. */
+  flowTests?: FlowTestStageResult;
   /**
    * The sessions-store scratch dir this run used, under the runtime directory —
    * what a stepwise run is inspected through. The record exists from the first
@@ -344,7 +379,7 @@ export async function guardGenerateInProcess(
     if (!progress.steps) return;
     run.setChecklist(
       progress.steps.map((step) => {
-        const kinds = GUARD_GENERATE_STEP_SESSION_KINDS[step.key];
+        const kinds = (options.productWorld ? WORLD_GENERATE_STEP_SESSION_KINDS : GUARD_GENERATE_STEP_SESSION_KINDS)[step.key];
         return kinds ? { ...step, sessionKinds: [...kinds] } : step;
       }),
     );
@@ -413,7 +448,7 @@ export async function guardGenerateInProcess(
     if (options.signal?.aborted) throw new GuardGenerateAborted();
   };
 
-  const STEPS: string[] = GUARD_GENERATE_STEPS.map((s) => s.key);
+  const STEPS: string[] = (options.productWorld ? WORLD_GENERATE_STEPS : GUARD_GENERATE_STEPS).map((s) => s.key);
   let cur = 0;
   const advanceTo = (key: string): void => {
     throwIfAborted();
@@ -563,9 +598,12 @@ export async function guardGenerateInProcess(
       flowsAreaSession,
       flowsEpicSession,
       flowWorkerSession,
+      ...(options.productWorld ? { productWorld: true } : {}),
+      // A product world needs no map of the product's interfaces: the session
+      // that writes a flow's test has the product itself in front of it.
       interfaces:
         options.interfaces ??
-        (async () => {
+        (options.productWorld ? undefined : async () => {
           // ONE working-tree analysis feeds every half: the interface catalog, the
           // repo's detected third-party dependencies, and the code-truth grounding
           // authoring needs.
@@ -706,6 +744,50 @@ export async function guardGenerateInProcess(
       tracker?.done(STEPS[cur], `stopped after ${guard.stoppedAfter}`);
       if (!options.sessionRun) finishRun('completed');
       return { guard, sessionsRunDir: run.dir };
+    }
+
+    // A product world: the spec side is done, now the tests. The product comes
+    // up once, one session per flow writes that flow's test against it, and it
+    // goes down again. The report describes the spec side; the tests are in
+    // the tree's tests directory with their own index.
+    if (options.productWorld) {
+      advanceTo('world');
+      const flowTests = await runFlowTestStage({
+        repoRoot,
+        worldId: composeProjectName(options.productWorld.worldKey ?? path.basename(path.resolve(repoRoot))),
+        acquire: acquireSessionContext,
+        ...(options.signal ? { signal: options.signal } : {}),
+        onPhase: (phase) => {
+          if (phase === 'tests') advanceTo('author');
+          else tracker?.detail('world', phase === 'build' ? 'building the checkout' : 'starting the product');
+        },
+        onProgress: ({ done, total, passing, failing, blocked, unsettled }) =>
+          tracker?.detail(
+            'author',
+            `flows ${done}/${total} · ${passing} passing · ${failing} failing · ${blocked} blocked${unsettled ? ` · ${unsettled} unsettled` : ''}`,
+          ),
+      });
+      throwIfAborted();
+      persistGuardReport(repoRoot, guard);
+      if (flowTests.status === 'world-failed') {
+        const reason = `the product did not come up (${flowTests.stage}): ${flowTests.reason}`;
+        tracker?.error('world', firstLine(reason) ?? 'the product did not come up');
+        finishRun('failed', { error: { message: reason, kind: 'world' } });
+        return { guard, flowTests, sessionsRunDir: run.dir };
+      }
+      if (flowTests.status === 'no-flows') {
+        for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i], 'no flows to test');
+      } else {
+        const count = (status: FlowTestStatus): number => flowTests.tests.filter((t) => t.status === status).length;
+        for (const { flowId, reason } of flowTests.unsettled) tracker?.fact('author', `${flowId}: no test, ${reason}`);
+        tracker?.done('world');
+        tracker?.done(
+          'author',
+          `${flowTests.tests.length} flow${flowTests.tests.length === 1 ? '' : 's'} · ${count('passing')} passing · ${count('failing')} failing · ${count('blocked')} blocked · ${flowTests.authored} written this run`,
+        );
+      }
+      if (!options.sessionRun) finishRun('completed');
+      return { guard, flowTests, sessionsRunDir: run.dir };
     }
 
     // Mark every remaining step done with a closing detail.

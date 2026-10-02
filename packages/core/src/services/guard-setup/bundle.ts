@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { GuardSetupReportSchema, type GuardSetupReport } from '@truecourse/shared';
-import { guardNonCanonicalLocatorsPath } from '@truecourse/shared/work-tree';
+import { guardNonCanonicalLocatorsPath, worldDir, worldLogsDir, worldStatePath } from '@truecourse/shared/work-tree';
 import {
   dependenciesPath,
   guardAuthoredInterfacesPath,
@@ -94,7 +94,37 @@ export function collectGuardSetupBundle(repoRoot: string): Record<string, string
     if (seed !== null && body !== null) files[relOf(repoRoot, seed)] = body;
   }
 
+  // The world scripts and whatever they use beside them (a compose override, an
+  // env file, a seed script). Never what a run of them left: the world file
+  // and the logs describe one boot, on one host.
+  for (const abs of worldFiles(repoRoot)) {
+    const body = readIfFile(abs);
+    if (body !== null) files[relOf(repoRoot, abs)] = body;
+  }
+
   return files;
+}
+
+/** Every file under the tree's world directory that is part of how the product is run. */
+function worldFiles(repoRoot: string): string[] {
+  const skip = new Set([worldStatePath(repoRoot), worldLogsDir(repoRoot)]);
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const abs = path.join(dir, entry.name);
+      if (skip.has(abs)) continue;
+      if (entry.isDirectory()) walk(abs);
+      else if (entry.isFile()) out.push(abs);
+    }
+  };
+  walk(worldDir(repoRoot));
+  return out.sort();
 }
 
 /** The bundle keys the interface catalog's two halves travel under — what a

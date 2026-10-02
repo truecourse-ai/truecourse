@@ -6,6 +6,7 @@
  * scenario and is skipped.
  */
 
+import { isFlowTestCorpusFile } from '@truecourse/shared/work-tree'
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
@@ -86,6 +87,8 @@ export function walkScenarioRelFiles(root: string): string[] {
       else if (e.isFile()) {
         if (/\.ya?ml$/i.test(e.name)) out.push(childRel)
         else if (rel === '' && SCENARIO_ROOT_FILES.includes(e.name)) out.push(childRel)
+        // The flow tests and their index: the corpus of a product-world generate.
+        else if (isFlowTestCorpusFile(childRel)) out.push(childRel)
       }
     }
   }
