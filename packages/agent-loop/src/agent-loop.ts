@@ -387,7 +387,7 @@ function startSession<TOutcome>(
       kind: def.kind,
       workItem,
       systemPrompt: def.systemPrompt,
-      toolNames: def.tools.map((t) => t.name),
+      toolNames: [...def.tools.map((t) => t.name), ...(def.computer?.tools ?? [])],
       ...(input.resume ? { resumeOf: input.resume.of } : {}),
       llm: driver.attribution,
       ...(display ? { display } : {}),
@@ -413,7 +413,10 @@ function startSession<TOutcome>(
       stoppedFor = detail;
       onAbort();
     };
-    const stallMs = input.stallTimeoutMs;
+    // A session with a computer runs its commands inside the backend, where
+    // neither clock can see them: a ten-minute build would read as a stall and
+    // as a turn that never ends. Such a session is bounded by its wall clock.
+    const stallMs = def.computer ? undefined : input.stallTimeoutMs;
     if (stallMs) {
       rearmStall = () => {
         clearTimeout(stallTimer);
@@ -427,7 +430,7 @@ function startSession<TOutcome>(
       const ceilingMs = input.timeoutMs;
       ceilingTimer = setTimeout(() => stopFor(`timed out after ${ceilingMs}ms`), ceilingMs);
     }
-    const turnMs = input.turnTimeoutMs;
+    const turnMs = def.computer ? undefined : input.turnTimeoutMs;
     if (turnMs) {
       rearmTurn = () => {
         clearTimeout(turnTimer);

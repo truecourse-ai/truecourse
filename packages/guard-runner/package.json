@@ -24,14 +24,19 @@
     "zod": "^3.23.8"
   },
   "peerDependencies": {
+    "@playwright/test": "1.62.1",
     "playwright-core": "1.62.1"
   },
   "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    },
     "playwright-core": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.19.15",
     "playwright-core": "1.62.1",

@@ -1125,6 +1125,33 @@ describe('runAgentLoop clocks', () => {
     });
   });
 
+  it('a session with a computer is bounded by its wall clock alone', async () => {
+    // Its commands run inside the backend, silent to both the stall and the
+    // turn clock: a build that takes longer than either must not end it.
+    const { driver } = fakeDriver(async ({ input }) => {
+      await Promise.race([new Promise((r) => setTimeout(r, 60)), untilAborted(input.signal)]);
+      return input.signal.aborted ? endedWithoutOutcome() : { kind: 'outcome', value: { verdict: 'kept' } };
+    });
+    const computer = { cwd: '/work/tree', tools: ['Bash'], env: {} } as const;
+    const run = (timeoutMs?: number) =>
+      runAgentLoop({
+        def: makeDef({ computer }),
+        workItem: 'w',
+        initialMessages: [],
+        driver,
+        persistence: memoryPersistence().persistence,
+        sessionId: 's1',
+        stallTimeoutMs: 20,
+        turnTimeoutMs: 20,
+        ...(timeoutMs ? { timeoutMs } : {}),
+      }).outcome;
+
+    expect((await run()).status).toBe('completed');
+    const stopped = await run(20);
+    if (stopped.status !== 'failed') throw new Error('unreachable');
+    expect(stopped.failure).toMatchObject({ kind: 'transport', detail: 'timed out after 20ms' });
+  });
+
   it('the turn clock waits while a tool runs, however long it takes', async () => {
     const slowTool = defineToolSpec({
       name: 'build',

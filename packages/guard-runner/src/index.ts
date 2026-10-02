@@ -534,3 +534,16 @@ export {
 } from './recipe-slices.js'
 export type { RecipeWritingStep } from './recipe-slices.js'
 export { type ResolvedProviderControl, resolveProviderControl, providerControlStateMaterial, scenarioProviderControlProblems, PROVIDER_CONTROL_VERSION } from './provider-control.js'
+
+export {
+  bootProductWorld,
+  buildProductWorld,
+  missingWorldScripts,
+  releaseWorldSlot,
+  reserveWorldSlot,
+  worldScriptEnv,
+} from './product-world.js'
+export type { RunningWorld, WorldBoot, WorldBootFailure, WorldRunOptions, WorldScriptResult, WorldSlot } from './product-world.js'
+
+export { FLOW_TEST_ENV, flowTestEnv, prepareFlowTestsDir, runFlowTests } from './flow-tests.js'
+export type { FlowTestsRun, RunFlowTestsOptions } from './flow-tests.js'

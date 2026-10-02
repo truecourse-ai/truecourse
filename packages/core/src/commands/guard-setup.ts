@@ -65,6 +65,9 @@ import { runGuardInterfaceAuthoring } from './guard-interfaces.js';
 import type { LlmEstimate } from '../services/llm/token-estimator.js';
 import { EstimateDeclined } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
+import path from 'node:path';
+import { composeProjectName } from '@truecourse/guard-generator';
+import { runWorldSetup, WORLD_SESSION_KIND } from '../services/product-world/index.js';
 
 export {
   GUARD_SETUP_STEPS,
@@ -77,6 +80,13 @@ export { readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
 
 export interface GuardSetupInProcessOptions {
   tracker?: StepTracker;
+  /**
+   * Set the repository up as a PRODUCT WORLD: one session with a shell in the
+   * checkout gets the product running and writes the scripts that bring it up,
+   * and none of the recipe, dependency, seed or interface steps run. The
+   * checklist is {@link WORLD_SETUP_STEPS}. Needs the Claude Code backend.
+   */
+  productWorld?: boolean;
   /**
    * The mode an explicit `driver` runs in, which the run record's
    * attribution states. Unset, the run is on this process's Claude Code.
@@ -195,10 +205,91 @@ const GUARD_SETUP_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   auth: [AUTH_PROOF_SESSION_KIND],
 };
 
+/** The checklist of a product-world setup: the one thing it does. */
+export const WORLD_SETUP_STEPS = [{ key: 'world', label: 'Bringing the product up' }] as const;
+
+/**
+ * Setup as a product world. One session context, one step: the tree ends with
+ * world scripts the engine built and booted, or the run failed saying why.
+ */
+async function worldSetupInProcess(
+  repoRoot: string,
+  options: GuardSetupInProcessOptions,
+): Promise<GuardSetupInProcessResult> {
+  const { tracker } = options;
+  const contextOptions = {
+    repoRoot,
+    ...(options.sessionRun ? { run: options.sessionRun } : {}),
+    stepSessionKinds: { world: [WORLD_SESSION_KIND] },
+    ...(options.sessionsKey ? { sessionsKey: options.sessionsKey } : {}),
+    ...(options.tracker ? { tracker: options.tracker } : {}),
+    ...(options.eagerRun ? { eager: true } : {}),
+    ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
+  };
+  const context = options.driver
+    ? createGuardSetupSessionContext({
+        ...contextOptions,
+        driver: options.driver,
+        transportMode: options.transportMode ?? 'claude-code',
+      })
+    : createGuardSetupSessionContext(contextOptions);
+
+  let closingFailure: RunError | null = null;
+  tracker?.start('world');
+  try {
+    const result = await runWorldSetup({
+      repoRoot,
+      worldId: composeProjectName(options.composeKey ?? path.basename(path.resolve(repoRoot))),
+      acquire: async () => {
+        const acquired = await context.acquire();
+        return { driver: acquired.driver, persistence: acquired.persistence };
+      },
+      ...(options.refresh ? { refresh: true } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      onPhase: (phase) =>
+        tracker?.detail('world', phase === 'checking' ? 'checking the scripts already here' : 'getting the product running'),
+    });
+    if (result.spent.sessions > 0) {
+      context.note(result.status === 'ok' ? 'completed' : 'failed');
+      context.addSpend(result.spent.sessions, result.spent);
+    }
+    const sessionRunId = context.runId();
+    const reason = result.status === 'failed' ? result.reason : undefined;
+    if (result.status === 'ok') {
+      const { world } = result;
+      tracker?.fact('world', `${result.outcome === 'kept' ? 'the scripts in the tree still hold' : 'scripts written'}: the product answers at its own address with ${world.accounts.length} seeded account${world.accounts.length === 1 ? '' : 's'}`);
+      for (const line of result.notRunning) tracker?.fact('world', `not running: ${line}`);
+      tracker?.done('world', result.outcome === 'kept' ? 'scripts kept' : 'scripts written');
+    } else {
+      tracker?.error('world', firstLine(reason) ?? 'the product was not brought up');
+      closingFailure = { message: reason ?? 'guard setup failed', kind: 'setup' };
+    }
+    const report: GuardSetupReport = {
+      ranAt: new Date().toISOString(),
+      status: result.status,
+      ...(reason ? { reason } : {}),
+      // The step rows are the recipe spine's own; a product world has none of
+      // those steps, and its one result is the report's own status and reason.
+      steps: [],
+      recipe: { status: 'skipped', reason: 'The product runs from its world scripts.' },
+      ...withUsage(context.usageTotals()),
+    };
+    const reportPath = writeGuardSetup(repoRoot, report);
+    const sessionsRunDirs = sessionRunId ? [sessionRunDir(options.sessionsKey ?? repoRoot, 'guard-setup', sessionRunId)] : [];
+    return { report, reportPath, sessionsRunDirs };
+  } catch (e) {
+    tracker?.error('world', (e as Error).message);
+    throw e;
+  } finally {
+    await context.finish(options.signal?.aborted === true, closingFailure ?? undefined);
+  }
+}
+
 export async function guardSetupInProcess(
   repoRoot: string,
   options: GuardSetupInProcessOptions,
 ): Promise<GuardSetupInProcessResult> {
+  if (options.productWorld) return worldSetupInProcess(repoRoot, options);
   const { tracker } = options;
   const mode: LlmTransportMode = options.transportMode ?? 'claude-code';
 

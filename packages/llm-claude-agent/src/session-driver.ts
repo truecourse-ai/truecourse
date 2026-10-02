@@ -16,8 +16,11 @@
  * - A success result MISSING `structured_output` is a malformed failure.
  *
  * ISOLATION IS INVARIANT: the options block below is hardcoded and no
- * session type may weaken it — a session that needs the harness's own tools
- * is a plan amendment, not a configuration knob.
+ * session type may weaken it. The harness's own tools reach a session through
+ * exactly one door, `SessionDef.computer`: the shell and file tools it names,
+ * rooted at its `cwd`, and nothing else the harness ships. Their calls run
+ * inside the subprocess, so the transcript's record of them is read back off
+ * the stream: the result the harness returned, with the call it answers.
  */
 
 import { zodToJsonSchema } from 'zod-to-json-schema';
@@ -28,6 +31,7 @@ import {
   type DriverResult,
   type SessionDef,
   type SessionDriver,
+  type SessionEventBody,
   type SessionFailure,
   type SessionRunInput,
   type SessionStatus,
@@ -50,6 +54,7 @@ import type {
   SdkResultMessage,
   SdkSessionStore,
   SdkSystemMessage,
+  SdkToolResultBlock,
   SdkUserMessage,
 } from './sdk-types.js';
 
@@ -271,7 +276,18 @@ async function runClaudeAgentSession(
       elapsedSeconds: 0,
     });
   };
+  // The computer's calls (`def.computer`) run inside the subprocess. Each is
+  // remembered by its id until the harness replays its result, and a result
+  // that arrives while its call's turn is still streaming is held back so the
+  // turn precedes it in the transcript.
+  const computerTools = new Set<string>(def.computer?.tools ?? []);
+  const computerCalls = new Map<string, { name: string; input: unknown }>();
+  const heldResults: Array<SessionEventBody & { type: 'tool-result' }> = [];
   const flushTurn = (): void => {
+    flushPendingTurn();
+    for (const result of heldResults.splice(0)) onEvent(result);
+  };
+  const flushPendingTurn = (): void => {
     if (!pendingTurn) return;
     const text = pendingTurn.texts.join('\n');
     const id = pendingTurn.id;
@@ -308,9 +324,12 @@ async function runClaudeAgentSession(
     const blocks = Array.isArray(message.message?.content) ? message.message.content : [];
     for (const block of blocks) {
       if (block.type === 'text') pendingTurn.texts.push((block as { text: string }).text);
-      else if (block.type === 'tool_use' && !pendingTurn.toolCall) {
-        const toolUse = block as { name: string; input: unknown };
-        pendingTurn.toolCall = { name: bareToolName(toolUse.name), args: toolUse.input };
+      else if (block.type === 'tool_use') {
+        const toolUse = block as { id: string; name: string; input: unknown };
+        if (computerTools.has(toolUse.name)) {
+          computerCalls.set(toolUse.id, { name: toolUse.name, input: toolUse.input });
+        }
+        pendingTurn.toolCall ??= { name: bareToolName(toolUse.name), args: toolUse.input };
       }
     }
     pendingTurn.raws.push(message);
@@ -338,19 +357,27 @@ async function runClaudeAgentSession(
     // The stream carries each call's final usage, so it is always on.
     includePartialMessages: true,
     // -- isolation invariants, hardcoded ------------------------------
-    tools: [], // no built-in tools
+    tools: [...computerTools], // no built-in tools but the session's computer
     disallowedTools: ['ToolSearch'], // deferred tool loading steals the first turn (spike)
     settingSources: [],
     systemPrompt: def.systemPrompt, // full replace
     // REPLACES the subprocess env, so the parent's is spread back in —
-    // dropping it breaks credential lookup (keychain, PATH).
-    env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+    // dropping it breaks credential lookup (keychain, PATH). A session with a
+    // computer is the exception: its shell inherits this env, so it gets the
+    // one its def spells out plus only what the harness authenticates with.
+    env: {
+      ...(def.computer ? { ...harnessAuthEnv(process.env), ...def.computer.env } : process.env),
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+    },
     strictMcpConfig: true,
-    settings: { autoCompactEnabled: false }, // compaction never runs
+    // Compaction never runs, except for a session with a computer: hours of
+    // command output outgrow any window, and the harness compacting its own
+    // history is how such a session reaches its end.
+    settings: { autoCompactEnabled: def.computer !== undefined },
     // ----------------------------------------------------------------------
     mcpServers: { [SESSION_MCP_SERVER_NAME]: server as never },
     permissionMode: 'dontAsk',
-    allowedTools: def.tools.map((t) => mcpToolName(t.name)),
+    allowedTools: [...def.tools.map((t) => mcpToolName(t.name)), ...computerTools],
     outputFormat: {
       type: 'json_schema',
       schema: zodToJsonSchema((def.outcomeInputSchema ?? def.outcomeSchema) as unknown as z.ZodTypeAny, {
@@ -363,7 +390,7 @@ async function runClaudeAgentSession(
     pathToClaudeCodeExecutable: opts.pathToClaudeCodeExecutable ?? resolveClaudeBinary(),
     ...(opts.model ? { model: opts.model } : {}),
     ...(opts.fallbackModel ? { fallbackModel: opts.fallbackModel } : {}),
-    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    ...(def.computer ? { cwd: def.computer.cwd } : opts.cwd ? { cwd: opts.cwd } : {}),
     ...(opts.sessionStore ? { sessionStore: opts.sessionStore } : {}),
     ...(cursor
       ? {
@@ -537,10 +564,27 @@ async function runClaudeAgentSession(
           bufferAssistant(assistant);
           break;
         }
-        case 'user':
-          // Tool results replayed by the SDK; the MCP handlers already
-          // emitted the transcript events at execution time.
+        case 'user': {
+          // Tool results replayed by the SDK. The MCP handlers already emitted
+          // theirs at execution time; the computer's are recorded from here.
+          const replay = message as SdkUserMessage;
+          if (replay.parent_tool_use_id !== null || typeof replay.message.content === 'string') break;
+          for (const block of replay.message.content) {
+            if (block.type !== 'tool_result') continue;
+            const call = computerCalls.get(block.tool_use_id);
+            if (!call) continue;
+            computerCalls.delete(block.tool_use_id);
+            heldResults.push({
+              type: 'tool-result',
+              toolName: call.name,
+              content: toolResultText(block.content),
+              ...(block.is_error ? { isError: true } : {}),
+              artifact: { input: call.input },
+            });
+          }
+          if (!openCall) flushTurn();
           break;
+        }
         case 'rate_limit_event': {
           // A LEVEL signal, fired on every change of the subscription's
           // rate-limit window — most of them say "still allowed", which is
@@ -687,6 +731,19 @@ function preflight(init: SdkSystemMessage, def: SessionDef): SessionFailure | un
     }
   }
   return undefined;
+}
+
+/** The variables the harness reads to reach its model: its own and the provider's. */
+function harnessAuthEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => /^(ANTHROPIC|CLAUDE)_/.test(name)));
+}
+
+/** A replayed tool result as the text the model read: its text parts, in order. */
+function toolResultText(content: SdkToolResultBlock['content']): string {
+  if (typeof content === 'string') return content;
+  return (content ?? [])
+    .map((part) => (part.type === 'text' && typeof part.text === 'string' ? part.text : `[${part.type}]`))
+    .join('\n');
 }
 
 function mcpToolName(bareName: string): string {
