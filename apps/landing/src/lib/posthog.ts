@@ -4,7 +4,8 @@ import posthog from 'posthog-js';
  * Default PostHog project key, the same one the dashboard app sends to. Project
  * API keys are write-only and explicitly designed to be exposed client-side, so
  * hardcoding it here keeps both sources (dashboard / landing) in one PostHog
- * project without an extra env var setup step.
+ * project without an extra env var setup step. api/waitlist.ts names the
+ * same project with its own copy.
  *
  * Override with VITE_POSTHOG_KEY for staging / experiments.
  */
@@ -59,6 +60,12 @@ export function trackPageview(path: string): void {
 export function trackEvent(event: string, properties?: Record<string, unknown>): void {
   if (!initialized) return;
   posthog.capture(event, properties);
+}
+
+/** This browser's PostHog id, so a server-side event can be tied to its visit. */
+export function distinctId(): string | undefined {
+  if (!initialized) return undefined;
+  return posthog.get_distinct_id();
 }
 
 export { posthog };
