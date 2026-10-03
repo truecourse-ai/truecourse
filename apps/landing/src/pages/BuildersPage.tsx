@@ -188,7 +188,7 @@ export default function BuildersPage() {
                 </div>
               ))}
             </div>
-            <InlineAsk say="Want this for your app?" more="We're building it now. Tell us what you'd need from it." placement="after-jobs" />
+            <InlineAsk say="Want this for your app?" more="Tell us what it should catch first. 15 minutes, no slides." placement="after-jobs" />
           </div>
         </section>
 
