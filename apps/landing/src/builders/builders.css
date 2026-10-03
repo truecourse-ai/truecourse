@@ -350,6 +350,13 @@
   color: var(--muted);
   font-size: 13.5px;
 }
+/* Every chip in the list holds the width of the widest, so swapping one
+   (Outage to Resolved) never reflows the line beside it. */
+.bs-report-list .bs-chip {
+  flex: none;
+  min-width: 84px;
+  justify-content: center;
+}
 .bs-report-foot {
   display: flex;
   align-items: center;
