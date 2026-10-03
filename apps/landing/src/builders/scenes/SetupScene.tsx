@@ -3,7 +3,7 @@ import { SiGithub, SiGoogledocs, SiJira, SiNotion } from 'react-icons/si';
 import { cn } from '@/lib/cn';
 import { Stage } from '../Stage';
 import { useScrollSteps } from '../useScrollSteps';
-import { easeInOut, easeOut, enter, lerp, span, typed, useNarrow } from '../motion';
+import { easeInOut, easeOut, enter, lerp, span, typed, useClock, useNarrow } from '../motion';
 import { Chat, Check, Mark, Pointer, Spin } from '../icons';
 
 /** How long a step's window takes to play once the scroll reaches it. */
@@ -21,22 +21,31 @@ const STEPS = [
   },
 ];
 
+/** The window's size: the desktop drawing, or the taller one a phone gets. */
+const WINDOW = { wide: { w: 640, h: 430 }, phone: { w: 400, h: 680 } };
+
 /**
- * Setup as three steps beside one app window, pinned while the page scrolls
- * through it. Scrolling picks the step from how far through the section the
- * reader is, and the window plays that step; nothing moves on by itself. A
- * click on a step scrolls to it, or on a phone, where it is not pinned, shows
- * it.
+ * Setup as three steps beside one app window. Where the section is pinned,
+ * scrolling picks the step from how far through the section the reader is,
+ * and the window plays that step; nothing moves on by itself, and a click on
+ * a step scrolls to it. Where it is not pinned, on narrower screens, each
+ * step comes with its own window under it, played as it scrolls into view.
  */
 export function SetupScene({ children }: { children?: ReactNode }) {
-  const { pin, step, u, jump } = useScrollSteps(STEPS.length, STEP, 4.6);
+  const { pin, step, u, jump, pinned } = useScrollSteps(STEPS.length, STEP, 4.6);
 
-  const narrow = useNarrow();
-  const screen = [
-    <Sources key="s" u={u} narrow={narrow} />,
-    <Repository key="r" u={u} narrow={narrow} />,
-    <Monitoring key="m" u={u} />,
-  ][step];
+  if (!pinned) {
+    return (
+      <div ref={pin} className="bs-pin bs-pin-setup">
+        {children}
+        <ol className="bs-setup-stack">
+          {STEPS.map((s, i) => (
+            <SetupStep key={s.title} index={i} />
+          ))}
+        </ol>
+      </div>
+    );
+  }
 
   return (
     <div ref={pin} className="bs-pin bs-pin-setup">
@@ -47,31 +56,69 @@ export function SetupScene({ children }: { children?: ReactNode }) {
             {STEPS.map((s, i) => (
               <li key={s.title}>
                 <button type="button" className={cn('bs-step', i === step && 'on')} onClick={() => jump(i)}>
-                  <span className="bs-step-n">{i + 1}</span>
-                  <span>
-                    <b>{s.title}</b>
-                    <span className="bs-step-body">{s.body}</span>
-                  </span>
+                  <StepText index={i} />
                 </button>
               </li>
             ))}
           </ol>
-          <Stage width={narrow ? 400 : 640} height={narrow ? 620 : 430} label={`Step ${step + 1}. ${STEPS[step]!.title}.`}>
-            <div className="bs-browser bs-app" style={{ inset: 0 }}>
-              <div className="bs-browser-bar">
-                <i />
-                <i />
-                <i />
-                <span className="bs-url">app.truecourse.dev/{['setup', 'code', 'watching'][step]}</span>
-              </div>
-              <div className="bs-app-body" key={step} style={enter(u, 0, 0.35, undefined, 8)}>
-                {screen}
-              </div>
-            </div>
-          </Stage>
+          <SetupWindow step={step} u={u} />
         </div>
       </div>
     </div>
+  );
+}
+
+function StepText({ index }: { index: number }) {
+  const s = STEPS[index]!;
+  return (
+    <>
+      <span className="bs-step-n">{index + 1}</span>
+      <span>
+        <b>{s.title}</b>
+        <span className="bs-step-body">{s.body}</span>
+      </span>
+    </>
+  );
+}
+
+/** One step with its own window under it, played once as it comes into view. */
+function SetupStep({ index }: { index: number }) {
+  const { ref, t } = useClock(STEP, 4.6, true);
+  return (
+    <li className="bs-setup-stack-step">
+      <div ref={ref}>
+        <div className="bs-step on">
+          <StepText index={index} />
+        </div>
+        <SetupWindow step={index} u={t} />
+      </div>
+    </li>
+  );
+}
+
+/** The app window playing step `step`, `u` seconds in. */
+function SetupWindow({ step, u }: { step: number; u: number }) {
+  const narrow = useNarrow();
+  const size = narrow ? WINDOW.phone : WINDOW.wide;
+  const screen = [
+    <Sources key="s" u={u} narrow={narrow} />,
+    <Repository key="r" u={u} narrow={narrow} />,
+    <Monitoring key="m" u={u} />,
+  ][step];
+  return (
+    <Stage width={size.w} height={size.h} label={`Step ${step + 1}. ${STEPS[step]!.title}.`}>
+      <div className="bs-browser bs-app" style={{ inset: 0 }}>
+        <div className="bs-browser-bar">
+          <i />
+          <i />
+          <i />
+          <span className="bs-url">app.truecourse.dev/{['setup', 'code', 'watching'][step]}</span>
+        </div>
+        <div className="bs-app-body" key={step} style={enter(u, 0, 0.35, undefined, 8)}>
+          {screen}
+        </div>
+      </div>
+    </Stage>
   );
 }
 
@@ -84,7 +131,7 @@ const SOURCES: { icon: ReactNode; name: string }[] = [
   { icon: <Chat />, name: 'Plain description' },
 ];
 
-/** On a phone the document sits under the list rather than beside it. */
+/** On a phone the document and the count follow the list down the window, in its flow. */
 function Sources({ u, narrow }: { u: number; narrow: boolean }) {
   const found = Math.round(24 * easeOut(span(u, 3.4, 4.6)));
   return (
@@ -111,7 +158,7 @@ function Sources({ u, narrow }: { u: number; narrow: boolean }) {
           );
         })}
       </ul>
-      <div className="bs-doc" style={{ ...(narrow ? { left: 30, top: 310, width: 340 } : {}), ...enter(u, 2.4, 0.5) }}>
+      <div className={cn('bs-doc', narrow && 'flow')} style={enter(u, 2.4, 0.5)}>
         <span className="bs-muted">Notion</span>
         <b>How team invites work</b>
         <span className="bs-skel" style={{ width: '90%' }} />
@@ -120,7 +167,7 @@ function Sources({ u, narrow }: { u: number; narrow: boolean }) {
         <span className="bs-skel" style={{ width: '84%' }} />
         <span className="bs-skel" style={{ width: '60%' }} />
       </div>
-      <div className="bs-found" style={{ ...(narrow ? { left: 30, top: 525 } : {}), ...enter(u, 3.4, 0.4) }}>
+      <div className={cn('bs-found', narrow && 'flow')} style={enter(u, 3.4, 0.4)}>
         <b>{found}</b> things to check
       </div>
     </>
@@ -135,7 +182,7 @@ const REPOS = ['acme/client-portal', 'acme/website', 'acme/old-prototype'];
 function Repository({ u, narrow }: { u: number; narrow: boolean }) {
   const toRow = easeInOut(span(u, 0.5, 1.3));
   const toButton = easeInOut(span(u, 1.8, 2.6));
-  const button = narrow ? { x: 290, y: 518 } : { x: 470, y: 330 };
+  const button = narrow ? { x: 290, y: 578 } : { x: 470, y: 330 };
   const x = lerp(lerp(button.x, 200, toRow), button.x, toButton);
   const y = lerp(lerp(button.y + 30, 118, toRow), button.y, toButton);
   const picked = u >= 1.45;

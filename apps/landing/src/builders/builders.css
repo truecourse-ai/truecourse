@@ -1127,6 +1127,19 @@ section.band:has(.bs-ask) {
     grid-template-columns: 1fr;
   }
 }
+/* Where setup is not pinned: each step, then its own window, down the page. */
+.bs-setup-stack {
+  list-style: none;
+  margin: clamp(32px, 5vw, 48px) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+.bs-setup-stack-step .bs-step {
+  cursor: default;
+  margin-bottom: 16px;
+}
 .bs-steps {
   list-style: none;
   margin: 0;
@@ -1279,6 +1292,14 @@ section.band:has(.bs-ask) {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
+}
+.bs-doc.flow,
+.bs-found.flow {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: auto;
+  margin-top: 16px;
 }
 .bs-found {
   position: absolute;

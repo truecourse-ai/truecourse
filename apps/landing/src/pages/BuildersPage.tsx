@@ -200,7 +200,7 @@ export default function BuildersPage() {
                 <p className="section-sub">It starts working right away.</p>
               </div>
             </SetupScene>
-            <InlineAsk say="Want to be one of the first?" more="Book 15 minutes and tell us about your app." placement="after-setup" />
+            <InlineAsk say="Ready to stop being the whole team?" more="Book 15 minutes and tell us about your app." placement="after-setup" />
           </div>
         </section>
 
