@@ -123,6 +123,23 @@
   padding-block: 0 32px;
 }
 
+/* The short ask at the end of a section: one line and the button, centered. */
+.bs-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 14px 20px;
+  margin-top: clamp(48px, 6vw, 80px);
+  text-align: center;
+}
+.bs-ask p {
+  margin: 0;
+  font-size: clamp(19px, 1.8vw, 22px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
 /* ---------- stage ---------- */
 .bs-stage {
   position: relative;

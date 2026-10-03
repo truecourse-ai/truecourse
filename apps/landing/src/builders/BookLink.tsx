@@ -4,7 +4,7 @@ import { trackEvent } from '@/lib/posthog';
 export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/15min';
 
 /** Where on the /builders page the click happened, so placements can be compared. */
-export type BookPlacement = 'header' | 'hero' | 'cta';
+export type BookPlacement = 'header' | 'hero' | 'after-week' | 'after-jobs' | 'after-setup' | 'cta';
 
 /**
  * Opens the meeting booking page in a new tab, and records the click as

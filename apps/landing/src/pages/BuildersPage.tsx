@@ -7,6 +7,7 @@ import { Reveal } from '@/components/Reveal';
 import { Clouds } from '@/components/Clouds';
 import { Voyage } from '@/components/Voyage';
 import { BookLink } from '@/builders/BookLink';
+import type { BookPlacement } from '@/builders/BookLink';
 import { Who } from '@/builders/Who';
 import { Waitlist } from '@/builders/Waitlist';
 import { useSectionViews } from '@/builders/useSectionViews';
@@ -62,6 +63,18 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
 
 /** The sections whose reach is recorded, top to bottom. */
 const SECTIONS = ['team', 'cto', 'setup', 'who', 'talk'];
+
+/** A short ask at the end of a section, for the reader the section has just won over. */
+function InlineAsk({ say, placement }: { say: string; placement: BookPlacement }) {
+  return (
+    <Reveal className="bs-ask">
+      <p>{say}</p>
+      <BookLink className="btn btn-primary" placement={placement}>
+        Talk to us
+      </BookLink>
+    </Reveal>
+  );
+}
 
 function BuildersHeader() {
   const [scrolled, setScrolled] = useState(false);
@@ -148,6 +161,7 @@ export default function BuildersPage() {
             <WeekScene>
               <p className="bs-week-lead">A normal week, building alone</p>
             </WeekScene>
+            <InlineAsk say="Sound like your week?" placement="after-week" />
           </div>
         </section>
 
@@ -168,6 +182,7 @@ export default function BuildersPage() {
                 </div>
               ))}
             </div>
+            <InlineAsk say="Want this watching your app?" placement="after-jobs" />
           </div>
         </section>
 
@@ -179,6 +194,7 @@ export default function BuildersPage() {
                 <p className="section-sub">It starts working right away.</p>
               </div>
             </SetupScene>
+            <InlineAsk say="Ready to try it on your app?" placement="after-setup" />
           </div>
         </section>
 
