@@ -129,12 +129,17 @@
   display: flex;
   align-items: center;
   gap: 20px 24px;
-  margin-top: clamp(48px, 6vw, 80px);
+  margin-top: clamp(32px, 4vw, 56px);
   padding: clamp(22px, 2.6vw, 32px) clamp(22px, 3vw, 40px);
   border-radius: 20px;
   border: 1px solid oklch(0.85 0.04 240);
   background: linear-gradient(105deg, oklch(0.94 0.04 240), oklch(0.985 0.012 240) 60%, #fff);
   box-shadow: 0 24px 50px -34px rgba(17, 24, 39, 0.35);
+}
+/* A section that ends on the banner closes soon after it, rather than with
+   a full section's worth of space below. */
+section.band:has(.bs-ask) {
+  padding-bottom: clamp(40px, 5vw, 64px);
 }
 .bs-ask-mark {
   flex: none;
