@@ -5,8 +5,9 @@ import { Mark, Moon } from '../icons';
 const LENGTH = 16;
 const OUT = 15;
 
-/** The incident: when checkout starts failing and when the rollback lands. */
+/** The incident: when checkout starts failing, when Dana applies the fix, and when it lands. */
 const BREAKS = 3.2;
+const APPLY = 8.0;
 const FIXED = 8.4;
 /** The chart's span of scene time, and its drawing box. */
 const RUN = 11;
@@ -32,9 +33,10 @@ function clock(t: number) {
 
 /**
  * The middle of the night: checkout's failures climb, the people trying to
- * pay turn red one by one, and before anyone wakes the AI CTO has named the
- * cause, undone it and written it up in plain words. On a phone the message
- * comes in under the chart rather than beside it.
+ * pay turn red one by one, and within minutes the AI CTO has named the change
+ * that caused it and has a fix ready; Dana applies it from her phone and the
+ * failures stop. On a phone the message comes in under the chart rather than
+ * beside it.
  */
 export function WatchScene() {
   const { ref, t } = useClock(LENGTH, 10.2);
@@ -51,12 +53,12 @@ export function WatchScene() {
   const arrive = easeOut(span(t, 5.0, 5.6));
   const narrow = useNarrow();
   const g = narrow
-    ? { w: 400, h: 520, chart: { left: 0, top: 0, width: 400 }, alert: { left: 0, top: 290, width: 400 } }
+    ? { w: 400, h: 560, chart: { left: 0, top: 0, width: 400 }, alert: { left: 0, top: 290, width: 400 } }
     : { w: 800, h: 460, chart: { left: 0, top: 20, width: 560 }, alert: { left: 440, top: 150, width: 360 } };
 
   return (
     <div ref={ref}>
-      <Stage width={g.w} height={g.h} label="At night checkout starts failing for 14 people. The AI CTO finds the change that caused it, undoes it and sends a plain-language message before anyone wakes.">
+      <Stage width={g.w} height={g.h} label="At night checkout starts failing for 14 people. The AI CTO finds the change that caused it, has a fix ready within minutes, and the owner applies it from her phone.">
         <div className="bs-fill" style={{ opacity: fade }}>
           <div className="bs-card bs-chart" style={g.chart}>
             <div className="bs-chart-head">
@@ -98,11 +100,17 @@ export function WatchScene() {
             <p>
               <b>Checkout is failing for Apple Pay users.</b> 14 people affected since 2:10 AM.
             </p>
-            <p className="bs-alert-more">{typed("Tuesday's payment change broke it. I undid that change.", t, 6.4, 34)}</p>
-            <div className="bs-alert-foot" style={enter(t, FIXED + 0.2, 0.5)}>
-              <span className="bs-chip tone-ok bs-pop">Resolved 2:24 AM</span>
-              <span className="bs-muted">Nobody had to wake up.</span>
-            </div>
+            <p className="bs-alert-more">{typed("Tuesday's payment change caused it. A fix is ready.", t, 6.4, 34)}</p>
+            {t < FIXED + 0.2 ? (
+              <div className={`bs-button small${t >= APPLY ? ' pressed' : ''}`} style={enter(t, 7.4, 0.4)}>
+                {t >= APPLY ? 'Applying fix…' : 'Apply fix'}
+              </div>
+            ) : (
+              <div className="bs-alert-foot">
+                <span className="bs-chip tone-ok bs-pop">Fixed 2:24 AM</span>
+                <span className="bs-muted">Applied from Dana's phone.</span>
+              </div>
+            )}
           </div>
         </div>
       </Stage>

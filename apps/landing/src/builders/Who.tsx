@@ -67,7 +67,7 @@ function Track({ pros, reverse }: { pros: Pro[]; reverse?: boolean }) {
 
 /**
  * The people this is for, two rows of them sliding past in opposite
- * directions: experts in their own field and the app each built with AI,
+ * directions: professionals in their own field and the app each built with AI,
  * for the firm, for clients or to sell.
  */
 export function Who() {

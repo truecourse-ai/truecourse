@@ -33,7 +33,7 @@ const ITEMS: Item[] = [
     icon: <Pulse />,
     tone: 'fail',
     title: 'Checkout failed for 14 people at 2:10 AM',
-    detail: "Tuesday's payment change caused it. I undid it.",
+    detail: "Caused by Tuesday's payment change. Fixed at 2:24 AM.",
     chip: ['Outage', 'fail'],
     settled: { at: 5.6, chip: ['Resolved', 'ok'], tone: 'ok' },
   },
@@ -49,7 +49,7 @@ const ITEMS: Item[] = [
 
 /**
  * The hero: the AI CTO's morning message. Overnight it checked the changes,
- * caught an outage and undid its cause, and found what users struggle with,
+ * caught an outage and found its cause, and found what users struggle with,
  * one line each, settling from alarm to resolved while the reader watches.
  * Drawn in the page's own flow, so it reads at any width.
  */
@@ -63,7 +63,7 @@ export function MorningReport() {
       className="bs-card bs-report"
       style={enter(t, 0.1, 0.7, OUT, 30)}
       role="img"
-      aria-label="A morning message from the AI CTO. Three changes checked and one bug stopped, a checkout outage undone overnight, and the top user problem found."
+      aria-label="A morning message from the AI CTO. Three changes checked and one bug stopped, a checkout outage found and fixed overnight, and the top user problem found."
     >
       <div className="bs-report-head" aria-hidden="true">
         <span className="bs-avatar">

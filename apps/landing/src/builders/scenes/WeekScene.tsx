@@ -31,7 +31,7 @@ const DAYS: Day[] = [
   },
   {
     day: 'Wednesday',
-    line: 'The app breaks at 3 AM. A customer reports it at 9.',
+    line: "The app breaks at night. The first sign is a customer's email.",
     note: { app: 'Mail', time: '3:12 AM', title: 'Customer', text: '"Is the app down??"' },
     tone: 'bad',
     tag: 'Production is a black box',
@@ -45,7 +45,7 @@ const DAYS: Day[] = [
   },
   {
     day: 'Friday',
-    line: "Still guessing what broke. Wednesday's customer cancels.",
+    line: 'The customer who hit the outage cancels.',
     note: { app: 'Stripe', time: '11:05 AM', title: 'Subscription cancelled', text: '"Too many problems lately."' },
     tone: 'bad',
     tag: 'Customers leave',
@@ -75,7 +75,7 @@ export function WeekScene({ children }: { children?: ReactNode }) {
     <div ref={pin} className="bs-pin bs-pin-week">
       <div className="bs-pin-sticky">
         {children}
-        <div role="img" aria-label="Five days of building alone. Monday team invites go live. Tuesday a customer leaves a one-star review because invites never arrive, so bugs reach users first. Wednesday the app breaks at 3 AM and a customer reports it, because production is a black box. Thursday 31 people give up at billing and nobody writes in, because users struggle in silence. Friday Wednesday's customer cancels, and customers leave.">
+        <div role="img" aria-label="Five days of building alone. Monday team invites go live. Tuesday a customer leaves a one-star review because invites never arrive, so bugs reach users first. Wednesday the app breaks at night and the first sign is a customer's email, because production is a black box. Thursday 31 people give up at billing and nobody writes in, because users struggle in silence. Friday the customer who hit the outage cancels, and customers leave.">
           <div className="bs-plain" aria-hidden="true">
             {DAYS.map((d, i) => {
               const at = i * EACH;

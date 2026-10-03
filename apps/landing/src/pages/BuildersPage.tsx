@@ -20,7 +20,7 @@ import { SetupScene } from '@/builders/scenes/SetupScene';
 import stylesheet from '@/builders/builders.css?url';
 
 /**
- * The AI CTO page, for experts who build their own apps with AI: a page of
+ * The AI CTO page, for professionals who build their own apps with AI: a page of
  * its own, outside the main site's header and footer. Its ask is a booked
  * call, with a waitlist for those not ready for one, and it
  * records how far down each visitor reads.
@@ -32,7 +32,7 @@ export const meta = () =>
   pageMeta({
     title: 'TrueCourse · Your AI CTO',
     description:
-      'For experts who build their own apps with AI. TrueCourse tests every change like a real user, watches production while you sleep, and tells you what your users are struggling with.',
+      'For professionals who build their own apps with AI. TrueCourse tests every change like a real user, watches the app overnight, and finds where people struggle.',
     path: '/builders',
   });
 
@@ -48,14 +48,14 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
     id: 'production',
     kicker: 'While it runs',
     title: 'Watches the app overnight',
-    body: 'When something breaks, it finds the change that caused it, undoes it and explains what happened. In words, not dashboards.',
+    body: 'When something breaks, it spots it right away, finds the change that caused it and suggests a fix, all on one dashboard in plain words.',
     scene: <WatchScene />,
   },
   {
     id: 'users',
     kicker: 'From real users',
     title: 'Knows where users struggle',
-    body: 'It watches how people really use the app. Errors they hit, buttons they tap again and again, steps they give up on. Then it ranks what it finds by how many people each problem hurts.',
+    body: 'It watches how people really use the app. Where they get stuck, which buttons they tap again and again, which steps they give up on. Then it ranks what it finds by how many people each problem hurts.',
     scene: <ListenScene />,
   },
 ];
@@ -104,7 +104,7 @@ export default function BuildersPage() {
           <div className="wrap bs-hero-inner">
             <div className="bs-hero-text">
               <Reveal as="p" className="kicker" delay={20} rise>
-                For experts who build with AI
+                For professionals who build their own apps with AI
               </Reveal>
               <Reveal as="h1" delay={60} rise>
                 Your AI CTO
@@ -176,7 +176,7 @@ export default function BuildersPage() {
             <SetupScene>
               <div className="bs-center">
                 <h2 className="section-h">Up and running in an afternoon</h2>
-                <p className="section-sub">Your first morning report arrives the next day.</p>
+                <p className="section-sub">Set it up today. Tomorrow morning the AI CTO sends its first report on the app.</p>
               </div>
             </SetupScene>
           </div>
@@ -185,9 +185,9 @@ export default function BuildersPage() {
         <section className="band" id="who">
           <div className="wrap">
             <Reveal className="bs-center">
-              <h2 className="section-h">Built for experts who build with AI</h2>
+              <h2 className="section-h">Built for professionals who build with AI</h2>
               <p className="section-sub">
-                Experts in their field, with code written by AI. An internal tool for the firm, a portal for
+                Accountants, lawyers, consultants and more, with code written by AI. An internal tool for the firm, a portal for
                 clients, or a SaaS of their own. Keeping it working should not take an engineering team.
               </p>
             </Reveal>
