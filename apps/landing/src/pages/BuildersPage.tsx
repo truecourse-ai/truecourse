@@ -176,7 +176,7 @@ export default function BuildersPage() {
             <SetupScene>
               <div className="bs-center">
                 <h2 className="section-h">Up and running in an afternoon</h2>
-                <p className="section-sub">Testing and watching start the moment it is connected.</p>
+                <p className="section-sub">It starts working right away.</p>
               </div>
             </SetupScene>
           </div>
