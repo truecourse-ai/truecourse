@@ -175,7 +175,7 @@ export default function BuildersPage() {
           <div className="wrap">
             <SetupScene>
               <div className="bs-center">
-                <h2 className="section-h">Up and running in an afternoon</h2>
+                <h2 className="section-h">Up and running in minutes</h2>
                 <p className="section-sub">It starts working right away.</p>
               </div>
             </SetupScene>
