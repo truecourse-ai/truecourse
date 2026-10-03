@@ -167,7 +167,7 @@ export default function BuildersPage() {
             <WeekScene>
               <p className="bs-week-lead">A normal week, building alone</p>
             </WeekScene>
-            <InlineAsk say="Sound like your week?" more="Tell us about your app. 15 minutes, no slides." placement="after-week" />
+            <InlineAsk say="Sound like your week?" more="Tell us what keeps breaking. 15 minutes, no slides." placement="after-week" />
           </div>
         </section>
 
@@ -188,7 +188,7 @@ export default function BuildersPage() {
                 </div>
               ))}
             </div>
-            <InlineAsk say="Want this watching your app?" more="See it on your own app in a 15-minute call." placement="after-jobs" />
+            <InlineAsk say="Want this for your app?" more="We're building it now. Tell us what you'd need from it." placement="after-jobs" />
           </div>
         </section>
 
@@ -200,7 +200,7 @@ export default function BuildersPage() {
                 <p className="section-sub">It starts working right away.</p>
               </div>
             </SetupScene>
-            <InlineAsk say="Ready to try it on your app?" more="Book 15 minutes and we connect it together." placement="after-setup" />
+            <InlineAsk say="Want to be one of the first?" more="Book 15 minutes and tell us about your app." placement="after-setup" />
           </div>
         </section>
 
@@ -223,7 +223,7 @@ export default function BuildersPage() {
           <div className="wrap">
             <h2>Hire your AI CTO</h2>
             <p className="bs-cta-say">
-              A 15-minute call. We look at the app together and say honestly whether this fits.
+              A 15-minute call about your app and what keeps breaking. No slides.
             </p>
             <div className="cta-row">
               <BookLink className="btn btn-primary" placement="cta">
