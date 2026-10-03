@@ -9,4 +9,6 @@ export default [
     // Unknown paths fall back to the home page (same module, distinct route id).
     route('*', 'pages/HomePage.tsx', { id: 'catch-all-home' }),
   ]),
+  // The AI CTO page brings its own header and footer.
+  route('builders', 'pages/BuildersPage.tsx'),
 ] satisfies RouteConfig;
