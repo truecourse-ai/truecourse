@@ -176,7 +176,7 @@ export default function BuildersPage() {
             <SetupScene>
               <div className="bs-center">
                 <h2 className="section-h">Up and running in an afternoon</h2>
-                <p className="section-sub">Set it up today. Tomorrow morning the AI CTO sends its first report on the app.</p>
+                <p className="section-sub">Testing and watching start the moment it is connected.</p>
               </div>
             </SetupScene>
           </div>
