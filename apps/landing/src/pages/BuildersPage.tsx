@@ -64,11 +64,17 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
 /** The sections whose reach is recorded, top to bottom. */
 const SECTIONS = ['team', 'cto', 'setup', 'who', 'talk'];
 
-/** A short ask at the end of a section, for the reader the section has just won over. */
-function InlineAsk({ say, placement }: { say: string; placement: BookPlacement }) {
+/** A banner at the end of a section, asking the reader it has just won over for a call. */
+function InlineAsk({ say, more, placement }: { say: string; more: string; placement: BookPlacement }) {
   return (
     <Reveal className="bs-ask">
-      <p>{say}</p>
+      <span className="bs-ask-mark" aria-hidden="true">
+        <img src="/truecourse-mark-twin-light.svg" alt="" />
+      </span>
+      <div className="bs-ask-text">
+        <p className="bs-ask-say">{say}</p>
+        <p className="bs-ask-more">{more}</p>
+      </div>
       <BookLink className="btn btn-primary" placement={placement}>
         Talk to us
       </BookLink>
@@ -161,7 +167,7 @@ export default function BuildersPage() {
             <WeekScene>
               <p className="bs-week-lead">A normal week, building alone</p>
             </WeekScene>
-            <InlineAsk say="Sound like your week?" placement="after-week" />
+            <InlineAsk say="Sound like your week?" more="Tell us about your app. 15 minutes, no slides." placement="after-week" />
           </div>
         </section>
 
@@ -182,7 +188,7 @@ export default function BuildersPage() {
                 </div>
               ))}
             </div>
-            <InlineAsk say="Want this watching your app?" placement="after-jobs" />
+            <InlineAsk say="Want this watching your app?" more="See it on your own app in a 15-minute call." placement="after-jobs" />
           </div>
         </section>
 
@@ -194,7 +200,7 @@ export default function BuildersPage() {
                 <p className="section-sub">It starts working right away.</p>
               </div>
             </SetupScene>
-            <InlineAsk say="Ready to try it on your app?" placement="after-setup" />
+            <InlineAsk say="Ready to try it on your app?" more="Book 15 minutes and we connect it together." placement="after-setup" />
           </div>
         </section>
 
