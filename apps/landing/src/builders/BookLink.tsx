@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { trackEvent } from '@/lib/posthog';
 
-export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/15min';
+export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/hire-you-ai-cto';
 
 /** Where on the /builders page the click happened, so placements can be compared. */
 export type BookPlacement = 'header' | 'hero' | 'after-week' | 'after-jobs' | 'after-setup' | 'cta';
