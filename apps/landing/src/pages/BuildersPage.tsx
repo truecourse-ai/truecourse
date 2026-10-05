@@ -20,6 +20,7 @@ import { ReviewScene } from '@/builders/scenes/ReviewScene';
 import { WatchScene } from '@/builders/scenes/WatchScene';
 import { ListenScene } from '@/builders/scenes/ListenScene';
 import { TextScene } from '@/builders/scenes/TextScene';
+import { TrackRecord, TrackStats } from '@/builders/scenes/TrackRecord';
 import stylesheet from '@/builders/builders.css?url';
 
 /**
@@ -64,7 +65,7 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
 ];
 
 /** The sections whose reach is recorded, top to bottom. */
-const SECTIONS = ['team', 'cto', 'text', 'pricing', 'who', 'talk'];
+const SECTIONS = ['team', 'cto', 'text', 'pricing', 'who', 'behind', 'talk'];
 
 /** A banner at the end of a section, offering the reader it has just won over an app checkup. */
 function InlineAsk({ say, more, placement }: { say: string; more: string; placement: BookPlacement }) {
@@ -280,6 +281,25 @@ export default function BuildersPage() {
           <Reveal>
             <Who />
           </Reveal>
+        </section>
+
+        <section className="band" id="behind">
+          <div className="wrap bs-behind">
+            <Reveal className="bs-behind-copy">
+              <p className="kicker">Who is behind it</p>
+              <h2 className="section-h">Built by tech leaders who have run production for decades</h2>
+              <p className="section-sub">
+                We have led engineering for enterprise platforms and consumer apps. What we learned keeping them
+                working is what your AI CTO does for you.
+              </p>
+              <TrackStats />
+              <p className="bs-backing large">
+                <span>Backed by</span>
+                <img src="/skydeck.svg" alt="Berkeley SkyDeck" />
+              </p>
+            </Reveal>
+            <TrackRecord />
+          </div>
         </section>
 
         <section className="cta" id="talk">

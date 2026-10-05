@@ -921,6 +921,7 @@ section.band:has(.bs-ask) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 82%, transparent 97%);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -992,6 +993,58 @@ section.band:has(.bs-ask) {
   flex: none;
   font-size: 12.5px;
   color: rgba(0, 0, 0, 0.5);
+}
+/* The glow behind a phone: green for a good day, red for a bad one. */
+.bs-lock-wrap {
+  position: relative;
+  isolation: isolate;
+}
+.bs-phone-glow {
+  position: absolute;
+  inset: -4% -48%;
+  z-index: -1;
+  border-radius: 50%;
+  filter: blur(48px);
+  pointer-events: none;
+}
+.bs-phone-glow.good {
+  background: radial-gradient(closest-side, rgba(34, 197, 94, 0.85) 35%, rgba(34, 197, 94, 0) 100%);
+}
+.bs-phone-glow.bad {
+  background: radial-gradient(closest-side, rgba(239, 68, 68, 0.85) 35%, rgba(239, 68, 68, 0) 100%);
+}
+
+/* A stack: the newest card on top, up to two layers peeking out beneath. */
+.bs-lock-group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.bs-lock-group .bs-lock-note {
+  position: relative;
+  z-index: 2;
+}
+.bs-lock-more {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.5);
+}
+.bs-lock-layer {
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 0 0 16px 16px;
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(18px);
+}
+.bs-lock-layer.l1 {
+  position: relative;
+  z-index: 1;
+  margin-inline: 9px;
+}
+.bs-lock-layer.l2 {
+  margin-inline: 18px;
+  background: rgba(255, 255, 255, 0.42);
 }
 .bs-ios-home.light {
   background: #fff;
@@ -1109,6 +1162,14 @@ section.band:has(.bs-ask) {
   .bs-backing {
     justify-content: center;
   }
+}
+.bs-backing.large {
+  margin-top: 36px;
+  gap: 12px;
+  font-size: 16px;
+}
+.bs-backing.large img {
+  height: 24px;
 }
 .bs-waitlist {
   max-width: 460px;
@@ -1638,5 +1699,91 @@ section.band:has(.bs-ask) {
   .bs-built .strip-item svg {
     width: 22px;
     height: 22px;
+  }
+}
+
+/* ---------- who is behind it: the record, and the kinds of apps built ---------- */
+.bs-behind {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+}
+@media (max-width: 900px) {
+  .bs-behind {
+    grid-template-columns: 1fr;
+  }
+}
+.bs-depth {
+  --half-w: 360px;
+  --half-h: 260px;
+  position: relative;
+  height: 460px;
+  overflow: hidden;
+  perspective: 900px;
+  perspective-origin: 50% 50%;
+  transform-style: preserve-3d;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, #000 60%, transparent 100%);
+}
+@media (max-width: 640px) {
+  .bs-depth {
+    --half-w: 190px;
+    --half-h: 200px;
+    height: 360px;
+  }
+}
+.bs-depth-kind {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 12px 30px -16px rgba(17, 24, 39, 0.4);
+  font-size: 24px;
+  font-weight: 550;
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+.bs-depth-kind .bs-glyph {
+  color: var(--accent);
+}
+.bs-depth-kind .bs-glyph {
+  width: 26px;
+  height: 26px;
+}
+.bs-track-stats {
+  list-style: none;
+  margin: 32px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.bs-track-stats li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.bs-track-stats b {
+  flex: none;
+  min-width: 5.5em;
+  font-size: clamp(30px, 3.2vw, 40px);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.bs-track-stats span {
+  font-size: 17px;
+  color: var(--fg-dim);
+}
+@media (max-width: 640px) {
+  .bs-track-stats li {
+    flex-direction: column;
+    gap: 2px;
   }
 }
