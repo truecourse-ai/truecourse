@@ -64,7 +64,7 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
 ];
 
 /** The sections whose reach is recorded, top to bottom. */
-const SECTIONS = ['team', 'cto', 'text', 'who', 'pricing', 'talk'];
+const SECTIONS = ['team', 'cto', 'text', 'pricing', 'who', 'talk'];
 
 /** A banner at the end of a section, offering the reader it has just won over an app checkup. */
 function InlineAsk({ say, more, placement }: { say: string; more: string; placement: BookPlacement }) {
@@ -110,8 +110,8 @@ function BuildersHeader() {
         </a>
         <nav className="nav-links">
           <a href="#cto">What it does</a>
-          <a href="#who">Who it's for</a>
           <a href="#pricing">Pricing</a>
+          <a href="#who">Who it's for</a>
         </nav>
         <BookLink className="btn btn-primary btn-sm" placement="header">
           Book a $49 checkup
@@ -229,21 +229,6 @@ export default function BuildersPage() {
           </div>
         </section>
 
-        <section className="band" id="who">
-          <div className="wrap">
-            <Reveal className="bs-center">
-              <h2 className="section-h">Built for professionals who build with AI</h2>
-              <p className="section-sub">
-                Whatever your field and whatever you built with AI. An internal tool for the firm, a portal for
-                clients, or a SaaS of your own. Keeping it working should not take an engineering team.
-              </p>
-            </Reveal>
-          </div>
-          <Reveal>
-            <Who />
-          </Reveal>
-        </section>
-
         <section className="band" id="pricing">
           <div className="wrap">
             <Reveal className="bs-center">
@@ -280,6 +265,21 @@ export default function BuildersPage() {
               </div>
             </Reveal>
           </div>
+        </section>
+
+        <section className="band" id="who">
+          <div className="wrap">
+            <Reveal className="bs-center">
+              <h2 className="section-h">Built for professionals who build with AI</h2>
+              <p className="section-sub">
+                Whatever your field and whatever you built with AI. An internal tool for the firm, a portal for
+                clients, or a SaaS of your own. Keeping it working should not take an engineering team.
+              </p>
+            </Reveal>
+          </div>
+          <Reveal>
+            <Who />
+          </Reveal>
         </section>
 
         <section className="cta" id="talk">
