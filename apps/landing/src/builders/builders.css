@@ -333,28 +333,15 @@ section.band:has(.bs-ask) {
   }
 }
 
-/* ---------- morning report ---------- */
-.bs-report {
-  position: relative;
-  padding: 26px 28px;
-  font-family: var(--font-ui);
-  font-size: 15px;
-  line-height: 1.4;
-  color: var(--fg);
-}
-.bs-report * {
-  box-sizing: border-box;
+/* ---------- the hero phone, a calm morning ---------- */
+.bs-morning {
+  width: 100%;
+  max-width: 320px;
+  margin-inline: auto;
 }
 @media (max-width: 640px) {
-  .bs-report {
-    padding: 20px 18px;
-    text-align: left;
-  }
-  .bs-report-say {
-    font-size: 18px;
-  }
-  .bs-report-list li {
-    align-items: flex-start;
+  .bs-morning {
+    max-width: 280px;
   }
 }
 .bs-report-head {
@@ -366,65 +353,6 @@ section.band:has(.bs-ask) {
 .bs-report-head .bs-muted {
   margin-left: auto;
   font-size: 13.5px;
-}
-.bs-report-say {
-  font-size: 21px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  margin: 18px 0 14px;
-  min-height: 30px;
-}
-.bs-report-say {
-  position: relative;
-}
-.bs-say-room {
-  visibility: hidden;
-}
-.bs-say-typed {
-  position: absolute;
-  inset: 0;
-}
-.bs-report-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.bs-report-list li {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 0;
-  border-top: 1px solid var(--line);
-}
-.bs-report-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-.bs-report-text b {
-  font-weight: 600;
-  font-size: 15.5px;
-}
-.bs-report-text span {
-  color: var(--muted);
-  font-size: 13.5px;
-}
-/* Every chip in the list holds the width of the widest, so swapping one
-   (Outage to Resolved) never reflows the line beside it. */
-.bs-report-list .bs-chip {
-  flex: none;
-  min-width: 84px;
-  justify-content: center;
-}
-.bs-report-foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-  font-size: 14.5px;
 }
 
 /* ---------- review ---------- */
@@ -958,11 +886,11 @@ section.band:has(.bs-ask) {
   border-left-color: var(--fg);
 }
 
-/* The lock screen the evening's notifications land on. */
+/* The lock screen both phone scenes draw on. */
 .bs-iphone-screen.bs-lock {
   background:
-    radial-gradient(120% 70% at 30% 0%, oklch(0.62 0.12 250), transparent 70%),
-    linear-gradient(180deg, oklch(0.42 0.1 255), oklch(0.3 0.07 265));
+    radial-gradient(110% 60% at 70% 0%, oklch(0.86 0.09 70), transparent 70%),
+    linear-gradient(180deg, oklch(0.7 0.09 230), oklch(0.5 0.1 255));
   color: #fff;
 }
 .bs-lock-island {
@@ -1026,10 +954,18 @@ section.band:has(.bs-ask) {
 .bs-lock-app.stripe {
   background: #635bff;
 }
+.bs-lock-app.cto {
+  border-radius: 50%;
+  background: linear-gradient(180deg, #a5aab6, #858a97);
+}
 .bs-lock-glyph {
   font-size: 19px;
   font-weight: 700;
   line-height: 1;
+}
+.bs-lock-glyph.small {
+  font-size: 14px;
+  font-weight: 600;
 }
 .bs-lock-text {
   flex: 1;
@@ -1657,4 +1593,40 @@ section.band:has(.bs-ask) {
 }
 .bs-plan-start .bs-muted {
   font-size: 13.5px;
+}
+
+/* ---------- the AI tools strip, larger on this page ---------- */
+.bs-built .strip-row {
+  column-gap: 24px;
+  row-gap: 16px;
+}
+.bs-built .strip-label {
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 15px;
+}
+.bs-built .strip-more {
+  font-size: 16px;
+}
+.bs-built .strip-item {
+  gap: 9px;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--fg-dim);
+}
+.bs-built .strip-item svg {
+  width: 26px;
+  height: 26px;
+}
+@media (max-width: 640px) {
+  .bs-built .strip-row {
+    column-gap: 20px;
+  }
+  .bs-built .strip-item {
+    font-size: 15px;
+  }
+  .bs-built .strip-item svg {
+    width: 22px;
+    height: 22px;
+  }
 }

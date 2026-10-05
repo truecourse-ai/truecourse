@@ -13,7 +13,7 @@ import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
 import { Waitlist } from '@/builders/Waitlist';
 import { useSectionViews } from '@/builders/useSectionViews';
-import { MorningReport } from '@/builders/scenes/MorningReport';
+import { MorningScene } from '@/builders/scenes/MorningScene';
 import { JobsChecklist } from '@/builders/scenes/JobsChecklist';
 import { EveningScene } from '@/builders/scenes/EveningScene';
 import { ReviewScene } from '@/builders/scenes/ReviewScene';
@@ -156,7 +156,7 @@ export default function BuildersPage() {
               </Reveal>
             </div>
             <Reveal className="bs-hero-scene" delay={300} rise>
-              <MorningReport />
+              <MorningScene />
             </Reveal>
           </div>
         </section>

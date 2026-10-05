@@ -28,7 +28,7 @@ const TOOLS: Tool[] = [
 /** The quiet row under the hero: the AI tools the apps it watches are built with. */
 export function BuiltWith() {
   return (
-    <section className="strip" aria-label="Works with apps built with AI tools">
+    <section className="strip bs-built" aria-label="Works with apps built with AI tools">
       <div className="wrap strip-rows">
         <div className="strip-row">
           <span className="strip-label">For apps built with</span>
