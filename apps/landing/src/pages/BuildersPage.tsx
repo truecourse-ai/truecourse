@@ -9,6 +9,7 @@ import { Voyage } from '@/components/Voyage';
 import { BookLink } from '@/builders/BookLink';
 import type { BookPlacement } from '@/builders/BookLink';
 import { Who } from '@/builders/Who';
+import { BuiltWith } from '@/builders/BuiltWith';
 import { Waitlist } from '@/builders/Waitlist';
 import { useSectionViews } from '@/builders/useSectionViews';
 import { MorningReport } from '@/builders/scenes/MorningReport';
@@ -151,6 +152,8 @@ export default function BuildersPage() {
             </Reveal>
           </div>
         </section>
+
+        <BuiltWith />
 
         <section className="band" id="team">
           <div className="wrap">
