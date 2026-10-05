@@ -137,7 +137,7 @@ export default function BuildersPage() {
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
-                  Book an app checkup, $49
+                  Book a $49 app checkup
                 </BookLink>
                 <a className="btn" href="#cto">
                   See what it does
@@ -252,7 +252,7 @@ export default function BuildersPage() {
             </p>
             <div className="cta-row">
               <BookLink className="btn btn-primary" placement="cta">
-                Book an app checkup, $49
+                Book a $49 app checkup
               </BookLink>
             </div>
             <Waitlist />
