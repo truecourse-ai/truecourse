@@ -14,19 +14,19 @@ interface Note {
   time: string;
   title: string;
   body: string;
-  /** The problem this notification is, if it is one; family texts are not. */
+  /** The problem this notification is, if it is one; a friend's texts are not. */
   pain?: number;
 }
 
 const NOTES: Note[] = [
-  { app: 'messages', time: '6:05 PM', title: 'Sarah', body: 'Dinner at 7? Kids are hungry' },
+  { app: 'messages', time: '6:05 PM', title: 'Alex', body: 'Still on for 7?' },
   { app: 'appstore', time: '6:12 PM', title: 'New review ★☆☆☆☆', body: '"Invites never arrive."', pain: 0 },
   { app: 'mail', time: '6:40 PM', title: 'Northwind', body: 'Is the app down??', pain: 1 },
-  { app: 'messages', time: '7:05 PM', title: 'Sarah', body: 'We started without you' },
+  { app: 'messages', time: '7:05 PM', title: 'Alex', body: 'We started without you' },
   { app: 'stripe', time: '7:22 PM', title: '31 checkouts abandoned today', body: 'Most stopped at the payment step.', pain: 2 },
   { app: 'mail', time: '7:48 PM', title: 'Acme Dental', body: "Still can't log in. Third time this week.", pain: 1 },
+  { app: 'messages', time: '7:55 PM', title: 'Alex', body: 'Movie starts at 8, where are you?' },
   { app: 'stripe', time: '8:30 PM', title: 'Subscription cancelled', body: 'Acme Dental, $49 a month', pain: 3 },
-  { app: 'messages', time: '9:15 PM', title: 'Sarah', body: 'Kids are asleep. You missed dinner again.' },
 ];
 
 const APP: Record<App, { name: string; icon: ReactNode }> = {
@@ -41,8 +41,8 @@ const EACH = 1.1;
 const LENGTH = NOTES.length * EACH + 0.6;
 
 /**
- * A Saturday evening of building alone, on a phone's lock screen: family
- * texts in between a bad review, customers asking if the app is down, people
+ * A Saturday evening of building alone, on a phone's lock screen: a friend's
+ * texts about the evening's plans in between a bad review, customers asking if the app is down, people
  * giving up at checkout, and a cancellation. Once the phone is in view the
  * notifications land one after another, newest on top, and the evening stays;
  * beside the phone, each problem lights up as its first notification lands.
@@ -67,7 +67,7 @@ export function EveningScene({ children }: { children?: ReactNode }) {
           </ul>
         </div>
         <div className="bs-evening-phone">
-          <Stage width={380} height={800} label="A phone's lock screen on a Saturday evening. Between texts from family about dinner, a one-star review, customers asking if the app is down, 31 abandoned checkouts and a cancelled subscription arrive, until the last text says dinner was missed again.">
+          <Stage width={380} height={800} label="A phone's lock screen on a Saturday evening. Between texts from a friend about plans for the evening, a one-star review, customers asking if the app is down and 31 abandoned checkouts arrive, and the evening ends with a cancelled subscription.">
             <div className="bs-iphone">
               <span className="bs-iphone-button left one" />
               <span className="bs-iphone-button left two" />
