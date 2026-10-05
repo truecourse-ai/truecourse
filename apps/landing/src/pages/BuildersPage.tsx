@@ -194,7 +194,7 @@ export default function BuildersPage() {
                 </div>
               ))}
             </div>
-            <InlineAsk say="Want this for your app?" more="Book an app checkup and get a written report on what to fix first." placement="after-jobs" />
+            <InlineAsk say="Want this for your app?" more="Book an app checkup and find out what your app actually needs." placement="after-jobs" />
           </div>
         </section>
 
@@ -247,9 +247,9 @@ export default function BuildersPage() {
           <div className="wrap">
             <h2>Hire your AI CTO</h2>
             <p className="bs-cta-say">
-              Start with a 30-minute app checkup. We look at your app together and send you a short report on
-              what is likely to break and what to fix first. $49, credited to your first month. After that, it
-              costs about as much as your Claude Code subscription.
+              Start with a 30-minute app checkup. We look at your app and how you run it, then send you a short
+              plan for what you actually need. $49, credited to your first month. After that, it costs about as
+              much as your Claude Code subscription.
             </p>
             <div className="cta-row">
               <BookLink className="btn btn-primary" placement="cta">
