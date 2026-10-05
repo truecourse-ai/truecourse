@@ -1671,86 +1671,210 @@ section.band:has(.bs-ask) {
   font-size: 16px;
   color: var(--fg-dim);
 }
-.bs-tphone {
+
+/* An iPhone in Messages, so the thread reads as text messages. */
+.bs-iphone {
   position: absolute;
   inset: 0;
+  border-radius: 58px;
+  padding: 11px;
+  background: linear-gradient(145deg, #3a3d42, #1c1e22 40%, #2b2e33);
+  box-shadow:
+    inset 0 0 0 1.5px #55595f,
+    0 40px 80px -40px rgba(17, 24, 39, 0.55);
+}
+.bs-iphone-button {
+  position: absolute;
+  width: 4px;
+  border-radius: 2px;
+  background: #2b2e33;
+}
+.bs-iphone-button.left {
+  left: -3px;
+}
+.bs-iphone-button.left.one {
+  top: 150px;
+  height: 56px;
+}
+.bs-iphone-button.left.two {
+  top: 218px;
+  height: 56px;
+}
+.bs-iphone-button.right {
+  right: -3px;
+  top: 190px;
+  height: 88px;
+}
+.bs-iphone-screen {
+  position: relative;
+  height: 100%;
   display: flex;
   flex-direction: column;
   border-radius: 48px;
-  border: 10px solid #15181d;
   background: #fff;
   overflow: hidden;
-  box-shadow: 0 40px 80px -40px rgba(17, 24, 39, 0.5);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', var(--font-ui);
+  color: #000;
 }
-.bs-tphone-head {
+.bs-ios-status {
+  position: relative;
+  height: 50px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 30px 20px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-elev);
-  font-size: 16px;
+  justify-content: space-between;
+  padding: 6px 28px 0 34px;
+  font-size: 15px;
 }
-.bs-tphone-head .bs-muted {
-  margin-left: auto;
-  font-size: 13px;
+.bs-ios-island {
+  position: absolute;
+  left: 50%;
+  top: 11px;
+  width: 112px;
+  height: 32px;
+  margin-left: -56px;
+  border-radius: 16px;
+  background: #000;
 }
-.bs-thread-view {
+.bs-ios-icons {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.bs-ios-icons svg {
+  width: 17px;
+  height: 12px;
+  fill: #000;
+}
+.bs-ios-battery {
+  position: relative;
+  width: 25px;
+  height: 12px;
+  border-radius: 4px;
+  border: 1.2px solid rgba(0, 0, 0, 0.4);
+  padding: 1.5px;
+}
+.bs-ios-battery::after {
+  content: '';
+  position: absolute;
+  right: -3.5px;
+  top: 3.5px;
+  width: 2px;
+  height: 4px;
+  border-radius: 0 1px 1px 0;
+  background: rgba(0, 0, 0, 0.4);
+}
+.bs-ios-battery i {
+  display: block;
+  width: 80%;
+  height: 100%;
+  border-radius: 2px;
+  background: #000;
+}
+.bs-ios-head {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 10px;
+  background: rgba(249, 249, 249, 0.94);
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.15);
+}
+.bs-ios-back {
+  position: absolute;
+  left: 14px;
+  top: 18px;
+}
+.bs-ios-back svg {
+  width: 12px;
+  height: 20px;
+  fill: none;
+  stroke: #007aff;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bs-ios-contact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.bs-ios-photo {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #4b5058, #24272c);
+}
+.bs-ios-photo img {
+  width: 30px;
+  height: 30px;
+}
+.bs-ios-name {
+  font-size: 12px;
+  color: #000;
+}
+.bs-ios-thread {
   flex: 1;
   min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 16px 14px;
+  gap: 3px;
+  padding: 12px 12px 10px;
 }
-.bs-text-time {
+.bs-ios-time {
   align-self: center;
-  margin: 8px 0 2px;
+  text-align: center;
+  margin: 10px 0 6px;
   font-size: 11.5px;
+  color: #8e8e93;
+  line-height: 1.35;
+}
+.bs-ios-time b {
   font-weight: 600;
-  color: var(--muted);
 }
-.bs-bubble {
-  max-width: 78%;
-  padding: 10px 14px;
-  border-radius: 20px;
-  font-size: 14.5px;
-  line-height: 1.4;
+.bs-ios-bubble {
+  max-width: 76%;
+  padding: 8px 13px;
+  border-radius: 19px;
+  font-size: 16px;
+  line-height: 1.32;
   white-space: pre-line;
+  margin-top: 4px;
 }
-.bs-bubble.cto {
+.bs-ios-bubble.cto {
   align-self: flex-start;
-  background: var(--bg-elev2);
-  color: var(--fg);
+  background: #e9e9eb;
+  color: #000;
   border-bottom-left-radius: 6px;
 }
-.bs-bubble.dana {
+.bs-ios-bubble.dana {
   align-self: flex-end;
-  background: oklch(0.52 0.14 250);
+  background: #34c759;
   color: #fff;
   border-bottom-right-radius: 6px;
 }
-.bs-typing {
+.bs-ios-typing {
   display: flex;
   gap: 4px;
-  padding: 14px 16px;
+  padding: 13px 15px;
 }
-.bs-typing i {
-  width: 7px;
-  height: 7px;
+.bs-ios-typing i {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--muted);
+  background: #8e8e93;
   opacity: 0.5;
 }
-.js .bs-typing i {
+.js .bs-ios-typing i {
   animation: bs-typing 1s ease-in-out infinite;
 }
-.bs-typing i:nth-child(2) {
+.bs-ios-typing i:nth-child(2) {
   animation-delay: 0.15s;
 }
-.bs-typing i:nth-child(3) {
+.bs-ios-typing i:nth-child(3) {
   animation-delay: 0.3s;
 }
 @keyframes bs-typing {
@@ -1759,17 +1883,51 @@ section.band:has(.bs-ask) {
     transform: translateY(-3px);
   }
 }
-.bs-tphone-input {
-  padding: 12px 14px 22px;
-  border-top: 1px solid var(--line);
+.bs-ios-compose {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 30px;
 }
-.bs-tphone-input span {
-  display: block;
-  height: 38px;
-  border-radius: 19px;
-  border: 1px solid var(--line-strong);
-  padding: 0 16px;
-  line-height: 36px;
-  font-size: 14px;
-  color: var(--muted);
+.bs-ios-plus {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #e9e9eb;
+  color: #8e8e93;
+  font-size: 24px;
+  line-height: 1;
+}
+.bs-ios-field {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 12px 0 14px;
+  border-radius: 18px;
+  border: 1px solid #d1d1d6;
+  font-size: 16px;
+  color: #c7c7cc;
+}
+.bs-ios-field svg {
+  width: 13px;
+  height: 18px;
+  fill: none;
+  stroke: #8e8e93;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.bs-ios-home {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  width: 134px;
+  height: 5px;
+  margin-left: -67px;
+  border-radius: 3px;
+  background: #000;
 }
