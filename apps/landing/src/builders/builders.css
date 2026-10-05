@@ -1114,9 +1114,6 @@ section.band:has(.bs-ask) {
   width: 20px;
   height: 20px;
 }
-.bs-lock-app.messages {
-  background: linear-gradient(180deg, #5bf675, #0cbd2a);
-}
 .bs-lock-app.appstore {
   background: linear-gradient(180deg, #1ec3fd, #1871f0);
 }
