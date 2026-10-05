@@ -11,11 +11,26 @@
  *   → apply scope verdicts (det — excluded subtrees never reach anything below)
  *   → prefilter/OpenAPI bypass (det, no session)
  *   → `spec-scan.curate-doc`   one session per doc   (pool)
+ *   → `spec-scan.corpus-review` computer path only: one session per shard of
+ *     the kept docs, dropping what does not belong (part of the curate step)
  *   → `spec-scan.settle-areas` ≤1 session per corpus (barrier, concurrency 1)
  *   → groupByArea (det)
- *   → deriveOverlapWorkItems (det — claim-token/heading pairing)
- *   → `spec-scan.overlap`      one session per collision cluster (pool)
+ *   → the overlap step, in the shape `conflictMethod` names:
+ *       `pairing`: deriveOverlapWorkItems (det — claim-token/heading pairing)
+ *       → `spec-scan.overlap` one session per collision cluster (pool);
+ *       `facts`: `spec-scan.record-facts` one session per window of a kept
+ *       doc's units (pool), each doc's ledger collected
+ *       → `spec-scan.settle-subjects` one session per part of the facts'
+ *       subject names (barrier)
+ *       → planCompareBatches (det — area batches, then subject batches)
+ *       → `spec-scan.compare-facts` one session per batch (pool), each
+ *       conflict it finds handed to the fold as a finding
  *   → verify pointers + cross-area dedup (det) → assemble → write.
+ *
+ * THE COMPUTER PATH is the caller's call (`computer`): it runs when the driver
+ * can hand a session a computer, and adds a corpus review after curation that
+ * reads the kept docs off a scratch directory (`corpus-dir.ts`). Without it the
+ * scan is unchanged.
  *
  * The orchestrator's standing `instructions` ride EVERY downstream session's
  * briefing AND every downstream cache key (the `extraParts` tails) — editing
@@ -25,8 +40,8 @@
  * TWO RULES carried over from the one-shot engine, exactly:
  *
  * - EVERY KIND FAILS OPEN PER ITEM — a failed curation session keeps its doc
- *   untagged, a failed settle session applies no merges, a failed overlap
- *   session flags nothing and lands the whole area in `notReached` — and the
+ *   untagged, a failed settle session applies no merges, a failed overlap or
+ *   compare session flags nothing and lands its docs in `notReached` — and the
  *   failures are tallied in `stats.llmFailures` (sessions, not calls).
  * - THE ONE-ABORT RULE — a session kind whose EVERY session failed with a
  *   `transport`-class failure produced nothing, and its fail-open defaults
@@ -66,6 +81,7 @@ import type { z } from 'zod'
 import {
   aliasMatcher,
   applySubjectAttribution,
+  assignDocPairArea,
   autoApplyHighConfidenceRecommendations,
   classifyStatusValue,
   discoverDocs,
@@ -85,8 +101,10 @@ import {
   writeCorpus,
   writeDecisions,
   type Area,
+  type AreaComparison,
   type AreaTag,
   type CandidatePair,
+  type CorpusComparison,
   type CuratedCorpus,
   type CurateResult,
   type CurateStats,
@@ -146,6 +164,7 @@ import {
   openedSectionKey,
   pairRecord,
   uncheckedBriefedPairs,
+  type OverlapFinding,
   type OverlapWorkItem,
 } from './overlap.js'
 import {
@@ -163,6 +182,71 @@ import {
   type ScopeSourceView,
 } from './orchestrate.js'
 import { buildScanUniverse, instructionsFingerprint } from './tools.js'
+import { corpusDir, corpusFingerprint } from './corpus-dir.js'
+import {
+  CORPUS_REVIEW_CACHE_NAME,
+  CORPUS_REVIEW_SESSION_KIND,
+  CORPUS_REVIEW_TIMEOUT_MS,
+  CorpusReviewOutcomeSchema,
+  applyCorpusReview,
+  corpusReviewBriefing,
+  corpusReviewCacheKey,
+  corpusReviewSessionDef,
+  corpusReviewWorkItem,
+  planCorpusReviewShards,
+  type CorpusReviewOutcome,
+  type CorpusReviewShard,
+} from './corpus-review.js'
+import {
+  FactLedgerSchema,
+  RECORD_FACTS_CACHE_NAME,
+  RECORD_FACTS_SESSION_KIND,
+  describeDocLedger,
+  docFactLedger,
+  docLedgerCounts,
+  factAreaIds,
+  recordFactsBriefing,
+  recordFactsCacheKey,
+  recordFactsItems,
+  recordFactsSessionDef,
+  recordFactsWorkItem,
+  type DocFactLedger,
+  type FactAreaContext,
+  type FactLedger,
+  type RecordFactsItem,
+  type RecordedFact,
+} from './record-facts.js'
+import {
+  SETTLE_SUBJECTS_CACHE_NAME,
+  SETTLE_SUBJECTS_SESSION_KIND,
+  SubjectSettlementSchema,
+  collectSubjectNames,
+  planSubjectParts,
+  settleSubjectsBriefing,
+  settleSubjectsCacheKey,
+  settleSubjectsSessionDef,
+  settleSubjectsWorkItem,
+  settledSubjects,
+  subjectKey,
+  subjectMerges,
+  type SubjectPart,
+  type SubjectSettlement,
+} from './settle-subjects.js'
+import {
+  COMPARE_BATCH_FACTS,
+  COMPARE_FACTS_CACHE_NAME,
+  COMPARE_FACTS_SESSION_KIND,
+  FactComparisonSchema,
+  checkGroups,
+  compareFactsBriefing,
+  compareFactsCacheKey,
+  compareFactsSessionDef,
+  compareFactsWorkItem,
+  describeBatch,
+  planCompareBatches,
+  type CompareItem,
+  type FactComparison,
+} from './compare-facts.js'
 
 // ---------------------------------------------------------------------------
 // Single-step mode (`only`)
@@ -176,10 +260,26 @@ export type ScanStep = (typeof SCAN_STEPS)[number]
  * The phase a fact is filed under. These are the scan CHECKLIST's step keys
  * (`spec-in-process`'s `CURATE_STEPS`), which group the session steps above:
  * discovery and the prefilter under `discover`, curation and settling under
- * `tag`, the cluster reviews under `overlap`, and the deterministic fold
- * (re-anchoring, dedup, auto-apply) under `verify`.
+ * `tag`, the cluster reviews and the conflicts found under `overlap`, and the
+ * deterministic fold (re-anchoring, dedup, auto-apply) under `verify`. A scan
+ * that finds conflicts by comparing facts files recording each doc's facts
+ * under `record`, settling their subjects under `subjects` and comparing them
+ * under `compare`, steps the checklist carries only on such a scan.
  */
-export type ScanFactStep = 'discover' | 'tag' | 'overlap' | 'verify'
+export type ScanFactStep = 'discover' | 'tag' | 'record' | 'subjects' | 'compare' | 'overlap' | 'verify'
+
+/**
+ * How the overlap step finds conflicts: `pairing` reviews the docs that share
+ * claim tokens or headings, cluster by cluster; `facts` records each kept
+ * doc's facts window by window, settles their subjects and compares them batch
+ * by batch.
+ */
+export type ConflictMethod = 'pairing' | 'facts'
+
+/** The method a scan runs: the one it was given, else pairing. */
+export function resolveConflictMethod(opts: { conflictMethod?: ConflictMethod }): ConflictMethod {
+  return opts.conflictMethod ?? 'pairing'
+}
 
 /**
  * The caller cancelled the run through its `signal` (the dashboard does this
@@ -235,6 +335,17 @@ export interface SpecScanSessionsOptions {
   skipCorpusWrite?: boolean
   /** Skip the overlap sessions entirely (workspace sync passes this). */
   disableOverlapDetection?: boolean
+  /**
+   * The driver can hand a session a computer (Claude Code). The caller that
+   * chose the driver says so; nothing below infers it. Then a corpus review
+   * (`spec-scan.corpus-review`) over the kept docs on disk follows curation.
+   */
+  computer?: boolean
+  /**
+   * How the overlap step finds conflicts (see {@link ConflictMethod}). The
+   * caller decides; absent, the scan pairs.
+   */
+  conflictMethod?: ConflictMethod
   /**
    * The corpus the last scan wrote, for the areas to reconcile against: its
    * area ids ride the settle session's briefing and are kept by its fold, and
@@ -316,6 +427,13 @@ export interface SpecScanSessionsOptions {
   onScope?: (state: 'covered' | 'ran' | 'failed' | 'skipped') => void
   onCurateProgress?: (done: number, total: number) => void
   onSettle?: (state: 'skipped' | 'cached' | 'ran' | 'failed') => void
+  /** The record step's sessions, one per doc window, when conflicts are found by comparing facts. */
+  onRecordProgress?: (done: number, total: number) => void
+  /** The subject settling's sessions, one per part of the subject names, when conflicts are found by comparing facts. */
+  onSubjectsProgress?: (done: number, total: number) => void
+  /** The compare step's sessions, one per batch of facts, when conflicts are found by comparing facts. */
+  onCompareProgress?: (done: number, total: number) => void
+  /** The overlap step's sessions: the collision clusters. */
   onOverlapProgress?: (done: number, total: number) => void
   /** Every transcript event as it is persisted — the caller's live view. */
   onSessionEvent?: (workItem: string, event: SessionEvent) => void
@@ -353,11 +471,19 @@ export interface SpecScanSessionsResult extends CurateResult {
    * including `only: 'overlap'`, which runs through the corpus write.
    */
   stoppedAfter?: ScanStep
+  /**
+   * The ledger the record step collected for each doc it recorded, in corpus
+   * order. Present only when conflicts are found by comparing facts.
+   */
+  factLedgers?: DocFactLedger[]
 }
 
 // ---------------------------------------------------------------------------
 // The cached session pool: probe → pool the misses → write back completions.
 // ---------------------------------------------------------------------------
+
+/** A kind's rollup as the run tallies it, before the result drops the tally fields. */
+type KindRun = ScanSessionKindSummary & { firstError?: string; allTransport: boolean }
 
 interface CachedPoolResult<TOutcome> {
   outcome: SessionOutcome<TOutcome> & { fromCache?: true }
@@ -382,6 +508,8 @@ interface CachedPoolOptions<TItem, TOutcome> {
   persistence: SessionPersistence
   concurrency?: number
   signal?: AbortSignal
+  /** Each session's wall clock; the only clock a session with a computer has. */
+  timeoutMs?: number
   onProgress?: (done: number, total: number) => void
   onSessionEvent?: (workItem: string, event: SessionEvent) => void
   mintSessionId?: () => string
@@ -489,6 +617,7 @@ async function runCachedSessionPool<TItem, TOutcome>(
       persistence: opts.persistence,
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
       ...(opts.now ? { now: opts.now } : {}),
@@ -563,6 +692,14 @@ function describeSessionFailure(failure: SessionFailure): string {
  *  `MAX_TALLY_ERROR_CHARS` (not re-exported through `@truecourse/shared/llm`). */
 const TALLY_ERROR_CAP = 500
 
+/** Canonical tags with one doc's concern rewrites from the area settlement applied. */
+function reassignConcerns(tags: readonly AreaTag[], perDoc: ReadonlyMap<string, string> | undefined): AreaTag[] {
+  return tags.map((tag) => {
+    const to = perDoc?.get(tag.concern)
+    return to === undefined ? tag : { ...tag, concern: to }
+  })
+}
+
 /** A kind's non-systemic losses as the tally shape every scan surface renders. */
 function kindTally(summary: ScanSessionKindSummary & { firstError?: string }): StageTransportTally | null {
   if (summary.failed === 0) return null
@@ -583,6 +720,7 @@ export async function runSpecScanSessions(
 ): Promise<SpecScanSessionsResult> {
   const { repoRoot } = opts
   const only = opts.only
+  const conflictMethod = resolveConflictMethod(opts)
   /** Stop the run where it stands — the pools own the gaps between the steps. */
   const throwIfAborted = (): void => {
     if (opts.signal?.aborted) throw new ScanAbortedError()
@@ -905,8 +1043,11 @@ export async function runSpecScanSessions(
   // post-cache — exactly as the one-shot engine ran them: a doc a stale cached
   // verdict wrongly dropped is rescued on every run.
   const prefilterReason = new Map(prefilterSkipped.map((s) => [s.path, s.reason]))
-  const keptProse: DocCandidate[] = []
+  let keptProse: DocCandidate[] = []
   const tagsByPath = new Map<string, DocAreaTags>()
+  // Each kept doc's tags as its curation verdict wrote them, before any
+  // reconciling or settling: the tags a fact recorded from it carries.
+  const rawTagsByPath = new Map<string, AreaTag[]>()
   // Seeded with the scope-excluded docs (discovery order), so the corpus's
   // skip list shows them and the dashboard can force-include them back.
   const skippedDocs: Array<{ path: string; reason: string; category?: string }> = [...scopeExcluded]
@@ -915,6 +1056,7 @@ export async function runSpecScanSessions(
 
   const keepDoc = (doc: DocCandidate, rawTags: AreaTag[], statusRaw: string | null | undefined): void => {
     keptProse.push(doc)
+    rawTagsByPath.set(doc.path, rawTags)
     const status: Status | undefined =
       (statusRaw ? classifyStatusValue(statusRaw) : undefined) ?? parseDocStatus(docBody(doc))
     // A label the session only re-spelled keeps the id the last scan gave it.
@@ -980,8 +1122,77 @@ export async function runSpecScanSessions(
     skippedDocs.push({ path: doc.path, reason: attributed.reason, category: attributed.category })
   }
 
+  // ---- Corpus review (computer path; one session per shard) ----------------
+  // What only the whole kept set shows: restatements, plans for what shipped
+  // otherwise, tooling notes. Its drops are folded here, after the cache, so a
+  // pin made since a cached review still wins.
+  let reviewSummary: KindRun | null = null
+  if (opts.computer && keptProse.length > 0) {
+    const keptRefs = new Set(keptProse.map((d) => d.path))
+    const areasByDoc = new Map(
+      keptProse.map((d) => [
+        d.path,
+        canonicalDocTags(tagsByPath.get(d.path)?.tags ?? []).map((t) => `${t.product}/${t.concern}`),
+      ]),
+    )
+    const shards = planCorpusReviewShards(keptProse, areasByDoc)
+    const keptSet = corpusFingerprint(keptProse)
+    const reviewed: CorpusReviewOutcome[] = []
+    const dir = corpusDir(keptProse)
+    try {
+      reviewSummary = await runCachedSessionPool<CorpusReviewShard, CorpusReviewOutcome>({
+        repoRoot,
+        kind: CORPUS_REVIEW_SESSION_KIND,
+        cacheName: CORPUS_REVIEW_CACHE_NAME,
+        items: shards,
+        workItem: (shard) => corpusReviewWorkItem(shard.index),
+        cacheKey: (shard) => corpusReviewCacheKey(shard, keptSet, instructionParts),
+        schema: CorpusReviewOutcomeSchema,
+        session: (shard) => corpusReviewSessionDef({ shard, kept: keptRefs, dir }),
+        briefing: (shard) =>
+          corpusReviewBriefing({ shard, keptCount: keptProse.length, root: dir.root(), areasByDoc, instructions }),
+        driver: opts.driver,
+        persistence: opts.persistence,
+        timeoutMs: CORPUS_REVIEW_TIMEOUT_MS,
+        ...(replayOnly('curate') ? { cacheOnly: 'curate' as const } : {}),
+        ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
+        ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
+        ...(opts.now ? { now: opts.now } : {}),
+        fold: (shard, result) => {
+          const item = corpusReviewWorkItem(shard.index)
+          if (result.outcome.status === 'failed') {
+            // Fail-open: a shard nobody reviewed keeps every doc curation kept.
+            fact('tag', `${item}: the corpus review failed, its ${shard.docs.length} docs stay`)
+            return
+          }
+          const by = result.outcome.fromCache === true ? ', from cache' : ''
+          fact('tag', `${item}: ${shard.docs.length} kept docs reviewed, ${result.outcome.output.drops.length} named to drop${by}`)
+          reviewed.push(result.outcome.output)
+        },
+      })
+    } finally {
+      dir.dispose()
+    }
+    assertKindHealthy(reviewSummary)
+    const applied = applyCorpusReview(reviewed, keptRefs, manualSet)
+    for (const declined of applied.declined) {
+      fact('tag', `${declined.ref}: kept although the corpus review would drop it, ${declined.why}`)
+    }
+    if (applied.drops.length > 0) {
+      const dropped = new Set(applied.drops.map((d) => d.ref))
+      keptProse = keptProse.filter((d) => !dropped.has(d.path))
+      for (const drop of applied.drops) {
+        tagsByPath.delete(drop.ref)
+        fact('tag', `${drop.ref}: skipped by the corpus review, ${drop.reason}`)
+        skippedDocs.push({ path: drop.ref, reason: drop.reason, category: drop.category })
+      }
+    }
+  }
+
   if (only === 'curate') {
-    return stoppedResult('curate', [...(orchestrateSummary ? [orchestrateSummary] : []), curateSummary], {
+    return stoppedResult('curate', [...(orchestrateSummary ? [orchestrateSummary] : []), curateSummary, ...(reviewSummary ? [reviewSummary] : [])], {
       skippedDocs,
       stats: {
         docsKept: keptProse.length + structuralKept.length,
@@ -998,6 +1209,9 @@ export async function runSpecScanSessions(
   )
   const vocabView: AreaVocabView = collectAreaVocab(canonicalByPath)
   let vocabMap: VocabMap = { products: {}, concerns: {} }
+  // The settlement's per-doc concern rewrites, kept for the facts recorded
+  // from each doc: their tags take the same path as the doc's own.
+  let reassignmentsByRef: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map()
   let settleSummary: (ScanSessionKindSummary & { firstError?: string; allTransport: boolean }) | null = null
   if (keptProse.length > 0 && settleAreasGate(vocabView, priorAreaIds)) {
     let settlement: AreaSettlement | null = null
@@ -1039,14 +1253,12 @@ export async function runSpecScanSessions(
       // Subdivision reassignments rewrite the CANONICAL concern per doc; the
       // merges ride the vocab map through the grouper, exactly as the old
       // normalizer's map did.
+      reassignmentsByRef = applied.reassignments
       for (const [ref, perDoc] of applied.reassignments) {
         for (const [from, to] of perDoc) fact('tag', `${ref}: concern "${from}" reassigned to "${to}"`)
         const tags = canonicalByPath.get(ref)
         if (!tags) continue
-        canonicalByPath.set(
-          ref,
-          tags.map((tag) => (perDoc.has(tag.concern) ? { ...tag, concern: perDoc.get(tag.concern)! } : tag)),
-        )
+        canonicalByPath.set(ref, reassignConcerns(tags, perDoc))
       }
       opts.onSettle?.(settleSummary.fromCache > 0 ? 'cached' : 'ran')
     } else {
@@ -1085,6 +1297,7 @@ export async function runSpecScanSessions(
       [
         ...(orchestrateSummary ? [orchestrateSummary] : []),
         curateSummary,
+        ...(reviewSummary ? [reviewSummary] : []),
         ...(settleSummary ? [settleSummary] : []),
       ],
       {
@@ -1100,14 +1313,8 @@ export async function runSpecScanSessions(
     )
   }
 
-  // ---- Overlap sessions (one per collision cluster) -----------------------
-  // Retrieval is deterministic: global claim-token/heading pairing over the
-  // kept docs, each pair assigned to exactly ONE area, connected components
-  // per area — a doc with no candidate collision costs no session at all.
-  const overlapItems: OverlapWorkItem[] =
-    opts.disableOverlapDetection === true ? [] : deriveOverlapWorkItems(grouped.areas, keptProse, vocabMap)
+  // ---- The overlap step ----------------------------------------------------
   if (opts.disableOverlapDetection === true) fact('overlap', 'overlap detection is off for this run')
-  else if (overlapItems.length === 0) fact('overlap', 'no two docs collide, no cluster to review')
 
   // Which areas each doc landed in — the SPAN a flagged pair still records
   // (`overlap.areas`) even though the pair is judged in one area only.
@@ -1151,106 +1358,418 @@ export async function runSpecScanSessions(
     const d = universe.byPath.get(ref)
     return d ? docBody(d) : undefined
   }
-  const overlapSummary = await runCachedSessionPool<OverlapWorkItem, z.infer<typeof OverlapOutcomeSchema>>({
-    repoRoot,
-    kind: OVERLAP_SESSION_KIND,
-    cacheName: OVERLAP_SESSION_CACHE_NAME,
-    items: overlapItems,
-    workItem: (item) => overlapWorkItem(item.areaId, item.cluster),
-    cacheKey: (item) => overlapSessionCacheKey(item, instructionParts),
-    legacyCacheKeys: (item) => [overlapSessionLegacyCacheKey(item, instructionParts)],
-    schema: OverlapOutcomeSchema,
-    session: (item) => overlapSessionDef({ item, universe }),
-    briefing: (item) => overlapBriefing(item, instructions, opts.priorOverlaps ?? []),
-    driver: opts.driver,
-    persistence: opts.persistence,
-    ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
-    ...(opts.signal ? { signal: opts.signal } : {}),
-    ...(opts.onOverlapProgress ? { onProgress: opts.onOverlapProgress } : {}),
-    ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
-    ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
-    ...(opts.now ? { now: opts.now } : {}),
-    // The skim signal AND the pair coverage are counted off the TRANSCRIPT,
-    // never self-reported: the stamps overwrite anything the session claimed,
-    // and they land in the CACHED value — so a fully-cached re-run keeps the
-    // corpus's `sectionsOpened`/`uncheckedPairs` instead of silently dropping
-    // them. A briefed pair counts as examined only when BOTH its sections
-    // were opened.
-    finalizeOutput: (item, output, sessionId) => {
-      const opened = openedSections(opts.persistence, sessionId)
-      return {
-        ...output,
-        sectionsOpened: countSectionsOpened(opts.persistence, sessionId),
-        uncheckedPairs: uncheckedBriefedPairs(item.pairs, opened).map(pairRecord),
+  /** Re-anchor a finding's pointers against the docs, recording each move. */
+  const verifiedSections = (
+    a: string,
+    b: string,
+    flagged: Pick<Parameters<typeof verifyOverlapSections>[0], 'note' | 'sections'>,
+  ) => {
+    const sections = flagged.sections.filter((s) => s.doc === a || s.doc === b)
+    const verified = verifyOverlapSections({ docs: [a, b], note: flagged.note, sections, bodyOf })
+    verified.forEach((ptr, i) => {
+      const claimed = sections[i]
+      if (claimed && claimed.heading !== ptr.heading) {
+        fact('verify', `${ptr.doc}: pointer re-anchored from ${claimed.heading ?? 'the lead'} to ${ptr.heading ?? 'the lead'}`)
       }
-    },
-    fold: (item, result) => {
-      if (result.outcome.status === 'failed') {
-        // Fail-open per cluster chunk: no flags, the failure is tallied, every
-        // doc of the chunk lands in notReached and every briefed pair in
-        // uncheckedPairs — a budget-exhausted session reads as "not covered",
-        // in the corpus, never as a log line. The skim signal is stamped here
-        // too (a failure has a transcript even though it has no outcome), so
-        // the corpus separates "opened 45 sections and still ran out" from
-        // "never really read".
+    })
+    return verified
+  }
+
+  /**
+   * Retrieval is deterministic: global claim-token/heading pairing over the
+   * kept docs, each pair assigned to exactly ONE area, connected components
+   * per area — a doc with no candidate collision costs no session at all.
+   */
+  async function reviewCollisionClusters(): Promise<KindRun> {
+    const overlapItems: OverlapWorkItem[] =
+      opts.disableOverlapDetection === true ? [] : deriveOverlapWorkItems(grouped.areas, keptProse, vocabMap)
+    if (opts.disableOverlapDetection !== true && overlapItems.length === 0) {
+      fact('overlap', 'no two docs collide, no cluster to review')
+    }
+    return runCachedSessionPool<OverlapWorkItem, z.infer<typeof OverlapOutcomeSchema>>({
+      repoRoot,
+      kind: OVERLAP_SESSION_KIND,
+      cacheName: OVERLAP_SESSION_CACHE_NAME,
+      items: overlapItems,
+      workItem: (item) => overlapWorkItem(item.areaId, item.cluster),
+      cacheKey: (item) => overlapSessionCacheKey(item, instructionParts),
+      legacyCacheKeys: (item) => [overlapSessionLegacyCacheKey(item, instructionParts)],
+      schema: OverlapOutcomeSchema,
+      session: (item) => overlapSessionDef({ item, universe }),
+      briefing: (item) => overlapBriefing(item, instructions, opts.priorOverlaps ?? []),
+      driver: opts.driver,
+      persistence: opts.persistence,
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.onOverlapProgress ? { onProgress: opts.onOverlapProgress } : {}),
+      ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
+      ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
+      ...(opts.now ? { now: opts.now } : {}),
+      // The skim signal AND the pair coverage are counted off the TRANSCRIPT,
+      // never self-reported: the stamps overwrite anything the session claimed,
+      // and they land in the CACHED value — so a fully-cached re-run keeps the
+      // corpus's `sectionsOpened`/`uncheckedPairs` instead of silently dropping
+      // them. A briefed pair counts as examined only when BOTH its sections
+      // were opened.
+      finalizeOutput: (item, output, sessionId) => {
+        const opened = openedSections(opts.persistence, sessionId)
+        return {
+          ...output,
+          sectionsOpened: countSectionsOpened(opts.persistence, sessionId),
+          uncheckedPairs: uncheckedBriefedPairs(item.pairs, opened).map(pairRecord),
+        }
+      },
+      fold: (item, result) => {
+        if (result.outcome.status === 'failed') {
+          // Fail-open per cluster chunk: no flags, the failure is tallied, every
+          // doc of the chunk lands in notReached and every briefed pair in
+          // uncheckedPairs — a budget-exhausted session reads as "not covered",
+          // in the corpus, never as a log line. The skim signal is stamped here
+          // too (a failure has a transcript even though it has no outcome), so
+          // the corpus separates "opened 45 sections and still ran out" from
+          // "never really read".
+          fact(
+            'overlap',
+            `${overlapWorkItem(item.areaId, item.cluster)}: session failed, ${item.pairs.length} candidate pair${item.pairs.length === 1 ? '' : 's'} left unchecked`,
+          )
+          addNotReached(item.areaId, item.docs.map((d) => d.path))
+          addUnchecked(item.areaId, item.pairs.map(pairRecord))
+          if (result.sessionId !== undefined) {
+            addSectionsOpened(item.areaId, countSectionsOpened(opts.persistence, result.sessionId))
+          }
+          return
+        }
+        const briefed = new Set(item.docs.map((d) => d.path))
+        const reviewedBy = result.outcome.fromCache === true ? ', from cache' : ''
         fact(
           'overlap',
-          `${overlapWorkItem(item.areaId, item.cluster)}: session failed, ${item.pairs.length} candidate pair${item.pairs.length === 1 ? '' : 's'} left unchecked`,
+          `${overlapWorkItem(item.areaId, item.cluster)}: ${item.pairs.length} candidate pair${item.pairs.length === 1 ? '' : 's'} compared, ${result.outcome.output.overlaps.length} disagreement${result.outcome.output.overlaps.length === 1 ? '' : 's'}${reviewedBy}`,
         )
-        addNotReached(item.areaId, item.docs.map((d) => d.path))
-        addUnchecked(item.areaId, item.pairs.map(pairRecord))
-        if (result.sessionId !== undefined) {
-          addSectionsOpened(item.areaId, countSectionsOpened(opts.persistence, result.sessionId))
+        for (const flagged of result.outcome.output.overlaps) {
+          // The fold's own validation — never trust the transcript: a pointer to
+          // a doc the session was not briefed on is dropped, and so is a doc
+          // paired with itself, which a collision cluster never nominates;
+          // every kept pointer is re-anchored deterministically (quote-first)
+          // against the doc text.
+          const [a, b] = flagged.docs
+          if (a === b || !briefed.has(a) || !briefed.has(b)) continue
+          fact('overlap', `${a} vs ${b}: ${flagged.note}`)
+          const verified = verifiedSections(a, b, flagged)
+          overlapEntries.push({
+            area: item.areaId,
+            overlap: {
+              docs: [a, b],
+              note: flagged.note,
+              sections: verified,
+              areas: spannedAreas(a, b, item.areaId),
+              review: flagged.review,
+            },
+          })
         }
-        return
+        addNotReached(item.areaId, result.outcome.output.notReached.filter((ref) => briefed.has(ref)))
+        // Fresh and cached alike: the run stamped `sectionsOpened` and
+        // `uncheckedPairs` into the value before it entered the cache
+        // (finalizeOutput above). Absent only on a legacy entry cached before
+        // the stamps existed — no signal, until that cluster re-runs.
+        if (result.outcome.output.sectionsOpened !== undefined) {
+          addSectionsOpened(item.areaId, result.outcome.output.sectionsOpened)
+        }
+        addUnchecked(item.areaId, result.outcome.output.uncheckedPairs ?? [])
+      },
+    })
+  }
+
+  // How a fact's raw tag lands in the corpus's areas: the path the doc's own
+  // tags took, one tag at a time. A doc a decision pins files every fact under
+  // the pinned areas, as the pin replaces the doc's own tags.
+  const corpusAreaTags = new Map(grouped.docs.map((d) => [d.ref, d.areaTags]))
+  const factAreas: FactAreaContext = {
+    rawTags: rawTagsByPath,
+    priorTags: priorTagsByRef,
+    reassignments: reassignmentsByRef,
+    vocab: vocabMap,
+    pinned: new Map((decisions.manualAreas ?? []).map((m) => [m.doc, corpusAreaTags.get(m.doc) ?? []])),
+  }
+
+  /**
+   * The facts path's first half: every kept prose doc with an area tag is
+   * recorded, one session per window of its units, and each doc's ledger is
+   * collected from its windows' outcomes. A failed window leaves its units out
+   * and lands its doc in each of its areas' `notReached`.
+   */
+  async function recordFacts(): Promise<{ summary: KindRun; ledgers: DocFactLedger[] }> {
+    const windowsByDoc = new Map<string, RecordFactsItem[]>()
+    if (opts.disableOverlapDetection !== true) {
+      for (const doc of keptProse) {
+        // A conflict in a doc with no area could be filed under none.
+        const tags = rawTagsByPath.get(doc.path) ?? []
+        if (tags.length === 0) {
+          fact('record', `${doc.path}: not recorded, it has no area tag`)
+          continue
+        }
+        if ((areaIdsByDoc.get(doc.path) ?? []).length === 0) {
+          fact('record', `${doc.path}: not recorded, it is in no area`)
+          continue
+        }
+        const items = recordFactsItems(doc, tags)
+        if (items.length === 0) fact('record', `${doc.path}: nothing to record, it has no units`)
+        else windowsByDoc.set(doc.path, items)
       }
-      const briefed = new Set(item.docs.map((d) => d.path))
-      const reviewedBy = result.outcome.fromCache === true ? ', from cache' : ''
+    }
+    const outcomes = new Map<string, { ledger: FactLedger | null; fromCache: boolean }>()
+    const summary = await runCachedSessionPool<RecordFactsItem, FactLedger>({
+      repoRoot,
+      kind: RECORD_FACTS_SESSION_KIND,
+      cacheName: RECORD_FACTS_CACHE_NAME,
+      items: [...windowsByDoc.values()].flat(),
+      workItem: recordFactsWorkItem,
+      cacheKey: (item) => recordFactsCacheKey(item, instructionParts),
+      schema: FactLedgerSchema,
+      session: recordFactsSessionDef,
+      briefing: (item) => recordFactsBriefing(item, instructions),
+      driver: opts.driver,
+      persistence: opts.persistence,
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.onRecordProgress ? { onProgress: opts.onRecordProgress } : {}),
+      ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
+      ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
+      ...(opts.now ? { now: opts.now } : {}),
+      fold: (item, result) => {
+        // Fail-open per window: a failed session records nothing of it.
+        outcomes.set(
+          recordFactsWorkItem(item),
+          result.outcome.status === 'completed'
+            ? { ledger: result.outcome.output, fromCache: result.outcome.fromCache === true }
+            : { ledger: null, fromCache: false },
+        )
+      },
+    })
+    const ledgers = [...windowsByDoc].map(([ref, items]) => {
+      const windows = items.map((item) => ({ item, outcome: outcomes.get(recordFactsWorkItem(item)) }))
+      const ledger = docFactLedger({
+        doc: ref,
+        units: items[0]!.units,
+        areas: items[0]!.areas,
+        windows: windows.map(({ item, outcome }) => ({ window: item.window, ledger: outcome?.ledger ?? null })),
+        canonicalAreas: (raw) => factAreaIds(factAreas, ref, raw),
+      })
+      const fromCache = windows.every(({ outcome }) => outcome?.fromCache === true)
+      fact('record', `${ref}: ${describeDocLedger(ledger, items.length)}${fromCache ? ', from cache' : ''}`)
+      if (ledger.failed.length > 0) for (const areaId of areaIdsByDoc.get(ref) ?? []) addNotReached(areaId, [ref])
+      return ledger
+    })
+    return { summary, ledgers }
+  }
+
+  // What comparing facts came to, for the corpus: per area, the facts its area
+  // batches compared and the groups they formed; for the whole corpus, the
+  // subjects and what the batches left unplaced.
+  const comparisonByArea = new Map<string, { facts: Set<RecordedFact>; groups: number }>()
+  const splitAreas = new Map<string, { parts: number; cutPairs: number }>()
+  let corpusComparison: CorpusComparison | undefined
+
+  /** File one conflict a comparison found: under the area its two docs' areas give, spanning the areas both share. */
+  const fileFinding = (flagged: OverlapFinding): void => {
+    const [a, b] = flagged.docs
+    const pair = a === b ? `${a}, inside the doc` : `${a} vs ${b}`
+    const area = assignDocPairArea(a, b, areaIdsByDoc)
+    if (area === null) {
+      fact('overlap', `${pair}: no area to file the conflict under`)
+      return
+    }
+    fact('overlap', `${pair}: ${flagged.note}`)
+    overlapEntries.push({
+      area,
+      overlap: {
+        docs: [a, b],
+        note: flagged.note,
+        sections: verifiedSections(a, b, flagged),
+        areas: spannedAreas(a, b, area),
+        review: flagged.review,
+      },
+    })
+  }
+
+  /**
+   * The facts path's second half. The facts' subject names are settled (names
+   * equal but for case, spacing and markup are one before any session runs;
+   * the rest are settled in parts), the facts are planned into area batches
+   * and the subject batches their subject families need, and each batch is
+   * compared by one session; every
+   * conflict that stands is filed as a finding. A failed settling session
+   * merges nothing; a failed comparison lands its facts' docs in the
+   * notReached of the areas it was comparing.
+   */
+  async function compareFactLedgers(ledgers: readonly DocFactLedger[]): Promise<KindRun[]> {
+    const facts = ledgers.flatMap((ledger) => ledger.facts)
+    const names = collectSubjectNames(facts)
+    const parts = planSubjectParts(names)
+    if (parts.length === 0 && names.length > 0) {
+      fact('subjects', `${names.length} subject name${names.length === 1 ? '' : 's'}, nothing to settle`)
+    }
+    const merges = new Map<string, string>()
+    const settleSummary = await runCachedSessionPool<SubjectPart, SubjectSettlement>({
+      repoRoot,
+      kind: SETTLE_SUBJECTS_SESSION_KIND,
+      cacheName: SETTLE_SUBJECTS_CACHE_NAME,
+      items: parts,
+      workItem: settleSubjectsWorkItem,
+      cacheKey: (part) => settleSubjectsCacheKey(part, instructionParts),
+      schema: SubjectSettlementSchema,
+      session: settleSubjectsSessionDef,
+      briefing: (part) => settleSubjectsBriefing(part, instructions),
+      driver: opts.driver,
+      persistence: opts.persistence,
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.onSubjectsProgress ? { onProgress: opts.onSubjectsProgress } : {}),
+      ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
+      ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
+      ...(opts.now ? { now: opts.now } : {}),
+      fold: (part, result) => {
+        const label = part.parts > 1 ? `subject names, part ${part.index} of ${part.parts}` : 'subject names'
+        if (result.outcome.status === 'failed') {
+          fact('subjects', `${label}: the session failed, its ${part.names.length} names stay as written`)
+          return
+        }
+        const merged = subjectMerges(part, result.outcome.output)
+        for (const [key, subject] of merged) merges.set(key, subject)
+        const into = new Set(merged.values()).size
+        const by = result.outcome.fromCache === true ? ', from cache' : ''
+        fact('subjects', `${label}: ${part.names.length} names, ${merged.size} of them merged into ${into} subject${into === 1 ? '' : 's'}${by}`)
+      },
+    })
+    assertKindHealthy(settleSummary)
+    const subjectOf = settledSubjects(facts, names, merges)
+    const settledCount = new Set([...subjectOf.values()].map(subjectKey)).size
+    if (facts.length > 0) {
       fact(
-        'overlap',
-        `${overlapWorkItem(item.areaId, item.cluster)}: ${item.pairs.length} candidate pair${item.pairs.length === 1 ? '' : 's'} compared, ${result.outcome.output.overlaps.length} disagreement${result.outcome.output.overlaps.length === 1 ? '' : 's'}${reviewedBy}`,
+        'subjects',
+        `${facts.length} fact${facts.length === 1 ? '' : 's'}: ${names.length} subject name${names.length === 1 ? '' : 's'}, ${settledCount} settled subject${settledCount === 1 ? '' : 's'}`,
       )
-      for (const flagged of result.outcome.output.overlaps) {
-        // The fold's own validation — never trust the transcript: a pointer to
-        // a doc the session was not briefed on is dropped; every kept pointer
-        // is re-anchored deterministically (quote-first) against the doc text.
-        const [a, b] = flagged.docs
-        if (a === b || !briefed.has(a) || !briefed.has(b)) continue
-        const sections = flagged.sections.filter((s) => s.doc === a || s.doc === b)
-        const verified = verifyOverlapSections({ docs: [a, b], note: flagged.note, sections, bodyOf })
-        fact('overlap', `${a} vs ${b}: ${flagged.note}`)
-        verified.forEach((ptr, i) => {
-          const claimed = sections[i]
-          if (claimed && claimed.heading !== ptr.heading) {
-            fact(
-              'verify',
-              `${ptr.doc}: pointer re-anchored from ${claimed.heading ?? 'the lead'} to ${ptr.heading ?? 'the lead'}`,
-            )
+    }
+
+    const plan = planCompareBatches(facts, (f) => subjectOf.get(f) ?? f.subject)
+    for (const [area, split] of plan.splitAreas) {
+      splitAreas.set(area, split)
+      const count = facts.filter((f) => f.areas.includes(area)).length
+      fact(
+        'compare',
+        `${area}: ${count} facts, over the batch bound of ${COMPARE_BATCH_FACTS}, split into ${split.parts} parts, ${split.cutPairs} linked pair${split.cutPairs === 1 ? '' : 's'} cut`,
+      )
+    }
+    if (plan.subjectFamilies > 0) {
+      fact(
+        'compare',
+        `${plan.subjectFamilies} subject famil${plan.subjectFamilies === 1 ? 'y' : 'ies'} formed from settled subjects whose names share a rare word`,
+      )
+    }
+    const subjectBatches = plan.batches.filter((b) => b.kind === 'subject').length
+    if (subjectBatches > 0) {
+      fact(
+        'compare',
+        `${plan.subjectBatchFamilies} famil${plan.subjectBatchFamilies === 1 ? 'y' : 'ies'} of subjects spanning area batches, ${plan.subjectBatchFacts} facts, compared again in ${subjectBatches} subject batch${subjectBatches === 1 ? '' : 'es'}`,
+      )
+    }
+    if (opts.disableOverlapDetection !== true) {
+      for (const area of grouped.areas) comparisonByArea.set(area.id, { facts: new Set(), groups: 0 })
+    }
+
+    const unplaced = new Set<RecordedFact>()
+    const items: CompareItem[] = plan.batches.map((batch) => ({
+      batch,
+      docs: new Map(
+        [...new Set(batch.facts.map((bf) => bf.fact.doc))].flatMap((ref) => {
+          const doc = universe.byPath.get(ref)
+          return doc ? [[ref, doc] as const] : []
+        }),
+      ),
+    }))
+    const compareSummary = await runCachedSessionPool<CompareItem, FactComparison>({
+      repoRoot,
+      kind: COMPARE_FACTS_SESSION_KIND,
+      cacheName: COMPARE_FACTS_CACHE_NAME,
+      items,
+      workItem: (item) => compareFactsWorkItem(item.batch),
+      cacheKey: (item) => compareFactsCacheKey(item, instructionParts),
+      schema: FactComparisonSchema,
+      session: compareFactsSessionDef,
+      briefing: (item) => compareFactsBriefing(item, instructions, opts.priorOverlaps ?? []),
+      driver: opts.driver,
+      persistence: opts.persistence,
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.onCompareProgress ? { onProgress: opts.onCompareProgress } : {}),
+      ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
+      ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
+      ...(opts.now ? { now: opts.now } : {}),
+      fold: ({ batch }, result) => {
+        const label = describeBatch(batch)
+        // The areas this batch compared for: its own on an area batch, every
+        // area of its facts on a subject batch.
+        const comparedFor = (fact: RecordedFact): string[] =>
+          batch.kind === 'area' ? fact.areas.filter((a) => batch.areas.includes(a)) : fact.areas
+        if (result.outcome.status === 'failed') {
+          const docs = new Set(batch.facts.map((bf) => bf.fact.doc))
+          fact('compare', `${label}: session failed, its ${batch.facts.length} facts from ${docs.size} docs left uncompared`)
+          for (const { fact: f } of batch.facts) for (const area of comparedFor(f)) addNotReached(area, [f.doc])
+          return
+        }
+        // Never trust the transcript: the gate runs again here, and only what
+        // it lets stand is folded.
+        const check = checkGroups(result.outcome.output, batch)
+        if (batch.kind === 'area') {
+          for (const { fact: f } of batch.facts) for (const area of comparedFor(f)) comparisonByArea.get(area)?.facts.add(f)
+          for (const group of check.groups) {
+            for (const area of new Set(group.facts.flatMap((bf) => comparedFor(bf.fact)))) {
+              const entry = comparisonByArea.get(area)
+              if (entry) entry.groups += 1
+            }
           }
-        })
-        overlapEntries.push({
-          area: item.areaId,
-          overlap: {
-            docs: [a, b],
-            note: flagged.note,
-            sections: verified,
-            areas: spannedAreas(a, b, item.areaId),
-            review: flagged.review,
-          },
-        })
+        }
+        const byId = new Map(batch.facts.map((bf) => [bf.id, bf.fact]))
+        for (const id of check.unplaced) {
+          const f = byId.get(id)
+          if (f) unplaced.add(f)
+        }
+        const by = result.outcome.fromCache === true ? ', from cache' : ''
+        const left = check.unplaced.length > 0 ? `, ${check.unplaced.length} left unplaced` : ''
+        fact(
+          'compare',
+          `${label}: ${batch.facts.length} facts, ${check.groups.length} group${check.groups.length === 1 ? '' : 's'}, ${check.findings.length} conflict${check.findings.length === 1 ? '' : 's'}${left}${by}`,
+        )
+        for (const finding of check.findings) fileFinding(finding)
+      },
+    })
+    if (opts.disableOverlapDetection !== true) {
+      corpusComparison = {
+        subjectNames: names.length,
+        settledSubjects: settledCount,
+        subjectFamilies: plan.subjectFamilies,
+        subjectBatchFamilies: plan.subjectBatchFamilies,
+        subjectBatchFacts: plan.subjectBatchFacts,
+        unplacedFacts: unplaced.size,
       }
-      addNotReached(item.areaId, result.outcome.output.notReached.filter((ref) => briefed.has(ref)))
-      // Fresh and cached alike: the run stamped `sectionsOpened` and
-      // `uncheckedPairs` into the value before it entered the cache
-      // (finalizeOutput above). Absent only on a legacy entry cached before
-      // the stamps existed — no signal, until that cluster re-runs.
-      if (result.outcome.output.sectionsOpened !== undefined) {
-        addSectionsOpened(item.areaId, result.outcome.output.sectionsOpened)
-      }
-      addUnchecked(item.areaId, result.outcome.output.uncheckedPairs ?? [])
-    },
-  })
-  assertKindHealthy(overlapSummary)
+    }
+    return [settleSummary, compareSummary]
+  }
+
+  let factLedgers: DocFactLedger[] | undefined
+  const overlapSummaries: KindRun[] = []
+  switch (conflictMethod) {
+    case 'facts': {
+      const recorded = await recordFacts()
+      assertKindHealthy(recorded.summary)
+      factLedgers = recorded.ledgers
+      overlapSummaries.push(recorded.summary, ...(await compareFactLedgers(recorded.ledgers)))
+      break
+    }
+    case 'pairing':
+      overlapSummaries.push(await reviewCollisionClusters())
+      break
+  }
+  for (const summary of overlapSummaries) assertKindHealthy(summary)
 
   // Cross-area dedup (det, unchanged rule from @truecourse/shared): the same
   // disagreement on a doc pair sharing several areas collapses to one record
@@ -1275,12 +1794,19 @@ export async function runSpecScanSessions(
     const notReached = notReachedByArea.get(a.id)
     const sectionsOpened = sectionsOpenedByArea.get(a.id)
     const uncheckedPairs = uncheckedPairsByArea.get(a.id)
+    const compared = comparisonByArea.get(a.id)
+    const comparison: AreaComparison | undefined = compared && {
+      facts: compared.facts.size,
+      groups: compared.groups,
+      ...splitAreas.get(a.id),
+    }
     return {
       ...a,
       overlaps: overlapsByArea.get(a.id) ?? [],
       ...(notReached && notReached.size > 0 ? { notReached: [...notReached].sort() } : {}),
       ...(sectionsOpened !== undefined ? { sectionsOpened } : {}),
       ...(uncheckedPairs && uncheckedPairs.length > 0 ? { uncheckedPairs } : {}),
+      ...(comparison ? { comparison } : {}),
     }
   })
 
@@ -1292,12 +1818,21 @@ export async function runSpecScanSessions(
     lastTouched: d.lastTouched,
     areaTags: [],
   }))
+  // A recorded doc carries its ledger's counts; the ledger itself stays in the cache.
+  const ledgerCounts = new Map((factLedgers ?? []).map((ledger) => [ledger.doc, docLedgerCounts(ledger)]))
   const corpus: CuratedCorpus = {
     version: 3,
     generatedAt: new Date().toISOString(),
-    docs: [...grouped.docs, ...structuralCorpusDocs],
+    docs: [
+      ...grouped.docs.map((doc) => {
+        const ledger = ledgerCounts.get(doc.ref)
+        return ledger ? { ...doc, ledger } : doc
+      }),
+      ...structuralCorpusDocs,
+    ],
     areas,
     skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason, category: s.category })),
+    ...(corpusComparison ? { comparison: corpusComparison } : {}),
   }
   let effectiveDecisions = decisions
   let autoResolvedConflicts: CurateStats['autoResolvedConflicts'] = []
@@ -1310,6 +1845,7 @@ export async function runSpecScanSessions(
       areas: corpus.areas,
       skippedDocs: corpus.skippedDocs,
       generatedAt: corpus.generatedAt,
+      ...(corpus.comparison ? { comparison: corpus.comparison } : {}),
     })
     fact('verify', 'corpus.json written')
     effectiveDecisions = pruneOrphanedConflictResolutions(repoRoot, corpus, decisions)
@@ -1319,11 +1855,16 @@ export async function runSpecScanSessions(
     effectiveDecisions = auto.decisions
     autoResolvedConflicts = auto.applied
     for (const applied of auto.applied) {
+      const pair = applied.a === applied.b ? `${applied.a}, inside the doc` : `${applied.a} vs ${applied.b}`
+      const winner =
+        applied.a === applied.b
+          ? `its ${applied.verdict === 'a' ? 'first' : 'second'} passage`
+          : applied.verdict === 'a' ? applied.a : applied.b
       fact(
         'verify',
         applied.verdict === 'dismissed'
-          ? `${applied.a} vs ${applied.b}: auto-dismissed in ${applied.area}`
-          : `${applied.a} vs ${applied.b}: auto-resolved in favour of ${applied.verdict === 'a' ? applied.a : applied.b}`,
+          ? `${pair}: auto-dismissed in ${applied.area}`
+          : `${pair}: auto-resolved in favour of ${winner}`,
       )
     }
   }
@@ -1332,8 +1873,9 @@ export async function runSpecScanSessions(
   const summaries = [
     ...(orchestrateSummary ? [orchestrateSummary] : []),
     curateSummary,
+    ...(reviewSummary ? [reviewSummary] : []),
     ...(settleSummary ? [settleSummary] : []),
-    overlapSummary,
+    ...overlapSummaries,
   ]
   const llmFailures = summaries
     .map((s) => kindTally(s))
@@ -1366,6 +1908,7 @@ export async function runSpecScanSessions(
     sessions: summaries.map(({ kind, ran, fromCache, failed, spent }) => ({ kind, ran, fromCache, failed, spent })),
     pendingQuestions,
     scanFindings,
+    ...(factLedgers ? { factLedgers } : {}),
   }
 }
 

@@ -22,11 +22,13 @@ import {
   applySubjectAttribution,
   discoverDocs,
   prefilterDocs,
+  readCorpus,
   readCorpusDecisions,
   readRepoIdentityInput,
   resolveRepoIdentity,
   groupByArea,
   type AreaTag,
+  type CuratedCorpus,
   type DocAreaTags,
   type DocCandidate,
 } from '@truecourse/spec-consolidator';
@@ -81,7 +83,64 @@ import {
   scopeCoverage,
 } from '../spec-scan/orchestrate.js';
 import { buildScanUniverse, instructionsFingerprint } from '../spec-scan/tools.js';
-import type { ScanStep } from '../spec-scan/run.js';
+import { corpusFingerprint } from '../spec-scan/corpus-dir.js';
+import {
+  CORPUS_REVIEW_BUDGET,
+  CORPUS_REVIEW_CACHE_NAME,
+  CORPUS_REVIEW_SESSION_KIND,
+  CORPUS_REVIEW_SYSTEM_PROMPT,
+  CorpusReviewOutcomeSchema,
+  applyCorpusReview,
+  corpusReviewBriefing,
+  corpusReviewCacheKey,
+  planCorpusReviewShards,
+  type CorpusReviewOutcome,
+} from '../spec-scan/corpus-review.js';
+import {
+  FactLedgerSchema,
+  RECORD_FACTS_BUDGET,
+  RECORD_FACTS_CACHE_NAME,
+  RECORD_FACTS_SESSION_KIND,
+  RECORD_FACTS_SYSTEM_PROMPT,
+  docFactLedger,
+  factAreaIds,
+  recordFactsBriefing,
+  recordFactsCacheKey,
+  recordFactsItems,
+  recordWindows,
+  RECORD_WINDOW_CHARS,
+  type FactAreaContext,
+  type FactLedger,
+  type RecordFactsItem,
+} from '../spec-scan/record-facts.js';
+import {
+  SETTLE_SUBJECTS_BUDGET,
+  SETTLE_SUBJECTS_CACHE_NAME,
+  SETTLE_SUBJECTS_NAMES,
+  SETTLE_SUBJECTS_SESSION_KIND,
+  SETTLE_SUBJECTS_SYSTEM_PROMPT,
+  SubjectSettlementSchema,
+  collectSubjectNames,
+  planSubjectParts,
+  settleSubjectsBriefing,
+  settleSubjectsCacheKey,
+  settledSubjects,
+  subjectMerges,
+  type SubjectPart,
+} from '../spec-scan/settle-subjects.js';
+import {
+  COMPARE_BATCH_FACTS,
+  COMPARE_FACTS_BUDGET,
+  COMPARE_FACTS_CACHE_NAME,
+  COMPARE_FACTS_SESSION_KIND,
+  COMPARE_FACTS_SYSTEM_PROMPT,
+  FactComparisonSchema,
+  compareFactsBriefing,
+  compareFactsCacheKey,
+  planCompareBatches,
+  type CompareItem,
+} from '../spec-scan/compare-facts.js';
+import { resolveConflictMethod, type ConflictMethod, type ScanStep } from '../spec-scan/run.js';
 import {
   planGuardWork,
   bindClaimPrerequisites,
@@ -251,6 +310,10 @@ const STAGE_LABELS: Record<string, string> = {
   [CURATE_DOC_SESSION_KIND]: 'Curating docs',
   [SETTLE_AREAS_SESSION_KIND]: 'Settling areas',
   [OVERLAP_SESSION_KIND]: 'Flagging overlaps',
+  [CORPUS_REVIEW_SESSION_KIND]: 'Reviewing the corpus',
+  [RECORD_FACTS_SESSION_KIND]: 'Recording facts',
+  [SETTLE_SUBJECTS_SESSION_KIND]: 'Settling subjects',
+  [COMPARE_FACTS_SESSION_KIND]: 'Comparing facts',
   // guard setup (session kinds)
   [RECIPE_REPAIR_SESSION_KIND]: 'Repairing the recipe',
   [DEPENDENCY_CATALOG_SESSION_KIND]: 'Classifying dependencies',
@@ -280,6 +343,10 @@ const EXPECTED_TURNS: Record<string, number> = {
   [CURATE_DOC_SESSION_KIND]: 2,
   [SETTLE_AREAS_SESSION_KIND]: 4,
   [OVERLAP_SESSION_KIND]: 8,
+  [CORPUS_REVIEW_SESSION_KIND]: 15,
+  [RECORD_FACTS_SESSION_KIND]: 4, // a draft, a check, a correction, the outcome
+  [SETTLE_SUBJECTS_SESSION_KIND]: 3, // a draft checked, a correction, the outcome
+  [COMPARE_FACTS_SESSION_KIND]: 8, // a draft, a few batched reads, a check, a correction, the outcome
   // guard setup — provisional, to re-ground on transcript data.
   [RECIPE_REPAIR_SESSION_KIND]: 8,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 6,
@@ -307,6 +374,10 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [CURATE_DOC_SESSION_KIND]: 120,
   [SETTLE_AREAS_SESSION_KIND]: 250,
   [OVERLAP_SESSION_KIND]: 400,
+  [CORPUS_REVIEW_SESSION_KIND]: 300,
+  [RECORD_FACTS_SESSION_KIND]: 2_500, // the draft checked and the outcome each carry the whole ledger
+  [SETTLE_SUBJECTS_SESSION_KIND]: 5_000, // the draft checked and the outcome each name every id of the list
+  [COMPARE_FACTS_SESSION_KIND]: 1_600, // every id once in each draft and the outcome, a review per conflict
   // guard setup — provisional.
   [RECIPE_REPAIR_SESSION_KIND]: 300,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 500,
@@ -324,6 +395,14 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
 };
 /** Cold-cache fallback for an overlap briefing's size (outlines, no bodies). */
 const OVERLAP_BRIEFING_FALLBACK_CHARS = 8_000;
+/**
+ * Facts a unit states on average, for the windows not yet recorded: measured
+ * on a 72-doc corpus, 3,390 facts over 5,121 units.
+ */
+const FACTS_PER_UNIT = 0.66;
+/** Briefing characters per subject name and per fact, when no list or batch is known. */
+const SUBJECT_NAME_LINE_CHARS = 110;
+const FACT_LINE_CHARS = 180;
 
 /** One session kind's work, rolled into the `StageCallEstimate` shape the
  *  dashboard already renders. `calls` = expected TURNS (items × expected
@@ -401,9 +480,24 @@ const mean = (ns: number[]): number =>
 export async function estimateScanTokens(
   repoRoot: string,
   prices?: PriceTable | null,
-  opts: { identity?: RepoIdentity | null; sessionModel?: string; only?: ScanStep } = {},
+  opts: {
+    identity?: RepoIdentity | null;
+    sessionModel?: string;
+    only?: ScanStep;
+    /** The run's computer path: a corpus review after curation. */
+    computer?: boolean;
+    /** How the run finds conflicts, resolved as the run resolves it. */
+    conflictMethod?: ConflictMethod;
+    /**
+     * The corpus the last scan wrote, as the run is given it: each doc's prior
+     * tags decide which areas its facts are filed under. Absent, the tree's
+     * `corpus.json` is read, as the run reads it.
+     */
+    previousCorpus?: CuratedCorpus | null;
+  } = {},
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.sessionModel);
+  const conflictMethod = resolveConflictMethod(opts);
 
   // Load the user's decisions so the estimate probes the SAME doc set the run
   // classifies (manual includes/excludes, scope verdicts, instructions — all of
@@ -471,6 +565,51 @@ export async function estimateScanTokens(
     });
     if (attributed.include || manualSet.has(path)) keptTags.set(path, v.areas);
   }
+
+  // ---- corpus review (computer path): probe per shard -----------------------
+  // Exact when every verdict is cached: the kept set, and so every shard key,
+  // is known, and cached drops leave the kept set below. A changed doc moves
+  // the kept set, which re-keys every shard: a range around the planned count.
+  const review = { items: 0, min: 0, max: 0, briefingChars: 0, settled: true };
+  if (opts.computer && (keptTags.size > 0 || missCount > 0)) {
+    const kept = curateItems.filter((d) => keptTags.has(d.path));
+    const areasByDoc = new Map(
+      kept.map((d) => [d.path, canonicalDocTags(keptTags.get(d.path) ?? []).map((t) => `${t.product}/${t.concern}`)]),
+    );
+    const shards = planCorpusReviewShards(kept, areasByDoc);
+    const briefingOf = (shard: (typeof shards)[number]): number =>
+      corpusReviewBriefing({ shard, keptCount: kept.length, root: repoRoot, areasByDoc, instructions }).length;
+    if (missCount === 0) {
+      const keptSet = corpusFingerprint(kept);
+      const reviewed: CorpusReviewOutcome[] = [];
+      const missing: typeof shards = [];
+      for (const shard of shards) {
+        const cached = await probeSessionCache(
+          repoRoot,
+          CORPUS_REVIEW_CACHE_NAME,
+          corpusReviewCacheKey(shard, keptSet, instructionParts),
+          CorpusReviewOutcomeSchema,
+        );
+        if (cached) reviewed.push(cached);
+        else missing.push(shard);
+      }
+      Object.assign(review, {
+        items: missing.length,
+        min: missing.length,
+        max: missing.length,
+        briefingChars: mean(missing.map(briefingOf)),
+        settled: missing.length === 0,
+      });
+      if (review.settled) {
+        const applied = applyCorpusReview(reviewed, new Set(kept.map((d) => d.path)), manualSet);
+        for (const drop of applied.drops) keptTags.delete(drop.ref);
+      }
+    } else {
+      const items = Math.max(1, shards.length);
+      Object.assign(review, { items, min: 0, max: items + 1, briefingChars: mean(shards.map(briefingOf)), settled: false });
+    }
+  }
+
   const canonicalByPath = new Map<string, AreaTag[]>(
     [...keptTags].map(([path, tags]) => [path, canonicalDocTags(tags)]),
   );
@@ -554,6 +693,192 @@ export async function estimateScanTokens(
   const overlapMaxItems = overlapIdle ? 0 : overlapItems.length + changedClusters;
   const clustersTotal = overlapItems.length + changedClusters;
 
+  // ---- the facts path: record per window, then subjects and batches ---------
+  // A window's key folds its own doc and that doc's raw tags alone, so the
+  // probed record misses are exact for every doc whose verdict is cached; a
+  // changed doc's windows are planned off its body, the share curation keeps
+  // expected. Settling subjects and comparing batches read every recorded
+  // fact: with every window cached and the upstream settled they are planned
+  // and probed exactly as the run plans them, and otherwise they cannot be
+  // planned before the recording runs, so they are sized as a range from the
+  // facts known and those the unrecorded units are expected to state.
+  const factStages = async (): Promise<StageCallEstimate[]> => {
+    const known: RecordFactsItem[] = keptDocs.flatMap((d) => recordFactsItems(d, keptTags.get(d.path) ?? []));
+    const cachedLedgers = new Map<RecordFactsItem, FactLedger>();
+    const missing: RecordFactsItem[] = [];
+    for (const item of known) {
+      const cached = await probeSessionCache(
+        repoRoot,
+        RECORD_FACTS_CACHE_NAME,
+        recordFactsCacheKey(item, instructionParts),
+        FactLedgerSchema,
+      );
+      if (cached) cachedLedgers.set(item, cached);
+      else missing.push(item);
+    }
+    const exact = missCount === 0 && review.settled;
+    const changedWindows = curateMissDocs.map((d) => recordWindows(d));
+    const changedWindowCount = changedWindows.reduce((n, w) => n + w.windows.length, 0);
+    const recordItems = missing.length + Math.round(changedWindowCount * KEEP_RATE);
+    const record = sessionKindStage({
+      kind: RECORD_FACTS_SESSION_KIND,
+      model,
+      items: recordItems,
+      minItems: missing.length,
+      maxItems: missing.length + changedWindowCount,
+      budget: RECORD_FACTS_BUDGET,
+      systemPromptChars: RECORD_FACTS_SYSTEM_PROMPT.length,
+      briefingChars:
+        mean(missing.map((item) => recordFactsBriefing(item, instructions).length)) ||
+        (recordItems > 0 ? Math.round(RECORD_WINDOW_CHARS / 2) : 0),
+      bound: exact
+        ? `${missing.length} of ${known.length} doc window${known.length === 1 ? '' : 's'} changed`
+        : `~${recordItems} doc windows: the changed docs' windows and those of the docs curation keeps`,
+    });
+
+    // The facts the cached windows hold, filed under areas as the run files them.
+    const previous = opts.previousCorpus === undefined ? readCorpus(repoRoot) : opts.previousCorpus;
+    const corpusAreaTags = new Map(grouped.docs.map((d) => [d.ref, d.areaTags]));
+    const factAreas: FactAreaContext = {
+      rawTags: keptTags,
+      priorTags: new Map(previous?.docs.map((d) => [d.ref, d.areaTags]) ?? []),
+      reassignments: applied?.reassignments ?? new Map(),
+      vocab: vocabMap,
+      pinned: new Map((decisions.manualAreas ?? []).map((m) => [m.doc, corpusAreaTags.get(m.doc) ?? []])),
+    };
+    const windowsByDoc = new Map<string, RecordFactsItem[]>();
+    for (const item of known) windowsByDoc.set(item.doc.path, [...(windowsByDoc.get(item.doc.path) ?? []), item]);
+    const facts = [...windowsByDoc].flatMap(
+      ([ref, items]) =>
+        docFactLedger({
+          doc: ref,
+          units: items[0]!.units,
+          areas: items[0]!.areas,
+          windows: items.map((item) => ({ window: item.window, ledger: cachedLedgers.get(item) ?? null })),
+          canonicalAreas: (raw) => factAreaIds(factAreas, ref, raw),
+        }).facts,
+    );
+
+    if (exact && overlapExact && missing.length === 0) {
+      const names = collectSubjectNames(facts);
+      const parts = planSubjectParts(names);
+      const merges = new Map<string, string>();
+      const settleMissing: SubjectPart[] = [];
+      for (const part of parts) {
+        const cached = await probeSessionCache(
+          repoRoot,
+          SETTLE_SUBJECTS_CACHE_NAME,
+          settleSubjectsCacheKey(part, instructionParts),
+          SubjectSettlementSchema,
+        );
+        if (cached) for (const [key, subject] of subjectMerges(part, cached)) merges.set(key, subject);
+        else settleMissing.push(part);
+      }
+      const settle = sessionKindStage({
+        kind: SETTLE_SUBJECTS_SESSION_KIND,
+        model,
+        items: settleMissing.length,
+        budget: SETTLE_SUBJECTS_BUDGET,
+        systemPromptChars: SETTLE_SUBJECTS_SYSTEM_PROMPT.length,
+        briefingChars: mean(settleMissing.map((part) => settleSubjectsBriefing(part, instructions).length)),
+        bound: `${settleMissing.length} of ${parts.length} list${parts.length === 1 ? '' : 's'} of subject names changed`,
+      });
+      if (settleMissing.length > 0) {
+        // A settlement still to run decides the subjects, and with them every
+        // batch's order and its subject batches: the area batches as the names
+        // are written stand in for the count.
+        const areaBatches = planCompareBatches(facts, (f) => f.subject).batches.filter((b) => b.kind === 'area').length;
+        return [record, settle, compareRange(areaBatches, 'the subjects settle')];
+      }
+      const subjectOf = settledSubjects(facts, names, merges);
+      const docsByRef = new Map(keptDocs.map((d) => [d.path, d]));
+      const items: CompareItem[] = planCompareBatches(facts, (f) => subjectOf.get(f) ?? f.subject).batches.map((batch) => ({
+        batch,
+        docs: new Map(batch.facts.flatMap((bf) => {
+          const doc = docsByRef.get(bf.fact.doc);
+          return doc ? [[bf.fact.doc, doc] as const] : [];
+        })),
+      }));
+      const compareMissing: CompareItem[] = [];
+      for (const item of items) {
+        const cached = await probeSessionCache(
+          repoRoot,
+          COMPARE_FACTS_CACHE_NAME,
+          compareFactsCacheKey(item, instructionParts),
+          FactComparisonSchema,
+        );
+        if (!cached) compareMissing.push(item);
+      }
+      const compare = sessionKindStage({
+        kind: COMPARE_FACTS_SESSION_KIND,
+        model,
+        items: compareMissing.length,
+        budget: COMPARE_FACTS_BUDGET,
+        systemPromptChars: COMPARE_FACTS_SYSTEM_PROMPT.length,
+        briefingChars: mean(compareMissing.map((item) => compareFactsBriefing(item, instructions).length)),
+        bound: `${compareMissing.length} of ${items.length} batch${items.length === 1 ? '' : 'es'} of facts changed`,
+      });
+      return [record, settle, compare];
+    }
+
+    // Not every window is recorded yet: size what follows from the facts known
+    // and those the unrecorded units are expected to state.
+    const unrecordedUnits =
+      missing.reduce((n, item) => n + item.window.to - item.window.from + 1, 0) +
+      changedWindows.reduce((n, w) => n + w.units.length, 0) * KEEP_RATE;
+    const expectedFacts = facts.length + Math.round(unrecordedUnits * FACTS_PER_UNIT);
+    const slotsPerFact = facts.length > 0 ? facts.reduce((n, f) => n + f.areas.length, 0) / facts.length : 1;
+    const settleParts = expectedFacts > 1 ? Math.ceil(expectedFacts / SETTLE_SUBJECTS_NAMES) : 0;
+    const settle = sessionKindStage({
+      kind: SETTLE_SUBJECTS_SESSION_KIND,
+      model,
+      items: Math.min(1, settleParts),
+      minItems: 0,
+      maxItems: settleParts,
+      budget: SETTLE_SUBJECTS_BUDGET,
+      systemPromptChars: SETTLE_SUBJECTS_SYSTEM_PROMPT.length,
+      briefingChars: Math.min(expectedFacts, SETTLE_SUBJECTS_NAMES) * SUBJECT_NAME_LINE_CHARS,
+      bound: 'the subject names are known once every changed doc is recorded',
+    });
+    const areaBatches = Math.ceil((expectedFacts * slotsPerFact) / COMPARE_BATCH_FACTS);
+    return [record, settle, compareRange(areaBatches, 'the changed docs are recorded and their subjects settle')];
+  };
+
+  /**
+   * The compare stage before its batches can be planned: the area batches
+   * expected, and up to as many subject batches again (a fact sits in at most
+   * one subject batch), none of them known to be cached.
+   */
+  const compareRange = (areaBatches: number, until: string): StageCallEstimate =>
+    sessionKindStage({
+      kind: COMPARE_FACTS_SESSION_KIND,
+      model,
+      items: areaBatches,
+      minItems: 0,
+      maxItems: 2 * areaBatches,
+      budget: COMPARE_FACTS_BUDGET,
+      systemPromptChars: COMPARE_FACTS_SYSTEM_PROMPT.length,
+      briefingChars: COMPARE_BATCH_FACTS * FACT_LINE_CHARS,
+      bound: `~${areaBatches} batch${areaBatches === 1 ? '' : 'es'} of facts: they are planned once ${until}`,
+    });
+
+  const clusterStage = (): StageCallEstimate =>
+    sessionKindStage({
+      kind: OVERLAP_SESSION_KIND,
+      model,
+      items: overlapExpectedItems,
+      minItems: overlapMissItems.length,
+      maxItems: overlapMaxItems,
+      budget: OVERLAP_SESSION_BUDGET,
+      systemPromptChars: OVERLAP_SESSION_SYSTEM_PROMPT.length,
+      briefingChars:
+        mean(overlapMissItems.map((i) => overlapBriefing(i, instructions).length)) ||
+        (overlapExpectedItems > 0 ? OVERLAP_BRIEFING_FALLBACK_CHARS : 0),
+      bound: overlapExact
+        ? `${overlapMissItems.length} of ${Math.max(clustersTotal, overlapMissItems.length)} comparison${clustersTotal === 1 ? '' : 's'} changed`
+        : `~${overlapExpectedItems} of ~${clustersTotal} comparison${clustersTotal === 1 ? '' : 's'} changed (changed docs may reshape clusters)`,
+    });
+
   // ---- roll-up ---------------------------------------------------------------
   const stages: StageCallEstimate[] = [
     sessionKindStage({
@@ -575,6 +900,20 @@ export async function estimateScanTokens(
       briefingChars: mean(curateMissDocs.map((d) => curateDocBriefing(d, identity, instructions).length)),
       bound: 'keys fold the standing instructions — editing one re-scans every doc',
     }),
+    ...(opts.computer
+      ? [
+          sessionKindStage({
+            kind: CORPUS_REVIEW_SESSION_KIND,
+            model,
+            items: review.items,
+            minItems: review.min,
+            maxItems: review.max,
+            budget: CORPUS_REVIEW_BUDGET,
+            systemPromptChars: CORPUS_REVIEW_SYSTEM_PROMPT.length,
+            briefingChars: review.briefingChars,
+          }),
+        ]
+      : []),
     sessionKindStage({
       kind: SETTLE_AREAS_SESSION_KIND,
       model,
@@ -586,33 +925,19 @@ export async function estimateScanTokens(
       briefingChars:
         settleItems > 0 ? settleAreasBriefing(vocab, buildScanUniverse(docs), instructions).length : 0,
     }),
-    sessionKindStage({
-      kind: OVERLAP_SESSION_KIND,
-      model,
-      items: overlapExpectedItems,
-      minItems: overlapMissItems.length,
-      maxItems: overlapMaxItems,
-      budget: OVERLAP_SESSION_BUDGET,
-      systemPromptChars: OVERLAP_SESSION_SYSTEM_PROMPT.length,
-      briefingChars:
-        mean(overlapMissItems.map((i) => overlapBriefing(i, instructions).length)) ||
-        (overlapExpectedItems > 0 ? OVERLAP_BRIEFING_FALLBACK_CHARS : 0),
-      bound: overlapExact
-        ? `${overlapMissItems.length} of ${Math.max(clustersTotal, overlapMissItems.length)} comparison${clustersTotal === 1 ? '' : 's'} changed`
-        : `~${overlapExpectedItems} of ~${clustersTotal} comparison${clustersTotal === 1 ? '' : 's'} changed (changed docs may reshape clusters)`,
-    }),
+    ...(conflictMethod === 'facts' ? await factStages() : [clusterStage()]),
   ];
 
   const changedDocs = missCount;
   // Single-step mode prices only the chosen step — prior steps replay from
   // cache (a miss fails the run loudly, never spends), later ones don't start.
-  const SCAN_STEP_KIND: Record<ScanStep, string> = {
-    orchestrate: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
-    curate: CURATE_DOC_SESSION_KIND,
-    settle: SETTLE_AREAS_SESSION_KIND,
-    overlap: OVERLAP_SESSION_KIND,
+  const SCAN_STEP_KINDS: Record<ScanStep, readonly string[]> = {
+    orchestrate: [SPEC_SCAN_ORCHESTRATE_SESSION_KIND],
+    curate: [CURATE_DOC_SESSION_KIND, CORPUS_REVIEW_SESSION_KIND],
+    settle: [SETTLE_AREAS_SESSION_KIND],
+    overlap: [OVERLAP_SESSION_KIND, RECORD_FACTS_SESSION_KIND, SETTLE_SUBJECTS_SESSION_KIND, COMPARE_FACTS_SESSION_KIND],
   };
-  const included = opts.only ? stages.filter((s) => s.stage === SCAN_STEP_KIND[opts.only!]) : stages;
+  const included = opts.only ? stages.filter((s) => SCAN_STEP_KINDS[opts.only!].includes(s.stage)) : stages;
   return estimateStageTokens(
     withLabels(included),
     changedSubject(curateItems.length, changedDocs, 'doc'),

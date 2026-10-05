@@ -22,7 +22,7 @@
  * verified one and the representative choice is trustworthy.
  */
 
-import { normalizeQuote } from '@truecourse/shared';
+import { normalizeQuote, parseHeadings } from '@truecourse/shared';
 import type { OverlapSection } from './corpus-types.js';
 
 // ---------------------------------------------------------------------------
@@ -57,9 +57,10 @@ const NEGLIGIBLE_RATIO = 0.25;
 /**
  * Generic English function words + a few markdown-noise words, dropped before
  * scoring so only content-bearing tokens are compared. Not tuned to any repo —
- * these carry no topical signal in any document.
+ * these carry no topical signal in any document. `partitionByAffinity` drops
+ * the same words.
  */
-const STOPWORDS = new Set<string>([
+export const STOPWORDS: ReadonlySet<string> = new Set<string>([
   'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'of', 'to', 'in',
   'on', 'at', 'by', 'for', 'with', 'as', 'is', 'are', 'was', 'were', 'be', 'been',
   'being', 'it', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their',
@@ -109,8 +110,8 @@ function pathWords(p: string): string[] {
 
 export interface DocSection {
   /**
-   * The section's own heading text (verbatim), or `null` when it has none — a
-   * true preamble section 0 (content before the first heading). An H1-lead keeps
+   * The section's own heading text as the outline lists it, or `null` when it
+   * has none — a true preamble section 0 (content before the first heading). An H1-lead keeps
    * its H1 text here so a pointer that correctly NAMES the opening heading still
    * resolves to section 0.
    */
@@ -121,18 +122,19 @@ export interface DocSection {
   text: string;
 }
 
-const HEADING_RE = /^ {0,3}#{1,6}\s+(.*)$/;
-
 /**
  * Split a doc into sections, each = a heading line + its body up to the next
- * heading. Section 0 is the doc's LEAD: the content before the first heading when
- * the doc has such a preamble, else the opening heading's own section (the common
- * README shape that starts with an H1). A pointer with a `null` heading targets
- * this section 0; a re-anchor TO section 0 is emitted as `null` — the canonical
- * lead pointer the viewer bands.
+ * heading. The headings are exactly the ones {@link parseHeadings} finds, the
+ * scanner a doc's outline, `read_section` and its units use, so a `#` line
+ * inside a fenced block is never a section and a heading reads as the outline
+ * lists it. Section 0 is the doc's LEAD: the content before the first heading
+ * when the doc has such a preamble, else the opening heading's own section (the
+ * common README shape that starts with an H1). A pointer with a `null` heading
+ * targets this section 0; a re-anchor TO section 0 is emitted as `null` — the
+ * canonical lead pointer the viewer bands.
  *
- * Mirrors the viewer's `splitSections` so the anchor this stage picks is exactly
- * the band the viewer will highlight.
+ * The viewer's `splitSections` splits the same way, so the anchor this stage
+ * picks is exactly the band the viewer will highlight.
  *
  * Exported (with {@link locateQuote}) for the overlap session's in-session
  * anchor validation (`check_findings` in core's `services/spec-scan/`), which
@@ -141,22 +143,24 @@ const HEADING_RE = /^ {0,3}#{1,6}\s+(.*)$/;
  * token scoring) is needed.
  */
 export function splitDocSections(body: string, drop: Set<string>): DocSection[] {
-  interface Raw { heading: string; text: string }
+  interface Raw { heading: string | null; text: string }
+  const lines = body.split(/\r?\n/);
+  const headingAt = new Map(parseHeadings(lines).map((h) => [h.line, h.text]));
   const raws: Raw[] = [];
-  let cur: Raw = { heading: '', text: '' };
-  for (const line of body.split(/\r?\n/)) {
-    const m = HEADING_RE.exec(line);
-    if (m) {
-      if (cur.text.trim() || cur.heading) raws.push(cur);
-      cur = { heading: m[1].trim(), text: `${line}\n` };
+  let cur: Raw = { heading: null, text: '' };
+  lines.forEach((line, i) => {
+    const heading = headingAt.get(i);
+    if (heading !== undefined) {
+      if (cur.text.trim() || cur.heading !== null) raws.push(cur);
+      cur = { heading, text: `${line}\n` };
     } else {
       cur.text += `${line}\n`;
     }
-  }
-  if (cur.text.trim() || cur.heading) raws.push(cur);
+  });
+  if (cur.text.trim() || cur.heading !== null) raws.push(cur);
 
   return raws.map((r) => ({
-    realHeading: r.heading === '' ? null : r.heading,
+    realHeading: r.heading,
     tokens: new Set(tokenize(r.text, drop)),
     text: r.text,
   }));

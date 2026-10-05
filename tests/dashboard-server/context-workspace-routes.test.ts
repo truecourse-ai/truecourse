@@ -376,10 +376,27 @@ describe('the workspace corpus and its decisions', () => {
     expect((await read()).conflictResolutions).toEqual([]);
   });
 
+  it('settles a conflict inside one document by its passage, and the other passage still disputes nothing', async () => {
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
+    const doc = ref(SRC_A, 'one.md');
+    const verdict = { docA: doc, anchorA: 'Cancellation', docB: doc, anchorB: 'Refunds', verdict: 'a' };
+    const add = await request(app).post('/api/context/conflict-resolution').send(verdict).expect(200);
+    expect(add.body.conflictResolutions).toEqual([expect.objectContaining(verdict)]);
+    // The same dispute named the other way round is the same verdict, replaced.
+    const flipped = { docA: doc, anchorA: 'Refunds', docB: doc, anchorB: 'Cancellation', verdict: 'b' };
+    const again = await request(app).post('/api/context/conflict-resolution').send(flipped).expect(200);
+    expect(again.body.conflictResolutions).toEqual([expect.objectContaining(flipped)]);
+  });
+
   it('refuses a malformed conflict verdict', async () => {
     await request(app)
       .post('/api/context/conflict-resolution')
       .send({ docA: 'a', docB: 'a', verdict: 'b' })
+      .expect(400);
+    // One passage named twice is no dispute.
+    await request(app)
+      .post('/api/context/conflict-resolution')
+      .send({ docA: 'a', anchorA: 'X', quoteA: 'q', docB: 'a', anchorB: 'X', quoteB: 'q', verdict: 'b' })
       .expect(400);
     await request(app)
       .post('/api/context/conflict-resolution')

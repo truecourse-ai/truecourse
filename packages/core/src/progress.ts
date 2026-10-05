@@ -111,10 +111,15 @@ export class StepTracker {
    * Insert a step at runtime if it isn't already there. Used for phases we can't
    * declare up front — e.g. the pre-flight cost estimate only runs when the
    * caller gates on it. `position: 'first'` puts it at the front (a phase that precedes
-   * everything declared); otherwise it lands just before `persist`.
-   * No-op if the key already exists.
+   * everything declared), `{ before }` just before the named step, and otherwise it
+   * lands just before `persist`; a step it should precede that is not there puts it
+   * last. No-op if the key already exists.
    */
-  ensureStep(key: string, label: string, position: 'first' | 'before-persist' = 'before-persist'): void {
+  ensureStep(
+    key: string,
+    label: string,
+    position: 'first' | 'before-persist' | { before: string } = 'before-persist',
+  ): void {
     if (this.steps.some((s) => s.key === key)) return;
     const step: AnalysisStep = { key, label, status: 'pending' };
     if (position === 'first') {
@@ -122,9 +127,9 @@ export class StepTracker {
       this.emit();
       return;
     }
-    const persistIdx = this.steps.findIndex((s) => s.key === 'persist');
-    if (persistIdx === -1) this.steps.push(step);
-    else this.steps.splice(persistIdx, 0, step);
+    const before = this.steps.findIndex((s) => s.key === (position === 'before-persist' ? 'persist' : position.before));
+    if (before === -1) this.steps.push(step);
+    else this.steps.splice(before, 0, step);
     this.emit();
   }
 

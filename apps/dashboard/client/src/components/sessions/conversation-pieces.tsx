@@ -16,6 +16,7 @@ import type { DisplayDispute, KnownDisplayBlock } from '@truecourse/agent-loop';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import * as api from '@/lib/api';
 import type { SpecConflictResolution } from '@/lib/api';
+import { passageNames } from '@/lib/passage-names';
 
 /**
  * The dispute identity of a finding: the SAME key `conflictResolutions`
@@ -44,7 +45,27 @@ const FindingResolveContext = createContext<FindingResolveCtx | null>(null);
 /** One derived Coverage conflict record: the same shape both pages build. */
 type ConflictRecord = ReturnType<typeof buildCorpusConflicts>[number];
 
+/**
+ * The side the finding's recommendation picks. A card written before the side
+ * was recorded names only the doc, which is enough between two docs; inside
+ * one doc only the side tells the passages apart.
+ */
+function recommendedSide(finding: ChatFinding): 'a' | 'b' | undefined {
+  const rec = finding.recommendation;
+  if (rec?.side) return rec.side;
+  const dispute = finding.dispute;
+  if (!rec?.doc || !dispute || dispute.docA === dispute.docB) return undefined;
+  return rec.doc === dispute.docA ? 'a' : rec.doc === dispute.docB ? 'b' : undefined;
+}
+
 export function FindingCard({ finding }: { finding: ChatFinding }) {
+  const side = recommendedSide(finding);
+  const dispute = finding.dispute;
+  // Inside one doc a quote is the recommended one by its words, not its doc.
+  const recommendedQuote = (q: ChatFinding['quotes'][number]): boolean =>
+    dispute && dispute.docA === dispute.docB
+      ? side !== undefined && q.quote === (side === 'a' ? dispute.quoteA : dispute.quoteB)
+      : finding.recommendation?.doc === q.doc;
   return (
     <div className="max-w-full overflow-hidden rounded-xl rounded-tl border border-border">
       <div className="px-3 py-2">
@@ -60,7 +81,7 @@ export function FindingCard({ finding }: { finding: ChatFinding }) {
               <HoverPopover content={q.heading ?? q.doc} width="narrow">
                 <div
                   className={`truncate font-mono text-[10px] ${
-                    finding.recommendation?.doc === q.doc ? 'text-emerald-600 dark:text-emerald-500' : 'text-muted-foreground'
+                    recommendedQuote(q) ? 'text-emerald-600 dark:text-emerald-500' : 'text-muted-foreground'
                   }`}
                 >
                   {shortDocRef(q.doc)}
@@ -92,18 +113,7 @@ export function FindingCard({ finding }: { finding: ChatFinding }) {
           )}
         </div>
       )}
-      {finding.dispute && (
-        <FindingResolveFooter
-          dispute={finding.dispute}
-          recommended={
-            finding.recommendation?.doc === finding.dispute.docA
-              ? 'a'
-              : finding.recommendation?.doc === finding.dispute.docB
-                ? 'b'
-                : undefined
-          }
-        />
-      )}
+      {dispute && <FindingResolveFooter dispute={dispute} recommended={side} />}
     </div>
   );
 }
@@ -128,7 +138,7 @@ function FindingResolveFooter({
   const [busy, setBusy] = useState<'a' | 'b' | 'dismissed' | 'undo' | null>(null);
   const [error, setError] = useState<string | null>(null);
   if (!ctx) return null;
-  const [nameA, nameB] = distinctDocRefs(dispute.docA, dispute.docB);
+  const [nameA, nameB] = disputeSideNames(dispute);
   // Same chrome on every verdict button; the recommended side is marked by a
   // check inside the button, matching its quote header's green.
   const recommendedMark = (
@@ -178,7 +188,7 @@ function FindingResolveFooter({
               <>
                 Resolved:{' '}
                 <span className="text-emerald-600 dark:text-emerald-500">
-                  {distinctDocRefs(resolution.docA, resolution.docB)[resolution.verdict === 'a' ? 0 : 1]}
+                  {disputeSideNames(resolution)[resolution.verdict === 'a' ? 0 : 1]}
                 </span>{' '}
                 wins
               </>
@@ -305,6 +315,17 @@ function basename(path: string): string {
 /** How a single doc is named on a card. */
 export function shortDocRef(path: string): string {
   return basename(path);
+}
+
+/**
+ * How a dispute's two sides are named on a card: the doc pair's shortest
+ * distinct names, or inside one doc that doc's name with each passage.
+ */
+function disputeSideNames(d: Pick<FindingDispute, 'docA' | 'anchorA' | 'docB' | 'anchorB'>): [string, string] {
+  if (d.docA !== d.docB) return distinctDocRefs(d.docA, d.docB);
+  const doc = d.docA.split('/').filter(Boolean).pop() ?? d.docA;
+  const [a, b] = passageNames(d.anchorA, d.anchorB);
+  return [`${doc} · ${a}`, `${doc} · ${b}`];
 }
 
 /**

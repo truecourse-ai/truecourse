@@ -34,6 +34,7 @@ import {
   buildCorpusConflicts,
   conflictVerdictFor,
   resolveConflictId,
+  verdictNamesOnePassage,
   type CorpusConflict,
 } from '@truecourse/shared';
 import { captureAction, EVENTS } from '../observability/posthog.js';
@@ -143,20 +144,26 @@ export async function resolveConflict(
   checks: ConflictChecks,
 ): Promise<ConflictResolution[]> {
   const { docA, docB, verdict } = request;
-  if (!docA || !docB || docA === docB) {
-    throw new ConflictVerdictError('docA and docB are required and must differ.');
+  if (!docA || !docB) throw new ConflictVerdictError('docA and docB are required.');
+  // A conflict inside one document names two of its passages; one passage
+  // named twice is no dispute.
+  const sides = {
+    docA,
+    anchorA: request.anchorA ?? null,
+    quoteA: request.quoteA,
+    docB,
+    anchorB: request.anchorB ?? null,
+    quoteB: request.quoteB,
+  };
+  if (verdictNamesOnePassage(sides)) {
+    throw new ConflictVerdictError('The two sides name one passage: give two different docs, or two passages of one doc.');
   }
   if (typeof verdict !== 'string' || !(CONFLICT_VERDICTS as readonly string[]).includes(verdict)) {
     throw new ConflictVerdictError(`verdict must be one of ${CONFLICT_VERDICTS.join(', ')}.`);
   }
   const decisions = await settled(actor.org, () =>
     addWorkspaceConflictResolution(actor.org, {
-      docA,
-      anchorA: request.anchorA ?? null,
-      quoteA: request.quoteA,
-      docB,
-      anchorB: request.anchorB ?? null,
-      quoteB: request.quoteB,
+      ...sides,
       verdict: verdict as ConflictResolution['verdict'],
       resolvedAt: new Date().toISOString(),
       note: request.note,

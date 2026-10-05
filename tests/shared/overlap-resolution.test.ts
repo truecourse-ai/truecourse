@@ -9,6 +9,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildCorpusConflicts,
+  conflictVerdictFor,
+  disputeSides,
   dormantResolutionForPair,
   openConflicts,
   orphanedConflictResolutions,
@@ -17,6 +19,7 @@ import {
   disputeKey,
   resolveConflictId,
   isConflictId,
+  samePassage,
   type ConflictResolutionLike,
 } from '../../packages/shared/src/spec/overlap-resolution.js';
 
@@ -472,5 +475,88 @@ describe('conflict identity — the addressable id the surfaces key rows on', ()
     const conflicts = buildCorpusConflicts(samePairTwoSections(), {});
     expect(isConflictId(conflicts[0].id)).toBe(true);
     expect(isConflictId('docs/SPEC.md')).toBe(false);
+  });
+});
+
+describe('a contradiction inside one document', () => {
+  const DOC = 'DESIGN.md';
+  const press = { doc: DOC, heading: 'Buttons', quote: 'A press translates the button down 1px.' };
+  const motion = { doc: DOC, heading: 'Motion', quote: 'A press scales the button to 0.97.' };
+  const inside = (sections = [press, motion]) => ({
+    areas: [
+      {
+        id: 'core/design',
+        overlaps: [{ docs: [DOC, DOC] as [string, string], note: 'press is a translate and a scale', sections }],
+      },
+    ],
+  });
+
+  it('reads its sides by position: the first pointer is side a, the second side b', () => {
+    expect(disputeSides(DOC, DOC, [press, motion])).toEqual([[press], [motion]]);
+    // Two docs keep reading each doc's own pointers, whatever order they came in.
+    const other = { doc: 'GUIDE.md', heading: 'Press', quote: 'q' };
+    expect(disputeSides(DOC, 'GUIDE.md', [other, press])).toEqual([[press], [other]]);
+  });
+
+  it('keys the dispute on both passages, in either order, apart from every other dispute on the doc', () => {
+    const key = disputeKey(DOC, DOC, [press, motion]);
+    expect(disputeKey(DOC, DOC, [motion, press])).toBe(key);
+    expect(disputeKey(DOC, DOC, [press, { ...motion, heading: 'Focus' }])).not.toBe(key);
+    expect(disputeKey(DOC, DOC, undefined)).not.toBe(key);
+    expect(disputeKey(DOC, 'GUIDE.md', [press, { doc: 'GUIDE.md', heading: 'Motion' }])).not.toBe(key);
+  });
+
+  it('stays one open conflict, survives the dedup beside a two-doc dispute on the same doc, and a verdict resolves it', () => {
+    const corpus = inside();
+    corpus.areas[0].overlaps.push({
+      docs: [DOC, 'GUIDE.md'],
+      note: 'radius 4 vs 6',
+      sections: [
+        { doc: DOC, heading: 'Corners', quote: 'Radius is 4px.' },
+        { doc: 'GUIDE.md', heading: 'Corners', quote: 'Radius is 6px.' },
+      ],
+    });
+    const conflicts = buildCorpusConflicts(corpus, {});
+    expect(conflicts.map((c) => [c.a, c.b])).toEqual([
+      [DOC, DOC],
+      [DOC, 'GUIDE.md'],
+    ]);
+    const self = conflicts[0];
+    const verdict = conflictVerdictFor(self.overlap, self.a, self.b, 'b');
+    expect(verdict).toMatchObject({ docA: DOC, anchorA: 'Buttons', docB: DOC, anchorB: 'Motion', verdict: 'b' });
+    const decisions = { conflictResolutions: [{ ...verdict, resolvedAt: '' }] };
+    expect(openConflicts(corpus, decisions).map((c) => c.a === c.b)).toEqual([false]);
+  });
+
+  it('suppresses the losing PASSAGE, never the winning one on the same doc', () => {
+    const a = { ...conflictVerdictFor(inside().areas[0].overlaps[0], DOC, DOC, 'a'), resolvedAt: '' };
+    expect(suppressedClaims(inside(), { conflictResolutions: [a] })).toEqual([
+      { doc: DOC, anchor: 'Motion', quote: motion.quote },
+    ]);
+    const b = { ...a, verdict: 'b' as const };
+    expect(suppressedClaims(inside(), { conflictResolutions: [b] })).toEqual([
+      { doc: DOC, anchor: 'Buttons', quote: press.quote },
+    ]);
+    // The next scan may list the passages the other way round: the anchors still say which lost.
+    expect(suppressedClaims(inside([motion, press]), { conflictResolutions: [a] })).toEqual([
+      { doc: DOC, anchor: 'Motion', quote: motion.quote },
+    ]);
+  });
+
+  it('under one heading, tells the passages apart by the quote the verdict recorded', () => {
+    const first = { doc: DOC, heading: 'Providers', quote: 'The provider is tested when you save it.' };
+    const second = { doc: DOC, heading: 'Providers', quote: 'Run the Test step to check the provider.' };
+    const pickFirst = { ...conflictVerdictFor({ sections: [first, second] }, DOC, DOC, 'a'), resolvedAt: '' };
+    expect(suppressedClaims(inside([second, first]), { conflictResolutions: [pickFirst] })).toEqual([
+      { doc: DOC, anchor: 'Providers', quote: second.quote },
+    ]);
+  });
+
+  it('samePassage tells a real pair of passages from one passage named twice', () => {
+    expect(samePassage(press, motion)).toBe(false);
+    expect(samePassage(press, { ...press, quote: 'A press translates the button down 1px.  ' })).toBe(true);
+    expect(samePassage(press, { ...press, quote: 'Another sentence under Buttons.' })).toBe(false);
+    expect(samePassage({ doc: DOC, heading: null }, { doc: DOC, heading: null })).toBe(true);
+    expect(samePassage(press, { ...press, doc: 'GUIDE.md' })).toBe(false);
   });
 });

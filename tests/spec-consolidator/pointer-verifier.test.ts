@@ -12,8 +12,8 @@
  * prose — so the scoring is exercised, not memorized.
  */
 import { describe, it, expect } from 'vitest';
-import { verifyOverlapSections } from '../../packages/spec-consolidator/src/index.js';
-import { dedupeCrossAreaOverlaps } from '@truecourse/shared';
+import { splitDocSections, verifyOverlapSections } from '../../packages/spec-consolidator/src/index.js';
+import { dedupeCrossAreaOverlaps, parseHeadings } from '@truecourse/shared';
 import type { Overlap } from '../../packages/spec-consolidator/src/index.js';
 
 // A README whose LEAD (the H1 + intro, before `## Install`) states the disputed
@@ -305,5 +305,69 @@ describe('verification before dedup', () => {
     expect(merged[0].overlap.sections).toContainEqual({ doc: 'README.md', heading: null });
     expect(merged[0].overlap.sections).not.toContainEqual({ doc: 'README.md', heading: 'Storage' });
     expect(merged[0].overlap.sections).toContainEqual({ doc: 'docs/SPEC.md', heading: '`rm <id>`' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sections are the outline's sections
+//
+// A doc's sections split at exactly the headings `parseHeadings` finds, the
+// scanner the outline, `read_section` and the unit splitter use: a `# comment`
+// inside a fenced block is code, never a section, and a closing hash run is
+// not part of the heading.
+// ---------------------------------------------------------------------------
+
+const INSTALL_MD = `# Install
+
+Run the installer once.
+
+## Setup
+
+\`\`\`bash
+# Install the dependencies
+pnpm install
+# Start the server
+pnpm dev --port 3000
+\`\`\`
+
+The server listens on port 3000.
+
+## Upgrade ##
+
+~~~sh
+#!/bin/sh
+## not a heading either
+~~~
+
+Upgrades keep your data.
+`;
+
+describe('splitDocSections follows the outline', () => {
+  it('splits at the headings parseHeadings finds, never at a comment inside a fence', () => {
+    const sections = splitDocSections(INSTALL_MD, new Set());
+    expect(sections.map((s) => s.realHeading)).toEqual(['Install', 'Setup', 'Upgrade']);
+    expect(sections.map((s) => s.realHeading)).toEqual(parseHeadings(INSTALL_MD.split('\n')).map((h) => h.text));
+    // The fence stays whole inside its section.
+    expect(sections[1]!.text).toContain('# Start the server\npnpm dev --port 3000\n```\n\nThe server listens on port 3000.');
+  });
+
+  it('keeps a pointer whose quote sits below a comment line inside a fence', () => {
+    const out = verifyOverlapSections({
+      docs: ['docs/install.md', 'docs/ops.md'],
+      note: 'install.md runs the server on port 3000; ops.md says 8080',
+      sections: [{ doc: 'docs/install.md', heading: 'Setup', quote: 'pnpm dev --port 3000' }],
+      bodyOf: bodyOf({ 'docs/install.md': INSTALL_MD }),
+    });
+    expect(out).toEqual([{ doc: 'docs/install.md', heading: 'Setup', quote: 'pnpm dev --port 3000' }]);
+  });
+
+  it('names a heading with a closing hash run as the outline does', () => {
+    const out = verifyOverlapSections({
+      docs: ['docs/install.md', 'docs/ops.md'],
+      note: 'upgrades keep data in install.md, not in ops.md',
+      sections: [{ doc: 'docs/install.md', heading: 'Setup', quote: 'Upgrades keep your data.' }],
+      bodyOf: bodyOf({ 'docs/install.md': INSTALL_MD }),
+    });
+    expect(out).toEqual([{ doc: 'docs/install.md', heading: 'Upgrade', quote: 'Upgrades keep your data.' }]);
   });
 });

@@ -55,7 +55,7 @@ import {
   type DocCandidate,
   type VocabMap,
 } from '@truecourse/spec-consolidator'
-import { disputeKey, type OverlapLike } from '@truecourse/shared'
+import { disputeKey, disputeSides, samePassage, type OverlapLike } from '@truecourse/shared'
 import { promptFingerprint } from '../agent/session-cache.js'
 import { LEGACY_OVERLAP_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
@@ -116,7 +116,13 @@ const CandidatePairOutcomeSchema = z.object({
   keys: z.array(z.string()),
 })
 
-const OverlapFindingSchema = z.object({
+/**
+ * One reported disagreement: the finding shape every path that flags
+ * conflicts produces (this session, and the fact comparison's conflicts), so
+ * the fold behind them (pointer re-anchoring, cross-area dedup, auto-apply) is
+ * one fold.
+ */
+export const OverlapFindingSchema = z.object({
   /** The two docs that disagree, by ref (both from the briefing). */
   docs: z.tuple([z.string(), z.string()]),
   /** What differs, naming each doc by FILENAME — shown to the user. */
@@ -154,6 +160,7 @@ export const OverlapOutcomeSchema = z
   })
   .strict()
 export type OverlapOutcome = z.infer<typeof OverlapOutcomeSchema>
+export type OverlapFinding = z.infer<typeof OverlapFindingSchema>
 
 /**
  * The outcome as the model writes it: the two docs of a finding named `a` and
@@ -161,22 +168,27 @@ export type OverlapOutcome = z.infer<typeof OverlapOutcomeSchema>
  * no JSON Schema form every provider accepts, so the pair is a tuple only once
  * {@link overlapOutcomeFromWire} has read it.
  */
+export const OverlapFindingWireSchema = OverlapFindingSchema.extend({
+  docs: z
+    .object({
+      a: z.string().describe('The doc `pick-a` names, by ref.'),
+      b: z.string().describe('The doc `pick-b` names, by ref.'),
+    })
+    .strict(),
+})
+
+/** One finding as the run keeps it, from what the model wrote. */
+export function overlapFindingFromWire(wire: z.infer<typeof OverlapFindingWireSchema>): OverlapFinding {
+  return { ...wire, docs: [wire.docs.a, wire.docs.b] }
+}
+
 export const OverlapOutcomeWireSchema = OverlapOutcomeSchema.extend({
-  overlaps: z.array(
-    OverlapFindingSchema.extend({
-      docs: z
-        .object({
-          a: z.string().describe('The doc `pick-a` names, by ref.'),
-          b: z.string().describe('The doc `pick-b` names, by ref.'),
-        })
-        .strict(),
-    }),
-  ),
+  overlaps: z.array(OverlapFindingWireSchema),
 })
 
 /** The outcome the run keeps, from what the model wrote. */
 export function overlapOutcomeFromWire(wire: z.infer<typeof OverlapOutcomeWireSchema>): OverlapOutcome {
-  return { ...wire, overlaps: wire.overlaps.map((o) => ({ ...o, docs: [o.docs.a, o.docs.b] })) }
+  return { ...wire, overlaps: wire.overlaps.map(overlapFindingFromWire) }
 }
 
 export const OVERLAP_SESSION_SYSTEM_PROMPT = `You find the DISAGREEMENTS between the docs of ONE comparison group of a documentation corpus. The briefing opens with CANDIDATE COLLISIONS — section pairs a deterministic pass nominated because they share concrete signals (an endpoint segment, a field name, an enum member, a header name, or the same heading) — followed by each doc as a heading OUTLINE. You open the nominated sections, compare what they state, and report every genuine disagreement — adjudicated, with the evidence pinned.
@@ -385,6 +397,35 @@ export function pairRecord(pair: CollisionPair): z.infer<typeof CandidatePairOut
   return { a: pair.a, b: pair.b, keys: pair.keys }
 }
 
+/** What a finding may name, per the path that produced it. */
+export interface FindingRules {
+  /**
+   * A finding may name one doc on both sides: a contradiction inside it, its
+   * two pointers two different passages (see {@link sameDocFindingProblem}).
+   * A collision cluster never pairs a doc with itself, so its check refuses
+   * one unless this is set.
+   */
+  sameDoc?: boolean
+}
+
+/**
+ * Why a finding that names one doc on both sides is not a contradiction inside
+ * it, or `undefined` when it is: exactly two pointers, both on the doc, naming
+ * two passages (another heading, or other words under the same heading). The
+ * first pointer is side a, the second side b.
+ */
+export function sameDocFindingProblem(finding: Pick<OverlapFinding, 'docs' | 'sections'>): string | undefined {
+  const [doc] = finding.docs
+  const onDoc = finding.sections.filter((s) => s.doc === doc)
+  if (finding.sections.length !== 2 || onDoc.length !== 2) {
+    return `a conflict inside \`${doc}\` takes exactly two pointers on it, the first passage and the second`
+  }
+  if (samePassage(onDoc[0]!, onDoc[1]!)) {
+    return `both pointers name the same passage of \`${doc}\`; point at the two passages that disagree`
+  }
+  return undefined
+}
+
 /**
  * The in-session validation `check_findings` runs — quote-first, exactly the
  * discipline the fold's `verifyOverlapSections` applies, so a draft that
@@ -393,11 +434,15 @@ export function pairRecord(pair: CollisionPair): z.infer<typeof CandidatePairOut
 export function validateOverlapFindings(
   outcome: OverlapOutcome,
   briefed: ReadonlyMap<string, DocCandidate>,
+  rules: FindingRules = {},
 ): string[] {
   const errors: string[] = []
   outcome.overlaps.forEach((overlap, i) => {
     const [a, b] = overlap.docs
-    if (a === b) errors.push(`overlaps[${i}]: the two docs are the same (\`${a}\`)`)
+    if (a === b) {
+      const problem = rules.sameDoc ? sameDocFindingProblem(overlap) : `the two docs are the same (\`${a}\`)`
+      if (problem) errors.push(`overlaps[${i}]: ${problem}`)
+    }
     for (const ref of overlap.docs) {
       if (!briefed.has(ref)) errors.push(`overlaps[${i}]: \`${ref}\` is not one of the briefed docs`)
     }
@@ -473,14 +518,15 @@ export interface OverlapSessionInput {
  * entry is matched by, so a verdict recorded off the card matches the corpus
  * conflict. The quotes ride along as evidence.
  */
-function presentOverlap(overlap: OverlapOutcome['overlaps'][number]): KnownDisplayBlock {
+export function presentOverlap(overlap: OverlapFinding): KnownDisplayBlock {
   const [docA, docB] = overlap.docs
-  const side = (ref: string): { anchor: string | null; quote?: string } => {
-    const section = overlap.sections.find((s) => s.doc === ref)
-    return { anchor: section?.heading ?? null, ...(section ? { quote: section.quote } : {}) }
-  }
-  const a = side(docA)
-  const b = side(docB)
+  const [[sectionA], [sectionB]] = disputeSides(docA, docB, overlap.sections)
+  const side = (section: OverlapFinding['sections'][number] | undefined): { anchor: string | null; quote?: string } => ({
+    anchor: section?.heading ?? null,
+    ...(section ? { quote: section.quote } : {}),
+  })
+  const a = side(sectionA)
+  const b = side(sectionB)
   const dispute: DisplayDispute = {
     docA,
     anchorA: a.anchor,
@@ -490,8 +536,10 @@ function presentOverlap(overlap: OverlapOutcome['overlaps'][number]): KnownDispl
     ...(b.quote !== undefined ? { quoteB: b.quote } : {}),
   }
   const { action, rationale, confidence } = overlap.review.recommendation
-  // Only a pick names a doc; `fix-doc`/`dismiss` recommend no side.
-  const recommendedDoc = action === 'pick-a' ? docA : action === 'pick-b' ? docB : undefined
+  // Only a pick names a doc; `fix-doc`/`dismiss` recommend no side. The side
+  // is what tells the two passages of one doc apart.
+  const recommendedSide = action === 'pick-a' ? 'a' : action === 'pick-b' ? 'b' : undefined
+  const recommendedDoc = recommendedSide === 'a' ? docA : recommendedSide === 'b' ? docB : undefined
   // Full paths throughout: the client matches the recommendation against the
   // quotes and the dispute sides by ref equality, and shortens only to display.
   return {
@@ -504,6 +552,7 @@ function presentOverlap(overlap: OverlapOutcome['overlaps'][number]): KnownDispl
     })),
     recommendation: {
       ...(recommendedDoc ? { doc: recommendedDoc } : {}),
+      ...(recommendedSide ? { side: recommendedSide } : {}),
       rationale,
       ...(confidence ? { confidence } : {}),
     },
@@ -576,13 +625,17 @@ const pairSide = (s: CollisionPair['a']): string => `${s.doc} · ${s.heading ?? 
  * what was flagged before, so a dispute keeps the section anchors that
  * identify it (and the verdict recorded against them) across scans.
  */
-export function priorDisputesFor(item: OverlapWorkItem, prior: readonly OverlapLike[]): OverlapLike[] {
-  const briefed = new Set(item.docs.map((d) => d.path))
+export function priorDisputesFor(item: Pick<OverlapWorkItem, 'docs'>, prior: readonly OverlapLike[]): OverlapLike[] {
+  return priorDisputesAmong(new Set(item.docs.map((d) => d.path)), prior)
+}
+
+/** The prior corpus's disputes whose BOTH docs are among `refs`, one per dispute. */
+export function priorDisputesAmong(refs: ReadonlySet<string>, prior: readonly OverlapLike[]): OverlapLike[] {
   // One line per dispute: a corpus stored before the cross-area merge carries
   // the same dispute once per area it spanned.
   const seen = new Set<string>()
   return prior.filter((o) => {
-    if (!briefed.has(o.docs[0]) || !briefed.has(o.docs[1])) return false
+    if (!refs.has(o.docs[0]) || !refs.has(o.docs[1])) return false
     const key = disputeKey(o.docs[0], o.docs[1], o.sections)
     if (seen.has(key)) return false
     seen.add(key)

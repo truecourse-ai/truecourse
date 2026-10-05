@@ -71,10 +71,14 @@ const MODULES = [
   'packages/core/src/services/llm/guard-visual-judge.ts',
   'packages/core/src/services/product-world/flow-test-session.ts',
   'packages/core/src/services/product-world/world-session.ts',
+  'packages/core/src/services/spec-scan/compare-facts.ts',
+  'packages/core/src/services/spec-scan/corpus-review.ts',
   'packages/core/src/services/spec-scan/curate-doc.ts',
   'packages/core/src/services/spec-scan/orchestrate.ts',
   'packages/core/src/services/spec-scan/overlap.ts',
+  'packages/core/src/services/spec-scan/record-facts.ts',
   'packages/core/src/services/spec-scan/settle-areas.ts',
+  'packages/core/src/services/spec-scan/settle-subjects.ts',
   'packages/core/src/services/spec-scan/tools.ts',
 ]
 

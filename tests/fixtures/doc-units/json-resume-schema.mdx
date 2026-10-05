@@ -1,0 +1,242 @@
+---
+title: "JSON Resume schema"
+description: "The Reactive Resume JSON Schema, published at /schema.json: what it covers, how to validate resume data against it, and how to build on it."
+---
+
+## The vision
+
+I want applying for a job to be as simple as sending a JSON file from one service to a job listing portal, without parsing errors, format inconsistencies, or bias from how a resume happens to be laid out.
+
+Reactive Resume aims to be the gold standard in JSON resume schemas: one documented, strictly typed schema that any service can adopt so resumes move between tools without loss.
+
+Imagine:
+
+- Exporting your resume from Reactive Resume as a JSON file
+- Uploading it directly to a job portal that instantly understands every field
+- No more PDF parsing failures or ATS (Applicant Tracking System) misreads
+- Your qualifications evaluated purely on merit, not on formatting quirks
+
+This is the future I'm hoping to build toward.
+
+## The schema endpoint
+
+The Reactive Resume JSON Schema is publicly available at:
+
+<Info>[https://rxresu.me/schema.json](https://rxresu.me/schema.json)</Info>
+
+The endpoint returns a complete JSON Schema in the draft 2020-12 dialect. It describes the structure of a Reactive Resume document and covers:
+
+- **All resume sections**: basics, summary, experience, education, projects, skills, languages, interests, awards, certifications, publications, volunteer work, and references
+- **Custom sections**: user-defined sections whose `type` selects one of the documented item shapes
+- **Metadata**: template, layout, typography, colors, page settings, and custom CSS
+- **Full descriptions**: every field is documented with its purpose and expected format
+
+## Schema dialect and document shape
+
+The schema document declares its JSON Schema dialect in its own `$schema` field:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object"
+}
+```
+
+Resume documents do not include a top-level `version` property. They also do not include the schema document's
+`$schema` field. Validate the exported resume object directly against the canonical schema endpoint.
+
+## Using the schema
+
+### Validating resume data
+
+You can use the schema to validate resume JSON files in any language that supports JSON Schema validation:
+
+```javascript
+import Ajv2020 from "ajv/dist/2020.js";
+
+const ajv = new Ajv2020();
+const schema = await fetch("https://rxresu.me/schema.json").then((r) => r.json());
+const validate = ajv.compile(schema);
+
+const isValid = validate(resumeData);
+if (!isValid) {
+  console.error(validate.errors);
+}
+```
+
+### IDE autocompletion
+
+Associate exported resume files with the canonical schema in VS Code's `settings.json`:
+
+```json
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["reactive-resume*.json"],
+      "url": "https://rxresu.me/schema.json"
+    }
+  ]
+}
+```
+
+This keeps editor configuration outside the resume data and avoids adding unsupported top-level properties.
+
+### Building integrations
+
+The schema enables third-party integrations:
+
+- **Job portals** can accept Reactive Resume JSON files directly
+- **HR systems** can parse candidate data without lossy PDF conversion
+- **Other resume builders** can import/export using a common format
+- **AI tools** can understand resume structure for analysis or enhancement
+
+## Schema structure overview
+
+The resume data is organized into these top-level sections:
+
+| Section          | Description                                     |
+| ---------------- | ----------------------------------------------- |
+| `picture`        | Profile photo configuration                     |
+| `basics`         | Name, headline, contact info, custom fields     |
+| `summary`        | Professional summary or bio                     |
+| `sections`       | Standard sections (experience, education, etc.) |
+| `customSections` | User-defined additional sections                |
+| `metadata`       | Template, layout, design, typography settings   |
+
+Each section within `sections` follows a consistent structure:
+
+```json
+{
+  "title": "Experience",
+  "columns": 1,
+  "hidden": false,
+  "items": [
+    {
+      "id": "229ad766-cb9a-4f16-aaf0-fdd8394a9b95",
+      "hidden": false,
+      "company": "Analytical Engines",
+      "position": "Engineer",
+      "location": "London",
+      "period": "1842",
+      "website": {
+        "url": "",
+        "label": "",
+        "inlineLink": false
+      },
+      "description": "<p>Built algorithms.</p>",
+      "roles": []
+    }
+  ]
+}
+```
+
+## For developers and job portals
+
+If you're building a job portal, HR system, or any other service that handles resumes, I'd encourage you to adopt this schema:
+
+- **Zero parsing errors**: structured data means no OCR or PDF parsing mistakes
+- **Complete information**: all resume data is preserved, including links and metadata
+- **Easy integration**: JSON is universally supported across all platforms
+- **Canonical contract**: one public schema endpoint tracks the current Reactive Resume data model
+
+The schema is open and free to use. Fetch it programmatically, or reference it by URL from your own systems.
+
+## Complete JSON Schema
+
+The full JSON Schema for Reactive Resume follows. You can also fetch the latest version directly from [https://rxresu.me/schema.json](https://rxresu.me/schema.json).
+
+<Tip>Copy the schema from the live endpoint so you always have the latest version.</Tip>
+
+<!-- RESUME-JSON-SCHEMA:START -->
+```json /schema.json lines expandable
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"type": "object",
+	"properties": {
+		"picture": {
+			"type": "object",
+			"properties": {
+				"hidden": {
+					"type": "boolean",
+					"description": "Whether to hide the picture from the resume."
+				},
+				"fit": {
+					"default": "cover",
+					"description": "How the picture fits its frame: cover crops overflow, while contain preserves the whole image.",
+					"type": "string",
+					"enum": [
+						"cover",
+						"contain"
+					]
+				},
+				"url": {
+					"type": "string",
+					"description": "The URL to the picture to display on the resume. Prefer local app-served paths (for example /uploads/...) populated via upload."
+				},
+				"size": {
+					"type": "number",
+					"minimum": 32,
+					"maximum": 512,
+					"description": "The size of the picture to display on the resume, defined in points (pt)."
+				},
+				"rotation": {
+					"type": "number",
+					"minimum": 0,
+					"maximum": 360,
+					"description": "The rotation of the picture to display on the resume, defined in degrees (°)."
+				},
+				"aspectRatio": {
+					"type": "number",
+					"minimum": 0.5,
+					"maximum": 2.5,
+					"description": "The aspect ratio of the picture to display on the resume, defined as width / height (e.g. 1.5 for 1.5:1 or 0.5 for 1:2)."
+				},
+				"borderRadius": {
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100,
+					"description": "The border radius of the picture to display on the resume, defined in points (pt)."
+				},
+				"borderColor": {
+					"type": "string",
+					"description": "The color of the border of the picture to display on the resume, defined as rgba(r, g, b, a)."
+				},
+				"borderWidth": {
+					"type": "number",
+					"minimum": 0,
+					"description": "The width of the border of the picture to display on the resume, defined in points (pt)."
+				},
+				"shadowColor": {
+					"type": "string",
+					"description": "The color of the shadow of the picture to display on the resume, defined as rgba(r, g, b, a)."
+				},
+				"shadowWidth": {
+					"type": "number",
+					"minimum": 0,
+					"description": "The width of the shadow of the picture to display on the resume, defined in points (pt)."
+				}
+			},
+			"required": [
+				"hidden",
+				"url",
+				"size",
+				"rotation",
+				"aspectRatio",
+				"borderRadius",
+				"borderColor",
+				"borderWidth",
+				"shadowColor",
+				"shadowWidth"
+			],
+			"description": "Configuration for photograph displayed on the resume"
+		},
+		"basics": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string",
+					"description": "The full name of the author of the resume."
+				},
+				"headline": {
+```
+<!-- RESUME-JSON-SCHEMA:END -->

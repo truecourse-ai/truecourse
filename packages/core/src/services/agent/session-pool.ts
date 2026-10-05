@@ -92,6 +92,8 @@ import {
  *
  *   spec-scan.curate-doc          spec-scan.settle-areas
  *   spec-scan.overlap             spec-scan.orchestrate
+ *   spec-scan.corpus-review       spec-scan.record-facts
+ *   spec-scan.settle-subjects     spec-scan.compare-facts
  *   guard-setup.recipe-repair     guard-setup.dependency-catalog
  *   guard-setup.reconcile-interfaces
  *   guard-setup.seed              guard-setup.auth-proof

@@ -33,6 +33,11 @@ import {
   OVERLAP_SESSION_KIND,
 } from '../../packages/core/src/services/spec-scan/overlap.js';
 import { SPEC_SCAN_ORCHESTRATE_SESSION_KIND } from '../../packages/core/src/services/spec-scan/orchestrate.js';
+import { CORPUS_REVIEW_SESSION_KIND } from '../../packages/core/src/services/spec-scan/corpus-review.js';
+import { RECORD_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/record-facts.js';
+import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects.js';
+import { COMPARE_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-facts.js';
+import type { ConflictMethod } from '../../packages/core/src/services/spec-scan/run.js';
 import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index.js';
 import type {
   DriverResult,
@@ -276,6 +281,28 @@ function warmDriver(): { driver: SessionDriver; kinds: string[] } {
               isError: false,
             });
             return { kind: 'outcome', value: { overlaps: [], notReached: [] } };
+          case CORPUS_REVIEW_SESSION_KIND:
+            return { kind: 'outcome', value: { drops: [] } };
+          case RECORD_FACTS_SESSION_KIND: {
+            // Every unit a fact about its doc's tokens, after the check the outcome needs.
+            const briefing = input.initialMessages.at(-1) ?? '';
+            const doc = /^DOCUMENT: (\S+)/m.exec(briefing)![1]!;
+            const area = /^AREA TAGS \(.*?\): (.+)$/m.exec(briefing)![1]!.split(', ')[0]!;
+            const units = [...briefing.matchAll(/^\[(\d+)\]/gm)].map(([, n]) => Number(n));
+            input.onEvent({ type: 'tool-result', toolName: 'check_ledger', content: 'complete', isError: false });
+            const facts = units.map((n) => ({ units: [n], subject: `${doc} tokens`, statement: `Unit ${n} of ${doc}.`, areas: [area] }));
+            return { kind: 'outcome', value: { facts, skips: [] } };
+          }
+          case SETTLE_SUBJECTS_SESSION_KIND: {
+            const distinct = [...(input.initialMessages.at(-1) ?? '').matchAll(/^(S\d+) · /gm)].map(([, id]) => id!);
+            input.onEvent({ type: 'tool-result', toolName: 'check_subjects', content: 'complete', isError: false });
+            return { kind: 'outcome', value: { same: [], distinct } };
+          }
+          case COMPARE_FACTS_SESSION_KIND: {
+            const alone = [...(input.initialMessages.at(-1) ?? '').matchAll(/^(F\d+) · /gm)].map(([, id]) => id!);
+            input.onEvent({ type: 'tool-result', toolName: 'check_groups', content: 'complete', isError: false });
+            return { kind: 'outcome', value: { groups: [], alone } };
+          }
           default:
             throw new Error(`unscripted kind ${input.def.kind}`);
         }
@@ -333,7 +360,12 @@ describe('estimateScanTokens — sessions, not calls', () => {
 
   /** Run the real scan on the scripted driver, warming every session cache. */
   async function warmScan(
-    opts: { identity?: RepoIdentity | null; disableOverlapDetection?: boolean } = {},
+    opts: {
+      identity?: RepoIdentity | null;
+      disableOverlapDetection?: boolean;
+      computer?: boolean;
+      conflictMethod?: ConflictMethod;
+    } = {},
   ): Promise<string[]> {
     const { driver, kinds } = warmDriver();
     await runSpecScanSessions({
@@ -343,6 +375,8 @@ describe('estimateScanTokens — sessions, not calls', () => {
       skipGit: true,
       ...(opts.identity !== undefined ? { repoIdentity: opts.identity } : {}),
       ...(opts.disableOverlapDetection ? { disableOverlapDetection: true } : {}),
+      ...(opts.computer ? { computer: true } : {}),
+      ...(opts.conflictMethod ? { conflictMethod: opts.conflictMethod } : {}),
     });
     return kinds;
   }
@@ -386,6 +420,59 @@ describe('estimateScanTokens — sessions, not calls', () => {
     expect((warm.stages?.length ?? 0) === 0).toBe(true);
     expect(warm.totalEstimatedTokens).toBe(0);
     expect(warm.subjectLabel).toBe('all 2 docs cached');
+  });
+
+  it('on the computer path quotes the corpus review beside the clusters, and agrees with the run', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+
+    const cold = await estimateScanTokens(repo, null, { computer: true });
+    const kinds = (cold.stages ?? []).map((s) => s.stage);
+    expect(kinds).toEqual(expect.arrayContaining([CURATE_DOC_SESSION_KIND, CORPUS_REVIEW_SESSION_KIND, OVERLAP_SESSION_KIND]));
+    expect((await estimateScanTokens(repo, null, { computer: true, only: 'curate' })).stages?.map((s) => s.stage)).toEqual([
+      CURATE_DOC_SESSION_KIND,
+      CORPUS_REVIEW_SESSION_KIND,
+    ]);
+
+    const ran = await warmScan({ computer: true });
+    expect(ran).toEqual(expect.arrayContaining([CORPUS_REVIEW_SESSION_KIND, OVERLAP_SESSION_KIND]));
+    expect((await estimateScanTokens(repo, null, { computer: true })).stages).toEqual([]);
+  });
+
+  it('when conflicts are found by comparing facts, quotes recording, settling and comparing, and agrees with the run', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+
+    const cold = await estimateScanTokens(repo, null, { conflictMethod: 'facts' });
+    const kinds = (cold.stages ?? []).map((s) => s.stage);
+    expect(kinds).toContain(RECORD_FACTS_SESSION_KIND);
+    expect(kinds).toContain(COMPARE_FACTS_SESSION_KIND);
+    expect(kinds).not.toContain(OVERLAP_SESSION_KIND);
+    expect(stage(cold, RECORD_FACTS_SESSION_KIND)?.label).toBe('Recording facts');
+    expect(stage(cold, COMPARE_FACTS_SESSION_KIND)?.label).toBe('Comparing facts');
+    // Before any doc is recorded the batches cannot be planned: an honest range, none known cached.
+    expect(stage(cold, COMPARE_FACTS_SESSION_KIND)?.bound).toMatch(/planned once the changed docs are recorded/);
+    expect(items(cold, COMPARE_FACTS_SESSION_KIND)).toBe(0);
+    expect(
+      (await estimateScanTokens(repo, null, { conflictMethod: 'facts', only: 'overlap' })).stages?.map((s) => s.stage),
+    ).toEqual(kinds.filter((k) => [RECORD_FACTS_SESSION_KIND, SETTLE_SUBJECTS_SESSION_KIND, COMPARE_FACTS_SESSION_KIND].includes(k)));
+
+    const ran = await warmScan({ conflictMethod: 'facts' });
+    expect(ran.filter((k) => k === RECORD_FACTS_SESSION_KIND)).toHaveLength(2);
+    expect(ran.filter((k) => k === SETTLE_SUBJECTS_SESSION_KIND)).toHaveLength(1);
+    expect(ran.filter((k) => k === COMPARE_FACTS_SESSION_KIND)).toHaveLength(1);
+    expect(ran).not.toContain(OVERLAP_SESSION_KIND);
+    // Every window, the settlement and the batch are probed under the run's own keys.
+    expect((await estimateScanTokens(repo, null, { conflictMethod: 'facts' })).stages).toEqual([]);
+
+    // One doc edited: only its window is unknown, the other doc's is a cache hit,
+    // and what follows the record is a range again.
+    writeDocs({ 'docs/session.md': `${SESSION_DOC}\nRefresh tokens last a day.\n` });
+    const edited = await estimateScanTokens(repo, null, { conflictMethod: 'facts' });
+    expect(items(edited, RECORD_FACTS_SESSION_KIND)).toBe(0);
+    expect(stage(edited, RECORD_FACTS_SESSION_KIND)?.bound).toMatch(/changed docs' windows/);
+    expect(stage(edited, SETTLE_SUBJECTS_SESSION_KIND)?.bound).toMatch(/known once every changed doc is recorded/);
+    expect(stage(edited, COMPARE_FACTS_SESSION_KIND)?.callsRange?.low).toBe(0);
   });
 
   it('an UNCOVERED universe keeps exactly one stage — the scope orchestrator — even with warm doc caches', async () => {

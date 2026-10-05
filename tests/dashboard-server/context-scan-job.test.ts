@@ -26,7 +26,7 @@ import { executeJob, type JobRuntime } from '@truecourse/jobs';
 import type { CuratedCorpus, DecisionsFile } from '@truecourse/spec-consolidator';
 import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import { CreditsExhaustedError } from '@truecourse/core/lib/credits-store';
-import type { WorkspaceContextScanResult } from '@truecourse/core/commands/context-scan';
+import type { WorkspaceContextScanOptions, WorkspaceContextScanResult } from '@truecourse/core/commands/context-scan';
 import {
   createContextScanTask,
   type ContextScanJobPayload,
@@ -204,6 +204,25 @@ describe('the context.scan job', () => {
     expect(notifications[0]).toMatchObject({ level: 'success', title: 'Documents scanned' });
     // The row's address is still the scan's own conversation.
     expect(notifications[0]!.data).toMatchObject({ runId: SCAN_RUN_ID });
+  });
+
+  it('on Claude Code hands the scan a computer and has it compare facts; in API mode it pairs', async () => {
+    const asked: Array<Pick<WorkspaceContextScanOptions, 'computer' | 'conflictMethod'>> = [];
+    for (const mode of ['api', 'claude-code'] as const) {
+      await runScan(scanResult(), {
+        deps: {
+          startLlm: async () => ({ ...testLlm, mode }),
+          runScan: async (options) => {
+            asked.push({ computer: options.computer, conflictMethod: options.conflictMethod });
+            return scanResult();
+          },
+        },
+      });
+    }
+    expect(asked).toEqual([
+      { computer: undefined, conflictMethod: undefined },
+      { computer: true, conflictMethod: 'facts' },
+    ]);
   });
 
   it('says so when the workspace has an open conflict', async () => {
