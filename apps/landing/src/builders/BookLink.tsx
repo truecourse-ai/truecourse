@@ -4,11 +4,11 @@ import { trackEvent } from '@/lib/posthog';
 export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/hire-you-ai-cto';
 
 /** Where on the /builders page the click happened, so placements can be compared. */
-export type BookPlacement = 'header' | 'hero' | 'after-week' | 'after-jobs' | 'after-setup' | 'cta';
+export type BookPlacement = 'header' | 'hero' | 'after-evening' | 'after-jobs' | 'pricing' | 'cta';
 
 /**
- * Opens the meeting booking page in a new tab, and records the click as
- * `talk_to_us_clicked` with its placement.
+ * Opens the app checkup booking page in a new tab, and records the click as
+ * `book_checkup_clicked` with its placement.
  */
 export function BookLink({
   placement,
@@ -25,7 +25,7 @@ export function BookLink({
       href={BOOKING_URL}
       target="_blank"
       rel="noreferrer"
-      onClick={() => trackEvent('talk_to_us_clicked', { placement, page: 'builders' })}
+      onClick={() => trackEvent('book_checkup_clicked', { placement, page: 'builders' })}
     >
       {children}
     </a>

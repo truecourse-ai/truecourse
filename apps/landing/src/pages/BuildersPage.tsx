@@ -9,22 +9,24 @@ import { Voyage } from '@/components/Voyage';
 import { BookLink } from '@/builders/BookLink';
 import type { BookPlacement } from '@/builders/BookLink';
 import { Who } from '@/builders/Who';
+import { Check } from '@/builders/icons';
+import { BuiltWith } from '@/builders/BuiltWith';
 import { Waitlist } from '@/builders/Waitlist';
 import { useSectionViews } from '@/builders/useSectionViews';
 import { MorningReport } from '@/builders/scenes/MorningReport';
-import { WholeTeam } from '@/builders/scenes/WholeTeam';
-import { WeekScene } from '@/builders/scenes/WeekScene';
+import { JobsChecklist } from '@/builders/scenes/JobsChecklist';
+import { EveningScene } from '@/builders/scenes/EveningScene';
 import { ReviewScene } from '@/builders/scenes/ReviewScene';
 import { WatchScene } from '@/builders/scenes/WatchScene';
 import { ListenScene } from '@/builders/scenes/ListenScene';
-import { SetupScene } from '@/builders/scenes/SetupScene';
+import { TextScene } from '@/builders/scenes/TextScene';
 import stylesheet from '@/builders/builders.css?url';
 
 /**
  * The AI CTO page, for professionals who build their own apps with AI: a page of
- * its own, outside the main site's header and footer. Its ask is a booked
- * call, with a waitlist for those not ready for one, and it
- * records how far down each visitor reads.
+ * its own, outside the main site's header and footer. Its ask is a paid app
+ * checkup, with a waitlist for those not ready for one, and it records how
+ * far down each visitor reads.
  */
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesheet }];
@@ -33,7 +35,7 @@ export const meta = () =>
   pageMeta({
     title: 'TrueCourse · Your AI CTO',
     description:
-      'For professionals who build their own apps with AI. TrueCourse tests every change like a real user, watches the app overnight, and finds where people struggle.',
+      'An AI CTO for professionals who build their own apps with AI, for $99 a month. Get your evenings and weekends back while it keeps your app working.',
     path: '/builders',
   });
 
@@ -62,9 +64,9 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
 ];
 
 /** The sections whose reach is recorded, top to bottom. */
-const SECTIONS = ['team', 'cto', 'setup', 'who', 'talk'];
+const SECTIONS = ['team', 'cto', 'text', 'who', 'pricing', 'talk'];
 
-/** A banner at the end of a section, asking the reader it has just won over for a call. */
+/** A banner at the end of a section, offering the reader it has just won over an app checkup. */
 function InlineAsk({ say, more, placement }: { say: string; more: string; placement: BookPlacement }) {
   return (
     <Reveal className="bs-ask">
@@ -76,11 +78,19 @@ function InlineAsk({ say, more, placement }: { say: string; more: string; placem
         <p className="bs-ask-more">{more}</p>
       </div>
       <BookLink className="btn btn-primary" placement={placement}>
-        Talk to us
+        Book a $49 checkup
       </BookLink>
     </Reveal>
   );
 }
+
+/** What the monthly plan includes, as the pricing card lists it. */
+const INCLUDED = [
+  'Tests every change before it goes live',
+  'Watches your app day and night, with a fix ready when something breaks',
+  'Shows where people get stuck, ranked by how many it affects',
+  'Reach it by text, any time',
+];
 
 function BuildersHeader() {
   const [scrolled, setScrolled] = useState(false);
@@ -100,11 +110,11 @@ function BuildersHeader() {
         </a>
         <nav className="nav-links">
           <a href="#cto">What it does</a>
-          <a href="#setup">Setup</a>
           <a href="#who">Who it's for</a>
+          <a href="#pricing">Pricing</a>
         </nav>
         <BookLink className="btn btn-primary btn-sm" placement="header">
-          Talk to us
+          Book a $49 checkup
         </BookLink>
       </div>
     </header>
@@ -129,12 +139,15 @@ export default function BuildersPage() {
                 Your AI CTO
               </Reveal>
               <Reveal as="p" className="sub" delay={140} rise>
-                You build the product. It catches bugs before users do, watches the app overnight, and finds
-                where people struggle.
+                Get your evenings and weekends back. It keeps your app working while you focus on your
+                business and the people you care about.
+              </Reveal>
+              <Reveal as="p" className="bs-price" delay={180} rise>
+                $99 a month. Less than one hour of a developer's time.
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
-                  Talk to us
+                  Book a $49 app checkup
                 </BookLink>
                 <a className="btn" href="#cto">
                   See what it does
@@ -151,23 +164,20 @@ export default function BuildersPage() {
           </div>
         </section>
 
+        <BuiltWith />
+
         <section className="band" id="team">
           <div className="wrap">
             <Reveal className="bs-center">
               <p className="kicker">The problem</p>
-              <h2 className="section-h">Building alone, some jobs never get done</h2>
-              <p className="section-sub">
-                One person builds the app and puts it live. Nobody else tests it, watches it at night or hears
-                from its users.
-              </p>
+              <h2 className="section-h">You hired yourself for one job. The app needs four</h2>
             </Reveal>
-            <Reveal className="bs-team-scene">
-              <WholeTeam />
-            </Reveal>
-            <WeekScene>
-              <p className="bs-week-lead">A normal week, building alone</p>
-            </WeekScene>
-            <InlineAsk say="Sound like your week?" more="Tell us what keeps breaking. 15 minutes, no slides." placement="after-week" />
+            <JobsChecklist />
+            <EveningScene>
+              <h3 className="bs-evening-lead">A Saturday evening, building alone</h3>
+              <p>Your phone does not stop, and none of it can wait until Monday.</p>
+            </EveningScene>
+            <InlineAsk say="Sound like your evenings?" more="Start with a 30-minute app checkup. $49, credited to your first month." placement="after-evening" />
           </div>
         </section>
 
@@ -188,19 +198,37 @@ export default function BuildersPage() {
                 </div>
               ))}
             </div>
-            <InlineAsk say="Want this for your app?" more="Tell us what it should catch first. 15 minutes, no slides." placement="after-jobs" />
+            <InlineAsk say="Want this for your app?" more="Book an app checkup and find out what your app actually needs." placement="after-jobs" />
           </div>
         </section>
 
-        <section className="band" id="setup">
-          <div className="wrap">
-            <SetupScene>
-              <div className="bs-center">
-                <h2 className="section-h">Up and running in minutes</h2>
-                <p className="section-sub">It starts working right away.</p>
-              </div>
-            </SetupScene>
-            <InlineAsk say="Ready to stop being the whole team?" more="Book 15 minutes and tell us about your app." placement="after-setup" />
+        <section className="band" id="text">
+          <div className="wrap bs-text-row">
+            <Reveal className="bs-text-copy">
+              <p className="kicker">By text, day and night</p>
+              <h2 className="section-h">One text away, any time</h2>
+              <p className="section-sub">
+                The AI CTO texts you when something needs you, answers what you ask, and does what you tell it.
+                The dashboard is there when you want the full picture.
+              </p>
+              <ul className="bs-text-kinds">
+                <li>
+                  <b>Alerts</b>
+                  <span>Checkout broke at 2 AM. I have a fix ready, want me to put it in?</span>
+                </li>
+                <li>
+                  <b>Questions</b>
+                  <span>What are users stuck on this week?</span>
+                </li>
+                <li>
+                  <b>Commands</b>
+                  <span>Fix the Export button, and put it live when it works.</span>
+                </li>
+              </ul>
+            </Reveal>
+            <Reveal className="bs-text-phone">
+              <TextScene />
+            </Reveal>
           </div>
         </section>
 
@@ -209,8 +237,8 @@ export default function BuildersPage() {
             <Reveal className="bs-center">
               <h2 className="section-h">Built for professionals who build with AI</h2>
               <p className="section-sub">
-                Accountants, lawyers, consultants and more, with code written by AI. An internal tool for the firm, a portal for
-                clients, or a SaaS of their own. Keeping it working should not take an engineering team.
+                Whatever your field and whatever you built with AI. An internal tool for the firm, a portal for
+                clients, or a SaaS of your own. Keeping it working should not take an engineering team.
               </p>
             </Reveal>
           </div>
@@ -219,15 +247,54 @@ export default function BuildersPage() {
           </Reveal>
         </section>
 
+        <section className="band" id="pricing">
+          <div className="wrap">
+            <Reveal className="bs-center">
+              <h2 className="section-h">One plan, everything included</h2>
+            </Reveal>
+            <Reveal className="bs-plan">
+              <div className="bs-plan-head">
+                <b>AI CTO</b>
+                <p className="bs-plan-price">
+                  $99<span>a month</span>
+                </p>
+                <p className="bs-muted">Less than one hour of a developer's time.</p>
+              </div>
+              <ul className="bs-plan-list">
+                {INCLUDED.map((line) => (
+                  <li key={line}>
+                    <span className="bs-glyph">
+                      <Check />
+                    </span>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+              <div className="bs-plan-start">
+                <b>Start with a $49 app checkup</b>
+                <p>
+                  We look at your app and how you run it, then send you a plan for what you need. Credited to your
+                  first month.
+                </p>
+                <BookLink className="btn btn-primary" placement="pricing">
+                  Book a $49 checkup
+                </BookLink>
+                <span className="bs-muted">Cancel anytime.</span>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
         <section className="cta" id="talk">
           <div className="wrap">
             <h2>Hire your AI CTO</h2>
             <p className="bs-cta-say">
-              A 15-minute call about your app and what keeps breaking. No slides.
+              Start with a 30-minute app checkup. We look at your app and how you run it, then send you a short
+              plan for what you actually need. $49, credited to your first month. After that, $99 a month.
             </p>
             <div className="cta-row">
               <BookLink className="btn btn-primary" placement="cta">
-                Talk to us
+                Book a $49 app checkup
               </BookLink>
             </div>
             <Waitlist />
