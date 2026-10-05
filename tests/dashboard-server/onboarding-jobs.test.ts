@@ -1075,6 +1075,107 @@ describe('the guard generate job', () => {
     expect(fs.existsSync(clone)).toBe(false);
   }, 60_000);
 
+  it('stores how a product-world generate\'s tests ran at the commit as a run of it, beside the tests', async () => {
+    const STAGE_RUN = '2026-03-05T00-00-00Z_stage1';
+    const PICTURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe]);
+    const moved = `.truecourse/guard/evidence/${STAGE_RUN}/export-invoices`;
+    const record = (flowId: string, commit: string): FlowTestsFile['tests'][number] => ({
+      flowId,
+      flowFingerprint: `fp-${flowId}`,
+      status: 'passing',
+      file: `${flowId}.spec.ts`,
+      summary: `the ${flowId} test`,
+      run: { ranAt: '2026-02-02T00:00:00.000Z', durationMs: 900, steps: [], commit },
+    });
+    const fetched: string[] = [];
+    setWorkTreeProvider('github', async () => {
+      fs.rmSync(clone, { recursive: true, force: true });
+      fs.cpSync(FIXTURE, clone, { recursive: true });
+      git(clone, 'init', '--initial-branch=main');
+      git(clone, 'config', 'user.name', 'Test');
+      git(clone, 'config', 'user.email', 'test@example.com');
+      git(clone, 'add', '-A');
+      git(clone, 'commit', '-m', 'one');
+      return {
+        dir: clone,
+        dispose: () => fs.rmSync(clone, { recursive: true, force: true }),
+        fetchCommit: async (commit) => {
+          fetched.push(commit);
+          return true;
+        },
+      };
+    });
+    let world: { commit?: string | null } | undefined;
+    generateImpl = async (repoRoot, options) => {
+      world = options?.productWorld;
+      // A moved test's session diffs against the commit the test was accepted on.
+      expect(await options?.productWorld?.fetchCommit?.('old111')).toBe(true);
+      const tests = [record('see-invoices', 'old111'), record('export-invoices', 'old111')];
+      fs.mkdirSync(flowTestsDir(repoRoot), { recursive: true });
+      fs.writeFileSync(flowTestsIndexPath(repoRoot), JSON.stringify({ version: 1, generatedAt: '2026-03-05T00:00:00.000Z', tests }, null, 2) + '\n');
+      for (const test of tests) fs.writeFileSync(path.join(flowTestsDir(repoRoot), test.file!), `// ${test.flowId}\n`);
+      fs.mkdirSync(path.join(repoRoot, moved), { recursive: true });
+      fs.writeFileSync(path.join(repoRoot, moved, 'step-1.png'), PICTURE);
+      writeCloneGuardResult(repoRoot, { ...okReport([]), generatedAt: '2026-03-05T00:00:00Z' });
+      const results = [
+        // Held: the rerun, with no evidence of its own.
+        { flowId: 'see-invoices', file: 'see-invoices.spec.ts', authored: 'passing' as const, outcome: 'pass' as const, run: { ranAt: '2026-03-05T00:00:00Z', durationMs: 800, steps: [], commit: world?.commit ?? undefined } },
+        // Moved, and no session settled it: the rerun disagrees with the record.
+        { flowId: 'export-invoices', file: 'export-invoices.spec.ts', authored: 'passing' as const, outcome: 'fail' as const, run: { ranAt: '2026-03-05T00:00:00Z', durationMs: 900, steps: [], error: 'no export', evidencePath: moved } },
+      ];
+      return {
+        guard: { ...okReport([]), flows: { settled: 0, total: 0 } },
+        flowTests: {
+          status: 'ok',
+          tests,
+          authored: 1,
+          unsettled: [{ flowId: 'export-invoices', reason: 'budget exhausted' }],
+          run: { runId: STAGE_RUN, ranAt: '2026-03-05T00:00:00Z', results },
+          moved: [{ flowId: 'export-invoices', reason: 'moved', signature: 'no export', settled: 'unsettled' }],
+          judged: { read: 0, flagged: 0, unavailable: 0 },
+          spent: { sessions: 1, turns: 3, tokens: 100, costUsd: 0 },
+        },
+        flowTestRun: {
+          run: { runId: STAGE_RUN, ranAt: '2026-03-05T00:00:00Z', branch: 'main', commit: world?.commit ?? null, recipeFingerprint: 'product-world' },
+          summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
+          scenarios: [],
+          sections: [],
+          flowTests: results,
+        },
+      } as unknown as Awaited<ReturnType<GenerateEngine>>;
+    };
+    generateLlm = { mode: 'claude-code', driver: () => forbiddenDriver('generation is stubbed in this test') };
+    await saveSetupBundle();
+
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-generate');
+    expect(job?.error).toBeNull();
+    expect(job).toMatchObject({ status: 'succeeded', result: { status: 'tests-written', written: 2 } });
+    // The engine was told the commit it runs on, and how to reach an earlier one.
+    const baseline = await readGuardBaselineCommit(REPO);
+    expect(world?.commit).toBe(baseline);
+    expect(fetched).toEqual(['old111']);
+
+    // The tests are the set; how they ran here is a run of this commit.
+    expect(await readScenarioFile(REPO, '.truecourse/scenarios/tests/tests.json')).toContain('"export-invoices"');
+    const latest = await readGuardLatest(REPO);
+    expect(latest?.run).toMatchObject({ runId: STAGE_RUN, commit: baseline, origin: 'hosted' });
+    expect(latest?.flowTests?.map((t) => [t.flowId, t.authored, t.outcome])).toEqual([
+      ['see-invoices', 'passing', 'pass'],
+      ['export-invoices', 'passing', 'fail'],
+    ]);
+    expect(await new PgGuardStore(db).readGuardEvidenceBytesAt(REPO, moved, 'step-1.png')).toEqual(PICTURE);
+
+    const notes = await new NotificationStore(db).listForOrg(ORG);
+    expect(notes.map((n) => [n.level, n.title, n.body])).toEqual([
+      ['success', 'Flow tests written', '2 tests for 2 flows: 2 passing, 0 failing, 0 blocked, 1 unsettled.'],
+    ]);
+    // Running stored tests is not a link of this chain.
+    expect(enqueued).toEqual(['repo.guard-generate']);
+  }, 60_000);
+
   it('chains the baseline run once the scenario set is stored', async () => {
     await saveSetupBundle();
 

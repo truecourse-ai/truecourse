@@ -235,20 +235,24 @@ export async function persistGuardRun(
 }
 
 /**
- * Lift a run of the stored flow tests out of `treeDir` into the store: the
- * snapshot as a run of `ref`'s scope, then each test's evidence (its step
- * pictures and session video), which attaches to that run row. No coverage
- * summary is written, so the run stays out of Home's trend: a summary derives
- * a flow's word from its scenarios and its authored test, never from this
- * run's outcomes, and would not describe it.
+ * Lift a run of flow tests out of `treeDir` into the store: the snapshot as a
+ * run of `ref`'s scope, then each test's evidence (its step pictures and
+ * session video), which attaches to that run row. A test whose run kept no
+ * evidence has none stored: it held, and what it showed is what its accepted
+ * run shows. `provenance` is the generate that left the run; the run job's
+ * own opens no session and runs on no model. No coverage summary is written,
+ * so the run stays out of Home's trend: a summary derives a flow's word from
+ * its scenarios and its authored test, never from this run's outcomes, and
+ * would not describe it.
  */
-export async function persistFlowTestRun(ref: RepoRef, treeDir: string, run: GuardLatest): Promise<void> {
+export async function persistFlowTestRun(
+  ref: RepoRef,
+  treeDir: string,
+  run: GuardLatest,
+  provenance: VersionProvenance = { producedByRun: null, model: null },
+): Promise<void> {
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
-  // A run of stored tests opens no session and runs on no model.
-  await writeGuardLatest(ref.repoKey, latest, {
-    scope: ref.scope,
-    provenance: { producedByRun: null, model: null },
-  });
+  await writeGuardLatest(ref.repoKey, latest, { scope: ref.scope, provenance });
   for (const test of latest.flowTests ?? []) {
     if (!test.run.evidencePath) continue;
     const files = collectEvidenceFiles(treeDir, test.run.evidencePath);

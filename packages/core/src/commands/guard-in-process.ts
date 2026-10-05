@@ -15,9 +15,11 @@
  */
 
 import { composeProjectName } from '@truecourse/guard-generator';
-import { tallyFlowTestRun, type FlowTestStatus } from '@truecourse/shared';
+import { tallyFlowTestRun, type FlowTestStatus, type GuardLatest } from '@truecourse/shared';
 import {
+  FLOW_TEST_FIDELITY_SESSION_KIND,
   FLOW_TEST_SESSION_KIND,
+  flowTestRunLatest,
   runFlowTestStage,
   runStoredFlowTests,
   type FlowTestRunOutcome,
@@ -209,7 +211,7 @@ const WORLD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   extract: [CLAIM_DIFF_SESSION_KIND, EXTRACT_SESSION_KIND],
   flows: [FLOWS_SESSION_KIND],
   world: [],
-  author: [FLOW_TEST_SESSION_KIND],
+  author: [FLOW_TEST_SESSION_KIND, FLOW_TEST_FIDELITY_SESSION_KIND],
 };
 
 /**
@@ -234,8 +236,14 @@ export interface GuardGenerateInProcessOptions {
    * it. No recipe is read, no interface is mapped and no scenario is authored. `worldKey` is the world's identity on
    * this host, the same one setup proved the scripts under. The checklist is
    * {@link WORLD_GENERATE_STEPS}. Needs the Claude Code backend.
+   *
+   * Every test the repository already has is run again at this commit, and one
+   * that moved is opened again. `commit` is the commit the tree is at, which an
+   * accepted status and the stage's run are stamped with; `fetchCommit` brings
+   * the commit a moved test was accepted on into the tree, so its session can
+   * diff against it.
    */
-  productWorld?: { worldKey?: string };
+  productWorld?: { worldKey?: string; commit?: string | null; fetchCommit?: (commit: string) => Promise<boolean> };
   /** Restore this interrupted run's completed stages without repeating their LLM work. */
   resume?: GuardGenerateResume;
   /**
@@ -352,6 +360,12 @@ export interface GuardGenerateInProcessResult {
   guard: GuardGenerateResult;
   /** What the flow-test stage did, on a product-world generate that reached it. */
   flowTests?: FlowTestStageResult;
+  /**
+   * How the repository's flow tests ran at this commit, as a run of it: the
+   * kept tests' rerun, and the accepted run of each test written or repaired
+   * here. Absent when the stage ran no test.
+   */
+  flowTestRun?: GuardLatest;
   /**
    * The sessions-store scratch dir this run used, under the runtime directory —
    * what a stepwise run is inspected through. The record exists from the first
@@ -766,9 +780,16 @@ export async function guardGenerateInProcess(
         runId: run.runId,
         acquire: acquireSessionContext,
         ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.productWorld.commit ? { commit: options.productWorld.commit } : {}),
+        ...(options.productWorld.fetchCommit ? { fetchCommit: options.productWorld.fetchCommit } : {}),
         onPhase: (phase) => {
           if (phase === 'tests') advanceTo('author');
-          else tracker?.detail('world', phase === 'build' ? 'building the checkout' : 'starting the product');
+          else {
+            tracker?.detail(
+              'world',
+              phase === 'build' ? 'building the checkout' : phase === 'up' ? 'starting the product' : 'running the kept tests',
+            );
+          }
         },
         onProgress: ({ done, total, passing, failing, blocked, unsettled }) =>
           tracker?.detail(
@@ -784,18 +805,53 @@ export async function guardGenerateInProcess(
         finishRun('failed', { error: { message: reason, kind: 'world' } });
         return { guard, flowTests, sessionsRunDir: run.dir };
       }
+      if (flowTests.status === 'rerun-failed') {
+        const reason = `the kept tests could not be run: ${flowTests.reason}`;
+        tracker?.error('world', firstLine(reason) ?? 'the kept tests could not be run');
+        finishRun('failed', { error: { message: reason, kind: 'world' } });
+        return { guard, flowTests, sessionsRunDir: run.dir };
+      }
       if (flowTests.status === 'no-flows') {
         for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i], 'no flows to test');
       } else {
         const count = (status: FlowTestStatus): number => flowTests.tests.filter((t) => t.status === status).length;
-        for (const { flowId, reason } of flowTests.unsettled) tracker?.fact('author', `${flowId}: no test, ${reason}`);
-        tracker?.done('world');
+        const { moved, judged } = flowTests;
+        // How the kept tests stood at this commit, and the groups one change
+        // moved the same way: the sizes say whether a change is moving many
+        // tests at once.
+        const signatures = new Map<string, typeof moved>();
+        for (const m of moved) signatures.set(m.signature, [...(signatures.get(m.signature) ?? []), m]);
+        for (const [signature, group] of signatures) {
+          tracker?.fact(
+            'world',
+            `${group.length} kept test${group.length === 1 ? '' : 's'} moved on "${signature}": ${group.map((m) => `${m.flowId} (${m.reason}, ${m.settled})`).join(', ')}`,
+          );
+        }
+        if (judged.read > 0) {
+          tracker?.fact(
+            'world',
+            `${judged.read} kept test${judged.read === 1 ? '' : 's'} read against the documents: ${judged.flagged} flagged${judged.unavailable ? `, ${judged.unavailable} without a verdict` : ''}`,
+          );
+        }
+        for (const { flowId, reason } of flowTests.unsettled) tracker?.fact('author', `${flowId}: unsettled, ${reason}`);
+        tracker?.done('world', moved.length > 0 ? `${moved.length} kept test${moved.length === 1 ? '' : 's'} moved` : undefined);
         tracker?.done(
           'author',
-          `${flowTests.tests.length} flow${flowTests.tests.length === 1 ? '' : 's'} · ${count('passing')} passing · ${count('failing')} failing · ${count('blocked')} blocked · ${flowTests.authored} written this run`,
+          `${flowTests.tests.length} flow${flowTests.tests.length === 1 ? '' : 's'} · ${count('passing')} passing · ${count('failing')} failing · ${count('blocked')} blocked · ${flowTests.authored} opened this run`,
         );
       }
       if (!options.sessionRun) finishRun('completed');
+      if (flowTests.status === 'ok' && flowTests.run && flowTests.run.results.length > 0) {
+        const { branch, commit } = await resolveGuardRepoRef(repoRoot);
+        const flowTestRun = flowTestRunLatest({
+          runId: flowTests.run.runId,
+          ranAt: flowTests.run.ranAt,
+          branch,
+          commit: options.productWorld.commit ?? commit,
+          flowTests: flowTests.run.results,
+        });
+        return { guard, flowTests, flowTestRun, sessionsRunDir: run.dir };
+      }
       return { guard, flowTests, sessionsRunDir: run.dir };
     }
 

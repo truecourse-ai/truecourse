@@ -168,10 +168,12 @@ export function createGithubConnection(
             403,
           );
         }
-        return createRunClone(repoKey, await tokenFor(via.installationId), {
+        const { installationId } = via;
+        return createRunClone(repoKey, await tokenFor(installationId), {
           workspaceOrgId: via.workspaceOrgId,
           defaultBranch: via.defaultBranch ?? null,
           commitSha: via.commitSha ?? null,
+          freshToken: () => tokenFor(installationId),
         });
       }
       const link = await repos.getRepo(repoKey);
@@ -183,6 +185,7 @@ export function createGithubConnection(
         workspaceOrgId: link.workspaceOrgId,
         defaultBranch: link.defaultBranch,
         commitSha: via?.commitSha ?? null,
+        freshToken: () => tokenFor(installationId),
       });
     });
   setWorkTreeProvider('github', workTree);
