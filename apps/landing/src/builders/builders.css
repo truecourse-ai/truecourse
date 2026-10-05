@@ -1673,24 +1673,27 @@ section.band:has(.bs-ask) {
 }
 
 /* An iPhone in Messages, so the thread reads as text messages. */
+/* A thin titanium edge around a slim black bezel, as on a current iPhone. */
 .bs-iphone {
   position: absolute;
-  inset: 0;
-  border-radius: 58px;
-  padding: 11px;
-  background: linear-gradient(145deg, #3a3d42, #1c1e22 40%, #2b2e33);
+  inset: 4px;
+  border-radius: 56px;
+  padding: 9px;
+  background: #0b0b0c;
   box-shadow:
-    inset 0 0 0 1.5px #55595f,
-    0 40px 80px -40px rgba(17, 24, 39, 0.55);
+    0 0 0 2px #c9cbce,
+    0 0 0 4px #9a9da2,
+    0 0 0 4.5px rgba(0, 0, 0, 0.25),
+    0 40px 80px -36px rgba(17, 24, 39, 0.5);
 }
 .bs-iphone-button {
   position: absolute;
-  width: 4px;
+  width: 3px;
   border-radius: 2px;
-  background: #2b2e33;
+  background: linear-gradient(90deg, #8f9296, #c9cbce);
 }
 .bs-iphone-button.left {
-  left: -3px;
+  left: -7px;
 }
 .bs-iphone-button.left.one {
   top: 150px;
@@ -1701,7 +1704,7 @@ section.band:has(.bs-ask) {
   height: 56px;
 }
 .bs-iphone-button.right {
-  right: -3px;
+  right: -7px;
   top: 190px;
   height: 88px;
 }
@@ -1710,7 +1713,7 @@ section.band:has(.bs-ask) {
   height: 100%;
   display: flex;
   flex-direction: column;
-  border-radius: 48px;
+  border-radius: 47px;
   background: #fff;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', var(--font-ui);
@@ -1798,17 +1801,18 @@ section.band:has(.bs-ask) {
   align-items: center;
   gap: 4px;
 }
+/* The monogram iOS shows for a contact without a photo. */
 .bs-ios-photo {
   display: grid;
   place-items: center;
   width: 50px;
   height: 50px;
   border-radius: 50%;
-  background: linear-gradient(180deg, #4b5058, #24272c);
-}
-.bs-ios-photo img {
-  width: 30px;
-  height: 30px;
+  background: linear-gradient(180deg, #a5aab6, #858a97);
+  color: #fff;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 .bs-ios-name {
   font-size: 12px;

@@ -1,6 +1,5 @@
 import { Stage } from '../Stage';
 import { easeOut, enter, span, useClock } from '../motion';
-import { Mark } from '../icons';
 
 interface Text {
   at: number;
@@ -92,9 +91,7 @@ export function TextScene() {
                 </svg>
               </span>
               <span className="bs-ios-contact">
-                <span className="bs-ios-photo">
-                  <Mark />
-                </span>
+                <span className="bs-ios-photo">AI</span>
                 <span className="bs-ios-name">AI CTO ›</span>
               </span>
             </div>
