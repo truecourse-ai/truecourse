@@ -13,7 +13,7 @@ import { BuiltWith } from '@/builders/BuiltWith';
 import { Waitlist } from '@/builders/Waitlist';
 import { useSectionViews } from '@/builders/useSectionViews';
 import { MorningReport } from '@/builders/scenes/MorningReport';
-import { WholeTeam } from '@/builders/scenes/WholeTeam';
+import { HoursBar, JobsChecklist } from '@/builders/scenes/ProblemIntros';
 import { EveningScene } from '@/builders/scenes/EveningScene';
 import { ReviewScene } from '@/builders/scenes/ReviewScene';
 import { WatchScene } from '@/builders/scenes/WatchScene';
@@ -158,17 +158,35 @@ export default function BuildersPage() {
 
         <section className="band" id="team">
           <div className="wrap">
-            <Reveal className="bs-center">
-              <p className="kicker">The problem</p>
-              <h2 className="section-h">Building alone, some jobs never get done</h2>
-              <p className="section-sub">
-                One person builds the app and puts it live. Nobody else tests it, watches it at night or hears
-                from its users.
-              </p>
+            {/* Three ways to open the problem section, one under another for choosing one. */}
+            <Reveal className="bs-option">
+              <span className="bs-option-label">Option 1, the evening leads</span>
+              <div className="bs-center">
+                <p className="kicker">The problem</p>
+                <h2 className="section-h">You built it. Now it needs you every evening</h2>
+                <p className="section-sub">
+                  Nobody else tests your changes, watches the app at night or hears from its users. So it all lands
+                  on your phone.
+                </p>
+              </div>
             </Reveal>
-            <Reveal className="bs-team-scene">
-              <WholeTeam />
+            <Reveal className="bs-option">
+              <span className="bs-option-label">Option 2, where the hours go</span>
+              <div className="bs-center">
+                <p className="kicker">The problem</p>
+                <h2 className="section-h">You meant to build. You ended up on call</h2>
+              </div>
+              <HoursBar />
             </Reveal>
+            <Reveal className="bs-option">
+              <span className="bs-option-label">Option 3, one job hired, four needed</span>
+              <div className="bs-center">
+                <p className="kicker">The problem</p>
+                <h2 className="section-h">You hired yourself for one job. The app needs four</h2>
+              </div>
+              <JobsChecklist />
+            </Reveal>
+            <span className="bs-option-label bs-option-shared">All three, then the evening</span>
             <EveningScene>
               <h3 className="bs-evening-lead">A Saturday evening, building alone</h3>
               <p>Your phone does not stop, and none of it can wait until Monday.</p>

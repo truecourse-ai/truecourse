@@ -21,8 +21,10 @@ interface Note {
 const NOTES: Note[] = [
   { app: 'appstore', time: '6:12 PM', title: 'New review ★☆☆☆☆', body: '"Invites never arrive."', pain: 0 },
   { app: 'mail', time: '6:40 PM', title: 'Northwind', body: 'Is the app down??', pain: 1 },
+  { app: 'stripe', time: '7:05 PM', title: 'Subscription cancelled', body: 'Northwind, $79 a month', pain: 3 },
   { app: 'stripe', time: '7:22 PM', title: '31 checkouts abandoned today', body: 'Most stopped at the payment step.', pain: 2 },
   { app: 'mail', time: '7:48 PM', title: 'Acme Dental', body: "Still can't log in. Third time this week.", pain: 1 },
+  { app: 'stripe', time: '8:12 PM', title: 'Subscription cancelled', body: 'Bloom Studio, $29 a month', pain: 3 },
   { app: 'stripe', time: '8:30 PM', title: 'Subscription cancelled', body: 'Acme Dental, $49 a month', pain: 3 },
 ];
 
@@ -33,7 +35,7 @@ const APP: Record<App, { name: string; icon: ReactNode }> = {
 };
 
 /** How far apart the notifications land. */
-const EACH = 1.1;
+const EACH = 0.9;
 const LENGTH = NOTES.length * EACH + 0.6;
 
 /**
@@ -63,7 +65,7 @@ export function EveningScene({ children }: { children?: ReactNode }) {
           </ul>
         </div>
         <div className="bs-evening-phone">
-          <Stage width={380} height={800} label="A phone's lock screen on a Saturday evening. A one-star review, customers asking if the app is down and 31 abandoned checkouts arrive one after another, and the evening ends with a cancelled subscription.">
+          <Stage width={380} height={800} label="A phone's lock screen on a Saturday evening. A one-star review, customers asking if the app is down and 31 abandoned checkouts arrive one after another, and three customers cancel their subscriptions over the evening.">
             <div className="bs-iphone">
               <span className="bs-iphone-button left one" />
               <span className="bs-iphone-button left two" />
