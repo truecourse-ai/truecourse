@@ -1163,6 +1163,14 @@ section.band:has(.bs-ask) {
     justify-content: center;
   }
 }
+.bs-backing.large {
+  margin-top: 36px;
+  gap: 12px;
+  font-size: 16px;
+}
+.bs-backing.large img {
+  height: 24px;
+}
 .bs-waitlist {
   max-width: 460px;
   margin: 30px auto 0;
@@ -1762,7 +1770,8 @@ section.band:has(.bs-ask) {
   gap: 12px;
 }
 .bs-track-stats b {
-  min-width: 6.2ch;
+  flex: none;
+  min-width: 5.5em;
   font-size: clamp(30px, 3.2vw, 40px);
   font-weight: 650;
   letter-spacing: -0.03em;

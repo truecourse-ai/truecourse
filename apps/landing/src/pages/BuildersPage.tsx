@@ -293,6 +293,10 @@ export default function BuildersPage() {
                 working is what your AI CTO does for you.
               </p>
               <TrackStats />
+              <p className="bs-backing large">
+                <span>Backed by</span>
+                <img src="/skydeck.svg" alt="Berkeley SkyDeck" />
+              </p>
             </Reveal>
             <TrackRecord />
           </div>
