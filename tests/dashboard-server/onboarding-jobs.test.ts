@@ -42,10 +42,12 @@ import type { JobView } from '@truecourse/shared';
 import {
   setGuardStore,
   loadGuardSetupBundle,
+  listGuardVersions,
   loadScenarios,
   readGuardBaselineCommit,
   readGuardLatest,
   readGuardResult,
+  readScenarioFile,
   saveGuardSetupBundle,
   saveScenarios,
   writeGuardDecisions,
@@ -80,7 +82,8 @@ import {
   scenariosDir,
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
-import { GUARD_FORMAT_VERSION, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
+import { GUARD_FORMAT_VERSION, type FlowTestsFile, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
+import { flowTestsDir, flowTestsIndexPath, worldScriptPath } from '@truecourse/shared/work-tree';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
 import { captureJobStarted } from '../../apps/dashboard/server/src/observability/posthog';
 import type { RepoGuardGenerateTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-generate';
@@ -1583,9 +1586,15 @@ describe('the guard run job', () => {
       { '.truecourse/scenarios/recipe.json': JSON.stringify(RECIPE, null, 2) + '\n' },
     );
 
+  type FlowTestsEngine = NonNullable<RepoGuardRunTaskDeps['runFlowTests']>;
+  let flowTestsImpl: FlowTestsEngine;
+
   beforeEach(async () => {
     seen = [];
     runImpl = failingRun;
+    flowTestsImpl = async () => {
+      throw new Error('a set with no flow tests never runs them');
+    };
     installWorkTree();
     jobs = createServerJobs({
       db,
@@ -1595,9 +1604,172 @@ describe('the guard run job', () => {
       guardRun: {
         startLlm: async () => testLlm,
         runGuard: (repoRoot, options) => runImpl(repoRoot, options),
+        runFlowTests: (repoRoot, options) => flowTestsImpl(repoRoot, options),
       },
     });
     await jobs.start();
+  });
+
+  describe('over a set that carries flow tests', () => {
+    const FLOW_RUN_ID = '2026-03-04T00-00-00Z_flows1';
+    const INDEX: FlowTestsFile = {
+      version: 1,
+      generatedAt: '2026-02-02T00:00:00.000Z',
+      tests: [
+        {
+          flowId: 'see-invoices',
+          flowFingerprint: 'fp-see',
+          status: 'passing',
+          file: 'see-invoices.spec.ts',
+          seed: 'see-invoices.seed.ts',
+          summary: 'The invoices page lists invoices.',
+          run: { ranAt: '2026-02-02T00:00:00.000Z', durationMs: 900, steps: [] },
+        },
+        {
+          flowId: 'export-invoices',
+          flowFingerprint: 'fp-export',
+          status: 'failing',
+          file: 'export-invoices.spec.ts',
+          summary: 'The invoices page has no export.',
+          disagreement: { documented: 'billing.md: an export', observed: 'no export control' },
+          run: { ranAt: '2026-02-02T00:00:00.000Z', durationMs: 700, steps: [] },
+        },
+      ],
+    };
+    const WORLD_SCRIPTS = {
+      '.truecourse/world/build.sh': 'echo build\n',
+      '.truecourse/world/up.sh': 'echo up\n',
+      '.truecourse/world/down.sh': 'echo down\n',
+    };
+
+    /** What a product-world generate left: a set of flow tests and nothing else. */
+    async function storeFlowTestSet(): Promise<void> {
+      const dir = makeTmpDir('tc-onboarding-flow-set-');
+      fs.mkdirSync(flowTestsDir(dir), { recursive: true });
+      fs.writeFileSync(flowTestsIndexPath(dir), JSON.stringify(INDEX, null, 2) + '\n');
+      fs.writeFileSync(path.join(flowTestsDir(dir), 'see-invoices.spec.ts'), '// see invoices\n');
+      fs.writeFileSync(path.join(flowTestsDir(dir), 'see-invoices.seed.ts'), '// its seed\n');
+      fs.writeFileSync(path.join(flowTestsDir(dir), 'export-invoices.spec.ts'), '// export invoices\n');
+      const ref = { repoKey: REPO, commitSha: GEN_COMMIT };
+      await saveScenarios(ref, scenariosDir(dir));
+      await writeGuardResult(ref, okReport());
+      await saveGuardSetupBundle({ repoKey: REPO, commitSha: 'setup-commit' }, WORLD_SCRIPTS);
+    }
+
+    /** The run of those tests: the authored-passing one now fails, the authored-failing one passes. */
+    const flowRun = (evidencePath: string): GuardLatest => ({
+      run: { runId: FLOW_RUN_ID, ranAt: '2026-03-04T00:00:00Z', branch: 'main', commit: null, recipeFingerprint: 'product-world' },
+      summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
+      scenarios: [],
+      sections: [],
+      flowTests: [
+        {
+          flowId: 'see-invoices',
+          file: 'see-invoices.spec.ts',
+          authored: 'passing',
+          outcome: 'fail',
+          run: {
+            ranAt: '2026-03-04T00:00:00Z',
+            durationMs: 1200,
+            steps: [{ order: 1, title: 'open invoices', outcome: 'failed', error: 'no heading' }],
+            error: 'no heading',
+            evidencePath,
+          },
+        },
+        {
+          flowId: 'export-invoices',
+          file: 'export-invoices.spec.ts',
+          authored: 'failing',
+          outcome: 'pass',
+          run: { ranAt: '2026-03-04T00:00:00Z', durationMs: 800, steps: [] },
+        },
+      ],
+    });
+
+    it('runs the stored tests instead of scenarios, and stores the run beside what authoring recorded', async () => {
+      await storeFlowTestSet();
+      const found: { files: Record<string, boolean>; worldKey?: string }[] = [];
+      flowTestsImpl = async (repoRoot, options) => {
+        found.push({
+          worldKey: options.worldKey,
+          files: Object.fromEntries(
+            [
+              flowTestsIndexPath(repoRoot),
+              path.join(flowTestsDir(repoRoot), 'see-invoices.spec.ts'),
+              path.join(flowTestsDir(repoRoot), 'see-invoices.seed.ts'),
+              path.join(flowTestsDir(repoRoot), 'export-invoices.spec.ts'),
+              worldScriptPath(repoRoot, 'build'),
+              worldScriptPath(repoRoot, 'up'),
+              worldScriptPath(repoRoot, 'down'),
+            ].map((file) => [path.relative(repoRoot, file), fs.existsSync(file)]),
+          ),
+        });
+        const evidencePath = `.truecourse/guard/evidence/${FLOW_RUN_ID}/see-invoices`;
+        fs.mkdirSync(path.join(repoRoot, evidencePath), { recursive: true });
+        fs.writeFileSync(path.join(repoRoot, evidencePath, 'step-1.png'), PNG);
+        return { status: 'ok', latest: flowRun(evidencePath) };
+      };
+
+      await jobs.enqueueGuardRun(request);
+      await Promise.all(running);
+
+      // The scenario runner was never asked; the tests found everything they need in the clone.
+      expect(seen).toEqual([]);
+      expect(found).toHaveLength(1);
+      expect(found[0]?.worldKey).toBe(`${ORG}/${REPO}`);
+      expect(Object.values(found[0]?.files ?? {})).toEqual([true, true, true, true, true, true, true]);
+
+      const [job] = await jobsOfType('repo.guard-run');
+      expect(job?.error).toBeNull();
+      expect(job).toMatchObject({
+        status: 'succeeded',
+        result: {
+          runId: FLOW_RUN_ID,
+          flowTests: { run: 2, passed: 1, failed: 1, seedFailed: 0, skipped: 0, nowFailing: 1, nowPassing: 1 },
+        },
+      });
+
+      // The run is stored as a run of its own, with each test's outcome and evidence.
+      const latest = await readGuardLatest(REPO);
+      expect(latest?.run).toMatchObject({ runId: FLOW_RUN_ID, origin: 'hosted' });
+      expect(latest?.flowTests?.map((t) => [t.flowId, t.authored, t.outcome])).toEqual([
+        ['see-invoices', 'passing', 'fail'],
+        ['export-invoices', 'failing', 'pass'],
+      ]);
+      const store = new PgGuardStore(db);
+      const dir = `.truecourse/guard/evidence/${FLOW_RUN_ID}/see-invoices`;
+      expect(await store.readGuardEvidenceBytesAt(REPO, dir, 'step-1.png')).toEqual(PNG);
+
+      // What authoring recorded is untouched: no new set, and the index is the one stored.
+      expect(await listGuardVersions(REPO, 'scenarios')).toHaveLength(1);
+      expect(await readScenarioFile(REPO, '.truecourse/scenarios/tests/tests.json')).toBe(JSON.stringify(INDEX, null, 2) + '\n');
+
+      const notes = await new NotificationStore(db).listForOrg(ORG);
+      expect(notes.map((n) => [n.level, n.title, n.body])).toEqual([
+        [
+          'warning',
+          'Flow tests ran, failures to review',
+          '1 of 2 passed, 1 failed, 0 seed failed. 1 now failing, 1 now passing against how they were written.',
+        ],
+      ]);
+    }, 60_000);
+
+    it('fails with what the world script printed when the product does not come up, and stores nothing', async () => {
+      await storeFlowTestSet();
+      flowTestsImpl = async () => ({
+        status: 'world-failed',
+        stage: 'build',
+        reason: 'world/build.sh exited 127:\npnpm: command not found',
+      });
+
+      await jobs.enqueueGuardRun(request);
+      await Promise.all(running);
+
+      const [job] = await jobsOfType('repo.guard-run');
+      expect(job).toMatchObject({ status: 'failed' });
+      expect(job?.error).toBe('The product did not come up (build): world/build.sh exited 127:\npnpm: command not found');
+      expect(await readGuardLatest(REPO)).toBeNull();
+    });
   });
 
   it('refuses a repository with no generated scenarios, and stores nothing', async () => {

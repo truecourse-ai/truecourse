@@ -4,7 +4,7 @@
  * result mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
-export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurrency, runFailureMessage, orderReadBeforeWrite } from './run.js'
+export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurrency, runFailureMessage, orderReadBeforeWrite, buildRunId } from './run.js'
 export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
 // The board — `LATEST.json` as the merged current-state view across runs.

@@ -21,7 +21,8 @@
  * The RUN job reads the same IN half (the baseline set is what it runs) and
  * leaves its own OUT: the run snapshot as the baseline run, and every
  * scenario's evidence bundle — the transcript and, for a browser run, the
- * screenshots and session video, which travel as bytes.
+ * screenshots and session video, which travel as bytes. A run of the set's
+ * flow tests leaves the same two: its snapshot, and each test's pictures.
  *
  * The recipe, the dependency catalog and the interface catalog are NOT moved
  * here: they belong to setup's bundle, which the job materializes over
@@ -230,6 +231,29 @@ export async function persistGuardRun(
     const files = collectEvidenceFiles(treeDir, scenario.evidencePath);
     if (!files) continue;
     await writeGuardEvidence(ref.repoKey, runId, scenario.id, files);
+  }
+}
+
+/**
+ * Lift a run of the stored flow tests out of `treeDir` into the store: the
+ * snapshot as a run of `ref`'s scope, then each test's evidence (its step
+ * pictures and session video), which attaches to that run row. No coverage
+ * summary is written, so the run stays out of Home's trend: a summary derives
+ * a flow's word from its scenarios and its authored test, never from this
+ * run's outcomes, and would not describe it.
+ */
+export async function persistFlowTestRun(ref: RepoRef, treeDir: string, run: GuardLatest): Promise<void> {
+  const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
+  // A run of stored tests opens no session and runs on no model.
+  await writeGuardLatest(ref.repoKey, latest, {
+    scope: ref.scope,
+    provenance: { producedByRun: null, model: null },
+  });
+  for (const test of latest.flowTests ?? []) {
+    if (!test.run.evidencePath) continue;
+    const files = collectEvidenceFiles(treeDir, test.run.evidencePath);
+    if (!files) continue;
+    await writeGuardEvidence(ref.repoKey, latest.run.runId, test.flowId, files);
   }
 }
 

@@ -359,9 +359,10 @@ export function looksWorldMutating(flow: { title: string; milestones: readonly s
  * section planning, interface mapping, realization matching, the build) are not
  * steps either — they run as needed to feed the chosen one.
  */
-/** What the spec side keys on in place of a recipe fingerprint when the product
- *  runs from its world scripts: how it starts is not an input to its claims. */
-const PRODUCT_WORLD_RECIPE_FINGERPRINT = 'product-world'
+/** What stands in for a recipe fingerprint when the product runs from its
+ *  world scripts: the spec side keys on it (how the product starts is not an
+ *  input to its claims), and a run of the flow tests is stamped with it. */
+export const PRODUCT_WORLD_RECIPE_FINGERPRINT = 'product-world'
 
 export const GENERATE_SESSION_STEPS = ['extract', 'flows', 'worker'] as const
 export type GenerateStep = (typeof GENERATE_SESSION_STEPS)[number]

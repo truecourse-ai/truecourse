@@ -119,6 +119,53 @@ export const FlowTestRunSchema = z.object({
 });
 export type FlowTestRun = z.infer<typeof FlowTestRunSchema>;
 
+/**
+ * One flow's test as a run of the stored tests went, beside the status
+ * authoring accepted it on. The record in `tests/tests.json` is never touched
+ * by such a run: this is the run's own account, kept on the run.
+ */
+export const FlowTestRunResultSchema = z.object({
+  flowId: z.string().min(1),
+  /** The spec's file name inside the tests directory. */
+  file: z.string().min(1),
+  /** The status the test was accepted on when it was written. */
+  authored: FlowTestStatusSchema.exclude(['blocked']),
+  outcome: FlowTestResultSchema.shape.outcome,
+  run: FlowTestRunSchema,
+});
+export type FlowTestRunResult = z.infer<typeof FlowTestRunResultSchema>;
+
+/** What a run of the stored tests came to, and where it parted from authoring. */
+export interface FlowTestRunTally {
+  /** Tests run. */
+  run: number;
+  passed: number;
+  failed: number;
+  seedFailed: number;
+  skipped: number;
+  /** Accepted as `passing`, and failed this run. */
+  nowFailing: number;
+  /** Accepted as `failing`, and passed this run. */
+  nowPassing: number;
+}
+
+/**
+ * Count a run's results. A seed that did not hold says nothing about the
+ * product, so it moves neither change count.
+ */
+export function tallyFlowTestRun(results: readonly FlowTestRunResult[]): FlowTestRunTally {
+  const count = (pick: (r: FlowTestRunResult) => boolean): number => results.filter(pick).length;
+  return {
+    run: results.length,
+    passed: count((r) => r.outcome === 'pass'),
+    failed: count((r) => r.outcome === 'fail'),
+    seedFailed: count((r) => r.outcome === 'seed-failed'),
+    skipped: count((r) => r.outcome === 'skipped'),
+    nowFailing: count((r) => r.authored === 'passing' && r.outcome === 'fail'),
+    nowPassing: count((r) => r.authored === 'failing' && r.outcome === 'pass'),
+  };
+}
+
 /** One flow's entry in `tests/tests.json`. */
 export const FlowTestRecordSchema = z.object({
   flowId: z.string().min(1),

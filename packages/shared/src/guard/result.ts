@@ -1,5 +1,6 @@
 import { GuardFailureObservationSchema } from './failure-observation.js'
 import { GuardPreparationEvidenceSchema } from './preparation.js'
+import { FlowTestRunResultSchema } from './flow-tests.js'
 /**
  * Guard run result types — the materialized current state a `guard run` writes to
  * `.truecourse/guard/LATEST.json` and the dashboard reads back.
@@ -367,6 +368,13 @@ export const GuardLatestSchema = z
     summary: GuardSummarySchema,
     scenarios: z.array(GuardScenarioResultSchema),
     sections: z.array(GuardSectionRollupSchema),
+    /**
+     * A run of a repository's stored flow tests: one result per test, each
+     * beside the status it was authored with. Such a run executes no scenario,
+     * so `scenarios` and `sections` are empty and `summary` counts the tests
+     * (a seed that did not hold is an `error`). Absent on a scenario run.
+     */
+    flowTests: z.array(FlowTestRunResultSchema).optional(),
   })
   .strict()
 export type GuardLatest = z.infer<typeof GuardLatestSchema>

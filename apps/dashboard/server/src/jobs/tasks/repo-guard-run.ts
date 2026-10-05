@@ -32,6 +32,15 @@
  * apart from that one annotation, so there is nothing expensive to salvage:
  * the resumed job runs the scenarios again and stores a board that is complete.
  *
+ * A set whose flows are proven by Playwright tests (it carries a tests index)
+ * is run as those tests instead: the product is built and brought up once from
+ * the bundle's world scripts, every test with a spec runs against it, and the
+ * product goes down however that went. The run is stored as a run of its own
+ * whose `flowTests` set each test's outcome beside the status it was written
+ * with; the tests index itself is never rewritten. A world that does not build
+ * or come up fails the job with what its script printed. A pull request's run
+ * stays on scenarios.
+ *
  * A run that carries a pull request is its check's last link: it runs the set
  * the pull request's generate stored, stores the run under the pull request's
  * scope stamped with its number, compares it flow by flow with the base's, and
@@ -48,16 +57,33 @@ import {
   createGuardVisualJudge,
   guardVisualJudgeEnabled,
 } from '@truecourse/core/services/llm/guard-visual-judge';
-import { guardRunInProcess, GUARD_RUN_STEPS } from '@truecourse/core/commands/guard-in-process';
+import {
+  guardFlowTestRunInProcess,
+  guardRunInProcess,
+  readFlowTests,
+  GUARD_RUN_STEPS,
+} from '@truecourse/core/commands/guard-in-process';
 import { buildOutputTail, runFailureMessage, type RunGuardResult } from '@truecourse/guard-runner';
 import { readGuardRunFlowSummaryFromTree } from '@truecourse/core/commands/guard-read';
-import { pullRequestScope, pullRequestWorkspaceScope, type GuardLatest, type GuardSummary } from '@truecourse/shared';
+import {
+  pullRequestScope,
+  pullRequestWorkspaceScope,
+  tallyFlowTestRun,
+  type FlowTestRunTally,
+  type GuardLatest,
+  type GuardSummary,
+} from '@truecourse/shared';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { createUsageMeter, withCredits, type UsageMeter } from '../../services/usage-meter.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
-import { markWorldStateUnknown, materializeStoredGuardState, persistGuardRun } from '../materialize-guard.js';
+import {
+  markWorldStateUnknown,
+  materializeStoredGuardState,
+  persistFlowTestRun,
+  persistGuardRun,
+} from '../materialize-guard.js';
 import {
   buildFailed,
   checkIsOpen,
@@ -83,12 +109,47 @@ export interface GuardRunJobResult {
   repoFullName: string;
   runId: string;
   summary: GuardSummary;
+  /** A run of the flow tests: its counts, and how many moved from how they were written. */
+  flowTests?: FlowTestRunTally;
+}
+
+/** How a run of the flow tests settles the job: its counts on the row, and a notification. */
+function flowTestRunSettled(repoFullName: string, latest: GuardLatest) {
+  const tally = tallyFlowTestRun(latest.flowTests ?? []);
+  const result: GuardRunJobResult = {
+    repoFullName,
+    runId: latest.run.runId,
+    summary: latest.summary,
+    flowTests: tally,
+  };
+  const red = tally.failed + tally.seedFailed;
+  const moved = `${tally.nowFailing} now failing, ${tally.nowPassing} now passing against how they were written.`;
+  const data = { repoFullName, guardRunId: result.runId, summary: latest.summary, flowTests: tally };
+  return {
+    result,
+    notification:
+      red > 0
+        ? {
+            level: 'warning' as const,
+            title: 'Flow tests ran, failures to review',
+            body: `${tally.passed} of ${tally.run} passed, ${tally.failed} failed, ${tally.seedFailed} seed failed. ${moved}`,
+            data,
+          }
+        : {
+            level: 'success' as const,
+            title: 'Flow tests passed',
+            body: `${tally.passed} of ${tally.run} passed. ${moved}`,
+            data,
+          },
+  };
 }
 
 /** The engines the body drives — production wires the real ones. */
 export interface RepoGuardRunTaskDeps {
   startLlm?: (orgId: string, meter?: UsageMeter) => Promise<WorkspaceLlm>;
   runGuard?: typeof guardRunInProcess;
+  /** Runs a set's stored flow tests. */
+  runFlowTests?: typeof guardFlowTestRunInProcess;
   /** The run is the chain's last link, so every settle ends it: see {@link ChainEnd}. */
   onChainEnd?: ChainEnd;
   /** The pull request checks a run carrying one settles. Without it such a run does nothing. */
@@ -114,6 +175,7 @@ export function createRepoGuardRunTask(
 ): JobDefinition<GuardRunJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runGuard = deps.runGuard ?? guardRunInProcess;
+  const runFlowTests = deps.runFlowTests ?? guardFlowTestRunInProcess;
   /** The commit each job cloned, for the settle hook. Cleared as the job settles. */
   const commits = new Map<string, string>();
   /** What a pull request's run decided its check settles on. Same lifetime. */
@@ -197,6 +259,27 @@ export function createRepoGuardRunTask(
         // to what was provided, and the runner reads that from the two overlay files.
         // Never a fork's.
         if (!pr?.fork) await materializeGuardOverlays(repoFullName, tree.dir);
+
+        // A set that carries flow tests is run as its tests. What decides it is
+        // what the set holds, not the workspace's model: running stored tests
+        // needs none.
+        if (!pr && readFlowTests(tree.dir).tests.length > 0) {
+          const outcome = await runFlowTests(tree.dir, {
+            worldKey: `${ctx.payload.workspaceOrgId}/${repoFullName}`,
+            tracker: mirrorTracker(ctx, GUARD_RUN_STEPS),
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+          });
+          if (ctx.signal?.aborted) return { notification: null };
+          if (outcome.status === 'no-tests') {
+            throw new Error(`${repoFullName} has no flow test to run: every flow is blocked.`);
+          }
+          if (outcome.status === 'world-failed') {
+            throw new Error(`The product did not come up (${outcome.stage}): ${outcome.reason}`);
+          }
+          if (outcome.status === 'run-failed') throw new Error(`The flow tests did not run: ${outcome.reason}`);
+          await persistFlowTestRun(ref, tree.dir, outcome.latest);
+          return flowTestRunSettled(repoFullName, outcome.latest);
+        }
 
         // The judge is the only thing here that spends, and it is annotation-only
         // — but a run that could not afford its verdicts is a run whose board is
