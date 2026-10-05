@@ -31,16 +31,6 @@
   margin: 24px 0 0;
   max-width: 34ch;
 }
-.bs-price {
-  display: inline-block;
-  margin: 18px 0 0;
-  padding: 6px 14px;
-  border-radius: 999px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-soft);
-}
 .bs-cta-row {
   display: flex;
   flex-wrap: wrap;

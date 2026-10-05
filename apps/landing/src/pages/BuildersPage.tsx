@@ -142,9 +142,6 @@ export default function BuildersPage() {
                 Get your evenings and weekends back. It keeps your app working while you focus on your
                 business and the people you care about.
               </Reveal>
-              <Reveal as="p" className="bs-price" delay={180} rise>
-                $99 a month. Less than one hour of a developer's time.
-              </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
                   Book a $49 app checkup
