@@ -830,7 +830,7 @@ section.band:has(.bs-ask) {
 /* ---------- an evening of building alone ---------- */
 .bs-evening {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
   gap: clamp(32px, 6vw, 96px);
   align-items: center;
   margin-top: clamp(48px, 6vw, 80px);
@@ -840,9 +840,14 @@ section.band:has(.bs-ask) {
     grid-template-columns: 1fr;
   }
   .bs-evening-phone {
-    max-width: 360px;
+    max-width: 320px;
     width: 100%;
     margin-inline: auto;
+  }
+}
+@media (max-width: 640px) {
+  .bs-evening-phone {
+    max-width: 280px;
   }
 }
 .bs-evening-lead {
