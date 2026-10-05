@@ -990,32 +990,6 @@ section.band:has(.bs-ask) {
   color: var(--muted);
 }
 
-/* ---------- pinned sections ----------
-   A pinned block is several screens tall and its contents stick in view while
-   the page scrolls through it, so the scroll can pick the step. Below 900px
-   it is not pinned. */
-.bs-pin-evening {
-  height: 340vh;
-}
-.bs-pin-sticky {
-  position: sticky;
-  top: 68px;
-  min-height: calc(100vh - 68px);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding-block: 24px;
-}
-@media (max-width: 899px) {
-  .bs-pin-evening {
-    height: auto;
-  }
-  .bs-pin-sticky {
-    position: static;
-    min-height: 0;
-  }
-}
-
 /* ---------- an evening of building alone ---------- */
 .bs-evening {
   display: grid;

@@ -233,8 +233,8 @@ export default function BuildersPage() {
             <Reveal className="bs-center">
               <h2 className="section-h">Built for professionals who build with AI</h2>
               <p className="section-sub">
-                Whatever your field, with code written by AI. An internal tool for the firm, a portal for clients,
-                or a SaaS of your own. Keeping it working should not take an engineering team.
+                Whatever your field and whatever you built with AI. An internal tool for the firm, a portal for
+                clients, or a SaaS of your own. Keeping it working should not take an engineering team.
               </p>
             </Reveal>
           </div>
