@@ -20,6 +20,14 @@
  * product does something else, and the test fails at exactly that point, which
  * is the finding. A flow nobody could write a test for is `blocked`, and says
  * what stood in the way.
+ *
+ * A kept test is run again at every commit its repository generates on. One
+ * that still behaves the way it was accepted HOLDS. One that does not has
+ * MOVED, and is opened again by a session that is told why
+ * (`FLOW_TEST_REPAIR_REASONS`). And every kept spec was read against its
+ * claims by a judge that saw nothing of how it was written: `judged` is the
+ * key that verdict was given under, so a spec, a seed or a document that
+ * changed since is read again.
  */
 
 import { z } from 'zod';
@@ -116,6 +124,8 @@ export const FlowTestRunSchema = z.object({
   steps: z.array(FlowTestStepSchema),
   error: z.string().optional(),
   evidencePath: z.string().optional(),
+  /** The commit the run was on. On a record's run, the commit its status was accepted on. */
+  commit: z.string().optional(),
 });
 export type FlowTestRun = z.infer<typeof FlowTestRunSchema>;
 
@@ -166,6 +176,56 @@ export function tallyFlowTestRun(results: readonly FlowTestRunResult[]): FlowTes
   };
 }
 
+/**
+ * Why a flow that already has a test gets a session again.
+ *   flow-changed   the flow is the same id with a new fingerprint
+ *   moved          the test no longer ends the way it was accepted
+ *   seed-failed    the seed no longer holds, so the test never starts
+ *   now-passing    it was accepted failing on a disagreement, and passes
+ *   judge-flagged  the judge read the kept spec and refused it
+ */
+export const FLOW_TEST_REPAIR_REASONS = ['flow-changed', 'moved', 'seed-failed', 'now-passing', 'judge-flagged'] as const;
+export type FlowTestRepairReason = (typeof FLOW_TEST_REPAIR_REASONS)[number];
+
+/** The 1-based order of the step a run failed at, when it failed inside one. */
+export function flowTestFailedStep(steps: readonly FlowTestStep[]): number | undefined {
+  return steps.find((step) => step.outcome === 'failed')?.order;
+}
+
+/**
+ * How a kept test's run at a new commit stands against the run its status was
+ * accepted on: `holds` when a passing test passes, or a failing one fails at
+ * the same step. Anything else moved, and the word says which way.
+ */
+export function flowTestMovement(
+  record: Pick<FlowTestRecord, 'status' | 'run'>,
+  rerun: Pick<FlowTestResult, 'outcome' | 'steps'>,
+): 'holds' | Exclude<FlowTestRepairReason, 'flow-changed' | 'judge-flagged'> {
+  if (rerun.outcome === 'seed-failed') return 'seed-failed';
+  if (record.status === 'passing') return rerun.outcome === 'pass' ? 'holds' : 'moved';
+  if (rerun.outcome === 'pass') return 'now-passing';
+  if (rerun.outcome !== 'fail') return 'moved';
+  return flowTestFailedStep(rerun.steps) === flowTestFailedStep(record.run?.steps ?? []) ? 'holds' : 'moved';
+}
+
+/**
+ * What an error says once everything particular to one run of one test is
+ * taken out of it (the unique names a seed made, ids, numbers, paths, timings):
+ * its first line, normalized. Tests one change moved the same way share it.
+ */
+export function flowTestErrorSignature(error: string | undefined): string {
+  const line = (error ?? '').split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? '';
+  return (
+    line
+      .replace(/https?:\/\/[^\s'"`)]+/g, '<url>')
+      .replace(/(['"`])(?:(?!\1).)*\1/g, '<text>')
+      .replace(/\b[0-9a-f]{8,}\b/gi, '<id>')
+      .replace(/\d+(?:\.\d+)?/g, '<n>')
+      .replace(/\s+/g, ' ')
+      .slice(0, 160) || '(no error text)'
+  );
+}
+
 /** One flow's entry in `tests/tests.json`. */
 export const FlowTestRecordSchema = z.object({
   flowId: z.string().min(1),
@@ -182,6 +242,12 @@ export const FlowTestRecordSchema = z.object({
   blockedOn: z.string().min(1).optional(),
   /** The engine's run the status was accepted on. Absent on a `blocked` flow. */
   run: FlowTestRunSchema.optional(),
+  /**
+   * The judge key the spec was accepted under: over the spec, the seed and
+   * what each step's document says. Absent on a test nobody has judged yet,
+   * which is judged at the next generate and is not stale for it.
+   */
+  judged: z.string().min(1).optional(),
 });
 export type FlowTestRecord = z.infer<typeof FlowTestRecordSchema>;
 

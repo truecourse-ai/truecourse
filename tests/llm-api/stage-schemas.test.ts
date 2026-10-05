@@ -69,6 +69,7 @@ const MODULES = [
   'packages/core/src/services/interface-author/session.ts',
   'packages/core/src/services/interface-author/tools.ts',
   'packages/core/src/services/llm/guard-visual-judge.ts',
+  'packages/core/src/services/product-world/flow-test-fidelity.ts',
   'packages/core/src/services/product-world/flow-test-session.ts',
   'packages/core/src/services/product-world/world-session.ts',
   'packages/core/src/services/spec-scan/compare-facts.ts',

@@ -74,8 +74,12 @@ and its browser:
 pnpm --filter @truecourse/guard-runner exec playwright install chromium
 ```
 
-Running the stored tests on every push and on pull requests is not wired on
-this path yet.
+Every generate also runs the tests the repository already has against the commit
+it cloned. A test that no longer ends the way it was accepted is opened again:
+repaired when the product only changed how a step is reached, kept as a finding
+when the product stopped doing what the document says. Before any test is kept,
+a reviewer with a fresh context reads it against the documents it was written
+from. Pull request checks are not wired on this path yet.
 
 `TRUECOURSE_MODE=local` runs without sign-in, and folders on this machine can be
 connected as repositories.

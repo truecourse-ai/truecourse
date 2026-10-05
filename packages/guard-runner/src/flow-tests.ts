@@ -572,14 +572,16 @@ export function flowSpecStepTitles(source: string): string[] {
  * Keep what a run recorded as a guard evidence bundle (`step-<n>.png` per
  * browser step, the session video) under `runId`, and return the run as a
  * test's record carries it: every step of the spec, the ones this run never
- * reached included. A run that drove no browser leaves no bundle.
+ * reached included. A run that drove no browser leaves no bundle, and neither
+ * does one kept with `evidence: false`, which is a run that showed nothing its
+ * test's accepted run does not already show.
  */
 export function keepFlowTestRun(
   repoRoot: string,
-  opts: { runId: string; result: FlowTestResult; specSource: string; ranAt: string },
+  opts: { runId: string; result: FlowTestResult; specSource: string; ranAt: string; commit?: string; evidence?: boolean },
 ): FlowTestRun {
   const { result } = opts
-  const visuals = result.attachments.flatMap((attachment) => {
+  const visuals = opts.evidence === false ? [] : result.attachments.flatMap((attachment) => {
     const shot = STEP_SHOT.exec(attachment.name)
     if (shot) return [{ from: attachment.path, file: `step-${shot[1]}.png` }]
     return attachment.name === 'video' ? [{ from: attachment.path, file: EVIDENCE_VIDEO_FILE }] : []
@@ -611,6 +613,7 @@ export function keepFlowTestRun(
     steps: [...result.steps, ...unreached],
     ...(result.error ? { error: result.error } : {}),
     ...(evidencePath ? { evidencePath } : {}),
+    ...(opts.commit ? { commit: opts.commit } : {}),
   }
 }
 
