@@ -1,18 +1,27 @@
 import type { ComponentType } from 'react';
-import { SiClaude, SiGithubcopilot, SiOpenai, SiReplit, SiV0, SiWindsurf } from 'react-icons/si';
+import { SiGithubcopilot } from 'react-icons/si';
+import {
+  BoltLogo,
+  ClaudeCodeLogo,
+  CodexLogo,
+  CursorLogo,
+  LovableLogo,
+  ReplitLogo,
+  V0Logo,
+  WindsurfLogo,
+} from './aiLogos';
 
-/** An AI builder, with its logo where the icon set has one; the rest go by name alone. */
-type Tool = { name: string; Icon?: ComponentType };
+type Tool = { name: string; Icon: ComponentType };
 
 const TOOLS: Tool[] = [
-  { name: 'Lovable' },
-  { name: 'Replit', Icon: SiReplit },
-  { name: 'Claude Code', Icon: SiClaude },
-  { name: 'Codex', Icon: SiOpenai },
-  { name: 'Cursor' },
-  { name: 'Bolt' },
-  { name: 'v0', Icon: SiV0 },
-  { name: 'Windsurf', Icon: SiWindsurf },
+  { name: 'Lovable', Icon: LovableLogo },
+  { name: 'Replit', Icon: ReplitLogo },
+  { name: 'Claude Code', Icon: ClaudeCodeLogo },
+  { name: 'Codex', Icon: CodexLogo },
+  { name: 'Cursor', Icon: CursorLogo },
+  { name: 'Bolt', Icon: BoltLogo },
+  { name: 'v0', Icon: V0Logo },
+  { name: 'Windsurf', Icon: WindsurfLogo },
   { name: 'GitHub Copilot', Icon: SiGithubcopilot },
 ];
 
@@ -25,7 +34,7 @@ export function BuiltWith() {
           <span className="strip-label">For apps built with</span>
           {TOOLS.map((t) => (
             <span className="strip-item" key={t.name}>
-              {t.Icon && <t.Icon />}
+              <t.Icon />
               {t.name}
             </span>
           ))}
