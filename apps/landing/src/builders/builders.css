@@ -975,14 +975,8 @@ section.band:has(.bs-ask) {
   border-radius: 16px;
   background: #000;
 }
-.bs-lock-date {
-  margin-top: 64px;
-  text-align: center;
-  font-size: 17px;
-  font-weight: 600;
-  opacity: 0.85;
-}
 .bs-lock-time {
+  margin-top: 72px;
   text-align: center;
   font-size: 84px;
   font-weight: 600;

@@ -39,9 +39,9 @@ const EACH = 0.9;
 const LENGTH = NOTES.length * EACH + 0.6;
 
 /**
- * A Saturday evening of building alone, on a phone's lock screen: a bad
+ * What lands on a solo builder's phone, on its lock screen: a bad
  * review, customers asking if the app is down, people giving up at checkout,
- * and a cancellation. Once the phone is in view the notifications land one
+ * and cancellations. Once the phone is in view the notifications land one
  * after another, newest on top, and the evening stays; beside the phone,
  * each problem lights up as its first notification lands.
  */
@@ -65,14 +65,13 @@ export function EveningScene({ children }: { children?: ReactNode }) {
           </ul>
         </div>
         <div className="bs-evening-phone">
-          <Stage width={380} height={800} label="A phone's lock screen on a Saturday evening. A one-star review, customers asking if the app is down and 31 abandoned checkouts arrive one after another, and three customers cancel their subscriptions over the evening.">
+          <Stage width={380} height={800} label="A phone's lock screen. A one-star review, customers asking if the app is down and 31 abandoned checkouts arrive one after another, and three customers cancel their subscriptions over the evening.">
             <div className="bs-iphone">
               <span className="bs-iphone-button left one" />
               <span className="bs-iphone-button left two" />
               <span className="bs-iphone-button right" />
               <div className="bs-iphone-screen bs-lock">
                 <div className="bs-lock-island" />
-                <div className="bs-lock-date">Saturday, October 11</div>
                 <div className="bs-lock-time">{NOTES[latest]!.time.replace(' PM', '')}</div>
                 <div className="bs-lock-notes">
                   {NOTES.map((n, i) => {

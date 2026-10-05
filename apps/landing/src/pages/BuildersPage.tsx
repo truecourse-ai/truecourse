@@ -171,10 +171,10 @@ export default function BuildersPage() {
             </Reveal>
             <JobsChecklist />
             <EveningScene>
-              <h3 className="bs-evening-lead">A Saturday evening, building alone</h3>
-              <p>Your phone does not stop, and none of it can wait until Monday.</p>
+              <h3 className="bs-evening-lead">Meanwhile, on your phone</h3>
+              <p>Reviews, outages, cancellations. None of it waits until you have time.</p>
             </EveningScene>
-            <InlineAsk say="Sound like your evenings?" more="Start with a 30-minute app checkup. $49, credited to your first month." placement="after-evening" />
+            <InlineAsk say="Sound familiar?" more="Start with a 30-minute app checkup. $49, credited to your first month." placement="after-evening" />
           </div>
         </section>
 
