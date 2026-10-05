@@ -24,13 +24,13 @@ import { easeOut, span, useClock } from '../motion';
 
 const KINDS: { label: string; icon: ReactNode }[] = [
   { label: 'ERP', icon: <Boxes /> },
-  { label: 'Healthtech', icon: <HeartPulse /> },
+  { label: 'Healthcare', icon: <HeartPulse /> },
   { label: 'CRM', icon: <Contact /> },
-  { label: 'Fintech', icon: <CreditCard /> },
+  { label: 'Fintech and payments', icon: <CreditCard /> },
   { label: 'Collaborative apps', icon: <MessagesSquare /> },
-  { label: 'MediaTech', icon: <Clapperboard /> },
+  { label: 'Media and streaming', icon: <Clapperboard /> },
   { label: 'E-commerce', icon: <ShoppingCart /> },
-  { label: 'Edtech', icon: <GraduationCap /> },
+  { label: 'Learning platforms', icon: <GraduationCap /> },
   { label: 'Marketplaces', icon: <Store /> },
   { label: 'Consumer mobile apps', icon: <Smartphone /> },
   { label: 'HR platforms', icon: <Users /> },
@@ -65,7 +65,7 @@ export function TrackRecord() {
       ref={ref}
       className="bs-depth"
       role="img"
-      aria-label="The kinds of applications the team has built stream out of the distance one after another, ERP, healthtech, CRM, fintech, collaborative apps, MediaTech, e-commerce, edtech, marketplaces, consumer mobile apps, HR platforms and analytics dashboards."
+      aria-label="The kinds of applications the team has built stream out of the distance one after another, ERP, healthcare, CRM, fintech and payments, collaborative apps, media and streaming, e-commerce, learning platforms, marketplaces, consumer mobile apps, HR platforms and analytics dashboards."
     >
       {KINDS.map((k, i) => {
         const p = (t / LOOP + i / KINDS.length) % 1;
