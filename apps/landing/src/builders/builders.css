@@ -1752,7 +1752,7 @@ section.band:has(.bs-ask) {
 .bs-depth-kind .bs-glyph {
   color: var(--accent);
 }
-.bs-depth-kind svg {
+.bs-depth-kind .bs-glyph {
   width: 26px;
   height: 26px;
 }
