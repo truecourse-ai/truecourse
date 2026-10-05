@@ -77,7 +77,7 @@ function InlineAsk({ say, more, placement }: { say: string; more: string; placem
         <p className="bs-ask-more">{more}</p>
       </div>
       <BookLink className="btn btn-primary" placement={placement}>
-        Book a checkup
+        Book a $49 checkup
       </BookLink>
     </Reveal>
   );
@@ -104,7 +104,7 @@ function BuildersHeader() {
           <a href="#who">Who it's for</a>
         </nav>
         <BookLink className="btn btn-primary btn-sm" placement="header">
-          Book a checkup
+          Book a $49 checkup
         </BookLink>
       </div>
     </header>
@@ -137,7 +137,7 @@ export default function BuildersPage() {
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
-                  Book an app checkup
+                  Book an app checkup, $49
                 </BookLink>
                 <a className="btn" href="#cto">
                   See what it does
