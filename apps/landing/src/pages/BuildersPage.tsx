@@ -23,9 +23,9 @@ import stylesheet from '@/builders/builders.css?url';
 
 /**
  * The AI CTO page, for professionals who build their own apps with AI: a page of
- * its own, outside the main site's header and footer. Its ask is a booked
- * call, with a waitlist for those not ready for one, and it
- * records how far down each visitor reads.
+ * its own, outside the main site's header and footer. Its ask is a paid app
+ * checkup, with a waitlist for those not ready for one, and it records how
+ * far down each visitor reads.
  */
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesheet }];
@@ -65,7 +65,7 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
 /** The sections whose reach is recorded, top to bottom. */
 const SECTIONS = ['team', 'cto', 'text', 'who', 'talk'];
 
-/** A banner at the end of a section, asking the reader it has just won over for a call. */
+/** A banner at the end of a section, offering the reader it has just won over an app checkup. */
 function InlineAsk({ say, more, placement }: { say: string; more: string; placement: BookPlacement }) {
   return (
     <Reveal className="bs-ask">
@@ -77,7 +77,7 @@ function InlineAsk({ say, more, placement }: { say: string; more: string; placem
         <p className="bs-ask-more">{more}</p>
       </div>
       <BookLink className="btn btn-primary" placement={placement}>
-        Talk to us
+        Book a checkup
       </BookLink>
     </Reveal>
   );
@@ -104,7 +104,7 @@ function BuildersHeader() {
           <a href="#who">Who it's for</a>
         </nav>
         <BookLink className="btn btn-primary btn-sm" placement="header">
-          Talk to us
+          Book a checkup
         </BookLink>
       </div>
     </header>
@@ -137,7 +137,7 @@ export default function BuildersPage() {
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
-                  Talk to us
+                  Book an app checkup
                 </BookLink>
                 <a className="btn" href="#cto">
                   See what it does
@@ -173,7 +173,7 @@ export default function BuildersPage() {
               <h3 className="bs-evening-lead">A Saturday evening, building alone</h3>
               <p>Your phone does not stop, and none of it can wait until Monday.</p>
             </EveningScene>
-            <InlineAsk say="Sound like your evenings?" more="Tell us what keeps breaking. 15 minutes, no slides." placement="after-evening" />
+            <InlineAsk say="Sound like your evenings?" more="Start with a 30-minute app checkup. $49, credited to your first month." placement="after-evening" />
           </div>
         </section>
 
@@ -194,7 +194,7 @@ export default function BuildersPage() {
                 </div>
               ))}
             </div>
-            <InlineAsk say="Want this for your app?" more="Tell us what it should catch first. 15 minutes, no slides." placement="after-jobs" />
+            <InlineAsk say="Want this for your app?" more="Book an app checkup and get a written report on what to fix first." placement="after-jobs" />
           </div>
         </section>
 
@@ -247,12 +247,13 @@ export default function BuildersPage() {
           <div className="wrap">
             <h2>Hire your AI CTO</h2>
             <p className="bs-cta-say">
-              A 15-minute call about your app and what keeps breaking. No slides. It costs about as much as
-              your Claude Code subscription.
+              Start with a 30-minute app checkup. We look at your app together and send you a short report on
+              what is likely to break and what to fix first. $49, credited to your first month. After that, it
+              costs about as much as your Claude Code subscription.
             </p>
             <div className="cta-row">
               <BookLink className="btn btn-primary" placement="cta">
-                Talk to us
+                Book an app checkup, $49
               </BookLink>
             </div>
             <Waitlist />

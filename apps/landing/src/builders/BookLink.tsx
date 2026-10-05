@@ -7,8 +7,8 @@ export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/hire-you-ai
 export type BookPlacement = 'header' | 'hero' | 'after-evening' | 'after-jobs' | 'cta';
 
 /**
- * Opens the meeting booking page in a new tab, and records the click as
- * `talk_to_us_clicked` with its placement.
+ * Opens the app checkup booking page in a new tab, and records the click as
+ * `book_checkup_clicked` with its placement.
  */
 export function BookLink({
   placement,
@@ -25,7 +25,7 @@ export function BookLink({
       href={BOOKING_URL}
       target="_blank"
       rel="noreferrer"
-      onClick={() => trackEvent('talk_to_us_clicked', { placement, page: 'builders' })}
+      onClick={() => trackEvent('book_checkup_clicked', { placement, page: 'builders' })}
     >
       {children}
     </a>
