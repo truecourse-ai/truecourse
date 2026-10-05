@@ -19,6 +19,10 @@
  * passed on the scripts as they stand, so what the session reports and what a
  * run will get cannot differ.
  *
+ * A tree whose scripts held at an earlier commit and fail at this one is not
+ * a tree without scripts: the session is told the stage that failed and what
+ * it printed, and starts from the scripts that are there.
+ *
  * Needs a backend that can hand a session a shell, which is Claude Code.
  */
 
@@ -38,6 +42,7 @@ import {
   buildProductWorld,
   missingWorldScripts,
   worldScriptEnv,
+  type WorldBootFailure,
   type WorldSlot,
 } from '@truecourse/guard-runner';
 import { WORLD_ENV, type ProductWorld } from '@truecourse/shared';
@@ -71,12 +76,24 @@ const WORLD_SESSION = defineSessionKind({
   outcomeSchema: WorldSessionOutcomeSchema,
 });
 
+/** How much of a failed script's output a briefing quotes: its end, where the error is. */
+const FAILURE_OUTPUT_CHARS = 6_000;
+
+/** Where the engine's own build and boot of the tree's scripts stopped, and what it has to show for it. */
+export interface WorldScriptsFailure {
+  stage: 'build' | WorldBootFailure['stage'] | 'down';
+  /** What the failing script printed, or what the engine found wrong. */
+  output: string;
+}
+
 export interface WorldSessionInput {
   repoRoot: string;
   /** The world's identity on this host; the scripts get it as their environment. */
   slot: WorldSlot;
   /** The documents the product's tests will be written from, so the session knows which product they describe. */
   documents: ReadonlyArray<{ path: string; title: string }>;
+  /** The tree already has scripts, and this is how the engine's run of them failed at this commit. */
+  failed?: WorldScriptsFailure;
   signal?: AbortSignal;
 }
 
@@ -199,11 +216,33 @@ export function worldSessionBriefing(input: WorldSessionInput): string {
     `- ${WORLD_ENV.ports}=${input.slot.ports.join(' ')}`,
     `- ${WORLD_ENV.stateFile} and ${WORLD_ENV.logsDir} point inside ${WORLD_REL}/`,
     '',
+    ...(input.failed ? [...failedScriptsBriefing(input.failed), ''] : []),
     input.documents.length > 0
       ? `The tests that will run against this world are written from these documents. They tell you WHICH product in the repository matters (${input.documents.length} in all${input.documents.length > documents.length ? `, first ${documents.length} shown` : ''}):`
       : 'No document list is available; the product is whatever this repository exists to ship.',
     ...documents,
   ].join('\n');
+}
+
+const FAILED_AT: Record<WorldScriptsFailure['stage'], string> = {
+  scripts: 'before anything ran',
+  build: `at build (\`${WORLD_REL}/build.sh\`)`,
+  up: `at up (\`${WORLD_REL}/up.sh\`)`,
+  report: `at the world file \`${WORLD_REL}/up.sh\` writes`,
+  answer: `after \`${WORLD_REL}/up.sh\` returned: the product did not answer`,
+  down: `at down (\`${WORLD_REL}/down.sh\`)`,
+};
+
+function failedScriptsBriefing(failed: WorldScriptsFailure): string[] {
+  const output = failed.output.trim();
+  const tail = output.length <= FAILURE_OUTPUT_CHARS ? output : `… ${output.slice(-FAILURE_OUTPUT_CHARS)}`;
+  return [
+    `The scripts already exist under ${WORLD_REL}/. They brought this product up at an earlier commit. At this commit the engine ran them and they failed ${FAILED_AT[failed.stage]}:`,
+    '',
+    ...(tail || '(nothing was printed)').split('\n').map((line) => `| ${line}`),
+    '',
+    'Start from those scripts. Read them, reproduce the failure, find what changed in the repository that causes it, and change what the failure calls for. Do not write them again from nothing: everything else in them still holds.',
+  ];
 }
 
 const SYSTEM_PROMPT = `You get a software product running from its source checkout, and you leave behind three shell scripts that do it again without you. Tests will then be written against the running product, by other sessions, from the product's documentation.
@@ -270,7 +309,7 @@ JSON, written by \`up.sh\` to \`$TC_WORLD_FILE\` once the product answers:
 
 # How to work
 
-1. Find out what the product is made of and how its own developers run it.
+1. Find out what the product is made of and how its own developers run it. When the briefing says the scripts exist and how they failed, start there instead: the scripts already say how the product runs.
 2. Get it running by hand in your shell. Your shell has the same \`TC_*\` variables the scripts get, so what works by hand works in the script.
 3. Write the three scripts and run them yourself. See that the product answers, that an account the installation made really signs in, and that the datastore command in your notes really reaches it.
 4. Stop what you started by hand, then call \`verify_world\`. It is the engine building and booting your scripts exactly as every later run will, and it reports the stage that failed with that script's own output. Fix and repeat until it passes.
