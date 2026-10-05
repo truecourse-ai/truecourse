@@ -210,8 +210,8 @@ export default function BuildersPage() {
               </p>
               <ul className="bs-text-kinds">
                 <li>
-                  <b>Alerts</b>
-                  <span>Checkout broke at 2 AM. I have a fix ready, want me to put it in?</span>
+                  <b>Updates</b>
+                  <span>Checkout broke at 2 AM. I fixed and tested it, nothing for you to do.</span>
                 </li>
                 <li>
                   <b>Questions</b>

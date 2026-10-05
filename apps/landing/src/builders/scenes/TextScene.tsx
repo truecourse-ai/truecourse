@@ -7,31 +7,28 @@ interface Text {
   body: string;
 }
 
-/** The thread, in the order it plays: a 2 AM alert, a morning question, a command. */
+/** The thread, in the order it plays: what it fixed overnight, a question, a command. */
 const THREAD: (Text | { at: number; time: string; first?: boolean })[] = [
-  { at: 0.4, time: 'Wed 2:14 AM', first: true },
+  { at: 0.4, time: 'Wed 7:30 AM', first: true },
   {
     at: 0.9,
     from: 'cto',
-    body: "Heads up, checkout is failing for 14 people. Tuesday's payment change caused it. I have a fix ready and tested. Want me to put it in?",
+    body: 'Morning. Checkout broke at 2:10 AM for 14 people. I fixed it, tested it and put it live. Nothing for you to do.',
   },
-  { at: 2.6, from: 'dana', body: 'Yes please' },
-  { at: 3.5, from: 'cto', body: 'Done. Checkout works again. Go back to sleep.' },
-  { at: 5.0, time: 'Wed 9:05 AM' },
-  { at: 5.4, from: 'dana', body: 'What are users stuck on this week?' },
+  { at: 2.8, from: 'dana', body: 'Thanks! What are users stuck on this week?' },
   {
-    at: 6.6,
+    at: 4.1,
     from: 'cto',
     body: "1. 23 people can't find Export on their phone\n2. Reset email arrives late, 9 people\n3. Yearly price reads as monthly, 6 people",
   },
-  { at: 8.6, from: 'dana', body: 'Fix the Export button' },
-  { at: 9.9, from: 'cto', body: 'Fixed and tested on a phone. Should I put it live?' },
-  { at: 11.6, from: 'dana', body: 'Go ahead 👍' },
-  { at: 12.5, from: 'cto', body: "It's live." },
+  { at: 6.1, from: 'dana', body: 'Fix the Export button' },
+  { at: 7.4, from: 'cto', body: 'Fixed and tested on a phone. Should I put it live?' },
+  { at: 9.1, from: 'dana', body: 'Go ahead 👍' },
+  { at: 10.0, from: 'cto', body: "It's live." },
 ];
 
-const LENGTH = 17;
-const OUT = 16.2;
+const LENGTH = 14.5;
+const OUT = 13.7;
 /** How long the AI CTO is seen typing before each of its replies. */
 const TYPING = 0.7;
 
@@ -63,21 +60,22 @@ function StatusBar() {
 }
 
 /**
- * The AI CTO by text, on an iPhone in Messages: an alert answered at 2 AM,
- * a question asked over coffee, and a command given and shipped, each reply
+ * The AI CTO by text, on an iPhone in Messages: a morning note on what it
+ * fixed overnight without waking anyone, a question asked over coffee, and a
+ * command given and shipped, each reply
  * arriving after a moment of typing. Replies are SMS green, so it reads as a
  * text message thread and not an app. The thread grows from the bottom, so
  * the newest message is always in view.
  */
 export function TextScene() {
-  const { ref, t } = useClock(LENGTH, 13.5);
+  const { ref, t } = useClock(LENGTH, 11);
   const fade = enter(t, 0, 0.4, OUT, 0).opacity;
   const next = THREAD.find((m) => m.at > t);
   const typing = next && isText(next) && next.from === 'cto' && t >= next.at - TYPING;
 
   return (
     <div ref={ref}>
-      <Stage width={380} height={800} label="A text message thread with the AI CTO on an iPhone. At 2:14 AM it reports checkout failing and the owner says yes to the fix. In the morning she asks what users are stuck on and gets a ranked list, then asks it to fix the Export button and tells it to put the fix live.">
+      <Stage width={380} height={800} label="A text message thread with the AI CTO on an iPhone. In the morning it reports that checkout broke at 2:10 AM and that it fixed, tested and put live the fix overnight. The owner asks what users are stuck on and gets a ranked list, then asks it to fix the Export button and tells it to put the fix live.">
         <div className="bs-iphone">
           <span className="bs-iphone-button left one" />
           <span className="bs-iphone-button left two" />
