@@ -2,15 +2,19 @@ import type { ReactNode } from 'react';
 import {
   BarChart3,
   Boxes,
+  Building2,
   Clapperboard,
   Contact,
   CreditCard,
   GraduationCap,
   HeartPulse,
+  Landmark,
+  Layers,
   MessagesSquare,
   ShoppingCart,
   Smartphone,
   Store,
+  Truck,
   Users,
 } from 'lucide-react';
 import { easeOut, span, useClock } from '../motion';
@@ -35,6 +39,10 @@ const KINDS: { label: string; icon: ReactNode }[] = [
   { label: 'Consumer mobile apps', icon: <Smartphone /> },
   { label: 'HR platforms', icon: <Users /> },
   { label: 'Analytics dashboards', icon: <BarChart3 /> },
+  { label: 'Banking and payments', icon: <Landmark /> },
+  { label: 'Logistics', icon: <Truck /> },
+  { label: 'Enterprise SaaS', icon: <Building2 /> },
+  { label: 'Internal platforms', icon: <Layers /> },
 ];
 
 /** Where each kind sits across the view, as a share of half its width and height. */
@@ -51,6 +59,10 @@ const SPOTS: [number, number][] = [
   [-0.6, 0.55],
   [0.65, -0.5],
   [-0.1, -0.35],
+  [0.3, 0.6],
+  [-0.35, 0.3],
+  [0.35, -0.4],
+  [-0.7, -0.25],
 ];
 
 /** How long one kind takes to come from the back and pass. */
@@ -65,7 +77,7 @@ export function TrackRecord() {
       ref={ref}
       className="bs-depth"
       role="img"
-      aria-label="The kinds of applications the team has built stream out of the distance one after another, ERP, healthcare, CRM, fintech and payments, collaborative apps, media and streaming, e-commerce, learning platforms, marketplaces, consumer mobile apps, HR platforms and analytics dashboards."
+      aria-label="The kinds of applications the team has built stream out of the distance one after another, ERP, healthcare, CRM, fintech and payments, collaborative apps, media and streaming, e-commerce, learning platforms, marketplaces, consumer mobile apps, HR platforms, analytics dashboards, banking and payments, logistics, enterprise SaaS and internal platforms."
     >
       {KINDS.map((k, i) => {
         const p = (t / LOOP + i / KINDS.length) % 1;
