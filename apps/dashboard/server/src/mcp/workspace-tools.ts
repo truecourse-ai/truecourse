@@ -12,11 +12,13 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   CONTEXT_SOURCE_KINDS,
+  disputeSides,
   type ContextDocumentRow,
   type ContextSource,
   type ContextSourceView,
   type CorpusConflict,
   type OverlapLike,
+  type OverlapSectionLike,
 } from '@truecourse/shared';
 import {
   addSource,
@@ -75,22 +77,20 @@ function sourceRow(source: ContextSource | ContextSourceView) {
   };
 }
 
-/** One conflict with both of its sides. */
+/** One conflict with both of its sides (inside one doc, its two passages in order). */
 function conflictRow(conflict: CorpusConflict<OverlapLike & { review?: unknown }>) {
-  const side = (doc: string) => {
-    const section = (conflict.overlap.sections ?? []).find((s) => s.doc === doc);
-    return {
-      doc,
-      heading: section?.heading ?? null,
-      ...(section?.quote ? { quote: section.quote } : {}),
-    };
-  };
+  const [[sectionA], [sectionB]] = disputeSides(conflict.a, conflict.b, conflict.overlap.sections);
+  const side = (doc: string, section: OverlapSectionLike | undefined) => ({
+    doc,
+    heading: section?.heading ?? null,
+    ...(section?.quote ? { quote: section.quote } : {}),
+  });
   return {
     id: conflict.id,
     area: conflict.area,
     note: conflict.note,
-    a: side(conflict.a),
-    b: side(conflict.b),
+    a: side(conflict.a, sectionA),
+    b: side(conflict.b, sectionB),
     ...(conflict.overlap.review ? { review: conflict.overlap.review } : {}),
     resolved: conflict.resolved,
     ...(conflict.resolution

@@ -14,6 +14,7 @@ import {
   CORE_PRODUCT,
   PROCESS_PRODUCT,
   CuratedCorpusSchema,
+  CorpusDocSchema,
   OverlapSchema,
   OverlapSectionSchema,
 } from '../../packages/spec-consolidator/src/index.js';
@@ -267,5 +268,53 @@ describe('CuratedCorpusSchema (overlap resolution brief)', () => {
       ],
     });
     expect(parsed.areas[0].overlaps[0].review!.recommendation.action).toBe('pick-b');
+  });
+});
+
+describe('CorpusDocSchema (fact ledger counts)', () => {
+  const doc = { ref: 'docs/a.md', kind: 'spec', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/a'] };
+
+  it('parses a doc with no ledger counts (older corpora, additive field)', () => {
+    expect(CorpusDocSchema.parse(doc).ledger).toBeUndefined();
+  });
+
+  it('parses a doc carrying its ledger counts, skipped units per reason', () => {
+    const ledger = { units: 61, facts: 34, skipped: { navigation: 20, example: 7 }, unrecorded: 0 };
+    expect(CorpusDocSchema.parse({ ...doc, ledger }).ledger).toEqual(ledger);
+  });
+
+  it('rejects a skip reason that is not one of the reasons', () => {
+    const ledger = { units: 1, facts: 0, skipped: { boring: 1 }, unrecorded: 0 };
+    expect(CorpusDocSchema.safeParse({ ...doc, ledger }).success).toBe(false);
+  });
+});
+
+describe('CuratedCorpusSchema (what comparing facts came to)', () => {
+  const area = { id: 'core/a', product: 'core', concern: 'a', docRefs: ['docs/a.md'], overlaps: [] };
+  const corpus = { version: 3 as const, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [area], skippedDocs: [] };
+
+  it('parses a corpus written by any other scan, with no comparison fields', () => {
+    const parsed = CuratedCorpusSchema.parse(corpus);
+    expect(parsed.comparison).toBeUndefined();
+    expect(parsed.areas[0].comparison).toBeUndefined();
+  });
+
+  it('keeps the counts per area, a split area\'s parts and cut pairs, and the corpus totals', () => {
+    const comparison = {
+      subjectNames: 1_400,
+      settledSubjects: 1_100,
+      subjectFamilies: 90,
+      subjectBatchFamilies: 40,
+      subjectBatchFacts: 320,
+      unplacedFacts: 2,
+    };
+    const split = { facts: 749, groups: 210, parts: 3, cutPairs: 57 };
+    const parsed = CuratedCorpusSchema.parse({
+      ...corpus,
+      areas: [{ ...area, comparison: split }, { ...area, id: 'core/b', concern: 'b', comparison: { facts: 12, groups: 3 } }],
+      comparison,
+    });
+    expect(parsed.comparison).toEqual(comparison);
+    expect(parsed.areas.map((a) => a.comparison)).toEqual([split, { facts: 12, groups: 3 }]);
   });
 });

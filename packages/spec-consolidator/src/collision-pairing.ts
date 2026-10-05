@@ -42,9 +42,10 @@ import { canonicalizeConcern, type VocabMap } from './corpus-types.js';
  * sections) and pairing on it would recreate the O(n²) matrix this net
  * replaces. 24 keeps worst-case generation per key at C(24,2) = 276 pairs
  * while comfortably passing real collision signals (a disputed endpoint's
- * segment lives in ~a dozen sections).
+ * segment lives in ~a dozen sections). `partitionByAffinity` holds its tokens
+ * to the same cap.
  */
-const PAIR_GEN_DF_CAP = 24;
+export const PAIR_GEN_DF_CAP = 24;
 
 /**
  * Minimum summed key weight for a pair to survive. On the `log2((S+1)/df)`
@@ -316,8 +317,20 @@ export function assignPairArea(
   pair: CollisionPair,
   areasByDoc: ReadonlyMap<string, readonly string[]>,
 ): string | null {
-  const a = areasByDoc.get(pair.a.doc) ?? [];
-  const b = areasByDoc.get(pair.b.doc) ?? [];
+  return assignDocPairArea(pair.a.doc, pair.b.doc, areasByDoc);
+}
+
+/**
+ * {@link assignPairArea}'s rule over two doc refs: where a disagreement found
+ * without a nominated pair (the conflict hunt) is filed.
+ */
+export function assignDocPairArea(
+  docA: string,
+  docB: string,
+  areasByDoc: ReadonlyMap<string, readonly string[]>,
+): string | null {
+  const a = areasByDoc.get(docA) ?? [];
+  const b = areasByDoc.get(docB) ?? [];
   const bSet = new Set(b);
   const shared = a.filter((id) => bSet.has(id)).sort();
   if (shared.length > 0) return shared[0];

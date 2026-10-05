@@ -179,6 +179,7 @@ describe('spec-scan.overlap — presentOutcome', () => {
       ],
       recommendation: {
         doc: 'docs/api/identity.md',
+        side: 'b',
         rationale: 'identity.md is the owner of the account schema',
         confidence: 'high',
       },

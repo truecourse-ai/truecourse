@@ -32,4 +32,11 @@ describe('DocMarkdown — code-span headings match plain pointers', () => {
     render(<DocMarkdown source={doc} highlight={['`rm <id>`']} />);
     expect(screen.getByText('Removes a task.').closest('div[class*="border-amber"]')).not.toBeNull();
   });
+
+  it('keeps a `#` comment inside a fence in its section, and the text after the fence banded', () => {
+    const fenced = '# tool\n\n## Setup\n\n```bash\n# install\npnpm i\n```\n\nThen run it.\n\n## Other\n\nElse.\n';
+    render(<DocMarkdown source={fenced} highlight={['Setup']} />);
+    expect(screen.getByText('Then run it.').closest('div[class*="border-amber"]')).not.toBeNull();
+    expect(screen.getByText('Else.').closest('div[class*="border-amber"]')).toBeNull();
+  });
 });

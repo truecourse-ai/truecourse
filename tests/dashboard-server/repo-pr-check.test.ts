@@ -91,6 +91,8 @@ let engines: {
 let seen: { setupHadOverlays: boolean | null; scanned: boolean };
 /** The checks a disconnect or a boot reap asked to settle, by pull request number. */
 let cancelledChecks: number[];
+/** The mode the check's own LLM runs in. */
+let checkLlmMode: WorkspaceLlm['mode'];
 
 const testLlm = {
   mode: 'api',
@@ -297,7 +299,7 @@ function mountJobs(): JobsMount {
         if (stopped) cancelledChecks.push(stopped.number);
         await pulls.settleCheck(checkId, { conclusion: 'neutral', reason });
       },
-      startLlm: async () => testLlm,
+      startLlm: async () => ({ ...testLlm, mode: checkLlmMode }),
       runScan: (opts) => engines.scan(opts),
     },
   });
@@ -323,6 +325,7 @@ beforeEach(async () => {
   changedFiles = [];
   seen = { setupHadOverlays: null, scanned: false };
   cancelledChecks = [];
+  checkLlmMode = 'api';
   engines = {
     setup: async (repoRoot) => {
       seen.setupHadOverlays = fs.existsSync(dependenciesLocalPath(repoRoot));
@@ -622,6 +625,29 @@ describe('the pull request check', () => {
     expect(settled.report?.conflictsCreated).toMatchObject([{ docs: [orgs, other], path: 'docs/orgs.md', line: 1 }]);
     expect((lastGithubUpdate()!.output as { annotations: { path: string }[] }).annotations.map((a) => a.path)).toEqual([
       'docs/orgs.md',
+    ]);
+  });
+
+  it('on Claude Code the head’s scan is handed a computer and compares facts; in API mode it pairs', async () => {
+    await storeBase();
+    await context.createSource(ORG, {
+      id: SOURCE,
+      kind: 'repository',
+      title: REPO,
+      config: { repoFullName: REPO, installationId: 5, include: ['docs/**'], exclude: [], branch: 'main' },
+    });
+    changedFiles = ['docs/orgs.md'];
+    const asked: Array<{ computer?: boolean; conflictMethod?: string }> = [];
+    engines.scan = async (opts) => {
+      asked.push({ computer: opts.computer, conflictMethod: opts.conflictMethod });
+      return { corpus: { version: 3, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
+    };
+    await check();
+    checkLlmMode = 'claude-code';
+    await check(pr({ number: 8, headSha: 'c'.repeat(40) }));
+    expect(asked).toEqual([
+      { computer: undefined, conflictMethod: undefined },
+      { computer: true, conflictMethod: 'facts' },
     ]);
   });
 

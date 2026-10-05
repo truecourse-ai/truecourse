@@ -44,7 +44,8 @@ export type SessionDisplay = z.infer<typeof SessionDisplaySchema>;
 /**
  * Two documents that disagree, named precisely enough for a reader to offer a
  * resolution. `anchorA`/`anchorB` are section anchors, `null` when the dispute
- * is whole-document.
+ * is whole-document. `docA` and `docB` are the same doc for a contradiction
+ * inside it, its sides the first and second passage.
  */
 export const DisplayDisputeSchema = z.object({
   docA: z.string(),
@@ -106,6 +107,9 @@ export const KnownDisplayBlockSchema = z.discriminatedUnion('kind', [
     recommendation: z
       .object({
         doc: z.string().optional(),
+        /** The dispute side the pick names: the only thing that tells two
+         *  passages of one doc apart, where `doc` names both. */
+        side: z.enum(['a', 'b']).optional(),
         rationale: z.string(),
         confidence: z.string().optional(),
       })

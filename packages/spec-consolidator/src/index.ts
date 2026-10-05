@@ -38,6 +38,10 @@ export {
   CandidatePairSchema,
   AreaSchema,
   CuratedCorpusSchema,
+  FactSkipReasonSchema,
+  DocLedgerCountsSchema,
+  AreaComparisonSchema,
+  CorpusComparisonSchema,
   normalizeArea,
   canonicalizeConcern,
   splitArea,
@@ -59,16 +63,25 @@ export type {
   Area,
   CuratedCorpus,
   VocabMap,
+  FactSkipReason,
+  DocLedgerCounts,
+  AreaComparison,
+  CorpusComparison,
 } from './corpus-types.js';
 
 export {
   deriveCollisionPairs,
   assignPairArea,
+  assignDocPairArea,
   clusterPairs,
   pairsFingerprint,
   extractClaimTokens,
+  PAIR_GEN_DF_CAP,
 } from './collision-pairing.js';
 export type { CollisionPair, CollisionSectionRef } from './collision-pairing.js';
+
+export { partitionByAffinity, clusterByAffinity, affinityTokens } from './affinity-partition.js';
+export type { AffinityOptions, AffinityPartition } from './affinity-partition.js';
 
 export {
   corpusFilePath,
@@ -103,6 +116,15 @@ export {
 
 export { verifyOverlapSections, splitDocSections, locateQuote } from './pointer-verifier.js';
 export type { VerifyPointersInput, DocSection } from './pointer-verifier.js';
+
+export {
+  splitDocUnits,
+  planUnitWindows,
+  presentUnit,
+  UNIT_SPLITTER_VERSION,
+  CODE_UNIT_LINES,
+} from './doc-units.js';
+export type { DocUnit, DocUnitKind, UnitWindow, UnitWindowBounds } from './doc-units.js';
 
 export {
   headingOutline,

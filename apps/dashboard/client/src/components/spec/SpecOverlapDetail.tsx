@@ -10,6 +10,10 @@
  * picks the edit up. Opened from Context's conflicts, and from a conflict
  * opened inside a document.
  *
+ * A contradiction inside ONE doc shows that doc in both columns, each scrolled
+ * to and highlighting its own passage (the first passage left, the second
+ * right), and names each side by its passage so the two verdicts differ.
+ *
  * The pane reads top-down the way a guard test's does: the judge's ASSESSMENT
  * leads (reasoning and recommendation in one card), the verdict actions sit with
  * it, and the two docs follow as the evidence. A recommendation never lands a
@@ -18,13 +22,20 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Copy, Loader2 } from 'lucide-react';
-import { conflictVerdictFor, type ConflictResolutionLike, type CorpusConflict } from '@truecourse/shared';
+import {
+  conflictVerdictFor,
+  disputeSides,
+  type ConflictResolutionLike,
+  type CorpusConflict,
+  type OverlapSectionLike,
+} from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlap, SpecOverlapReview } from '@/lib/api';
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
+import { passageNames } from '@/lib/passage-names';
 
 /** Caption above a detail card, the label grammar the guard detail panes read in. */
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
@@ -97,26 +108,43 @@ export function SpecOverlapDetail({
   const review = overlap?.review;
   const open = !resolution && !excludedRef;
 
+  // One doc on both sides: a contradiction inside it, its sides its passages.
+  const sameDoc = docA === docB;
+
   // The reviewer's action, resolved to a verdict against the PROPS' docA/docB
   // (which may sit in either order vs overlap.docs): 'pick-a' backs the overlap's
   // first doc, 'pick-b' the second, so key on the winning ref, not the letter.
+  // Inside one doc the letter is the passage, in the order the sections carry.
   // `null` = no apply shortcut (fix-doc, or an unreviewed flag).
   const recVerdict: 'a' | 'b' | 'dismissed' | null = (() => {
     const action = review?.recommendation.action;
     if (!action || !overlap) return null;
     if (action === 'dismiss') return 'dismissed';
     if (action === 'fix-doc') return null;
+    if (sameDoc) return action === 'pick-a' ? 'a' : 'b';
     const winner = action === 'pick-a' ? overlap.docs[0] : overlap.docs[1];
     return winner === docA ? 'a' : 'b';
   })();
 
-  // Heading pointers for a doc (null pointers, preamble conflicts, excluded).
-  const sectionsFor = (d: string): string[] =>
-    (overlap?.sections ?? [])
-      .filter((s) => s.doc === d && s.heading !== null)
-      .map((s) => s.heading as string);
-  const preambleFor = (d: string): boolean =>
-    (overlap?.sections ?? []).some((s) => s.doc === d && s.heading === null);
+  // Each column's pointers: the doc's own, or inside one doc its passage.
+  const [pointersA, pointersB] = disputeSides(docA, docB, overlap?.sections);
+  // Heading pointers of a side (null pointers are preamble conflicts).
+  const headingsOf = (side: readonly OverlapSectionLike[]): string[] =>
+    side.flatMap((s) => (s.heading !== null ? [s.heading] : []));
+  const preambleOf = (side: readonly OverlapSectionLike[]): boolean => side.some((s) => s.heading === null);
+
+  // How each side is named: its doc, and inside one doc its passage too.
+  const sideNames = (r: Pick<ConflictResolutionLike, 'docA' | 'anchorA' | 'docB' | 'anchorB'>): [string, string] => {
+    if (r.docA !== r.docB) return [titleOf(r.docA), titleOf(r.docB)];
+    const [a, b] = passageNames(r.anchorA, r.anchorB);
+    return [`${titleOf(r.docA)} · ${a}`, `${titleOf(r.docB)} · ${b}`];
+  };
+  const [nameA, nameB] = sideNames({
+    docA,
+    anchorA: pointersA[0]?.heading ?? null,
+    docB,
+    anchorB: pointersB[0]?.heading ?? null,
+  });
 
   // On open (or when the dispute changes), scroll each pane to its first
   // conflicting section, and drop any stale optimistic verdict from a prior one.
@@ -125,8 +153,8 @@ export function SpecOverlapDetail({
   // first's scroll position and optimistic verdict.
   useEffect(() => {
     setOverride(undefined);
-    const a = sectionsFor(docA)[0];
-    const b = sectionsFor(docB)[0];
+    const a = headingsOf(pointersA)[0];
+    const b = headingsOf(pointersB)[0];
     if (a) setScrollA({ heading: a, nonce: 1 });
     if (b) setScrollB({ heading: b, nonce: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,19 +211,21 @@ export function SpecOverlapDetail({
     }
   };
 
-  const winnerOf = (r: ConflictResolutionLike): string => (r.verdict === 'a' ? r.docA : r.docB);
+  const winnerOf = (r: ConflictResolutionLike): string => sideNames(r)[r.verdict === 'a' ? 0 : 1];
+  // Newer or older says nothing about two passages of one doc.
+  const badgeOf = (doc: string): string | undefined => (sameDoc ? undefined : doc === newerDoc ? 'Newer' : 'Older');
 
   return (
     <div data-testid="overlap-detail" className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-medium">
           <span className="flex items-center gap-1.5">
-            {titleOf(docA)}
+            {nameA}
             {isWorkspace(docA) && <WorkspaceBadge />}
           </span>
           <span className="text-muted-foreground">↔</span>
           <span className="flex items-center gap-1.5">
-            {titleOf(docB)}
+            {nameB}
             {isWorkspace(docB) && <WorkspaceBadge />}
           </span>
           <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtArea(area)}</span>
@@ -203,7 +233,7 @@ export function SpecOverlapDetail({
         {review ? (
           <ConflictAssessment
             review={review}
-            winner={recVerdict === 'a' ? titleOf(docA) : recVerdict === 'b' ? titleOf(docB) : null}
+            winner={recVerdict === 'a' ? nameA : recVerdict === 'b' ? nameB : null}
             canApply={open && recVerdict !== null}
             applyDisabled={busy !== null}
             applying={recVerdict !== null && busy === recVerdict}
@@ -225,8 +255,8 @@ export function SpecOverlapDetail({
             ) : (
               <span className="flex flex-wrap items-center gap-1 text-emerald-600 dark:text-emerald-400">
                 {resolution.resolvedBy === 'auto' ? 'Auto-resolved -' : 'Resolved -'}
-                <HoverPopover content={titleOf(winnerOf(resolution))}>
-                  <span className="max-w-[22rem] truncate font-medium">{titleOf(winnerOf(resolution))}</span>
+                <HoverPopover content={winnerOf(resolution)}>
+                  <span className="max-w-[22rem] truncate font-medium">{winnerOf(resolution)}</span>
                 </HoverPopover>
                 is right
               </span>
@@ -252,13 +282,13 @@ export function SpecOverlapDetail({
           <div className="mt-2 flex flex-col gap-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
               <VerdictButton
-                doc={titleOf(docA)}
+                doc={nameA}
                 busy={busy === 'a'}
                 disabled={busy !== null}
                 onClick={() => recordVerdict('a')}
               />
               <VerdictButton
-                doc={titleOf(docB)}
+                doc={nameB}
                 busy={busy === 'b'}
                 disabled={busy !== null}
                 onClick={() => recordVerdict('b')}
@@ -286,10 +316,10 @@ export function SpecOverlapDetail({
             docRef={docA}
             title={docMeta.get(docA)?.title}
             url={docMeta.get(docA)?.url}
-            badge={docA === newerDoc ? 'Newer' : 'Older'}
+            badge={badgeOf(docA)}
             scrollTo={scrollA}
-            highlight={sectionsFor(docA)}
-            highlightPreamble={preambleFor(docA)}
+            highlight={headingsOf(pointersA)}
+            highlightPreamble={preambleOf(pointersA)}
           />
         </div>
         <div className="flex min-h-0 flex-col overflow-hidden">
@@ -298,10 +328,10 @@ export function SpecOverlapDetail({
             docRef={docB}
             title={docMeta.get(docB)?.title}
             url={docMeta.get(docB)?.url}
-            badge={docB === newerDoc ? 'Newer' : 'Older'}
+            badge={badgeOf(docB)}
             scrollTo={scrollB}
-            highlight={sectionsFor(docB)}
-            highlightPreamble={preambleFor(docB)}
+            highlight={headingsOf(pointersB)}
+            highlightPreamble={preambleOf(pointersB)}
           />
         </div>
       </div>

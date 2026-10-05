@@ -219,6 +219,36 @@ export function isProcessArea(id: string): boolean {
 // Corpus artifacts
 // ---------------------------------------------------------------------------
 
+/**
+ * Why a doc's units were skipped when its facts were recorded: the units state
+ * no concrete fact another doc could state differently. `other` carries a note
+ * in the ledger itself.
+ */
+export const FactSkipReasonSchema = z.enum([
+  'navigation',
+  'advice',
+  'rationale',
+  'marketing',
+  'competitor',
+  'example',
+  'legal',
+  'other',
+]);
+export type FactSkipReason = z.infer<typeof FactSkipReasonSchema>;
+
+/**
+ * What recording a doc's facts came to, counted: its units, the facts
+ * recorded, the units skipped per reason, and the units the recording left
+ * unaccounted for. The ledger itself stays in the scan's cache.
+ */
+export const DocLedgerCountsSchema = z.object({
+  units: z.number().int().nonnegative(),
+  facts: z.number().int().nonnegative(),
+  skipped: z.record(FactSkipReasonSchema, z.number().int().nonnegative()),
+  unrecorded: z.number().int().nonnegative(),
+});
+export type DocLedgerCounts = z.infer<typeof DocLedgerCountsSchema>;
+
 /** One doc in the curated corpus — a reference + its tags, never its prose. */
 export const CorpusDocSchema = z.object({
   /** Where the doc's .md lives. */
@@ -239,6 +269,11 @@ export const CorpusDocSchema = z.object({
    */
   sourceId: z.string().optional(),
   sourceKind: z.string().optional(),
+  /**
+   * What recording this doc's facts came to, on a scan that finds conflicts
+   * by comparing facts. Absent on any other scan, and on a doc not recorded.
+   */
+  ledger: DocLedgerCountsSchema.optional(),
 });
 export type CorpusDoc = z.infer<typeof CorpusDocSchema>;
 
@@ -350,6 +385,40 @@ export const CandidatePairSchema = z.object({
 });
 export type CandidatePair = z.infer<typeof CandidatePairSchema>;
 
+/**
+ * What comparing the recorded facts came to for one area: the area's facts its
+ * area batches compared (a failed batch's facts are not counted), and the
+ * groups of two or more those batches formed that hold one of them. An area
+ * over the batch bound also carries how many parts it was cut into and how
+ * many linked pairs of facts the cut separated.
+ */
+export const AreaComparisonSchema = z.object({
+  facts: z.number().int().nonnegative(),
+  groups: z.number().int().nonnegative(),
+  parts: z.number().int().positive().optional(),
+  cutPairs: z.number().int().nonnegative().optional(),
+});
+export type AreaComparison = z.infer<typeof AreaComparisonSchema>;
+
+/**
+ * What comparing the recorded facts came to for the whole corpus: the distinct
+ * subject names the facts use (after names equal but for case, spacing and
+ * markup are merged), the subjects they settled into, the subject families
+ * formed (settled subjects joined by a rare word of their names, two or more
+ * to a family), the families whose facts span area batches and were compared
+ * again in subject batches, the facts those batches held, and the facts a
+ * comparison session placed in no group and not alone.
+ */
+export const CorpusComparisonSchema = z.object({
+  subjectNames: z.number().int().nonnegative(),
+  settledSubjects: z.number().int().nonnegative(),
+  subjectFamilies: z.number().int().nonnegative(),
+  subjectBatchFamilies: z.number().int().nonnegative(),
+  subjectBatchFacts: z.number().int().nonnegative(),
+  unplacedFacts: z.number().int().nonnegative(),
+});
+export type CorpusComparison = z.infer<typeof CorpusComparisonSchema>;
+
 /** A group of docs sharing one normalized area. */
 export const AreaSchema = z.object({
   /** Canonical area id, `product/concern`. */
@@ -383,6 +452,11 @@ export const AreaSchema = z.object({
    * optional; absent on pre-pairing corpora.
    */
   uncheckedPairs: z.array(CandidatePairSchema).optional(),
+  /**
+   * What comparing the recorded facts came to here, on a scan that finds
+   * conflicts by comparing facts. Absent on any other scan.
+   */
+  comparison: AreaComparisonSchema.optional(),
 });
 export type Area = z.infer<typeof AreaSchema>;
 
@@ -412,5 +486,10 @@ export const CuratedCorpusSchema = z.object({
   areas: z.array(AreaSchema),
   /** Docs the relevance filter dropped (path + reason); empty for older corpora. */
   skippedDocs: z.array(SkippedDocSchema).default([]),
+  /**
+   * What comparing the recorded facts came to, on a scan that finds conflicts
+   * by comparing facts. Absent on any other scan.
+   */
+  comparison: CorpusComparisonSchema.optional(),
 });
 export type CuratedCorpus = z.infer<typeof CuratedCorpusSchema>;

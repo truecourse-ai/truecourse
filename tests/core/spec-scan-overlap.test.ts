@@ -482,6 +482,33 @@ describe('the fold re-verifies every pointer', () => {
     })
     expect(result.corpus.areas.find((a) => a.id === 'core/auth')!.overlaps).toEqual([])
   })
+
+  it('drops a finding that names one doc on both sides: a cluster never pairs a doc with itself', async () => {
+    const { result } = await runScan({
+      tagging: {
+        'docs/auth.md': [{ product: 'core', concern: 'auth' }],
+        'docs/session.md': [{ product: 'core', concern: 'auth' }],
+      },
+      overlap: async () => ({
+        kind: 'outcome',
+        value: {
+          overlaps: [
+            {
+              docs: { a: 'docs/auth.md', b: 'docs/auth.md' },
+              note: 'auth.md disagrees with itself',
+              sections: [
+                { doc: 'docs/auth.md', heading: null, quote: 'every access token is minted here' },
+                { doc: 'docs/auth.md', heading: 'Token lifetime', quote: 'Access tokens expire after 15 minutes.' },
+              ],
+              review: { explanation: 'x', recommendation: { action: 'dismiss', rationale: 'x', confidence: 'low' } },
+            },
+          ],
+          notReached: [],
+        },
+      }),
+    })
+    expect(result.corpus.areas.flatMap((a) => a.overlaps)).toEqual([])
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -557,6 +584,17 @@ describe('validateOverlapFindings', () => {
     const text = errors.join('\n')
     expect(text).toContain('has no heading `Deletion Policy`')
     expect(text).toContain('Token lifetime')
+  })
+
+  it('refuses a finding that names one doc on both sides, two passages or not', () => {
+    const inside = base({
+      docs: ['docs/auth.md', 'docs/auth.md'],
+      sections: [
+        { doc: 'docs/auth.md', heading: null, quote: 'every access token is minted here' },
+        { doc: 'docs/auth.md', heading: 'Token lifetime', quote: 'Access tokens expire after 15 minutes.' },
+      ],
+    })
+    expect(validateOverlapFindings(inside, briefed).join('\n')).toContain('the two docs are the same')
   })
 
   it('refuses notReached naming a doc that was never briefed', () => {

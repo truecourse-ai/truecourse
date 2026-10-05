@@ -39,11 +39,14 @@ import { repositoryDocumentsIn, sliceCorpus } from '@truecourse/core/services/co
 import { conflictsCreated } from '@truecourse/core/services/pr-check/compare';
 import { splitRepo, type OctokitClient } from '@truecourse/github-app';
 import {
+  disputeSides,
   isForkPullRequest,
   openConflicts,
+  parseHeadings,
   pullRequestWorkspaceScope,
   type CorpusConflict,
   type NotificationLevel,
+  type OverlapSectionLike,
   type PullRequestCheckConclusion,
   type PullRequestCheckReason,
   type PullRequestCheckReport,
@@ -211,6 +214,9 @@ export function createRepoPullRequestCheckTask(
                   workspaceOrgId,
                   driver: llm.driver(),
                   transportMode: llm.mode,
+                  // On Claude Code the scan reviews the head's documents on
+                  // disk and finds conflicts by comparing facts; in API mode it pairs.
+                  ...(llm.mode === 'claude-code' ? { computer: true, conflictMethod: 'facts' as const } : {}),
                   tracker: pipelineTracker(ctx, 'scan', CURATE_STEPS),
                   pullRequest: { repoFullName, number, headSha, checkId: opened.id, scope: workspaceScope, sourceId, documents },
                   ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -452,24 +458,29 @@ function reportConflict(
   repos: readonly { repoFullName: string; sourceIds: string[] }[],
 ): PullRequestCheckReport['conflictsCreated'][number] {
   const { source, documents } = scan;
-  const headings = (doc: string): string[] =>
-    (conflict.sections ?? []).filter((s) => s.doc === doc && s.heading !== null).map((s) => s.heading!);
+  const headings = (side: readonly OverlapSectionLike[]): string[] =>
+    side.flatMap((s) => (s.heading !== null ? [s.heading] : []));
+  const [sideA, sideB] = disputeSides(conflict.a, conflict.b, conflict.sections);
   const ownSides = [conflict.a, conflict.b]
     .map((doc) => ({ doc, parsed: parseContextDocRef(doc) }))
     .filter(({ parsed }) => parsed !== null && source !== null && parsed.sourceId === source.id);
   const own = ownSides.find(({ parsed }) => scan.changed.has(parsed!.docPath)) ?? ownSides[0];
-  const docs: [string, string] =
-    own?.doc === conflict.b ? [conflict.b, conflict.a] : [conflict.a, conflict.b];
+  // A conflict inside one doc keeps its passages in order: there is no other doc to put first.
+  const flip = own?.doc === conflict.b && conflict.a !== conflict.b;
+  const docs: [string, string] = flip ? [conflict.b, conflict.a] : [conflict.a, conflict.b];
+  const sections: [string[], string[]] = flip
+    ? [headings(sideB), headings(sideA)]
+    : [headings(sideA), headings(sideB)];
   const path = own?.parsed?.docPath ?? null;
   const body = path !== null ? documents.get(path) : undefined;
-  const heading = own ? headings(own.doc)[0] : undefined;
+  const heading = own ? sections[0][0] : undefined;
   const line = body !== undefined && heading !== undefined ? headingLine(body, heading) : null;
   const sourcesOf = new Set(
     [conflict.a, conflict.b].map((doc) => parseContextDocRef(doc)?.sourceId).filter((id): id is string => !!id),
   );
   return {
     docs,
-    sections: [headings(docs[0]), headings(docs[1])],
+    sections,
     note: conflict.note,
     area: conflict.area,
     path,
@@ -478,14 +489,14 @@ function reportConflict(
   };
 }
 
-/** The 1-based line of a markdown heading in a body, or null when it is not there. */
+/**
+ * The 1-based line of a markdown heading in a body, or null when it is not
+ * there. Headings are the ones the doc's outline lists, so a `#` comment inside
+ * a fenced block is never one.
+ */
 function headingLine(body: string, heading: string): number | null {
-  const wanted = heading.replace(/[`*_~]/g, '').trim().toLowerCase();
-  const lines = body.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    const match = /^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(lines[i] ?? '');
-    if (match && match[1]!.replace(/[`*_~]/g, '').trim().toLowerCase() === wanted) return i + 1;
-  }
-  return null;
+  const key = (text: string): string => text.replace(/[`*_~]/g, '').trim().toLowerCase();
+  const found = parseHeadings(body.split('\n')).find((h) => key(h.text) === key(heading));
+  return found ? found.line + 1 : null;
 }
 

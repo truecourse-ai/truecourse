@@ -33,6 +33,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { Info, Lightbulb, OctagonAlert, TriangleAlert } from 'lucide-react';
+import { parseHeadings } from '@truecourse/shared';
 
 import { headingMatchKey as norm } from '@/lib/heading-match';
 import { ADMONITION_KIND, ADMONITION_TITLE, remarkAdmonitions } from '@/lib/remark-admonitions';
@@ -183,20 +184,25 @@ interface Section {
   text: string;
 }
 
-/** Split markdown into sections, each = a heading line + its body up to the next heading. */
+/**
+ * Split markdown into sections, each = a heading line + its body up to the next
+ * heading, at exactly the headings `parseHeadings` finds: a `#` line inside a
+ * fenced block stays in its block, as the scan's section pointers read it.
+ */
 function splitSections(source: string): Section[] {
-  const headingRe = /^#{1,6}\s+(.*)$/;
+  const lines = source.split('\n');
+  const headingAt = new Map(parseHeadings(lines).map((h) => [h.line, h.text]));
   const sections: Section[] = [];
   let cur: Section = { heading: '', text: '' };
-  for (const line of source.split('\n')) {
-    const m = headingRe.exec(line);
-    if (m) {
+  lines.forEach((line, i) => {
+    const heading = headingAt.get(i);
+    if (heading !== undefined) {
       if (cur.text.trim() || cur.heading) sections.push(cur);
-      cur = { heading: m[1].trim(), text: `${line}\n` };
+      cur = { heading, text: `${line}\n` };
     } else {
       cur.text += `${line}\n`;
     }
-  }
+  });
   if (cur.text.trim() || cur.heading) sections.push(cur);
   return sections;
 }

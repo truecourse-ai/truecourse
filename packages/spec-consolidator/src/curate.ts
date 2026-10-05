@@ -23,6 +23,7 @@ import path from 'node:path';
 import { type StageTransportTally } from '@truecourse/shared/llm';
 import {
   buildCorpusConflicts,
+  conflictVerdictFor,
   type CorpusConflict,
 } from '@truecourse/shared';
 import { writeDecisions } from './orchestrator.js';
@@ -164,15 +165,8 @@ export function autoApplyHighConfidenceRecommendations(
     if (!rec || rec.confidence !== 'high' || rec.action === 'fix-doc') continue;
     const verdict: 'a' | 'b' | 'dismissed' =
       rec.action === 'pick-a' ? 'a' : rec.action === 'pick-b' ? 'b' : 'dismissed';
-    const secOf = (doc: string) => (c.sections ?? []).find((s) => s.doc === doc);
     added.push({
-      docA: c.a,
-      anchorA: secOf(c.a)?.heading ?? null,
-      quoteA: secOf(c.a)?.quote,
-      docB: c.b,
-      anchorB: secOf(c.b)?.heading ?? null,
-      quoteB: secOf(c.b)?.quote,
-      verdict,
+      ...conflictVerdictFor(c, c.a, c.b, verdict),
       resolvedAt: new Date().toISOString(),
       note: rec.rationale,
       resolvedBy: 'auto',
@@ -193,8 +187,9 @@ export function autoApplyHighConfidenceRecommendations(
  * The judge's review for a conflict, resolved from its REPRESENTATIVE
  * overlap — the record whose docs order is exactly `[c.a, c.b]` and whose section
  * pointers match — so a `pick-a`/`pick-b` recommendation orients exactly as
- * `c.a`/`c.b`. The merged conflict record deliberately does not carry the
- * review itself.
+ * `c.a`/`c.b` (inside one doc, as the first and second pointer the conflict
+ * carries, which are the representative's own). The merged conflict record
+ * deliberately does not carry the review itself.
  */
 function reviewForConflict(corpus: CuratedCorpus, c: CorpusConflict): Overlap['review'] {
   const sectionKeys = (

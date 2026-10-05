@@ -1,0 +1,148 @@
+---
+title: "Quickstart"
+description: "Sign in to the hosted version of Reactive Resume, or deploy your own self-hosted instance with Docker Compose."
+---
+
+## Options
+
+There are two ways to use Reactive Resume:
+
+<CardGroup cols={2}>
+  <Card title="Use the Cloud Version" icon="cloud" href="#using-the-cloud-version">
+    The fastest way to get started, and the right choice for most people.
+  </Card>
+  <Card title="Self-Host with Docker" icon="docker" href="#self-host-with-docker">
+    Deploy your own instance and keep full control. Requires some technical knowledge.
+  </Card>
+</CardGroup>
+
+---
+
+## Using the cloud version
+
+The easiest way to use Reactive Resume is our cloud version at [rxresu.me](https://rxresu.me). It is free, and it will stay free.
+
+<Steps>
+	<Step title="Create an Account">
+		Visit [rxresu.me](https://rxresu.me) and sign up for free using your email, or sign in with your GitHub or Google
+		account.
+	</Step>
+
+    <Step title="Create Your First Resume">
+    	Click the **Create Resume** button on your dashboard. Give your resume a name and select a template to get started.
+    </Step>
+
+    <Step title="Fill in Your Details">
+    	Use the builder to add your personal information, work experience, education, skills, projects, and
+    	anything else the resume needs.
+    </Step>
+
+    <Step title="Export & Share">
+    	When you're ready, export your resume as a PDF or share it at its public URL.
+    </Step>
+
+</Steps>
+
+<Tip>Your resume updates in real-time as you type. The preview panel shows exactly how your final PDF will look.</Tip>
+
+---
+
+## Self-host with Docker
+
+You can deploy Reactive Resume on your own infrastructure using Docker.
+
+<Info>
+  **From v5.1.0 onwards** — PDF generation now runs entirely client-side via `@react-pdf/renderer`. Self-hosted deployments no longer require Browserless, Chromium, or any external print service as a dependency. The `PRINTER_*` and `BROWSERLESS_*` environment variables are no longer read and can be removed from your `.env`.
+</Info>
+
+### Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- [Docker](https://docs.docker.com/get-docker/) (v20.10 or higher)
+- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0 or higher)
+
+<Info>
+  There is <strong>no difference in features</strong> between the cloud-hosted version and the self-hosted option. Both
+  offer the same privacy and customization. Pick whichever deployment type suits you.
+</Info>
+
+### Quick deployment
+
+<Steps>
+	<Step title="Clone the Repository">
+		```bash
+		git clone https://github.com/reactive-resume/reactive-resume.git reactive-resume
+		cd reactive-resume
+		```
+	</Step>
+
+    <Step title="Configure Environment Variables">
+    	Create a `.env` file in the root directory with the following variables:
+
+```bash .env
+# Application
+APP_URL=http://localhost:3000
+
+# Database
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres
+
+# Authentication (generate a secure secret)
+AUTH_SECRET=your-secure-secret-key-here
+
+# Storage (S3-compatible via SeaweedFS)
+S3_ACCESS_KEY_ID=seaweedfs
+S3_SECRET_ACCESS_KEY=seaweedfs
+S3_ENDPOINT=http://seaweedfs:8333
+S3_BUCKET=reactive-resume
+S3_FORCE_PATH_STYLE=true
+
+# AI features (optional; ENCRYPTION_SECRET for saved providers, plus REDIS_URL for the agent)
+REDIS_URL=redis://redis:6379
+ENCRYPTION_SECRET=your-secure-encryption-secret-here
+```
+
+    	<Warning>
+		For production deployments, always use strong, unique values for `AUTH_SECRET`, `ENCRYPTION_SECRET`, and
+		database credentials.
+    	</Warning>
+    </Step>
+
+    <Step title="Start the Services">
+    	```bash
+    	docker compose up -d
+    	```
+
+    	This starts:
+    	- **PostgreSQL** — Database for storing user data and resumes
+	- **Redis** — Required for the AI Agent workspace
+    	- **SeaweedFS** — S3-compatible storage for file uploads
+    	- **Reactive Resume** — The main application
+    </Step>
+
+    <Step title="Access Your Instance">
+    	Once all services are running, access your Reactive Resume instance at:
+
+    	```text
+    	http://localhost:3000
+    	```
+    </Step>
+
+</Steps>
+
+### Docker Compose services
+
+Here's what each service in the stack does:
+
+| Service           | Port | Description                                          |
+| ----------------- | ---- | ---------------------------------------------------- |
+| `postgres`        | 5432 | PostgreSQL database for storing all application data |
+| `redis`           | 6379 | Redis instance required by the AI Agent workspace    |
+| `seaweedfs`       | 8333 | S3-compatible object storage for file uploads        |
+| `reactive_resume` | 3000 | The main Reactive Resume application                 |
+
+<Note>
+  Saved AI provider management requires `ENCRYPTION_SECRET`, and the AI Agent workspace requires both `REDIS_URL` and
+  `ENCRYPTION_SECRET`. Other Reactive Resume features can run without them. Agent attachments and other private objects
+  require S3-compatible storage; local storage rejects private objects.
+</Note>
