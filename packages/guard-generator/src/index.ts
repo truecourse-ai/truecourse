@@ -19,6 +19,7 @@ export {
   // steps in order. `@truecourse/core` enforces the cache-only replay of the
   // prior ones against these.
   GENERATE_SESSION_STEPS,
+  PRODUCT_WORLD_RECIPE_FINGERPRINT,
   type GenerateStep,
   type GenerateGuardsOptions,
   // One line per thing a run did, filed under the phase that did it.

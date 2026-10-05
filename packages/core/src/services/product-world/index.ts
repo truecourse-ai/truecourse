@@ -6,6 +6,7 @@
  *   world-session.ts      the session that writes them
  *   flow-test-stage.ts    generate: one Playwright test per flow
  *   flow-test-session.ts  the session that writes one
+ *   flow-test-run.ts      run: every stored test against the product, brought up once
  *
  * The deterministic half (running the scripts, running the tests) is
  * `@truecourse/guard-runner`'s `product-world.ts` and `flow-tests.ts`.
@@ -21,3 +22,4 @@ export {
   type FlowTestStageResult,
 } from './flow-test-stage.js';
 export { FLOW_TEST_SESSION_KIND } from './flow-test-session.js';
+export { runStoredFlowTests, type FlowTestRunInput, type FlowTestRunOutcome } from './flow-test-run.js';

@@ -1784,7 +1784,7 @@ export function apiBootConcurrency(general: number): number {
 }
 
 /** `<iso>_<short-uuid>` — sortable, filesystem-safe, matches the analyze store convention. */
-function buildRunId(): string {
+export function buildRunId(): string {
   const iso = new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z')
   const short = crypto.randomUUID().replace(/-/g, '').slice(0, 8)
   return `${iso}_${short}`
