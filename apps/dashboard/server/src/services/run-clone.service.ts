@@ -97,6 +97,13 @@ export interface RunClone {
   dir: string;
   /** Delete the clone. Idempotent, never throws. */
   dispose: () => void;
+  /**
+   * Bring one more commit into the tree, beside the one checked out, and say
+   * whether it is there. A tree holds a single commit; a run that must read
+   * what changed since an earlier one asks for that one by name. Never throws:
+   * a commit that cannot be had is `false`.
+   */
+  fetchCommit?: (commitSha: string) => Promise<boolean>;
 }
 
 /**
@@ -120,6 +127,10 @@ export interface RunClone {
  * ref, and a pull request's head is reachable from the base repository's
  * `refs/pull/`, so a fork's head needs no access to the fork. A per-command
  * `-c` on `fetch` persists nothing, so there is nothing to unset on that path.
+ *
+ * `fetchCommit` on the clone is that same depth-1 fetch of one more commit,
+ * made later in the run, so it asks `freshToken` for a credential when one is
+ * given: the token the clone was made with may have expired by then.
  */
 export async function createRunClone(
   repoFullName: string,
@@ -128,6 +139,8 @@ export async function createRunClone(
     workspaceOrgId: string;
     defaultBranch?: string | null;
     commitSha?: string | null;
+    /** A credential for a fetch made after the clone. Absent means the clone's own token. */
+    freshToken?: () => Promise<string>;
     run?: GitRunner;
   },
 ): Promise<RunClone> {
@@ -146,6 +159,16 @@ export async function createRunClone(
     }
   };
 
+  const fetchCommit = async (commitSha: string): Promise<boolean> => {
+    try {
+      const fresh = opts.freshToken ? await opts.freshToken() : token;
+      await run([...cloneAuthArgs(fresh), 'fetch', '--quiet', '--depth', '1', 'origin', commitSha], dir);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   try {
     if (opts.commitSha) {
       await run(['init', '--quiet', dir]);
@@ -157,7 +180,7 @@ export async function createRunClone(
           : ['checkout', '--quiet', '--detach', 'FETCH_HEAD'],
         dir,
       );
-      return { dir, dispose };
+      return { dir, dispose, fetchCommit };
     }
     await run([
       'clone',
@@ -174,7 +197,7 @@ export async function createRunClone(
     } catch {
       // key absent — nothing at rest to remove
     }
-    return { dir, dispose };
+    return { dir, dispose, fetchCommit };
   } catch (err) {
     dispose();
     throw createAppError(`Could not clone ${url}: ${gitFailureMessage(err)}`, 502);
@@ -189,11 +212,13 @@ export async function createRunClone(
  * writes inside the tree it is given, and a developer's checkout is theirs. The
  * copy is whole (`.git` included, so the run resolves the same commit the
  * developer is on) and it is the only tree the run ever touches; disposing it
- * leaves the original exactly as it was.
+ * leaves the original exactly as it was. The copy has whatever history the
+ * folder has, so `fetchCommit` fetches nothing: it answers whether the commit
+ * is there.
  */
 export async function createRunCopy(
   sourceDir: string,
-  opts: { workspaceOrgId: string },
+  opts: { workspaceOrgId: string; run?: GitRunner },
 ): Promise<RunClone> {
   if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
     throw createAppError(`${sourceDir} is not a folder on this machine any more.`, 404);
@@ -219,7 +244,16 @@ export async function createRunCopy(
     // the folder is copied as the link it is rather than dragging the tree it
     // names into the run.
     fs.cpSync(sourceDir, dir, { recursive: true, dereference: false, force: true });
-    return { dir, dispose };
+    const run = opts.run ?? runGit;
+    const fetchCommit = async (commitSha: string): Promise<boolean> => {
+      try {
+        await run(['cat-file', '-e', `${commitSha}^{commit}`], dir);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    return { dir, dispose, fetchCommit };
   } catch (err) {
     dispose();
     throw createAppError(`Could not copy ${sourceDir}: ${(err as Error).message}`, 500);

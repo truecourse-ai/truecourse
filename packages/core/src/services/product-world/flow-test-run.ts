@@ -121,34 +121,51 @@ export async function runStoredFlowTests(input: FlowTestRunInput): Promise<FlowT
           result,
           specSource: fs.readFileSync(path.join(flowTestsDir(repoRoot), result.file), 'utf-8'),
           ranAt,
+          ...(input.commit ? { commit: input.commit } : {}),
         }),
       },
     ];
   });
 
-  const tally = tallyFlowTestRun(flowTests);
   return {
     status: 'ok',
-    latest: {
-      run: {
-        runId,
-        ranAt,
-        branch: input.branch,
-        commit: input.commit,
-        recipeFingerprint: PRODUCT_WORLD_RECIPE_FINGERPRINT,
-      },
-      summary: {
-        total: tally.run,
-        pass: tally.passed,
-        fail: tally.failed,
-        stale: 0,
-        orphaned: 0,
-        error: tally.seedFailed,
-        blocked: 0,
-      },
-      scenarios: [],
-      sections: [],
-      flowTests,
+    latest: flowTestRunLatest({ runId, ranAt, branch: input.branch, commit: input.commit, flowTests }),
+  };
+}
+
+/**
+ * A run of flow tests as a run snapshot: its envelope, the tally of its
+ * outcomes, and each test's result beside the status it was authored with.
+ * The run job's run and the one a generate leaves at its commit are the same
+ * record.
+ */
+export function flowTestRunLatest(run: {
+  runId: string;
+  ranAt: string;
+  branch: string | null;
+  commit: string | null;
+  flowTests: FlowTestRunResult[];
+}): GuardLatest {
+  const tally = tallyFlowTestRun(run.flowTests);
+  return {
+    run: {
+      runId: run.runId,
+      ranAt: run.ranAt,
+      branch: run.branch,
+      commit: run.commit,
+      recipeFingerprint: PRODUCT_WORLD_RECIPE_FINGERPRINT,
     },
+    summary: {
+      total: tally.run,
+      pass: tally.passed,
+      fail: tally.failed,
+      stale: 0,
+      orphaned: 0,
+      error: tally.seedFailed,
+      blocked: 0,
+    },
+    scenarios: [],
+    sections: [],
+    flowTests: run.flowTests,
   };
 }

@@ -18,6 +18,11 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  * as a warning rather than a failure — the remedy is a resolution, not a retry.
  * A cancelled generate leaves the store exactly as it found it.
  *
+ * A product-world generate also runs every flow test the repository already
+ * has at the commit it cloned, and repairs the ones that moved. How the tests
+ * ran there is stored as a run of that commit, beside the tests themselves, so
+ * every such generate leaves one.
+ *
  * A generate that produced a scenario set chains into the BASELINE RUN — the
  * last link of onboarding — so every connected repository ends up with a run
  * on record, not just a set of scenarios. A generate that settled no flow and
@@ -66,6 +71,7 @@ import { materializeStoredSpec } from '../materialize-spec.js';
 import {
   markWorldStateUnknown,
   materializeStoredGuardState,
+  persistFlowTestRun,
   persistGeneratedGuard,
   readGeneratedReport,
 } from '../materialize-guard.js';
@@ -259,11 +265,12 @@ export function createRepoGuardGenerateTask(
 
             let guard;
             let flowTests: Awaited<ReturnType<typeof runGenerate>>['flowTests'];
+            let flowTestRun: Awaited<ReturnType<typeof runGenerate>>['flowTestRun'];
             // The versions this generate writes say which run wrote them and on which model.
             const driver = llm.driver();
             const provenance = { producedByRun: activityRun.runId, model: driver.attribution.model };
             try {
-              ({ guard, flowTests } = await runGenerate(tree.dir, {
+              ({ guard, flowTests, flowTestRun } = await runGenerate(tree.dir, {
                 driver,
                 transportMode: llm.mode,
                 attribution: driver.attribution,
@@ -274,7 +281,13 @@ export function createRepoGuardGenerateTask(
                 // left in the bundle, under the same world identity setup proved
                 // them with; otherwise from the recipe setup derived.
                 ...(llm.mode === 'claude-code'
-                  ? { productWorld: { worldKey: `${ctx.payload.workspaceOrgId}/${repoFullName}${pr ? `#${pr.number}` : ''}` } }
+                  ? {
+                      productWorld: {
+                        worldKey: `${ctx.payload.workspaceOrgId}/${repoFullName}${pr ? `#${pr.number}` : ''}`,
+                        commit: commitSha,
+                        ...(tree.fetchCommit ? { fetchCommit: tree.fetchCommit } : {}),
+                      },
+                    }
                   : { requireExistingRecipe: true }),
                 ...(resume ? { resume } : {}),
                 ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -344,10 +357,22 @@ export function createRepoGuardGenerateTask(
               if (flowTests.status === 'world-failed') {
                 throw new Error(`The product did not come up (${flowTests.stage}): ${firstLine(flowTests.reason)}`);
               }
+              if (flowTests.status === 'rerun-failed') {
+                throw new Error(`The kept flow tests could not be run: ${firstLine(flowTests.reason)}`);
+              }
+              // How the tests ran at this commit, as a run of it.
+              if (flowTestRun) {
+                try {
+                  await persistFlowTestRun(ref, tree.dir, flowTestRun, provenance);
+                } catch (cause) {
+                  throw new UserFacingError("Generation finished, but we couldn't save how its tests ran.", { cause });
+                }
+              }
               const tests = flowTests.status === 'ok' ? flowTests.tests : [];
               const kept = tests.filter((t) => t.status !== 'blocked').length;
               const failing = tests.filter((t) => t.status === 'failing').length;
               const blocked = tests.length - kept;
+              const unsettled = flowTests.status === 'ok' ? flowTests.unsettled.length : 0;
               return {
                 result: {
                   repoFullName,
@@ -360,7 +385,7 @@ export function createRepoGuardGenerateTask(
                 notification: {
                   level: kept === 0 || failing > 0 ? 'warning' : 'success',
                   title: kept === 0 ? 'No flow test was written' : failing > 0 ? 'Flow tests written, findings to review' : 'Flow tests written',
-                  body: `${kept} test${kept === 1 ? '' : 's'} for ${tests.length} flow${tests.length === 1 ? '' : 's'}: ${kept - failing} passing, ${failing} failing, ${blocked} blocked.`,
+                  body: `${kept} test${kept === 1 ? '' : 's'} for ${tests.length} flow${tests.length === 1 ? '' : 's'}: ${kept - failing} passing, ${failing} failing, ${blocked} blocked${unsettled > 0 ? `, ${unsettled} unsettled` : ''}.`,
                   data: { repoFullName, runId: activityRun.runId, written: kept, birthFindings: failing },
                 },
               };
