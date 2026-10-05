@@ -1,5 +1,5 @@
 import { easeOut, span, useClock } from '../motion';
-import { LockScreen, glowLevel, type LockNote } from './LockScreen';
+import { LockScreen, clockTime, floodMinutes, glowLevel, lockClock, type LockNote } from './LockScreen';
 
 /**
  * The hero: the same phone as the evening, on a good morning, the evening's
@@ -33,7 +33,7 @@ const BEFORE: LockNote[] = [
   { app: 'mail', time: '7:09 AM', title: 'Northwind', body: 'Love the new export!' },
 ];
 
-/** Then the new subscriptions pour in, a minute or two apart, from 7:12 AM. */
+/** Then the new subscriptions keep coming through the morning, from 7:12 AM. */
 const FLOOD: [customer: string, perMonth: number][] = [
   ['Baker & Lane CPA', 99],
   ['Clearwater Dental', 79],
@@ -53,22 +53,20 @@ const FLOOD: [customer: string, perMonth: number][] = [
   ['Foxglove Studio', 29],
 ];
 
-const am = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')} AM`;
-const FLOOD_START = 7 * 60 + 12;
-const floodMinute = (i: number) => FLOOD_START + Math.round(i * 1.3);
+const AT_MINUTE = floodMinutes(7 * 60 + 12, FLOOD.length);
 const gained = FLOOD.reduce((sum, [, m]) => sum + m, 0);
 
 const NOTES: LockNote[] = [
   ...BEFORE,
   ...FLOOD.map(([customer, perMonth], i): LockNote => ({
     app: 'stripe',
-    time: am(floodMinute(i)),
+    time: clockTime(AT_MINUTE[i]!),
     title: 'New subscription',
     body: `${customer}, $${perMonth} a month`,
   })),
   {
     app: 'stripe',
-    time: am(floodMinute(FLOOD.length - 1) + 1),
+    time: clockTime(AT_MINUTE[FLOOD.length - 1]! + 2),
     title: `+$${gained.toLocaleString('en-US')} this month`,
     body: `${FLOOD.length} new subscriptions, none cancelled.`,
   },
@@ -98,7 +96,7 @@ export function MorningScene() {
     <div ref={ref} className="bs-morning">
       <LockScreen
         glow={{ tone: 'good', level: glowLevel(t, AT) }}
-        time={NOTES[latest]!.time.replace(' AM', '')}
+        time={lockClock(NOTES[latest]!.time)}
         notes={NOTES}
         shown={shown}
         label="A phone's lock screen in the morning. The AI CTO texts that it fixed and tested a checkout outage at 2:10 AM and stopped a bad change from going live. Then a five-star review and a happy customer email, then new subscriptions pour in faster and faster, and the month ends over a thousand dollars up."

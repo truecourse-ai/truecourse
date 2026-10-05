@@ -48,6 +48,26 @@ function group(notes: LockNote[], shown: number[]): Group[] {
   return groups;
 }
 
+/** Minutes since midnight as a lock screen writes it, like 8:41 PM; past midnight wraps to the next day. */
+export function clockTime(minutes: number): string {
+  const m = ((minutes % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  return `${h % 12 || 12}:${String(m % 60).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/** The big clock, which leaves off AM and PM. */
+export const lockClock = (time: string) => time.replace(/ [AP]M$/, '');
+
+/** The uneven gaps, in minutes, between notifications in a flood. */
+const FLOOD_GAPS = [12, 27, 8, 19, 31, 14, 22, 9, 25, 16];
+
+/** When each of `count` flood notifications arrives, in minutes since midnight, from `start`. */
+export function floodMinutes(start: number, count: number): number[] {
+  const at = [start];
+  for (let i = 1; i < count; i++) at.push(at[i - 1]! + FLOOD_GAPS[(i - 1) % FLOOD_GAPS.length]!);
+  return at;
+}
+
 export interface Glow {
   tone: 'good' | 'bad';
   /** 0 to 1, from `glowLevel`. */

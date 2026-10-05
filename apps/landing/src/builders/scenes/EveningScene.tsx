@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import { easeOut, span, useClock } from '../motion';
-import { LockScreen, glowLevel, type LockNote } from './LockScreen';
+import { LockScreen, clockTime, floodMinutes, glowLevel, lockClock, type LockNote } from './LockScreen';
 
 /** What goes wrong, beside the phone; each lights up when its first notification lands. */
 const PAINS = ['Bugs reach users first', 'Production is a black box', 'Users struggle in silence', 'Customers leave'];
@@ -22,7 +22,7 @@ const BEFORE: Note[] = [
   { app: 'stripe', time: '8:30 PM', title: 'Subscription cancelled', body: 'Acme Dental, $49 a month', pain: 3 },
 ];
 
-/** Then the cancellations pour in, a minute or two apart, from 8:31 PM. */
+/** Then the cancellations keep coming, on into the night, from 8:41 PM. */
 const FLOOD: [customer: string, perMonth: number][] = [
   ['Harbor Legal', 99],
   ['Pine & Co', 49],
@@ -46,9 +46,7 @@ const FLOOD: [customer: string, perMonth: number][] = [
   ['Sterling CPA', 99],
 ];
 
-const pm = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')} PM`;
-const FLOOD_START = 8 * 60 + 31;
-const floodMinute = (i: number) => FLOOD_START + Math.round(i * 1.4);
+const AT_MINUTE = floodMinutes(20 * 60 + 41, FLOOD.length);
 
 const cancelled = [...BEFORE.filter((n) => n.title === 'Subscription cancelled').map((n) => Number(n.body.match(/\$(\d+)/)![1])), ...FLOOD.map(([, m]) => m)];
 const lost = cancelled.reduce((sum, m) => sum + m, 0);
@@ -57,14 +55,14 @@ const NOTES: Note[] = [
   ...BEFORE,
   ...FLOOD.map(([customer, perMonth], i): Note => ({
     app: 'stripe',
-    time: pm(floodMinute(i)),
+    time: clockTime(AT_MINUTE[i]!),
     title: 'Subscription cancelled',
     body: `${customer}, $${perMonth} a month`,
     pain: 3,
   })),
   {
     app: 'stripe',
-    time: pm(floodMinute(FLOOD.length - 1) + 1),
+    time: clockTime(AT_MINUTE[FLOOD.length - 1]! + 2),
     title: `−$${lost.toLocaleString('en-US')} this month`,
     body: `${cancelled.length} subscriptions cancelled, 1 new.`,
     pain: 3,
@@ -117,7 +115,7 @@ export function EveningScene({ children }: { children?: ReactNode }) {
         <div className="bs-evening-phone">
           <LockScreen
             glow={{ tone: 'bad', level: glowLevel(t, AT) }}
-            time={NOTES[latest]!.time.replace(' PM', '')}
+            time={lockClock(NOTES[latest]!.time)}
             notes={NOTES}
             shown={shown}
             label="A phone's lock screen. A one-star review, customers asking if the app is down and 31 abandoned checkouts arrive one after another, then cancellations pour in faster and faster, and the month ends over 1,500 dollars down."
