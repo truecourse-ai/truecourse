@@ -921,6 +921,7 @@ section.band:has(.bs-ask) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 82%, transparent 97%);
   display: flex;
   flex-direction: column;
   gap: 8px;
