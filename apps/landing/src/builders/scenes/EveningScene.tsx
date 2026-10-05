@@ -11,7 +11,8 @@ interface Note extends LockNote {
   pain: number;
 }
 
-const NOTES: Note[] = [
+/** The evening before the flood: a review, worried customers, the first cancellations. */
+const BEFORE: Note[] = [
   { app: 'appstore', time: '6:12 PM', title: 'New review ★☆☆☆☆', body: '"Invites never arrive."', pain: 0 },
   { app: 'mail', time: '6:40 PM', title: 'Northwind', body: 'Is the app down??', pain: 1 },
   { app: 'stripe', time: '7:05 PM', title: 'Subscription cancelled', body: 'Northwind, $79 a month', pain: 3 },
@@ -19,21 +20,69 @@ const NOTES: Note[] = [
   { app: 'mail', time: '7:48 PM', title: 'Acme Dental', body: "Still can't log in. Third time this week.", pain: 1 },
   { app: 'stripe', time: '8:12 PM', title: 'Subscription cancelled', body: 'Bloom Studio, $29 a month', pain: 3 },
   { app: 'stripe', time: '8:30 PM', title: 'Subscription cancelled', body: 'Acme Dental, $49 a month', pain: 3 },
-  { app: 'stripe', time: '8:41 PM', title: 'Subscription cancelled', body: 'Harbor Legal, $99 a month', pain: 3 },
-  { app: 'stripe', time: '8:47 PM', title: 'Subscription cancelled', body: 'Pine & Co, $49 a month', pain: 3 },
-  { app: 'stripe', time: '8:52 PM', title: 'Subscription cancelled', body: 'Lumen Clinic, $79 a month', pain: 3 },
-  { app: 'stripe', time: '8:55 PM', title: '−$1,240 this month', body: '9 subscriptions cancelled, 1 new.', pain: 3 },
+];
+
+/** Then the cancellations pour in, a minute or two apart, from 8:31 PM. */
+const FLOOD: [customer: string, perMonth: number][] = [
+  ['Harbor Legal', 99],
+  ['Pine & Co', 49],
+  ['Lumen Clinic', 79],
+  ['Oak Street CPA', 99],
+  ['Riverside Dental', 49],
+  ['Summit Advisors', 79],
+  ['Maple Law', 99],
+  ['Brightside Tax', 49],
+  ['Cedar Health', 79],
+  ['Atlas Bookkeeping', 29],
+  ['Northstar Wealth', 99],
+  ['Bluebird Studio', 29],
+  ['Granite Partners', 79],
+  ['Elm Family Law', 49],
+  ['Coastal Accounting', 99],
+  ['Willow Therapy', 49],
+  ['Ironwood Legal', 99],
+  ['Juniper Tax', 29],
+  ['Redwood Clinic', 79],
+  ['Sterling CPA', 99],
+];
+
+const pm = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')} PM`;
+const FLOOD_START = 8 * 60 + 31;
+const floodMinute = (i: number) => FLOOD_START + Math.round(i * 1.4);
+
+const cancelled = [...BEFORE.filter((n) => n.title === 'Subscription cancelled').map((n) => Number(n.body.match(/\$(\d+)/)![1])), ...FLOOD.map(([, m]) => m)];
+const lost = cancelled.reduce((sum, m) => sum + m, 0);
+
+const NOTES: Note[] = [
+  ...BEFORE,
+  ...FLOOD.map(([customer, perMonth], i): Note => ({
+    app: 'stripe',
+    time: pm(floodMinute(i)),
+    title: 'Subscription cancelled',
+    body: `${customer}, $${perMonth} a month`,
+    pain: 3,
+  })),
+  {
+    app: 'stripe',
+    time: pm(floodMinute(FLOOD.length - 1) + 1),
+    title: `−$${lost.toLocaleString('en-US')} this month`,
+    body: `${cancelled.length} subscriptions cancelled, 1 new.`,
+    pain: 3,
+  },
 ];
 
 /**
- * When each notification lands. The gaps shrink as the evening goes on, so
- * the alarms come faster and faster until the month's loss lands last.
+ * When each notification lands. The gaps shrink as the evening goes on until
+ * the cancellations pour in almost at once; the month's loss lands last,
+ * after a beat.
  */
-const FIRST_GAP = 1.1;
-const SPEEDUP = 0.8;
-const MIN_GAP = 0.22;
+const FIRST_GAP = 1.0;
+const SPEEDUP = 0.78;
+const MIN_GAP = 0.07;
+const LAST_BEAT = 0.7;
 const AT = NOTES.reduce<number[]>((at, _, i) => {
-  at.push(i === 0 ? 0 : at[i - 1]! + Math.max(MIN_GAP, FIRST_GAP * SPEEDUP ** (i - 1)));
+  const gap = i === NOTES.length - 1 ? LAST_BEAT : Math.max(MIN_GAP, FIRST_GAP * SPEEDUP ** (i - 1));
+  at.push(i === 0 ? 0 : at[i - 1]! + gap);
   return at;
 }, []);
 const LENGTH = AT[AT.length - 1]! + 0.6;
@@ -48,7 +97,7 @@ const LENGTH = AT[AT.length - 1]! + 0.6;
  */
 export function EveningScene({ children }: { children?: ReactNode }) {
   const { ref, t } = useClock(LENGTH, LENGTH, true);
-  const shown = AT.map((at) => easeOut(span(t, at, at + 0.35)));
+  const shown = AT.map((at) => easeOut(span(t, at, at + 0.25)));
   const latest = shown.reduce((last, k, i) => (k > 0 ? i : last), 0);
   const lit = PAINS.map((_, p) => NOTES.some((n, i) => n.pain === p && shown[i]! > 0.5));
 
@@ -70,7 +119,7 @@ export function EveningScene({ children }: { children?: ReactNode }) {
             time={NOTES[latest]!.time.replace(' PM', '')}
             notes={NOTES}
             shown={shown}
-            label="A phone's lock screen. A one-star review, customers asking if the app is down and 31 abandoned checkouts arrive one after another, then cancellations come faster and faster, six over the evening, and the month ends 1,240 dollars down."
+            label="A phone's lock screen. A one-star review, customers asking if the app is down and 31 abandoned checkouts arrive one after another, then cancellations pour in faster and faster, and the month ends thousands of dollars down."
           />
         </div>
       </div>
