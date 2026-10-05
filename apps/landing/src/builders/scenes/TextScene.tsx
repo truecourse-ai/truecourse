@@ -13,10 +13,10 @@ const THREAD: (Text | { at: number; time: string; first?: boolean })[] = [
   {
     at: 0.9,
     from: 'cto',
-    body: "Checkout is failing for 14 people. Tuesday's payment change caused it. A fix is ready and tested. Reply YES to apply it.",
+    body: "Heads up, checkout is failing for 14 people. Tuesday's payment change caused it. I have a fix ready and tested. Want me to put it in?",
   },
-  { at: 2.6, from: 'dana', body: 'YES' },
-  { at: 3.5, from: 'cto', body: 'Applied. Checkout works again.' },
+  { at: 2.6, from: 'dana', body: 'Yes please' },
+  { at: 3.5, from: 'cto', body: 'Done. Checkout works again. Go back to sleep.' },
   { at: 5.0, time: 'Wed 9:05 AM' },
   { at: 5.4, from: 'dana', body: 'What are users stuck on this week?' },
   {
@@ -25,9 +25,9 @@ const THREAD: (Text | { at: number; time: string; first?: boolean })[] = [
     body: "1. 23 people can't find Export on their phone\n2. Reset email arrives late, 9 people\n3. Yearly price reads as monthly, 6 people",
   },
   { at: 8.6, from: 'dana', body: 'Fix the Export button' },
-  { at: 9.9, from: 'cto', body: 'Done and tested in a real browser. Reply SHIP to put it live.' },
-  { at: 11.6, from: 'dana', body: 'SHIP' },
-  { at: 12.5, from: 'cto', body: 'Live.' },
+  { at: 9.9, from: 'cto', body: 'Fixed and tested on a phone. Should I put it live?' },
+  { at: 11.6, from: 'dana', body: 'Go ahead 👍' },
+  { at: 12.5, from: 'cto', body: "It's live." },
 ];
 
 const LENGTH = 17;
@@ -77,7 +77,7 @@ export function TextScene() {
 
   return (
     <div ref={ref}>
-      <Stage width={380} height={800} label="A text message thread with the AI CTO on an iPhone. At 2:14 AM it reports checkout failing and the owner replies YES to apply the fix. In the morning she asks what users are stuck on and gets a ranked list, then asks it to fix the Export button and replies SHIP to put the fix live.">
+      <Stage width={380} height={800} label="A text message thread with the AI CTO on an iPhone. At 2:14 AM it reports checkout failing and the owner says yes to the fix. In the morning she asks what users are stuck on and gets a ranked list, then asks it to fix the Export button and tells it to put the fix live.">
         <div className="bs-iphone">
           <span className="bs-iphone-button left one" />
           <span className="bs-iphone-button left two" />

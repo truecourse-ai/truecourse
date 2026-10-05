@@ -210,7 +210,7 @@ export default function BuildersPage() {
               <ul className="bs-text-kinds">
                 <li>
                   <b>Alerts</b>
-                  <span>Checkout broke at 2 AM. Reply YES to apply the fix.</span>
+                  <span>Checkout broke at 2 AM. I have a fix ready, want me to put it in?</span>
                 </li>
                 <li>
                   <b>Questions</b>
@@ -218,7 +218,7 @@ export default function BuildersPage() {
                 </li>
                 <li>
                   <b>Commands</b>
-                  <span>Fix the Export button. Reply SHIP to put it live.</span>
+                  <span>Fix the Export button, and put it live when it works.</span>
                 </li>
               </ul>
             </Reveal>
