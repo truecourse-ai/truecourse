@@ -34,7 +34,7 @@ export const meta = () =>
   pageMeta({
     title: 'TrueCourse · Your AI CTO',
     description:
-      'An AI CTO for professionals who build their own apps with AI, for about the price of a Claude Code subscription. Get your evenings and weekends back while it keeps your app working.',
+      'An AI CTO for professionals who build their own apps with AI, for $99 a month. Get your evenings and weekends back while it keeps your app working.',
     path: '/builders',
   });
 
@@ -133,7 +133,7 @@ export default function BuildersPage() {
                 business and the people you care about.
               </Reveal>
               <Reveal as="p" className="bs-price" delay={180} rise>
-                For about the price of your Claude Code subscription.
+                $99 a month. Less than one hour of a developer's time.
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
@@ -248,8 +248,7 @@ export default function BuildersPage() {
             <h2>Hire your AI CTO</h2>
             <p className="bs-cta-say">
               Start with a 30-minute app checkup. We look at your app and how you run it, then send you a short
-              plan for what you actually need. $49, credited to your first month. After that, it costs about as
-              much as your Claude Code subscription.
+              plan for what you actually need. $49, credited to your first month. After that, $99 a month.
             </p>
             <div className="cta-row">
               <BookLink className="btn btn-primary" placement="cta">
