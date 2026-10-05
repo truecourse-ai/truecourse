@@ -1001,17 +1001,17 @@ section.band:has(.bs-ask) {
 }
 .bs-phone-glow {
   position: absolute;
-  inset: 6% -22%;
+  inset: -4% -48%;
   z-index: -1;
   border-radius: 50%;
-  filter: blur(42px);
+  filter: blur(48px);
   pointer-events: none;
 }
 .bs-phone-glow.good {
-  background: radial-gradient(closest-side, rgba(34, 197, 94, 0.6), rgba(34, 197, 94, 0) 100%);
+  background: radial-gradient(closest-side, rgba(34, 197, 94, 0.85) 35%, rgba(34, 197, 94, 0) 100%);
 }
 .bs-phone-glow.bad {
-  background: radial-gradient(closest-side, rgba(239, 68, 68, 0.6), rgba(239, 68, 68, 0) 100%);
+  background: radial-gradient(closest-side, rgba(239, 68, 68, 0.85) 35%, rgba(239, 68, 68, 0) 100%);
 }
 
 /* A stack: the newest card on top, up to two layers peeking out beneath. */
