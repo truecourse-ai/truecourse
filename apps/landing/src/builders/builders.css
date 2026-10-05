@@ -1778,8 +1778,8 @@ section.band:has(.bs-ask) {
   display: flex;
   justify-content: center;
   padding: 4px 0 10px;
-  background: rgba(249, 249, 249, 0.94);
-  border-bottom: 0.5px solid rgba(0, 0, 0, 0.15);
+  background: #fff;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.12);
 }
 .bs-ios-back {
   position: absolute;
@@ -1901,9 +1901,14 @@ section.band:has(.bs-ask) {
   height: 34px;
   border-radius: 50%;
   background: #e9e9eb;
-  color: #8e8e93;
-  font-size: 24px;
-  line-height: 1;
+}
+.bs-ios-plus svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: #8e8e93;
+  stroke-width: 2.2;
+  stroke-linecap: round;
 }
 .bs-ios-field {
   flex: 1;

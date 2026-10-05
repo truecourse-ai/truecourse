@@ -127,7 +127,11 @@ export function TextScene() {
               )}
             </div>
             <div className="bs-ios-compose">
-              <span className="bs-ios-plus">+</span>
+              <span className="bs-ios-plus">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2v12M2 8h12" />
+                </svg>
+              </span>
               <span className="bs-ios-field">
                 Text Message
                 <svg viewBox="0 0 14 20" aria-hidden="true">
