@@ -8,7 +8,9 @@ import { Mail } from '../icons';
  * alarms pile up. Notifications land newest on top; how far each one has
  * landed (0 to 1) is the scene's to say. A run of Stripe notifications
  * stacks the way iOS stacks them: one card showing the newest, layers
- * peeking out beneath, and how many more it holds.
+ * peeking out beneath, and how many more it holds. Behind the phone a glow
+ * says which kind of day it is, green for good news and red for bad, growing
+ * as the notifications land and pulsing with each one.
  */
 
 export type LockApp = 'appstore' | 'mail' | 'stripe' | 'cto';
@@ -46,6 +48,22 @@ function group(notes: LockNote[], shown: number[]): Group[] {
   return groups;
 }
 
+export interface Glow {
+  tone: 'good' | 'bad';
+  /** 0 to 1, from `glowLevel`. */
+  level: number;
+}
+
+/**
+ * How strong the glow is at scene time `t`, given when each notification
+ * lands: it grows with the share landed and flares as each one lands.
+ */
+export function glowLevel(t: number, at: number[]): number {
+  const landed = at.filter((a) => t >= a);
+  const pulse = landed.reduce((p, a) => Math.max(p, Math.exp(-(t - a) / 0.4)), 0);
+  return Math.min(1, 0.15 + 0.55 * (landed.length / at.length) + 0.3 * pulse);
+}
+
 const APP: Record<LockApp, ReactNode> = {
   appstore: <span className="bs-lock-glyph">A</span>,
   mail: <Mail />,
@@ -58,6 +76,7 @@ export function LockScreen({
   time,
   notes,
   shown,
+  glow,
 }: {
   label: string;
   /** The clock, as the lock screen shows it. */
@@ -65,9 +84,15 @@ export function LockScreen({
   notes: LockNote[];
   /** How far each note has landed, 0 hidden to 1 in place. */
   shown: number[];
+  glow: Glow;
 }) {
   return (
-    <Stage width={380} height={800} label={label}>
+    <div className="bs-lock-wrap">
+      <span
+        className={`bs-phone-glow ${glow.tone}`}
+        style={{ opacity: glow.level, transform: `scale(${0.85 + 0.2 * glow.level})` }}
+      />
+      <Stage width={380} height={800} label={label}>
       <div className="bs-iphone">
         <span className="bs-iphone-button left one" />
         <span className="bs-iphone-button left two" />
@@ -109,6 +134,7 @@ export function LockScreen({
           <span className="bs-ios-home light" />
         </div>
       </div>
-    </Stage>
+      </Stage>
+    </div>
   );
 }

@@ -994,6 +994,26 @@ section.band:has(.bs-ask) {
   font-size: 12.5px;
   color: rgba(0, 0, 0, 0.5);
 }
+/* The glow behind a phone: green for a good day, red for a bad one. */
+.bs-lock-wrap {
+  position: relative;
+  isolation: isolate;
+}
+.bs-phone-glow {
+  position: absolute;
+  inset: 6% -22%;
+  z-index: -1;
+  border-radius: 50%;
+  filter: blur(42px);
+  pointer-events: none;
+}
+.bs-phone-glow.good {
+  background: radial-gradient(closest-side, rgba(34, 197, 94, 0.6), rgba(34, 197, 94, 0) 100%);
+}
+.bs-phone-glow.bad {
+  background: radial-gradient(closest-side, rgba(239, 68, 68, 0.6), rgba(239, 68, 68, 0) 100%);
+}
+
 /* A stack: the newest card on top, up to two layers peeking out beneath. */
 .bs-lock-group {
   display: flex;

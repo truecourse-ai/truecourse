@@ -1,5 +1,5 @@
 import { easeOut, span, useClock } from '../motion';
-import { LockScreen, type LockNote } from './LockScreen';
+import { LockScreen, glowLevel, type LockNote } from './LockScreen';
 
 /**
  * The hero: the same phone as the evening, on a good morning, the evening's
@@ -97,10 +97,11 @@ export function MorningScene() {
   return (
     <div ref={ref} className="bs-morning">
       <LockScreen
+        glow={{ tone: 'good', level: glowLevel(t, AT) }}
         time={NOTES[latest]!.time.replace(' AM', '')}
         notes={NOTES}
         shown={shown}
-        label="A phone's lock screen in the morning. The AI CTO texts that it fixed and tested a checkout outage at 2:10 AM and stopped a bad change from going live. Then a five-star review and a happy customer email, then new subscriptions pour in faster and faster, and the month ends thousands of dollars up."
+        label="A phone's lock screen in the morning. The AI CTO texts that it fixed and tested a checkout outage at 2:10 AM and stopped a bad change from going live. Then a five-star review and a happy customer email, then new subscriptions pour in faster and faster, and the month ends over a thousand dollars up."
       />
     </div>
   );

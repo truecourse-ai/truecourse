@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import { easeOut, span, useClock } from '../motion';
-import { LockScreen, type LockNote } from './LockScreen';
+import { LockScreen, glowLevel, type LockNote } from './LockScreen';
 
 /** What goes wrong, beside the phone; each lights up when its first notification lands. */
 const PAINS = ['Bugs reach users first', 'Production is a black box', 'Users struggle in silence', 'Customers leave'];
@@ -116,10 +116,11 @@ export function EveningScene({ children }: { children?: ReactNode }) {
         </div>
         <div className="bs-evening-phone">
           <LockScreen
+            glow={{ tone: 'bad', level: glowLevel(t, AT) }}
             time={NOTES[latest]!.time.replace(' PM', '')}
             notes={NOTES}
             shown={shown}
-            label="A phone's lock screen. A one-star review, customers asking if the app is down and 31 abandoned checkouts arrive one after another, then cancellations pour in faster and faster, and the month ends thousands of dollars down."
+            label="A phone's lock screen. A one-star review, customers asking if the app is down and 31 abandoned checkouts arrive one after another, then cancellations pour in faster and faster, and the month ends over 1,500 dollars down."
           />
         </div>
       </div>
