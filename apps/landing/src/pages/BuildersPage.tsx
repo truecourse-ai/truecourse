@@ -14,11 +14,10 @@ import { Waitlist } from '@/builders/Waitlist';
 import { useSectionViews } from '@/builders/useSectionViews';
 import { MorningReport } from '@/builders/scenes/MorningReport';
 import { WholeTeam } from '@/builders/scenes/WholeTeam';
-import { WeekScene } from '@/builders/scenes/WeekScene';
+import { EveningScene } from '@/builders/scenes/EveningScene';
 import { ReviewScene } from '@/builders/scenes/ReviewScene';
 import { WatchScene } from '@/builders/scenes/WatchScene';
 import { ListenScene } from '@/builders/scenes/ListenScene';
-import { SetupScene } from '@/builders/scenes/SetupScene';
 import { TextScene } from '@/builders/scenes/TextScene';
 import stylesheet from '@/builders/builders.css?url';
 
@@ -35,7 +34,7 @@ export const meta = () =>
   pageMeta({
     title: 'TrueCourse · Your AI CTO',
     description:
-      'For professionals who build their own apps with AI. TrueCourse tests every change like a real user, watches the app overnight, and finds where people struggle.',
+      'An AI CTO for professionals who build their own apps with AI, for about the price of a Claude Code subscription. Get your evenings and weekends back while it keeps your app working.',
     path: '/builders',
   });
 
@@ -64,7 +63,7 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
 ];
 
 /** The sections whose reach is recorded, top to bottom. */
-const SECTIONS = ['team', 'cto', 'text', 'setup', 'who', 'talk'];
+const SECTIONS = ['team', 'cto', 'text', 'who', 'talk'];
 
 /** A banner at the end of a section, asking the reader it has just won over for a call. */
 function InlineAsk({ say, more, placement }: { say: string; more: string; placement: BookPlacement }) {
@@ -102,7 +101,6 @@ function BuildersHeader() {
         </a>
         <nav className="nav-links">
           <a href="#cto">What it does</a>
-          <a href="#setup">Setup</a>
           <a href="#who">Who it's for</a>
         </nav>
         <BookLink className="btn btn-primary btn-sm" placement="header">
@@ -131,8 +129,11 @@ export default function BuildersPage() {
                 Your AI CTO
               </Reveal>
               <Reveal as="p" className="sub" delay={140} rise>
-                You build the product. It catches bugs before users do, watches the app overnight, and finds
-                where people struggle. Reach it by text, any time.
+                Get your evenings and weekends back. It keeps your app working while you focus on your
+                business and the people you care about.
+              </Reveal>
+              <Reveal as="p" className="bs-price" delay={180} rise>
+                For about the price of your Claude Code subscription.
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
@@ -168,10 +169,11 @@ export default function BuildersPage() {
             <Reveal className="bs-team-scene">
               <WholeTeam />
             </Reveal>
-            <WeekScene>
-              <p className="bs-week-lead">A normal week, building alone</p>
-            </WeekScene>
-            <InlineAsk say="Sound like your week?" more="Tell us what keeps breaking. 15 minutes, no slides." placement="after-week" />
+            <EveningScene>
+              <h3 className="bs-evening-lead">A Saturday evening, building alone</h3>
+              <p>Your phone does not stop, and none of it can wait until Monday.</p>
+            </EveningScene>
+            <InlineAsk say="Sound like your evenings?" more="Tell us what keeps breaking. 15 minutes, no slides." placement="after-evening" />
           </div>
         </section>
 
@@ -226,25 +228,13 @@ export default function BuildersPage() {
           </div>
         </section>
 
-        <section className="band" id="setup">
-          <div className="wrap">
-            <SetupScene>
-              <div className="bs-center">
-                <h2 className="section-h">Up and running in minutes</h2>
-                <p className="section-sub">It starts working right away.</p>
-              </div>
-            </SetupScene>
-            <InlineAsk say="Ready to stop being the whole team?" more="Book 15 minutes and tell us about your app." placement="after-setup" />
-          </div>
-        </section>
-
         <section className="band" id="who">
           <div className="wrap">
             <Reveal className="bs-center">
               <h2 className="section-h">Built for professionals who build with AI</h2>
               <p className="section-sub">
-                Accountants, lawyers, consultants and more, with code written by AI. An internal tool for the firm, a portal for
-                clients, or a SaaS of their own. Keeping it working should not take an engineering team.
+                Whatever your field, with code written by AI. An internal tool for the firm, a portal for clients,
+                or a SaaS of your own. Keeping it working should not take an engineering team.
               </p>
             </Reveal>
           </div>
@@ -257,7 +247,8 @@ export default function BuildersPage() {
           <div className="wrap">
             <h2>Hire your AI CTO</h2>
             <p className="bs-cta-say">
-              A 15-minute call about your app and what keeps breaking. No slides.
+              A 15-minute call about your app and what keeps breaking. No slides. It costs about as much as
+              your Claude Code subscription.
             </p>
             <div className="cta-row">
               <BookLink className="btn btn-primary" placement="cta">

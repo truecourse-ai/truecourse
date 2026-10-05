@@ -1,0 +1,113 @@
+import type { ReactNode } from 'react';
+import { cn } from '@/lib/cn';
+import { Stage } from '../Stage';
+import { easeOut, span } from '../motion';
+import { useScrollSteps } from '../useScrollSteps';
+import { Chat, Mail } from '../icons';
+
+/** What goes wrong, beside the phone; each lights up when its first notification lands. */
+const PAINS = ['Bugs reach users first', 'Production is a black box', 'Users struggle in silence', 'Customers leave'];
+
+type App = 'messages' | 'appstore' | 'mail' | 'stripe';
+
+interface Note {
+  app: App;
+  time: string;
+  title: string;
+  body: string;
+  /** The problem this notification is, if it is one; family texts are not. */
+  pain?: number;
+}
+
+const NOTES: Note[] = [
+  { app: 'messages', time: '6:05 PM', title: 'Sarah', body: 'Dinner at 7? Kids are hungry' },
+  { app: 'appstore', time: '6:12 PM', title: 'New review ★☆☆☆☆', body: '"Invites never arrive."', pain: 0 },
+  { app: 'mail', time: '6:40 PM', title: 'Northwind', body: 'Is the app down??', pain: 1 },
+  { app: 'messages', time: '7:05 PM', title: 'Sarah', body: 'We started without you' },
+  { app: 'stripe', time: '7:22 PM', title: '31 checkouts abandoned today', body: 'Most stopped at the payment step.', pain: 2 },
+  { app: 'mail', time: '7:48 PM', title: 'Acme Dental', body: "Still can't log in. Third time this week.", pain: 1 },
+  { app: 'stripe', time: '8:30 PM', title: 'Subscription cancelled', body: 'Acme Dental, $49 a month', pain: 3 },
+  { app: 'messages', time: '9:15 PM', title: 'Sarah', body: 'Kids are asleep. You missed dinner again.' },
+];
+
+const APP: Record<App, { name: string; icon: ReactNode }> = {
+  messages: { name: 'Messages', icon: <Chat /> },
+  appstore: { name: 'App Store', icon: <span className="bs-lock-glyph">A</span> },
+  mail: { name: 'Mail', icon: <Mail /> },
+  stripe: { name: 'Stripe', icon: <span className="bs-lock-glyph">S</span> },
+};
+
+/** How long a notification takes to land once the scroll reaches it. */
+const EACH = 0.5;
+
+/**
+ * A Saturday evening of building alone, on a phone's lock screen: family
+ * texts in between a bad review, customers asking if the app is down, people
+ * giving up at checkout, and a cancellation. The section is pinned and each
+ * stretch of scroll brings the next notification, newest on top; beside the
+ * phone, each problem lights up as its first notification lands. Where it is
+ * not pinned, on narrower screens, the whole evening shows at once.
+ */
+export function EveningScene({ children }: { children?: ReactNode }) {
+  const { pin, step, u, pinned } = useScrollSteps(NOTES.length, EACH, EACH);
+  const t = pinned ? step * EACH + u : NOTES.length * EACH;
+  const shown = NOTES.map((_, i) => easeOut(span(t, i * EACH, i * EACH + 0.4)));
+  const latest = shown.reduce((last, k, i) => (k > 0 ? i : last), 0);
+  const lit = PAINS.map((_, p) => NOTES.some((n, i) => n.pain === p && shown[i]! > 0.5));
+
+  return (
+    <div ref={pin} className="bs-pin bs-pin-evening">
+      <div className="bs-pin-sticky">
+        <div className="bs-evening">
+          <div className="bs-evening-copy">
+            {children}
+            <ul className="bs-evening-pains">
+              {PAINS.map((p, i) => (
+                <li key={p} className={cn(lit[i] && 'on', i === PAINS.length - 1 && 'cost')}>
+                  {p}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="bs-evening-phone">
+            <Stage width={380} height={800} label="A phone's lock screen on a Saturday evening. Between texts from family about dinner, a one-star review, customers asking if the app is down, 31 abandoned checkouts and a cancelled subscription arrive, until the last text says dinner was missed again.">
+              <div className="bs-iphone">
+                <span className="bs-iphone-button left one" />
+                <span className="bs-iphone-button left two" />
+                <span className="bs-iphone-button right" />
+                <div className="bs-iphone-screen bs-lock">
+                  <div className="bs-lock-island" />
+                  <div className="bs-lock-date">Saturday, October 11</div>
+                  <div className="bs-lock-time">{NOTES[latest]!.time.replace(' PM', '')}</div>
+                  <div className="bs-lock-notes">
+                    {NOTES.map((n, i) => {
+                      const k = shown[i]!;
+                      if (k <= 0) return null;
+                      return (
+                        <div
+                          key={i}
+                          className="bs-lock-note"
+                          style={{ order: -i, opacity: k, transform: `translateY(${(1 - k) * -18}px) scale(${0.96 + 0.04 * k})` }}
+                        >
+                          <span className={`bs-lock-app ${n.app}`}>{APP[n.app].icon}</span>
+                          <span className="bs-lock-text">
+                            <span className="bs-lock-head">
+                              <b>{n.title}</b>
+                              <span>{n.time}</span>
+                            </span>
+                            <span>{n.body}</span>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <span className="bs-ios-home light" />
+                </div>
+              </div>
+            </Stage>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -31,6 +31,16 @@
   margin: 24px 0 0;
   max-width: 34ch;
 }
+.bs-price {
+  display: inline-block;
+  margin: 18px 0 0;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 .bs-cta-row {
   display: flex;
   flex-wrap: wrap;
@@ -980,111 +990,12 @@ section.band:has(.bs-ask) {
   color: var(--muted);
 }
 
-/* ---------- a week of building alone ---------- */
-.bs-week {
-  margin-top: clamp(56px, 7vw, 96px);
-}
-/* a day's notification */
-.bs-note-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  font-size: 14px;
-  line-height: 1.35;
-}
-.bs-note-text b {
-  font-size: 15px;
-  font-weight: 600;
-}
-.bs-note-text > span:last-child {
-  color: var(--fg-dim);
-}
-.bs-note-app {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-}
-.bs-note-app span {
-  font-weight: 400;
-  margin-left: 4px;
-}
-
-/* the days */
-.bs-plain {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 26px;
-  padding-top: 8px;
-}
-@media (max-width: 980px) {
-  .bs-plain {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    row-gap: 40px;
-  }
-}
-@media (max-width: 560px) {
-  .bs-plain {
-    grid-template-columns: 1fr;
-  }
-  .bs-plain-day p {
-    min-height: 0 !important;
-  }
-}
-/* Each day is drawn frame by frame as it comes in; when scrolling back takes
-   one away, its parts fade out over this instead of vanishing in one frame. */
-.bs-plain-day,
-.bs-plain-day .bs-note,
-.bs-plain-rule,
-.bs-plain-pain {
-  transition:
-    opacity 0.3s ease,
-    transform 0.3s ease;
-}
-.bs-plain-day b {
-  display: block;
-  font-size: clamp(28px, 2.6vw, 34px);
-  font-weight: 650;
-  letter-spacing: -0.03em;
-}
-.bs-plain-day p {
-  margin: 12px 0 16px;
-  font-size: 17px;
-  line-height: 1.45;
-  color: var(--fg-dim);
-  min-height: 80px;
-}
-.bs-plain-rule {
-  display: block;
-  height: 3px;
-  margin-top: 18px;
-  background: #cf222e;
-  border-radius: 2px;
-  transform-origin: 0 50%;
-}
-.bs-plain-pain {
-  display: block;
-  margin-top: 10px;
-  font-size: 17px;
-  font-weight: 700;
-  color: #cf222e;
-}
-.bs-plain-rule.ok {
-  background: #1a7f37;
-}
-.bs-plain-pain.ok {
-  color: #1a7f37;
-}
-
-
-/* ---------- setup: steps beside one app window ----------
-   Setup and the week are pinned blocks, several screens tall, whose contents
-   stick in view while the page scrolls through them, so the scroll can pick
-   the step. */
-.bs-pin-setup {
-  height: 280vh;
-}
-.bs-pin-week {
-  height: 300vh;
+/* ---------- pinned sections ----------
+   A pinned block is several screens tall and its contents stick in view while
+   the page scrolls through it, so the scroll can pick the step. Below 900px
+   it is not pinned. */
+.bs-pin-evening {
+  height: 340vh;
 }
 .bs-pin-sticky {
   position: sticky;
@@ -1095,19 +1006,8 @@ section.band:has(.bs-ask) {
   justify-content: center;
   padding-block: 24px;
 }
-.bs-pin-week .bs-plain {
-  margin-top: clamp(24px, 3vw, 40px);
-}
-.bs-week-lead {
-  text-align: center;
-  font-size: clamp(22px, 2.2vw, 28px);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin: 0;
-}
 @media (max-width: 899px) {
-  .bs-pin-setup,
-  .bs-pin-week {
+  .bs-pin-evening {
     height: auto;
   }
   .bs-pin-sticky {
@@ -1115,306 +1015,171 @@ section.band:has(.bs-ask) {
     min-height: 0;
   }
 }
-.bs-setup {
+
+/* ---------- an evening of building alone ---------- */
+.bs-evening {
   display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-  gap: clamp(32px, 5vw, 72px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
+  gap: clamp(32px, 6vw, 96px);
   align-items: center;
-  margin-top: clamp(40px, 5vw, 72px);
+  margin-top: clamp(48px, 6vw, 80px);
 }
 @media (max-width: 900px) {
-  .bs-setup {
+  .bs-evening {
     grid-template-columns: 1fr;
   }
+  .bs-evening-phone {
+    max-width: 360px;
+    width: 100%;
+    margin-inline: auto;
+  }
 }
-/* Where setup is not pinned: each step, then its own window, down the page. */
-.bs-setup-stack {
-  list-style: none;
-  margin: clamp(32px, 5vw, 48px) 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 40px;
-}
-.bs-setup-stack-step .bs-step {
-  cursor: default;
-  margin-bottom: 16px;
-}
-.bs-steps {
-  list-style: none;
+.bs-evening-lead {
   margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.bs-step {
-  display: flex;
-  gap: 16px;
-  width: 100%;
-  text-align: left;
-  padding: 18px 20px;
-  border-radius: 14px;
-  border: 1px solid transparent;
-  background: none;
-  font: inherit;
-  color: var(--muted);
-  cursor: pointer;
-  transition:
-    background 0.3s ease,
-    border-color 0.3s ease,
-    color 0.3s ease;
-}
-.bs-step:hover {
-  color: var(--fg-dim);
-}
-.bs-step.on {
-  color: var(--fg);
-  background: #fff;
-  border-color: var(--line-strong);
-  box-shadow: 0 18px 40px -26px rgba(17, 24, 39, 0.35);
-}
-.bs-step b {
-  display: block;
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.bs-step-body {
-  display: block;
-  margin-top: 6px;
-  font-size: 15.5px;
-  line-height: 1.5;
-}
-.bs-step-n {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  font-size: 14px;
-  font-weight: 600;
-  background: var(--bg-elev2);
-  color: var(--muted);
-  transition:
-    background 0.3s ease,
-    color 0.3s ease;
-}
-.bs-step.on .bs-step-n {
-  background: var(--accent);
-  color: #fff;
-}
-.bs-app-body {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 40px;
-  bottom: 0;
-  padding: 26px 30px;
-}
-.bs-app-title {
-  display: block;
-  font-size: 20px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  margin-bottom: 18px;
-}
-.bs-sources {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  width: 270px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-.bs-sources li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 58px;
-  padding-inline: 16px;
-  border-top: 1px solid var(--line);
-  font-size: 15px;
-}
-.bs-sources li:first-child {
-  border-top: 0;
-}
-.bs-sources li > :last-child {
-  margin-left: auto;
-}
-.bs-source-icon {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-}
-.bs-source-icon svg {
-  width: 20px;
-  height: 20px;
-}
-.bs-doc {
-  position: absolute;
-  left: 330px;
-  top: 70px;
-  width: 270px;
-  padding: 18px;
-  border-radius: 12px;
-  border: 1px solid var(--line-strong);
-  background: #fff;
-  box-shadow: 0 18px 40px -24px rgba(17, 24, 39, 0.35);
-  display: flex;
-  flex-direction: column;
-  font-size: 13px;
-}
-.bs-doc b {
-  font-size: 16px;
-  margin: 2px 0 10px;
-}
-.bs-doc .bs-skel {
-  display: block;
-  flex: none;
-  height: 9px;
-  margin: 6px 0;
-}
-.bs-req {
-  font-size: 14px;
-  line-height: 1.35;
-  padding: 4px 6px;
-  margin: 4px -6px;
-  border-radius: 6px;
-  color: var(--fg-dim);
-  transition:
-    background 0.4s ease,
-    color 0.4s ease;
-}
-.bs-req.lit {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-.bs-doc.flow,
-.bs-found.flow {
-  position: relative;
-  left: auto;
-  top: auto;
-  width: auto;
-  margin-top: 16px;
-}
-.bs-found {
-  position: absolute;
-  left: 330px;
-  top: 300px;
-  font-size: 15px;
-  color: var(--fg-dim);
-}
-.bs-found b {
-  font-size: 30px;
-  font-weight: 650;
-  color: var(--accent);
-  margin-right: 6px;
-  font-variant-numeric: tabular-nums;
-}
-.bs-repos {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-.bs-repos li {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  height: 64px;
-  padding-inline: 18px;
-  border-top: 1px solid var(--line);
-  font-size: 16px;
-  transition: background 0.3s ease;
-}
-.bs-repos li:first-child {
-  border-top: 0;
-  border-radius: 12px 12px 0 0;
-}
-.bs-repos li.on {
-  background: var(--accent-soft);
-}
-.bs-repos .bs-muted {
-  margin-left: auto;
-  font-size: 13.5px;
-}
-.bs-gh {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-}
-.bs-gh svg {
-  width: 22px;
-  height: 22px;
-}
-.bs-connect {
-  position: absolute;
-  right: 30px;
-  bottom: 40px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding-inline: 20px;
-  border-radius: 10px;
-  background: var(--fg);
-  color: #fff;
-  font-size: 15px;
-  font-weight: 600;
-  transition: background 0.3s ease;
-}
-.bs-connect.done {
-  background: #1a7f37;
-}
-.bs-mpr {
-  border: 1px solid var(--line-strong);
-  border-radius: 12px;
-  padding: 18px 20px;
-}
-.bs-mpr-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 16px;
-}
-.bs-mpr-head .bs-muted {
-  font-size: 14px;
-}
-.bs-mpr-head .bs-chip {
-  margin-left: auto;
-}
-.bs-live-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 26px 0 12px;
-  font-size: 15px;
-}
-.bs-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-.bs-stat {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13.5px;
-}
-.bs-stat b {
-  font-size: 26px;
+  font-size: clamp(24px, 2.4vw, 30px);
   font-weight: 650;
   letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.bs-evening-copy > p {
+  margin: 12px 0 0;
+  font-size: 17px;
+  color: var(--fg-dim);
+  max-width: 40ch;
+}
+.bs-evening-pains {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.bs-evening-pains li {
+  font-size: clamp(19px, 1.8vw, 22px);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  padding-left: 16px;
+  border-left: 3px solid var(--line-strong);
+  color: #c0c4cb;
+  transition:
+    color 0.4s ease,
+    border-color 0.4s ease;
+}
+.bs-evening-pains li.on {
+  color: #cf222e;
+  border-left-color: #cf222e;
+}
+.bs-evening-pains li.cost.on {
+  color: var(--fg);
+  border-left-color: var(--fg);
+}
+
+/* The lock screen the evening's notifications land on. */
+.bs-iphone-screen.bs-lock {
+  background:
+    radial-gradient(120% 70% at 30% 0%, oklch(0.62 0.12 250), transparent 70%),
+    linear-gradient(180deg, oklch(0.42 0.1 255), oklch(0.3 0.07 265));
+  color: #fff;
+}
+.bs-lock-island {
+  position: absolute;
+  left: 50%;
+  top: 11px;
+  width: 112px;
+  height: 32px;
+  margin-left: -56px;
+  border-radius: 16px;
+  background: #000;
+}
+.bs-lock-date {
+  margin-top: 64px;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+.bs-lock-time {
+  text-align: center;
+  font-size: 84px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
+}
+.bs-lock-notes {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 22px 10px 40px;
+}
+.bs-lock-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px);
+  color: #000;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+.bs-lock-app {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  color: #fff;
+}
+.bs-lock-app svg {
+  width: 20px;
+  height: 20px;
+}
+.bs-lock-app.messages {
+  background: linear-gradient(180deg, #5bf675, #0cbd2a);
+}
+.bs-lock-app.appstore {
+  background: linear-gradient(180deg, #1ec3fd, #1871f0);
+}
+.bs-lock-app.mail {
+  background: linear-gradient(180deg, #1d9bf6, #1a5ee8);
+}
+.bs-lock-app.stripe {
+  background: #635bff;
+}
+.bs-lock-glyph {
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+}
+.bs-lock-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+  line-height: 1.3;
+}
+.bs-lock-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bs-lock-head b {
+  font-weight: 600;
+}
+.bs-lock-head span {
+  flex: none;
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.5);
+}
+.bs-ios-home.light {
+  background: #fff;
 }
 
 /* ---------- who it is for: two rows sliding past ---------- */
@@ -1499,26 +1264,6 @@ section.band:has(.bs-ask) {
   margin-bottom: 2px;
 }
 
-.bs-note {
-  display: flex;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid var(--line-strong);
-  border-left: 3px solid #1a7f37;
-  box-shadow: 0 12px 26px -18px rgba(17, 24, 39, 0.45);
-  min-height: 86px;
-}
-.bs-note.bad {
-  border-left-color: #cf222e;
-}
-.bs-note .bs-note-text {
-  font-size: 13px;
-}
-.bs-note .bs-note-text b {
-  font-size: 13.5px;
-}
-
 /* ---------- phone layouts inside the scenes ---------- */
 .bs-plot {
   width: 100%;
@@ -1530,33 +1275,6 @@ section.band:has(.bs-ask) {
 .bs-people.tight span {
   width: 13px;
   height: 13px;
-}
-@media (max-width: 640px) {
-  .bs-sources {
-    width: auto;
-  }
-}
-.bs-diff {
-  margin-top: 14px;
-  border-radius: 8px;
-  background: #e6ffec;
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 62px;
-  font-family: var(--font-mono);
-  font-size: 13.5px;
-  color: #1a7f37;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.bs-approved {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  font-size: 15px;
 }
 
 /* ---------- the lighter ask ---------- */
