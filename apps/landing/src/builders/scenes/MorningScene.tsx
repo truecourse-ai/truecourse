@@ -2,10 +2,11 @@ import { easeOut, span, useClock } from '../motion';
 import { LockScreen, type LockNote } from './LockScreen';
 
 /**
- * The hero: the same phone as the evening, on a calm morning. The only
- * notifications are the AI CTO's texts about the night, a fix it made and
- * tested, a bug it stopped before it went live, and what users struggled
- * with. They land one after another once the phone is in view, and stay.
+ * The hero: the same phone as the evening, on a calm morning. The AI CTO's
+ * texts about the night, a fix it made and tested, a bug it stopped before
+ * it went live and what users struggled with, and between them the month's
+ * revenue growing. They land one after another once the phone is in view,
+ * and stay.
  */
 
 const NOTES: LockNote[] = [
@@ -20,6 +21,12 @@ const NOTES: LockNote[] = [
     time: '6:45 AM',
     title: 'AI CTO',
     body: 'Stopped one change from going live. Team invites would have sent no email. The fix is ready.',
+  },
+  {
+    app: 'stripe',
+    time: '7:00 AM',
+    title: '+$4,600 this month',
+    body: '12 new subscriptions, none cancelled.',
   },
   {
     app: 'cto',
@@ -41,7 +48,7 @@ export function MorningScene() {
         time="7:30"
         notes={NOTES}
         shown={shown}
-        label="A phone's lock screen in the morning, with three texts from the AI CTO. Checkout broke at 2:10 AM and it fixed and tested it. It stopped a change that would have broken team invites. And 9 people got stuck on the signup form this week, with an offer to fix it."
+        label="A phone's lock screen in the morning, with three texts from the AI CTO. Checkout broke at 2:10 AM and it fixed and tested it. It stopped a change that would have broken team invites. Stripe reports 4,600 dollars in new revenue this month. And 9 people got stuck on the signup form this week, with an offer to fix it."
       />
     </div>
   );

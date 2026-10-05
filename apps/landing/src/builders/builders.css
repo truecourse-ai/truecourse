@@ -1168,7 +1168,7 @@ section.band:has(.bs-ask) {
 /* ---------- the AI CTO by text ---------- */
 .bs-text-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 400px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
   gap: clamp(32px, 6vw, 96px);
   align-items: center;
 }
@@ -1177,9 +1177,14 @@ section.band:has(.bs-ask) {
     grid-template-columns: 1fr;
   }
   .bs-text-phone {
-    max-width: 380px;
+    max-width: 320px;
     width: 100%;
     margin-inline: auto;
+  }
+}
+@media (max-width: 640px) {
+  .bs-text-phone {
+    max-width: 280px;
   }
 }
 .bs-text-kinds {
