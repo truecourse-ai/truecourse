@@ -18,6 +18,7 @@ import { ReviewScene } from '@/builders/scenes/ReviewScene';
 import { WatchScene } from '@/builders/scenes/WatchScene';
 import { ListenScene } from '@/builders/scenes/ListenScene';
 import { SetupScene } from '@/builders/scenes/SetupScene';
+import { TextScene } from '@/builders/scenes/TextScene';
 import stylesheet from '@/builders/builders.css?url';
 
 /**
@@ -62,7 +63,7 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
 ];
 
 /** The sections whose reach is recorded, top to bottom. */
-const SECTIONS = ['team', 'cto', 'setup', 'who', 'talk'];
+const SECTIONS = ['team', 'cto', 'text', 'setup', 'who', 'talk'];
 
 /** A banner at the end of a section, asking the reader it has just won over for a call. */
 function InlineAsk({ say, more, placement }: { say: string; more: string; placement: BookPlacement }) {
@@ -130,7 +131,7 @@ export default function BuildersPage() {
               </Reveal>
               <Reveal as="p" className="sub" delay={140} rise>
                 You build the product. It catches bugs before users do, watches the app overnight, and finds
-                where people struggle.
+                where people struggle. Reach it by text, any time.
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
@@ -189,6 +190,36 @@ export default function BuildersPage() {
               ))}
             </div>
             <InlineAsk say="Want this for your app?" more="Tell us what it should catch first. 15 minutes, no slides." placement="after-jobs" />
+          </div>
+        </section>
+
+        <section className="band" id="text">
+          <div className="wrap bs-text-row">
+            <Reveal className="bs-text-copy">
+              <p className="kicker">By text, day and night</p>
+              <h2 className="section-h">One text away, any time</h2>
+              <p className="section-sub">
+                The AI CTO texts you when something needs you, answers what you ask, and does what you tell it.
+                The dashboard is there when you want the full picture.
+              </p>
+              <ul className="bs-text-kinds">
+                <li>
+                  <b>Alerts</b>
+                  <span>Checkout broke at 2 AM. Reply YES to apply the fix.</span>
+                </li>
+                <li>
+                  <b>Questions</b>
+                  <span>What are users stuck on this week?</span>
+                </li>
+                <li>
+                  <b>Commands</b>
+                  <span>Fix the Export button. Reply SHIP to put it live.</span>
+                </li>
+              </ul>
+            </Reveal>
+            <Reveal className="bs-text-phone">
+              <TextScene />
+            </Reveal>
           </div>
         </section>
 
