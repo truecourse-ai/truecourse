@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import {
   BarChart3,
   Boxes,
-  CalendarCheck,
+  Clapperboard,
   Contact,
   CreditCard,
   GraduationCap,
@@ -24,17 +24,17 @@ import { easeOut, span, useClock } from '../motion';
 
 const KINDS: { label: string; icon: ReactNode }[] = [
   { label: 'ERP', icon: <Boxes /> },
+  { label: 'Healthtech', icon: <HeartPulse /> },
   { label: 'CRM', icon: <Contact /> },
+  { label: 'Fintech', icon: <CreditCard /> },
   { label: 'Collaborative apps', icon: <MessagesSquare /> },
+  { label: 'MediaTech', icon: <Clapperboard /> },
   { label: 'E-commerce', icon: <ShoppingCart /> },
-  { label: 'Fintech and payments', icon: <CreditCard /> },
-  { label: 'Healthcare', icon: <HeartPulse /> },
+  { label: 'Edtech', icon: <GraduationCap /> },
   { label: 'Marketplaces', icon: <Store /> },
   { label: 'Consumer mobile apps', icon: <Smartphone /> },
   { label: 'HR platforms', icon: <Users /> },
   { label: 'Analytics dashboards', icon: <BarChart3 /> },
-  { label: 'Booking systems', icon: <CalendarCheck /> },
-  { label: 'Learning platforms', icon: <GraduationCap /> },
 ];
 
 /** Where each kind sits across the view, as a share of half its width and height. */
@@ -65,7 +65,7 @@ export function TrackRecord() {
       ref={ref}
       className="bs-depth"
       role="img"
-      aria-label="The kinds of applications the team has built stream out of the distance one after another, ERP, CRM, collaborative apps, e-commerce, fintech and payments, healthcare, marketplaces, consumer mobile apps, HR platforms, analytics dashboards, booking systems and learning platforms."
+      aria-label="The kinds of applications the team has built stream out of the distance one after another, ERP, healthtech, CRM, fintech, collaborative apps, MediaTech, e-commerce, edtech, marketplaces, consumer mobile apps, HR platforms and analytics dashboards."
     >
       {KINDS.map((k, i) => {
         const p = (t / LOOP + i / KINDS.length) % 1;
