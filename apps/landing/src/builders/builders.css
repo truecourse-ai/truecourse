@@ -994,6 +994,38 @@ section.band:has(.bs-ask) {
   font-size: 12.5px;
   color: rgba(0, 0, 0, 0.5);
 }
+/* A stack: the newest card on top, up to two layers peeking out beneath. */
+.bs-lock-group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.bs-lock-group .bs-lock-note {
+  position: relative;
+  z-index: 2;
+}
+.bs-lock-more {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.5);
+}
+.bs-lock-layer {
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 0 0 16px 16px;
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(18px);
+}
+.bs-lock-layer.l1 {
+  position: relative;
+  z-index: 1;
+  margin-inline: 9px;
+}
+.bs-lock-layer.l2 {
+  margin-inline: 18px;
+  background: rgba(255, 255, 255, 0.42);
+}
 .bs-ios-home.light {
   background: #fff;
 }
