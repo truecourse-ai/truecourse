@@ -1693,3 +1693,88 @@ section.band:has(.bs-ask) {
     height: 22px;
   }
 }
+
+/* ---------- who is behind it: the record, and the kinds of apps built ---------- */
+.bs-behind {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+}
+@media (max-width: 900px) {
+  .bs-behind {
+    grid-template-columns: 1fr;
+  }
+}
+.bs-depth {
+  --half-w: 360px;
+  --half-h: 260px;
+  position: relative;
+  height: 460px;
+  overflow: hidden;
+  perspective: 900px;
+  perspective-origin: 50% 50%;
+  transform-style: preserve-3d;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, #000 60%, transparent 100%);
+}
+@media (max-width: 640px) {
+  .bs-depth {
+    --half-w: 190px;
+    --half-h: 200px;
+    height: 360px;
+  }
+}
+.bs-depth-kind {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 12px 30px -16px rgba(17, 24, 39, 0.4);
+  font-size: 24px;
+  font-weight: 550;
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+.bs-depth-kind .bs-glyph {
+  color: var(--accent);
+}
+.bs-depth-kind svg {
+  width: 26px;
+  height: 26px;
+}
+.bs-track-stats {
+  list-style: none;
+  margin: 32px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.bs-track-stats li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.bs-track-stats b {
+  min-width: 6.2ch;
+  font-size: clamp(30px, 3.2vw, 40px);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.bs-track-stats span {
+  font-size: 17px;
+  color: var(--fg-dim);
+}
+@media (max-width: 640px) {
+  .bs-track-stats li {
+    flex-direction: column;
+    gap: 2px;
+  }
+}
