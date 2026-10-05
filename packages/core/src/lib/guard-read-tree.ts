@@ -14,7 +14,7 @@
  *
  * What lands, in the order the readers look for it: the newest setup bundle
  * (the recipe, the catalog, `guard/setup.json`), the scenario set (manifest,
- * scenario files, the flow corpus), the last generate report, the repo's guard
+ * scenario files, the flow corpus, the flow tests), the last generate report, the repo's guard
  * decisions, and the stored overlays.
  */
 
@@ -26,6 +26,8 @@ import {
   manifestPath,
   writeGuardResult as writeTreeGuardResult,
 } from '@truecourse/guard-runner';
+import { FlowTestsFileSchema } from '@truecourse/shared';
+import { flowTestsDir, flowTestsIndexPath } from '@truecourse/shared/work-tree';
 import { assertSafeRel, safeJoin } from './safe-path.js';
 import { materializeGuardSetupBundle } from '../services/guard-setup/bundle.js';
 import {
@@ -50,9 +52,11 @@ const CORPUS_FILES = ['flows.json', 'claims.json'];
 
 /**
  * Every file of the stored scenario set, as tree-relative paths: the scenario
- * yaml the listing enumerates plus the corpus files beside the manifest — the
- * committed flows and claims a generate reconciles against. Anyone putting a
- * stored set into a tree walks this list, so the corpus is never left behind.
+ * yaml the listing enumerates, the corpus files beside the manifest (the
+ * committed flows and claims a generate reconciles against), and the flow
+ * tests: their index and every spec and seed it names, which are all the set
+ * holds of them. Anyone putting a stored set into a tree walks this list, so
+ * nothing of it is left behind.
  */
 export async function storedScenarioSetFiles(
   repoKey: string,
@@ -63,8 +67,26 @@ export async function storedScenarioSetFiles(
   const files = [
     ...(await listScenarioFiles(repoKey, at)),
     ...CORPUS_FILES.map((name) => `${scenariosRel}/${name}`),
+    ...(await storedFlowTestFiles(repoKey, treeDir, at)),
   ];
   return [...new Set(files)];
+}
+
+/** The stored set's tests index and the specs and seeds it names; none when it has no index. */
+async function storedFlowTestFiles(repoKey: string, treeDir: string, at?: VersionAt): Promise<string[]> {
+  const indexRel = relOf(treeDir, flowTestsIndexPath(treeDir));
+  const raw = await readScenarioFile(repoKey, indexRel, at);
+  if (raw == null) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [indexRel];
+  }
+  const index = FlowTestsFileSchema.safeParse(parsed);
+  const testsRel = relOf(treeDir, flowTestsDir(treeDir));
+  const named = index.success ? index.data.tests.flatMap((t) => [t.file, t.seed]) : [];
+  return [indexRel, ...named.flatMap((file) => (file ? [`${testsRel}/${file}`] : []))];
 }
 
 function writeFile(file: string, body: string): void {

@@ -15,8 +15,15 @@
  */
 
 import { composeProjectName } from '@truecourse/guard-generator';
-import type { FlowTestStatus } from '@truecourse/shared';
-import { FLOW_TEST_SESSION_KIND, runFlowTestStage, type FlowTestStageResult } from '../services/product-world/index.js';
+import { tallyFlowTestRun, type FlowTestStatus } from '@truecourse/shared';
+import {
+  FLOW_TEST_SESSION_KIND,
+  runFlowTestStage,
+  runStoredFlowTests,
+  type FlowTestRunOutcome,
+  type FlowTestStageResult,
+} from '../services/product-world/index.js';
+export { readFlowTests, type FlowTestRunOutcome } from '../services/product-world/index.js';
 import {
   generateGuards,
   corpusOpenApiDocs,
@@ -1098,6 +1105,54 @@ export async function guardRunInProcess(
     }
     return result;
   }
+}
+
+export interface GuardFlowTestRunInProcessOptions {
+  tracker?: StepTracker;
+  /** The world's identity on this host, the same one setup proved the scripts under. */
+  worldKey: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * Run a repository's stored flow tests, driving a tracker through
+ * {@link GUARD_RUN_STEPS}: `build` while the checkout is built and the product
+ * brought up, `run` while the tests run. Like a scenario run it needs no model.
+ * Returns the stage's result untouched; the caller decides how to store it.
+ */
+export async function guardFlowTestRunInProcess(
+  repoRoot: string,
+  options: GuardFlowTestRunInProcessOptions,
+): Promise<FlowTestRunOutcome> {
+  const { tracker } = options;
+  const { branch, commit } = await resolveGuardRepoRef(repoRoot);
+  const outcome = await runStoredFlowTests({
+    repoRoot,
+    worldId: composeProjectName(options.worldKey),
+    branch,
+    commit,
+    ...(options.signal ? { signal: options.signal } : {}),
+    onPhase: (phase, tests) => {
+      if (phase === 'build') tracker?.start('build', 'building the checkout');
+      else if (phase === 'up') tracker?.detail('build', 'starting the product');
+      else {
+        tracker?.done('build');
+        tracker?.start('run', `${tests} test${tests === 1 ? '' : 's'}`);
+      }
+    },
+  });
+  if (outcome.status === 'ok') {
+    const t = tallyFlowTestRun(outcome.latest.flowTests ?? []);
+    tracker?.done(
+      'run',
+      `${t.run} test${t.run === 1 ? '' : 's'} · ${t.passed} passed · ${t.failed} failed · ${t.seedFailed} seed failed · ${t.nowFailing} now failing · ${t.nowPassing} now passing`,
+    );
+  } else if (outcome.status === 'world-failed') {
+    tracker?.error('build', `the product did not come up (${outcome.stage}): ${firstLine(outcome.reason) ?? ''}`);
+  } else if (outcome.status === 'run-failed') {
+    tracker?.error('run', firstLine(outcome.reason) ?? 'the tests did not run');
+  }
+  return outcome;
 }
 
 /**
