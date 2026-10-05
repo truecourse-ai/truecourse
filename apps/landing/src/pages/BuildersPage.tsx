@@ -51,7 +51,7 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
     id: 'production',
     kicker: 'While it runs',
     title: 'Watches the app overnight',
-    body: 'When something breaks, it spots it right away, finds the change that caused it and suggests a fix, all on one dashboard in plain words.',
+    body: 'When something breaks, it spots it right away, finds the change that caused it, then tests a fix and puts it live, all without waking you.',
     scene: <WatchScene />,
   },
   {
@@ -87,7 +87,7 @@ function InlineAsk({ say, more, placement }: { say: string; more: string; placem
 /** What the monthly plan includes, as the pricing card lists it. */
 const INCLUDED = [
   'Tests every change before it goes live',
-  'Watches your app day and night, with a fix ready when something breaks',
+  'Watches your app day and night, and fixes what breaks while you sleep',
   'Shows where people get stuck, ranked by how many it affects',
   'Reach it by text, any time',
 ];
