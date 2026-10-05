@@ -38,34 +38,6 @@ export function Spin({ angle }: { angle: number }) {
   );
 }
 
-export function Shield() {
-  return (
-    <svg viewBox="0 0 24 24">
-      <path {...S} d="M12 3l7.5 3v5.5c0 4.6-3.2 8.2-7.5 9.5-4.3-1.3-7.5-4.9-7.5-9.5V6z" />
-      <path {...S} d="M8.7 12.2l2.3 2.3 4.4-4.6" />
-    </svg>
-  );
-}
-
-export function Pulse() {
-  return (
-    <svg viewBox="0 0 24 24">
-      <path {...S} d="M3 12h4l2.5-6 5 12 2.5-6h4" />
-    </svg>
-  );
-}
-
-export function People() {
-  return (
-    <svg viewBox="0 0 24 24">
-      <circle {...S} cx="9" cy="8.5" r="3.2" />
-      <path {...S} d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" />
-      <circle {...S} cx="16.5" cy="9.5" r="2.6" />
-      <path {...S} d="M16 14.2c2.4.1 4 1.7 4.5 4.3" />
-    </svg>
-  );
-}
-
 export function Mail() {
   return (
     <svg viewBox="0 0 24 24">

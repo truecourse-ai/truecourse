@@ -5,7 +5,7 @@ import { distinctId } from '@/lib/posthog';
 type State = 'idle' | 'sending' | 'done' | 'failed';
 
 /**
- * The lighter ask under "Talk to us": joining the waitlist. It posts to
+ * The lighter ask under the app checkup: joining the waitlist. It posts to
  * /api/waitlist, which records the signup server-side and ties it to this
  * visit.
  */
@@ -38,7 +38,7 @@ export function Waitlist() {
 
   return (
     <form className="bs-waitlist" onSubmit={submit}>
-      <label htmlFor="bs-waitlist-email">Not ready for a call? Join the waitlist.</label>
+      <label htmlFor="bs-waitlist-email">Not ready yet? Join the waitlist.</label>
       <div className="bs-waitlist-row">
         <input
           id="bs-waitlist-email"
