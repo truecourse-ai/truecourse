@@ -4,7 +4,7 @@ import { trackEvent } from '@/lib/posthog';
 export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/hire-you-ai-cto';
 
 /** Where on the /builders page the click happened, so placements can be compared. */
-export type BookPlacement = 'header' | 'hero' | 'after-evening' | 'after-jobs' | 'cta';
+export type BookPlacement = 'header' | 'hero' | 'after-evening' | 'after-jobs' | 'pricing' | 'cta';
 
 /**
  * Opens the app checkup booking page in a new tab, and records the click as

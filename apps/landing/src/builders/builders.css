@@ -1594,3 +1594,83 @@ section.band:has(.bs-ask) {
     grid-column: 2;
   }
 }
+
+/* ---------- pricing: one plan ---------- */
+.bs-plan {
+  max-width: 560px;
+  margin: clamp(32px, 4vw, 48px) auto 0;
+  border-radius: 24px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  box-shadow: 0 30px 70px -40px rgba(17, 24, 39, 0.35);
+  overflow: hidden;
+}
+.bs-plan-head {
+  padding: clamp(24px, 3vw, 36px) clamp(24px, 3vw, 40px) 20px;
+  text-align: center;
+}
+.bs-plan-head > b {
+  font-size: 18px;
+}
+.bs-plan-price {
+  margin: 8px 0 4px;
+  font-size: 56px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.bs-plan-price span {
+  margin-left: 8px;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+.bs-plan-head .bs-muted {
+  margin: 0;
+  font-size: 15px;
+}
+.bs-plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px clamp(24px, 3vw, 40px) 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.bs-plan-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 16px;
+  color: var(--fg-dim);
+}
+.bs-plan-list .bs-glyph {
+  color: var(--accent);
+  margin-top: 2px;
+}
+.bs-plan-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px clamp(24px, 3vw, 40px) clamp(24px, 3vw, 32px);
+  text-align: center;
+  background: linear-gradient(105deg, oklch(0.94 0.04 240), oklch(0.985 0.012 240) 70%, #fff);
+  border-top: 1px solid oklch(0.85 0.04 240);
+}
+.bs-plan-start > b {
+  font-size: 18px;
+}
+.bs-plan-start p {
+  margin: 0;
+  font-size: 15px;
+  color: var(--fg-dim);
+  max-width: 42ch;
+}
+.bs-plan-start .btn {
+  margin-top: 6px;
+}
+.bs-plan-start .bs-muted {
+  font-size: 13.5px;
+}

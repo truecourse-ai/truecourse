@@ -9,6 +9,7 @@ import { Voyage } from '@/components/Voyage';
 import { BookLink } from '@/builders/BookLink';
 import type { BookPlacement } from '@/builders/BookLink';
 import { Who } from '@/builders/Who';
+import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
 import { Waitlist } from '@/builders/Waitlist';
 import { useSectionViews } from '@/builders/useSectionViews';
@@ -63,7 +64,7 @@ const JOBS: { id: string; kicker: string; title: string; body: string; scene: Re
 ];
 
 /** The sections whose reach is recorded, top to bottom. */
-const SECTIONS = ['team', 'cto', 'text', 'who', 'talk'];
+const SECTIONS = ['team', 'cto', 'text', 'who', 'pricing', 'talk'];
 
 /** A banner at the end of a section, offering the reader it has just won over an app checkup. */
 function InlineAsk({ say, more, placement }: { say: string; more: string; placement: BookPlacement }) {
@@ -82,6 +83,14 @@ function InlineAsk({ say, more, placement }: { say: string; more: string; placem
     </Reveal>
   );
 }
+
+/** What the monthly plan includes, as the pricing card lists it. */
+const INCLUDED = [
+  'Tests every change before it goes live',
+  'Watches your app day and night, with a fix ready when something breaks',
+  'Shows where people get stuck, ranked by how many it affects',
+  'Reach it by text, any time',
+];
 
 function BuildersHeader() {
   const [scrolled, setScrolled] = useState(false);
@@ -102,6 +111,7 @@ function BuildersHeader() {
         <nav className="nav-links">
           <a href="#cto">What it does</a>
           <a href="#who">Who it's for</a>
+          <a href="#pricing">Pricing</a>
         </nav>
         <BookLink className="btn btn-primary btn-sm" placement="header">
           Book a $49 checkup
@@ -235,6 +245,44 @@ export default function BuildersPage() {
           <Reveal>
             <Who />
           </Reveal>
+        </section>
+
+        <section className="band" id="pricing">
+          <div className="wrap">
+            <Reveal className="bs-center">
+              <h2 className="section-h">One plan, everything included</h2>
+            </Reveal>
+            <Reveal className="bs-plan">
+              <div className="bs-plan-head">
+                <b>AI CTO</b>
+                <p className="bs-plan-price">
+                  $99<span>a month</span>
+                </p>
+                <p className="bs-muted">Less than one hour of a developer's time.</p>
+              </div>
+              <ul className="bs-plan-list">
+                {INCLUDED.map((line) => (
+                  <li key={line}>
+                    <span className="bs-glyph">
+                      <Check />
+                    </span>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+              <div className="bs-plan-start">
+                <b>Start with a $49 app checkup</b>
+                <p>
+                  We look at your app and how you run it, then send you a plan for what you need. Credited to your
+                  first month.
+                </p>
+                <BookLink className="btn btn-primary" placement="pricing">
+                  Book a $49 checkup
+                </BookLink>
+                <span className="bs-muted">Cancel anytime.</span>
+              </div>
+            </Reveal>
+          </div>
         </section>
 
         <section className="cta" id="talk">
