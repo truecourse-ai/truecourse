@@ -165,7 +165,7 @@ export default function BuildersPage() {
                 <p className="kicker">The problem</p>
                 <h2 className="section-h">You built it. Now it needs you every evening</h2>
                 <p className="section-sub">
-                  Nobody else tests your changes, watches the app at night or hears from its users. So it all lands
+                  Nobody else tests your changes, watches the app at night or sees how people use it. So it all lands
                   on your phone.
                 </p>
               </div>

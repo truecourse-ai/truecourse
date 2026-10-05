@@ -1715,7 +1715,7 @@ section.band:has(.bs-ask) {
 }
 .bs-jobs-check {
   list-style: none;
-  max-width: 640px;
+  max-width: 760px;
   margin: clamp(28px, 4vw, 44px) auto 0;
   padding: 0;
   display: flex;
@@ -1724,7 +1724,7 @@ section.band:has(.bs-ask) {
 }
 .bs-jobs-check li {
   display: grid;
-  grid-template-columns: 28px 180px 1fr;
+  grid-template-columns: 28px 250px 1fr;
   align-items: center;
   gap: 12px;
   padding: 16px 20px;
