@@ -5,7 +5,9 @@
  * Scripts that already hold are kept: the engine builds and boots them, and a
  * pass costs no session. Only a tree with no scripts, or with scripts that no
  * longer work, gets the world session (`world-session.ts`), which writes them
- * and is held to that same build and boot.
+ * and is held to that same build and boot. Scripts that stopped working are
+ * handed to that session with where they failed and what they printed, so it
+ * starts from them and not from nothing.
  */
 
 import fs from 'node:fs';
@@ -27,6 +29,7 @@ import {
   WORLD_SESSION_TIMEOUT_MS,
   worldSessionBriefing,
   worldSessionDef,
+  type WorldScriptsFailure,
   type WorldSessionInput,
   type WorldSessionOutcome,
 } from './world-session.js';
@@ -61,10 +64,12 @@ export async function runWorldSetup(input: WorldSetupInput): Promise<WorldSetupR
   const slot = await reserveWorldSlot(input.worldId);
   const spent = { sessions: 0, turns: 0, tokens: 0, costUsd: 0 };
   try {
+    let failed: WorldScriptsFailure | undefined;
     if (!input.refresh && missingWorldScripts(repoRoot).length === 0) {
       input.onPhase?.('checking');
       const standing = await proveWorld(repoRoot, slot, input.signal);
-      if (standing) return { status: 'ok', outcome: 'kept', world: standing, notRunning: [], spent };
+      if (standing.ok) return { status: 'ok', outcome: 'kept', world: standing.world, notRunning: [], spent };
+      failed = standing.failure;
     }
 
     input.onPhase?.('session');
@@ -72,6 +77,7 @@ export async function runWorldSetup(input: WorldSetupInput): Promise<WorldSetupR
       repoRoot,
       slot,
       documents: documentList(repoRoot),
+      ...(failed ? { failed } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     };
     const { def, state } = worldSessionDef(sessionInput);
@@ -109,15 +115,22 @@ export async function runWorldSetup(input: WorldSetupInput): Promise<WorldSetupR
   }
 }
 
-/** The engine's own build and boot of the tree's scripts; the world they bring up, or nothing. */
-async function proveWorld(repoRoot: string, slot: WorldSlot, signal?: AbortSignal): Promise<ProductWorld | undefined> {
+/** The engine's own build and boot of the tree's scripts: the world they bring up, or where they failed. */
+async function proveWorld(
+  repoRoot: string,
+  slot: WorldSlot,
+  signal?: AbortSignal,
+): Promise<{ ok: true; world: ProductWorld } | { ok: false; failure: WorldScriptsFailure }> {
   const run = { slot, ...(signal ? { signal } : {}) };
+  const exited = (script: string, result: { timedOut?: boolean; exitCode: number | null; output: string }): string =>
+    `world/${script}.sh ${result.timedOut ? 'did not finish in time' : `exited ${result.exitCode ?? 'without a code'}`}:\n${result.output}`;
   const build = await buildProductWorld(repoRoot, run);
-  if (!build.ok) return undefined;
+  if (!build.ok) return { ok: false, failure: { stage: 'build', output: exited('build', build) } };
   const boot = await bootProductWorld(repoRoot, run);
-  if (!boot.ok) return undefined;
+  if (!boot.ok) return { ok: false, failure: { stage: boot.stage, output: boot.reason } };
   const down = await boot.running.down();
-  return down.ok ? boot.running.world : undefined;
+  if (!down.ok) return { ok: false, failure: { stage: 'down', output: exited('down', down) } };
+  return { ok: true, world: boot.running.world };
 }
 
 /** The corpus documents, each with its first heading as a title. */
