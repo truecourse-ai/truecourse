@@ -11,7 +11,6 @@ import type { BookPlacement } from '@/builders/BookLink';
 import { Who } from '@/builders/Who';
 import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
-import { Waitlist } from '@/builders/Waitlist';
 import { useSectionViews } from '@/builders/useSectionViews';
 import { MorningScene } from '@/builders/scenes/MorningScene';
 import { JobsChecklist } from '@/builders/scenes/JobsChecklist';
@@ -25,9 +24,8 @@ import stylesheet from '@/builders/builders.css?url';
 
 /**
  * The AI CTO page, for professionals who build their own apps with AI: a page of
- * its own, outside the main site's header and footer. Its ask is a paid app
- * checkup, with a waitlist for those not ready for one, and it records how
- * far down each visitor reads.
+ * its own, outside the main site's header and footer. Its one ask is a free
+ * app checkup, and it records how far down each visitor reads.
  */
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesheet }];
@@ -79,7 +77,7 @@ function InlineAsk({ say, more, placement }: { say: string; more: string; placem
         <p className="bs-ask-more">{more}</p>
       </div>
       <BookLink className="btn btn-primary" placement={placement}>
-        Book a $49 checkup
+        Book a free checkup
       </BookLink>
     </Reveal>
   );
@@ -115,7 +113,7 @@ function BuildersHeader() {
           <a href="#who">Who it's for</a>
         </nav>
         <BookLink className="btn btn-primary btn-sm" placement="header">
-          Book a $49 checkup
+          Book a free checkup
         </BookLink>
       </div>
     </header>
@@ -145,7 +143,7 @@ export default function BuildersPage() {
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
-                  Book a $49 app checkup
+                  Book a free app checkup
                 </BookLink>
                 <a className="btn" href="#cto">
                   See what it does
@@ -175,7 +173,7 @@ export default function BuildersPage() {
               <h3 className="bs-evening-lead">Meanwhile, on your phone</h3>
               <p>Reviews, outages, cancellations. None of it waits until you have time.</p>
             </EveningScene>
-            <InlineAsk say="Sound familiar?" more="Start with a 30-minute app checkup. $49, credited to your first month." placement="after-evening" />
+            <InlineAsk say="Sound familiar?" more="Start with a free 30-minute app checkup." placement="after-evening" />
           </div>
         </section>
 
@@ -254,13 +252,10 @@ export default function BuildersPage() {
                 ))}
               </ul>
               <div className="bs-plan-start">
-                <b>Start with a $49 app checkup</b>
-                <p>
-                  We look at your app and how you run it, then send you a plan for what you need. Credited to your
-                  first month.
-                </p>
+                <b>Start with a free app checkup</b>
+                <p>We look at your app and how you run it, then send you a plan for what you need.</p>
                 <BookLink className="btn btn-primary" placement="pricing">
-                  Book a $49 checkup
+                  Book a free checkup
                 </BookLink>
                 <span className="bs-muted">Cancel anytime.</span>
               </div>
@@ -306,15 +301,14 @@ export default function BuildersPage() {
           <div className="wrap">
             <h2>Hire your AI CTO</h2>
             <p className="bs-cta-say">
-              Start with a 30-minute app checkup. We look at your app and how you run it, then send you a short
-              plan for what you actually need. $49, credited to your first month. After that, $99 a month.
+              Start with a free 30-minute app checkup. We look at your app and how you run it, then send you a
+              short plan for what you actually need.
             </p>
             <div className="cta-row">
               <BookLink className="btn btn-primary" placement="cta">
-                Book a $49 app checkup
+                Book a free app checkup
               </BookLink>
             </div>
-            <Waitlist />
           </div>
           <Voyage />
         </section>
