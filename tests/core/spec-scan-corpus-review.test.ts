@@ -5,7 +5,9 @@
  * Under test: the fold applies the review's drops as skipped docs with their
  * category and reason, a pinned doc is never dropped, a restatement whose
  * sources all leave stays, the in-session check refuses a drop it cannot
- * stand behind, and the cache key moves with exactly its named inputs.
+ * stand behind (a historical drop most of all: only the document's own words
+ * or its own status make it one, never another document contradicting it), and
+ * the cache key moves with exactly its named inputs.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -18,6 +20,7 @@ import {
   CORPUS_REVIEW_SESSION_KIND,
   applyCorpusReview,
   corpusReviewCacheKey,
+  saysItIsHistorical,
   validateCorpusReview,
   type CorpusReviewOutcome,
 } from '../../packages/core/src/services/spec-scan/corpus-review'
@@ -104,8 +107,8 @@ function decide(manualIncludes: string[] = []): void {
 
 const DROPS: CorpusReviewOutcome = {
   drops: [
-    { ref: 'docs/vs-other.md', category: 'derivative', reason: 'It only restates the guide.', restates: ['docs/guide.md'] },
-    { ref: 'docs/plan.md', category: 'historical', reason: 'It labels itself a historical plan.', restates: [] },
+    { ref: 'docs/vs-other.md', category: 'derivative', reason: 'It only restates the guide.', restates: ['docs/guide.md'], marker: '' },
+    { ref: 'docs/plan.md', category: 'historical', reason: 'It labels itself a historical plan.', restates: [], marker: 'Plugin plan (historical)' },
   ],
 }
 
@@ -150,7 +153,7 @@ describe('the corpus review in the run', () => {
     expect(result.corpus.skippedDocs).toEqual(
       expect.arrayContaining([
         { ref: 'docs/vs-other.md', category: 'derivative', reason: 'It only restates the guide. (restates docs/guide.md)' },
-        { ref: 'docs/plan.md', category: 'historical', reason: 'It labels itself a historical plan.' },
+        { ref: 'docs/plan.md', category: 'historical', reason: 'It labels itself a historical plan. (it says: "Plugin plan (historical)")' },
       ]),
     )
   })
@@ -177,8 +180,8 @@ describe('applyCorpusReview', () => {
       [
         {
           drops: [
-            { ref: 'a.md', category: 'derivative', reason: 'restates b', restates: ['b.md'] },
-            { ref: 'b.md', category: 'duplicate', reason: 'copy of a', restates: ['a.md'] },
+            { ref: 'a.md', category: 'derivative', reason: 'restates b', restates: ['b.md'], marker: '' },
+            { ref: 'b.md', category: 'duplicate', reason: 'copy of a', restates: ['a.md'], marker: '' },
           ],
         },
       ],
@@ -192,8 +195,8 @@ describe('applyCorpusReview', () => {
   it('keeps a restatement whose only source is dropped for another reason', () => {
     const applied = applyCorpusReview(
       [{ drops: [
-        { ref: 'a.md', category: 'derivative', reason: 'restates b', restates: ['b.md'] },
-        { ref: 'b.md', category: 'historical', reason: 'a plan', restates: [] },
+        { ref: 'a.md', category: 'derivative', reason: 'restates b', restates: ['b.md'], marker: '' },
+        { ref: 'b.md', category: 'historical', reason: 'a plan', restates: [], marker: '' },
       ] }],
       kept,
       new Set(),
@@ -205,8 +208,8 @@ describe('applyCorpusReview', () => {
   it('drops a restatement whose source stays, and ignores refs that are not kept', () => {
     const applied = applyCorpusReview(
       [{ drops: [
-        { ref: 'a.md', category: 'derivative', reason: 'restates c', restates: ['c.md'] },
-        { ref: 'z.md', category: 'process', reason: 'not kept', restates: [] },
+        { ref: 'a.md', category: 'derivative', reason: 'restates c', restates: ['c.md'], marker: '' },
+        { ref: 'z.md', category: 'process', reason: 'not kept', restates: [], marker: '' },
       ] }],
       kept,
       new Set(),
@@ -216,19 +219,59 @@ describe('applyCorpusReview', () => {
 })
 
 describe('validateCorpusReview', () => {
+  const doc = (ref: string, content: string): DocCandidate => ({
+    path: ref,
+    absPath: '',
+    content,
+    kind: 'spec',
+    preview: '',
+    lastTouched: '2020-01-01T00:00:00Z',
+    contentHash: `h-${ref}`,
+    size: content.length,
+  })
+  const spec = doc('docs/app.md', '# App\n\nPaginate with five expenses per page.\n')
+  const requirements = doc('docs/requirements.md', '# Requirements\n\nPaginate with 25 expenses per page.\n')
+  const record = doc('docs/plan.md', '# Plugin plan\n\n> This is a **historical record**: the plugin shipped differently.\n\nWe will build a sandbox.\n')
+  const superseded = doc('docs/adr-3.md', '---\ntitle: Use polling\nstatus: Superseded by ADR-9\n---\n\nWe poll every minute.\n')
+  const done = doc('docs/ticket-7.md', '---\ntitle: Add export\nstatus: Done\n---\n\nExport is under Settings.\n')
+  const shard = new Map([spec, requirements, record, superseded, done].map((d) => [d.path, d]))
+  const kept = new Set(shard.keys())
+  const historical = (ref: string, marker: string): CorpusReviewOutcome => ({
+    drops: [{ ref, category: 'historical', reason: 'r', restates: [], marker }],
+  })
+
   it('refuses a drop outside the shard, a doubled ref, and a restatement naming nothing kept', () => {
     const errors = validateCorpusReview(
       {
         drops: [
-          { ref: 'x.md', category: 'process', reason: 'r', restates: [] },
-          { ref: 'a.md', category: 'derivative', reason: 'r', restates: [] },
-          { ref: 'a.md', category: 'duplicate', reason: 'r', restates: ['gone.md'] },
+          { ref: 'x.md', category: 'process', reason: 'r', restates: [], marker: '' },
+          { ref: 'docs/app.md', category: 'derivative', reason: 'r', restates: [], marker: '' },
+          { ref: 'docs/app.md', category: 'duplicate', reason: 'r', restates: ['gone.md'], marker: '' },
         ],
       },
-      new Set(['a.md']),
-      new Set(['a.md', 'b.md']),
+      shard,
+      kept,
     )
     expect(errors).toHaveLength(4)
+  })
+
+  it('refuses a historical drop of a document that only contradicts another', () => {
+    // No marker, and a marker quoting what the document states about the product, are the same refusal.
+    expect(validateCorpusReview(historical('docs/requirements.md', ''), shard, kept)).toHaveLength(1)
+    expect(validateCorpusReview(historical('docs/requirements.md', 'app.md shows it was built differently'), shard, kept)).toHaveLength(1)
+    expect(validateCorpusReview(historical('docs/requirements.md', 'per page'), shard, kept)[0]).toMatch(/disagrees with another is not historical/)
+  })
+
+  it('accepts a historical drop the document states in its own words, whatever the markup and spacing', () => {
+    expect(validateCorpusReview(historical('docs/plan.md', 'This is a historical  record'), shard, kept)).toEqual([])
+    expect(saysItIsHistorical(record, 'the plugin shipped differently')).toBe(true)
+    expect(saysItIsHistorical(record, 'it was superseded')).toBe(false)
+  })
+
+  it('accepts a historical drop on the status the document carries, and not on a delivered one or on its age', () => {
+    expect(validateCorpusReview(historical('docs/adr-3.md', 'STATUS: Superseded by ADR-9 (deprecated)'), shard, kept)).toEqual([])
+    expect(validateCorpusReview(historical('docs/ticket-7.md', 'STATUS: Done (shipped)'), shard, kept)).toHaveLength(1)
+    expect(validateCorpusReview(historical('docs/app.md', 'LAST CHANGED: 2020-01-01'), shard, kept)).toHaveLength(1)
   })
 })
 

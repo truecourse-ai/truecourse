@@ -116,6 +116,9 @@ const CandidatePairOutcomeSchema = z.object({
   keys: z.array(z.string()),
 })
 
+/** Where one side's disputed claim lives, as the session writes it. */
+const FindingPointerSchema = z.object({ doc: z.string(), heading: z.string().nullable(), quote: z.string() })
+
 /**
  * One reported disagreement: the finding shape every path that flags
  * conflicts produces (this session, and the fact comparison's conflicts), so
@@ -129,9 +132,7 @@ export const OverlapFindingSchema = z.object({
   note: z.string(),
   /** Where each side's disputed claim lives. Quote REQUIRED — it is the
    *  verbatim evidence the fold re-anchors by. */
-  sections: z
-    .array(z.object({ doc: z.string(), heading: z.string().nullable(), quote: z.string() }))
-    .min(1),
+  sections: z.array(FindingPointerSchema).min(1),
   /** The adjudication: explanation + recommended action (reused shape). */
   review: OverlapReviewSchema,
 })
@@ -160,7 +161,15 @@ export const OverlapOutcomeSchema = z
   })
   .strict()
 export type OverlapOutcome = z.infer<typeof OverlapOutcomeSchema>
-export type OverlapFinding = z.infer<typeof OverlapFindingSchema>
+
+/**
+ * One side's pointer as the fold keeps it. The fact comparison's carries the
+ * passage key of the unit it quotes (`passageKey`); this session's never does,
+ * since nothing it writes can name one, so its findings keep the section
+ * identity.
+ */
+export type FindingPointer = z.infer<typeof FindingPointerSchema> & { passage?: string }
+export type OverlapFinding = Omit<z.infer<typeof OverlapFindingSchema>, 'sections'> & { sections: FindingPointer[] }
 
 /**
  * The outcome as the model writes it: the two docs of a finding named `a` and
@@ -514,26 +523,22 @@ export interface OverlapSessionInput {
 /**
  * One reported disagreement as a card: the note as the claim, up to two quoted
  * passages, the adjudication, and the DISPUTE IDENTITY — the unordered doc pair
- * plus each side's section anchor, which is the key a `conflictResolutions`
- * entry is matched by, so a verdict recorded off the card matches the corpus
- * conflict. The quotes ride along as evidence.
+ * plus each side's section anchor and passage key, which is the key a
+ * `conflictResolutions` entry is matched by, so a verdict recorded off the card
+ * matches the corpus conflict. The quotes ride along as evidence.
  */
 export function presentOverlap(overlap: OverlapFinding): KnownDisplayBlock {
   const [docA, docB] = overlap.docs
   const [[sectionA], [sectionB]] = disputeSides(docA, docB, overlap.sections)
-  const side = (section: OverlapFinding['sections'][number] | undefined): { anchor: string | null; quote?: string } => ({
-    anchor: section?.heading ?? null,
-    ...(section ? { quote: section.quote } : {}),
-  })
-  const a = side(sectionA)
-  const b = side(sectionB)
   const dispute: DisplayDispute = {
     docA,
-    anchorA: a.anchor,
-    ...(a.quote !== undefined ? { quoteA: a.quote } : {}),
+    anchorA: sectionA?.heading ?? null,
+    ...(sectionA ? { quoteA: sectionA.quote } : {}),
+    ...(sectionA?.passage !== undefined ? { passageA: sectionA.passage } : {}),
     docB,
-    anchorB: b.anchor,
-    ...(b.quote !== undefined ? { quoteB: b.quote } : {}),
+    anchorB: sectionB?.heading ?? null,
+    ...(sectionB ? { quoteB: sectionB.quote } : {}),
+    ...(sectionB?.passage !== undefined ? { passageB: sectionB.passage } : {}),
   }
   const { action, rationale, confidence } = overlap.review.recommendation
   // Only a pick names a doc; `fix-doc`/`dismiss` recommend no side. The side

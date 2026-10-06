@@ -286,6 +286,7 @@ export function verifyOverlapSections(input: VerifyPointersInput): OverlapSectio
       const hits = locateQuote(candidates, ptr.quote);
       if (hits.length > 0) {
         if (pointedIdx >= 0 && hits.includes(pointedIdx)) return { ...ptr };
+        // Only the heading moves; the quote and the passage key ride along.
         const target = hits[0];
         return { ...ptr, heading: target === 0 ? null : candidates[target].realHeading };
       }
@@ -308,7 +309,8 @@ export function verifyOverlapSections(input: VerifyPointersInput): OverlapSectio
 
     if (!reanchor) return { ...ptr };
     // Re-anchor. Section 0 is the lead → the canonical `null` pointer; every other
-    // section carries a real heading. The quote (if any) rides along unchanged.
+    // section carries a real heading. The quote and the passage key (if any) ride
+    // along unchanged: only the heading moves.
     return { ...ptr, heading: bestIdx === 0 ? null : candidates[bestIdx].realHeading };
   });
 }

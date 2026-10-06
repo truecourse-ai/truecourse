@@ -47,19 +47,23 @@ export interface ConflictResolutionPayload {
   docA: string;
   anchorA: string | null;
   quoteA?: string;
+  passageA?: string;
   docB: string;
   anchorB: string | null;
   quoteB?: string;
+  passageB?: string;
   verdict: 'a' | 'b' | 'dismissed';
   note?: string;
 }
 
-/** The verdict-DELETE payload (dispute identity: unordered pair + anchors). */
+/** The verdict-DELETE payload (dispute identity: unordered pair + anchors, + passages when it names them). */
 export interface DeleteConflictPayload {
   docA: string;
   anchorA: string | null;
+  passageA?: string;
   docB: string;
   anchorB: string | null;
+  passageB?: string;
 }
 
 /**

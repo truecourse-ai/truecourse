@@ -36,15 +36,23 @@
  * facts and a verdict; an `agree` group names no conflict; a `conflict` group
  * names at least one pair of its own facts from two different passages
  * (different docs, or one doc and no unit in common), each with a note and a
- * review. A wrapping-up session's outcome is accepted as it stands, the facts
+ * review, and accounts for every other fact of the group, in another pair or
+ * as `consistent`, so one pair cannot stand for a group of disagreements. A wrapping-up session's outcome is accepted as it stands, the facts
  * it placed nowhere STAMPED into it as `unplaced` by the engine before it is
  * cached. An entry the gate refuses never stands in the fold.
  *
  * A conflict that stands becomes the finding the overlap fold takes: the two
  * facts' docs, one pointer per fact ({@link factPointer}: the unit and the
  * window of at most {@link POINTER_QUOTE_WORDS} words that share the most
- * words with the fact's statement, verbatim by construction), the note and the
- * review.
+ * words with the fact's statement, verbatim by construction, and the unit's
+ * passage key), the note and the review.
+ *
+ * A conflict is ONE PAIR OF PASSAGES: its identity is the two passages its
+ * pointers name, so the same two sections can hold many conflicts, each with
+ * its own verdict. Fact pairs that land on the same two passages (one pair of
+ * sentences that disagrees on two points, or one pair found by an area batch
+ * and again by a subject batch) are folded into one finding by
+ * {@link foldSamePassages}, which keeps what each of them said.
  */
 
 import { createHash } from 'node:crypto'
@@ -65,9 +73,24 @@ import {
   partitionByAffinity,
   type DocCandidate,
   type DocUnit,
+  type OverlapReview,
 } from '@truecourse/spec-consolidator'
-import { parseHeadings, type OverlapLike } from '@truecourse/shared'
-import { presentOverlap, priorDisputesAmong, sameDocFindingProblem, type OverlapFinding } from './overlap.js'
+import {
+  disputeSides,
+  normalizeQuote,
+  parseHeadings,
+  passageKey,
+  samePassage,
+  type OverlapLike,
+  type OverlapSectionLike,
+} from '@truecourse/shared'
+import {
+  presentOverlap,
+  priorDisputesAmong,
+  sameDocFindingProblem,
+  type FindingPointer,
+  type OverlapFinding,
+} from './overlap.js'
 import type { RecordedFact } from './record-facts.js'
 import { subjectKey } from './settle-subjects.js'
 import { docLifecycleFingerprint, docLifecycleLines, instructionsBriefingBlock, scanCacheKey } from './tools.js'
@@ -81,7 +104,7 @@ export const COMPARE_FACTS_CACHE_NAME = 'consolidator/fact-compare'
  * THE COMPARE STEP'S VERSION, bumped by hand. A prompt change that fixes wrong
  * output bumps it in the same commit; any other prompt edit invalidates nothing.
  */
-export const COMPARE_STAGE_VERSION = 1
+export const COMPARE_STAGE_VERSION = 3
 
 /**
  * Most facts one batch holds. A briefed fact is a line of about 180
@@ -391,7 +414,9 @@ const FactConflictSchema = z
   .object({
     a: z.string().describe('The id of the fact on side a, the side `pick-a` says is right, e.g. "F41".'),
     b: z.string().describe('The id of the fact on side b, from another passage than side a.'),
-    note: z.string().describe('What differs, naming each document by its filename (for one document, its two sections).'),
+    note: z
+      .string()
+      .describe('What THESE two facts disagree on, naming each document by its filename (for one document, its two sections). Nothing the two facts do not themselves state.'),
     review: OverlapReviewSchema,
   })
   .strict()
@@ -403,7 +428,15 @@ const FactGroupSchema = z
     verdict: z.enum(['agree', 'conflict']),
     conflicts: z
       .array(FactConflictSchema)
-      .describe('For a "conflict" group, every pair of its facts that cannot both be true; empty for an "agree" group.'),
+      .describe(
+        'For a "conflict" group, one pair for every two of its facts that cannot both be true; empty for an "agree" group.',
+      ),
+    consistent: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'For a "conflict" group: the ids of its facts that contradict NO other fact of the group. Every fact of the group is in a pair or here.',
+      ),
   })
   .strict()
 
@@ -458,10 +491,12 @@ export function evidenceWindow(text: string, wanted: ReadonlySet<string>): strin
 /**
  * Where a fact is stated, as a finding's pointer: among the units it cites,
  * the one sharing the most words with its statement (the first in doc order
- * on a tie), its heading, and within it the {@link evidenceWindow} as the
- * quote. Deterministic, and verbatim: the quote is a slice of the unit's text.
+ * on a tie), its heading, within it the {@link evidenceWindow} as the quote,
+ * and the unit's {@link passageKey}. Deterministic, and verbatim: the quote is
+ * a slice of the unit's text, and the passage key depends on that text alone,
+ * never on the unit's number.
  */
-export function factPointer(fact: RecordedFact): OverlapFinding['sections'][number] {
+export function factPointer(fact: RecordedFact): FindingPointer {
   const wanted = affinityTokens(fact.statement)
   let unit: DocUnit | undefined
   let unitScore = -1
@@ -476,6 +511,7 @@ export function factPointer(fact: RecordedFact): OverlapFinding['sections'][numb
     doc: fact.doc,
     heading: unit?.heading ?? null,
     quote: unit ? evidenceWindow(unit.text, wanted) : fact.statement,
+    passage: passageKey(unit?.text ?? fact.statement),
   }
 }
 
@@ -583,13 +619,32 @@ export function checkGroups(outcome: FactComparisonWire, batch: CompareBatch): G
         sections: [factPointer(a.fact), factPointer(b.fact)],
         review: conflict.review,
       }
-      const samePassage = a.fact.doc === b.fact.doc ? sameDocFindingProblem(finding) : undefined
-      if (samePassage) {
+      const onePassageProblem = a.fact.doc === b.fact.doc ? sameDocFindingProblem(finding) : undefined
+      if (onePassageProblem) {
         problems.push(`${at}: ${conflict.a} and ${conflict.b} quote the same words under one heading of ${a.fact.doc}; a conflict is between two passages`)
         return
       }
       findings.push(finding)
     })
+    // Every fact of a conflict group is accounted for: in a pair, or declared to
+    // contradict nothing in the group. One pair standing for a whole group, its
+    // note listing five disagreements its two facts do not state, leaves the
+    // other facts in neither.
+    const paired = new Set(group.conflicts.flatMap((c) => [c.a, c.b]))
+    const consistent = group.consistent ?? []
+    const strays = consistent.filter((id) => !listed.has(id))
+    if (strays.length > 0) problems.push(`${where}.consistent names ${strays.join(', ')}, not in this group`)
+    const both = consistent.filter((id) => paired.has(id))
+    if (both.length > 0) {
+      problems.push(`${where}: ${both.join(', ')} ${both.length === 1 ? 'is' : 'are'} in a pair and in "consistent"; a fact that contradicts another is not consistent`)
+    }
+    const accounted = new Set([...paired, ...consistent])
+    const unjudged = group.conflicts.length === 0 ? [] : group.facts.filter((id) => byId.has(id) && !accounted.has(id))
+    if (unjudged.length > 0) {
+      problems.push(
+        `${where}: ${idRanges(unjudged, REFUSAL_RANGES_MAX)} ${unjudged.length === 1 ? 'is' : 'are'} in no pair and not in "consistent". For each, name the pair with the fact of this group it contradicts, or list it in "consistent" when it contradicts none. One pair does not stand for a group: a note may say only what its own two facts state.`,
+      )
+    }
   })
   for (const id of outcome.alone) place(id, 'alone')
   const unplaced = batch.facts.map((bf) => bf.id).filter((id) => !placedAt.has(id))
@@ -615,6 +670,100 @@ export function groupsRefusal(check: GroupsCheck): string | undefined {
     parts.push(`Entries that do not stand:\n${listed.join('\n')}`)
   }
   return `Groups refused.\n\n${parts.join('\n\n')}\n\nFix these and check the whole draft again.`
+}
+
+// ---------------------------------------------------------------------------
+// Findings on the same two passages
+// ---------------------------------------------------------------------------
+
+/** What separates the notes of fact pairs folded into one finding. */
+export const FOLDED_NOTE_SEPARATOR = ' · '
+
+/** A finding as the fold keeps it, whatever else its record carries. */
+interface FoldableFinding {
+  docs: readonly [string, string]
+  note: string
+  sections: readonly OverlapSectionLike[]
+  review?: OverlapReview
+}
+
+type Confidence = NonNullable<OverlapReview['recommendation']['confidence']>
+const CONFIDENCE_RANK: Record<Confidence, number> = { low: 0, medium: 1, high: 2 }
+
+/** Whether `m` reads its sides as `lead` does: the same doc first, or inside one doc the same passage first. */
+function sameSides(lead: FoldableFinding, m: FoldableFinding): boolean {
+  if (lead.docs[0] !== lead.docs[1]) return m.docs[0] === lead.docs[0]
+  const [[leadA]] = disputeSides(lead.docs[0], lead.docs[1], lead.sections)
+  const [[mA]] = disputeSides(m.docs[0], m.docs[1], m.sections)
+  return leadA !== undefined && mA !== undefined && samePassage(leadA, mA)
+}
+
+/** A recommended action read from the other side: a pick names the other doc, the rest are the same either way. */
+const flipped = (action: OverlapReview['recommendation']['action']): OverlapReview['recommendation']['action'] =>
+  action === 'pick-a' ? 'pick-b' : action === 'pick-b' ? 'pick-a' : action
+
+/** Texts once each, by their normalized words, in the order given. */
+function distinctTexts(texts: readonly string[]): string[] {
+  const seen = new Set<string>()
+  return texts.filter((text) => {
+    const key = normalizeQuote(text)
+    if (key === '' || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/**
+ * ONE finding from several that name the same two passages: one pair of
+ * sentences that disagrees on more than one point, or one pair found by an
+ * area batch and again by a subject batch. Deterministic whatever order the
+ * sessions finished in: the members are ordered by note, then review, and the
+ * first LEADS (its docs order, pointers, rationale and recommended action).
+ *
+ * Nothing a member said is dropped. Every distinct note (by its normalized
+ * words) is kept, in that order, joined by {@link FOLDED_NOTE_SEPARATOR}, and
+ * every distinct explanation, joined by a space. The recommendation is only as
+ * confident as the least confident member recommending the same action from
+ * the lead's side, and `low` when any member recommends another, so points
+ * that disagree on the winner are never resolved unsupervised.
+ */
+export function foldSamePassages<F extends FoldableFinding>(members: readonly [F, ...F[]]): F {
+  const sortKey = (m: F): string[] => {
+    const rec = m.review?.recommendation
+    return [m.note, m.review?.explanation ?? '', rec?.rationale ?? '', rec?.action ?? '', rec?.confidence ?? '', m.docs[0]]
+  }
+  const ordered = [...members].sort((x, y) => {
+    const kx = sortKey(x)
+    const ky = sortKey(y)
+    for (let i = 0; i < kx.length; i++) {
+      const order = byText(kx[i]!, ky[i]!)
+      if (order !== 0) return order
+    }
+    return 0
+  })
+  const lead = ordered[0]!
+  const note = distinctTexts(ordered.map((m) => m.note.trim())).join(FOLDED_NOTE_SEPARATOR)
+  if (!lead.review) return { ...lead, note }
+
+  const { action, rationale, fix } = lead.review.recommendation
+  // A member without a confidence grade is never applied unsupervised, so it ranks below `low`.
+  const ranks = ordered.map((m) => {
+    const rec = m.review?.recommendation
+    const fromLead = rec && (sameSides(lead, m) ? rec.action : flipped(rec.action))
+    if (fromLead !== action) return CONFIDENCE_RANK.low
+    return rec?.confidence === undefined ? -1 : CONFIDENCE_RANK[rec.confidence]
+  })
+  const lowest = Math.min(...ranks)
+  const confidence = (Object.keys(CONFIDENCE_RANK) as Confidence[]).find((c) => CONFIDENCE_RANK[c] === lowest)
+  const explanation = distinctTexts(ordered.flatMap((m) => (m.review ? [m.review.explanation.trim()] : []))).join(' ')
+  return {
+    ...lead,
+    note,
+    review: {
+      explanation,
+      recommendation: { action, rationale, ...(fix !== undefined ? { fix } : {}), ...(confidence ? { confidence } : {}) },
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -820,8 +969,11 @@ export function compareFactsBriefing(
       '',
       'PREVIOUSLY FLAGGED: conflicts an earlier scan reported between these documents. Re-examine each among the facts above; one that still stands is a conflict group here, one the documents no longer state is not.',
     )
+    // A side that names its passage shows its quote: two sections can hold several conflicts.
+    const side = (s: OverlapSectionLike): string =>
+      `${s.doc} · ${s.heading ?? '(lead)'}${s.passage !== undefined && s.quote ? ` · "${s.quote}"` : ''}`
     prior.forEach((o, i) => {
-      const sides = (o.sections ?? []).map((s) => `${s.doc} · ${s.heading ?? '(lead)'}`).join('  <->  ')
+      const sides = (o.sections ?? []).map(side).join('  <->  ')
       lines.push(`  ${i + 1}. ${sides || `${o.docs[0]}  <->  ${o.docs[1]}`}${o.note ? `  : ${o.note}` : ''}`)
     })
   }
@@ -836,8 +988,8 @@ export const COMPARE_FACTS_SYSTEM_PROMPT = `You find where a product's documenta
 
 # How to work
 
-1. GROUP the facts by what they are ABOUT, not by their wording. Facts that state something about the same product thing (the same control, setting, endpoint, variable, limit, list or feature) form one group, even when their subjects are named differently or they sit far apart in the list. A fact no other fact of the batch speaks about goes in \`alone\`.
-2. JUDGE every group of two or more. Its verdict is \`agree\` when all its facts can be true of the same product at once: facts that restate each other, add detail or describe different aspects are a group with the verdict \`agree\`. It is \`conflict\` when two of its facts cannot both be true; name each such pair.
+1. GROUP the facts by the POINT they speak to, not by their wording and not by their topic. A point is one question about the product that has one answer: how many rows a page shows, what saving announces, where a control lives, which status a route returns. Facts that answer the same question form one group, even when their subjects are named differently or they sit far apart in the list. Facts about the same screen or feature that answer DIFFERENT questions are different groups: the default date of a form and the message it shows after saving are two points. A fact no other fact of the batch speaks to goes in \`alone\`.
+2. JUDGE every group of two or more. Its verdict is \`agree\` when all its facts can be true of the same product at once: facts that restate each other, add detail or describe different aspects are a group with the verdict \`agree\`. It is \`conflict\` when two of its facts cannot both be true; name a pair for every two facts that disagree, and list the group's remaining facts in \`consistent\` (see "Each conflict").
 3. When you are unsure whether two facts are compatible, OPEN THEIR PASSAGES with \`read_context\` and read them before you decide. A statement alone loses the sentence before it, the list it belongs to and the scope its heading sets. Batch the ids: several facts per call.
 4. Check the draft with \`check_groups\`, fix what it lists, then give the outcome.
 
@@ -859,8 +1011,16 @@ When you have read both passages and genuinely cannot tell whether two stated fa
 
 # Each conflict
 
+A conflict is ONE PAIR OF FACTS that cannot both be true. Each fact is one sentence, list item or table row of a document, and the finding shows exactly those two passages as its evidence. So:
+
+  - Name a pair for EVERY two facts that disagree. A group in which a document states a point in one fact and another document contradicts it in one fact has one pair. Where two documents disagree on five points, in five facts each, that is five pairs (and usually five groups).
+  - A pair's note says only what ITS two facts state. Never let one pair stand for several: a note that lists disagreements its two facts do not themselves state points the reader at passages that do not show them.
+  - When the same two facts disagree on two points (one sentence gives both a default date and a default category, and so does the other), that is one pair whose note names both.
+  - When several passages of one document repeat the same statement, pair the one that states the point most directly and completely, so the next scan makes the same choice, and list the repeats in \`consistent\`.
+  - \`consistent\`: every fact of a conflict group that contradicts no other fact of the group. Every fact of the group is in a pair or in \`consistent\`; the run refuses a conflict group that leaves a fact in neither.
+
   - \`a\` and \`b\`: the ids of the two facts, both from the group. Side a is what \`pick-a\` names.
-  - \`note\`: what differs, naming each document by its filename (for one document, its two sections).
+  - \`note\`: what these two facts disagree on, naming each document by its filename (for one document, its two sections).
   - \`review.explanation\`: 2 to 4 sentences naming the exact disagreement and quoting both sides, each attributed to its document by name.
   - \`review.recommendation.action\`: exactly one of "pick-a" (fact a's passage is right; b's should change), "pick-b", "fix-doc" (neither is simply right; say which doc needs which edit in \`fix\`), "dismiss" (on reflection both can hold).
   - \`review.recommendation.rationale\`: one sentence, naming the documents.
@@ -868,10 +1028,10 @@ When you have read both passages and genuinely cannot tell whether two stated fa
 
 # The gate
 
-Every fact id of the batch appears EXACTLY ONCE: in one group's \`facts\`, or in \`alone\`. A group holds two or more facts and a verdict. An \`agree\` group names no conflicts. A \`conflict\` group names every pair of its facts that disagree, both facts of that group, from two different passages (two documents, or two places in one), each with a note and a review. One group can hold more than one disagreement (where a control is, and what it does): name a pair for each distinct point, and one pair is enough for a point that several passages repeat. \`check_groups\` runs exactly this check.
+Every fact id of the batch appears EXACTLY ONCE: in one group's \`facts\`, or in \`alone\`. A group holds two or more facts and a verdict. An \`agree\` group names no conflicts. A \`conflict\` group names at least one pair of its facts that disagree, both facts of that group, from two different passages (two documents, or two places in one), each with a note and a review, and every other fact of the group is in another pair or in \`consistent\`. \`check_groups\` runs exactly this check.
 
 You have ${COMPARE_FACTS_BUDGET.turns} turns, and one more grant of as many when they run out. Draft every group in your first turn or two, then read what you are unsure of.
 
 # The outcome
 
-One object: { "groups": [{ "subject": "Export my data", "facts": ["F41", "F207"], "verdict": "conflict", "conflicts": [{ "a": "F41", "b": "F207", "note": "exporting-your-resume.mdx puts Export my data under Settings, Account; faq.mdx under Settings, Danger Zone", "review": { "explanation": "...", "recommendation": { "action": "fix-doc", "rationale": "...", "fix": "...", "confidence": "medium" } } }] }, { "subject": "PDF page size", "facts": ["F12", "F13"], "verdict": "agree", "conflicts": [] }], "alone": ["F3", "F9"] }`
+One object: { "groups": [{ "subject": "Export my data", "facts": ["F41", "F207"], "verdict": "conflict", "conflicts": [{ "a": "F41", "b": "F207", "note": "exporting-your-resume.mdx puts Export my data under Settings, Account; faq.mdx under Settings, Danger Zone", "review": { "explanation": "...", "recommendation": { "action": "fix-doc", "rationale": "...", "fix": "...", "confidence": "medium" } } }], "consistent": [] }, { "subject": "PDF page size", "facts": ["F12", "F13"], "verdict": "agree", "conflicts": [] }], "alone": ["F3", "F9"] }`

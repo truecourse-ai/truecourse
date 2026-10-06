@@ -9,7 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { buildCorpusConflicts } from '@truecourse/shared';
+import { buildCorpusConflicts, passageKey } from '@truecourse/shared';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { SpecSourceProvider, type SpecSource } from '@/components/spec/spec-source';
 import { FindingCard, FindingResolveProvider } from '@/components/sessions/conversation-pieces';
@@ -107,5 +107,61 @@ describe('the finding card, for a conflict inside one doc', () => {
     } finally {
       window.fetch = realFetch;
     }
+  });
+});
+
+describe('the conflict pane, for one of several contradictions under one heading', () => {
+  const at = (quote: string) => ({ doc: DOC, heading: 'Buttons', quote, passage: passageKey(quote) });
+  const press = [at('A press translates the button down 1px.'), at('A press scales the button to 0.97.')];
+  const focus = [at('Focus draws a 2px ring.'), at('Focus draws no ring.')];
+  const corpus = {
+    ...CORPUS,
+    areas: [
+      {
+        ...CORPUS.areas[0]!,
+        overlaps: [
+          { ...overlap, note: 'press', sections: press },
+          { ...overlap, note: 'focus', sections: focus },
+        ],
+      },
+    ],
+  };
+
+  it('records its verdict, and withdraws it, by its own two passages', async () => {
+    const post = vi.fn(async () => ({ conflictResolutions: [] }));
+    const del = vi.fn(async () => ({ conflictResolutions: [] }));
+    const withSource = (resolutions: unknown[]) => {
+      const read = { corpus, manualIncludes: [], manualExcludes: [], conflictResolutions: resolutions } as unknown as SpecCorpusResponse;
+      const focusConflict = buildCorpusConflicts(read.corpus, read).find((c) => c.note === 'focus');
+      return render(
+        <SpecSourceProvider source={{ ...source(post), deleteConflictResolution: del }}>
+          <SpecOverlapDetail repoId="" area="core/design" docA={DOC} docB={DOC} conflict={focusConflict as never} data={read} onResolved={() => {}} />
+        </SpecSourceProvider>,
+      );
+    };
+    const user = userEvent.setup();
+    const first = withSource([]);
+    expect(screen.getByTestId('overlap-detail')).toHaveTextContent('Design · Buttons, first passage↔Design · Buttons, second passage');
+    await user.click(screen.getByRole('button', { name: /first passage\s*is right/ }));
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ anchorA: 'Buttons', passageA: focus[0]!.passage, anchorB: 'Buttons', passageB: focus[1]!.passage, verdict: 'a' }),
+    );
+    first.unmount();
+
+    // Another contradiction's verdict on the same heading leaves this one open; its own resolves it.
+    const pressVerdict = { docA: DOC, anchorA: 'Buttons', passageA: press[0]!.passage, docB: DOC, anchorB: 'Buttons', passageB: press[1]!.passage, verdict: 'a', resolvedAt: '' };
+    const focusVerdict = { ...pressVerdict, passageA: focus[0]!.passage, passageB: focus[1]!.passage, verdict: 'b' };
+    withSource([pressVerdict, focusVerdict]);
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() =>
+      expect(del).toHaveBeenCalledWith({
+        docA: DOC,
+        anchorA: 'Buttons',
+        passageA: focus[0]!.passage,
+        docB: DOC,
+        anchorB: 'Buttons',
+        passageB: focus[1]!.passage,
+      }),
+    );
   });
 });

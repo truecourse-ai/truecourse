@@ -5,12 +5,20 @@
  *
  * Per-doc curation judges each document alone, so it cannot see what only a
  * view of the whole corpus shows: a comparison page that only restates the
- * guides, a design doc for what shipped differently, a fixture's README, a
- * generated copy of a schema guide. This session sees the list of every doc
+ * guides, a plan that calls itself superseded, a fixture's README, a generated
+ * copy of a schema guide. This session sees the list of every doc
  * curation KEPT, reads what it needs out of the corpus directory
  * (`corpus-dir.ts`), and names the docs that do not belong in a corpus of
  * documents that state how the shipped product behaves. Everything it does not
  * name stays.
+ *
+ * A document is never dropped for DISAGREEING with another one: which of two
+ * disagreeing documents describes the shipped product is the question a
+ * conflict puts to a person, and a review that answered it would delete the
+ * conflict. So `historical` is something a document says of itself, in its
+ * text or in its status metadata, and the check ({@link validateCorpusReview})
+ * holds the session to that: the words it quotes must be in the document, or
+ * the document's own status must read as superseded or dropped.
  *
  * The fold applies its drops as skipped docs ({@link applyCorpusReview}), and
  * two rules there outrank it: a doc the user pinned (`manualIncludes`) is never
@@ -25,9 +33,15 @@
 
 import { z } from 'zod'
 import { defineSessionKind, type KnownDisplayBlock, type SessionBudget, type SessionDef } from '@truecourse/agent-loop'
-import type { DocCandidate } from '@truecourse/spec-consolidator'
+import {
+  classifyStatusValue,
+  docBody,
+  parseDocStatus,
+  readDocFrontmatter,
+  type DocCandidate,
+} from '@truecourse/spec-consolidator'
 import { corpusDocLine, corpusReadingComputer, planReadingSlices, type CorpusDir } from './corpus-dir.js'
-import { instructionsBriefingBlock, scanCacheKey } from './tools.js'
+import { docLifecycleLines, instructionsBriefingBlock, scanCacheKey } from './tools.js'
 
 export const CORPUS_REVIEW_SESSION_KIND = 'spec-scan.corpus-review'
 
@@ -38,7 +52,7 @@ export const CORPUS_REVIEW_CACHE_NAME = 'consolidator/corpus-review'
  * THE CORPUS REVIEW'S VERSION, bumped by hand. A prompt change that fixes wrong
  * output bumps it in the same commit; any other prompt edit invalidates nothing.
  */
-export const CORPUS_REVIEW_STAGE_VERSION = 1
+export const CORPUS_REVIEW_STAGE_VERSION = 2
 
 /**
  * One shard's bounds. The session reads selectively, so the bound that binds is
@@ -71,6 +85,11 @@ const CorpusReviewDropSchema = z
     restates: z
       .array(z.string())
       .describe('For derivative and duplicate: the kept docs it restates, by ref. Empty otherwise.'),
+    marker: z
+      .string()
+      .describe(
+        'For historical: the words of the document itself that say so, copied verbatim from its text or from its STATUS line as briefed. Empty otherwise.',
+      ),
   })
   .strict()
 
@@ -115,10 +134,57 @@ export function corpusReviewCacheKey(
   return scanCacheKey([`corpus-review-v${CORPUS_REVIEW_STAGE_VERSION}`, docs.join(','), keptSet, ...extraParts])
 }
 
-/** The in-session check: every drop names a shard doc once, and a restatement names kept docs. */
+/** A marker shorter than this is a word, not a statement a document makes about itself. */
+const MARKER_MIN_CHARS = 8
+
+/** Text as a marker is matched against it: case, markup and spacing do not count. */
+const plain = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[*_`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/**
+ * The words by which a document says of itself that it is no longer current.
+ * A quoted marker must carry one: quoting a sentence that is in the document
+ * proves only that the document says it, and what a historical drop needs is
+ * the document saying THIS. A document that says it some other way stays in
+ * the corpus, which is the cheap mistake.
+ */
+const SAYS_NOT_CURRENT =
+  /\b(histor(?:y|ic|ical)|supersed\w*|deprecat\w*|obsolete|archiv\w*|retired|replaced|outdated|out of date|legacy|no longer|abandon\w*|cancell?ed|rejected|withdrawn|won'?t (?:do|fix)|never (?:shipped|implemented|built)|not (?:shipped|implemented|built)|did not ship|shipped differently|built differently|(?:was|were) (?:cut|dropped))\b/i
+
+/** The statuses that say a document no longer describes the product: superseded, retired, rejected, cancelled. */
+const HISTORICAL_STATUSES: ReadonlySet<string> = new Set(['deprecated', 'out-of-scope'])
+
+/** The document's own status as the scan reads it: its frontmatter's, else its header's. */
+function ownStatus(doc: DocCandidate): string | undefined {
+  const body = docBody(doc)
+  const stated = readDocFrontmatter(body)?.status
+  return (stated ? classifyStatusValue(stated) : undefined) ?? parseDocStatus(body)
+}
+
+/**
+ * Whether the document says of ITSELF that it is historical: the quoted marker
+ * is in its text (frontmatter included) and says so, or its status metadata
+ * reads as superseded or dropped. A last-changed date is not a status, and what other
+ * documents say is not the document's word.
+ */
+export function saysItIsHistorical(doc: DocCandidate, marker: string): boolean {
+  const quoted = plain(marker)
+  if (quoted.length >= MARKER_MIN_CHARS && SAYS_NOT_CURRENT.test(quoted) && plain(docBody(doc)).includes(quoted)) return true
+  const status = ownStatus(doc)
+  return status !== undefined && HISTORICAL_STATUSES.has(status)
+}
+
+/**
+ * The in-session check: every drop names a shard doc once, a restatement names
+ * kept docs, and a historical drop stands on the document's own word.
+ */
 export function validateCorpusReview(
   outcome: CorpusReviewOutcome,
-  shard: ReadonlySet<string>,
+  shard: ReadonlyMap<string, DocCandidate>,
   kept: ReadonlySet<string>,
 ): string[] {
   const errors: string[] = []
@@ -135,6 +201,12 @@ export function validateCorpusReview(
         if (ref === drop.ref) errors.push(`drops[${i}]: \`${ref}\` cannot restate itself`)
         else if (!kept.has(ref)) errors.push(`drops[${i}]: \`${ref}\` in \`restates\` is not a kept doc`)
       }
+    }
+    const doc = shard.get(drop.ref)
+    if (drop.category === 'historical' && doc && !saysItIsHistorical(doc, drop.marker)) {
+      errors.push(
+        `drops[${i}]: nothing in \`${drop.ref}\` says it is historical: \`marker\` must be words copied from the document (its text or its status line) that say it is superseded, retired, or a record of a plan, and its status metadata does not say so either. A document that disagrees with another is not historical; leave it in and the scan reports the disagreement.`,
+      )
     }
   })
   return errors
@@ -156,7 +228,7 @@ export interface CorpusReviewSessionInput {
 }
 
 export function corpusReviewSessionDef(input: CorpusReviewSessionInput): SessionDef<CorpusReviewOutcome> {
-  const shard = new Set(input.shard.docs.map((d) => d.path))
+  const shard = new Map(input.shard.docs.map((d) => [d.path, d]))
   return {
     ...CORPUS_REVIEW_SESSION,
     systemPrompt: CORPUS_REVIEW_SYSTEM_PROMPT,
@@ -191,7 +263,10 @@ export function corpusReviewBriefing(input: CorpusReviewBriefingInput): string {
     `The kept corpus is in ${input.root}: every document at its ref, ${input.keptCount} in all. Your working directory is that directory.`,
     '',
     `THE DOCS YOU JUDGE (${input.shard.docs.length}):`,
-    ...input.shard.docs.map((doc) => corpusDocLine(doc, input.areasByDoc.get(doc.path) ?? [])),
+    ...input.shard.docs.flatMap((doc) => [
+      corpusDocLine(doc, input.areasByDoc.get(doc.path) ?? []),
+      ...docLifecycleLines(doc, { classify: true }).map((line) => `    ${line}`),
+    ]),
     ...(others > 0
       ? ['', `${others} other kept doc${others === 1 ? ' is' : 's are'} in the same directory; \`Glob\` lists them and they count as sources.`]
       : []),
@@ -246,26 +321,34 @@ export function applyCorpusReview(
       changed = true
     }
   }
-  const drops = [...candidates.values()].map(({ ref, category, reason, restates }) => ({
+  const drops = [...candidates.values()].map(({ ref, category, reason, restates, marker }) => ({
     ref,
     category,
-    reason: RESTATING.has(category) ? `${reason} (restates ${restates.join(', ')})` : reason,
+    reason: RESTATING.has(category)
+      ? `${reason} (restates ${restates.join(', ')})`
+      : category === 'historical' && marker.trim() !== ''
+        ? `${reason} (it says: "${marker.trim()}")`
+        : reason,
   }))
   return { drops, declined }
 }
 
 export const CORPUS_REVIEW_SYSTEM_PROMPT = `You review the documents a product's documentation corpus has KEPT, and name the ones that do not belong in it. The corpus is meant to hold documents that state how the SHIPPED product behaves: what it does, what it allows, how it is configured and used. Tests are written from it, so a document in it is taken as a promise about the product.
 
-The documents are files in your working directory, at their refs. You have \`Read\`, \`Glob\` and \`Grep\` over them. The briefing lists the documents you judge, with title, size and the areas curation tagged them with. Read what you need to decide; you do not have to read everything.
+The documents are files in your working directory, at their refs. You have \`Read\`, \`Glob\` and \`Grep\` over them. The briefing lists the documents you judge, with title, size, the areas curation tagged them with, and each one's own lifecycle metadata: when it last changed, and its status and status history when it states them. Read what you need to decide; you do not have to read everything.
 
 # What does not belong
 
 Name a document only when it is one of these, and say which:
 
-- \`derivative\`: it only restates what other kept documents already say (a comparison page, a summary, a landing page that repeats the guides), so removing it loses no statement about the product. Name the documents it restates in \`restates\`. If it states even one product fact no other kept document states, it is not derivative.
+- \`derivative\`: it only restates what other kept documents already say (a comparison page, a summary, a landing page that repeats the guides), so removing it loses no statement about the product. Name the documents it restates in \`restates\`. If it states even one product fact no other kept document states, it is not derivative. A document that states something DIFFERENT from the documents it would restate is not derivative either: it is one side of a disagreement, and it stays.
 - \`duplicate\`: a generated or copied version of another kept document (an export, a rendered copy, a second language's page with the same content). Name the original in \`restates\`.
-- \`historical\`: a plan, proposal, design record or implementation plan that does not describe what shipped: it labels itself historical or superseded, or describes a design the other documents show was built differently.
+- \`historical\`: a document that SAYS OF ITSELF that it no longer describes the product. Either its own text says so (it calls itself a historical record, superseded, replaced, retired, archived, a plan that was carried out or abandoned, a note that what shipped differs from it), or its own status metadata says so (a status such as superseded, deprecated, obsolete, rejected, cancelled or won't do, as an issue or a decision record carries). Copy the words that say it into \`marker\`, verbatim, from the document's text or from its STATUS line in the briefing. The run checks that the marker is in the document and that it says the document is no longer current, and refuses a historical drop that nothing in the document supports. A date alone is not a status: an old document is not historical for being old.
 - \`process\`: about working on the product rather than the product: test fixtures and their READMEs, development tooling, CI notes, contributor or translator guides, glossaries for translators.
+
+# Never drop a document for disagreeing
+
+Two documents that say different things about the product are a CONFLICT, and reporting conflicts is what this scan is for. Which of the two describes the shipped product is not yours to decide and cannot be read off the documents: a requirements page that contradicts the specification at every point may be the stale one, or the specification may be. Leave both in. A document is never historical, derivative or out of place because another document contradicts it, however thoroughly.
 
 # Be conservative
 
@@ -273,4 +356,4 @@ A document stays when you are unsure. A document that is the ONLY source of some
 
 # The outcome
 
-One object: { "drops": [ { "ref": "...", "category": "derivative" | "duplicate" | "historical" | "process", "reason": "one sentence grounded in what the document says", "restates": ["refs", "..."] } ] }. \`restates\` is empty except for derivative and duplicate. Name only documents from your list, each at most once. When every document belongs: { "drops": [] }.`
+One object: { "drops": [ { "ref": "...", "category": "derivative" | "duplicate" | "historical" | "process", "reason": "one sentence grounded in what the document says", "restates": ["refs", "..."], "marker": "..." } ] }. \`restates\` is empty except for derivative and duplicate, and \`marker\` is empty except for historical. Name only documents from your list, each at most once. When every document belongs: { "drops": [] }.`

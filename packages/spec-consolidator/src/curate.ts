@@ -109,8 +109,10 @@ export interface CurateResult {
  * so a verdict whose dispute this scan did not re-flag is not wrong, only
  * unexercised: the next scan may flag it again, and the verdict must still be
  * there to match. Dormant rows stay in `decisions.json` (surfaced by
- * `orphanedConflictResolutions` and offered as reapply hints on re-flagged
- * pairs via `dormantResolutionForPair`).
+ * `orphanedConflictResolutions` and offered as reapply hints on the pair's
+ * conflicts via `dormantResolutionForPair`). A verdict recorded before
+ * conflicts named their passages is such a row on a pair whose conflicts now
+ * do: it matches none of them, and stays until a doc of it leaves.
  *
  * The returned entries are the caller's own array elements, so identity
  * filtering keeps the survivors byte-identical. Writes only when something is
@@ -189,14 +191,19 @@ export function autoApplyHighConfidenceRecommendations(
  * pointers match — so a `pick-a`/`pick-b` recommendation orients exactly as
  * `c.a`/`c.b` (inside one doc, as the first and second pointer the conflict
  * carries, which are the representative's own). The merged conflict record
- * deliberately does not carry the review itself.
+ * deliberately does not carry the review itself. A pointer's passage key is
+ * part of the match, so where several conflicts share two docs and two
+ * headings each takes its own review.
  */
 function reviewForConflict(corpus: CuratedCorpus, c: CorpusConflict): Overlap['review'] {
   const sectionKeys = (
-    sections: readonly { doc: string; heading: string | null }[] | undefined,
+    sections: readonly { doc: string; heading: string | null; passage?: string }[] | undefined,
   ): string[] =>
     (sections ?? [])
-      .map((s) => `${s.doc}\x00${s.heading === null || s.heading === undefined ? '\x00lead' : s.heading}`)
+      .map(
+        (s) =>
+          `${s.doc}\x00${s.heading === null || s.heading === undefined ? '\x00lead' : s.heading}${s.passage !== undefined ? `\x00${s.passage}` : ''}`,
+      )
       .sort();
   const want = sectionKeys(c.sections);
   const areaIds = [c.area, ...c.areas.filter((a) => a !== c.area)];

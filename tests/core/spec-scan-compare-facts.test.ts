@@ -15,11 +15,17 @@
  *   wrapping-up outcome is accepted with its unplaced facts stamped;
  * - the cache key moves with each named input and with nothing else;
  * - `read_context` shows a fact's passage in its document;
+ * - a pointer's passage key, and the fold of findings that name the same two
+ *   passages: every note kept, the recommendation as confident as the members
+ *   that agree with it, the passage carried through re-anchoring;
  * - through the real `runSpecScanSessions`, from docs to corpus: a conflict
  *   folds into an overlap entry whose verbatim quotes the pointer verifier
  *   anchors where they are; a conflict inside one doc; the same conflict
- *   found by an area batch and a subject batch folds to one; a failed session
- *   lands its docs in `notReached`; the checklist carries the new steps.
+ *   found by an area batch and a subject batch folds to one; several
+ *   conflicts between the same two sections stay several; two fact pairs on
+ *   the same two passages fold into one that keeps both notes; a failed
+ *   session lands its docs in `notReached`; the checklist carries the new
+ *   steps.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -37,18 +43,22 @@ import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-s
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
 import { RECORD_FACTS_SESSION_KIND, type RecordedFact } from '../../packages/core/src/services/spec-scan/record-facts'
 import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects'
+import { buildCorpusConflicts, passageKey } from '../../packages/shared/src/spec/overlap-resolution.js'
 import {
   COMPARE_FACTS_BUDGET,
   COMPARE_FACTS_SESSION_KIND,
   COMPARE_STAGE_VERSION,
+  FOLDED_NOTE_SEPARATOR,
   POINTER_QUOTE_WORDS,
   SUBJECT_FAMILY_DF_CAP,
   checkGroups,
+  compareFactsBriefing,
   compareFactsCacheKey,
   compareFactsSessionDef,
   groupsRefusal,
   evidenceWindow,
   factPointer,
+  foldSamePassages,
   planCompareBatches,
   type CompareBatch,
   type CompareItem,
@@ -277,7 +287,7 @@ describe('the comparison gate', () => {
   const COMPLETE: FactComparisonWire = {
     groups: [
       { subject: 'Export my data', facts: ['F1', 'F2'], verdict: 'conflict', conflicts: [conflict('F1', 'F2')] },
-      { subject: 'Export schedule', facts: ['F3', 'F4', 'F5'], verdict: 'conflict', conflicts: [conflict('F3', 'F5')] },
+      { subject: 'Export schedule', facts: ['F3', 'F4', 'F5'], verdict: 'conflict', conflicts: [conflict('F3', 'F5')], consistent: ['F4'] },
     ],
     alone: [],
   }
@@ -291,15 +301,25 @@ describe('the comparison gate', () => {
       docs: ['docs/export.md', 'docs/privacy.md'],
       note: 'F1 vs F2',
       sections: [
-        { doc: 'docs/export.md', heading: 'Where', quote: 'Export my data is under Settings, Account.' },
-        { doc: 'docs/privacy.md', heading: 'Where', quote: 'Export my data is under Settings, Danger Zone.' },
+        {
+          doc: 'docs/export.md',
+          heading: 'Where',
+          quote: 'Export my data is under Settings, Account.',
+          passage: passageKey('Export my data is under Settings, Account.'),
+        },
+        {
+          doc: 'docs/privacy.md',
+          heading: 'Where',
+          quote: 'Export my data is under Settings, Danger Zone.',
+          passage: passageKey('Export my data is under Settings, Danger Zone.'),
+        },
       ],
       review: REVIEW,
     })
   })
 
   it('refuses a fact placed twice, and one placed nowhere', () => {
-    const check = checkGroups({ ...COMPLETE, alone: ['F1'], groups: COMPLETE.groups.map((g, i) => (i === 1 ? { ...g, facts: ['F3', 'F5'] } : g)) }, batch)
+    const check = checkGroups({ ...COMPLETE, alone: ['F1'], groups: COMPLETE.groups.map((g, i) => (i === 1 ? { ...g, facts: ['F3', 'F5'], consistent: [] } : g)) }, batch)
     expect(check.problems).toEqual(['F1 is placed twice, in groups[0] and in alone; place each fact once'])
     expect(check.unplaced).toEqual(['F4'])
     expect(groupsRefusal(check)).toMatch(/^Groups refused\.\n\n1 fact\(s\) placed nowhere: F4\./)
@@ -324,8 +344,8 @@ describe('the comparison gate', () => {
     const check = checkGroups(
       {
         groups: [
-          { subject: 'Export my data', facts: ['F1', 'F2'], verdict: 'conflict', conflicts: [conflict('F1', 'F5')] },
-          { subject: 'Export schedule', facts: ['F3', 'F4', 'F5'], verdict: 'conflict', conflicts: [conflict('F3', 'F4')] },
+          { subject: 'Export my data', facts: ['F1', 'F2'], verdict: 'conflict', conflicts: [conflict('F1', 'F5')], consistent: ['F2'] },
+          { subject: 'Export schedule', facts: ['F3', 'F4', 'F5'], verdict: 'conflict', conflicts: [conflict('F3', 'F4')], consistent: ['F5'] },
         ],
         alone: [],
       },
@@ -356,6 +376,22 @@ describe('the comparison gate', () => {
     expect(check.findings).toEqual([])
   })
 
+  it('refuses a conflict group that leaves a fact in neither a pair nor "consistent"', () => {
+    // One pair standing for the whole group: F4 is in no pair and is not declared consistent.
+    const bundled = checkGroups({ ...COMPLETE, groups: COMPLETE.groups.map((g) => ({ ...g, consistent: [] })) }, batch)
+    expect(bundled.problems).toHaveLength(1)
+    expect(bundled.problems[0]).toMatch(/^groups\[1\]: F4 is in no pair and not in "consistent"\./)
+    // A fact cannot be both, and "consistent" names only the group's own facts.
+    const confused = checkGroups(
+      { ...COMPLETE, groups: COMPLETE.groups.map((g, i) => (i === 1 ? { ...g, consistent: ['F4', 'F3', 'F1'] } : g)) },
+      batch,
+    )
+    expect(confused.problems).toEqual([
+      'groups[1].consistent names F1, not in this group',
+      'groups[1]: F3 is in a pair and in "consistent"; a fact that contradicts another is not consistent',
+    ])
+  })
+
   it('stamps the facts a wrapping-up session placed nowhere, and accepts its outcome', () => {
     const def = compareFactsSessionDef({ batch, docs: new Map() })
     const partial: FactComparisonWire = { groups: [COMPLETE.groups[0]!], alone: ['F3'] }
@@ -376,7 +412,23 @@ describe('a pointer\'s evidence', () => {
     const [fact] = factsOf('docs/export.md', body, [
       { units: [1, 2], subject: 'PDF export', statement: 'A resume can be exported as a PDF.', areas: ['core/exports'] },
     ])
-    expect(factPointer(fact!)).toEqual({ doc: 'docs/export.md', heading: null, quote: 'Export your resume as a PDF.' })
+    expect(factPointer(fact!)).toEqual({
+      doc: 'docs/export.md',
+      heading: null,
+      quote: 'Export your resume as a PDF.',
+      passage: passageKey('Export your resume as a PDF.'),
+    })
+  })
+
+  it('names its passage by the whole unit it quotes, never by the unit\'s number', () => {
+    const body = '## Where\n\nExport my data is under Settings, Account. It runs nightly.\n'
+    const [fact] = factsOf('docs/export.md', body, [{ units: [2], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
+    expect(factPointer(fact!).passage).toBe(passageKey('It runs nightly.'))
+    // An edit above the passage renumbers it and leaves its key.
+    const edited = `## Intro\n\nA new first sentence.\n\n${body}`
+    const [moved] = factsOf('docs/export.md', edited, [{ units: [3], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
+    expect(moved!.units[0]!.n).not.toBe(fact!.units[0]!.n)
+    expect(factPointer(moved!).passage).toBe(factPointer(fact!).passage)
   })
 
   it('takes the window of words that shares the most with the statement, as an exact slice of the unit', () => {
@@ -421,6 +473,63 @@ describe('a pointer\'s evidence', () => {
   })
 })
 
+describe('findings on the same two passages', () => {
+  const at = (doc: string, quote: string) => ({ doc, heading: 'Expense list', quote, passage: passageKey(quote) })
+  const api = at('docs/api.md', 'Expenses are listed 20 per page, newest first.')
+  const app = at('docs/app.md', 'Expenses are listed 50 per page, oldest first.')
+  const finding = (
+    note: string,
+    action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss',
+    confidence: 'low' | 'medium' | 'high' | undefined,
+    reversed = false,
+  ) => ({
+    docs: (reversed ? ['docs/app.md', 'docs/api.md'] : ['docs/api.md', 'docs/app.md']) as [string, string],
+    note,
+    sections: reversed ? [app, api] : [api, app],
+    review: {
+      explanation: `${note}, explained.`,
+      recommendation: { action, rationale: `${note}, because.`, ...(confidence ? { confidence } : {}) },
+    },
+  })
+
+  it('keeps every distinct note and explanation, in one order whatever order the sessions finished in', () => {
+    const size = finding('page size differs', 'pick-a', 'high')
+    const sort = finding('sort order differs', 'pick-a', 'medium')
+    const again = finding('page size differs', 'pick-a', 'high')
+    const folded = foldSamePassages([sort, size, again])
+    expect(foldSamePassages([size, again, sort])).toEqual(folded)
+    expect(folded.note).toBe(`page size differs${FOLDED_NOTE_SEPARATOR}sort order differs`)
+    expect(folded.review.explanation).toBe('page size differs, explained. sort order differs, explained.')
+    // As confident as the least confident member that agrees.
+    expect(folded.review.recommendation).toEqual({ action: 'pick-a', rationale: 'page size differs, because.', confidence: 'medium' })
+  })
+
+  it('reads a member listed the other way round from the lead\'s side', () => {
+    // pick-b from app.md's side is pick-a from api.md's: the two agree.
+    const folded = foldSamePassages([finding('a', 'pick-a', 'high'), finding('b', 'pick-b', 'high', true)])
+    expect(folded.docs).toEqual(['docs/api.md', 'docs/app.md'])
+    expect(folded.review.recommendation).toMatchObject({ action: 'pick-a', confidence: 'high' })
+  })
+
+  it('never lets a high pick decide a point another member would decide the other way', () => {
+    const folded = foldSamePassages([finding('a', 'pick-a', 'high'), finding('b', 'pick-b', 'high')])
+    expect(folded.review.recommendation).toMatchObject({ action: 'pick-a', confidence: 'low' })
+    // A member with no grade leaves the fold with none, so nothing applies it unsupervised.
+    expect(foldSamePassages([finding('a', 'dismiss', 'high'), finding('b', 'dismiss', undefined)]).review.recommendation).not.toHaveProperty('confidence')
+  })
+
+  it('carries the passage through a pointer the verifier re-anchors', () => {
+    const body = '# API\n\n## Paging\n\nNothing here.\n\n## Expense list\n\nExpenses are listed 20 per page, newest first.\n'
+    const [moved] = verifyOverlapSections({
+      docs: ['docs/api.md', 'docs/app.md'],
+      note: 'page size',
+      sections: [{ ...api, heading: 'Paging' }],
+      bodyOf: () => body,
+    })
+    expect(moved).toEqual(api)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // the cache key, and the session's tools
 // ---------------------------------------------------------------------------
@@ -453,7 +562,7 @@ describe('compareFactsCacheKey', () => {
     expect(key(item(base()), ['be strict'])).not.toBe(KEY)
     // The settled subject is what the briefing shows, so a settlement moves it too.
     expect(key(item(base(), [], (f) => (f.subject === 'Export my data' ? 'Data export' : f.subject)))).not.toBe(KEY)
-    expect(COMPARE_STAGE_VERSION).toBe(1)
+    expect(COMPARE_STAGE_VERSION).toBe(3)
   })
 
   it('moves with the lifecycle of a doc that has a status, never with an edit no fact cites', () => {
@@ -477,6 +586,24 @@ describe('the comparison session', () => {
     expect(def.computer).toBeUndefined()
     expect(def.tools.map((t) => t.name)).toEqual(['read_context', 'check_groups'])
     expect(def.outcomePrecondition?.tool).toBe('check_groups')
+  })
+
+  it('briefs each earlier conflict between its docs, quoting the passages of one that names them', () => {
+    const where = (quote: string, doc: string) => ({ doc, heading: 'Where', quote, passage: passageKey(quote) })
+    const keyed = {
+      docs: ['docs/export.md', 'docs/privacy.md'] as [string, string],
+      note: 'where',
+      sections: [
+        where('Export my data is under Settings, Account.', 'docs/export.md'),
+        where('Export my data is under Settings, Danger Zone.', 'docs/privacy.md'),
+      ],
+    }
+    const plain = { ...keyed, note: 'schedule', sections: keyed.sections.map(({ doc, heading, quote }) => ({ doc, heading, quote })) }
+    const briefing = compareFactsBriefing({ batch, docs: new Map() }, [], [keyed, plain])
+    expect(briefing).toContain(
+      '  1. docs/export.md · Where · "Export my data is under Settings, Account."  <->  docs/privacy.md · Where · "Export my data is under Settings, Danger Zone."  : where',
+    )
+    expect(briefing).toContain('  2. docs/export.md · Where  <->  docs/privacy.md · Where  : schedule')
   })
 
   it('reads the section around each fact, one block per passage', async () => {
@@ -588,8 +715,18 @@ describe('a scan that compares facts, from docs to corpus', () => {
     const overlap = area!.overlaps[0]!
     expect(overlap.docs).toEqual(['docs/export.md', 'docs/privacy.md'])
     expect(overlap.sections).toEqual([
-      { doc: 'docs/export.md', heading: 'Where', quote: 'Export my data is under Settings, Account.' },
-      { doc: 'docs/privacy.md', heading: 'Where', quote: 'Export my data is under Settings, Danger Zone.' },
+      {
+        doc: 'docs/export.md',
+        heading: 'Where',
+        quote: 'Export my data is under Settings, Account.',
+        passage: passageKey('Export my data is under Settings, Account.'),
+      },
+      {
+        doc: 'docs/privacy.md',
+        heading: 'Where',
+        quote: 'Export my data is under Settings, Danger Zone.',
+        passage: passageKey('Export my data is under Settings, Danger Zone.'),
+      },
     ])
     // Verbatim by construction, so the verifier anchors each pointer where it already is.
     const bodies: Record<string, string> = { 'docs/export.md': EXPORT_MD, 'docs/privacy.md': PRIVACY_MD }
@@ -661,7 +798,72 @@ describe('a scan that compares facts, from docs to corpus', () => {
     expect(overlaps).toHaveLength(1)
     expect(overlaps[0]!.docs).toEqual(['docs/export.md', 'docs/shared.md'])
     expect(overlaps[0]!.areas).toEqual(['core/a'])
+    // The same two passages, named once, with the one note both batches wrote.
+    expect(overlaps[0]!.sections.map((s) => s.passage)).toEqual([
+      passageKey('Export my data is under Settings, Account.'),
+      passageKey('Export my data is under Settings, Danger Zone.'),
+    ])
+    expect(overlaps[0]!.note).toBe('docs/export.md and docs/shared.md disagree on Export my data')
+    expect(facts).toContainEqual(['verify', 'docs/export.md vs docs/shared.md: 2 conflicts on the same two passages, folded into one'])
     expect(result.corpus.comparison).toMatchObject({ subjectBatchFamilies: 1, subjectBatchFacts: 3, unplacedFacts: 0 })
+  })
+
+  // Two docs whose "Expense list" sections disagree, sentence by sentence, on three points.
+  const API_MD = `# API\n\n## Expense list\n\nThe list returns 20 expenses per page. Expenses are sorted newest first. An empty list returns an empty array.\n`
+  const APP_MD = `# App\n\n## Expense list\n\nThe list shows 50 expenses per page. Expenses are sorted oldest first. An empty list shows a message.\n`
+  const EXPENSES = { product: 'core', concern: 'expenses' }
+  const expenseSubject = (line: string): string | null =>
+    /per page/.test(line) ? 'Expense page size' : /sorted/.test(line) ? 'Expense sort order' : /empty list/i.test(line) ? 'Empty expense list' : null
+  const apiAgainstApp = (call: StubCall) => compare(call, (a, b) => a.doc === 'docs/api.md' && b.doc === 'docs/app.md')
+
+  it('files every conflict between the same two sections as an overlap of its own', async () => {
+    writeDocs({ 'docs/api.md': API_MD, 'docs/app.md': APP_MD })
+    const { result } = await scan({
+      tags: { 'docs/api.md': [EXPENSES], 'docs/app.md': [EXPENSES] },
+      factOf: ({ line }) => {
+        const subject = expenseSubject(line)
+        return subject ? { subject, statement: line } : null
+      },
+      compareWith: apiAgainstApp,
+    })
+    const overlaps = result.corpus.areas.flatMap((a) => a.overlaps)
+    expect(overlaps).toHaveLength(3)
+    expect(overlaps.every((o) => o.sections.every((s) => s.heading === 'Expense list'))).toBe(true)
+    expect(new Set(overlaps.map((o) => o.sections.map((s) => s.passage).join())).size).toBe(3)
+    expect(overlaps.flatMap((o) => o.sections.filter((s) => s.doc === 'docs/app.md').map((s) => s.quote)).sort()).toEqual([
+      'An empty list shows a message.',
+      'Expenses are sorted oldest first.',
+      'The list shows 50 expenses per page.',
+    ])
+    expect(result.stats.overlapFlags).toBe(3)
+    // Read back, they stay three conflicts, each with its own id.
+    const conflicts = buildCorpusConflicts(result.corpus, {})
+    expect(new Set(conflicts.map((c) => c.id)).size).toBe(3)
+  })
+
+  it('folds two fact pairs on the same two passages into one conflict that keeps both notes', async () => {
+    writeDocs({
+      'docs/api.md': '# API\n\n## Expense list\n\nExpenses are listed 20 per page, newest first.\n',
+      'docs/app.md': '# App\n\n## Expense list\n\nExpenses are listed 50 per page, oldest first.\n',
+    })
+    const { result, facts } = await scan({
+      tags: { 'docs/api.md': [EXPENSES], 'docs/app.md': [EXPENSES] },
+      // One sentence states two facts, each a point the other doc's sentence contradicts.
+      factOf: ({ line }) =>
+        /listed/.test(line)
+          ? [
+              { subject: 'Expense page size', statement: `${line} (page size)` },
+              { subject: 'Expense sort order', statement: `${line} (sort order)` },
+            ]
+          : null,
+      compareWith: apiAgainstApp,
+    })
+    const overlaps = result.corpus.areas.flatMap((a) => a.overlaps)
+    expect(overlaps).toHaveLength(1)
+    expect(overlaps[0]!.note).toBe(
+      `docs/api.md and docs/app.md disagree on Expense page size${FOLDED_NOTE_SEPARATOR}docs/api.md and docs/app.md disagree on Expense sort order`,
+    )
+    expect(facts).toContainEqual(['verify', 'docs/api.md vs docs/app.md: 2 conflicts on the same two passages, folded into one'])
   })
 
   it('lands a failed comparison\'s docs in their areas\' notReached', async () => {

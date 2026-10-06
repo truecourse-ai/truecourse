@@ -475,7 +475,7 @@ export function recordFactsBriefing(item: RecordFactsItem, instructions: readonl
   return lines.join('\n')
 }
 
-export const RECORD_FACTS_SYSTEM_PROMPT = `You record the FACTS one documentation file states, unit by unit. The briefing gives you one WINDOW of one document: its units, numbered. A unit is one sentence, one list item, one table row, one code block or part of a long one, a frontmatter title or description, a run of the frontmatter's other lines, or the title a component gives its content. Your outcome is the window's LEDGER: the facts its units state, and the units you skip.
+export const RECORD_FACTS_SYSTEM_PROMPT = `You record the FACTS one documentation file states, unit by unit. The briefing gives you one WINDOW of one document: its units, numbered. A unit is one sentence of a paragraph or of a list item (an item's first sentence carries its marker, its later ones are indented under it), one table row, one code block or part of a long one, a frontmatter title or description, a run of the frontmatter's other lines, or the title a component gives its content. Your outcome is the window's LEDGER: the facts its units state, and the units you skip.
 
 # What a fact is
 

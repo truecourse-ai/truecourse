@@ -168,8 +168,9 @@ export function SpecOverlapDetail({
   const repoSource = useMemo(() => createRepoSpecSource(repoId), [repoId]);
   const source = ctxSource ?? repoSource;
 
-  // Build the persisted verdict from the flagged sections: the heading per doc
-  // is the identity a stored verdict is matched by, the quote rides as evidence.
+  // Build the persisted verdict from the flagged sections: the heading per doc,
+  // and its passage when the conflict names one, is the identity a stored
+  // verdict is matched by; the quote rides as evidence.
   const buildResolution = (verdict: 'a' | 'b' | 'dismissed'): SpecConflictResolution =>
     conflictVerdictFor(overlap, docA, docB, verdict);
 
@@ -194,11 +195,14 @@ export function SpecOverlapDetail({
     if (!resolution) return;
     setBusy('undo');
     try {
+      // The verdict's own passages name it among the conflicts two sections can hold.
       const res = await source.deleteConflictResolution({
         docA: resolution.docA,
         anchorA: resolution.anchorA,
+        ...(resolution.passageA !== undefined ? { passageA: resolution.passageA } : {}),
         docB: resolution.docB,
         anchorB: resolution.anchorB,
+        ...(resolution.passageB !== undefined ? { passageB: resolution.passageB } : {}),
       });
       if ('corpus' in res) onResolved(res);
       else {

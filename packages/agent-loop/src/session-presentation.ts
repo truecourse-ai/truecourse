@@ -44,16 +44,19 @@ export type SessionDisplay = z.infer<typeof SessionDisplaySchema>;
 /**
  * Two documents that disagree, named precisely enough for a reader to offer a
  * resolution. `anchorA`/`anchorB` are section anchors, `null` when the dispute
- * is whole-document. `docA` and `docB` are the same doc for a contradiction
- * inside it, its sides the first and second passage.
+ * is whole-document, and `passageA`/`passageB` the passage keys when the
+ * dispute names its passages. `docA` and `docB` are the same doc for a
+ * contradiction inside it, its sides the first and second passage.
  */
 export const DisplayDisputeSchema = z.object({
   docA: z.string(),
   anchorA: z.string().nullable(),
   quoteA: z.string().optional(),
+  passageA: z.string().optional(),
   docB: z.string(),
   anchorB: z.string().nullable(),
   quoteB: z.string().optional(),
+  passageB: z.string().optional(),
 });
 export type DisplayDispute = z.infer<typeof DisplayDisputeSchema>;
 

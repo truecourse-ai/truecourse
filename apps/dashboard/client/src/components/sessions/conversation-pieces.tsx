@@ -11,7 +11,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Check } from 'lucide-react';
-import { buildCorpusConflicts, resolutionForConflict } from '@truecourse/shared';
+import { buildCorpusConflicts, resolutionForConflict, type OverlapSectionLike } from '@truecourse/shared';
 import type { DisplayDispute, KnownDisplayBlock } from '@truecourse/agent-loop';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import * as api from '@/lib/api';
@@ -20,10 +20,17 @@ import { passageNames } from '@/lib/passage-names';
 
 /**
  * The dispute identity of a finding: the SAME key `conflictResolutions`
- * entries carry (unordered doc pair + per-side section anchor + verbatim
- * quote), so a verdict recorded here matches the corpus conflict.
+ * entries carry (unordered doc pair + per-side section anchor, and per-side
+ * passage key when the finding names its passages), so a verdict recorded
+ * here matches the corpus conflict. The quotes ride along as evidence.
  */
 export type FindingDispute = DisplayDispute;
+
+/** A dispute's two sides as the pointers the shared identity reads. */
+const disputePointers = (d: FindingDispute): OverlapSectionLike[] => [
+  { doc: d.docA, heading: d.anchorA, quote: d.quoteA, ...(d.passageA !== undefined ? { passage: d.passageA } : {}) },
+  { doc: d.docB, heading: d.anchorB, quote: d.quoteB, ...(d.passageB !== undefined ? { passage: d.passageB } : {}) },
+];
 
 /** A `finding` display block as the card consumes it. */
 export type ChatFinding = Omit<Extract<KnownDisplayBlock, { kind: 'finding' }>, 'kind'>;
@@ -145,10 +152,7 @@ function FindingResolveFooter({
     <Check aria-hidden className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-500" />
   );
 
-  const resolution = resolutionForConflict(ctx.resolutions ?? [], dispute.docA, dispute.docB, [
-    { doc: dispute.docA, heading: dispute.anchorA, quote: dispute.quoteA },
-    { doc: dispute.docB, heading: dispute.anchorB, quote: dispute.quoteB },
-  ]);
+  const resolution = resolutionForConflict(ctx.resolutions ?? [], dispute.docA, dispute.docB, disputePointers(dispute));
 
   const act = async (verdict: 'a' | 'b' | 'dismissed' | 'undo'): Promise<void> => {
     setBusy(verdict);
@@ -285,8 +289,10 @@ export function FindingResolveProvider({
         await api.deleteContextConflictResolution({
           docA: d.docA,
           anchorA: d.anchorA,
+          ...(d.passageA !== undefined ? { passageA: d.passageA } : {}),
           docB: d.docB,
           anchorB: d.anchorB,
+          ...(d.passageB !== undefined ? { passageB: d.passageB } : {}),
         }),
       );
     },
@@ -294,7 +300,9 @@ export function FindingResolveProvider({
     // conflicts list that page renders (a hand-minted pair-form id would land
     // on the pair's FIRST dispute, which can be a sibling without the review).
     // Treating the dispute as a resolution-like reuses the canonical identity
-    // matcher. No match yet (corpus not folded, mid-flight) is the Coverage tab.
+    // matcher, passages included, which tells apart the many conflicts two
+    // sections can hold. No match yet (corpus not folded, mid-flight) is the
+    // Coverage tab.
     coverageHref: (d) => {
       const match = (conflicts ?? []).find((c) =>
         resolutionForConflict([{ ...d, verdict: 'a' }], c.a, c.b, c.overlap.sections),

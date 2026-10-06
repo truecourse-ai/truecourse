@@ -126,6 +126,47 @@ describe('readSuppressionIndex', () => {
     expect(readSuppressionIndex(repo).size).toBe(0)
   })
 
+  it('keeps the passages that tell two conflicts on the same two sections apart, and suppresses only the verdict’s own loser', () => {
+    repo = tempRepo()
+    const sections = (readme: string, spec: string) => [
+      { doc: 'README.md', heading: 'taskline', quote: readme, passage: `p-${readme.length}` },
+      { doc: 'docs/SPEC.md', heading: 'rm <id>', quote: spec, passage: `p-${spec.length}` },
+    ]
+    const archived = sections('rm permanently deletes the task.', QUOTE)
+    const restore = sections('A removed task cannot be restored.', 'An archived task can be restored with undo.')
+    fs.writeFileSync(
+      path.join(repo, '.truecourse', 'specs', 'corpus.json'),
+      JSON.stringify({
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [],
+        areas: [
+          {
+            id: 'core/persistence',
+            overlaps: [
+              { docs: ['README.md', 'docs/SPEC.md'], note: 'rm permanent vs archived', sections: archived },
+              { docs: ['README.md', 'docs/SPEC.md'], note: 'restore', sections: restore },
+            ],
+          },
+        ],
+      }),
+    )
+    // README is right about restoring; nothing is said about the archive point.
+    writeDecisions(repo, [
+      {
+        docA: 'README.md',
+        anchorA: 'taskline',
+        passageA: restore[0]!.passage,
+        docB: 'docs/SPEC.md',
+        anchorB: 'rm <id>',
+        passageB: restore[1]!.passage,
+        verdict: 'a',
+        resolvedAt: '',
+      },
+    ])
+    expect(readSuppressionIndex(repo).get('docs/SPEC.md')).toEqual(['An archived task can be restored with undo.'])
+  })
+
   it('is empty when no corpus / no decisions (tolerant)', () => {
     repo = tempRepo()
     expect(readSuppressionIndex(repo).size).toBe(0)

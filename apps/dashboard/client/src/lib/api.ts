@@ -192,17 +192,22 @@ export interface SpecOverlapSection {
   /** The verbatim disputed sentence, when the detector captured one — carried into a
    *  pick-a-side verdict so the loser's claim is suppressed at guard generate. */
   quote?: string;
+  /** The passage key, when the finding named its passage: part of the dispute's identity. */
+  passage?: string;
 }
 
 /** A section-scoped conflict verdict — pick-a-side ('a'/'b') or dismissal.
- *  Identity is the unordered doc pair + each side's section anchor (+ optional quote). */
+ *  Identity is the unordered doc pair + each side's section anchor (+ its passage
+ *  key when the conflict names its passages). */
 export interface SpecConflictResolution {
   docA: string;
   anchorA: string | null;
   quoteA?: string;
+  passageA?: string;
   docB: string;
   anchorB: string | null;
   quoteB?: string;
+  passageB?: string;
   verdict: 'a' | 'b' | 'dismissed';
   resolvedAt?: string;
   note?: string;
@@ -1094,9 +1099,11 @@ export function postContextConflictResolution(payload: {
   docA: string;
   anchorA: string | null;
   quoteA?: string;
+  passageA?: string;
   docB: string;
   anchorB: string | null;
   quoteB?: string;
+  passageB?: string;
   verdict: 'a' | 'b' | 'dismissed';
   note?: string;
 }): Promise<SpecConflictAck> {
@@ -1106,11 +1113,14 @@ export function postContextConflictResolution(payload: {
   });
 }
 
+/** Withdraw a verdict, named by its dispute: the two sections, and the two passages when it names them. */
 export function deleteContextConflictResolution(payload: {
   docA: string;
   anchorA: string | null;
+  passageA?: string;
   docB: string;
   anchorB: string | null;
+  passageB?: string;
 }): Promise<SpecConflictAck> {
   return fetchApi<SpecConflictAck>('/api/context/conflict-resolution', {
     method: 'DELETE',

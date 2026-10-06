@@ -61,7 +61,7 @@ import { resetSpecStore, saveWorkspaceSpec, setSpecStore } from '@truecourse/cor
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { resetGuardStore as resetCoreGuardStore, setGuardStore, type GuardStore } from '@truecourse/core/lib/guard-store';
 import { writeGuardLatest } from '@truecourse/guard-runner';
-import type { GuardGenerateReport } from '@truecourse/shared';
+import { passageKey, type GuardGenerateReport } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { createAuth, LOCAL_ORG_ID } from '../../apps/dashboard/server/src/auth/index';
 import { createHostedMcpAuth, loadMcpOAuthConfig, type McpAuth } from '../../apps/dashboard/server/src/auth/mcp';
@@ -610,6 +610,33 @@ describe('write tools', () => {
       resetCoreGuardStore();
       installWorkTreeGuardStore();
     }
+  });
+
+  it('resolves and undoes one of several conflicts between the same two sections, by its passages', async () => {
+    const at = (doc: string, heading: string, quote: string) => ({ doc, heading, quote, passage: passageKey(quote) });
+    const points = [
+      [at(A, 'Cancellation', 'within 24 hours'), at(B, 'Cancellation policy', 'within 48 hours')],
+      [at(A, 'Cancellation', 'a fee of 10 dollars'), at(B, 'Cancellation policy', 'free of charge')],
+    ];
+    const base = corpus();
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
+      ...base,
+      areas: [{ ...base.areas[0]!, overlaps: points.map((sections, i) => ({ docs: [A, B], note: `point ${i}`, sections, areas: [] })) }],
+    } as unknown as CuratedCorpus);
+
+    const { conflicts } = await ok(client, 'list_conflicts');
+    expect(conflicts.map((c: { note: string }) => c.note).sort()).toEqual(['point 0', 'point 1']);
+    const fee = conflicts.find((c: { note: string }) => c.note === 'point 1');
+    await ok(client, 'resolve_conflict', { conflictId: fee.id, verdict: 'b' });
+    expect((await corpusRead()).conflictResolutions).toEqual([
+      expect.objectContaining({ passageA: points[1]![0]!.passage, passageB: points[1]![1]!.passage, verdict: 'b' }),
+    ]);
+    expect((await ok(client, 'list_conflicts')).conflicts.map((c: { note: string }) => c.note)).toEqual(['point 0']);
+
+    // The undo names the same passages, so it removes exactly that verdict.
+    await ok(client, 'undo_conflict_resolution', { conflictId: fee.id });
+    expect((await corpusRead()).conflictResolutions).toEqual([]);
+    expect((await ok(client, 'list_conflicts')).conflicts).toHaveLength(2);
   });
 
   it('dismisses a flow and restores it', async () => {
