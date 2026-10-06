@@ -6,7 +6,7 @@
  * fold made them useless as a total — a section is worth the worst thing in it,
  * so one blocked scenario erased every proof beside it and a workspace with
  * dozens of passing flows read zero. The strip and the trend therefore count
- * flows, in the Flows page's five words, so the same flow wears the same word
+ * flows, in the Flows page's words, so the same flow wears the same word
  * and rides the same number on both pages.
  *
  * Sections are still counted, and still in the product owner's words: the Areas
@@ -24,7 +24,7 @@ import type { ContextDocumentStatus } from './context.js';
 
 // --- Flows: what the strip and the trend count -------------------------------
 
-/** The five words a FLOW wears on Home, which are the engine's own five. */
+/** The words a FLOW wears on Home, which are the engine's own. */
 export type HomeFlowStatus = GuardCoveragePlainStatus;
 
 /**
@@ -34,6 +34,7 @@ export type HomeFlowStatus = GuardCoveragePlainStatus;
  */
 export const HOME_FLOW_STATUS_ORDER = [
   'succeeded',
+  'partially-succeeded',
   'failed',
   'blocked',
   'not-testable',
@@ -43,7 +44,7 @@ export const HOME_FLOW_STATUS_ORDER = [
 /** The ONE word per flow status — the Flows page's, never a second name. */
 export const HOME_FLOW_STATUS_WORD: Record<HomeFlowStatus, string> = GUARD_COVERAGE_STATUS_WORD;
 
-/** Flows counted under the five words. */
+/** Flows counted under those words. */
 export interface HomeFlowTally {
   total: number;
   byStatus: Record<HomeFlowStatus, number>;
@@ -158,7 +159,7 @@ export interface HomeBlockedOnRow {
   href: string;
 }
 
-/** One document's flows, counted under the five words. */
+/** One document's flows, counted under the words a flow wears. */
 export interface HomeDocumentFlowsRow extends HomeFlowTally {
   /** The document as the flows cite it. */
   doc: string;

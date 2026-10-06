@@ -76,6 +76,14 @@ const TESTS: FlowTestsFile = {
       summary: 'The details page shows the expense.',
     },
     {
+      flowId: 'rename-expense',
+      flowFingerprint: 'sha256:rename-expense',
+      status: 'passing',
+      file: 'rename-expense.spec.ts',
+      summary: 'Renaming works, from the menu item the product calls Edit details.',
+      copyDrift: [{ step: 1, documented: 'Update', observed: 'Edit details' }],
+    },
+    {
       flowId: 'convert-expense',
       flowFingerprint: 'sha256:convert-expense',
       status: 'blocked',
@@ -125,6 +133,7 @@ beforeEach(async () => {
         flows: [
           flow('edit-expense', 'Edit expense'),
           flow('open-expense', 'Open an expense'),
+          flow('rename-expense', 'Rename an expense'),
           flow('convert-expense', 'Convert an expense'),
           flow('delete-expense', 'Delete an expense'),
         ],
@@ -135,6 +144,7 @@ beforeEach(async () => {
     fs.writeFileSync(path.join(src, 'tests', 'edit-expense.spec.ts'), "import { flowTest } from './flow'\n");
     fs.writeFileSync(path.join(src, 'tests', 'edit-expense.seed.ts'), 'export async function seed() {}\n');
     fs.writeFileSync(path.join(src, 'tests', 'open-expense.spec.ts'), "import { test } from './flow'\n");
+    fs.writeFileSync(path.join(src, 'tests', 'rename-expense.spec.ts'), "import { test } from './flow'\n");
     const ref = { repoKey: REPO, commitSha: COMMIT };
     await guardStore.saveScenarios(ref, src);
     await guardStore.writeGuardResult(ref, REPORT);
@@ -170,6 +180,14 @@ describe('flows proven by a Playwright test', () => {
     expect(guardFlowPlainStatus(byId.get('open-expense')!)).toBe('succeeded');
     expect(byId.get('open-expense')!.test).toEqual({ status: 'passing', seeded: false });
 
+    // A test that passed after using the product's name for a control: the flow is partially succeeded.
+    expect(guardFlowPlainStatus(byId.get('rename-expense')!)).toBe('partially-succeeded');
+    expect(byId.get('rename-expense')!.test).toEqual({
+      status: 'passing',
+      seeded: false,
+      copyDrift: [{ step: 1, documented: 'Update', observed: 'Edit details' }],
+    });
+
     expect(guardFlowPlainStatus(byId.get('convert-expense')!)).toBe('blocked');
     expect(byId.get('convert-expense')!.test?.blockedOn).toBe('CurrencyBeacon API key');
 
@@ -187,6 +205,10 @@ describe('flows proven by a Playwright test', () => {
     });
     expect(detail?.test?.seed?.content).toBe('export async function seed() {}\n');
     expect(detail?.test?.run?.steps.map((s) => s.outcome)).toEqual(['failed', 'not-reached']);
+
+    expect((await readGuardFlowDetail(REPO, 'rename-expense'))?.test?.copyDrift).toEqual([
+      { step: 1, documented: 'Update', observed: 'Edit details' },
+    ]);
 
     const blocked = await readGuardFlowDetail(REPO, 'convert-expense');
     expect(blocked?.test).toMatchObject({ status: 'blocked', blockedOn: 'CurrencyBeacon API key' });

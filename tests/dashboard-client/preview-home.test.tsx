@@ -80,16 +80,16 @@ const HOME: HomeResponse = {
   period: '30d',
   today: {
     total: 5,
-    byStatus: { succeeded: 2, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 1 },
+    byStatus: { succeeded: 2, 'partially-succeeded': 0, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 1 },
   },
   trend: [
     {
       at: '2026-09-01T10:00:00.000Z',
-      byStatus: { succeeded: 1, failed: 2, blocked: 1, 'not-testable': 0, 'never-run': 1 },
+      byStatus: { succeeded: 1, 'partially-succeeded': 0, failed: 2, blocked: 1, 'not-testable': 0, 'never-run': 1 },
     },
     {
       at: '2026-09-09T10:00:00.000Z',
-      byStatus: { succeeded: 2, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 1 },
+      byStatus: { succeeded: 2, 'partially-succeeded': 0, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 1 },
     },
   ],
   areas: [
@@ -163,13 +163,13 @@ const HOME: HomeResponse = {
     {
       doc: 'docs/refunds.md',
       total: 3,
-      byStatus: { succeeded: 1, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 0 },
+      byStatus: { succeeded: 1, 'partially-succeeded': 0, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 0 },
       href: '/flows?doc=docs%2Frefunds.md',
     },
     {
       doc: 'docs/shipping.md',
       total: 2,
-      byStatus: { succeeded: 2, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
+      byStatus: { succeeded: 2, 'partially-succeeded': 0, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
       href: '/flows?doc=docs%2Fshipping.md',
     },
   ],
@@ -201,7 +201,7 @@ const EMPTY: HomeResponse = {
   period: '30d',
   today: {
     total: 0,
-    byStatus: { succeeded: 0, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
+    byStatus: { succeeded: 0, 'partially-succeeded': 0, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
   },
   trend: [],
   areas: [],
@@ -299,7 +299,7 @@ describe('Home', () => {
     serve({ showBlocked: false, home: {
       ...HOME,
       attention: [...HOME.attention, { id: 'blocked-doc', kind: 'blocked-document', title: 'Blocked document', status: 'Blocked', fact: 'Needs recipe', at: null, href: '/context' }],
-      documents: [...HOME.documents, { doc: 'docs/blocked-only.md', total: 1, byStatus: { succeeded: 0, failed: 0, blocked: 1, 'not-testable': 0, 'never-run': 0 }, href: '/flows?doc=docs%2Fblocked-only.md' }],
+      documents: [...HOME.documents, { doc: 'docs/blocked-only.md', total: 1, byStatus: { succeeded: 0, 'partially-succeeded': 0, failed: 0, blocked: 1, 'not-testable': 0, 'never-run': 0 }, href: '/flows?doc=docs%2Fblocked-only.md' }],
     } });
     renderHome('/');
     const strip = await screen.findByRole('list', { name: 'Today' });
@@ -324,6 +324,20 @@ describe('Home', () => {
     expect(within(screen.getByRole('region', { name: 'Blocked on' })).getByText('Stripe test account')).toBeInTheDocument();
     expect(within(restoredStrip).getByText('40%')).toBeInTheDocument();
     expect(within(restoredStrip).getByRole('listitem', { name: '1 Blocked' })).toBeInTheDocument();
+  });
+
+  it('counts a partially succeeded flow in the succeeded share, and under its own word beside it', async () => {
+    serve({ home: {
+      ...HOME,
+      today: { total: 5, byStatus: { succeeded: 2, 'partially-succeeded': 1, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 0 } },
+    } });
+    renderHome();
+
+    const strip = await screen.findByRole('list', { name: 'Today' });
+    expect(within(strip).getByText('60%')).toBeInTheDocument();
+    expect(within(strip).getByText('3 of 5 flows succeeded')).toBeInTheDocument();
+    expect(within(strip).getByRole('listitem', { name: '2 Succeeded' })).toBeInTheDocument();
+    expect(within(strip).getByRole('listitem', { name: '1 Partially succeeded' })).toBeInTheDocument();
   });
 
   it('draws today’s FLOWS in the strip above the chart, the succeeded share first', async () => {

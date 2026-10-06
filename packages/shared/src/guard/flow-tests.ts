@@ -21,6 +21,10 @@
  * is the finding. A flow nobody could write a test for is `blocked`, and says
  * what stood in the way.
  *
+ * A name is not a finding. Where the documents call a control one thing and
+ * the product another, the test uses the product's name, goes on to what the
+ * flow is about, and carries the difference as COPY DRIFT.
+ *
  * A kept test is run again at every commit its repository generates on. One
  * that still behaves the way it was accepted HOLDS. One that does not has
  * MOVED, and is opened again by a session that is told why
@@ -45,6 +49,29 @@ export const FlowTestDisagreementSchema = z.object({
 });
 export type FlowTestDisagreement = z.infer<typeof FlowTestDisagreementSchema>;
 
+/**
+ * COPY DRIFT: a control or a place the documents name one way and the product
+ * another, where the product still does what the step claims. The test uses
+ * the product's name and goes on to the claim, and the difference is kept here
+ * for a reader. It is a mark on a `passing` or a `failing` test and never a
+ * status of its own: a test that met a renamed button can still fail on
+ * something the product does.
+ */
+export const FlowTestCopyDriftSchema = z.object({
+  /** The 1-based order of the step the name was met in. */
+  step: z.number().int().positive(),
+  /** The name as the document has it. */
+  documented: z.string().min(1),
+  /** The name the product has. */
+  observed: z.string().min(1),
+});
+export type FlowTestCopyDrift = z.infer<typeof FlowTestCopyDriftSchema>;
+
+/** A copy drift list in the one order it is stored and keyed in: by step, then by the documented name. */
+export function orderCopyDrift(drift: readonly FlowTestCopyDrift[]): FlowTestCopyDrift[] {
+  return [...drift].sort((a, b) => a.step - b.step || a.documented.localeCompare(b.documented) || a.observed.localeCompare(b.observed));
+}
+
 /** How a flow-test session ends. */
 export const FlowTestOutcomeSchema = z
   .object({
@@ -61,8 +88,13 @@ export const FlowTestOutcomeSchema = z
      * phrase, which is what a reader groups them by.
      */
     blockedOn: z.string().min(1).optional(),
+    /** Every name the test met that the documents have one way and the product another. */
+    copyDrift: z.array(FlowTestCopyDriftSchema).optional(),
   })
   .superRefine((outcome, ctx) => {
+    if (outcome.status === 'blocked' && outcome.copyDrift?.length) {
+      ctx.addIssue({ code: 'custom', path: ['copyDrift'], message: 'a blocked flow has no test, so it met no copy drift' });
+    }
     if (outcome.status === 'failing' && !outcome.disagreement) {
       ctx.addIssue({ code: 'custom', path: ['disagreement'], message: 'a failing test names the disagreement it fails on' });
     }
@@ -240,11 +272,13 @@ export const FlowTestRecordSchema = z.object({
   disagreement: FlowTestDisagreementSchema.optional(),
   blockedBy: z.string().min(1).optional(),
   blockedOn: z.string().min(1).optional(),
+  /** The copy drift the test was accepted with, in {@link orderCopyDrift}'s order. Absent when it met none. */
+  copyDrift: z.array(FlowTestCopyDriftSchema).optional(),
   /** The engine's run the status was accepted on. Absent on a `blocked` flow. */
   run: FlowTestRunSchema.optional(),
   /**
-   * The judge key the spec was accepted under: over the spec, the seed and
-   * what each step's document says. Absent on a test nobody has judged yet,
+   * The judge key the spec was accepted under: over the spec, the seed, what
+   * each step's document says and the copy drift. Absent on a test nobody has judged yet,
    * which is judged at the next generate and is not stale for it.
    */
   judged: z.string().min(1).optional(),

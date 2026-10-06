@@ -39,6 +39,8 @@ const CHIP_COLOUR_SOURCE: Record<GuardCoveragePlainStatus, GuardSectionCoverageS
   failed: 'fail',
   blocked: 'blocked-on',
   'never-run': 'never-run',
+  // Only a flow wears it, so no section is ever counted under it.
+  'partially-succeeded': 'pass',
   succeeded: 'pass',
   'not-testable': 'untestable',
 };

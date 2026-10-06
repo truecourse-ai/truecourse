@@ -51,6 +51,10 @@ export function compareFlows(base: GuardRunFlowSummary, head: GuardRunFlowSummar
   });
 }
 
+/** A flow a run proved: it succeeded, with or without healing around a renamed control. */
+const proven = (status: GuardCoveragePlainStatus | null): boolean =>
+  status === 'succeeded' || status === 'partially-succeeded';
+
 function deltaKind(
   base: GuardCoveragePlainStatus | null,
   head: GuardCoveragePlainStatus | null,
@@ -58,9 +62,9 @@ function deltaKind(
   if (head === null) return 'retired';
   if (head === 'failed') return base === 'failed' ? 'pre-existing' : 'new-failure';
   if (base === null) return 'added';
-  if (base === 'failed') return head === 'succeeded' ? 'fixed' : 'unchanged';
-  if (base === 'succeeded' && head === 'blocked') return 'newly-blocked';
-  if (head === 'succeeded' && (base === 'blocked' || base === 'never-run')) return 'newly-covered';
+  if (base === 'failed') return proven(head) ? 'fixed' : 'unchanged';
+  if (proven(base) && head === 'blocked') return 'newly-blocked';
+  if (proven(head) && (base === 'blocked' || base === 'never-run')) return 'newly-covered';
   return 'unchanged';
 }
 

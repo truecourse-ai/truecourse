@@ -58,6 +58,7 @@ import {
   FlowTestsFileSchema,
   flowTestErrorSignature,
   flowTestMovement,
+  orderCopyDrift,
   type FlowTestOutcome,
   type FlowTestRecord,
   type FlowTestRepairReason,
@@ -260,7 +261,7 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
         const flow = flowById.get(record.flowId)!;
         const steps = stepsOf(flow);
         const sources = sourcesOf(record);
-        const key = flowTestJudgeKey({ steps, spec: sources.spec!, seed: sources.seed });
+        const key = flowTestJudgeKey({ steps, spec: sources.spec!, seed: sources.seed, copyDrift: record.copyDrift });
         return record.judged === key ? [] : [{ flow, steps, record, spec: sources.spec!, ...(sources.seed !== undefined ? { seed: sources.seed } : {}), key }];
       }),
       signal: judgeStop.signal,
@@ -418,8 +419,9 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
               const was = moved.find((m) => m.flowId === flow.id);
               if (outcome.status === 'completed') {
                 const { status, summary, disagreement, blockedBy, blockedOn } = outcome.output;
+                const copyDrift = status === 'blocked' ? [] : orderCopyDrift(outcome.output.copyDrift ?? []);
                 const result = status === 'blocked' ? undefined : state?.lastRun();
-                const key = status === 'blocked' ? undefined : state?.judged();
+                const key = status === 'blocked' ? undefined : state?.judged(copyDrift);
                 if (result) accepted.set(flow.id, result);
                 written.set(flow.id, {
                   flowId: flow.id,
@@ -431,6 +433,7 @@ export async function runFlowTestStage(input: FlowTestStageInput): Promise<FlowT
                   ...(disagreement ? { disagreement } : {}),
                   ...(blockedBy ? { blockedBy } : {}),
                   ...(blockedOn ? { blockedOn } : {}),
+                  ...(copyDrift.length > 0 ? { copyDrift } : {}),
                   ...(result
                     ? {
                         run: keepFlowTestRun(repoRoot, {
@@ -552,6 +555,7 @@ async function judgeKeptTests(
         steps: test.steps,
         spec: test.spec,
         ...(test.seed !== undefined ? { seed: test.seed } : {}),
+        ...(test.record.copyDrift ? { copyDrift: test.record.copyDrift } : {}),
         run: {
           outcome: test.record.status === 'passing' ? 'pass' : 'fail',
           steps: test.record.run.steps,

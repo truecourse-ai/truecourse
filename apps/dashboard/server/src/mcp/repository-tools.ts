@@ -85,7 +85,12 @@ function flowView(detail: GuardFlowDetail) {
     flowId: detail.flowId,
     title: detail.title,
     goal: detail.goal,
-    status: guardFlowPlainStatus({ status: detail.status, bucket: detail.bucket, findings: detail.findings.length }),
+    status: guardFlowPlainStatus({
+      status: detail.status,
+      bucket: detail.bucket,
+      findings: detail.findings.length,
+      ...(detail.test ? { test: detail.test } : {}),
+    }),
     dismissed: detail.dismissed,
     ...(detail.dismissalNote ? { dismissalNote: detail.dismissalNote } : {}),
     ...(detail.orphaned ? { orphaned: true, orphanedReason: detail.orphanedReason ?? null } : {}),
@@ -127,7 +132,7 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     {
       title: 'List flows',
       description:
-        "A repository's flows. A flow is one path a user takes through the product, derived from what the documents claim, and each has tests that prove it. `status` is one of failed, blocked, never-run, succeeded, not-testable. Filter by `status` to find, say, every failing flow.",
+        "A repository's flows. A flow is one path a user takes through the product, derived from what the documents claim, and each has tests that prove it. `status` is one of failed, blocked, never-run, partially-succeeded, succeeded, not-testable. A partially-succeeded flow's test passed after using the product's name for a control the documents call something else. Filter by `status` to find, say, every failing flow.",
       inputSchema: {
         repo: repoArg,
         status: z.array(z.enum(GUARD_COVERAGE_PLAIN_ORDER)).optional(),

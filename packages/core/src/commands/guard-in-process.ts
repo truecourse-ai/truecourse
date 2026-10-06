@@ -815,6 +815,7 @@ export async function guardGenerateInProcess(
         for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i], 'no flows to test');
       } else {
         const count = (status: FlowTestStatus): number => flowTests.tests.filter((t) => t.status === status).length;
+        const withCopyDrift = flowTests.tests.filter((t) => t.copyDrift?.length).length;
         const { moved, judged } = flowTests;
         // How the kept tests stood at this commit, and the groups one change
         // moved the same way: the sizes say whether a change is moving many
@@ -837,7 +838,7 @@ export async function guardGenerateInProcess(
         tracker?.done('world', moved.length > 0 ? `${moved.length} kept test${moved.length === 1 ? '' : 's'} moved` : undefined);
         tracker?.done(
           'author',
-          `${flowTests.tests.length} flow${flowTests.tests.length === 1 ? '' : 's'} · ${count('passing')} passing · ${count('failing')} failing · ${count('blocked')} blocked · ${flowTests.authored} opened this run`,
+          `${flowTests.tests.length} flow${flowTests.tests.length === 1 ? '' : 's'} · ${count('passing')} passing · ${count('failing')} failing · ${count('blocked')} blocked${withCopyDrift ? ` · ${withCopyDrift} with copy drift` : ''} · ${flowTests.authored} opened this run`,
         );
       }
       if (!options.sessionRun) finishRun('completed');

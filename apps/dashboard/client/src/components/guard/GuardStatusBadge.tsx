@@ -4,7 +4,7 @@
  * so a status looks and READS the same wherever it appears:
  *
  *  - {@link GuardStatusBadge}, a wire status, for the coverage surfaces;
- *  - {@link GuardFlowStatusChip}, the five-status word a flow, a test, or a
+ *  - {@link GuardFlowStatusChip}, the status word a flow, a test, or a
  *    surface row wears, in the list and in the detail alike;
  *  - {@link GuardNotInSpecsChip} / {@link GuardDismissedChip} /
  *    {@link GuardToolDefectChip}, the NON-status markers, muted: one for a flow
@@ -53,8 +53,8 @@ export function GuardStatusBadge({
 }
 
 /**
- * The one word a flow / surface wears, the five of coverage: "Succeeded",
- * "Failed", "Blocked", "Not testable", "Never run". `word` overrides it for a row
+ * The one word a flow / surface wears, the words of coverage: "Succeeded",
+ * "Partially succeeded", "Failed", "Blocked", "Not testable", "Never run". `word` overrides it for a row
  * that is a TEST rather than coverage, which keeps the run-verdict wording
  * ("Passing", "Failing (birth)").
  */
