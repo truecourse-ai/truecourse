@@ -9,7 +9,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildCorpusConflicts,
+  conflictId,
   conflictVerdictFor,
+  dedupeCrossAreaOverlaps,
   disputeSides,
   dormantResolutionForPair,
   openConflicts,
@@ -17,10 +19,15 @@ import {
   suppressedClaims,
   normalizeQuote,
   disputeKey,
+  passageKey,
+  resolutionDisputeKey,
+  resolutionForConflict,
   resolveConflictId,
   isConflictId,
   samePassage,
+  verdictNamesOnePassage,
   type ConflictResolutionLike,
+  type OverlapSectionLike,
 } from '../../packages/shared/src/spec/overlap-resolution.js';
 
 interface Rel {
@@ -353,8 +360,12 @@ describe('section-scoped conflict resolutions — dispute matching, verdicts, cl
     expect(normalizeQuote('  `rm`  Deletes\nthe  task. ')).toBe('rm deletes the task.');
   });
 
-  describe('dormantResolutionForPair — the reapply hint for a verdict recorded under other anchors', () => {
-    const conflict = () => buildCorpusConflicts(disputed(), {})[0];
+  describe('dormantResolutionForPair — the reapply hint for a verdict that matches no current conflict', () => {
+    const hint = (resolutions: ConflictResolutionLike[]) => {
+      const decisions = { conflictResolutions: resolutions };
+      const conflicts = buildCorpusConflicts(disputed(), decisions);
+      return dormantResolutionForPair(decisions, conflicts, conflicts[0].a, conflicts[0].b);
+    };
 
     it('finds a same-pair verdict whose anchors differ (does not match the dispute)', () => {
       const moved: ConflictResolutionLike = {
@@ -362,12 +373,10 @@ describe('section-scoped conflict resolutions — dispute matching, verdicts, cl
         // The dispute was re-flagged under a renamed heading — same pair, other key.
         anchorA: 'Taskline (v2)',
       };
-      const c = conflict();
-      const decisions = { conflictResolutions: [moved] };
       // Not resolved (anchor identity is precise, deliberately)…
-      expect(openConflicts(disputed(), decisions)).toHaveLength(1);
+      expect(openConflicts(disputed(), { conflictResolutions: [moved] })).toHaveLength(1);
       // …but surfaced as the pair's dormant verdict.
-      expect(dormantResolutionForPair(decisions, c.a, c.b, c.sections)).toBe(moved);
+      expect(hint([moved])).toBe(moved);
     });
 
     it('matches the pair in EITHER doc order', () => {
@@ -378,19 +387,15 @@ describe('section-scoped conflict resolutions — dispute matching, verdicts, cl
         docB: 'README.md',
         anchorB: 'taskline',
       };
-      const c = conflict();
-      expect(dormantResolutionForPair({ conflictResolutions: [moved] }, c.a, c.b, c.sections)).toBe(moved);
+      expect(hint([moved])).toBe(moved);
     });
 
     it('returns nothing when the resolution MATCHES the dispute (it resolves, no hint)', () => {
-      const c = conflict();
-      expect(dormantResolutionForPair({ conflictResolutions: [pickReadme] }, c.a, c.b, c.sections)).toBeUndefined();
+      expect(hint([pickReadme])).toBeUndefined();
     });
 
     it('returns nothing for a different doc pair', () => {
-      const other: ConflictResolutionLike = { ...pickReadme, docB: 'docs/OTHER.md' };
-      const c = conflict();
-      expect(dormantResolutionForPair({ conflictResolutions: [other] }, c.a, c.b, c.sections)).toBeUndefined();
+      expect(hint([{ ...pickReadme, docB: 'docs/OTHER.md' }])).toBeUndefined();
     });
   });
 });
@@ -558,5 +563,183 @@ describe('a contradiction inside one document', () => {
     expect(samePassage(press, { ...press, quote: 'Another sentence under Buttons.' })).toBe(false);
     expect(samePassage({ doc: DOC, heading: null }, { doc: DOC, heading: null })).toBe(true);
     expect(samePassage(press, { ...press, doc: 'GUIDE.md' })).toBe(false);
+  });
+});
+
+describe('a pointer without a passage key keeps the identity it always had', () => {
+  const sections = [
+    { doc: 'README.md', heading: 'taskline', quote: 'rm permanently deletes the task.' },
+    { doc: 'docs/SPEC.md', heading: 'rm <id>', quote: 'rm archives the task, keeping history.' },
+  ];
+  const overlap = { docs: ['README.md', 'docs/SPEC.md'] as [string, string], note: 'rm permanent vs archived', sections };
+
+  it('keys, ids and verdicts are byte-for-byte what they were', () => {
+    expect(conflictId('core/persistence', 'README.md', 'docs/SPEC.md', overlap)).toBe(
+      'overlap::core/persistence::README.md::docs/SPEC.md::ed2bf893',
+    );
+    expect(disputeKey('README.md', 'docs/SPEC.md', sections)).toBe('[["README.md","taskline"],["docs/SPEC.md","rm <id>"]]');
+    expect(disputeKey('DESIGN.md', 'DESIGN.md', [{ doc: 'DESIGN.md', heading: 'Motion' }, { doc: 'DESIGN.md', heading: 'Buttons' }])).toBe(
+      '[["DESIGN.md","buttons"],["DESIGN.md","motion"]]',
+    );
+    const verdict = conflictVerdictFor(overlap, 'README.md', 'docs/SPEC.md', 'a');
+    expect(Object.keys(verdict).sort()).toEqual(['anchorA', 'anchorB', 'docA', 'docB', 'quoteA', 'quoteB', 'verdict']);
+    expect(resolutionDisputeKey(verdict)).toBe(disputeKey('README.md', 'docs/SPEC.md', sections));
+  });
+
+  it('still merges two overlaps on a pair that share one section, and returns every member', () => {
+    const merged = dedupeCrossAreaOverlaps([
+      { area: 'core/a', overlap },
+      { area: 'core/b', overlap: { ...overlap, note: 'rm semantics', sections: [sections[0]!, { doc: 'docs/SPEC.md', heading: 'Other' }] } },
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.areas).toEqual(['core/a', 'core/b']);
+    expect(merged[0]!.members).toHaveLength(2);
+    expect(merged[0]!.members[0]).toBe(merged[0]!.overlap);
+  });
+});
+
+describe('conflicts identified by their passages', () => {
+  // Two docs whose "Expense list" sections disagree on three separate points.
+  const API = 'docs/api.md';
+  const APP = 'docs/app.md';
+  const at = (doc: string, heading: string | null, text: string): Required<OverlapSectionLike> => ({
+    doc,
+    heading,
+    quote: text,
+    passage: passageKey(text),
+  });
+  const pageSize = [at(API, 'Expense list', 'Returns 20 expenses per page.'), at(APP, 'Expense list', 'The list shows 50 expenses per page.')];
+  const sortOrder = [at(API, 'Expense list', 'Expenses are sorted newest first.'), at(APP, 'Expense list', 'Expenses are sorted oldest first.')];
+  const emptyText = [at(API, 'Expense list', 'An empty list returns an empty array.'), at(APP, 'Expense list', 'An empty list says "No expenses yet".')];
+  const POINTS = [pageSize, sortOrder, emptyText];
+  const corpusOf = (lists: ReadonlyArray<readonly OverlapSectionLike[]>, area = 'core/expenses') => ({
+    areas: [{ id: area, overlaps: lists.map((sections, i) => ({ docs: [API, APP] as [string, string], note: `point ${i}`, sections })) }],
+  });
+  const verdictOn = (sections: readonly OverlapSectionLike[], verdict: 'a' | 'b' | 'dismissed'): ConflictResolutionLike => ({
+    ...conflictVerdictFor({ sections }, API, APP, verdict),
+    resolvedAt: '',
+  });
+
+  it('a passage key is a short hash of the normalized text, blind to case, spacing and markup', () => {
+    expect(passageKey('Returns 20 expenses per page.')).toMatch(/^[0-9a-f]{8}$/);
+    expect(passageKey('Returns **20**  expenses\nper page.')).toBe(passageKey('returns 20 expenses per page.'));
+    expect(passageKey('Returns 25 expenses per page.')).not.toBe(passageKey('Returns 20 expenses per page.'));
+  });
+
+  it('three disagreements between the same two sections are three conflicts, with three ids and three dispute keys', () => {
+    const conflicts = buildCorpusConflicts(corpusOf(POINTS), {});
+    expect(conflicts).toHaveLength(3);
+    expect(new Set(conflicts.map((c) => c.id)).size).toBe(3);
+    expect(new Set(conflicts.map((c) => disputeKey(c.a, c.b, c.sections))).size).toBe(3);
+    expect(conflicts.map((c) => c.note).sort()).toEqual(['point 0', 'point 1', 'point 2']);
+    for (const c of conflicts) expect(resolveConflictId(conflicts, c.id)).toBe(c);
+  });
+
+  it('two overlaps naming the same two passages are one dispute, in either doc order and across areas', () => {
+    const reversed = { docs: [APP, API] as [string, string], note: 'page size again', sections: [...pageSize].reverse() };
+    const merged = dedupeCrossAreaOverlaps([
+      { area: 'core/expenses', overlap: { docs: [API, APP] as [string, string], note: 'page size', sections: pageSize } },
+      { area: 'core/lists', overlap: reversed },
+      { area: 'core/expenses', overlap: { docs: [API, APP] as [string, string], note: 'sort order', sections: sortOrder } },
+    ]);
+    expect(merged.map((m) => [m.overlap.note, m.areas, m.members.map((o) => o.note)])).toEqual([
+      ['page size', ['core/expenses', 'core/lists'], ['page size', 'page size again']],
+      ['sort order', ['core/expenses'], ['sort order']],
+    ]);
+  });
+
+  it('never merges a passage-keyed overlap with a passage-less one on the same sections', () => {
+    const plain = pageSize.map(({ doc, heading, quote }) => ({ doc, heading, quote }));
+    const corpus = corpusOf([pageSize, plain, plain.map((s) => ({ ...s, quote: 'other words' }))]);
+    const conflicts = buildCorpusConflicts(corpus, {});
+    // The two passage-less records still merge with each other by their shared sections.
+    expect(conflicts).toHaveLength(2);
+    expect(conflicts.map((c) => c.sections?.some((s) => s.passage !== undefined))).toEqual([true, false]);
+  });
+
+  it('a verdict names its passages and resolves only the conflict on them', () => {
+    const verdict = verdictOn(sortOrder, 'b');
+    expect(verdict).toMatchObject({ passageA: sortOrder[0]!.passage, passageB: sortOrder[1]!.passage });
+    const decisions = { conflictResolutions: [verdict] };
+    const conflicts = buildCorpusConflicts(corpusOf(POINTS), decisions);
+    expect(conflicts.map((c) => [c.note, c.resolved])).toEqual([
+      ['point 0', false],
+      ['point 1', true],
+      ['point 2', false],
+    ]);
+    expect(resolutionForConflict([verdict], API, APP, sortOrder)).toBe(verdict);
+    expect(resolutionForConflict([verdict], API, APP, pageSize)).toBeUndefined();
+    expect(orphanedConflictResolutions(corpusOf(POINTS), decisions)).toEqual([]);
+  });
+
+  it('a verdict without passages matches only a conflict without them, and one with passages only its own', () => {
+    const old: ConflictResolutionLike = { docA: API, anchorA: 'Expense list', docB: APP, anchorB: 'Expense list', verdict: 'a', resolvedAt: '' };
+    // Recorded before conflicts had passages: it resolves none of them, and is orphaned.
+    expect(openConflicts(corpusOf(POINTS), { conflictResolutions: [old] })).toHaveLength(3);
+    expect(orphanedConflictResolutions(corpusOf(POINTS), { conflictResolutions: [old] })).toEqual([old]);
+    // A verdict with passages never resolves a passage-less conflict on the same sections.
+    const plain = corpusOf([pageSize.map(({ doc, heading, quote }) => ({ doc, heading, quote }))]);
+    expect(openConflicts(plain, { conflictResolutions: [verdictOn(pageSize, 'a')] })).toHaveLength(1);
+    expect(openConflicts(plain, { conflictResolutions: [old] })).toEqual([]);
+  });
+
+  it('offers as a hint only a verdict that matches no current conflict', () => {
+    const inForce = verdictOn(pageSize, 'a');
+    const old: ConflictResolutionLike = { docA: API, anchorA: 'Expense list', docB: APP, anchorB: 'Expense list', verdict: 'b', resolvedAt: '' };
+    const decisions = { conflictResolutions: [inForce] };
+    const conflicts = buildCorpusConflicts(corpusOf(POINTS), decisions);
+    // The verdict on page size is in force there, so it is no hint on sort order or the empty text.
+    expect(dormantResolutionForPair(decisions, conflicts, API, APP)).toBeUndefined();
+    const withOld = { conflictResolutions: [inForce, old] };
+    expect(dormantResolutionForPair(withOld, buildCorpusConflicts(corpusOf(POINTS), withOld), APP, API)).toBe(old);
+  });
+
+  it('suppresses the losing quote of the conflict each verdict is on, never another point on the same sections', () => {
+    const decisions = { conflictResolutions: [verdictOn(pageSize, 'a'), verdictOn(emptyText, 'b')] };
+    expect(suppressedClaims(corpusOf(POINTS), decisions)).toEqual([
+      { doc: APP, anchor: 'Expense list', quote: pageSize[1]!.quote },
+      { doc: API, anchor: 'Expense list', quote: emptyText[0]!.quote },
+    ]);
+  });
+
+  describe('inside one document', () => {
+    const DOC = 'docs/expenses.md';
+    // Two contradictions between the same two passages' headings, and one between two passages under one heading.
+    const first = [at(DOC, 'Paging', 'A page holds 20 expenses.'), at(DOC, 'Limits', 'A page holds 50 expenses.')];
+    const second = [at(DOC, 'Paging', 'Pages are numbered from 1.'), at(DOC, 'Limits', 'Pages are numbered from 0.')];
+    const oneHeading = [at(DOC, 'Paging', 'Deleted expenses are hidden.'), at(DOC, 'Paging', 'Deleted expenses are listed in grey.')];
+    const inside = (lists: ReadonlyArray<readonly OverlapSectionLike[]>) => ({
+      areas: [{ id: 'core/expenses', overlaps: lists.map((sections, i) => ({ docs: [DOC, DOC] as [string, string], note: `inside ${i}`, sections })) }],
+    });
+
+    it('keeps each contradiction its own conflict, keyed on both passages in either order', () => {
+      const conflicts = buildCorpusConflicts(inside([first, second, oneHeading]), {});
+      expect(conflicts).toHaveLength(3);
+      expect(disputeKey(DOC, DOC, first)).toBe(disputeKey(DOC, DOC, [...first].reverse()));
+      expect(disputeKey(DOC, DOC, first)).not.toBe(disputeKey(DOC, DOC, second));
+      // Under one heading the passage orders the two sides.
+      expect(disputeKey(DOC, DOC, oneHeading)).toBe(disputeKey(DOC, DOC, [...oneHeading].reverse()));
+    });
+
+    it('a verdict resolves its own contradiction and suppresses its losing passage, whatever order the next scan lists them in', () => {
+      const pickFirst = { ...conflictVerdictFor({ sections: oneHeading }, DOC, DOC, 'a'), resolvedAt: '' };
+      const rescanned = inside([first, second, [...oneHeading].reverse()]);
+      const decisions = { conflictResolutions: [pickFirst] };
+      expect(openConflicts(rescanned, decisions).map((c) => c.note)).toEqual(['inside 0', 'inside 1']);
+      expect(suppressedClaims(rescanned, decisions)).toEqual([{ doc: DOC, anchor: 'Paging', quote: oneHeading[1]!.quote }]);
+    });
+
+    it('two pointers with passage keys are one passage only when their keys are equal', () => {
+      const [hidden, grey] = oneHeading;
+      expect(samePassage(hidden!, grey!)).toBe(false);
+      expect(samePassage(hidden!, { ...hidden!, quote: 'a different window of the same unit' })).toBe(true);
+      expect(samePassage(hidden!, { ...hidden!, passage: grey!.passage })).toBe(false);
+      expect(
+        verdictNamesOnePassage({ docA: DOC, anchorA: 'Paging', passageA: hidden!.passage, docB: DOC, anchorB: 'Paging', passageB: hidden!.passage }),
+      ).toBe(true);
+      expect(
+        verdictNamesOnePassage({ docA: DOC, anchorA: 'Paging', passageA: hidden!.passage, docB: DOC, anchorB: 'Paging', passageB: grey!.passage }),
+      ).toBe(false);
+    });
   });
 });

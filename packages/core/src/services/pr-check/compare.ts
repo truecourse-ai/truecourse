@@ -66,8 +66,11 @@ function deltaKind(
 
 /**
  * The open conflicts of the head's corpus that the workspace's corpus does not
- * carry, by dispute identity (the doc pair and each side's section anchor).
- * The workspace corpus is its CURRENT one: a corpus has no commit dimension.
+ * carry, by dispute identity (the doc pair, each side's section anchor, and
+ * each side's passage when the conflict names its passages), so a new
+ * disagreement between two sections the workspace already disputes on another
+ * point is a conflict created. The workspace corpus is its CURRENT one: a
+ * corpus has no commit dimension.
  */
 export function conflictsCreated<O extends CorpusConflict>(
   defaultCorpus: CorpusLike | null,

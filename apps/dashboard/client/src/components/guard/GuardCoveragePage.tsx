@@ -23,7 +23,7 @@
 import { headingMatchKey } from '@/lib/heading-match';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, PlayCircle } from 'lucide-react';
-import type { GuardClaimsView, GuardCoveragePlainStatus, GuardStaleness } from '@truecourse/shared';
+import type { CorpusConflict, GuardClaimsView, GuardCoveragePlainStatus, GuardStaleness } from '@truecourse/shared';
 import { buildCorpusConflicts, isConflictId, resolveConflictId } from '@truecourse/shared';
 import { parseSpecKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
@@ -212,18 +212,26 @@ export function GuardCoveragePage({
 
   // Headings in the current doc flagged by a within-area overlap → the conflict
   // key that resolves them. Reuses the same overlap `sections` the Spec doc viewer
-  // marks (normalized heading text → overlap key).
+  // marks (normalized heading text → overlap key). A heading carries one tag, and
+  // one section can hold many conflicts, so the tag opens the one being viewed
+  // when it is on that heading, else the first still open, else the first.
   const conflictHeadings = useMemo(() => {
-    const map = new Map<string, string>();
-    if (!doc) return map;
+    if (!doc) return new Map<string, string>();
+    const onHeading = new Map<string, CorpusConflict[]>();
     for (const cf of conflicts) {
       for (const s of cf.sections ?? []) {
         // A preamble pointer (null heading) has no heading row to tag, skip it.
-        if (s.doc === doc && s.heading !== null) map.set(headingMatchKey(s.heading), cf.id);
+        if (s.doc !== doc || s.heading === null) continue;
+        const key = headingMatchKey(s.heading);
+        const list = onHeading.get(key) ?? [];
+        if (!list.includes(cf)) list.push(cf);
+        onHeading.set(key, list);
       }
     }
-    return map;
-  }, [doc, conflicts]);
+    const tagged = (list: readonly CorpusConflict[]): CorpusConflict =>
+      list.find((cf) => cf.id === activeConflictRecord?.id) ?? list.find((cf) => !cf.resolved) ?? list[0]!;
+    return new Map([...onHeading].map(([key, list]) => [key, tagged(list).id]));
+  }, [doc, conflicts, activeConflictRecord]);
 
   // --- The pane for the active tab (or the Overview) --------------------------
   const pane = (() => {

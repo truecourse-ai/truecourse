@@ -12,6 +12,15 @@
  *     is gone with it).
  * Two docs that textually disagree stay an open conflict until verdicted,
  * dismissed, or fixed.
+ *
+ * A dispute is identified by its two docs and, per side, the section it points
+ * at. A pointer that also carries a PASSAGE key (the fact comparison sets one:
+ * the passage it quotes, see {@link passageKey}) is identified by its passage
+ * too, so several disagreements between the same two sections are several
+ * disputes, each with its own id, verdict and suppressed quote. A pointer
+ * without one (the overlap session's, and every corpus stored before passage
+ * keys) keeps the section identity, byte for byte, and the two kinds never
+ * name one dispute.
  */
 
 /**
@@ -22,8 +31,9 @@
  * matches a line-wrapped or backtick-styled source sentence while staying an
  * essentially exact match. The single copy: the consolidator's overlap
  * pointer-verifier imports THIS one (never a second implementation). A
- * dispute's identity is its doc pair and section anchors ({@link disputeKey}),
- * not its quotes, so nothing here matches a resolution by quote.
+ * dispute's identity is its doc pair, section anchors and passage keys
+ * ({@link disputeKey}), not its quotes, so nothing here matches a resolution
+ * by quote.
  */
 export function normalizeQuote(text: string): string {
   return text
@@ -33,16 +43,45 @@ export function normalizeQuote(text: string): string {
     .trim();
 }
 
+/** FNV-1a 32-bit as hex — short, dependency-free, identical in node and the
+ *  browser. NOT cryptographic: it only has to separate the handful of disputes
+ *  that share one area + doc pair, or the passages under one heading. */
+const shortHash = (s: string): string => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+};
+
+/**
+ * The passage key of a pointer that quotes `text`, the whole text of the
+ * document unit it quotes from: a short hash of its {@link normalizeQuote}d
+ * form. It depends on the words alone, never on the unit's number, so an edit
+ * above the passage (which renumbers it) leaves the key, and the verdict
+ * recorded against it, in place; an edit to the passage itself is a new one.
+ */
+export function passageKey(text: string): string {
+  return shortHash(normalizeQuote(text));
+}
+
 /** A conflicting section pointer — a doc + its heading (`null` = the doc's preamble). */
 export interface OverlapSectionLike {
   doc: string;
   heading: string | null;
   /**
    * The verbatim disputed-sentence excerpt, when the model supplied one. Carried
-   * for display/transparency only — NOT part of the dedup identity below, which
-   * stays doc + heading so a quote difference never splits one dispute into two.
+   * for display/transparency only — never part of the identity below, so a
+   * quote difference never splits one dispute into two.
    */
   quote?: string;
+  /**
+   * The {@link passageKey} of the passage the pointer quotes, when the finding
+   * named one (the fact comparison does). Part of the identity: two pointers
+   * under one heading with different passages name two disputes.
+   */
+  passage?: string;
 }
 
 /** The minimal overlap shape — the two docs, the note, and (for dedup) its sections. */
@@ -76,15 +115,20 @@ export interface CorpusLike<O extends OverlapLike = OverlapLike> {
  * the verdict. `verdict` 'a'/'b' picks a side (the loser's quoted claim is
  * suppressed at extraction); 'dismissed' is a detector false-positive that
  * resolves the gate but suppresses nothing. Anchors mirror {@link
- * OverlapSectionLike.heading} (`null` = the doc's preamble/lead).
+ * OverlapSectionLike.heading} (`null` = the doc's preamble/lead), and the
+ * passages {@link OverlapSectionLike.passage}: a verdict recorded on a
+ * conflict whose pointers carry passage keys names them, and matches only the
+ * conflict on those two passages.
  */
 export interface ConflictResolutionLike {
   docA: string;
   anchorA: string | null;
   quoteA?: string;
+  passageA?: string;
   docB: string;
   anchorB: string | null;
   quoteB?: string;
+  passageB?: string;
   verdict: 'a' | 'b' | 'dismissed';
   resolvedAt?: string;
   note?: string;
@@ -170,22 +214,36 @@ export interface MergedOverlap<O extends OverlapLike> {
   areas: string[];
   /** The representative overlap (its docs order / note / sections). */
   overlap: O;
+  /**
+   * Every overlap merged into this record, the representative first, then in
+   * the order the representative was chosen by. A scan reads them to keep what
+   * each merged finding said; a read of the corpus needs only the representative.
+   */
+  members: [O, ...O[]];
 }
 
 const PREAMBLE_PTR = '\x00preamble';
 const NUL = '\x00';
 const unorderedPairKey = (a: string, b: string): string => (a < b ? `${a}${NUL}${b}` : `${b}${NUL}${a}`);
+/** One key per pointer: doc + heading, and its passage when it carries one. */
 const sectionPointerKeys = (ov: OverlapLike): string[] =>
-  (ov.sections ?? []).map((s) => `${s.doc}${NUL}${s.heading ?? PREAMBLE_PTR}`);
+  (ov.sections ?? []).map(
+    (s) => `${s.doc}${NUL}${s.heading ?? PREAMBLE_PTR}${s.passage !== undefined ? `${NUL}${s.passage}` : ''}`,
+  );
 const preambleCount = (ov: OverlapLike): number =>
   (ov.sections ?? []).filter((s) => s.heading === null || s.heading === undefined).length;
+
+/** Whether an overlap names its passages: any of its pointers carries a passage key. */
+export const namesPassages = (ov: Pick<OverlapLike, 'sections'>): boolean =>
+  (ov.sections ?? []).some((s) => s.passage !== undefined);
 
 /**
  * The canonical identity of ONE dispute, folded to a single string: the SAME
  * section identity {@link dedupeCrossAreaOverlaps} merges on. Sorted section
- * pointers when the overlap flags any; the normalized note otherwise — a
- * SECTIONLESS overlap shares no pointer with anything, so it never merges, and
- * without the fallback two of them on one pair would be indistinguishable.
+ * pointers (each with its passage, when it carries one) when the overlap flags
+ * any; the normalized note otherwise — a SECTIONLESS overlap shares no pointer
+ * with anything, so it never merges, and without the fallback two of them on
+ * one pair would be indistinguishable.
  *
  * The dedup and {@link conflictId} both read THIS, which is what keeps "what
  * makes two disputes the same" from being answered twice and drifting.
@@ -195,18 +253,6 @@ const overlapIdentity = (ov: OverlapLike): string => {
   return ptrs.length > 0 ? [...ptrs].sort().join(NUL) : `note${NUL}${normalizeQuote(ov.note ?? '')}`;
 };
 
-/** FNV-1a 32-bit as hex — short, dependency-free, identical in node and the
- *  browser. NOT cryptographic: it only has to separate the handful of disputes
- *  that share one area + doc pair. */
-const shortHash = (s: string): string => {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
-};
-
 /** Every conflict id starts with this — the marker a URL/tab layer routes on. */
 const CONFLICT_ID_PREFIX = 'overlap::';
 
@@ -214,7 +260,8 @@ const CONFLICT_ID_PREFIX = 'overlap::';
  * The addressable id of one dispute: `overlap::<area>::<a>::<b>::<discriminator>`.
  * The trailing discriminator is what the pre-existing area+pair key lacked, so
  * two disputes the dedup deliberately kept apart (disjoint sections on the same
- * pair) get distinct, URL-stable ids instead of colliding on one.
+ * pair, or different passages of the same two sections) get distinct,
+ * URL-stable ids instead of colliding on one.
  */
 export function conflictId(area: string, a: string, b: string, overlap: OverlapLike): string {
   return `${CONFLICT_ID_PREFIX}${area}::${a}::${b}::${shortHash(overlapIdentity(overlap))}`;
@@ -256,6 +303,13 @@ export function resolveConflictId<O extends OverlapLike>(
  * between two docs, and merges with another inside the same doc by the same
  * shared-pointer rule.
  *
+ * Overlaps that name their passages ({@link namesPassages}) merge on a
+ * stricter rule: only with another naming the very same passages (one
+ * identity, {@link overlapIdentity}), since the same two sections can hold
+ * many separate disagreements. One sharing a single pointer with another is a
+ * different point, and an overlap naming passages never merges with one that
+ * names none.
+ *
  * The representative (which record survives) is deterministic: fewest preamble
  * (null) pointers first — the most bandable in the viewer — then area then note.
  * The span (`areas`) unions each member's tagged area with any `overlap.areas`
@@ -275,7 +329,8 @@ export function dedupeCrossAreaOverlaps<O extends OverlapLike>(
 
   const merged: MergedOverlap<O>[] = [];
   for (const members of byPair.values()) {
-    // Union-find within the pair, connecting members that share a section pointer.
+    // Union-find within the pair: members naming no passages connect when they
+    // share a section pointer, members naming passages when they are one identity.
     const parent = members.map((_, i) => i);
     const find = (i: number): number => {
       while (parent[i] !== i) {
@@ -290,10 +345,13 @@ export function dedupeCrossAreaOverlaps<O extends OverlapLike>(
       if (ri !== rj) parent[Math.max(ri, rj)] = Math.min(ri, rj);
     };
     const ptrOwner = new Map<string, number>();
+    const identityOwner = new Map<string, number>();
     members.forEach((m, i) => {
-      for (const ptr of sectionPointerKeys(m.overlap)) {
-        const owner = ptrOwner.get(ptr);
-        if (owner === undefined) ptrOwner.set(ptr, i);
+      const keys = namesPassages(m.overlap) ? [overlapIdentity(m.overlap)] : sectionPointerKeys(m.overlap);
+      const owners = namesPassages(m.overlap) ? identityOwner : ptrOwner;
+      for (const key of keys) {
+        const owner = owners.get(key);
+        if (owner === undefined) owners.set(key, i);
         else union(owner, i);
       }
     });
@@ -307,20 +365,27 @@ export function dedupeCrossAreaOverlaps<O extends OverlapLike>(
     });
 
     for (const idxs of components.values()) {
-      const group = idxs.map((i) => members[i]);
-      const rep = [...group].sort((x, y) => {
-        const px = preambleCount(x.overlap);
-        const py = preambleCount(y.overlap);
-        if (px !== py) return px - py;
-        if (x.area !== y.area) return x.area < y.area ? -1 : 1;
-        return (x.overlap.note ?? '') < (y.overlap.note ?? '') ? -1 : 1;
-      })[0];
+      const group = idxs
+        .map((i) => members[i])
+        .sort((x, y) => {
+          const px = preambleCount(x.overlap);
+          const py = preambleCount(y.overlap);
+          if (px !== py) return px - py;
+          if (x.area !== y.area) return x.area < y.area ? -1 : 1;
+          return (x.overlap.note ?? '') < (y.overlap.note ?? '') ? -1 : 1;
+        });
+      const [rep, ...rest] = group;
       const span = new Set<string>();
       for (const g of group) {
         span.add(g.area);
         for (const a of g.overlap.areas ?? []) span.add(a);
       }
-      merged.push({ area: rep.area, areas: [...span].sort(), overlap: rep.overlap });
+      merged.push({
+        area: rep.area,
+        areas: [...span].sort(),
+        overlap: rep.overlap,
+        members: [rep.overlap, ...rest.map((g) => g.overlap)],
+      });
     }
   }
 
@@ -368,27 +433,33 @@ export function disputeSides<S extends OverlapSectionLike>(
 
 /**
  * Whether two pointers name ONE passage: the same doc, the same section, and
- * the same quoted words (a missing quote counts as empty). A contradiction
+ * the same passage. Two pointers that both carry a passage key are one
+ * passage when the keys are equal, whatever words each quotes; otherwise the
+ * quoted words decide (a missing quote counts as empty). A contradiction
  * inside one doc needs two passages that are not one.
  */
 export function samePassage(p: OverlapSectionLike, q: OverlapSectionLike): boolean {
-  return (
-    p.doc === q.doc &&
-    anchorKey(p.heading) === anchorKey(q.heading) &&
-    normalizeQuote(p.quote ?? '') === normalizeQuote(q.quote ?? '')
-  );
+  if (p.doc !== q.doc || anchorKey(p.heading) !== anchorKey(q.heading)) return false;
+  if (p.passage !== undefined && q.passage !== undefined) return p.passage === q.passage;
+  return normalizeQuote(p.quote ?? '') === normalizeQuote(q.quote ?? '');
 }
 
 /**
  * A dispute's IDENTITY: the unordered doc pair and, per side, the section
- * anchor the conflict points at (`null` = the doc's lead). The quotes are
- * evidence, never identity — the overlap session re-excerpts the same
- * disagreement differently on every scan, and a verdict recorded against one
- * excerpt must still match the dispute when the next scan quotes it anew. A
- * side the conflict flags no section for is its doc's lead, so a sectionless
- * dispute is matched by a `null`-anchor resolution. A dispute inside one doc
- * is keyed on its two anchors, unordered; two such disputes whose passages
- * sit under the same two headings share a key.
+ * anchor the conflict points at (`null` = the doc's lead), with the side's
+ * passage key when the conflict names its passages. The quotes are evidence,
+ * never identity — the overlap session re-excerpts the same disagreement
+ * differently on every scan, and a verdict recorded against one excerpt must
+ * still match the dispute when the next scan quotes it anew. A side the
+ * conflict flags no section for is its doc's lead, so a sectionless dispute is
+ * matched by a `null`-anchor resolution. A dispute inside one doc is keyed on
+ * its two sides, unordered: by anchor, then by passage. Without passages, two
+ * disputes inside one doc whose passages sit under the same two headings share
+ * a key; with them, they do not.
+ *
+ * A conflict without passages keys exactly as it always has, so a verdict
+ * recorded without passages matches only a conflict without them, and one
+ * recorded with passages only the conflict on those two passages.
  *
  * Stable across scans, so two corpora's conflicts compare by it. The one key
  * every consumer compares by: the read side matches a resolution to a conflict
@@ -400,22 +471,45 @@ export function disputeKey(
   b: string,
   sections: readonly OverlapSectionLike[] | undefined,
 ): string {
-  const [sideA, sideB] = disputeSides(a, b, sections);
-  return disputeKeyOf(a, anchorKey(sideA[0]?.heading), b, anchorKey(sideB[0]?.heading));
+  const [[sideA], [sideB]] = disputeSides(a, b, sections);
+  return disputeKeyOf(
+    { doc: a, anchor: anchorKey(sideA?.heading), passage: sideA?.passage },
+    { doc: b, anchor: anchorKey(sideB?.heading), passage: sideB?.passage },
+  );
 }
 
 /** {@link disputeKey} for the dispute a stored resolution records. */
-export function resolutionDisputeKey(r: Pick<ConflictResolutionLike, 'docA' | 'anchorA' | 'docB' | 'anchorB'>): string {
-  return disputeKeyOf(r.docA, anchorKey(r.anchorA), r.docB, anchorKey(r.anchorB));
+export function resolutionDisputeKey(
+  r: Pick<ConflictResolutionLike, 'docA' | 'anchorA' | 'passageA' | 'docB' | 'anchorB' | 'passageB'>,
+): string {
+  return disputeKeyOf(
+    { doc: r.docA, anchor: anchorKey(r.anchorA), passage: r.passageA },
+    { doc: r.docB, anchor: anchorKey(r.anchorB), passage: r.passageB },
+  );
 }
 
-function disputeKeyOf(docA: string, anchorA: string | null, docB: string, anchorB: string | null): string {
+/** One side of a dispute as its key reads it. */
+interface KeySide {
+  doc: string;
+  anchor: string | null;
+  passage: string | undefined;
+}
+
+function disputeKeyOf(a: KeySide, b: KeySide): string {
   // Encoded, not concatenated: a heading may carry any delimiter, and the
-  // lead (`null`) is not the same section as an empty heading.
-  // Ordered by doc, then (inside one doc) by anchor, so either order of the
-  // two sides gives one key.
-  const sides: [string, string | null][] = [[docA, anchorA], [docB, anchorB]];
-  const inOrder = docA !== docB ? docA < docB : JSON.stringify(anchorA) <= JSON.stringify(anchorB);
+  // lead (`null`) is not the same section as an empty heading. A side carries
+  // its passage only when the dispute names passages, so a dispute that names
+  // none keys as it always has.
+  const withPassages = a.passage !== undefined || b.passage !== undefined;
+  const encode = (s: KeySide): (string | null)[] =>
+    withPassages ? [s.doc, s.anchor, s.passage ?? null] : [s.doc, s.anchor];
+  // Ordered by doc, then (inside one doc) by anchor and then passage, so
+  // either order of the two sides gives one key.
+  const anchorA = JSON.stringify(a.anchor);
+  const anchorB = JSON.stringify(b.anchor);
+  const inOrder =
+    a.doc !== b.doc ? a.doc < b.doc : anchorA !== anchorB ? anchorA < anchorB : (a.passage ?? '') <= (b.passage ?? '');
+  const sides = [encode(a), encode(b)];
   return JSON.stringify(inOrder ? sides : sides.reverse());
 }
 
@@ -446,23 +540,23 @@ export function resolutionForConflict(
 }
 
 /**
- * A stored resolution for THIS doc pair that does NOT match the conflict's
- * dispute identity — the pair was re-flagged under other section anchors (a
- * heading renamed, or the disagreement found in another section), or an
- * earlier dispute between these docs was resolved and a new one flagged.
- * Surfaces show it as a reapply HINT on the open conflict; it never resolves
- * anything by itself (a genuinely new dispute must not be swallowed by an old
- * verdict).
+ * A stored resolution for THIS doc pair that matches NO current conflict — the
+ * pair was re-flagged under other section anchors (a heading renamed, or the
+ * disagreement found in another section), its passage was edited, or it was
+ * recorded before conflicts named their passages. `conflicts` is every
+ * current conflict ({@link buildCorpusConflicts}, resolved ones included): a
+ * verdict in force on one conflict of the pair is no hint on the others, since
+ * two docs can carry dozens of separate disputes. Surfaces show it as a
+ * reapply HINT on an open conflict of the pair; it never resolves anything by
+ * itself (a genuinely new dispute must not be swallowed by an old verdict).
  */
 export function dormantResolutionForPair(
   decisions: DecisionsLike,
+  conflicts: readonly Pick<CorpusConflict, 'a' | 'b' | 'sections'>[],
   a: string,
   b: string,
-  sections: readonly OverlapSectionLike[] | undefined,
 ): ConflictResolutionLike | undefined {
-  return (decisions.conflictResolutions ?? []).find(
-    (r) => samePair(r.docA, r.docB, a, b) && !resolutionMatchesConflict(r, a, b, sections),
-  );
+  return orphansAmong(decisions.conflictResolutions ?? [], conflicts).find((r) => samePair(r.docA, r.docB, a, b));
 }
 
 /** The first stored resolution matching this conflict, or `undefined`. */
@@ -520,11 +614,12 @@ export function buildCorpusConflicts<O extends OverlapLike>(
 }
 
 /**
- * The verdict record for one dispute: each side's flagged section heading, the
- * dispute's identity ({@link disputeKey}), its quote as evidence, and the
- * verdict. Built ONCE — the dashboard's verdict buttons and the MCP tool both
- * record through it, and so does the scan's auto-apply. Sides are read by
- * {@link disputeSides}, so inside one doc `a` is the first passage.
+ * The verdict record for one dispute: each side's flagged section heading and
+ * passage key (the dispute's identity, {@link disputeKey}), its quote as
+ * evidence, and the verdict. Built ONCE — the dashboard's verdict buttons and
+ * the MCP tool both record through it, and so does the scan's auto-apply.
+ * Sides are read by {@link disputeSides}, so inside one doc `a` is the first
+ * passage. A side without a passage key records none.
  */
 export function conflictVerdictFor(
   overlap: Pick<OverlapLike, 'sections'> | undefined,
@@ -537,24 +632,27 @@ export function conflictVerdictFor(
     docA,
     anchorA: sideA?.heading ?? null,
     quoteA: sideA?.quote,
+    ...(sideA?.passage !== undefined ? { passageA: sideA.passage } : {}),
     docB,
     anchorB: sideB?.heading ?? null,
     quoteB: sideB?.quote,
+    ...(sideB?.passage !== undefined ? { passageB: sideB.passage } : {}),
     verdict,
   };
 }
 
 /**
  * Whether a verdict names one passage on both sides, so it identifies no
- * dispute: the same doc, the same anchor and the same quote twice. A verdict
- * on a contradiction inside one doc names two passages of it.
+ * dispute: the same doc, the same anchor and the same passage twice (see
+ * {@link samePassage}). A verdict on a contradiction inside one doc names two
+ * passages of it.
  */
 export function verdictNamesOnePassage(
-  r: Pick<ConflictResolutionLike, 'docA' | 'anchorA' | 'quoteA' | 'docB' | 'anchorB' | 'quoteB'>,
+  r: Pick<ConflictResolutionLike, 'docA' | 'anchorA' | 'quoteA' | 'passageA' | 'docB' | 'anchorB' | 'quoteB' | 'passageB'>,
 ): boolean {
   return samePassage(
-    { doc: r.docA, heading: r.anchorA, quote: r.quoteA },
-    { doc: r.docB, heading: r.anchorB, quote: r.quoteB },
+    { doc: r.docA, heading: r.anchorA, quote: r.quoteA, passage: r.passageA },
+    { doc: r.docB, heading: r.anchorB, quote: r.quoteB, passage: r.passageB },
   );
 }
 
@@ -582,10 +680,16 @@ export function orphanedConflictResolutions(
 ): ConflictResolutionLike[] {
   const resolutions = decisions.conflictResolutions ?? [];
   if (resolutions.length === 0) return [];
-  const conflicts = buildCorpusConflicts(corpus, decisions);
-  return resolutions.filter(
-    (r) => !conflicts.some((c) => resolutionMatchesConflict(r, c.a, c.b, c.sections)),
-  );
+  return orphansAmong(resolutions, buildCorpusConflicts(corpus, decisions));
+}
+
+/** The resolutions that match none of `conflicts`, in their stored order. */
+function orphansAmong(
+  resolutions: readonly ConflictResolutionLike[],
+  conflicts: readonly Pick<CorpusConflict, 'a' | 'b' | 'sections'>[],
+): ConflictResolutionLike[] {
+  const current = new Set(conflicts.map((c) => disputeKey(c.a, c.b, c.sections)));
+  return resolutions.filter((r) => !current.has(resolutionDisputeKey(r)));
 }
 
 /** One claim the extraction stage must suppress: the losing side of a side-verdict
@@ -608,6 +712,11 @@ export interface SuppressedClaim {
  * loser carries no quote yields nothing to suppress (the gate still counts it
  * resolved). The guard generator injects each entry into the losing section's
  * extraction context so no claim asserting the stale sentence is authored.
+ *
+ * Each conflict carries its own pointers and matches only the verdict on its
+ * own dispute, so where many conflicts share two docs and two headings, each
+ * verdict suppresses the losing quote of its own conflict, never another
+ * point's.
  */
 export function suppressedClaims(corpus: CorpusLike, decisions: DecisionsLike): SuppressedClaim[] {
   const out: SuppressedClaim[] = [];
@@ -616,8 +725,8 @@ export function suppressedClaims(corpus: CorpusLike, decisions: DecisionsLike): 
     if (!r || r.verdict === 'dismissed') continue;
     const loser =
       r.verdict === 'a'
-        ? { doc: r.docB, anchor: r.anchorB, quote: r.quoteB }
-        : { doc: r.docA, anchor: r.anchorA, quote: r.quoteA };
+        ? { doc: r.docB, anchor: r.anchorB, quote: r.quoteB, passage: r.passageB }
+        : { doc: r.docA, anchor: r.anchorA, quote: r.quoteA, passage: r.passageA };
     // The sentence to drop is the one the CURRENT scan quoted: the verdict
     // matched by section, and the section's text may have moved on since the
     // verdict was recorded. The stored quote stands in only for a conflict
@@ -631,18 +740,20 @@ export function suppressedClaims(corpus: CorpusLike, decisions: DecisionsLike): 
 /**
  * The conflict's current pointer for one side a verdict recorded. Between two
  * docs, the doc says which. Inside one doc the anchor does, and under a
- * single heading only the recorded quote can: no match there is no pointer,
- * so the caller falls back to the quote the verdict stored.
+ * single heading the recorded passage, or for a verdict without one the
+ * recorded quote: no match there is no pointer, so the caller falls back to
+ * the quote the verdict stored.
  */
 function currentPointer(
   c: Pick<CorpusConflict, 'a' | 'b' | 'sections'>,
-  side: { doc: string; anchor: string | null; quote?: string },
+  side: { doc: string; anchor: string | null; quote?: string; passage?: string },
 ): OverlapSectionLike | undefined {
   const [[sideA], [sideB]] = disputeSides(c.a, c.b, c.sections);
   const onDoc = [sideA, sideB].filter((s): s is OverlapSectionLike => s !== undefined && s.doc === side.doc);
   if (c.a !== c.b) return onDoc[0];
   const atAnchor = onDoc.filter((s) => anchorKey(s.heading) === anchorKey(side.anchor));
   if (atAnchor.length === 1) return atAnchor[0];
+  if (side.passage !== undefined) return atAnchor.find((s) => s.passage === side.passage);
   const recorded = normalizeQuote(side.quote ?? '');
   return recorded ? atAnchor.find((s) => normalizeQuote(s.quote ?? '') === recorded) : undefined;
 }

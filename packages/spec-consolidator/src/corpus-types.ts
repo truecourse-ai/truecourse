@@ -301,10 +301,18 @@ export const OverlapSectionSchema = z.object({
    * so older corpora without it still parse) for verification transparency and so
    * the viewer can later highlight the exact disputed sentence, not just band the
    * section. Consumed at assembly by `verifyOverlapSections` to anchor the pointer
-   * by exact location; NOT part of the cross-area dedup identity (that stays
-   * doc + heading).
+   * by exact location; NOT part of the dispute's identity (that is doc + heading,
+   * and the passage below when the pointer carries one).
    */
   quote: z.string().optional(),
+  /**
+   * The passage key (`passageKey` in `@truecourse/shared`) of the document unit
+   * the quote is cut from, on a pointer the fact comparison wrote. Part of the
+   * dispute's identity, so two disagreements between the same two sections are
+   * two conflicts. Absent on the overlap session's pointers and on older corpora,
+   * which keep the section identity.
+   */
+  passage: z.string().optional(),
 });
 export type OverlapSection = z.infer<typeof OverlapSectionSchema>;
 

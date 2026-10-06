@@ -26,7 +26,12 @@ import { specsDir } from '@truecourse/shared/work-tree'
 // spanned areas). Everything else in corpus.json is ignored; `.passthrough()`
 // keeps unknown keys harmless.
 const OverlapSectionShape = z
-  .object({ doc: z.string(), heading: z.string().nullable().optional(), quote: z.string().optional() })
+  .object({
+    doc: z.string(),
+    heading: z.string().nullable().optional(),
+    quote: z.string().optional(),
+    passage: z.string().optional(),
+  })
   .passthrough()
 const OverlapShape = z
   .object({
@@ -47,9 +52,11 @@ const ConflictResolutionShape = z
     docA: z.string(),
     anchorA: z.string().nullable().optional(),
     quoteA: z.string().optional(),
+    passageA: z.string().optional(),
     docB: z.string(),
     anchorB: z.string().nullable().optional(),
     quoteB: z.string().optional(),
+    passageB: z.string().optional(),
     verdict: z.enum(['a', 'b', 'dismissed']),
     resolvedAt: z.string().optional(),
     note: z.string().optional(),
@@ -84,7 +91,14 @@ export function readSuppressedClaims(repoRoot: string): SuppressedClaim[] {
       overlaps: (a.overlaps ?? []).map((o) => ({
         docs: o.docs,
         note: o.note,
-        sections: (o.sections ?? []).map((s) => ({ doc: s.doc, heading: s.heading ?? null, quote: s.quote })),
+        // The passage is part of a pointer's identity: dropping it would merge
+        // conflicts that share two sections, and match the wrong verdict.
+        sections: (o.sections ?? []).map((s) => ({
+          doc: s.doc,
+          heading: s.heading ?? null,
+          quote: s.quote,
+          ...(s.passage !== undefined ? { passage: s.passage } : {}),
+        })),
         areas: o.areas,
       })),
     })),
@@ -95,9 +109,11 @@ export function readSuppressedClaims(repoRoot: string): SuppressedClaim[] {
       docA: r.docA,
       anchorA: r.anchorA ?? null,
       quoteA: r.quoteA,
+      ...(r.passageA !== undefined ? { passageA: r.passageA } : {}),
       docB: r.docB,
       anchorB: r.anchorB ?? null,
       quoteB: r.quoteB,
+      ...(r.passageB !== undefined ? { passageB: r.passageB } : {}),
       verdict: r.verdict,
       resolvedAt: r.resolvedAt,
       note: r.note,

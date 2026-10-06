@@ -11,7 +11,7 @@ import {
   conflictsCreated,
   sectionsMoved,
 } from '../../packages/core/src/services/pr-check/compare';
-import { buildCorpusConflicts } from '../../packages/shared/src/spec/overlap-resolution';
+import { buildCorpusConflicts, passageKey } from '../../packages/shared/src/spec/overlap-resolution';
 
 describe('compareFlows', () => {
   it.each([
@@ -95,6 +95,21 @@ describe('conflictsCreated', () => {
     // The same anchors as the workspace's, resolved there: not open, not created.
     const same = buildCorpusConflicts(workspace, decisions).filter((c) => !c.resolved);
     expect(conflictsCreated(workspace, same, decisions)).toEqual([]);
+  });
+
+  it('a new disagreement between two sections the workspace already disputes on another point is created', () => {
+    const between = (quoteA: string, quoteB: string) => ({
+      docs: ['a.md', 'b.md'] as [string, string],
+      note: `${quoteA} vs ${quoteB}`,
+      sections: [
+        { doc: 'a.md', heading: 'Login', quote: quoteA, passage: passageKey(quoteA) },
+        { doc: 'b.md', heading: 'Sessions', quote: quoteB, passage: passageKey(quoteB) },
+      ],
+    });
+    const ttl = between('Tokens last an hour.', 'Tokens last a day.');
+    const lockout = between('Five failures lock the account.', 'Accounts never lock.');
+    const prConflicts = buildCorpusConflicts(corpus(ttl, lockout), {});
+    expect(conflictsCreated(corpus(ttl), prConflicts, {}).map((c) => c.note)).toEqual([lockout.note]);
   });
 
   it('treats no workspace corpus as carrying nothing', () => {

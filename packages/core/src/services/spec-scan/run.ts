@@ -25,7 +25,8 @@
  *       → planCompareBatches (det — area batches, then subject batches)
  *       → `spec-scan.compare-facts` one session per batch (pool), each
  *       conflict it finds handed to the fold as a finding
- *   → verify pointers + cross-area dedup (det) → assemble → write.
+ *   → verify pointers + cross-area dedup (det; findings that name the same
+ *     two passages folded into one) → assemble → write.
  *
  * THE COMPUTER PATH is the caller's call (`computer`): it runs when the driver
  * can hand a session a computer, and adds a corpus review after curation that
@@ -118,7 +119,7 @@ import {
   type VocabMap,
 } from '@truecourse/spec-consolidator'
 import { LlmStageFailureError, type StageTransportTally } from '@truecourse/shared/llm'
-import { dedupeCrossAreaOverlaps, type OverlapLike } from '@truecourse/shared'
+import { dedupeCrossAreaOverlaps, namesPassages, type OverlapLike } from '@truecourse/shared'
 import { cachedSessionOutcome } from '../agent/session-cache.js'
 import { runSessionPool } from '../agent/session-pool.js'
 import {
@@ -243,6 +244,7 @@ import {
   compareFactsSessionDef,
   compareFactsWorkItem,
   describeBatch,
+  foldSamePassages,
   planCompareBatches,
   type CompareItem,
   type FactComparison,
@@ -1771,19 +1773,23 @@ export async function runSpecScanSessions(
   }
   for (const summary of overlapSummaries) assertKindHealthy(summary)
 
-  // Cross-area dedup (det, unchanged rule from @truecourse/shared): the same
+  // Cross-area dedup (det, the rule in @truecourse/shared): the same
   // disagreement on a doc pair sharing several areas collapses to one record
-  // under a representative area, every spanned area listed.
+  // under a representative area, every spanned area listed. A finding that
+  // names its passages merges only with one naming the same two, and those are
+  // folded into one that keeps every member's note.
   const overlapsByArea = new Map<string, Overlap[]>()
   for (const merged of dedupeCrossAreaOverlaps(overlapEntries)) {
+    const [a, b] = merged.overlap.docs
     if (merged.areas.length > 1) {
-      fact(
-        'verify',
-        `${merged.overlap.docs[0]} vs ${merged.overlap.docs[1]}: one disagreement across ${merged.areas.join(', ')}`,
-      )
+      fact('verify', `${a} vs ${b}: one disagreement across ${merged.areas.join(', ')}`)
+    }
+    const folded = namesPassages(merged.overlap) && merged.members.length > 1
+    if (folded) {
+      fact('verify', `${a} vs ${b}: ${merged.members.length} conflicts on the same two passages, folded into one`)
     }
     const list = overlapsByArea.get(merged.area) ?? []
-    list.push({ ...merged.overlap, areas: merged.areas })
+    list.push({ ...(folded ? foldSamePassages(merged.members) : merged.overlap), areas: merged.areas })
     overlapsByArea.set(merged.area, list)
   }
   for (const list of overlapsByArea.values()) {

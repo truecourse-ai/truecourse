@@ -770,7 +770,7 @@ export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): Dec
   ];
 
   // Conflict verdicts: the overlay wins per dispute identity (same unordered pair
-  // + same section anchors), other base verdicts survive.
+  // + same section anchors + same passages), other base verdicts survive.
   const overlayResKeys = new Set((overlay.conflictResolutions ?? []).map(resolutionDisputeKey));
   const conflictResolutions = [
     ...(base.conflictResolutions ?? []).filter((r) => !overlayResKeys.has(resolutionDisputeKey(r))),
@@ -883,6 +883,9 @@ function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): Dec
 // recording a verdict for a dispute already resolved replaces it (a side verdict
 // overwrites a prior dismissal and vice versa).
 
+/** What names one dispute: its two docs, their section anchors, and their passages when it names them. */
+export type DisputeIdentity = Pick<ConflictResolution, 'docA' | 'anchorA' | 'passageA' | 'docB' | 'anchorB' | 'passageB'>;
+
 function applyAddConflictResolution(existing: DecisionsFile, input: ConflictResolution): DecisionsFile {
   // Two docs, or two passages of one doc (a contradiction inside it).
   if (verdictNamesOnePassage(input)) {
@@ -902,7 +905,7 @@ function applyAddConflictResolution(existing: DecisionsFile, input: ConflictReso
 
 function applyRemoveConflictResolution(
   existing: DecisionsFile,
-  input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
+  input: DisputeIdentity,
 ): DecisionsFile {
   const key = resolutionDisputeKey(input);
   return {
@@ -972,7 +975,7 @@ export async function addWorkspaceConflictResolution(
 
 export async function removeWorkspaceConflictResolution(
   org: string,
-  input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
+  input: DisputeIdentity,
 ): Promise<DecisionsFile> {
   const next = applyRemoveConflictResolution(await loadWorkspaceDecisions(org), input);
   await storeWorkspaceDecisions(org, next);

@@ -261,6 +261,31 @@ describe('an inclusion decision says a scan is needed', () => {
     expect(removed.body.conflictResolutions).toEqual([]);
   });
 
+  it('keeps one verdict per pair of passages between the same two sections, and removes only the one named', async () => {
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
+    const sections = { docA: ref(SRC_A, 'one.md'), anchorA: 'Cancellation', docB: ref(SRC_B, 'site.md'), anchorB: 'Cancellation' };
+    await request(app)
+      .post('/api/context/conflict-resolution')
+      .send({ ...sections, passageA: 'p-hours', passageB: 'q-hours', verdict: 'a' })
+      .expect(200);
+    const both = await request(app)
+      .post('/api/context/conflict-resolution')
+      .send({ ...sections, passageA: 'p-fee', passageB: 'q-fee', verdict: 'b' })
+      .expect(200);
+    expect(both.body.conflictResolutions.map((r: { passageA?: string; verdict: string }) => [r.passageA, r.verdict])).toEqual([
+      ['p-hours', 'a'],
+      ['p-fee', 'b'],
+    ]);
+    // A verdict without passages is another dispute again, and leaves both in place.
+    const removed = await request(app).delete('/api/context/conflict-resolution').send(sections).expect(200);
+    expect(removed.body.conflictResolutions).toHaveLength(2);
+    const left = await request(app)
+      .delete('/api/context/conflict-resolution')
+      .send({ ...sections, passageA: 'p-hours', passageB: 'q-hours' })
+      .expect(200);
+    expect(left.body.conflictResolutions).toEqual([expect.objectContaining({ passageA: 'p-fee', passageB: 'q-fee' })]);
+  });
+
   it('reports nothing for a verdict the route refuses', async () => {
     await request(app)
       .post('/api/context/conflict-resolution')

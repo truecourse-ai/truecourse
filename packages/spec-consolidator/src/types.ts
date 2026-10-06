@@ -56,7 +56,7 @@ export type DocKind = z.infer<typeof DocKindSchema>;
  * A SECTION-scoped conflict resolution — the redesign's verdict on ONE
  * disagreement between two specific sections, as opposed to a doc-wide verdict.
  * Keyed by the *dispute identity*: the unordered doc pair plus each side's section
- * anchor and (when the detector captured one) its verbatim disputed-sentence quote.
+ * anchor, and each side's passage key when the conflict named its passages.
  * This identity re-matches the same dispute across a rescan even though the corpus's
  * `overlaps[]` are regenerated each scan.
  *
@@ -69,7 +69,10 @@ export type DocKind = z.infer<typeof DocKindSchema>;
  *
  * `anchorA`/`anchorB` are the conflicting section's heading text (or `null` for a
  * doc's preamble/lead), mirroring {@link OverlapSectionSchema.heading}; `quoteA`/
- * `quoteB` are the verbatim disputed sentence when the detector supplied one.
+ * `quoteB` are the verbatim disputed sentence when the detector supplied one;
+ * `passageA`/`passageB` the passage keys, when the conflict named its passages.
+ * A verdict with passages matches only the conflict on those two passages; one
+ * without matches only a conflict without them.
  */
 export const ConflictResolutionSchema = z.object({
   /** Repo-relative path / DocRef of the first doc in the dispute. */
@@ -78,12 +81,16 @@ export const ConflictResolutionSchema = z.object({
   anchorA: z.string().nullable(),
   /** docA's verbatim disputed sentence, when the detector captured one. */
   quoteA: z.string().optional(),
+  /** docA's passage key, when the conflict named its passages. */
+  passageA: z.string().optional(),
   /** Repo-relative path / DocRef of the second doc in the dispute. */
   docB: z.string(),
   /** docB's conflicting section heading, or `null` for its preamble/lead. */
   anchorB: z.string().nullable(),
   /** docB's verbatim disputed sentence, when the detector captured one. */
   quoteB: z.string().optional(),
+  /** docB's passage key, when the conflict named its passages. */
+  passageB: z.string().optional(),
   /** Which side wins, or `dismissed` (not a real conflict). */
   verdict: z.enum(['a', 'b', 'dismissed']),
   /** ISO timestamp the resolution was recorded. */

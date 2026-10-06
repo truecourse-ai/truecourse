@@ -43,17 +43,22 @@ export function recordBriefing(briefing: string): { doc: string; areas: string[]
   }
 }
 
-/** What a unit states, or `null` to skip it. */
-export type UnitFact = (unit: BriefedUnit, doc: string) => { subject: string; statement: string } | null
+interface StatedFact {
+  subject: string
+  statement: string
+}
+
+/** What a unit states (one fact, or several), or `null` to skip it. */
+export type UnitFact = (unit: BriefedUnit, doc: string) => StatedFact | readonly StatedFact[] | null
 
 /** A recorder that records what `factOf` says each unit states, under every area of the doc, and skips the rest. */
 export async function record(call: StubCall, factOf: UnitFact): Promise<DriverResult> {
   const { doc, areas, units } = recordBriefing(call.briefing)
   const ledger: FactLedgerWire = { facts: [], skips: [] }
   for (const unit of units) {
-    const fact = factOf(unit, doc)
-    if (fact) ledger.facts.push({ units: [unit.n], areas, ...fact })
-    else ledger.skips.push({ from: unit.n, to: unit.n, why: 'other', note: 'nothing to record' })
+    const stated = factOf(unit, doc)
+    if (stated === null) ledger.skips.push({ from: unit.n, to: unit.n, why: 'other', note: 'nothing to record' })
+    else for (const fact of [stated].flat()) ledger.facts.push({ units: [unit.n], areas, ...fact })
   }
   await useTool(call, 'check_ledger', ledger)
   return outcome(ledger)
@@ -133,7 +138,14 @@ export async function compare(
     const conflicts = group.flatMap((a) =>
       group.filter((b) => b !== a && conflicting(a, b)).map((b) => ({ a: a.id, b: b.id, note: `${a.doc} and ${b.doc} disagree on ${subject}`, review: REVIEW })),
     )
-    comparison.groups.push({ subject, facts: group.map((f) => f.id), verdict: conflicts.length > 0 ? 'conflict' : 'agree', conflicts })
+    const paired = new Set(conflicts.flatMap((c) => [c.a, c.b]))
+    comparison.groups.push({
+      subject,
+      facts: group.map((f) => f.id),
+      verdict: conflicts.length > 0 ? 'conflict' : 'agree',
+      conflicts,
+      ...(conflicts.length > 0 ? { consistent: group.map((f) => f.id).filter((id) => !paired.has(id)) } : {}),
+    })
   }
   await useTool(call, 'check_groups', comparison)
   return outcome(comparison)

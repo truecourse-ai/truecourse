@@ -122,17 +122,27 @@ export async function unexcludeDocument(org: string, ref: unknown): Promise<Incl
 /** The verdicts a conflict resolution may carry. */
 export const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
 
-/** A verdict on one conflict, keyed by the dispute's two sections. */
+/** A verdict on one conflict, keyed by the dispute's two sections and, when it names them, its two passages. */
 export interface ConflictVerdictRequest {
   docA?: string;
   anchorA?: string | null;
   quoteA?: string;
+  passageA?: string;
   docB?: string;
   anchorB?: string | null;
   quoteB?: string;
+  passageB?: string;
   verdict?: unknown;
   note?: string;
 }
+
+/** A request's passage keys, only those it names: a verdict on a conflict without passages records none. */
+const passagesOf = (
+  request: Pick<ConflictVerdictRequest, 'passageA' | 'passageB'>,
+): Pick<ConflictResolution, 'passageA' | 'passageB'> => ({
+  ...(request.passageA !== undefined ? { passageA: request.passageA } : {}),
+  ...(request.passageB !== undefined ? { passageB: request.passageB } : {}),
+});
 
 /** A refused verdict: the request itself is malformed. */
 export class ConflictVerdictError extends Error {}
@@ -154,6 +164,7 @@ export async function resolveConflict(
     docB,
     anchorB: request.anchorB ?? null,
     quoteB: request.quoteB,
+    ...passagesOf(request),
   };
   if (verdictNamesOnePassage(sides)) {
     throw new ConflictVerdictError('The two sides name one passage: give two different docs, or two passages of one doc.');
@@ -185,10 +196,10 @@ export async function resolveConflict(
   return decisions.conflictResolutions ?? [];
 }
 
-/** Undo a conflict verdict, named by the dispute's two sections. */
+/** Undo a conflict verdict, named by the dispute's two sections and, when it names them, its two passages. */
 export async function unresolveConflict(
   org: string,
-  request: { docA?: string; anchorA?: string | null; docB?: string; anchorB?: string | null },
+  request: Pick<ConflictVerdictRequest, 'docA' | 'anchorA' | 'passageA' | 'docB' | 'anchorB' | 'passageB'>,
 ): Promise<ConflictResolution[]> {
   const { docA, docB } = request;
   if (!docA || !docB) throw new ConflictVerdictError('docA and docB are required.');
@@ -198,6 +209,7 @@ export async function unresolveConflict(
       docB,
       anchorA: request.anchorA ?? null,
       anchorB: request.anchorB ?? null,
+      ...passagesOf(request),
     }),
   );
   return decisions.conflictResolutions ?? [];
@@ -289,8 +301,8 @@ export async function unresolveConflictById(org: string, id: string): Promise<Wo
         : 'This conflict has no verdict to withdraw.',
     );
   }
-  const { docA, anchorA, docB, anchorB } = conflict.resolution;
-  await unresolveConflict(org, { docA, anchorA, docB, anchorB });
+  const { docA, anchorA, passageA, docB, anchorB, passageB } = conflict.resolution;
+  await unresolveConflict(org, { docA, anchorA, passageA, docB, anchorB, passageB });
   return findWorkspaceConflict(org, id);
 }
 

@@ -34,11 +34,14 @@
  *   of a component (`<Info>…</Info>`, `<Tip>`, `<Note>`, a `<Card>` body) are
  *   cut into sentences like any other paragraph. A GitHub alert marker line
  *   (`> [!NOTE]`) is not a unit.
- * - ITEM: one list item: its first paragraph, lazy continuation lines
- *   included. A nested item is a unit of its own, and a later paragraph inside
- *   an item is cut into sentences. Deeper indentation than the parent's marker
- *   nests, as authors mean it, even where CommonMark would not. An ordered
- *   marker other than `1.` does not interrupt a paragraph.
+ * - ITEM: one sentence of a list item's first paragraph, lazy continuation
+ *   lines included, cut the way a paragraph is. The first sentence is the unit
+ *   the list marker opens; every sentence of the item names the unit
+ *   introducing its list. A nested item is cut the same way under its own
+ *   marker, and a later paragraph inside an item is cut into sentences. Deeper
+ *   indentation than the parent's marker nests, as authors mean it, even where
+ *   CommonMark would not. An ordered marker other than `1.` does not interrupt
+ *   a paragraph.
  * - ROW: one table row, from its first to its last non-space character. The
  *   header row and the separator row are not units, nor is a row of empty
  *   cells. A table continues while its lines carry a `|`.
@@ -64,7 +67,7 @@
 import { parseHeadings } from '@truecourse/shared';
 
 /** Bumped by hand whenever a change here moves a unit's number or text. */
-export const UNIT_SPLITTER_VERSION = 1;
+export const UNIT_SPLITTER_VERSION = 2;
 
 /**
  * Lines of a fenced block's content (or of a run of frontmatter) one unit
@@ -98,8 +101,13 @@ type UnitShape =
       kind: 'item';
       /** 0 for a top-level item. */
       depth: number;
-      /** The unit introducing the list (for a nested item, its parent item), or `null`. */
+      /**
+       * The unit introducing the list (for a nested item, its parent item's
+       * first sentence), or `null`. Every sentence of one item names the same.
+       */
       intro: number | null;
+      /** Whether the unit is the item's first sentence, the one its list marker opens. */
+      marker: boolean;
     }
   | { kind: 'row'; columns: readonly string[] }
   | { kind: 'code'; lang: string | null; part: number; parts: number }
@@ -592,14 +600,17 @@ export function splitDocUnits(body: string): DocUnit[] {
     }
     paragraph = [];
   };
+  /** The item's first paragraph as sentences; its first is what an item nested under it names. */
   const flushItem = (): void => {
     if (!item) return;
     const { segments, depth, intro, level } = item;
     item = null;
-    const start = segments[0]?.start;
-    const end = segments[segments.length - 1]?.end;
-    if (start !== undefined && end !== undefined && hasWord(body.slice(start, end))) {
-      level.unit = push({ kind: 'item', depth, intro, start, end });
+    let first = true;
+    for (const span of sentenceSpans(body, segments)) {
+      if (!hasWord(body.slice(span.start, span.end))) continue;
+      const n = push({ kind: 'item', depth, intro, marker: first, ...span });
+      if (first) level.unit = n;
+      first = false;
     }
   };
   const flushText = (): void => {
@@ -936,8 +947,9 @@ function dedent(text: string): string {
  * One unit as a briefing shows it, numbered, with what it needs to be read
  * alone: a row names its columns, an item the unit introducing its list (by
  * number when that unit is in the window, quoted when it is not), a code part
- * its language and place, a run of frontmatter its place. `units` is the
- * doc's whole list.
+ * its language and place, a run of frontmatter its place. An item's first
+ * sentence carries its marker; a later one is indented under it. `units` is
+ * the doc's whole list.
  */
 export function presentUnit(unit: DocUnit, units: readonly DocUnit[], window: UnitWindow): string {
   const label = `[${unit.n}]`;
@@ -964,7 +976,7 @@ export function presentUnit(unit: DocUnit, units: readonly DocUnit[], window: Un
           : intro.n >= window.from && intro.n <= window.to
             ? ` (under [${intro.n}])`
             : ` (under "${clip(oneLine(intro.text), INTRO_CHARS)}")`;
-      return `${label} ${'  '.repeat(unit.depth)}- ${oneLine(unit.text)}${under}`;
+      return `${label} ${'  '.repeat(unit.depth)}${unit.marker ? '- ' : '  '}${oneLine(unit.text)}${under}`;
     }
     case 'row': {
       const named = tableCells(unit.text).map((cell, i) => `${unit.columns[i] || `column ${i + 1}`}: ${cell || '(empty)'}`);

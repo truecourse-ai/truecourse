@@ -309,6 +309,24 @@ describe('splitDocUnits edge rules', () => {
     ])
   })
 
+  it('a list item is cut into sentences: the first carries the marker, each names the list intro', () => {
+    const units = splitDocUnits(
+      'Paging:\n\n- A page holds 20 expenses. Pages start at 1.\n  The last page may be\n  short.\n\n  - Nested under the first sentence.\n- Sorting is newest first.\n',
+    )
+    expect(units.map((u) => [u.n, u.kind, u.text, u.kind === 'item' ? [u.depth, u.intro, u.marker] : null])).toEqual([
+      [1, 'sentence', 'Paging:', null],
+      [2, 'item', 'A page holds 20 expenses.', [0, 1, true]],
+      [3, 'item', 'Pages start at 1.', [0, 1, false]],
+      [4, 'item', 'The last page may be\n  short.', [0, 1, false]],
+      [5, 'item', 'Nested under the first sentence.', [1, 2, true]],
+      [6, 'item', 'Sorting is newest first.', [0, 1, true]],
+    ])
+    // A hard break inside an item ends a sentence as it does in a paragraph.
+    expect(texts('- **Default:** 30  \n  **Maximum:** 100\n')).toEqual(['**Default:** 30', '**Maximum:** 100'])
+    // Punctuation in a code span stays inside its sentence.
+    expect(texts('- Set `a. B` first. Then go.\n')).toEqual(['Set `a. B` first.', 'Then go.'])
+  })
+
   it('a table without outer pipes, and an empty row', () => {
     const units = splitDocUnits('Key | Value\n--- | ---\nA | 1\n | \nB | 2\n')
     expect(units.map((u) => u.text)).toEqual(['A | 1', 'B | 2'])
@@ -410,6 +428,18 @@ describe('presentUnit', () => {
     expect(presentUnit(item, units, { index: 2, from: item.n, to: item.n })).toBe(
       `[${item.n}] - ${item.text} (under "Before you begin, ensure you have the following installed:")`,
     )
+  })
+
+  it('shows a later sentence of an item under its intro, without the marker', () => {
+    const items = splitDocUnits('Paging:\n\n- A page holds 20 expenses. Pages start at 1.\n  - Nested here. And more.\n')
+    const window = { index: 1, from: 1, to: items.length }
+    expect(items.map((u) => presentUnit(u, items, window))).toEqual([
+      '[1] Paging:',
+      '[2] - A page holds 20 expenses. (under [1])',
+      '[3]   Pages start at 1. (under [1])',
+      '[4]   - Nested here. (under [2])',
+      '[5]     And more. (under [2])',
+    ])
   })
 
   it('shows code dedented, with its language, and frontmatter and tags with their field', () => {
