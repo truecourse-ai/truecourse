@@ -22,7 +22,7 @@ import { easeOut, span, useClock } from '../motion';
 /**
  * Who is behind it, without names. On the right the kinds of applications
  * the team has built stream out of the distance: each starts small and
- * blurred far back, comes forward sharp, and fades as it passes, one after
+ * faint far back, comes forward, and fades as it passes, one after
  * another without end. On the left the track record counts up.
  */
 
@@ -83,7 +83,6 @@ export function TrackRecord() {
         const p = (t / LOOP + i / KINDS.length) % 1;
         const z = FAR + (NEAR - FAR) * p;
         const opacity = easeOut(span(p, 0, 0.35)) * (1 - easeOut(span(p, 0.7, 0.94)));
-        const blur = (1 - span(p, 0, 0.55)) * 4;
         const [x, y] = SPOTS[i]!;
         return (
           <div
@@ -91,7 +90,6 @@ export function TrackRecord() {
             className="bs-depth-kind"
             style={{
               opacity,
-              filter: blur > 0.05 ? `blur(${blur.toFixed(2)}px)` : undefined,
               transform: `translate(-50%, -50%) translate3d(calc(${x} * var(--half-w)), calc(${y} * var(--half-h)), ${z.toFixed(0)}px)`,
               zIndex: Math.round(p * 100),
             }}
