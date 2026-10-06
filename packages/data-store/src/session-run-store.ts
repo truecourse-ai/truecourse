@@ -8,7 +8,7 @@
  */
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, gt, inArray, sql, getTableColumns } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, notInArray, sql, getTableColumns } from 'drizzle-orm';
 import { activityRuns, activityEvents, type Db, type Pool, type PoolClient } from '@truecourse/db';
 import {
   SessionRunNotFoundError, parseSessionRunCursor, sessionRunDir, toPublicRunRecord,
@@ -261,15 +261,18 @@ export class PgSessionRunStore implements SessionRunBackend {
   /** A lease is machine-independent; a reused PID cannot keep a dead run alive.
    *  Every named repository (or every repository, for `null`) is swept in one
    *  transaction; each recovered row publishes and notifies under the repository
-   *  that owns it. */
+   *  that owns it. A run this process is still writing is never swept: its
+   *  writer is alive, however late a stalled database made its renewal. */
   private async reconcile(repoKeys: string[] | null): Promise<void> {
     if (repoKeys !== null && !repoKeys.length) return;
     const recovered: { repoKey: string; event: ActivityEvent }[] = [];
     await this.db.transaction(async tx => {
+      const writing = [...this.live.keys()];
       const rows = await tx.select().from(activityRuns).where(and(
         repoKeys === null ? undefined : inArray(activityRuns.repoKey, repoKeys),
         sql`${activityRuns.record}->>'status' = 'running'`,
         sql`${activityRuns.leaseUntil} < CURRENT_TIMESTAMP`,
+        writing.length ? notInArray(activityRuns.runId, writing) : undefined,
       )).for('update');
       for (const row of rows) {
         const record = decodeRunRecord(row.record);
@@ -363,12 +366,29 @@ export class PgSessionRunStore implements SessionRunBackend {
     const transcripts = new Map<string, Event[]>();
     let pending = Promise.resolve();
     let failure: unknown;
+    const failed = new Set<(error: unknown) => void>();
+    // The writer stops for good: nothing more is renewed or written, the run is
+    // this process's no longer (so a sweep may take it), and whoever owns the
+    // work is told once, so it stops rather than running on unrecorded.
+    const fail = (error: unknown) => {
+      if (failure) return;
+      failure = error ?? new Error('Activity writer failed');
+      clearInterval(heartbeat);
+      this.live.delete(record.runId);
+      for (const notify of failed) notify(failure);
+    };
     const flush = async () => { await pending; if (failure) throw failure; };
+    // A reader waits for the writes ahead of it and reads what was stored. That
+    // the writer has failed is the owning job's to hear, never a reader's.
+    const drain = () => pending;
     // Only adjacent checklist updates can replace one another. Transcript and
     // lifecycle events are ordering barriers and are always persisted.
     let checklistTail: { value: ActivityEventBody; state?: Record } | undefined;
     const enqueue = (body: ActivityEventBody, snapshot?: Record, coalesce = false) => {
-      if (failure) throw failure;
+      // These are progress callbacks, called from wherever the work happens to
+      // be. A failed writer drops what it is handed: the failure reaches the
+      // job through `onFailure` and `flush`, not through whoever reported next.
+      if (failure) return;
       const value = clone(body);
       // The live progress this event supersedes goes NOW, in the driver's own
       // order: the commit lands later, after the driver may already have
@@ -387,9 +407,12 @@ export class PgSessionRunStore implements SessionRunBackend {
         if (failure) return;
         const { value, state } = queued;
         const event = await this.db.transaction(async tx => {
-          const [row] = await tx.select({ ...getTableColumns(activityRuns), leaseActive: sql<boolean>`${activityRuns.leaseUntil} > CURRENT_TIMESTAMP` }).from(activityRuns).where(and(eq(activityRuns.runId, record.runId), eq(activityRuns.repoKey, repoKey))).for('update');
+          const [row] = await tx.select().from(activityRuns).where(and(eq(activityRuns.runId, record.runId), eq(activityRuns.repoKey, repoKey))).for('update');
           if (!row) throw new Error('Session run was removed');
-          if (owned && (row.owner !== this.owner || !row.leaseActive)) throw new Error('Activity writer lost its lease');
+          // The fence is the OWNER. A lease that ran out lets another process
+          // take the run, and taking it clears or replaces the owner; until one
+          // does, a writer that was only late is still the writer.
+          if (owned && row.owner !== this.owner) throw new Error('Activity writer lost its lease');
           if (!owned && row.record.status === 'running') throw new Error('Activity writer does not own this run');
           if (row.record.status !== 'running' && state?.status === 'running') throw new Error('Activity run is already terminal');
           await tx.insert(activityEvents).values({ runId: record.runId, cursor: row.nextCursor, body: encodeActivityBody(value) });
@@ -404,26 +427,29 @@ export class PgSessionRunStore implements SessionRunBackend {
         publishCommittedActivity(dir, event);
         this.announce(repoKey, record.runId, false);
         if (value.kind === 'run' && value.run.status !== 'running') { clearInterval(heartbeat); this.live.delete(record.runId); }
-      }).catch(error => { failure = error; clearInterval(heartbeat); this.live.delete(record.runId); });
+      }).catch(fail);
     };
+    // Renewed by ownership, like the write guard: a renewal a stalled database
+    // delivered late still renews, unless the run was taken in the meantime.
     const heartbeat = setInterval(() => {
       if (!owned || failure) return;
-      void this.db.update(activityRuns).set({ leaseUntil: sql`CURRENT_TIMESTAMP + interval '60 seconds'` }).where(and(eq(activityRuns.runId, record.runId), eq(activityRuns.owner, this.owner), sql`${activityRuns.leaseUntil} > CURRENT_TIMESTAMP`)).returning({ id: activityRuns.runId }).then(rows => {
+      void this.db.update(activityRuns).set({ leaseUntil: sql`CURRENT_TIMESTAMP + interval '60 seconds'` }).where(and(eq(activityRuns.runId, record.runId), eq(activityRuns.owner, this.owner))).returning({ id: activityRuns.runId }).then(rows => {
         if (!rows.length && record.status === 'running') throw new Error('Activity writer lost its lease');
-      }).catch(error => { failure = error; clearInterval(heartbeat); });
+      }).catch(fail);
     }, 20_000);
     heartbeat.unref();
     if (!owned) clearInterval(heartbeat);
     const write = (coalesce = false) => enqueue({ kind: 'run', run: toPublicRunRecord(record) }, record, coalesce);
     return {
       runId: record.runId, dir, record: () => record, flush,
+      onFailure: notify => { failed.add(notify); if (failure) notify(failure); return () => { failed.delete(notify); }; },
       subscribeActivity: notify => this.subscribe(`run:${record.runId}`, notify),
-      readActivity: async after => { await flush(); await this.reconcile([repoKey]); return this.readEvents(record.runId, after); },
-      readActivityPage: async (after, limit) => { await flush(); await this.reconcile([repoKey]); return this.readEvents(record.runId, after, limit); },
-      readCompactActivityPage: async (after, limit) => { await flush(); await this.reconcile([repoKey]); return this.readCompactPage(record.runId, after, limit); },
-      validateActivityCursor: async after => { await flush(); await this.validateCursor(record.runId, after); },
-      readTranscript: async (sessionId, since) => { await flush(); return this.readTranscript(record.runId, sessionId, since); },
-      readTranscriptPage: async (sessionId, options) => { await flush(); return this.readTranscriptPage(record.runId, sessionId, options); },
+      readActivity: async after => { await drain(); await this.reconcile([repoKey]); return this.readEvents(record.runId, after); },
+      readActivityPage: async (after, limit) => { await drain(); await this.reconcile([repoKey]); return this.readEvents(record.runId, after, limit); },
+      readCompactActivityPage: async (after, limit) => { await drain(); await this.reconcile([repoKey]); return this.readCompactPage(record.runId, after, limit); },
+      validateActivityCursor: async after => { await drain(); await this.validateCursor(record.runId, after); },
+      readTranscript: async (sessionId, since) => { await drain(); return this.readTranscript(record.runId, sessionId, since); },
+      readTranscriptPage: async (sessionId, options) => { await drain(); return this.readTranscriptPage(record.runId, sessionId, options); },
       setGitRef(gitRef) { record.gitRef = gitRef; write(); },
       setEndpoint(endpoint) { record.endpoint = endpoint; write(); },
       setLlm(llm) { record.llm = llm; write(); },

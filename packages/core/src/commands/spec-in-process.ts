@@ -402,7 +402,12 @@ export async function curateInProcess(
     gitRef,
     ...(options.pullRequest ? { pullRequest: options.pullRequest } : {}),
   });
-  options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
+  options.onRunStarted?.({
+    command: 'spec-scan',
+    runId: run.runId,
+    dir: run.dir,
+    ...(run.onFailure ? { onFailure: run.onFailure } : {}),
+  });
   // Mirror the step checklist into the run record as the run's own display:
   // the dashboard can only see what run.json carries, and the early phases
   // (discover/tag) have no sessions to show progress through.

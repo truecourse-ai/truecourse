@@ -80,6 +80,8 @@ export interface SessionRunStartedInfo {
   runId: string;
   /** The run's local scratch directory. */
   dir: string;
+  /** The run's own {@link SessionRunStore.onFailure}, for a caller that must stop the work it started. */
+  onFailure?: SessionRunStore['onFailure'];
 }
 
 /**
@@ -102,6 +104,12 @@ export interface SessionRunStore {
   record(): RunRecord;
   /** Drain ordered async writes before the owning job settles. */
   flush?(): Promise<void>;
+  /**
+   * Hear, once, that this run can no longer be written (another process took
+   * it, or its storage failed). Writes after that are dropped, so the owner
+   * stops the work. Returns the unsubscribe.
+   */
+  onFailure?(notify: (error: unknown) => void): () => void;
   subscribeActivity?(notify: () => void): () => void;
   readActivity?(after: number): Promise<import('@truecourse/shared/activity-stream').ActivityEvent[]>;
   /** One bounded slice of the journal, so a reader pages a long run instead of

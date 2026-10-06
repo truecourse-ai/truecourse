@@ -161,6 +161,8 @@ export function createContextScanTask(
             onRunStarted: (info) => {
               runIds.set(ctx.jobId, info.runId);
               meter.setRunId(info.runId);
+              // A scan whose run can no longer be recorded stops, failed.
+              info.onFailure?.((error) => ctx.fail(error));
               // A resumed scan scans again — there is no half corpus to carry
               // on from — so it opens a run of its own rather than reviving
               // this one, and names itself a rescan.

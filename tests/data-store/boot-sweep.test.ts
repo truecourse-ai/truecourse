@@ -46,9 +46,11 @@ describe('the boot sweep settles a dead process’s work', () => {
       .set({ leaseUntil: sql`CURRENT_TIMESTAMP - interval '1 minute'` })
       .where(eq(activityRuns.runId, run.runId));
 
-    // Boot: the queue settles its rows, the run store settles its own.
+    // Boot: the queue settles its rows, and the new process's run store settles
+    // the runs the dead one left. A store never sweeps a run it is writing itself.
     const reaped = await jobs.interruptOrphaned();
-    await runs.reconcileAll();
+    const booted = new PgSessionRunStore(db);
+    await booted.reconcileAll();
 
     expect(reaped.map((j) => j.id).sort()).toEqual([queued.id, running.id].sort());
     for (const id of [queued.id, running.id]) {
@@ -58,7 +60,7 @@ describe('the boot sweep settles a dead process’s work', () => {
       expect(row?.finishedAt).not.toBeNull();
     }
 
-    const [after] = await runs.list(repoKey);
+    const [after] = await booted.list(repoKey);
     expect(after.status).toBe('interrupted');
     expect(after.finishedAt).toBeTruthy();
 
