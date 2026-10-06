@@ -302,7 +302,7 @@ export default function BuildersPage() {
             <h2>Hire your AI CTO</h2>
             <p className="bs-cta-say">
               Start with a free 30-minute app checkup. We look at your app and how you run it, then send you a
-              short plan for what you actually need. After that, $99 a month.
+              short plan for what you actually need.
             </p>
             <div className="cta-row">
               <BookLink className="btn btn-primary" placement="cta">
