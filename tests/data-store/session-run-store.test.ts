@@ -347,6 +347,44 @@ describe('Postgres activity storage', () => {
     await expect(run.flush!()).rejects.toThrow('lost its lease');
   });
 
+  it('keeps a run whose lease ran out while its own process was still writing it', async () => {
+    const run = await create();
+    await db.update(activityRuns).set({ leaseUntil: '2000-01-01T00:00:00Z' }).where(eq(activityRuns.runId, run.runId));
+    // A reader in the writer's own process is no reason to call the run dead.
+    expect((await store.list(REPO))[0]).toMatchObject({ status: 'running' });
+    run.setChecklist([{ key: 'scan', label: 'Scanning', status: 'active' }]);
+    await run.flush!();
+    const [row] = await db.select().from(activityRuns).where(eq(activityRuns.runId, run.runId));
+    expect(row!.record.status).toBe('running');
+    expect(row!.nextCursor).toBe(2);
+  });
+
+  it('a writer that lost its run tells its owner once, drops later writes, and fails no reader', async () => {
+    const run = await create();
+    await run.flush!();
+    const heard: unknown[] = [];
+    run.onFailure!(error => heard.push(error));
+    await db.update(activityRuns).set({ leaseUntil: '2000-01-01T00:00:00Z' }).where(eq(activityRuns.runId, run.runId));
+    await new PgSessionRunStore(db).reconcileAll();
+    run.setChecklist([]);
+    await expect(run.flush!()).rejects.toThrow('lost its lease');
+    expect(heard).toHaveLength(1);
+    expect(String(heard[0])).toContain('lost its lease');
+    // Progress reported after that is dropped where it lands, never thrown back.
+    expect(() => {
+      run.persistence.appendEvent('s', event());
+      run.setChecklist([]);
+      run.finish('failed');
+    }).not.toThrow();
+    expect(heard).toHaveLength(1);
+    const history = await run.readActivity!(-1);
+    expect(history.at(-1)).toMatchObject({ kind: 'run', run: { status: 'interrupted' } });
+    // A late subscriber still hears it.
+    const late: unknown[] = [];
+    run.onFailure!(error => late.push(error));
+    expect(late).toHaveLength(1);
+  });
+
 });
 
 
