@@ -164,7 +164,7 @@ export default function BuildersPage() {
 
         <BuiltWith />
 
-        <section className="band" id="team">
+        <section className="band bs-clip-x" id="team">
           <div className="wrap">
             <Reveal className="bs-center">
               <p className="kicker">The problem</p>

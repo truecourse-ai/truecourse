@@ -1003,15 +1003,30 @@ section.band:has(.bs-ask) {
   position: absolute;
   inset: -4% -48%;
   z-index: -1;
-  border-radius: 50%;
-  filter: blur(48px);
   pointer-events: none;
+  will-change: opacity, transform;
 }
 .bs-phone-glow.good {
-  background: radial-gradient(closest-side, rgba(34, 197, 94, 0.85) 35%, rgba(34, 197, 94, 0) 100%);
+  background: radial-gradient(
+    closest-side,
+    rgba(34, 197, 94, 0.6),
+    rgba(34, 197, 94, 0.32) 45%,
+    rgba(34, 197, 94, 0.1) 75%,
+    rgba(34, 197, 94, 0)
+  );
 }
 .bs-phone-glow.bad {
-  background: radial-gradient(closest-side, rgba(239, 68, 68, 0.85) 35%, rgba(239, 68, 68, 0) 100%);
+  background: radial-gradient(
+    closest-side,
+    rgba(239, 68, 68, 0.6),
+    rgba(239, 68, 68, 0.32) 45%,
+    rgba(239, 68, 68, 0.1) 75%,
+    rgba(239, 68, 68, 0)
+  );
+}
+/* The evening's glow reaches past the screen's edge on a phone; it stops at the section's. */
+.bs-clip-x {
+  overflow-x: clip;
 }
 
 /* A stack: the newest card on top, up to two layers peeking out beneath. */
