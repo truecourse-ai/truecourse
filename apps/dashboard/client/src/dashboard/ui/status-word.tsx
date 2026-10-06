@@ -27,6 +27,7 @@ import type { CheckConclusion } from '@/dashboard/data/types';
 
 export type StatusTone =
   | 'success'
+  | 'partial'
   | 'failure'
   | 'blocked'
   | 'attention'
@@ -37,6 +38,9 @@ export type StatusTone =
 
 const DOT: Record<StatusTone, string> = {
   success: 'bg-emerald-500',
+  // Proven, with something beside it for a reader to fix: a flow that
+  // succeeded after healing around a renamed control. Between green and amber.
+  partial: 'bg-lime-500',
   failure: 'bg-red-500',
   blocked: 'bg-amber-500',
   // Amber for the states that want a reader rather than a fix: an interrupted
@@ -160,14 +164,15 @@ export const VERDICT_WORD: Record<'passed' | 'failed' | 'blocked', string> = {
 };
 
 /**
- * The five coverage words as tones. The words and the order are guard's
- * (`GUARD_COVERAGE_PLAIN_ORDER`); the paint is guard's four colours, so a
+ * The coverage words as tones. The words and the order are guard's
+ * (`GUARD_COVERAGE_PLAIN_ORDER`); the paint is guard's colours, so a
  * tally under a guard list and the chips in it carry the same dot.
  */
 export const GUARD_COVERAGE_TONE: Record<GuardCoveragePlainStatus, StatusTone> = {
   failed: 'failure',
   blocked: 'blocked',
   'never-run': 'unproven',
+  'partially-succeeded': 'partial',
   succeeded: 'success',
   'not-testable': 'neutral',
 };

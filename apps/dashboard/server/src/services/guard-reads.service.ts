@@ -31,7 +31,7 @@ import {
 } from '@truecourse/shared';
 
 /**
- * The Flows payload, narrowed to the flows wearing one of `status` (the five
+ * The Flows payload, narrowed to the flows wearing one of `status` (the
  * coverage words) when it is given. The totals stay the whole repository's.
  */
 export async function listRepoFlows(

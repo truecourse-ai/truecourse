@@ -124,7 +124,10 @@ function kept(root: string, f: GuardFlow, status: 'passing' | 'failing', opts: {
 const events = (root: string): string[] => fs.readFileSync(path.join(root, 'events.log'), 'utf-8').trim().split('\n')
 
 /** What a scripted flow-test session does: act on the tree and its tools, then end. */
-type FlowScript = (ctx: { input: SessionRunInput; tool: (name: string) => Promise<{ content: string; isError?: boolean }> }) => Promise<DriverResult>
+type FlowScript = (ctx: {
+  input: SessionRunInput
+  tool: (name: string, args?: Record<string, unknown>) => Promise<{ content: string; isError?: boolean }>
+}) => Promise<DriverResult>
 
 const gaveUp: DriverResult = { kind: 'failure', failure: { kind: 'budget-exhausted', retryability: 'none' } }
 
@@ -156,7 +159,7 @@ function scripted(scripts: Record<string, FlowScript>) {
         if (!script) throw new Error(`no script for a session on ${flowId}`)
         return script({
           input,
-          tool: (name) => input.def.tools.find((t) => t.name === name)!.execute({}, {} as never),
+          tool: (name, args = {}) => input.def.tools.find((t) => t.name === name)!.execute(args, {} as never),
         })
       })()
       return { done, status: () => 'running' as const, steer: () => {}, interrupt: async () => {} }
@@ -345,6 +348,30 @@ describe('the flow-test stage, on a tree that already has tests', () => {
     expect(result.status === 'ok' && result.run).toBeUndefined()
     expect(fs.existsSync(path.join(root, 'events.log'))).toBe(false)
   })
+
+  it('keeps the copy drift a session declared on the record, under a verdict that stands at the next generate', async () => {
+    const f = flow('renamed')
+    const root = tree([f], {})
+    const copyDrift = [{ step: 1, documented: 'Bills', observed: 'Invoices' }]
+    const model = scripted({
+      renamed: async ({ tool }) => {
+        fs.writeFileSync(flowTestPath(root, 'renamed'), spec('renamed', 'heading'))
+        expect((await tool('review_test', { copyDrift })).content).toContain('FAITHFUL')
+        return { kind: 'outcome', value: { status: 'passing', summary: 'The page lists invoices, under the name the product has.', copyDrift } }
+      },
+    })
+
+    const first = await runFlowTestStage({ repoRoot: root, worldId: 'tc-flow-test-stage', runId: 'generate-run', acquire: model.acquire })
+    expect(first).toMatchObject({ status: 'ok', authored: 1 })
+    const [record] = readFlowTests(root).tests
+    expect(record.copyDrift).toEqual(copyDrift)
+    expect(record.judged).toBe(flowTestJudgeKey({ steps: flowStepReader(root)(f), spec: spec('renamed', 'heading'), copyDrift }))
+
+    // The test holds and its verdict was given knowing the drift, so nobody reads or opens it again.
+    const second = await runFlowTestStage({ repoRoot: root, worldId: 'tc-flow-test-stage', runId: 'generate-run-2', acquire: model.acquire })
+    expect(second).toMatchObject({ status: 'ok', authored: 0, judged: { read: 0, flagged: 0, unavailable: 0 } })
+    expect(readFlowTests(root).tests[0].copyDrift).toEqual(copyDrift)
+  }, 120_000)
 
   it('writes a test again when its spec is not stepped by the flow\'s claims', async () => {
     const f = flow('legacy')

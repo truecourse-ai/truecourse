@@ -1430,6 +1430,7 @@ function flowTestMark(test: FlowTestRecord): GuardFlowTestMark {
     ...(test.disagreement ? { documented: test.disagreement.documented, observed: test.disagreement.observed } : {}),
     ...(test.blockedOn ? { blockedOn: test.blockedOn } : {}),
     ...(test.blockedBy ? { blockedBy: test.blockedBy } : {}),
+    ...(test.copyDrift?.length ? { copyDrift: test.copyDrift } : {}),
   }
 }
 
@@ -2048,6 +2049,7 @@ export async function readGuardFlowDetail(
             ...(test.disagreement ? { disagreement: test.disagreement } : {}),
             ...(test.blockedBy ? { blockedBy: test.blockedBy } : {}),
             ...(test.blockedOn ? { blockedOn: test.blockedOn } : {}),
+            ...(test.copyDrift?.length ? { copyDrift: test.copyDrift } : {}),
             ...(spec ? { spec } : {}),
             ...(seed ? { seed } : {}),
             ...(test.run ? { run: test.run } : {}),

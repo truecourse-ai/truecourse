@@ -657,6 +657,7 @@ export function GuardFlowDetail({
               findings: detail.findings.filter(
                 (f) => guardFindingClass(f) !== "defect",
               ).length,
+              ...(detail.test ? { test: detail.test } : {}),
             })}
           />
           {/* Not a status: the same marker the list row wears. The sentence below

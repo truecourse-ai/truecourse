@@ -31,6 +31,12 @@
  * order, and that is checked. It is what lets a reader, the judge and a later
  * session all mean the same step by the same words.
  *
+ * A NAME is not a finding. Where the documents call a control one thing and
+ * the product another, the session uses the product's name, goes on to what
+ * the step is about, and declares the difference as COPY DRIFT: to
+ * `review_test`, which reads the spec knowing it, and in its outcome. An
+ * outcome stands only on the verdict given over exactly the list it carries.
+ *
  * A flow that already has a test is opened with a REASON and the earlier test
  * (`FlowTestPrior`): the flow changed, the test moved at this commit, its seed
  * stopped holding, a failing test started passing, or the judge refused it.
@@ -53,8 +59,11 @@ import {
 } from '@truecourse/agent-loop';
 import { FLOW_TEST_ENV, flowSpecStepTitles, flowTestEnv, runFlowTests, type FlowTestWorld } from '@truecourse/guard-runner';
 import {
+  FlowTestCopyDriftSchema,
   FlowTestOutcomeSchema,
   flowTestFailedStep,
+  orderCopyDrift,
+  type FlowTestCopyDrift,
   type FlowTestOutcome,
   type FlowTestRecord,
   type FlowTestRepairReason,
@@ -69,6 +78,7 @@ import {
   flowTestsDir,
 } from '@truecourse/shared/work-tree';
 import {
+  copyDriftLine,
   describeFlagged,
   flowTestFidelityBriefing,
   flowTestFidelityDef,
@@ -130,8 +140,8 @@ export interface FlowTestSessionInput {
 export interface FlowTestSessionState {
   /** The engine's last run of the spec. */
   lastRun(): FlowTestResult | undefined;
-  /** The judge key of the files as they stand, when a faithful verdict covers them. */
-  judged(): string | undefined;
+  /** The judge key of the files as they stand with this copy drift, when a faithful verdict covers them. */
+  judged(copyDrift?: readonly FlowTestCopyDrift[]): string | undefined;
   /** What the judge's last reading refused, when it refused. */
   flagged(): string | undefined;
   /** What the judge's child sessions cost; a session's own spend does not include them. */
@@ -157,15 +167,22 @@ export function flowTestSessionDef(input: FlowTestSessionInput): {
   const verdicts = new Map<string, FlowTestVerdict>();
   if (prior?.record.judged) verdicts.set(prior.record.judged, { kind: 'faithful' });
 
-  /** The spec and seed as they stand, or why they are not a test yet. */
-  const readFiles = (): { ok: true; spec: string; seed?: string; key: string } | { ok: false; reason: string } => {
+  /**
+   * The spec and seed as they stand, or why they are not a test yet. `key` is
+   * the judge key of the files alone, which is how a run knows them; a verdict
+   * is given under `judgeKey`, over the files and a copy drift list.
+   */
+  const readFiles = ():
+    | { ok: true; spec: string; seed?: string; key: string; judgeKey: (copyDrift: readonly FlowTestCopyDrift[]) => string }
+    | { ok: false; reason: string } => {
     if (!fs.existsSync(specPath)) return { ok: false, reason: `There is no spec at ${specRel} yet.` };
     const spec = fs.readFileSync(specPath, 'utf-8');
     const seed = fs.existsSync(seedPath) ? fs.readFileSync(seedPath, 'utf-8') : undefined;
     const defect =
       specDefect(spec, input.steps) ?? (seed !== undefined ? seedDefect(seed, spec, flowSeedFileName(input.flow.id)) : undefined);
     if (defect) return { ok: false, reason: defect };
-    return { ok: true, spec, ...(seed !== undefined ? { seed } : {}), key: flowTestJudgeKey({ steps: input.steps, spec, seed }) };
+    const judgeKey = (copyDrift: readonly FlowTestCopyDrift[]): string => flowTestJudgeKey({ steps: input.steps, spec, seed, copyDrift });
+    return { ok: true, spec, ...(seed !== undefined ? { seed } : {}), key: judgeKey([]), judgeKey };
   };
 
   const runSpec = async (signal?: AbortSignal): Promise<SpecRun> => {
@@ -184,11 +201,18 @@ export function flowTestSessionDef(input: FlowTestSessionInput): {
     return { ok: true, result: run.results[0] };
   };
 
-  /** The judge's reading of the files as they stand: the verdict already given under their key, or a new one. */
-  const review: ReviewTest = async (ctx) => {
+  /**
+   * The judge's reading of the files as they stand with the copy drift the
+   * session declares: the verdict already given under that key, or a new one.
+   */
+  const review: ReviewTest = async (ctx, declared) => {
     const files = readFiles();
     if (!files.ok) return { ok: false, reason: files.reason };
-    const known = verdicts.get(files.key);
+    const copyDrift = orderCopyDrift(declared);
+    const defect = copyDriftDefect(copyDrift, input.steps);
+    if (defect) return { ok: false, reason: defect };
+    const judgeKey = files.judgeKey(copyDrift);
+    const known = verdicts.get(judgeKey);
     if (known) {
       lastVerdict = known;
       return { ok: true, verdict: known, fresh: false };
@@ -211,6 +235,7 @@ export function flowTestSessionDef(input: FlowTestSessionInput): {
         steps: input.steps,
         spec: files.spec,
         ...(files.seed !== undefined ? { seed: files.seed } : {}),
+        copyDrift,
         run: { outcome: result.outcome, steps: result.steps, ...(result.error ? { error: result.error } : {}) },
       }),
     ]);
@@ -221,7 +246,7 @@ export function flowTestSessionDef(input: FlowTestSessionInput): {
     const verdict = flowTestVerdictOf(outcome);
     // No verdict is no reading: nothing is remembered, and the next call asks again.
     if (verdict.kind !== 'unavailable') {
-      verdicts.set(files.key, verdict);
+      verdicts.set(judgeKey, verdict);
       lastVerdict = verdict;
     }
     return { ok: true, verdict, fresh: true };
@@ -258,12 +283,15 @@ export function flowTestSessionDef(input: FlowTestSessionInput): {
       if (changed) return `Outcome refused: ${changed}`;
       const files = readFiles();
       if (!files.ok) return `Outcome refused: ${files.reason}`;
-      const verdict = verdicts.get(files.key);
+      const copyDrift = orderCopyDrift(outcome.copyDrift ?? []);
+      const driftDefect = copyDriftDefect(copyDrift, input.steps);
+      if (driftDefect) return `Outcome refused: ${driftDefect}`;
+      const verdict = verdicts.get(files.judgeKey(copyDrift));
       if (verdict?.kind === 'flagged') {
         return `Outcome refused: \`review_test\` read the spec and seed as they are now and did not accept them:\n\n${flaggedLines(verdict.flagged)}\n\nMake each of those steps observe what its document says, then call \`review_test\` again. If the product cannot be made to show it, the flow is \`blocked\`.`;
       }
       if (!verdict) {
-        return 'Outcome refused: `review_test` has not accepted the spec and seed as they are now (it has not run, or they changed since). An outcome stands only on files it read and found faithful. Call `review_test`.';
+        return `Outcome refused: \`review_test\` has not accepted the spec and seed as they are now with the copy drift this outcome reports (${copyDrift.length > 0 ? copyDrift.map(copyDriftLine).join('; ') : 'none'}). It has not run, the files changed since, or it was given a different \`copyDrift\`. An outcome stands only on files it read and found faithful, knowing exactly that list. Call \`review_test\` with it.`;
       }
       const run = await runSpec(input.signal);
       if (!run.ok) return `Outcome refused: ${run.reason}`;
@@ -284,9 +312,11 @@ export function flowTestSessionDef(input: FlowTestSessionInput): {
     def,
     state: {
       lastRun: () => lastRun?.result,
-      judged: () => {
+      judged: (copyDrift = []) => {
         const files = readFiles();
-        return files.ok && verdicts.get(files.key)?.kind === 'faithful' ? files.key : undefined;
+        if (!files.ok) return undefined;
+        const judgeKey = files.judgeKey(orderCopyDrift(copyDrift));
+        return verdicts.get(judgeKey)?.kind === 'faithful' ? judgeKey : undefined;
       },
       flagged: () => (lastVerdict?.kind === 'flagged' ? describeFlagged(lastVerdict.flagged) : undefined),
       judgeSpent: () => ({ ...judgeSpent }),
@@ -334,6 +364,24 @@ function restoreFrozen(
 
 function flaggedLines(flagged: readonly FlowTestFlaggedStep[]): string {
   return flagged.map((f) => `- step ${f.step}: ${f.mismatch}`).join('\n');
+}
+
+/**
+ * What a copy drift list may not say, as the reason it is refused: a step the
+ * flow does not have, or a name that is the same on both sides. Whether an
+ * entry really is a name and nothing more is the judge's to say.
+ */
+function copyDriftDefect(copyDrift: readonly FlowTestCopyDrift[], steps: readonly FlowTestStep[]): string | undefined {
+  const orders = new Set(steps.map((step) => step.order));
+  const unknown = copyDrift.filter((drift) => !orders.has(drift.step));
+  if (unknown.length > 0) {
+    return `\`copyDrift\` names step ${[...new Set(unknown.map((drift) => drift.step))].join(', ')}, and the flow's steps are ${[...orders].join(', ')}. Each entry carries the number of the step it was met in.`;
+  }
+  const same = copyDrift.find((drift) => drift.documented.trim() === drift.observed.trim());
+  if (same) {
+    return `\`copyDrift\` says the document and the product both have ${JSON.stringify(same.observed)} in step ${same.step}. An entry is a name that DIFFERS: \`documented\` as the document has it, \`observed\` as the product has it.`;
+  }
+  return undefined;
 }
 
 /**
@@ -423,21 +471,22 @@ function runTestTool(specRel: string, runSpec: (signal?: AbortSignal) => Promise
 const REVIEW_TEST = defineToolSpec({
   name: 'review_test',
   description:
-    'A reviewer with a fresh context reads your spec and seed AS THEY ARE NOW against the claims of the flow, with how the engine\'s last run of them went, and answers whether every step observes what its document promises. Returns FAITHFUL, or the steps it refuses with what each fails to observe. An outcome is accepted only when this accepted the files as they are at that moment: any edit after it means calling it again. It runs the test first when the files changed since `run_test`.',
+    'A reviewer with a fresh context reads your spec and seed AS THEY ARE NOW against the claims of the flow, with how the engine\'s last run of them went, and answers whether every step observes what its document promises. Give it the `copyDrift` your outcome will report (every name the document has one way and the product another), or nothing when there is none: it reads the spec knowing that list, and holds each entry to being a name. Returns FAITHFUL, or the steps it refuses with what each fails to observe. An outcome is accepted only when this accepted the files as they are at that moment with that same list: any edit after it, or a different list, means calling it again. It runs the test first when the files changed since `run_test`.',
   kind: 'review-flow-test',
   readOnly: true,
   destructive: false,
-  inputSchema: z.object({}).strict(),
+  inputSchema: z.object({ copyDrift: z.array(FlowTestCopyDriftSchema).optional() }).strict(),
 });
 
 type ReviewTest = (
   ctx: ToolContext,
+  copyDrift: readonly FlowTestCopyDrift[],
 ) => Promise<{ ok: true; verdict: FlowTestVerdict; fresh: boolean } | { ok: false; reason: string }>;
 
 function reviewTestTool(specRel: string, review: ReviewTest): SessionTool {
   return REVIEW_TEST.bind({
-    async execute(_args, ctx) {
-      const reviewed = await review(ctx);
+    async execute(args, ctx) {
+      const reviewed = await review(ctx, args.copyDrift ?? []);
       if (!reviewed.ok) return { content: reviewed.reason, isError: true };
       const { verdict } = reviewed;
       if (verdict.kind === 'unavailable') {
@@ -521,6 +570,12 @@ function priorBriefing(input: FlowTestSessionInput, prior: FlowTestPrior): strin
     ...(record.disagreement
       ? [`The disagreement it failed on. Documented: ${record.disagreement.documented} Observed: ${record.disagreement.observed}`]
       : []),
+    ...(record.copyDrift?.length
+      ? [
+          'The copy drift it was accepted with. Whatever of it the test still meets is reported again, in `review_test` and in your outcome:',
+          ...record.copyDrift.map((drift) => `- ${copyDriftLine(drift)}`),
+        ]
+      : []),
   ];
   const acceptedSteps = (record.run?.steps ?? []).map((step) => `  ${step.order}. ${step.outcome === 'passed' ? 'passed' : step.outcome === 'failed' ? 'FAILED' : 'not reached'}: ${step.title}`);
   const rerunLines = rerun
@@ -568,7 +623,7 @@ function priorBriefing(input: FlowTestSessionInput, prior: FlowTestPrior): strin
         ...rerunLines,
         ...diff,
         'Decide which of two things happened, by looking at the product:',
-        '- The product changed how a step is REACHED (a control renamed or moved, a page restructured, a route changed) and still does what the document says. Fix the locator or the navigation, and end `passing`. This is the test having aged, not a finding.',
+        '- The product changed how a step is REACHED (a control renamed or moved, a page restructured, a route changed) and still does what the document says. Fix the locator or the navigation, and end `passing`. This is the test having aged, not a finding. A control renamed away from the name the document still uses is copy drift: report it.',
         '- The product no longer DOES what the document says. Keep the assertion, and end `failing` with the disagreement. This is a regression, and the finding this run exists to make.',
         'What may not change: the list of steps, and what each step asserts. Never make this test pass by asserting less. `review_test` reads the repaired spec against the documents again.',
       ];
@@ -639,6 +694,22 @@ A flow is a short path through the product, made of claims its documentation mak
 
 When the product does something other than what the documents say, that is not a problem with your test. It is the finding. Keep the assertion the documents call for, let the test fail at that point, and report the flow as \`failing\` with the disagreement spelled out. Never weaken, drop or reword an assertion to make a test pass.
 
+# When only a name differs
+
+Documents name the things a person uses: a button, a menu item, a link, a tab, a field, a heading, a page. Products rename these without changing what they do, and the documents fall behind. That is COPY DRIFT. It is worth telling the reader, and it is not what a flow's test is for: a test that stops at a renamed menu item never reaches the claim it was written to prove.
+
+When a step needs something the document names, and the product has it under another name (in the place the document describes, doing what the document says it does):
+
+- Use it under the name the product has, and go on to what the step is about.
+- Report the difference as copy drift: the step's number, the name as the document has it, the name the product has. The same list goes to \`review_test\`, which reads your spec knowing it, and into the outcome's \`copyDrift\`.
+- Everything else the step asserts stays what the document promises.
+
+This holds even when the claim is that the thing is there (a sidebar that lists its links): it is there, under the product's name. Assert it under that name and report the drift.
+
+Copy drift is the NAME of a control or a place, and nothing else. It never covers what the product does or says back: a message, an error text or code, a status, a value, a count, a URL, the order of things. Nor a control that is not there under any name, or one that does something other than what the document says. Those are findings: keep the document's assertion and let the test fail on it.
+
+Look before you decide which it is. A name from the document that matches nothing on the page is a question about the product, not yet an answer: open the page, read its roles and names, and find out whether the thing is there under another name.
+
 # The seed
 
 The product was brought up bare: installed, migrated, answering, and holding nothing that was put there for a test. There is no shared test account and no sample data. What your flow starts from (the account that signs in, the workspace it works in, the records the first step expects to find) your own seed creates, for this test alone.
@@ -708,22 +779,22 @@ Other tests run against this same product, at the same time and after yours, eac
 2. Look at the product. Scratch specs are the way to see it: write one in the scratch directory the briefing names (it imports \`../../flow\`) and run it with the command the briefing gives. Print what you need (\`console.log(await page.locator('body').ariaSnapshot())\` shows a page as roles and names; \`page.url()\`, a response's status and JSON). \`curl\` works too.
 3. Find out how the starting state comes to exist (how an account is made, verified, given its role) and write the seed. Then write the spec on top of it.
 4. Call \`run_test\`: the engine runs seed and spec exactly as every later run will, and tells you which of the two did not hold.
-5. When it fails, read the error and decide which it is. The seed not holding, or your test reaching for the wrong control or racing the page: fix them. The product not doing what the document says: that is the finding, keep the assertion.
-6. Call \`review_test\`. A reviewer with a fresh context reads the spec and seed against the same claims you were given, and names every step that does not really observe what its document says. Fix what it names, run again, review again. Any edit after a review means another review.
+5. When it fails, read the error and decide which it is. The seed not holding, or your test reaching for the wrong control or racing the page: fix them. A control the product has under another name than the document's: use the product's name and note the copy drift. The product not doing what the document says: that is the finding, keep the assertion.
+6. Call \`review_test\`, with the copy drift you noted when there is any. A reviewer with a fresh context reads the spec and seed against the same claims you were given, and names every step that does not really observe what its document says. Fix what it names, run again, review again. Any edit after a review means another review.
 7. Delete your scratch directory, then give the outcome.
 
 # The review
 
 \`review_test\` is a gate, not advice. An outcome is accepted only when the reviewer accepted the spec and seed exactly as they are at that moment. It asks one thing of each step: would this step fail if the product did not do what the claim says? A step that only sees a page load, a 200, or a value the test itself just typed, would not. For a failing test it asks whether the DOCUMENT calls for the assertion that failed, because that assertion is the finding a person will read.
 
-It reads only the files. It cannot be persuaded by a comment, and a verdict on files that have not changed does not change. When you believe it is wrong about a step, make the step's assertion plainer about what the document says rather than repeating the review.
+It reads only the files and the copy drift you hand it. A name in your spec that is not the document's is a mismatch to it unless you declared it, and it holds every declaration to being a name: one that stands in for a message, a value or a behaviour is refused. It cannot be persuaded by a comment, and a verdict on files that have not changed does not change. When you believe it is wrong about a step, make the step's assertion plainer about what the document says rather than repeating the review.
 
 # A flow that already has a test
 
 Some sessions are opened on a flow whose test already exists. The briefing then begins with WHY, and with the earlier test, which is at your paths as it was accepted. Start from it. The reason decides what you may change:
 
 - The flow changed: keep the code of steps whose claim is the same, write what is new.
-- The test moved (it was passing and now fails, or fails somewhere else): find out whether the product changed how a step is reached, which you fix, or stopped doing what the document says, which is the finding. The steps and what each asserts stay.
+- The test moved (it was passing and now fails, or fails somewhere else): find out whether the product changed how a step is reached, which you fix, or stopped doing what the document says, which is the finding. The steps and what each asserts stay. A control the product renamed while the document kept the old name is copy drift.
 - The seed stopped holding: only the seed changes. The engine puts the spec back if it differs.
 - It was failing and now passes: nothing changes. You confirm the pass and say what the test proves now.
 - The reviewer refused it: fix the steps it named, leave the rest.
@@ -733,7 +804,8 @@ In every case the outcome is held to the same run and the same review as a new t
 # The outcome
 
 - \`passing\`: the engine's run of your seed and spec passes. The product does what the documents say along this flow.
-- \`failing\`: the spec asserts what the documents say and fails because the product does otherwise. Name the disagreement: \`documented\` (what the document says, and which one) and \`observed\` (what the product did). Be sure it is the product and not your test: reproduce it by hand first. A seed that fails is never this.
+- \`failing\`: the spec asserts what the documents say and fails because the product does otherwise. Name the disagreement: \`documented\` (what the document says, and which one) and \`observed\` (what the product did). Be sure it is the product and not your test: reproduce it by hand first. A seed that fails is never this, and neither is a control that is there under another name.
+- \`copyDrift\`, on a \`passing\` or a \`failing\` test: every name the test met that the document has one way and the product another, each as \`{ "step": <the step's number>, "documented": "<the name in the document>", "observed": "<the name in the product>" }\`. Only the names, as short as they are on the page. Leave it out when there is none. It is exactly the list \`review_test\` accepted the files with.
 - \`blocked\`: no honest test can be written here, because the flow needs something this world does not have (a third-party account, a second machine, hardware) or its starting state cannot be created in this world by any means. Say what, in \`blockedBy\`, and name the missing thing in \`blockedOn\` as a short noun phrase in the product's own words (\`CurrencyBeacon API key\`, \`A product no other test is using\`): every flow blocked on the same thing is listed under that phrase, so use the plainest name for it. Leave no spec and no seed behind. A step that is merely hard to reach, or data that is merely tedious to create, is not blocked.
 
 The engine runs your seed and spec once more when you give the outcome and holds you to it: \`passing\` must pass, \`failing\` must fail in the test, and either stands only on files \`review_test\` accepted.`;

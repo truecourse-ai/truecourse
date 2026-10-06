@@ -1,4 +1,5 @@
 import {
+  FlowTestCopyDriftSchema,
   FlowTestDisagreementSchema,
   FlowTestRunSchema,
   FlowTestStatusSchema,
@@ -177,14 +178,19 @@ export function worstCoverageStatus(
 }
 
 // ---------------------------------------------------------------------------
-// THE COVERAGE VOCABULARY — five words, and only these five.
+// THE COVERAGE VOCABULARY — six words, and only these six.
 // ---------------------------------------------------------------------------
 
 /**
  * What a reader is told about coverage: a doc section, a flow, an overview
- * counter, a filter and a chip each wear exactly ONE of these five, everywhere.
+ * counter, a filter and a chip each wear exactly ONE of these six, everywhere.
  *
  *  - `succeeded` — the claims' scenarios passed;
+ *  - `partially-succeeded` — a flow's test ran to its end and passed, but only
+ *    after its author HEALED around something that is not the product failing: a
+ *    control the documents name one way and the product another (copy drift).
+ *    What was healed is on the test. Only a flow wears it: no wire status folds
+ *    onto it, so a section or a document never does ({@link guardFlowPlainStatus});
  *  - `failed` — a scenario contradicted the spec (drift), or could not complete;
  *  - `blocked` — something NAMED stands between the claim and its proof: no
  *    interface to step through, a supplied dependency nobody registered, an
@@ -204,28 +210,33 @@ export type GuardCoveragePlainStatus =
   | 'failed'
   | 'blocked'
   | 'never-run'
+  | 'partially-succeeded'
   | 'succeeded'
   | 'not-testable'
 
 /**
- * The five in SEVERITY order — worst first, and the order every counter, filter
- * and legend lists them in. `not-testable` is last on purpose: it is the one
- * status that is nobody's to-do, so it surfaces only when nothing else applies.
+ * The six in SEVERITY order — worst first, and the order every counter, filter
+ * and legend lists them in. `partially-succeeded` sits just above `succeeded`:
+ * the flow is proven, and something beside it is a reader's to fix.
+ * `not-testable` is last on purpose: it is the one status that is nobody's
+ * to-do, so it surfaces only when nothing else applies.
  */
 export const GUARD_COVERAGE_PLAIN_ORDER = [
   'failed',
   'blocked',
   'never-run',
+  'partially-succeeded',
   'succeeded',
   'not-testable',
 ] as const satisfies readonly GuardCoveragePlainStatus[]
 
-/** The five words as a wire value, for the payloads that carry one. */
+/** The six words as a wire value, for the payloads that carry one. */
 export const GuardCoveragePlainStatusSchema = z.enum([...GUARD_COVERAGE_PLAIN_ORDER])
 
 /** The ONE word per status. Nothing else may name a coverage state to a reader. */
 export const GUARD_COVERAGE_STATUS_WORD: Record<GuardCoveragePlainStatus, string> = {
   succeeded: 'Succeeded',
+  'partially-succeeded': 'Partially succeeded',
   failed: 'Failed',
   blocked: 'Blocked',
   'not-testable': 'Not testable',
@@ -781,7 +792,7 @@ export type GuardFlowProgress = z.infer<typeof GuardFlowProgressSchema>
 
 /**
  * The wire status a flow wears for what its Playwright test says, so a flow
- * proven by a test reads through the same five words as every other flow.
+ * proven by a test reads through the same words as every other flow.
  */
 export function flowTestCoverageStatus(status: FlowTestStatus): GuardSectionCoverageStatus {
   return status === 'passing' ? 'pass' : status === 'failing' ? 'fail' : 'blocked-on'
@@ -800,6 +811,8 @@ export const GuardFlowTestMarkSchema = z
     blockedOn: z.string().optional(),
     /** A blocked flow: the same thing as its test's session explained it, in full. */
     blockedBy: z.string().optional(),
+    /** Names the documents have one way and the product another, which the test met. Absent when it met none. */
+    copyDrift: z.array(FlowTestCopyDriftSchema).optional(),
   })
   .strict()
 export type GuardFlowTestMark = z.infer<typeof GuardFlowTestMarkSchema>
@@ -812,6 +825,7 @@ export const GuardFlowTestViewSchema = z
     disagreement: FlowTestDisagreementSchema.optional(),
     blockedBy: z.string().optional(),
     blockedOn: z.string().optional(),
+    copyDrift: z.array(FlowTestCopyDriftSchema).optional(),
     spec: z.object({ file: z.string(), content: z.string() }).optional(),
     seed: z.object({ file: z.string(), content: z.string() }).optional(),
     run: FlowTestRunSchema.optional(),
@@ -894,8 +908,13 @@ export const GuardFlowListItemSchema = z
 export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
 
 /**
- * A flow's coverage status in the five words — the ONE derivation every flow
+ * A flow's coverage status in the six words — the ONE derivation every flow
  * list reads, so no two of them can disagree about a flow.
+ *
+ * PARTIALLY SUCCEEDED is a flow whose Playwright test passes and carries copy
+ * drift: it reached its end because its author used the product's name for a
+ * control the documents call something else. A FAILING test that met copy
+ * drift is Failed, as any failing test is: the drift is on its page.
  *
  * FAILED means a test ran and was contradicted (at birth or in a run): guard
  * commits failing tests, so a birth failure reaches the list as a `fail` surface
@@ -907,11 +926,15 @@ export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
  * generate is what clears it.
  */
 export function guardFlowPlainStatus(
-  flow: Pick<GuardFlowListItem, 'status' | 'bucket' | 'findings'>,
+  flow: Pick<GuardFlowListItem, 'status' | 'bucket' | 'findings'> & {
+    /** The flow's Playwright test, when it has one: its status and what it healed around. */
+    test?: Pick<GuardFlowTestMark, 'status' | 'copyDrift'>
+  },
 ): GuardCoveragePlainStatus {
   if (flow.findings > 0) return 'failed'
   if (flow.bucket === 'ungenerated') return 'blocked'
-  return guardCoveragePlainStatus(flow.status)
+  const word = guardCoveragePlainStatus(flow.status)
+  return word === 'succeeded' && flow.test?.status === 'passing' && flow.test.copyDrift?.length ? 'partially-succeeded' : word
 }
 
 /** Flow-tally for the list header — the buckets plus the corpus totals. */

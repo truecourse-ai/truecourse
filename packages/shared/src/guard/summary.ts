@@ -62,7 +62,7 @@ export interface GuardFlowsCoverageSummary {
   /** The gap labels behind the partial/blocked flows, most common first (top 3). */
   gapLabels: string[]
   /**
-   * The flows counted under the FIVE coverage words — the tally every user-facing
+   * The flows counted under the coverage words a flow wears — the tally every user-facing
    * surface renders. The buckets above are the manifest's own shape (how much of a
    * flow was realized); this is what a reader is told, and it is the same
    * derivation the dashboard's Flows list uses.

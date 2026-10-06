@@ -10,7 +10,7 @@
  *
  * Three rules run through it:
  *
- *   - A flow wears the ENGINE's five words ({@link guardFlowPlainStatus}'s), so
+ *   - A flow wears the ENGINE's words ({@link guardFlowPlainStatus}'s), so
  *     Home's number is the Flows page's number. A section wears the Documents
  *     view's ({@link CONTEXT_DOCUMENT_STATUS_OF_COVERAGE}, {@link
  *     worstContextStatus}), so an area reads the way its documents do.
@@ -173,7 +173,7 @@ function zeroFlows(): Record<HomeFlowStatus, number> {
 }
 
 /**
- * A tally over flow statuses, in the engine's five words. A status this build
+ * A tally over flow statuses, in the engine's words. A status this build
  * never learned is dropped rather than counted under a word it does not wear.
  */
 function flowTally(statuses: Iterable<HomeFlowStatus>): HomeFlowTally {
@@ -478,7 +478,7 @@ function homeFlowHref(flowId: string, repoId: string): string {
 /**
  * What the flows' own tests say, folded three ways: each failing test as a
  * finding, the blocked flows grouped by the thing they wait on, and each
- * document's flows counted under the five words, worst share first.
+ * document's flows counted under those words, worst share first.
  */
 export function composeHomeFlowFacts(
   input: Pick<HomeInput, 'repos'>,

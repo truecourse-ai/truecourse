@@ -5,10 +5,11 @@
  * statuses); everything a user READS about a status is derived here, so one state
  * can never wear two words:
  *
- *  - the FIVE WORDS of coverage ({@link GUARD_FLOW_STATUS_WORD}, owned by
- *    `@truecourse/shared`), Succeeded / Failed / Blocked / Not testable /
- *    Never run. Every section, flow, counter, filter and
- *    chip wears one of them and nothing else ({@link guardStatusWord});
+ *  - the WORDS of coverage ({@link GUARD_FLOW_STATUS_WORD}, owned by
+ *    `@truecourse/shared`), Succeeded / Partially succeeded / Failed / Blocked /
+ *    Not testable / Never run. Every section, flow, counter, filter and
+ *    chip wears one of them and nothing else ({@link guardStatusWord}).
+ *    Partially succeeded is a flow's alone: a section never wears it;
  *  - ONE SENTENCE table (the per-gap-kind copy behind {@link guardGapNeed}), what
  *    a state concretely NEEDS, in the words a user would use ("needs credentials
  *    and network access", "awaiting web driver", "no code path does this"), shown
@@ -54,7 +55,7 @@ import type {
 } from '@truecourse/shared';
 
 /**
- * A coverage state in plain words, the five, and the Flows-list filter domain.
+ * A coverage state in plain words, and the Flows-list filter domain.
  * The domain lives in `@truecourse/shared`; this alias is the client's local
  * name for it.
  */
@@ -222,7 +223,7 @@ export function guardStatusHint(status: GuardSectionCoverageStatus): string | un
   return vocab(status).hint;
 }
 
-/** A flow's plain status, one of the five, derived once in `@truecourse/shared`
+/** A flow's plain status, derived once in `@truecourse/shared`
  *  so the server's flow view and the Flows page can never disagree about a flow. */
 export const guardFlowPlainStatus = sharedFlowPlainStatus;
 
@@ -240,6 +241,7 @@ export const guardFlowPlainStatus = sharedFlowPlainStatus;
  */
 export const GUARD_TEST_VERDICT_WORD: Record<GuardFlowPlainStatus, string> = {
   succeeded: 'Passing',
+  'partially-succeeded': 'Passing',
   failed: 'Failing',
   blocked: GUARD_COVERAGE_STATUS_WORD.blocked,
   'not-testable': GUARD_COVERAGE_STATUS_WORD['not-testable'],

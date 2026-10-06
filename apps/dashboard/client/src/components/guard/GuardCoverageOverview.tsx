@@ -55,12 +55,13 @@ export interface Segment {
   fill: string;
 }
 
-/** The five coverage words in their own worst-first order, in the palette the
+/** The coverage words in their own worst-first order, in the palette the
  *  file comment describes. */
 const PLAIN_FILL: Record<GuardCoveragePlainStatus, string> = {
   failed: 'bg-red-500',
   blocked: 'bg-amber-500',
   'never-run': 'bg-sky-500',
+  'partially-succeeded': 'bg-lime-500',
   succeeded: 'bg-emerald-500',
   'not-testable': 'bg-slate-400',
 };

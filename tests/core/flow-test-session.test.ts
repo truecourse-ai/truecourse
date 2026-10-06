@@ -12,7 +12,7 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import type { FlowTestWorld } from '@truecourse/guard-runner'
-import type { FlowTestOutcome, FlowTestRecord, GuardFlow } from '@truecourse/shared'
+import type { FlowTestCopyDrift, FlowTestOutcome, FlowTestRecord, GuardFlow } from '@truecourse/shared'
 import { flowSeedPath, flowTestPath, flowTestsDir, worldDir, worldStatePath } from '@truecourse/shared/work-tree'
 import {
   flowTestBriefing,
@@ -109,7 +109,7 @@ function session(opts: { verdict?: Verdict; prior?: FlowTestPrior } = {}) {
     state,
     judge,
     briefing: () => flowTestBriefing(input),
-    review: () => tool('review_test').execute({}, ctx as never),
+    review: (args: { copyDrift?: FlowTestCopyDrift[] } = {}) => tool('review_test').execute(args, ctx as never),
     give: (outcome: FlowTestOutcome) => Promise.resolve(def.validateOutcome?.(outcome, { wrappingUp: false })),
   }
 }
@@ -229,6 +229,51 @@ describe('the flow-test session gate', () => {
 
     fs.rmSync(flowSeedPath(root, FLOW.id))
     expect(await s.give(BLOCKED)).toBeUndefined()
+  })
+})
+
+describe('copy drift', () => {
+  const drift: FlowTestCopyDrift[] = [{ step: 2, documented: 'Export', observed: 'Invoices' }]
+
+  it('is read by the judge as declared, and an outcome stands only on the list the judge was given', async () => {
+    write({ spec: specOf('heading'), seed: GOOD_SEED })
+    const s = session()
+
+    expect((await s.review({ copyDrift: drift })).content).toContain('FAITHFUL')
+    expect(s.judge.briefings[0]).toContain('- step 2: the document says "Export", the product has "Invoices"')
+
+    // The verdict was given knowing that list. An outcome that reports none has no verdict.
+    expect(await s.give(PASSING)).toContain('`review_test` has not accepted')
+    expect(await s.give({ ...PASSING, copyDrift: drift })).toBeUndefined()
+    expect(s.state.judged(drift)).toBe(flowTestJudgeKey({ steps: STEPS, spec: specOf('heading'), seed: GOOD_SEED, copyDrift: drift }))
+    expect(s.state.judged()).toBeUndefined()
+    expect(s.judge.asked).toBe(1)
+  }, 120_000)
+
+  it('is refused on a step the flow does not have, before the judge is asked', async () => {
+    write({ spec: specOf('heading'), seed: GOOD_SEED })
+    const s = session()
+    const stray: FlowTestCopyDrift[] = [{ step: 3, documented: 'Export', observed: 'Download' }]
+
+    const reviewed = await s.review({ copyDrift: stray })
+    expect(reviewed.isError).toBe(true)
+    expect(reviewed.content).toContain('`copyDrift` names step 3')
+    expect(s.judge.asked).toBe(0)
+    expect(await s.give({ ...PASSING, copyDrift: stray })).toContain('`copyDrift` names step 3')
+  })
+
+  it('keys a verdict only when there is some, in whatever order it is given', () => {
+    const files = { steps: STEPS, spec: specOf('heading'), seed: GOOD_SEED }
+    const two: FlowTestCopyDrift[] = [...drift, { step: 1, documented: 'Bills', observed: 'Invoices' }]
+
+    expect(flowTestJudgeKey({ ...files, copyDrift: [] })).toBe(flowTestJudgeKey(files))
+    expect(flowTestJudgeKey({ ...files, copyDrift: drift })).not.toBe(flowTestJudgeKey(files))
+    expect(flowTestJudgeKey({ ...files, copyDrift: two })).toBe(flowTestJudgeKey({ ...files, copyDrift: [...two].reverse() }))
+  })
+
+  it('is handed to a session opened on the test again', () => {
+    const prior: FlowTestPrior = { reason: 'moved', record: record('passing', { copyDrift: drift }), spec: specOf('heading'), seed: GOOD_SEED }
+    expect(session({ prior }).briefing()).toContain('- step 2: the document says "Export", the product has "Invoices"')
   })
 })
 

@@ -60,12 +60,13 @@ import { useOnboarding } from '@/dashboard/shell/use-onboarding';
 import { FLOWS_BASE, flowsStatusHref } from './flow-hrefs';
 
 /**
- * The fills the five states wear: green, red, amber, grey, blue. ONE colour per
+ * The fills the states wear: green, lime, red, amber, grey, blue. ONE colour per
  * state under both vocabularies — a flow's Succeeded and a section's Proved are
  * the same green, because they are the same state counted in two units.
  */
 const FLOW_FILL: Record<HomeFlowStatus, { fill: string; dot: string }> = {
   succeeded: { fill: 'fill-emerald-500', dot: 'bg-emerald-500' },
+  'partially-succeeded': { fill: 'fill-lime-500', dot: 'bg-lime-500' },
   failed: { fill: 'fill-red-500', dot: 'bg-red-500' },
   blocked: { fill: 'fill-amber-500', dot: 'bg-amber-500' },
   'not-testable': { fill: 'fill-slate-400', dot: 'bg-slate-400' },
@@ -73,7 +74,7 @@ const FLOW_FILL: Record<HomeFlowStatus, { fill: string; dot: string }> = {
 };
 
 /** Bottom first: what is proved is the ground, the worst news sits on top. */
-const STACK: HomeFlowStatus[] = ['succeeded', 'never-run', 'not-testable', 'blocked', 'failed'];
+const STACK: HomeFlowStatus[] = ['succeeded', 'partially-succeeded', 'never-run', 'not-testable', 'blocked', 'failed'];
 
 const SERIES: StackedSeries<HomeFlowStatus>[] = STACK.map((status) => ({
   key: status,
@@ -310,8 +311,10 @@ function Dashboard({ signal }: { signal: number }) {
     );
   }
 
-  const provenShare =
-    today && today.total > 0 ? Math.round((today.byStatus.succeeded / today.total) * 100) : 0;
+  // A partially succeeded flow proved what its documents promise, under another
+  // name for a control, so the headline counts it as succeeded.
+  const proven = today ? today.byStatus.succeeded + today.byStatus['partially-succeeded'] : 0;
+  const provenShare = today && today.total > 0 ? Math.round((proven / today.total) * 100) : 0;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -323,14 +326,14 @@ function Dashboard({ signal }: { signal: number }) {
             it. */}
         {today && (
           <div
-            className={`grid grid-cols-2 border-b border-border sm:grid-cols-3 ${showBlocked ? 'lg:grid-cols-6' : 'lg:grid-cols-5'} [&>*]:border-b [&>*]:border-r [&>*]:border-border lg:[&>*]:border-b-0 [&>*:nth-child(2n)]:border-r-0 sm:[&>*:nth-child(2n)]:border-r sm:[&>*:nth-child(3n)]:border-r-0 lg:[&>*:nth-child(3n)]:border-r lg:[&>*:last-child]:border-r-0`}
+            className={`grid grid-cols-2 border-b border-border sm:grid-cols-3 ${showBlocked ? 'lg:grid-cols-7' : 'lg:grid-cols-6'} [&>*]:border-b [&>*]:border-r [&>*]:border-border lg:[&>*]:border-b-0 [&>*:nth-child(2n)]:border-r-0 sm:[&>*:nth-child(2n)]:border-r sm:[&>*:nth-child(3n)]:border-r-0 lg:[&>*:nth-child(3n)]:border-r lg:[&>*:last-child]:border-r-0`}
             role="list"
             aria-label="Today"
           >
             <div role="listitem" className="bg-background px-6 py-4">
               <span className="block text-2xl font-semibold tabular-nums text-foreground">{provenShare}%</span>
               <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                {`${today.byStatus.succeeded} of ${today.total} ${today.total === 1 ? 'flow' : 'flows'} succeeded${showBlocked ? '' : ', excluding blocked'}`}
+                {`${proven} of ${today.total} ${today.total === 1 ? 'flow' : 'flows'} succeeded${showBlocked ? '' : ', excluding blocked'}`}
               </span>
             </div>
             {HOME_FLOW_STATUS_ORDER.filter((status) => showBlocked || status !== 'blocked').map((status) => (

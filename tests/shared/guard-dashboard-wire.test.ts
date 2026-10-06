@@ -78,16 +78,18 @@ describe('coverage status precedence', () => {
 });
 
 /**
- * THE FIVE WORDS. Every user-facing coverage status — a doc section, a flow, an
- * overview counter, a filter, a chip — is one of Succeeded / Failed / Blocked /
- * Not testable / Never run, on the CLI and in the dashboard alike.
+ * THE SIX WORDS. Every user-facing coverage status — a doc section, a flow, an
+ * overview counter, a filter, a chip — is one of Succeeded / Partially
+ * succeeded / Failed / Blocked / Not testable / Never run, on the CLI and in
+ * the dashboard alike. Partially succeeded is a flow's alone.
  */
-describe('the five-word coverage vocabulary', () => {
-  it('offers exactly five words, worst-first', () => {
+describe('the coverage vocabulary', () => {
+  it('offers exactly six words, worst-first', () => {
     expect([...GUARD_COVERAGE_PLAIN_ORDER]).toEqual([
       'failed',
       'blocked',
       'never-run',
+      'partially-succeeded',
       'succeeded',
       'not-testable',
     ]);
@@ -96,6 +98,7 @@ describe('the five-word coverage vocabulary', () => {
       'Failed',
       'Never run',
       'Not testable',
+      'Partially succeeded',
       'Succeeded',
     ]);
   });

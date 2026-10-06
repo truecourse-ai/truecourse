@@ -265,6 +265,27 @@ describe('Flows, the index', () => {
     expect(within(within(succeeded).getByText('Open an expense').closest('tr')!).getByText('Seeded')).toBeInTheDocument();
   });
 
+  it('lists a flow whose test passed after healing around a renamed control as partially succeeded', async () => {
+    serve({
+      cliFlows: [
+        flow({ flowId: 'open-expense', title: 'Open an expense', test: { status: 'passing', seeded: true } }),
+        flow({
+          flowId: 'rename-expense',
+          title: 'Rename an expense',
+          test: { status: 'passing', seeded: true, copyDrift: [{ step: 1, documented: 'Update', observed: 'Edit details' }] },
+        }),
+      ],
+      webFlows: [],
+    });
+    renderAt('/flows');
+
+    const partial = await screen.findByRole('table', { name: 'Partially succeeded flows' });
+    expect(within(partial).getByText('Rename an expense')).toBeInTheDocument();
+    const succeeded = screen.getByRole('table', { name: 'Succeeded flows' });
+    expect(within(succeeded).getByText('Open an expense')).toBeInTheDocument();
+    expect(within(succeeded).queryByText('Rename an expense')).toBeNull();
+  });
+
   it('puts a filter picked through Add filter into the address', async () => {
     serve();
     renderAt('/flows');

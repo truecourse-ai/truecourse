@@ -234,7 +234,7 @@ describe('GET /api/home', () => {
     expect(page.period).toBe('30d');
     expect(page.today).toEqual({
       total: 0,
-      byStatus: { succeeded: 0, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
+      byStatus: { succeeded: 0, 'partially-succeeded': 0, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
     });
     expect(page.trend).toEqual([]);
     expect(page.areas).toEqual([]);
@@ -254,7 +254,7 @@ describe('GET /api/home', () => {
     // contributes nothing, rather than a row of never-run guesses.
     expect((await home()).today).toEqual({
       total: 2,
-      byStatus: { succeeded: 1, failed: 1, blocked: 0, 'not-testable': 0, 'never-run': 0 },
+      byStatus: { succeeded: 1, 'partially-succeeded': 0, failed: 1, blocked: 0, 'not-testable': 0, 'never-run': 0 },
     });
   });
 

@@ -13,19 +13,24 @@
  * `faithful` verdict on the files as they stand (`review_test` dispatches this
  * judge as a child), and a kept test is judged again whenever what the verdict
  * was given over has changed. That is the KEY: named inputs, hashed. The stage
- * version, the spec, the seed, and per step the claim title, the extracted
- * claim and the section text as quoted. A document edit that leaves the flow
- * itself alone still changes the key, so the kept test is read against the new
- * words.
+ * version, the spec, the seed, per step the claim title, the extracted claim
+ * and the section text as quoted, and the copy drift the author declared. A
+ * document edit that leaves the flow itself alone still changes the key, so
+ * the kept test is read against the new words.
  *
  * For a `failing` test the judge reads the failing assertion against the
  * document: that assertion is the finding a person will read.
+ *
+ * COPY DRIFT is declared to the judge, not discovered by it. A step that uses
+ * a name the product has where the document has another is faithful only under
+ * a declaration of exactly that, and the judge holds every declaration to
+ * being a name and nothing the product does or says back.
  */
 
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { defineSessionKind, type SessionBudget, type SessionDef, type SessionOutcome } from '@truecourse/agent-loop';
-import type { FlowTestStep as FlowTestStepRun, GuardFlow } from '@truecourse/shared';
+import { orderCopyDrift, type FlowTestCopyDrift, type FlowTestStep as FlowTestStepRun, type GuardFlow } from '@truecourse/shared';
 import { describeSessionFailure } from '../guard-setup/session-context.js';
 import { flowStepQuotes, quotedSection, type FlowTestStep } from './flow-test-steps.js';
 
@@ -107,17 +112,23 @@ export interface FlowTestFidelityInput {
   spec: string;
   /** The seed's source, for a test that has one. */
   seed?: string;
+  /** The copy drift the author declared for these files. */
+  copyDrift?: readonly FlowTestCopyDrift[];
   /** The engine's last run of these files: how it ended, and how each step went. */
   run: { outcome: 'pass' | 'fail'; steps: readonly FlowTestStepRun[]; error?: string };
 }
 
 /**
  * The key a verdict is given under. Named inputs: the stage version, the spec,
- * the seed, and per step the claim title, the extracted claim and the section
- * text as quoted. How the last run went is not one of them: it is what the
- * files do, and the files are.
+ * the seed, per step the claim title, the extracted claim and the section text
+ * as quoted, and the declared copy drift. How the last run went is not one of
+ * them: it is what the files do, and the files are.
+ *
+ * The copy drift is folded only when there is some, in the one order it is
+ * stored in, so declaring none and having none to declare are the same key.
  */
-export function flowTestJudgeKey(input: Pick<FlowTestFidelityInput, 'steps' | 'spec' | 'seed'>): string {
+export function flowTestJudgeKey(input: Pick<FlowTestFidelityInput, 'steps' | 'spec' | 'seed' | 'copyDrift'>): string {
+  const drift = orderCopyDrift(input.copyDrift ?? []).map((d) => [d.step, d.documented, d.observed]);
   return createHash('sha256')
     .update(
       JSON.stringify([
@@ -125,9 +136,15 @@ export function flowTestJudgeKey(input: Pick<FlowTestFidelityInput, 'steps' | 's
         input.spec,
         input.seed ?? null,
         input.steps.map((step) => [step.order, step.claimTitle, step.claim ?? null, quotedSection(step) ?? null]),
+        ...(drift.length > 0 ? [drift] : []),
       ]),
     )
     .digest('hex');
+}
+
+/** One declared copy drift as a briefing says it. */
+export function copyDriftLine(drift: FlowTestCopyDrift): string {
+  return `step ${drift.step}: the document says ${JSON.stringify(drift.documented)}, the product has ${JSON.stringify(drift.observed)}`;
 }
 
 export function flowTestFidelityDef(input: Pick<FlowTestFidelityInput, 'steps'>): SessionDef<FlowTestFidelityOutcome> {
@@ -161,6 +178,13 @@ export function flowTestFidelityBriefing(input: FlowTestFidelityInput): string {
     'The steps, in order. Each is something the documents say the product does:',
     '',
     ...flowStepQuotes(input.steps),
+    ...(input.copyDrift?.length
+      ? [
+          "Copy drift the author declared. Each is a control or a place the document names one way and the product another, and the spec uses the product's name for it:",
+          ...orderCopyDrift(input.copyDrift).map((drift) => `- ${copyDriftLine(drift)}`),
+        ]
+      : ['The author declared no copy drift.']),
+    '',
     'The spec:',
     '```ts',
     input.spec.trimEnd(),
@@ -223,12 +247,21 @@ And for the seed, when there is one: it creates what the flow STARTS from and no
 
 Be strict about assertions that cannot fail and lenient about everything else. A flag sends the author back to work, or costs the flow its test: flag what a careful reviewer would refuse to merge, and say exactly what is not observed.
 
+# Copy drift
+
+A document names the things a person uses: a button, a menu item, a link, a tab, a field, a heading, a page. Products rename these without changing what they do, and documents fall behind. The author is told to use the product's name for such a thing, go on to what the step is about, and DECLARE the difference. The briefing lists what was declared.
+
+- A declared name is not a mismatch. Where the document says "Update" and the declaration says the product has "Edit details", a step that finds, uses and asserts that control as "Edit details" observes what the document describes. This holds even when the claim is that the thing is there: it is there, under the product's name.
+- Hold every declaration to what it may cover: the NAME of a control or a place. Flag the step when a declaration stands in for something the product does or says back (a message, an error text or code, a status, a value, a count, a URL, the order of things), when the step no longer asserts what its claim says the product does once the name is set aside, or when the spec does not use the declared name in that step at all.
+- A step that asserts a name other than the document's with NO declaration for it is a mismatch like any other: say which name, so the author can declare it or fix it.
+
 # A failing test
 
 When the last run FAILED, the test is kept as a FINDING: the claim is that the product does something other than what its documents say. A person will read that finding and act on it. So judge the failing step hardest:
 
 - The assertion that failed must be one the DOCUMENT calls for. Read the quoted section. If the document does not promise what the assertion demands (the test expects a button label, a message or a behaviour the section never states), the finding is the test's invention: flag that step.
 - The failure must be the assertion's. An error that is the test not finding its way (a locator that matches nothing on the way to the assertion, a navigation that timed out, a step that never reached its \`expect\`) is not a disagreement between product and document: flag that step.
+- A declared copy drift never explains a failure. The assertion that failed is still one the document calls for, about what the product does.
 - Steps after the failing one were not reached. Judge them from the code alone.
 
 # The outcome

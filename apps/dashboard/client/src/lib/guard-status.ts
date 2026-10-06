@@ -16,11 +16,14 @@
  * + pill variants. All colours are opacity-based so they read in both light and
  * dark themes, matching the Spec conflict-band idiom (`border-<c>-500 bg-<c>-500/10`).
  *
- * FIVE COLOURS, and only these five:
+ * SIX COLOURS, and only these six:
  *
  *   RED    something is wrong and someone must fix it, `fail`, `error`, and
  *          `authoring-error` (our engine failing to do its job);
  *   GREEN  proven, `pass`;
+ *   LIME   a flow that is Partially succeeded: proven, after its test healed
+ *          around a control the documents name differently. No wire status
+ *          wears it;
  *   AMBER  the Blocked tier a user can clear (`blocked`, `needs-setup`,
  *          `blocked-on`, `no-interface`, `unguarded`): a to-do, never a failure,
  *          and the same amber every blocked thing wears wherever it is read;
@@ -183,8 +186,19 @@ export function guardStatusMeta(status: GuardSectionCoverageStatus): GuardStatus
   return GUARD_STATUS_META[status];
 }
 
+/**
+ * Partially succeeded: proven, after healing around something a reader should
+ * fix beside it. Lime, between proven green and blocked amber. Only a flow
+ * wears it, so there is no wire status to borrow its paint from.
+ */
+const PARTIAL_COLOUR: GuardStatusColour = {
+  band: 'border-lime-500/50 bg-lime-500/[0.07]',
+  dot: 'bg-lime-500',
+  badge: 'bg-lime-500/15 text-lime-700 dark:text-lime-400',
+};
+
 /** The coverage status each plain status borrows its colour from. */
-const BADGE_SOURCE: Record<GuardFlowPlainStatus, GuardSectionCoverageStatus> = {
+const BADGE_SOURCE: Record<Exclude<GuardFlowPlainStatus, 'partially-succeeded'>, GuardSectionCoverageStatus> = {
   failed: 'fail',
   blocked: 'blocked-on',
   'not-testable': 'untestable',
@@ -192,14 +206,17 @@ const BADGE_SOURCE: Record<GuardFlowPlainStatus, GuardSectionCoverageStatus> = {
   succeeded: 'pass',
 };
 
-/** Pill classes for a plain status, the shared status colours, never a new set. */
+const plainColour = (status: GuardFlowPlainStatus): GuardStatusColour =>
+  status === 'partially-succeeded' ? PARTIAL_COLOUR : GUARD_STATUS_META[BADGE_SOURCE[status]];
+
+/** Pill classes for a plain status, the shared status colours. */
 export function guardFlowStatusBadge(status: GuardFlowPlainStatus): string {
-  return GUARD_STATUS_META[BADGE_SOURCE[status]].badge;
+  return plainColour(status).badge;
 }
 
 /** Dot colour for a plain status, the status idiom's carrier (dot + plain word). */
 export function guardFlowStatusDot(status: GuardFlowPlainStatus): string {
-  return GUARD_STATUS_META[BADGE_SOURCE[status]].dot;
+  return plainColour(status).dot;
 }
 
 /** The `border-l-4 …` wrapper classes for a section's band. */

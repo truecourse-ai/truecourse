@@ -380,15 +380,17 @@ export const CONTEXT_DOCUMENT_STATUS_WORD: Record<ContextDocumentStatus, string>
 };
 
 /**
- * The engine's five coverage words in the product owner's five. One map, so a
+ * The engine's coverage words in the product owner's five. One map, so a
  * document's row and the coverage page it opens can never disagree about what
- * the same section statuses mean.
+ * the same section statuses mean. A flow that succeeded after healing around a
+ * renamed control still proves what its document says.
  */
 export const CONTEXT_DOCUMENT_STATUS_OF_COVERAGE: Record<
   GuardCoveragePlainStatus,
   ContextDocumentStatus
 > = {
   succeeded: 'proved',
+  'partially-succeeded': 'proved',
   failed: 'failed',
   blocked: 'blocked',
   'never-run': 'not-run',

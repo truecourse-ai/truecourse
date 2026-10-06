@@ -28,6 +28,12 @@ describe('compareFlows', () => {
     ['succeeded', 'blocked', 'newly-blocked'],
     ['blocked', 'blocked', 'unchanged'],
     ['succeeded', 'succeeded', 'unchanged'],
+    // Partially succeeded is proven: a renamed control moves nothing, and it counts wherever succeeded does.
+    ['succeeded', 'partially-succeeded', 'unchanged'],
+    ['failed', 'partially-succeeded', 'fixed'],
+    ['partially-succeeded', 'blocked', 'newly-blocked'],
+    ['blocked', 'partially-succeeded', 'newly-covered'],
+    ['partially-succeeded', 'failed', 'new-failure'],
     // Coverage the head gained: a flow that could not run, or had no scenario, now passes.
     ['never-run', 'succeeded', 'newly-covered'],
     ['blocked', 'succeeded', 'newly-covered'],

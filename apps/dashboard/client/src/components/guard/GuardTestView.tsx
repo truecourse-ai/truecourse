@@ -993,6 +993,7 @@ const VERDICT_TONE: Record<
 > = {
   failed: { dot: "bg-red-500", border: "border-red-500/35" },
   succeeded: { dot: "bg-emerald-500", border: "border-emerald-500/35" },
+  "partially-succeeded": { dot: "bg-lime-500", border: "border-lime-500/35" },
   blocked: { dot: "bg-amber-500", border: "border-amber-500/35" },
   "never-run": { dot: "bg-sky-500", border: "border-sky-500/35" },
   "not-testable": { dot: "bg-slate-400", border: "border-border" },
