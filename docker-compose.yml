@@ -17,6 +17,11 @@ services:
   db:
     image: postgres:16
     restart: unless-stopped
+    # An init as PID 1, so the postmaster is not the one adopting orphans. When
+    # the healthcheck below times out Docker kills its shell, and the orphaned
+    # pg_isready then exits 2 ("no response"); a postmaster that reaps that
+    # takes it for a crashed backend and drops every connection to recover.
+    init: true
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-truecourse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-truecourse}
