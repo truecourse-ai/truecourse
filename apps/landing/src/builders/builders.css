@@ -1186,60 +1186,6 @@ section.band:has(.bs-ask) {
 .bs-backing.large img {
   height: 24px;
 }
-.bs-waitlist {
-  max-width: 460px;
-  margin: 30px auto 0;
-  text-align: left;
-}
-.bs-waitlist label {
-  display: block;
-  font-size: 14px;
-  color: var(--fg-dim);
-  margin-bottom: 8px;
-  text-align: center;
-}
-.bs-waitlist-row {
-  display: flex;
-  gap: 8px;
-}
-.bs-waitlist input {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 46px;
-  padding-inline: 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--line-strong);
-  background: #fff;
-  font: inherit;
-  font-size: 15px;
-  color: var(--fg);
-}
-.bs-waitlist input:focus {
-  outline: 2px solid var(--accent-line);
-  outline-offset: 1px;
-}
-.bs-waitlist .btn {
-  justify-content: center;
-}
-.bs-waitlist .btn[disabled] {
-  opacity: 0.6;
-  cursor: default;
-}
-.bs-waitlist-done,
-.bs-waitlist-failed {
-  margin: 14px 0 0;
-  font-size: 14.5px;
-  color: var(--fg-dim);
-  text-align: center;
-}
-.bs-waitlist-failed a {
-  text-decoration: underline;
-}
-@media (max-width: 480px) {
-  .bs-waitlist-row {
-    flex-direction: column;
-  }
-}
 
 /* ---------- the AI CTO by text ---------- */
 .bs-text-row {
