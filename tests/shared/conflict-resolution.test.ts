@@ -185,17 +185,17 @@ describe('conflict resolutions — matching, verdicts, claim suppression', () =>
 
   it('suppressedClaims names the LOSER’s quote for a side verdict', () => {
     expect(suppressedClaims(corpus([RM]), { conflictResolutions: [pickReadme] })).toEqual([
-      { doc: SPEC, anchor: 'rm <id>', quote: 'rm archives the task, keeping history.' },
+      { doc: SPEC, anchor: 'rm <id>', quote: 'rm archives the task, keeping history.', sentence: rmSides[1]!.sentence },
     ]);
     expect(suppressedClaims(corpus([RM]), { conflictResolutions: [{ ...pickReadme, verdict: 'b' }] })).toEqual([
-      { doc: README, anchor: 'taskline', quote: 'rm permanently deletes the task.' },
+      { doc: README, anchor: 'taskline', quote: 'rm permanently deletes the task.', sentence: rmSides[0]!.sentence },
     ]);
   });
 
   it('suppresses the words and heading the CURRENT scan carries, not the ones the verdict recorded', () => {
     const rescanned = corpus([{ ...RM, sections: [rmSides[0]!, { ...rmSides[1]!, heading: 'Removing', quote: 'rm archives the task, keeping' }] }]);
     expect(suppressedClaims(rescanned, { conflictResolutions: [pickReadme] })).toEqual([
-      { doc: SPEC, anchor: 'Removing', quote: 'rm archives the task, keeping' },
+      { doc: SPEC, anchor: 'Removing', quote: 'rm archives the task, keeping', sentence: rmSides[1]!.sentence },
     ]);
   });
 
@@ -358,9 +358,9 @@ describe('a contradiction inside one document', () => {
 
   it('suppresses the losing sentence, never the winning one on the same doc, whatever order the next scan lists them in', () => {
     const a = verdictOn([press, motion], DOC, DOC, 'a');
-    expect(suppressedClaims(inside(), { conflictResolutions: [a] })).toEqual([{ doc: DOC, anchor: 'Motion', quote: motion.quote }]);
-    expect(suppressedClaims(inside(), { conflictResolutions: [{ ...a, verdict: 'b' }] })).toEqual([{ doc: DOC, anchor: 'Buttons', quote: press.quote }]);
-    expect(suppressedClaims(inside([motion, press]), { conflictResolutions: [a] })).toEqual([{ doc: DOC, anchor: 'Motion', quote: motion.quote }]);
+    expect(suppressedClaims(inside(), { conflictResolutions: [a] })).toEqual([{ doc: DOC, anchor: 'Motion', quote: motion.quote, sentence: motion.sentence }]);
+    expect(suppressedClaims(inside(), { conflictResolutions: [{ ...a, verdict: 'b' }] })).toEqual([{ doc: DOC, anchor: 'Buttons', quote: press.quote, sentence: press.sentence }]);
+    expect(suppressedClaims(inside([motion, press]), { conflictResolutions: [a] })).toEqual([{ doc: DOC, anchor: 'Motion', quote: motion.quote, sentence: motion.sentence }]);
   });
 
   it('under one heading, two sentences are two sides, and two repeats of one text are too', () => {
@@ -368,7 +368,7 @@ describe('a contradiction inside one document', () => {
     const second = at(DOC, 'Providers', 'Run the Test step to check the provider.');
     const pickFirst = verdictOn([first, second], DOC, DOC, 'a');
     expect(suppressedClaims(inside([second, first]), { conflictResolutions: [pickFirst] })).toEqual([
-      { doc: DOC, anchor: 'Providers', quote: second.quote },
+      { doc: DOC, anchor: 'Providers', quote: second.quote, sentence: second.sentence },
     ]);
     const once = at(DOC, 'Status', 'Returns 200.');
     const twice = at(DOC, 'Errors', 'Returns 200.', 1);
@@ -445,8 +445,8 @@ describe('several conflicts between the same two sections', () => {
   it('suppresses the losing quote of the conflict each verdict is on, never another point on the same sections', () => {
     const decisions = { conflictResolutions: [verdictOn(pageSize, API, APP, 'a'), verdictOn(emptyText, API, APP, 'b')] };
     expect(suppressedClaims(corpusOf(POINTS), decisions)).toEqual([
-      { doc: APP, anchor: 'Expense list', quote: pageSize[1]!.quote },
-      { doc: API, anchor: 'Expense list', quote: emptyText[0]!.quote },
+      { doc: APP, anchor: 'Expense list', quote: pageSize[1]!.quote, sentence: pageSize[1]!.sentence },
+      { doc: API, anchor: 'Expense list', quote: emptyText[0]!.quote, sentence: emptyText[0]!.sentence },
     ]);
   });
 });

@@ -32,6 +32,8 @@ import {
   decisionsPath,
   type CuratedCorpus,
 } from '../../packages/spec-consolidator/src/index.js';
+import { specClaimsFilePath } from '@truecourse/shared/work-tree';
+import type { ClaimsFile } from '@truecourse/shared';
 import { materializeStoredSpec } from '../../apps/dashboard/server/src/jobs/materialize-spec';
 import {
   readStoredRepoDoc,
@@ -87,6 +89,7 @@ async function seed(): Promise<void> {
     removed: [],
   });
   await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'corpus', corpus());
+  await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'claims', claims());
   await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'decisions', {
     version: 2,
     manualIncludes: [ref(SRC_A, 'docs/one.md')],
@@ -124,6 +127,20 @@ function corpus(): CuratedCorpus {
   };
 }
 
+/** One claim per document, so the slice's claims are told apart from the rest. */
+function claims(): ClaimsFile {
+  const claim = (doc: string) => ({
+    id: `claim::${doc}::x`,
+    doc,
+    sentences: ['s-one'],
+    subject: 'the doc',
+    statement: `${doc} states one thing.`,
+    areas: ['p/c'],
+    testable: true as const,
+  });
+  return { version: 1, generatedAt: '2026-01-01T00:00:00Z', claims: [claim(ref(SRC_A, 'docs/one.md')), claim(ref(SRC_B, 'site.md'))] };
+}
+
 const readJson = (file: string): unknown => JSON.parse(fs.readFileSync(file, 'utf-8'));
 
 describe('materializeStoredSpec', () => {
@@ -137,6 +154,8 @@ describe('materializeStoredSpec', () => {
 
     const written = readJson(corpusFilePath(tree)) as CuratedCorpus;
     expect(written.docs.map((d) => d.ref)).toEqual([ref(SRC_A, 'docs/one.md')]);
+    // The slice's claims travel with it, and only its own.
+    expect((readJson(specClaimsFilePath(tree)) as ClaimsFile).claims.map((c) => c.doc)).toEqual([ref(SRC_A, 'docs/one.md')]);
     // The bodies go in at their refs, so every stage reads them by the ref the
     // corpus names.
     expect(fs.readFileSync(path.join(tree, 'context', SRC_A, 'docs', 'one.md'), 'utf-8')).toBe('# One\n');
@@ -174,6 +193,7 @@ describe('materializeStoredSpec', () => {
       documents: 0,
     });
     expect((readJson(corpusFilePath(tree)) as CuratedCorpus).docs).toEqual([]);
+    expect((readJson(specClaimsFilePath(tree)) as ClaimsFile).claims).toEqual([]);
     expect(fs.existsSync(path.join(tree, 'context'))).toBe(false);
   });
 

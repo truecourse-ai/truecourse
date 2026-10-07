@@ -62,6 +62,9 @@ export {
   type SectionInput,
 } from './section-plan.js'
 
+export { readSpecClaims, placeClaims, docTreesOf } from './claims-input.js'
+export type { PlacedClaim, ClaimPlacement } from './claims-input.js'
+
 export {
   matchFlow,
   matchProviderControls,
