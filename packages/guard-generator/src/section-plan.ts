@@ -392,7 +392,7 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   const hasUniverse = hasGuardUniverse(repoRoot)
   const { indexes } = indexRepoDocs(repoRoot, [])
   const areaTags = readCorpusAreaTags(repoRoot)
-  // Section-scoped conflict verdicts: losing doc → stale quotes. A section carrying a
+  // Conflict verdicts: losing doc → stale quotes. A section carrying a
   // suppressed quote gets a non-empty suppressionFingerprint, which re-keys ONLY that
   // section (unaffected sections stay byte-identical).
   const suppressionIndex = readSuppressionIndex(repoRoot)

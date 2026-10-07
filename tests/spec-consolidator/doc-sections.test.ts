@@ -1,14 +1,14 @@
 /**
- * The SECTION MACHINERY of the retired overlap verifier.
+ * The SECTION MACHINERY of the retired conflict verifier.
  *
  * The precision one-shot itself is gone — `verifyFlaggedOverlaps` /
  * `buildVerifyOverlapUserPrompt` and the per-flag verdict cache went with it,
- * because the `spec-scan.overlap` session now flags AND adjudicates in one pass
+ * because the `spec-scan.conflict` session now flags AND adjudicates in one pass
  * (its confirm/refute strictness, its four-action resolution brief and the
- * auto-apply stakes are pinned in `tests/core/spec-scan-overlap.test.ts`).
+ * auto-apply stakes are pinned in `tests/core/spec-scan-conflict.test.ts`).
  *
  * What stayed is deterministic and load-bearing for that session:
- * - {@link headingOutline} is how the overlap BRIEFING shows every doc (outlines,
+ * - {@link headingOutline} is how the conflict BRIEFING shows every doc (outlines,
  *   never bodies) and what an errored `read_section` hands back;
  * - {@link leadText} / {@link sectionText} are exactly what `read_section`
  *   answers with — the lead for a `null` pointer, a heading's section (its

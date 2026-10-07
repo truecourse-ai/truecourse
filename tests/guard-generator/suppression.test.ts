@@ -36,12 +36,12 @@ function tempRepo(): string {
 
 const QUOTE = 'rm archives the task, keeping history.'
 
-/** corpus.json flagging README ↔ SPEC's rm dispute, with per-side quotes. */
+/** corpus.json flagging README ↔ SPEC's rm conflict, with per-side quotes. */
 function writeCorpus(dir: string): void {
   fs.writeFileSync(
     path.join(dir, '.truecourse', 'specs', 'corpus.json'),
     JSON.stringify({
-      version: 3,
+      version: 5,
       generatedAt: '2026-01-01T00:00:00Z',
       docs: [
         { ref: 'README.md', kind: 'readme', lastTouched: '', areaTags: ['core/persistence'] },
@@ -53,13 +53,13 @@ function writeCorpus(dir: string): void {
           product: 'core',
           concern: 'persistence',
           docRefs: ['README.md', 'docs/SPEC.md'],
-          overlaps: [
+          conflicts: [
             {
               docs: ['README.md', 'docs/SPEC.md'],
               note: 'rm permanent vs archived',
               sections: [
-                { doc: 'README.md', heading: 'taskline', quote: 'rm permanently deletes the task.' },
-                { doc: 'docs/SPEC.md', heading: 'rm <id>', quote: QUOTE },
+                { doc: 'README.md', heading: 'taskline', quote: 'rm permanently deletes the task.', sentence: 's-readme' },
+                { doc: 'docs/SPEC.md', heading: 'rm <id>', quote: QUOTE, sentence: 's-spec' },
               ],
             },
           ],
@@ -116,34 +116,34 @@ describe('readSuppressionIndex', () => {
     writeCorpus(repo)
     // verdict 'a' → README right, SPEC's sentence stale.
     writeDecisions(repo, [
-      { docA: 'README.md', anchorA: 'taskline', quoteA: 'rm permanently deletes the task.', docB: 'docs/SPEC.md', anchorB: 'rm <id>', quoteB: QUOTE, verdict: 'a', resolvedAt: '' },
+      { docA: 'README.md', anchorA: 'taskline', quoteA: 'rm permanently deletes the task.', sentenceA: 's-readme', docB: 'docs/SPEC.md', anchorB: 'rm <id>', quoteB: QUOTE, sentenceB: 's-spec', verdict: 'a', resolvedAt: '' },
     ])
     expect(readSuppressionIndex(repo).get('docs/SPEC.md')).toEqual([QUOTE])
 
     writeDecisions(repo, [
-      { docA: 'README.md', anchorA: 'taskline', docB: 'docs/SPEC.md', anchorB: 'rm <id>', verdict: 'dismissed', resolvedAt: '' },
+      { docA: 'README.md', anchorA: 'taskline', sentenceA: 's-readme', docB: 'docs/SPEC.md', anchorB: 'rm <id>', sentenceB: 's-spec', verdict: 'dismissed', resolvedAt: '' },
     ])
     expect(readSuppressionIndex(repo).size).toBe(0)
   })
 
-  it('keeps the passages that tell two conflicts on the same two sections apart, and suppresses only the verdict’s own loser', () => {
+  it('keeps the sentences that tell two conflicts on the same two sections apart, and suppresses only the verdict’s own loser', () => {
     repo = tempRepo()
     const sections = (readme: string, spec: string) => [
-      { doc: 'README.md', heading: 'taskline', quote: readme, passage: `p-${readme.length}` },
-      { doc: 'docs/SPEC.md', heading: 'rm <id>', quote: spec, passage: `p-${spec.length}` },
+      { doc: 'README.md', heading: 'taskline', quote: readme, sentence: `p-${readme.length}` },
+      { doc: 'docs/SPEC.md', heading: 'rm <id>', quote: spec, sentence: `p-${spec.length}` },
     ]
     const archived = sections('rm permanently deletes the task.', QUOTE)
     const restore = sections('A removed task cannot be restored.', 'An archived task can be restored with undo.')
     fs.writeFileSync(
       path.join(repo, '.truecourse', 'specs', 'corpus.json'),
       JSON.stringify({
-        version: 3,
+        version: 5,
         generatedAt: '2026-01-01T00:00:00Z',
         docs: [],
         areas: [
           {
             id: 'core/persistence',
-            overlaps: [
+            conflicts: [
               { docs: ['README.md', 'docs/SPEC.md'], note: 'rm permanent vs archived', sections: archived },
               { docs: ['README.md', 'docs/SPEC.md'], note: 'restore', sections: restore },
             ],
@@ -156,10 +156,10 @@ describe('readSuppressionIndex', () => {
       {
         docA: 'README.md',
         anchorA: 'taskline',
-        passageA: restore[0]!.passage,
+        sentenceA: restore[0]!.sentence,
         docB: 'docs/SPEC.md',
         anchorB: 'rm <id>',
-        passageB: restore[1]!.passage,
+        sentenceB: restore[1]!.sentence,
         verdict: 'a',
         resolvedAt: '',
       },
@@ -223,7 +223,7 @@ describe('a side verdict re-keys the losing section', () => {
     // every flow binding it: those flows re-author with the stale claim suppressed,
     // while README's stay a no-op.
     writeDecisions(repo, [
-      { docA: 'README.md', anchorA: 'taskline', quoteA: 'rm permanently deletes the task.', docB: 'docs/SPEC.md', anchorB: 'rm <id>', quoteB: QUOTE, verdict: 'a', resolvedAt: '' },
+      { docA: 'README.md', anchorA: 'taskline', quoteA: 'rm permanently deletes the task.', sentenceA: 's-readme', docB: 'docs/SPEC.md', anchorB: 'rm <id>', quoteB: QUOTE, sentenceB: 's-spec', verdict: 'a', resolvedAt: '' },
     ])
     const plan1 = planGuardWork(repo)
     expect(plan1.work).toHaveLength(0) // no document changed on disk

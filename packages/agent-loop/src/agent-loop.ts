@@ -131,7 +131,7 @@ export function runAgentLoop<TOutcome>(input: AgentLoopInput<TOutcome>): AgentLo
 
 /**
  * BUDGET VISIBILITY + THE WRAP-UP WINDOW (decision 2026-08-21, from the first
- * documenso field run: 12 of 26 overlap sessions read to the wall and lost
+ * documenso field run: 12 of 26 conflicts sessions read to the wall and lost
  * everything — silent grants give a session no way to pace itself, and a
  * budget-exhausted failure that discards 45 turns of reading is not the "real
  * result" promised). Two mechanics, both shell-owned:

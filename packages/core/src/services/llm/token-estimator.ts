@@ -28,7 +28,7 @@ export interface LlmEstimate {
     model: string;
     calls: number;
     estimatedTokens: number;
-    /** Set when call count is a range (e.g. scan's overlap pairs). */
+    /** Set when call count is a range (e.g. the scan's collision clusters). */
     callsRange?: { low: number; high: number };
     /**
      * Realistic (point) call count when the ceiling overstates the likely spend.
@@ -88,12 +88,12 @@ export interface StageCallEstimate {
   avgInputTokens: number;
   /** Average OUTPUT tokens per call. */
   avgOutputTokens: number;
-  /** When the call count is uncertain (e.g. overlap pairs), the low/high bounds. */
+  /** When the call count is uncertain (e.g. collision clusters), the low/high bounds. */
   minCalls?: number;
   maxCalls?: number;
   /**
    * Realistic (point) call count when the ceiling `maxCalls` overstates the likely
-   * spend — e.g. verify runs on only the flagged fraction of the overlap pairs.
+   * spend — e.g. a stage that runs on only a fraction of its candidates.
    * Drives the "expected" cost shown alongside the ceiling. Omit when `calls` is
    * already the realistic count (the stage renders unchanged).
    */

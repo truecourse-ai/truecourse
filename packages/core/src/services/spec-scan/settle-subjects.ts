@@ -136,7 +136,7 @@ export function planSubjectParts(names: readonly SubjectName[]): SubjectPart[] {
   const { parts } = partitionByAffinity(names, {
     maxSize: SETTLE_SUBJECTS_NAMES,
     text: (name) => name.name,
-    passage: (name) => name.key,
+    origin: (name) => name.key,
   })
   return parts
     .map((part, i) => ({ index: i + 1, parts: parts.length, total: names.length, names: part }))

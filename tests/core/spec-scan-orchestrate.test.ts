@@ -1,6 +1,6 @@
 /**
  * THE SCAN ORCHESTRATOR SESSION — `spec-scan.orchestrate`,
- * plus the decisions schema v2 it writes into.
+ * plus the decisions file it writes into.
  *
  * The rules under test:
  * - a COVERED universe spends ZERO sessions (the deterministic pre-pass);
@@ -45,7 +45,6 @@ import {
 import { buildScanUniverse } from '../../packages/core/src/services/spec-scan/tools'
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
-import { OVERLAP_SESSION_KIND } from '../../packages/core/src/services/spec-scan/overlap'
 import { curateInProcess, syncWorkspaceCorpusInProcess } from '../../packages/core/src/commands/spec-in-process'
 import {
   DecisionsFileSchema,
@@ -94,29 +93,10 @@ function scriptedDriver(script: Script): { driver: SessionDriver; seen: Seen[] }
     attribution: { provider: 'test', model: 'scripted' },
     runSession(input) {
       seen.push({ kind: input.def.kind, briefing: openingOf(input) })
-      let ranCheck = false
-      const observed: SessionRunInput = {
-        ...input,
-        onEvent: (event) => {
-          if (event.type === 'tool-result' && event.toolName === 'check_findings') ranCheck = true
-          input.onEvent(event)
-        },
-      }
       for (const content of input.initialMessages) input.onEvent({ type: 'user-message', content })
       const done = (async () => {
         await new Promise((r) => setTimeout(r, 0))
-        const result = await script(input.def.kind, observed)
-        // The overlap def carries an `outcomePrecondition` on `check_findings`;
-        // a script standing in for a model that followed its prompt has run it.
-        if (result.kind === 'outcome' && input.def.kind === OVERLAP_SESSION_KIND && !ranCheck) {
-          input.onEvent({
-            type: 'tool-result',
-            toolName: 'check_findings',
-            content: 'The draft is valid.',
-            isError: false,
-          })
-        }
-        return result
+        return script(input.def.kind, input)
       })()
       return { done, status: () => 'running' as const, steer: () => {}, interrupt: async () => {} }
     },
@@ -150,15 +130,13 @@ const EMPTY_SETTLEMENT: DriverResult = {
   kind: 'outcome',
   value: { concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] },
 }
-const NO_OVERLAPS: DriverResult = { kind: 'outcome', value: { overlaps: [], notReached: [] } }
-
-/** Answer every downstream kind trivially; `orchestrate` is the caller's job. */
+/** Answer every downstream kind trivially; `orchestrate` is the caller's job. The
+ *  conflict steps are off in these scans, so no fact session is ever asked. */
 function downstream(orchestrate: (input: SessionRunInput) => Promise<DriverResult>): Script {
   return async (kind, input) => {
     if (kind === SPEC_SCAN_ORCHESTRATE_SESSION_KIND) return orchestrate(input)
     if (kind === CURATE_DOC_SESSION_KIND) return KEEP_DOC
     if (kind === SETTLE_AREAS_SESSION_KIND) return EMPTY_SETTLEMENT
-    if (kind === OVERLAP_SESSION_KIND) return NO_OVERLAPS
     throw new Error(`unscripted session kind: ${kind}`)
   }
 }
@@ -224,31 +202,26 @@ const docCandidate = (p: string): DocCandidate => ({
 })
 
 // ---------------------------------------------------------------------------
-// 1. decisions schema v2 — v1 in, v2 out
+// 1. the decisions file — version 3 alone
 // ---------------------------------------------------------------------------
 
-describe('decisions schema v2', () => {
-  it('parses a v1 file, defaults the new fields, and drops a legacy `relations` array', () => {
+describe('the decisions file', () => {
+  it('reads an older file as empty: nothing it holds is a decision this version knows', () => {
     fs.mkdirSync(path.dirname(decisionsPath(repo)), { recursive: true })
     fs.writeFileSync(
       decisionsPath(repo),
-      JSON.stringify({
-        version: 1,
-        manualIncludes: ['docs/keep.md'],
-        relations: [{ from: 'a.md', to: 'b.md', kind: 'replace' }],
-      }),
+      JSON.stringify({ version: 2, manualIncludes: ['docs/keep.md'], relations: [{ from: 'a.md', to: 'b.md', kind: 'replace' }] }),
     )
     const parsed = readDecisions(repo)
-    expect(parsed.version).toBe(1)
-    expect(parsed.manualIncludes).toEqual(['docs/keep.md'])
+    expect(parsed.version).toBe(3)
+    expect(parsed.manualIncludes).toEqual([])
     expect(parsed.scopeVerdicts).toEqual([])
-    expect(parsed.instructions).toEqual([])
     expect(parsed).not.toHaveProperty('relations')
   })
 
-  it('parses a v2 file with the new rows', () => {
+  it('parses the scope verdicts and standing instructions', () => {
     const parsed = DecisionsFileSchema.parse({
-      version: 2,
+      version: 3,
       scopeVerdicts: [{ path: 'docs', verdict: 'keep', reason: 'r', decidedAt: 'now', resolvedBy: 'auto' }],
       instructions: ['docs/handbook is process, not product'],
     })
@@ -256,9 +229,9 @@ describe('decisions schema v2', () => {
     expect(parsed.instructions).toEqual(['docs/handbook is process, not product'])
   })
 
-  it('always writes version 2, whatever the caller still carries', () => {
+  it('always writes version 3, whatever the caller still carries', () => {
     writeDecisions(repo, {
-      version: 1,
+      version: 3,
       manualIncludes: [],
       manualExcludes: [],
       manualAreas: [],
@@ -267,7 +240,7 @@ describe('decisions schema v2', () => {
       instructions: ['keep this'],
     })
     const raw = JSON.parse(fs.readFileSync(decisionsPath(repo), 'utf-8'))
-    expect(raw.version).toBe(2)
+    expect(raw.version).toBe(3)
     expect(raw.scopeVerdicts).toHaveLength(1)
     expect(raw.instructions).toEqual(['keep this'])
   })
@@ -293,6 +266,7 @@ describe('the deterministic coverage pre-pass', () => {
       driver: async () => driver,
       persistence: memoryPersistence(),
       skipGit: true,
+      disableConflictDetection: true,
       onScope: (state) => states.push(state),
     })
     expect(states).toEqual(['covered'])
@@ -321,6 +295,7 @@ describe('the deterministic coverage pre-pass', () => {
       driver: async () => driver,
       persistence: memoryPersistence(),
       skipGit: true,
+      disableConflictDetection: true,
       now: () => '2026-08-19T00:00:00.000Z',
       onScope: (state) => states.push(state),
     })
@@ -446,6 +421,7 @@ describe('mergeScopeOutcome', () => {
       driver: async () => driver,
       persistence: memoryPersistence(),
       skipGit: true,
+      disableConflictDetection: true,
     })
     const stored = readDecisions(repo)
     expect(stored.scopeVerdicts.find((v) => v.path === 'docs')).toMatchObject({
@@ -588,10 +564,10 @@ describe('standing instructions', () => {
       driver: async () => cold.driver,
       persistence: memoryPersistence(),
       skipGit: true,
+      disableConflictDetection: true,
     })
     const coldKinds = cold.seen.map((s) => s.kind)
     expect(coldKinds.filter((k) => k === CURATE_DOC_SESSION_KIND)).toHaveLength(2)
-    expect(coldKinds).toContain(OVERLAP_SESSION_KIND)
     for (const s of cold.seen) expect(s.briefing).not.toContain('STANDING SCAN INSTRUCTIONS')
 
     // A warm re-run spends nothing…
@@ -601,6 +577,7 @@ describe('standing instructions', () => {
       driver: async () => warm.driver,
       persistence: memoryPersistence(),
       skipGit: true,
+      disableConflictDetection: true,
     })
     expect(unchanged.noChanges).toBe(true)
     expect(warm.seen).toEqual([])
@@ -614,6 +591,7 @@ describe('standing instructions', () => {
       driver: async () => rekeyed.driver,
       persistence: memoryPersistence(),
       skipGit: true,
+      disableConflictDetection: true,
     })
     expect(rekeyed.seen.map((s) => s.kind).sort()).toEqual(coldKinds.sort())
     for (const s of rekeyed.seen) {
@@ -659,6 +637,7 @@ describe('the interactive session', () => {
     const { curate, pendingQuestions } = await curateInProcess(repo, {
       driver,
       skipGit: true,
+      disableConflictDetection: true,
       onQuestion: (workItem, q) => seenQuestions.push({ workItem, id: q.id }),
     })
     expect(pendingQuestions.map((q) => q.id)).toEqual(['q1'])
@@ -680,7 +659,7 @@ describe('a failed orchestrate session', () => {
   it('aborts the run before any corpus write when it dies of transport', async () => {
     const corpusFile = path.join(repo, '.truecourse', 'specs', 'corpus.json')
     fs.mkdirSync(path.dirname(corpusFile), { recursive: true })
-    const sentinel = JSON.stringify({ version: 3, generatedAt: 'never', docs: [], areas: [], skippedDocs: [] })
+    const sentinel = JSON.stringify({ version: 5, generatedAt: 'never', docs: [], areas: [], skippedDocs: [] })
     fs.writeFileSync(corpusFile, sentinel)
 
     const { driver } = scriptedDriver(
@@ -694,6 +673,7 @@ describe('a failed orchestrate session', () => {
       driver: async () => driver,
       persistence: memoryPersistence(),
       skipGit: true,
+      disableConflictDetection: true,
     }).catch((e: unknown) => e as LlmStageFailureError)
     expect(error).toBeInstanceOf(LlmStageFailureError)
     expect((error as LlmStageFailureError).tally.stage).toBe(SPEC_SCAN_ORCHESTRATE_SESSION_KIND)
@@ -713,6 +693,7 @@ describe('a failed orchestrate session', () => {
       driver: async () => driver,
       persistence: memoryPersistence(),
       skipGit: true,
+      disableConflictDetection: true,
       onScope: (state) => states.push(state),
     })
     expect(states).toEqual(['failed'])
@@ -737,6 +718,7 @@ describe('surfaces that skip the scope session', () => {
       workspaceOrgId: 'acme',
       docs: [{ docPath: 'knowledge/confluence/a.md', markdown: '# A\n\nSome spec prose.\n' }],
       driver: scriptedDriver(downstream(NO_ORCHESTRATE)).driver,
+      disableConflictDetection: true,
     })
     expect(result.areaCount).toBeGreaterThan(0)
     const corpus = await loadWorkspaceSpec<{ docs: Array<{ ref: string }> }>(
@@ -756,6 +738,7 @@ describe('surfaces that skip the scope session', () => {
       driver: async () => driver,
       persistence: memoryPersistence(),
       skipGit: true,
+      disableConflictDetection: true,
       disableScopeOrchestration: true,
       onScope: (state) => states.push(state),
     })

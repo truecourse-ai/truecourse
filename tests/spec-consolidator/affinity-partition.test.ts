@@ -3,7 +3,7 @@
  * keep items sharing rare words together. What is under test: the same items
  * always give the same parts; no part is ever over the bound; items that share
  * a rare token stay together when they fit; a token in too many items links
- * nothing; two items of one passage are never linked; the linked pairs a cut
+ * nothing; two items of one sentence are never linked; the linked pairs a cut
  * separates are counted; an input under the bound is one part. With item
  * weights the bound holds the summed weight, and the clustering step alone
  * keeps every item once, linked items together up to the bound.
@@ -15,13 +15,13 @@ import { PAIR_GEN_DF_CAP, clusterByAffinity, partitionByAffinity } from '../../p
 interface Item {
   id: number
   text: string
-  passage?: string
+  origin?: string
 }
 
 const options = (maxSize: number) => ({
   maxSize,
   text: (item: Item) => item.text,
-  passage: (item: Item) => item.passage ?? `p${item.id}`,
+  origin: (item: Item) => item.origin ?? `p${item.id}`,
 })
 
 const items = (texts: readonly string[]): Item[] => texts.map((text, id) => ({ id, text }))
@@ -100,11 +100,11 @@ describe('partitionByAffinity', () => {
     expect(ids(parts)[0]).toEqual([0, 1, 2, 3, 4])
   })
 
-  it('never links two items of one passage', () => {
+  it('never links two items of one origin', () => {
     const input: Item[] = [
-      { id: 0, text: 'webhook retries', passage: 'a' },
-      { id: 1, text: 'filler', passage: 'b' },
-      { id: 2, text: 'webhook retries', passage: 'a' },
+      { id: 0, text: 'webhook retries', origin: 'a' },
+      { id: 1, text: 'filler', origin: 'b' },
+      { id: 2, text: 'webhook retries', origin: 'a' },
     ]
     const { parts, cutPairs } = partitionByAffinity(input, options(1))
     expect(ids(parts)).toEqual([[0], [1], [2]])
@@ -121,7 +121,7 @@ describe('partitionByAffinity with item weights', () => {
   const weighted = (maxSize: number, dfCap?: number) => ({
     maxSize,
     text: (item: Weighted) => item.text,
-    passage: (item: Weighted) => `p${item.id}`,
+    origin: (item: Weighted) => `p${item.id}`,
     weight: (item: Weighted) => item.weight,
     ...(dfCap !== undefined ? { dfCap } : {}),
   })

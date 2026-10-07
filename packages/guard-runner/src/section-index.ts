@@ -16,8 +16,8 @@
  * text nothing can bind to.
  *
  * The slug helper is a small, self-contained duplicate of the heading-slug
- * convention used elsewhere in the codebase (spec-consolidator's overlap
- * widening): strip inline emphasis/code markers, lowercase, fold non-alphanumeric
+ * convention used elsewhere in the codebase (spec-consolidator's
+ * concern canonicalization): strip inline emphasis/code markers, lowercase, fold non-alphanumeric
  * runs to single hyphens, trim. Kept local so this module stays dependency-lean.
  */
 
@@ -28,7 +28,7 @@ import { isOpenApiDoc, deriveOpenApiSections, type RefResolutionContext } from '
 
 // The heading scan, markdown check, and top-level section splitter live in
 // @truecourse/shared (doc-chunks) — the one splitting mechanism shared with the
-// guard generator's views and spec-scan's overlap windows. Re-exported here so
+// guard generator's views and spec-scan's section reads. Re-exported here so
 // this module remains their canonical import site for runner consumers.
 export { isMarkdownDoc, splitTopLevelSections } from '@truecourse/shared'
 // Re-exported so this module stays the canonical import site for the runner and

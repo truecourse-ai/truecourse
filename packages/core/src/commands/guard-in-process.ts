@@ -107,7 +107,7 @@ import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../prog
 export { EstimateDeclined } from './spec-in-process.js';
 
 /**
- * The corpus has unresolved within-area overlaps — thrown by the guard-generate
+ * The corpus has unresolved conflicts — thrown by the guard-generate
  * gate before any LLM/build work. Carries the full open-conflict list (never
  * truncated) so the dashboard can return it; `message` is the assembled
  * multi-line text.
@@ -124,7 +124,7 @@ export class OpenConflictsError extends Error {
 export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string {
   const lines: string[] = [
     `${conflicts.length} open spec conflict${conflicts.length === 1 ? '' : 's'} must be resolved before guard generate.`,
-    'Extracting both sides of an unresolved overlap births a red finding that is really the dispute.',
+    'Extracting both sides of an unresolved conflict births a red finding that is really the conflict.',
     '',
   ];
   for (const c of conflicts) {
@@ -140,10 +140,10 @@ export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string 
 }
 
 /**
- * The guard-generate gate: an unresolved within-area overlap means two docs make
+ * The guard-generate gate: an unresolved conflict means two docs make
  * contradictory claims, and extracting BOTH births a paid "finding" that is
- * really the dispute. Read the corpus + decisions and fail before any LLM/build
- * work (and before the estimate) when any overlap is still open. No corpus at all
+ * really the conflict. Read the corpus + decisions and fail before any LLM/build
+ * work (and before the estimate) when any conflict is still open. No corpus at all
  * is NOT a conflict — the downstream no-docs path reports that.
  *
  * Reads the corpus + decisions out of the run's work tree — the ones the
@@ -415,7 +415,7 @@ export async function guardGenerateInProcess(
   let resumeFailure: GuardGenerateResumeError | undefined;
   try {
     // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
-    // spend, then fail. Extracting both sides of an open overlap births noise.
+    // spend, then fail. Extracting both sides of an open conflict births noise.
     assertNoOpenConflicts(repoRoot);
 
     // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing

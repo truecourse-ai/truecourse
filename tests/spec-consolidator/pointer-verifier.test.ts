@@ -1,8 +1,8 @@
 /**
- * Overlap section pointers are model-chosen and UNVALIDATED: the judge names
- * "the nearest heading above the conflicting passage" and can
- * mis-anchor — the live bug pointed taskline's README `rm` dispute at `## Storage`
- * when the disputed sentence lives in the doc's LEAD. `verifyOverlapSections`
+ * Conflict section pointers are model-chosen and UNVALIDATED: the judge names
+ * "the nearest heading above the conflicting sentence" and can
+ * mis-anchor — the live bug pointed taskline's README `rm` conflict at `## Storage`
+ * when the disputed sentence lives in the doc's LEAD. `verifyConflictSides`
  * re-anchors deterministically from the doc's own content (no LLM), and running
  * it at assembly BEFORE the cross-area dedup makes the fewest-null representative
  * choice trustworthy.
@@ -12,9 +12,9 @@
  * prose — so the scoring is exercised, not memorized.
  */
 import { describe, it, expect } from 'vitest';
-import { splitDocSections, verifyOverlapSections } from '../../packages/spec-consolidator/src/index.js';
-import { dedupeCrossAreaOverlaps, parseHeadings } from '@truecourse/shared';
-import type { Overlap } from '../../packages/spec-consolidator/src/index.js';
+import { splitDocSections, verifyConflictSides } from '../../packages/spec-consolidator/src/index.js';
+import { dedupeCrossAreaConflicts, parseHeadings } from '@truecourse/shared';
+import type { Conflict } from '../../packages/spec-consolidator/src/index.js';
 
 // A README whose LEAD (the H1 + intro, before `## Install`) states the disputed
 // deletion rule; the later `## Storage` section talks about the JSON file and ids
@@ -60,9 +60,9 @@ const NOTE =
 
 const bodyOf = (m: Record<string, string>) => (ref: string): string | undefined => m[ref];
 
-describe('verifyOverlapSections', () => {
+describe('verifyConflictSides', () => {
   it('re-anchors a mis-pointed README side (Storage → the lead) when the lead holds the claim', () => {
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['README.md', 'docs/SPEC.md'],
       note: NOTE,
       sections: [
@@ -81,7 +81,7 @@ describe('verifyOverlapSections', () => {
   it('keeps a correct pointer whose section discusses the disputed behavior', () => {
     // The SPEC `rm <id>` section is where removal/archival is specified — the
     // best-scoring section — so it is the anchor and stays put.
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['README.md', 'docs/SPEC.md'],
       note: NOTE,
       sections: [{ doc: 'docs/SPEC.md', heading: '`rm <id>`' }],
@@ -93,7 +93,7 @@ describe('verifyOverlapSections', () => {
   it('keeps a null (lead) pointer that correctly holds the claim', () => {
     // The README lead genuinely states the rule, so a null pointer is already
     // right and is left untouched — never bounced to some lower-scoring heading.
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['README.md', 'docs/SPEC.md'],
       note: NOTE,
       sections: [{ doc: 'README.md', heading: null }],
@@ -120,7 +120,7 @@ they are purged.
     // "Deletion" shares deletion/removes/permanently with the note (real signal)
     // while "Trash" shares more — but a section that carries meaningful signal is
     // KEPT, not upgraded to the highest scorer.
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['app.md', 'store.md'],
       note,
       sections: [{ doc: 'app.md', heading: 'Deletion' }],
@@ -143,7 +143,7 @@ Refunds are issued within five business days.
     // The note is about pagination; nothing in the doc matches, so no candidate
     // scores and the pointer is left exactly as the model set it.
     const note = 'a.md and b.md disagree about the pagination cursor page size';
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['a.md', 'b.md'],
       note,
       sections: [
@@ -161,7 +161,7 @@ Refunds are issued within five business days.
   it('re-anchors a hallucinated heading (names a section that does not exist) to the real anchor', () => {
     // A pointer naming a non-existent heading scores 0 and re-anchors to the lead
     // when the lead clearly holds the claim.
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['README.md', 'docs/SPEC.md'],
       note: NOTE,
       sections: [{ doc: 'README.md', heading: 'Deletion Policy' }],
@@ -170,8 +170,8 @@ Refunds are issued within five business days.
     expect(out).toEqual([{ doc: 'README.md', heading: null }]);
   });
 
-  it('is a no-op on an overlap with no section pointers', () => {
-    const out = verifyOverlapSections({
+  it('is a no-op on an conflict with no section pointers', () => {
+    const out = verifyConflictSides({
       docs: ['a.md', 'b.md'],
       note: NOTE,
       sections: [],
@@ -181,7 +181,7 @@ Refunds are issued within five business days.
   });
 
   it('keeps pointers when the doc body is unresolvable', () => {
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['README.md', 'docs/SPEC.md'],
       note: NOTE,
       sections: [{ doc: 'README.md', heading: 'Storage' }],
@@ -191,12 +191,12 @@ Refunds are issued within five business days.
   });
 });
 
-// A verbatim quote upgrades verification from token-overlap to EXACT location.
+// A verbatim quote upgrades verification from token-conflict to EXACT location.
 // A located quote anchors with certainty (skipping token scoring); a quote found
 // nowhere falls back to the token path unchanged.
-describe('verifyOverlapSections — a located verbatim quote anchors with certainty', () => {
+describe('verifyConflictSides — a located verbatim quote anchors with certainty', () => {
   it('re-anchors with certainty: quote of the rm sentence found in the lead → null even though the model said Storage', () => {
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['README.md', 'docs/SPEC.md'],
       note: NOTE,
       sections: [
@@ -210,7 +210,7 @@ describe('verifyOverlapSections — a located verbatim quote anchors with certai
   });
 
   it('keeps a correct pointer whose quote is located in the pointed section (certainty keep)', () => {
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['README.md', 'docs/SPEC.md'],
       note: NOTE,
       sections: [
@@ -224,7 +224,7 @@ describe('verifyOverlapSections — a located verbatim quote anchors with certai
   });
 
   it('falls back to token scoring when the quote is found nowhere (still re-anchors Storage → lead)', () => {
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['README.md', 'docs/SPEC.md'],
       note: NOTE,
       sections: [
@@ -239,7 +239,7 @@ describe('verifyOverlapSections — a located verbatim quote anchors with certai
   });
 
   it('normalizes backticks + whitespace when locating the quote', () => {
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['README.md', 'docs/SPEC.md'],
       note: NOTE,
       // Backticks around `rm`, collapsed em-dash spacing, and a line break — the
@@ -253,20 +253,20 @@ describe('verifyOverlapSections — a located verbatim quote anchors with certai
 });
 
 // ---------------------------------------------------------------------------
-// Verification runs BEFORE dedup — now in the overlap SESSION's fold
+// Verification runs BEFORE dedup — now in the conflict SESSION's fold
 //
 // `flagOverlaps` retired with the one-shot detector. The rule
 // it enforced did not: the run's fold re-anchors every session pointer with
-// `verifyOverlapSections` BEFORE `dedupeCrossAreaOverlaps` merges the same
+// `verifyConflictSides` BEFORE `dedupeCrossAreaConflicts` merges the same
 // disagreement across the areas that share the pair. This case drives the two
 // deterministic halves in that order, exactly as `services/spec-scan/run.ts`
 // chains them. (The end-to-end path through a scripted session driver lives in
-// `tests/core/spec-scan-overlap.test.ts`.)
+// `tests/core/spec-scan-conflict.test.ts`.)
 // ---------------------------------------------------------------------------
 
 describe('verification before dedup', () => {
   it('converges a wrong-named duplicate onto the verified lead anchor and merges to one record', () => {
-    // The live bug: the SAME README+SPEC `rm` dispute is flagged in two shared
+    // The live bug: the SAME README+SPEC `rm` conflict is flagged in two shared
     // areas. One area\'s session anchors the README side at the LEAD (null,
     // correct); the other at `## Storage` (wrong-but-NAMED). Un-verified, the
     // fewest-null dedup rule would keep the wrong-named record as the
@@ -279,11 +279,11 @@ describe('verification before dedup', () => {
     ];
     const entries = flagged.map(({ area, heading }) => ({
       area,
-      overlap: {
+      conflict: {
         docs: ['README.md', 'docs/SPEC.md'] as [string, string],
         note: NOTE,
         areas: [] as string[],
-        sections: verifyOverlapSections({
+        sections: verifyConflictSides({
           docs: ['README.md', 'docs/SPEC.md'],
           note: NOTE,
           sections: [
@@ -292,19 +292,19 @@ describe('verification before dedup', () => {
           ],
           bodyOf: bodies,
         }),
-      } satisfies Overlap,
+      } satisfies Conflict,
     }));
 
-    const merged = dedupeCrossAreaOverlaps(entries);
+    const merged = dedupeCrossAreaConflicts(entries);
 
     // One merged record, under the representative (lexicographically-first) area.
     expect(merged).toHaveLength(1);
     expect(merged[0].area).toBe('core/persistence');
     expect(merged[0].areas).toEqual(['core/persistence', 'core/tasks-entity']);
     // The README side is the verified LEAD anchor (null), NOT the mis-anchored Storage.
-    expect(merged[0].overlap.sections).toContainEqual({ doc: 'README.md', heading: null });
-    expect(merged[0].overlap.sections).not.toContainEqual({ doc: 'README.md', heading: 'Storage' });
-    expect(merged[0].overlap.sections).toContainEqual({ doc: 'docs/SPEC.md', heading: '`rm <id>`' });
+    expect(merged[0].conflict.sections).toContainEqual({ doc: 'README.md', heading: null });
+    expect(merged[0].conflict.sections).not.toContainEqual({ doc: 'README.md', heading: 'Storage' });
+    expect(merged[0].conflict.sections).toContainEqual({ doc: 'docs/SPEC.md', heading: '`rm <id>`' });
   });
 });
 
@@ -352,7 +352,7 @@ describe('splitDocSections follows the outline', () => {
   });
 
   it('keeps a pointer whose quote sits below a comment line inside a fence', () => {
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['docs/install.md', 'docs/ops.md'],
       note: 'install.md runs the server on port 3000; ops.md says 8080',
       sections: [{ doc: 'docs/install.md', heading: 'Setup', quote: 'pnpm dev --port 3000' }],
@@ -362,7 +362,7 @@ describe('splitDocSections follows the outline', () => {
   });
 
   it('names a heading with a closing hash run as the outline does', () => {
-    const out = verifyOverlapSections({
+    const out = verifyConflictSides({
       docs: ['docs/install.md', 'docs/ops.md'],
       note: 'upgrades keep data in install.md, not in ops.md',
       sections: [{ doc: 'docs/install.md', heading: 'Setup', quote: 'Upgrades keep your data.' }],

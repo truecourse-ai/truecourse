@@ -17,6 +17,7 @@
 
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { isConflictId } from '@truecourse/shared';
 import { SpecSourceProvider, type SpecSource } from '@/components/spec/spec-source';
 import { useSpecCorpus } from '@/components/spec/SpecCorpusView';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
@@ -59,7 +60,7 @@ function Pane({
       openTabs: [{ id: itemId, pinned: true }],
       open: (id) => {
         if (id === itemId) return;
-        navigate(id.startsWith('overlap::') ? conflictHref(id) : docHref(id, repoId || undefined));
+        navigate(isConflictId(id) ? conflictHref(id) : docHref(id, repoId || undefined));
       },
       close: () => navigate(backTo),
       deselect: () => navigate(backTo),

@@ -62,18 +62,6 @@ import {
   type AreaSettlement,
 } from '../spec-scan/settle-areas.js';
 import {
-  OVERLAP_SESSION_BUDGET,
-  OVERLAP_SESSION_CACHE_NAME,
-  OVERLAP_SESSION_KIND,
-  OVERLAP_SESSION_SYSTEM_PROMPT,
-  OverlapOutcomeSchema,
-  deriveOverlapWorkItems,
-  overlapBriefing,
-  overlapSessionCacheKey,
-  overlapSessionLegacyCacheKey,
-  type OverlapWorkItem,
-} from '../spec-scan/overlap.js';
-import {
   ORCHESTRATE_BUDGET,
   ORCHESTRATE_SYSTEM_PROMPT,
   SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
@@ -140,7 +128,7 @@ import {
   planCompareBatches,
   type CompareItem,
 } from '../spec-scan/compare-facts.js';
-import { resolveConflictMethod, type ConflictMethod, type ScanStep } from '../spec-scan/run.js';
+import type { ScanStep } from '../spec-scan/run.js';
 import {
   planGuardWork,
   bindClaimPrerequisites,
@@ -301,7 +289,6 @@ import type { PriceTable } from './model-prices.js';
 
 // Heuristic assumptions, surfaced as ranges where they bite.
 const KEEP_RATE = 0.9; // fraction of curated docs a session keeps (approximation path)
-const AVG_AREA_SIZE = 4; // docs per area (sizes the changed-docs share of overlap areas)
 
 // Human-readable labels for the confirm UI — users don't know the internal stage ids.
 const STAGE_LABELS: Record<string, string> = {
@@ -309,7 +296,6 @@ const STAGE_LABELS: Record<string, string> = {
   [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 'Settling scan scope',
   [CURATE_DOC_SESSION_KIND]: 'Curating docs',
   [SETTLE_AREAS_SESSION_KIND]: 'Settling areas',
-  [OVERLAP_SESSION_KIND]: 'Flagging overlaps',
   [CORPUS_REVIEW_SESSION_KIND]: 'Reviewing the corpus',
   [RECORD_FACTS_SESSION_KIND]: 'Recording facts',
   [SETTLE_SUBJECTS_SESSION_KIND]: 'Settling subjects',
@@ -342,7 +328,6 @@ const EXPECTED_TURNS: Record<string, number> = {
   [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 6,
   [CURATE_DOC_SESSION_KIND]: 2,
   [SETTLE_AREAS_SESSION_KIND]: 4,
-  [OVERLAP_SESSION_KIND]: 8,
   [CORPUS_REVIEW_SESSION_KIND]: 15,
   [RECORD_FACTS_SESSION_KIND]: 4, // a draft, a check, a correction, the outcome
   [SETTLE_SUBJECTS_SESSION_KIND]: 3, // a draft checked, a correction, the outcome
@@ -373,7 +358,6 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 300,
   [CURATE_DOC_SESSION_KIND]: 120,
   [SETTLE_AREAS_SESSION_KIND]: 250,
-  [OVERLAP_SESSION_KIND]: 400,
   [CORPUS_REVIEW_SESSION_KIND]: 300,
   [RECORD_FACTS_SESSION_KIND]: 2_500, // the draft checked and the outcome each carry the whole ledger
   [SETTLE_SUBJECTS_SESSION_KIND]: 5_000, // the draft checked and the outcome each name every id of the list
@@ -393,11 +377,9 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [FLOW_WORKER_SESSION_KIND]: 700, // ~one scenario YAML per run/submit turn
   [FIDELITY_SESSION_KIND]: 60, // a verdict + a one-sentence mismatch
 };
-/** Cold-cache fallback for an overlap briefing's size (outlines, no bodies). */
-const OVERLAP_BRIEFING_FALLBACK_CHARS = 8_000;
 /**
- * Facts a unit states on average, for the windows not yet recorded: measured
- * on a 72-doc corpus, 3,390 facts over 5,121 units.
+ * Facts a sentence states on average, for the windows not yet recorded: measured
+ * on a 72-doc corpus, 3,390 facts over 5,121 sentences.
  */
 const FACTS_PER_UNIT = 0.66;
 /** Briefing characters per subject name and per fact, when no list or batch is known. */
@@ -486,8 +468,6 @@ export async function estimateScanTokens(
     only?: ScanStep;
     /** The run's computer path: a corpus review after curation. */
     computer?: boolean;
-    /** How the run finds conflicts, resolved as the run resolves it. */
-    conflictMethod?: ConflictMethod;
     /**
      * The corpus the last scan wrote, as the run is given it: each doc's prior
      * tags decide which areas its facts are filed under. Absent, the tree's
@@ -497,7 +477,6 @@ export async function estimateScanTokens(
   } = {},
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.sessionModel);
-  const conflictMethod = resolveConflictMethod(opts);
 
   // Load the user's decisions so the estimate probes the SAME doc set the run
   // classifies (manual includes/excludes, scope verdicts, instructions — all of
@@ -642,12 +621,7 @@ export async function estimateScanTokens(
     settleMax = 1;
   }
 
-  // ---- overlap: group from cached tags, probe per-cluster keys --------------
-  // Exactly the run's derivation whenever everything upstream is cached (the
-  // settlement applied, the same grouper, the same collision pairing and
-  // clustering via deriveOverlapWorkItems, the same key builder); with
-  // upstream misses the probed part still holds and the changed docs' share is
-  // added as a range.
+  // ---- the areas, as the run groups them from the cached tags ---------------
   const applied = settlement ? applySettlement(settlement, vocab) : null;
   const vocabMap = applied?.vocab ?? { products: {}, concerns: {} };
   if (applied) {
@@ -665,33 +639,9 @@ export async function estimateScanTokens(
     keptDocs.map((d) => [d.path, { tags: canonicalByPath.get(d.path) ?? [] }]),
   );
   const grouped = groupByArea(keptDocs, groupTags, decisions.manualAreas ?? [], vocabMap);
-  const overlapItems: OverlapWorkItem[] = deriveOverlapWorkItems(grouped.areas, keptDocs, vocabMap);
-  const overlapMissItems: OverlapWorkItem[] = [];
-  for (const item of overlapItems) {
-    const cached = await probeSessionCache(
-      repoRoot,
-      OVERLAP_SESSION_CACHE_NAME,
-      overlapSessionCacheKey(item, instructionParts),
-      OverlapOutcomeSchema,
-      overlapSessionLegacyCacheKey(item, instructionParts),
-    );
-    if (!cached) overlapMissItems.push(item);
-  }
-  // Exact only when the whole upstream is settled: every doc verdict cached AND
-  // the settlement either cached or not needed. A pending settlement can
-  // reshape the areas, so its presence downgrades the overlap count to a range.
-  const overlapExact = missCount === 0 && (settlement !== null || !gate);
-  // Comparison clusters the CHANGED docs will land in — unknowable before
-  // their sessions run; sized by the mean-area heuristic and carried as a range.
-  const changedClusters = missCount > 0 ? Math.ceil(Math.round(missCount * KEEP_RATE) / AVG_AREA_SIZE) : 0;
-  const overlapExpectedItems = overlapMissItems.length + changedClusters;
-  // A fully settled upstream with zero misses is a KNOWN no-op — the ceiling
-  // drops to zero so the stage vanishes and a warmed cache yields an EMPTY
-  // estimate (confirm skipped). An unsettled upstream keeps the honest
-  // ceiling: a fresh settlement can re-key every cluster.
-  const overlapIdle = overlapExpectedItems === 0 && overlapExact;
-  const overlapMaxItems = overlapIdle ? 0 : overlapItems.length + changedClusters;
-  const clustersTotal = overlapItems.length + changedClusters;
+  // The upstream is settled when every doc verdict is cached AND the settlement
+  // is either cached or not needed: only then are the areas the run's areas.
+  const upstreamSettled = missCount === 0 && (settlement !== null || !gate);
 
   // ---- the facts path: record per window, then subjects and batches ---------
   // A window's key folds its own doc and that doc's raw tags alone, so the
@@ -701,7 +651,7 @@ export async function estimateScanTokens(
   // fact: with every window cached and the upstream settled they are planned
   // and probed exactly as the run plans them, and otherwise they cannot be
   // planned before the recording runs, so they are sized as a range from the
-  // facts known and those the unrecorded units are expected to state.
+  // facts known and those the unrecorded sentences are expected to state.
   const factStages = async (): Promise<StageCallEstimate[]> => {
     const known: RecordFactsItem[] = keptDocs.flatMap((d) => recordFactsItems(d, keptTags.get(d.path) ?? []));
     const cachedLedgers = new Map<RecordFactsItem, FactLedger>();
@@ -752,14 +702,14 @@ export async function estimateScanTokens(
       ([ref, items]) =>
         docFactLedger({
           doc: ref,
-          units: items[0]!.units,
+          sentences: items[0]!.sentences,
           areas: items[0]!.areas,
           windows: items.map((item) => ({ window: item.window, ledger: cachedLedgers.get(item) ?? null })),
           canonicalAreas: (raw) => factAreaIds(factAreas, ref, raw),
         }).facts,
     );
 
-    if (exact && overlapExact && missing.length === 0) {
+    if (exact && upstreamSettled && missing.length === 0) {
       const names = collectSubjectNames(facts);
       const parts = planSubjectParts(names);
       const merges = new Map<string, string>();
@@ -822,10 +772,10 @@ export async function estimateScanTokens(
     }
 
     // Not every window is recorded yet: size what follows from the facts known
-    // and those the unrecorded units are expected to state.
+    // and those the unrecorded sentences are expected to state.
     const unrecordedUnits =
       missing.reduce((n, item) => n + item.window.to - item.window.from + 1, 0) +
-      changedWindows.reduce((n, w) => n + w.units.length, 0) * KEEP_RATE;
+      changedWindows.reduce((n, w) => n + w.sentences.length, 0) * KEEP_RATE;
     const expectedFacts = facts.length + Math.round(unrecordedUnits * FACTS_PER_UNIT);
     const slotsPerFact = facts.length > 0 ? facts.reduce((n, f) => n + f.areas.length, 0) / facts.length : 1;
     const settleParts = expectedFacts > 1 ? Math.ceil(expectedFacts / SETTLE_SUBJECTS_NAMES) : 0;
@@ -862,22 +812,6 @@ export async function estimateScanTokens(
       bound: `~${areaBatches} batch${areaBatches === 1 ? '' : 'es'} of facts: they are planned once ${until}`,
     });
 
-  const clusterStage = (): StageCallEstimate =>
-    sessionKindStage({
-      kind: OVERLAP_SESSION_KIND,
-      model,
-      items: overlapExpectedItems,
-      minItems: overlapMissItems.length,
-      maxItems: overlapMaxItems,
-      budget: OVERLAP_SESSION_BUDGET,
-      systemPromptChars: OVERLAP_SESSION_SYSTEM_PROMPT.length,
-      briefingChars:
-        mean(overlapMissItems.map((i) => overlapBriefing(i, instructions).length)) ||
-        (overlapExpectedItems > 0 ? OVERLAP_BRIEFING_FALLBACK_CHARS : 0),
-      bound: overlapExact
-        ? `${overlapMissItems.length} of ${Math.max(clustersTotal, overlapMissItems.length)} comparison${clustersTotal === 1 ? '' : 's'} changed`
-        : `~${overlapExpectedItems} of ~${clustersTotal} comparison${clustersTotal === 1 ? '' : 's'} changed (changed docs may reshape clusters)`,
-    });
 
   // ---- roll-up ---------------------------------------------------------------
   const stages: StageCallEstimate[] = [
@@ -925,7 +859,7 @@ export async function estimateScanTokens(
       briefingChars:
         settleItems > 0 ? settleAreasBriefing(vocab, buildScanUniverse(docs), instructions).length : 0,
     }),
-    ...(conflictMethod === 'facts' ? await factStages() : [clusterStage()]),
+    ...(await factStages()),
   ];
 
   const changedDocs = missCount;
@@ -935,7 +869,7 @@ export async function estimateScanTokens(
     orchestrate: [SPEC_SCAN_ORCHESTRATE_SESSION_KIND],
     curate: [CURATE_DOC_SESSION_KIND, CORPUS_REVIEW_SESSION_KIND],
     settle: [SETTLE_AREAS_SESSION_KIND],
-    overlap: [OVERLAP_SESSION_KIND, RECORD_FACTS_SESSION_KIND, SETTLE_SUBJECTS_SESSION_KIND, COMPARE_FACTS_SESSION_KIND],
+    conflicts: [RECORD_FACTS_SESSION_KIND, SETTLE_SUBJECTS_SESSION_KIND, COMPARE_FACTS_SESSION_KIND],
   };
   const included = opts.only ? stages.filter((s) => SCAN_STEP_KINDS[opts.only!].includes(s.stage)) : stages;
   return estimateStageTokens(

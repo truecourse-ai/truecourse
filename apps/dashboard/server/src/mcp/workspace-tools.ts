@@ -12,13 +12,13 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   CONTEXT_SOURCE_KINDS,
-  disputeSides,
+  conflictSides,
   type ContextDocumentRow,
   type ContextSource,
   type ContextSourceView,
   type CorpusConflict,
-  type OverlapLike,
-  type OverlapSectionLike,
+  type ConflictLike,
+  type ConflictSideLike,
 } from '@truecourse/shared';
 import {
   addSource,
@@ -77,10 +77,10 @@ function sourceRow(source: ContextSource | ContextSourceView) {
   };
 }
 
-/** One conflict with both of its sides (inside one doc, its two passages in order). */
-function conflictRow(conflict: CorpusConflict<OverlapLike & { review?: unknown }>) {
-  const [[sectionA], [sectionB]] = disputeSides(conflict.a, conflict.b, conflict.overlap.sections);
-  const side = (doc: string, section: OverlapSectionLike | undefined) => ({
+/** One conflict with both of its sides (inside one doc, its two sentences in order). */
+function conflictRow(conflict: CorpusConflict<ConflictLike & { review?: unknown }>) {
+  const [[sectionA], [sectionB]] = conflictSides(conflict.a, conflict.b, conflict.sections);
+  const side = (doc: string, section: ConflictSideLike | undefined) => ({
     doc,
     heading: section?.heading ?? null,
     ...(section?.quote ? { quote: section.quote } : {}),
@@ -91,7 +91,7 @@ function conflictRow(conflict: CorpusConflict<OverlapLike & { review?: unknown }
     note: conflict.note,
     a: side(conflict.a, sectionA),
     b: side(conflict.b, sectionB),
-    ...(conflict.overlap.review ? { review: conflict.overlap.review } : {}),
+    ...(conflict.review ? { review: conflict.review } : {}),
     resolved: conflict.resolved,
     ...(conflict.resolution
       ? {

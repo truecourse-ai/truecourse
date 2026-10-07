@@ -114,11 +114,11 @@ function corpus(): CuratedCorpus {
     { ref: ref(SRC_B, 'site.md'), kind: 'prd' as const, lastTouched: '', areaTags: ['p/c'], sourceId: SRC_B },
   ];
   return {
-    version: 3,
+    version: 5,
     generatedAt: '2026-01-01T00:00:00Z',
     docs,
     areas: [
-      { id: 'p/c', product: 'p', concern: 'c', docRefs: docs.map((d) => d.ref), overlaps: [] },
+      { id: 'p/c', product: 'p', concern: 'c', docRefs: docs.map((d) => d.ref), conflicts: [] },
     ],
     skippedDocs: [],
   };

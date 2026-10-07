@@ -153,7 +153,7 @@ describe('the scan run — an OpenAPI doc lands in the corpus with empty area ta
       },
       repoIdentity: null,
       skipGit: true,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
     })
 
     expect(stub.calls).toEqual([])

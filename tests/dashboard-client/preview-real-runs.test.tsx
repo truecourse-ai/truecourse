@@ -85,7 +85,7 @@ function runningScan(overrides: Partial<PublicSessionRun> = {}): PublicSessionRu
           items: [
             { key: 'discover', label: 'Discover documents', status: 'done', detail: '41 docs · 12 to curate' },
             { key: 'tag', label: 'Curate documents', status: 'active', detail: '3/12 docs' },
-            { key: 'overlap', label: 'Compare areas', status: 'pending' },
+            { key: 'conflicts', label: 'Compare areas', status: 'pending' },
             { key: 'verify', label: 'Verify anchors', status: 'pending' },
           ],
         },
@@ -159,7 +159,7 @@ describe('a run record as the shell reads it', () => {
     expect(job.steps).toEqual([
       { key: 'discover', label: 'Discover documents', state: 'done', counter: '41 docs · 12 to curate' },
       { key: 'tag', label: 'Curate documents', state: 'active', counter: '3/12 docs' },
-      { key: 'overlap', label: 'Compare areas', state: 'pending' },
+      { key: 'conflicts', label: 'Compare areas', state: 'pending' },
       { key: 'verify', label: 'Verify anchors', state: 'pending' },
     ]);
   });

@@ -95,6 +95,6 @@ export interface CorpusDiff {
     retagged: Array<{ ref: string; from: string[]; to: string[] }>;
   };
   areas: { added: string[]; removed: string[] };
-  /** Overlap flags by document pair: pairs flagged only after, only before. */
+  /** Conflicts by document pair: pairs flagged only after, only before. */
   conflicts: { opened: number; closed: number };
 }

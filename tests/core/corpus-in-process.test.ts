@@ -87,7 +87,7 @@ const scanOptions = (driver = scanDriver()) => ({
   driver,
   decisions: DECISIONS,
   repoIdentity: null,
-  disableOverlapDetection: true,
+  disableConflictDetection: true,
   skipGit: true,
 });
 describe('curateInProcess', () => {

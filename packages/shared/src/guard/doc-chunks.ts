@@ -1,7 +1,7 @@
 /**
  * Heading-aware markdown chunking — the ONE splitting mechanism every budgeted
- * doc consumer shares. Guard extraction's "views" and spec-scan's overlap
- * windows both plan their per-call slices here, so a doc splits identically
+ * doc consumer shares. Guard extraction's "views" and spec-scan's section
+ * reads both plan their per-call slices here, so a doc splits identically
  * everywhere: recursively along its shallowest partitioning heading level until
  * pieces fit the caller's budget, then adjacent pieces greedily repacked up to
  * that budget so calls stay few. A section with no finer heading structure is

@@ -1,8 +1,8 @@
 /**
- * Types for the **curated doc corpus** — the spec-scan pipeline's unit of
- * curation. The corpus never disassembles a
+ * Types for the **curated doc corpus** — what the spec-scan pipeline
+ * curates. The corpus never disassembles a
  * doc into claims; it annotates each doc with the AREAS it covers, groups docs
- * by area, and flags within-area OVERLAPS. Downstream, generate turns the kept
+ * by area, and flags the CONFLICTS within each area. Downstream, generate turns the kept
  * docs into claims, flows and scenarios.
  *
  * Storage principle: the corpus stores NO prose — it references each doc by a
@@ -220,7 +220,7 @@ export function isProcessArea(id: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Why a doc's units were skipped when its facts were recorded: the units state
+ * Why a doc's sentences were skipped when its facts were recorded: the sentences state
  * no concrete fact another doc could state differently. `other` carries a note
  * in the ledger itself.
  */
@@ -237,12 +237,12 @@ export const FactSkipReasonSchema = z.enum([
 export type FactSkipReason = z.infer<typeof FactSkipReasonSchema>;
 
 /**
- * What recording a doc's facts came to, counted: its units, the facts
- * recorded, the units skipped per reason, and the units the recording left
+ * What recording a doc's facts came to, counted: its sentences, the facts
+ * recorded, the sentences skipped per reason, and the sentences the recording left
  * unaccounted for. The ledger itself stays in the scan's cache.
  */
 export const DocLedgerCountsSchema = z.object({
-  units: z.number().int().nonnegative(),
+  sentences: z.number().int().nonnegative(),
   facts: z.number().int().nonnegative(),
   skipped: z.record(FactSkipReasonSchema, z.number().int().nonnegative()),
   unrecorded: z.number().int().nonnegative(),
@@ -277,19 +277,13 @@ export const CorpusDocSchema = z.object({
 });
 export type CorpusDoc = z.infer<typeof CorpusDocSchema>;
 
-/**
- * A flagged within-area overlap — two docs in the same area that MAY disagree.
- * Carries refs only; the UI derives the prose passages at display time. The
- * user resolves it with a section-scoped conflict verdict (pick-a-side or
- * dismissal) or a force-exclude.
- */
-/** A specific section (markdown heading) in one doc that participates in an overlap. */
-export const OverlapSectionSchema = z.object({
-  /** The doc this section lives in, by ref (one of the overlap's two docs). */
+/** One side of a conflict: a section (markdown heading) of one of its docs. */
+export const ConflictSideSchema = z.object({
+  /** The doc this section lives in, by ref (one of the conflict's two docs). */
   doc: DocRefSchema,
   /**
    * The heading text of the conflicting section (verbatim from the doc), or
-   * `null` when the conflicting passage sits in the doc's PREAMBLE — the block
+   * `null` when the conflicting sentence sits in the doc's PREAMBLE — the block
    * before its first heading (README badges/tagline, intro line). A plain string
    * from older corpora still parses; `null` is the preamble marker the viewer
    * bands as the pre-first-heading block.
@@ -300,21 +294,20 @@ export const OverlapSectionSchema = z.object({
    * the doc — the model's evidence for the heading it picked. Persisted (optional,
    * so older corpora without it still parse) for verification transparency and so
    * the viewer can later highlight the exact disputed sentence, not just band the
-   * section. Consumed at assembly by `verifyOverlapSections` to anchor the pointer
-   * by exact location; NOT part of the dispute's identity (that is doc + heading,
-   * and the passage below when the pointer carries one).
+   * section. Consumed at assembly by `verifyConflictSides` to anchor the pointer
+   * by exact location; NOT part of the conflict's identity (that is doc + heading,
+   * and the sentence below when the pointer carries one).
    */
   quote: z.string().optional(),
   /**
-   * The passage key (`passageKey` in `@truecourse/shared`) of the document unit
-   * the quote is cut from, on a pointer the fact comparison wrote. Part of the
-   * dispute's identity, so two disagreements between the same two sections are
-   * two conflicts. Absent on the overlap session's pointers and on older corpora,
-   * which keep the section identity.
+   * The key (`sentenceKey` in `@truecourse/shared`) of the document sentence the
+   * quote is cut from. With the doc, the side's identity: two sides under one
+   * heading with different sentences name two conflicts, and a heading renamed
+   * leaves the conflict in place.
    */
-  passage: z.string().optional(),
+  sentence: z.string(),
 });
-export type OverlapSection = z.infer<typeof OverlapSectionSchema>;
+export type ConflictSide = z.infer<typeof ConflictSideSchema>;
 
 /**
  * The resolution brief a judge-confirmed conflict carries — a persisted verdict
@@ -322,7 +315,7 @@ export type OverlapSection = z.infer<typeof OverlapSectionSchema>;
  * only on a confirmed flag whose brief parsed cleanly; a confirmed flag with a
  * malformed brief keeps the flag but omits this field.
  */
-export const OverlapReviewSchema = z.object({
+export const ConflictReviewSchema = z.object({
   /** 2–4 sentences naming the exact disagreement — which values/keys/rules conflict, quoting both sides. */
   explanation: z.string(),
   recommendation: z.object({
@@ -342,22 +335,26 @@ export const OverlapReviewSchema = z.object({
     confidence: z.enum(['low', 'medium', 'high']).optional(),
   }),
 });
-export type OverlapReview = z.infer<typeof OverlapReviewSchema>;
+export type ConflictReview = z.infer<typeof ConflictReviewSchema>;
 
-export const OverlapSchema = z.object({
-  /** The two docs that overlap, by ref. */
+/**
+ * A conflict — two docs in the same area (or two sentences of one doc) that
+ * state incompatible things. Carries refs only; the UI derives the prose
+ * sentences at display time. The user resolves it with a verdict
+ * (pick-a-side or dismissal) or a force-exclude.
+ */
+export const ConflictSchema = z.object({
+  /** The two docs that disagree, by ref. */
   docs: z.tuple([DocRefSchema, DocRefSchema]),
-  /** Short note on what may disagree ("auth0_id vs auth0_sub"). */
+  /** Short note on what disagrees ("auth0_id vs auth0_sub"). */
   note: z.string().default(''),
-  /** The specific conflicting sections per doc (markdown headings), when known. */
-  sections: z.array(OverlapSectionSchema).default([]),
+  /** The sides, one per doc (markdown headings), when known. */
+  sections: z.array(ConflictSideSchema).default([]),
   /**
-   * The area ids this dispute spans. Detection runs per area, so one disagreement
+   * The area ids this conflict spans. Detection runs per area, so one disagreement
    * on a doc pair sharing several areas is flagged in each; the cross-area merge
    * collapses those to this single record and lists every area it spanned here, so
-   * a resolution scoped to any of them clears the dispute everywhere. Empty for
-   * older corpora written before the merge — the read layer recomputes the span
-   * from the per-area placement of the (then-duplicated) records.
+   * a resolution scoped to any of them clears the conflict everywhere.
    */
   areas: z.array(z.string()).default([]),
   /**
@@ -366,32 +363,9 @@ export const OverlapSchema = z.object({
    * (detector-only flags, verifier errors, or confirmed flags with a malformed
    * brief) and on older corpora — the field is additive and optional.
    */
-  review: OverlapReviewSchema.optional(),
+  review: ConflictReviewSchema.optional(),
 });
-export type Overlap = z.infer<typeof OverlapSchema>;
-
-/** One side of a deterministic candidate pair — a section, addressed the way
- *  the overlap session's `read_section` addresses it (`null` = the doc's lead). */
-export const CandidateSectionRefSchema = z.object({
-  doc: DocRefSchema,
-  heading: z.string().nullable(),
-});
-export type CandidateSectionRef = z.infer<typeof CandidateSectionRefSchema>;
-
-/**
- * A candidate collision the deterministic pairing nominated: two
- * sections in different docs sharing rare claim tokens or the same canonical
- * heading. Lands in the corpus only when NOT examined (`Area.uncheckedPairs`),
- * so a coverage gap is data — the exact pairs nobody compared — never an
- * inference from doc lists.
- */
-export const CandidatePairSchema = z.object({
-  a: CandidateSectionRefSchema,
-  b: CandidateSectionRefSchema,
-  /** The shared signals that nominated the pair (display form), sorted. */
-  keys: z.array(z.string()).default([]),
-});
-export type CandidatePair = z.infer<typeof CandidatePairSchema>;
+export type Conflict = z.infer<typeof ConflictSchema>;
 
 /**
  * What comparing the recorded facts came to for one area: the area's facts its
@@ -435,31 +409,14 @@ export const AreaSchema = z.object({
   concern: z.string(),
   /** Docs tagged with this area, by ref. */
   docRefs: z.array(DocRefSchema),
-  /** Within-area overlaps still awaiting a relation. */
-  overlaps: z.array(OverlapSchema).default([]),
+  /** The conflicts found within this area. */
+  conflicts: z.array(ConflictSchema).default([]),
   /**
-   * Docs of this area the overlap SESSION did not reach — either the session
-   * declared them (its budget contract: "docs you do not reach go in
-   * notReached") or the session failed and every doc of the area lands here.
-   * Additive + optional so older corpora parse; absent means fully covered by
-   * the one-shot pipeline that predates sessions.
+   * Docs of this area a failed session left unjudged: a window whose record
+   * session failed, or the docs of a comparison batch that failed. Absent when
+   * every session of the area completed.
    */
   notReached: z.array(DocRefSchema).optional(),
-  /**
-   * How many `read_section` tool calls the area's overlap session actually
-   * made — counted from the TRANSCRIPT by the fold (never self-reported), so a
-   * session that flagged nothing while opening nothing is visible as a skim.
-   * Absent on cache-hit areas (no transcript) and on pre-session corpora.
-   */
-  sectionsOpened: z.number().int().nonnegative().optional(),
-  /**
-   * Candidate pairs assigned to this area that no session examined — briefed
-   * pairs whose two sections the transcript never shows both opened, pairs
-   * beyond a session's briefing cap, and every pair of a failed session.
-   * Stamped by the run off the transcript (never self-reported). Additive +
-   * optional; absent on pre-pairing corpora.
-   */
-  uncheckedPairs: z.array(CandidatePairSchema).optional(),
   /**
    * What comparing the recorded facts came to here, on a scan that finds
    * conflicts by comparing facts. Absent on any other scan.
@@ -471,7 +428,7 @@ export type Area = z.infer<typeof AreaSchema>;
 /**
  * The curated corpus — `.truecourse/specs/corpus.json`. Stored as the
  * workspace's spec set and materialized into a run's work tree. Holds docs +
- * area tags + within-area overlap flags.
+ * area tags + the conflicts within each area.
  */
 /** A doc the relevance filter dropped, with the reason — surfaced so the user can force-include it. */
 export const SkippedDocSchema = z.object({
@@ -488,7 +445,7 @@ export const SkippedDocSchema = z.object({
 export type SkippedDoc = z.infer<typeof SkippedDocSchema>;
 
 export const CuratedCorpusSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(5),
   generatedAt: z.string(),
   docs: z.array(CorpusDocSchema),
   areas: z.array(AreaSchema),

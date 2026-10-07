@@ -1,17 +1,17 @@
 /**
- * Deterministic re-anchoring of overlap SECTION POINTERS at assembly. Overlap
- * pointers are model-chosen and UNVALIDATED — the judge names "the nearest
- * heading above the conflicting passage" and can mis-anchor: it once pointed the
- * README side of taskline's `rm` dispute at `## Storage` when the disputed
+ * Deterministic re-anchoring of a conflict's SIDES at assembly. A side's
+ * pointer is model-chosen and UNVALIDATED — the judge names "the nearest
+ * heading above the conflicting sentence" and can mis-anchor: it once pointed the
+ * README side of taskline's `rm` conflict at `## Storage` when the disputed
  * sentence lives in the doc's LEAD (the intro before any `##`). Nothing
  * downstream noticed, and the cross-area dedup's representative rule (fewest null
  * pointers) then systematically PREFERS a wrong-but-named anchor over a correct
  * null (lead) one.
  *
  * This stage re-derives each pointer from the doc's own content, with NO LLM and
- * NO prompt change (it runs at assembly, downstream of the overlap cache, so it
+ * NO prompt change (it runs at assembly, downstream of the session cache, so it
  * corrects fresh AND cached verdicts, and old committed corpora self-heal on the
- * next rescan). It is a pure function of the overlap NOTE + the pointed doc's
+ * next rescan). It is a pure function of the conflict NOTE + the pointed doc's
  * text: score every section of the pointed doc (the LEAD counted as a
  * null-heading candidate, per the lead definition below) by weighted token
  * overlap with the note, then KEEP the model's pointer when its section carries
@@ -23,7 +23,7 @@
  */
 
 import { normalizeQuote, parseHeadings } from '@truecourse/shared';
-import type { OverlapSection } from './corpus-types.js';
+import type { ConflictSide } from './corpus-types.js';
 
 // ---------------------------------------------------------------------------
 // Scoring / decision constants — principled, documented, never tuned to a repo
@@ -125,7 +125,7 @@ export interface DocSection {
 /**
  * Split a doc into sections, each = a heading line + its body up to the next
  * heading. The headings are exactly the ones {@link parseHeadings} finds, the
- * scanner a doc's outline, `read_section` and its units use, so a `#` line
+ * scanner a doc's outline, `read_section` and its sentences use, so a `#` line
  * inside a fenced block is never a section and a heading reads as the outline
  * lists it. Section 0 is the doc's LEAD: the content before the first heading
  * when the doc has such a preamble, else the opening heading's own section (the
@@ -136,8 +136,8 @@ export interface DocSection {
  * The viewer's `splitSections` splits the same way, so the anchor this stage
  * picks is exactly the band the viewer will highlight.
  *
- * Exported (with {@link locateQuote}) for the overlap session's in-session
- * anchor validation (`check_findings` in core's `services/spec-scan/`), which
+ * Exported (with {@link locateQuote}) for the conflicts session's in-session
+ * anchor validation (`check_conflicts` in core's `services/spec-scan/`), which
  * refuses a fabricated heading or a non-verbatim quote before the outcome.
  * `drop` is the doc-path word set — pass `new Set()` when only structure (not
  * token scoring) is needed.
@@ -180,7 +180,7 @@ function headingKey(h: string): string {
  * the exact locations of the disputed sentence. Empty when the quote is blank
  * after normalization or found nowhere (caller then falls back to token scoring).
  * Normalization is the shared {@link normalizeQuote} (one copy — the same key the
- * conflict-resolution dispute identity matches through).
+ * conflict-resolution identity matches through).
  */
 export function locateQuote(sections: DocSection[], quote: string): number[] {
   const needle = normalizeQuote(quote);
@@ -223,22 +223,22 @@ function scoreSections(sections: DocSection[], noteTokens: Set<string>): number[
 }
 
 // ---------------------------------------------------------------------------
-// Public: verify + re-anchor an overlap's section pointers
+// Public: verify + re-anchor a conflict's sides
 // ---------------------------------------------------------------------------
 
 export interface VerifyPointersInput {
-  /** The overlap's two docs, by ref — their filenames become drop tokens. */
+  /** The conflict's two docs, by ref — their filenames become drop tokens. */
   docs: readonly [string, string];
-  /** The overlap note (the query the pointers are scored against). */
+  /** The conflict note (the query the pointers are scored against). */
   note: string;
-  /** The model's section pointers to verify. */
-  sections: readonly OverlapSection[];
+  /** The model's sides to verify. */
+  sections: readonly ConflictSide[];
   /** Resolve a doc ref to its full markdown body; `undefined` when unresolvable. */
   bodyOf: (docRef: string) => string | undefined;
 }
 
 /**
- * Return the overlap's section pointers with each re-anchored where the model
+ * Return the conflict's sides with each re-anchored where the model
  * clearly mis-anchored, and every other pointer left exactly as given. A pointer
  * is re-anchored to the best-scoring section only when its own section is BOTH
  * below the meaningful floor AND a negligible fraction of the best; a pointer
@@ -253,7 +253,7 @@ export interface VerifyPointersInput {
  * skipped entirely. No quote, or a quote found nowhere, falls back to the token
  * overlap path unchanged.
  */
-export function verifyOverlapSections(input: VerifyPointersInput): OverlapSection[] {
+export function verifyConflictSides(input: VerifyPointersInput): ConflictSide[] {
   const { docs, note, sections, bodyOf } = input;
   if (sections.length === 0) return [...sections];
 
@@ -286,7 +286,7 @@ export function verifyOverlapSections(input: VerifyPointersInput): OverlapSectio
       const hits = locateQuote(candidates, ptr.quote);
       if (hits.length > 0) {
         if (pointedIdx >= 0 && hits.includes(pointedIdx)) return { ...ptr };
-        // Only the heading moves; the quote and the passage key ride along.
+        // Only the heading moves; the quote and the sentence key ride along.
         const target = hits[0];
         return { ...ptr, heading: target === 0 ? null : candidates[target].realHeading };
       }
@@ -309,7 +309,7 @@ export function verifyOverlapSections(input: VerifyPointersInput): OverlapSectio
 
     if (!reanchor) return { ...ptr };
     // Re-anchor. Section 0 is the lead → the canonical `null` pointer; every other
-    // section carries a real heading. The quote and the passage key (if any) ride
+    // section carries a real heading. The quote and the sentence key (if any) ride
     // along unchanged: only the heading moves.
     return { ...ptr, heading: bestIdx === 0 ? null : candidates[bestIdx].realHeading };
   });

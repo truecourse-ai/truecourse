@@ -42,15 +42,17 @@ describe('ManualAreaSchema (per-doc area override)', () => {
   });
 });
 
-describe('ConflictResolutionSchema (section-scoped conflict verdicts)', () => {
+describe('ConflictResolutionSchema (conflict verdicts)', () => {
   it('round-trips a pick-a-side verdict with anchors + quotes', () => {
     const r = {
       docA: 'README.md',
       anchorA: 'taskline',
       quoteA: 'rm permanently deletes the task.',
+      sentenceA: 's-readme',
       docB: 'docs/SPEC.md',
       anchorB: 'rm <id>',
       quoteB: 'rm archives the task.',
+      sentenceB: 's-spec',
       verdict: 'a' as const,
       resolvedAt: '2026-07-10T00:00:00Z',
       note: 'README is authoritative',
@@ -62,8 +64,10 @@ describe('ConflictResolutionSchema (section-scoped conflict verdicts)', () => {
     const parsed = ConflictResolutionSchema.parse({
       docA: 'README.md',
       anchorA: null,
+      sentenceA: 's-readme',
       docB: 'docs/SPEC.md',
       anchorB: null,
+      sentenceB: 's-spec',
       verdict: 'dismissed',
       resolvedAt: '',
     });
@@ -71,41 +75,37 @@ describe('ConflictResolutionSchema (section-scoped conflict verdicts)', () => {
     expect(parsed.quoteA).toBeUndefined();
   });
 
-  it('rejects an unknown verdict', () => {
+  it('rejects an unknown verdict, and a verdict that names no sentences', () => {
     expect(() =>
-      ConflictResolutionSchema.parse({ docA: 'a', anchorA: null, docB: 'b', anchorB: null, verdict: 'maybe', resolvedAt: '' }),
+      ConflictResolutionSchema.parse({ docA: 'a', anchorA: null, sentenceA: 's', docB: 'b', anchorB: null, sentenceB: 't', verdict: 'maybe', resolvedAt: '' }),
+    ).toThrow();
+    expect(() =>
+      ConflictResolutionSchema.parse({ docA: 'a', anchorA: null, docB: 'b', anchorB: null, verdict: 'a', resolvedAt: '' }),
     ).toThrow();
   });
 });
 
 describe('DecisionsFileSchema (corpus curation intent)', () => {
   it('defaults the optional arrays when absent', () => {
-    const parsed = DecisionsFileSchema.parse({ version: 1 });
+    const parsed = DecisionsFileSchema.parse({ version: 3 });
     expect(parsed.manualIncludes).toEqual([]);
     expect(parsed.manualAreas).toEqual([]);
     expect(parsed.conflictResolutions).toEqual([]);
   });
 
-  it('parses an OLD decisions file — missing arrays default, an unknown relations field is dropped', () => {
-    const old = {
-      version: 1 as const,
-      manualIncludes: ['docs/keep.md'],
-      manualExcludes: [],
-      relations: [{ type: 'keep-both' as const, older: 'a.md', newer: 'b.md' }],
-      manualAreas: [],
-    };
-    const parsed = DecisionsFileSchema.parse(old);
+  it('drops an unknown field on parse', () => {
+    const parsed = DecisionsFileSchema.parse({ version: 3, manualIncludes: ['docs/keep.md'], relations: [{ older: 'a.md', newer: 'b.md' }] });
     expect(parsed.conflictResolutions).toEqual([]);
     expect((parsed as Record<string, unknown>).relations).toBeUndefined();
   });
 
   it('round-trips manualAreas + manualIncludes + conflictResolutions', () => {
     const file = {
-      version: 1 as const,
+      version: 3 as const,
       manualIncludes: ['docs/keep.md'],
       manualAreas: [{ doc: 'a.md', areas: ['core/auth'] }],
       conflictResolutions: [
-        { docA: 'a.md', anchorA: 'x', docB: 'b.md', anchorB: 'y', verdict: 'b' as const, resolvedAt: '2026-07-10T00:00:00Z' },
+        { docA: 'a.md', anchorA: 'x', sentenceA: 's-a', docB: 'b.md', anchorB: 'y', sentenceB: 's-b', verdict: 'b' as const, resolvedAt: '2026-07-10T00:00:00Z' },
       ],
     };
     const parsed = DecisionsFileSchema.parse(file);
@@ -115,13 +115,11 @@ describe('DecisionsFileSchema (corpus curation intent)', () => {
     expect(parsed.conflictResolutions[0].verdict).toBe('b');
   });
 
-  // v2 added the scan orchestrator's scope verdicts + standing
-  // instructions. BOTH versions parse — a v1 file simply has neither and gets the
-  // defaults — while every writer stamps 2. Any OTHER version literal is still a
-  // deliberate bump nobody has made, so it must fail loud.
-  it('parses a v2 file with scope verdicts and standing instructions', () => {
+  // Version 3 alone parses; any other version literal is a bump nobody has
+  // made, so it must fail loud.
+  it('parses the scope verdicts and standing instructions', () => {
     const parsed = DecisionsFileSchema.parse({
-      version: 2,
+      version: 3,
       scopeVerdicts: [
         { path: 'docs/archive', verdict: 'exclude', reason: 'superseded', decidedAt: '2026-08-19T00:00:00Z' },
         { path: 'docs', verdict: 'keep', reason: 'our specs', decidedAt: '2026-08-19T00:00:00Z', resolvedBy: 'auto' },
@@ -134,23 +132,22 @@ describe('DecisionsFileSchema (corpus curation intent)', () => {
     expect(parsed.instructions).toEqual(['the English tree under docs/en is canonical']);
   });
 
-  it('defaults the v2 fields on a v1 file', () => {
-    const parsed = DecisionsFileSchema.parse({ version: 1 });
-    expect(parsed.scopeVerdicts).toEqual([]);
-    expect(parsed.instructions).toEqual([]);
+  it('refuses an older version', () => {
+    expect(() => DecisionsFileSchema.parse({ version: 2 })).toThrow();
+    expect(() => DecisionsFileSchema.parse({ version: 1 })).toThrow();
   });
 
   it('rejects a scope verdict with an unknown verdict word', () => {
     expect(() =>
       DecisionsFileSchema.parse({
-        version: 2,
+        version: 3,
         scopeVerdicts: [{ path: 'docs', verdict: 'maybe', reason: 'r', decidedAt: 'now' }],
       }),
     ).toThrow();
   });
 
   it('rejects a version literal nobody bumped to — bumping is intentional', () => {
-    expect(() => DecisionsFileSchema.parse({ version: 3 })).toThrow();
+    expect(() => DecisionsFileSchema.parse({ version: 4 })).toThrow();
     expect(() => DecisionsFileSchema.parse({ version: 0 })).toThrow();
   });
 });

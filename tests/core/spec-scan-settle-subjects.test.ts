@@ -44,19 +44,19 @@ import {
   type SubjectPart,
 } from '../../packages/core/src/services/spec-scan/settle-subjects'
 import { instructionsFingerprint, scanCacheKey } from '../../packages/core/src/services/spec-scan/tools'
-import { splitDocUnits, writeDecisions, type DecisionsFile } from '../../packages/spec-consolidator/src/index.js'
+import { splitDocSentences, writeDecisions, type DecisionsFile } from '../../packages/spec-consolidator/src/index.js'
 import { docPathOf, memoryPersistence, outcome, stubDriver, transportFailure, malformedFailure, type StubCall } from './spec-scan-session-stub'
-import { compare, compareBriefing, record, settle, subjectNames, type UnitFact } from './spec-scan-facts-stub'
+import { compare, compareBriefing, record, settle, subjectNames, type SentenceFact } from './spec-scan-facts-stub'
 import type { DriverResult } from '../../packages/agent-loop/src/index'
 
 // ---------------------------------------------------------------------------
 // names
 // ---------------------------------------------------------------------------
 
-const UNITS = splitDocUnits('One.\n\nTwo.\n\nThree.\n')
+const UNITS = splitDocSentences('One.\n\nTwo.\n\nThree.\n')
 const fact = (doc: string, subject: string, statement = `${subject} works.`): RecordedFact => ({
   doc,
-  units: [UNITS[0]!],
+  sentences: [UNITS[0]!],
   subject,
   statement,
   areas: ['core/x'],
@@ -211,7 +211,7 @@ const DOCS: Record<string, string> = {
 }
 
 /** Every sentence a fact, its subject the checker it names as written. */
-const checkerFact: UnitFact = ({ line }) => {
+const checkerFact: SentenceFact = ({ line }) => {
   const named = /(ATS checker|ATS Checker|resume checker|`ATS checker`)/.exec(line)?.[1]
   return named ? { subject: named, statement: line } : null
 }
@@ -267,7 +267,6 @@ async function scan(settleWith: (call: StubCall) => DriverResult | Promise<Drive
     driver: async () => stub.driver,
     persistence: memoryPersistence().persistence,
     skipGit: true,
-    conflictMethod: 'facts',
     onFact: (step, line) => facts.push([step, line]),
   })
   return { result, stub, facts }

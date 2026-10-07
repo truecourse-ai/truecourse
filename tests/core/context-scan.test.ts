@@ -39,6 +39,7 @@ import {
 import { memorySpecStore } from '../helpers/memory-spec-store';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { outcome, stubDriver, type StubCall } from './spec-scan-session-stub';
+import { compare, record, settle } from './spec-scan-facts-stub';
 
 /** The document a universe-mode curate briefing is about. */
 const refOf = (briefing: string): string => /^REF: (.+)$/m.exec(briefing)?.[1] ?? '';
@@ -126,8 +127,8 @@ const covered = (paths: readonly string[]): DecisionsFile => ({
   })),
 });
 
-/** Keep every doc, tag it, and answer an overlap pass with nothing flagged. */
-function keepEverything(call: StubCall) {
+/** Keep every doc, tag it, and record nothing to compare. */
+async function keepEverything(call: StubCall) {
   if (call.kind === 'spec-scan.curate-doc') {
     return outcome({
       keep: true,
@@ -140,9 +141,9 @@ function keepEverything(call: StubCall) {
   if (call.kind === 'spec-scan.settle-areas') {
     return outcome({ merges: [], renames: [] });
   }
-  if (call.kind === 'spec-scan.overlap') {
-    return outcome({ overlaps: [], notReached: [] });
-  }
+  if (call.kind === 'spec-scan.record-facts') return record(call, () => null);
+  if (call.kind === 'spec-scan.settle-subjects') return settle(call);
+  if (call.kind === 'spec-scan.compare-facts') return compare(call);
   if (call.kind === 'spec-scan.orchestrate') {
     return outcome({ scopeVerdicts: [], instructions: [], findings: [] });
   }

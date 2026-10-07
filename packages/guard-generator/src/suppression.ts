@@ -1,5 +1,5 @@
 /**
- * Extraction suppression from section-scoped conflict resolutions.
+ * Extraction suppression from conflict resolutions.
  *
  * When a conflict is resolved by a SIDE verdict ("README is right"), the LOSER's
  * disputed sentence is stale: no claim asserting it may be extracted. This module
@@ -10,7 +10,7 @@
  * verbatim quotes extraction must not turn into claims.
  *
  * The derivation only ever names a quote for a resolution that MATCHES a currently
- * flagged conflict (a 'dismissed' verdict, or an orphaned resolution whose dispute
+ * flagged conflict (a 'dismissed' verdict, or an orphaned resolution whose conflict
  * the corpus no longer flags, contributes nothing) — so a doc absent from the
  * returned map has nothing suppressed and its extraction is byte-identical to an
  * unsuppressed doc's.
@@ -22,28 +22,28 @@ import { z } from 'zod'
 import { suppressedClaims, normalizeQuote, type SuppressedClaim } from '@truecourse/shared'
 import { specsDir } from '@truecourse/shared/work-tree'
 
-// Tolerant corpus view: just the areas' overlaps (docs + note + section pointers +
+// Tolerant corpus view: just the areas' conflicts (docs + note + sides +
 // spanned areas). Everything else in corpus.json is ignored; `.passthrough()`
 // keeps unknown keys harmless.
-const OverlapSectionShape = z
+const ConflictSideShape = z
   .object({
     doc: z.string(),
     heading: z.string().nullable().optional(),
     quote: z.string().optional(),
-    passage: z.string().optional(),
+    sentence: z.string(),
   })
   .passthrough()
-const OverlapShape = z
+const ConflictShape = z
   .object({
     docs: z.tuple([z.string(), z.string()]),
     note: z.string().optional(),
-    sections: z.array(OverlapSectionShape).optional(),
+    sections: z.array(ConflictSideShape).optional(),
     areas: z.array(z.string()).optional(),
   })
   .passthrough()
 const CorpusShape = z
   .object({
-    areas: z.array(z.object({ id: z.string(), overlaps: z.array(OverlapShape).optional() }).passthrough()).optional(),
+    areas: z.array(z.object({ id: z.string(), conflicts: z.array(ConflictShape).optional() }).passthrough()).optional(),
   })
   .passthrough()
 
@@ -52,11 +52,11 @@ const ConflictResolutionShape = z
     docA: z.string(),
     anchorA: z.string().nullable().optional(),
     quoteA: z.string().optional(),
-    passageA: z.string().optional(),
+    sentenceA: z.string(),
     docB: z.string(),
     anchorB: z.string().nullable().optional(),
     quoteB: z.string().optional(),
-    passageB: z.string().optional(),
+    sentenceB: z.string(),
     verdict: z.enum(['a', 'b', 'dismissed']),
     resolvedAt: z.string().optional(),
     note: z.string().optional(),
@@ -88,16 +88,16 @@ export function readSuppressedClaims(repoRoot: string): SuppressedClaim[] {
   const corpusLike = {
     areas: (corpus.areas ?? []).map((a) => ({
       id: a.id,
-      overlaps: (a.overlaps ?? []).map((o) => ({
+      conflicts: (a.conflicts ?? []).map((o) => ({
         docs: o.docs,
         note: o.note,
-        // The passage is part of a pointer's identity: dropping it would merge
+        // The sentence is part of a side's identity: dropping it would merge
         // conflicts that share two sections, and match the wrong verdict.
         sections: (o.sections ?? []).map((s) => ({
           doc: s.doc,
           heading: s.heading ?? null,
           quote: s.quote,
-          ...(s.passage !== undefined ? { passage: s.passage } : {}),
+          sentence: s.sentence,
         })),
         areas: o.areas,
       })),
@@ -109,11 +109,11 @@ export function readSuppressedClaims(repoRoot: string): SuppressedClaim[] {
       docA: r.docA,
       anchorA: r.anchorA ?? null,
       quoteA: r.quoteA,
-      ...(r.passageA !== undefined ? { passageA: r.passageA } : {}),
+      sentenceA: r.sentenceA,
       docB: r.docB,
       anchorB: r.anchorB ?? null,
       quoteB: r.quoteB,
-      ...(r.passageB !== undefined ? { passageB: r.passageB } : {}),
+      sentenceB: r.sentenceB,
       verdict: r.verdict,
       resolvedAt: r.resolvedAt,
       note: r.note,

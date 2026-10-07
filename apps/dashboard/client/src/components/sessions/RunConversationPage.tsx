@@ -28,7 +28,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import { Capsule } from '@/dashboard/ui/bits';
-import { FindingCard, FindingResolveProvider } from './conversation-pieces';
+import { ConflictCard, ConflictResolveProvider } from './conversation-pieces';
 import { STEP_DOT, formatDuration, runDuration } from './run-model';
 import { useRunConversation } from './useRunConversation';
 import type { ConversationLine, DataField, SessionBlock, StepBlock } from './conversation-model';
@@ -166,11 +166,11 @@ export function RunConversationPage({
     return () => observer.disconnect();
   }, [toEnd]);
 
-  const hasDispute = useMemo(
+  const hasConflict = useMemo(
     () =>
       steps.some((step) =>
         step.sessions.some((block) =>
-          block.lines.some((line) => line.kind === 'outcome' && line.findings.some((f) => f.dispute !== undefined)),
+          block.lines.some((line) => line.kind === 'outcome' && line.conflicts.some((c) => c.conflict !== undefined)),
         ),
       ),
     [steps],
@@ -234,9 +234,9 @@ export function RunConversationPage({
         </div>
       </div>
       {selected && (
-        <FindingResolveProvider repoId={repoId} active={hasDispute}>
+        <ConflictResolveProvider repoId={repoId} active={hasConflict}>
           <WorkPane block={selected} onClose={() => select(null)} loading={loading} hasOlder={hasOlder} loadingOlder={loadingOlder} loadOlder={loadOlder} now={now} />
-        </FindingResolveProvider>
+        </ConflictResolveProvider>
       )}
     </div>
   );
@@ -925,9 +925,9 @@ function Line({ line }: { line: ConversationLine }) {
       return (
         <Message ts={line.ts}>
           <Json label="outcome" value={line.value} />
-          {line.findings.map((finding, i) => (
+          {line.conflicts.map((card, i) => (
             <div key={i} className="mt-2">
-              <FindingCard finding={finding} />
+              <ConflictCard card={card} />
             </div>
           ))}
         </Message>

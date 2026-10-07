@@ -28,18 +28,18 @@ export async function useTool(call: StubCall, name: string, args: unknown): Prom
 // record
 // ---------------------------------------------------------------------------
 
-/** One unit as a record briefing shows it. */
-export interface BriefedUnit {
+/** One sentence as a record briefing shows it. */
+export interface BriefedSentence {
   n: number
-  /** The rest of its line: the unit's text as presented. */
+  /** The rest of its line: the sentence's text as presented. */
   line: string
 }
 
-export function recordBriefing(briefing: string): { doc: string; areas: string[]; units: BriefedUnit[] } {
+export function recordBriefing(briefing: string): { doc: string; areas: string[]; sentences: BriefedSentence[] } {
   return {
     doc: /^DOCUMENT: (\S+)/m.exec(briefing)![1]!,
     areas: /^AREA TAGS \(.*?\): (.+)$/m.exec(briefing)![1]!.split(', '),
-    units: [...briefing.matchAll(/^\[(\d+)\] (.*)$/gm)].map((m) => ({ n: Number(m[1]), line: m[2]! })),
+    sentences: [...briefing.matchAll(/^\[(\d+)\] (.*)$/gm)].map((m) => ({ n: Number(m[1]), line: m[2]! })),
   }
 }
 
@@ -48,17 +48,17 @@ interface StatedFact {
   statement: string
 }
 
-/** What a unit states (one fact, or several), or `null` to skip it. */
-export type UnitFact = (unit: BriefedUnit, doc: string) => StatedFact | readonly StatedFact[] | null
+/** What a sentence states (one fact, or several), or `null` to skip it. */
+export type SentenceFact = (sentence: BriefedSentence, doc: string) => StatedFact | readonly StatedFact[] | null
 
-/** A recorder that records what `factOf` says each unit states, under every area of the doc, and skips the rest. */
-export async function record(call: StubCall, factOf: UnitFact): Promise<DriverResult> {
-  const { doc, areas, units } = recordBriefing(call.briefing)
+/** A recorder that records what `factOf` says each sentence states, under every area of the doc, and skips the rest. */
+export async function record(call: StubCall, factOf: SentenceFact): Promise<DriverResult> {
+  const { doc, areas, sentences } = recordBriefing(call.briefing)
   const ledger: FactLedgerWire = { facts: [], skips: [] }
-  for (const unit of units) {
-    const stated = factOf(unit, doc)
-    if (stated === null) ledger.skips.push({ from: unit.n, to: unit.n, why: 'other', note: 'nothing to record' })
-    else for (const fact of [stated].flat()) ledger.facts.push({ units: [unit.n], areas, ...fact })
+  for (const sentence of sentences) {
+    const stated = factOf(sentence, doc)
+    if (stated === null) ledger.skips.push({ from: sentence.n, to: sentence.n, why: 'other', note: 'nothing to record' })
+    else for (const fact of [stated].flat()) ledger.facts.push({ sentences: [sentence.n], areas, ...fact })
   }
   await useTool(call, 'check_ledger', ledger)
   return outcome(ledger)
@@ -112,19 +112,31 @@ export function compareBriefing(briefing: string): BriefedFact[] {
   }))
 }
 
-const REVIEW = {
-  explanation: 'The two passages give different places for the same control.',
-  recommendation: { action: 'fix-doc' as const, rationale: 'Neither document says which is current.', fix: 'Pick one place.', confidence: 'medium' as const },
+/** A conflict's adjudication, as the comparer writes it. */
+export interface StubReview {
+  explanation: string
+  recommendation: {
+    action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss'
+    rationale: string
+    fix?: string
+    confidence?: 'low' | 'medium' | 'high'
+  }
+}
+
+export const REVIEW: StubReview = {
+  explanation: 'The two sentences give different places for the same control.',
+  recommendation: { action: 'fix-doc', rationale: 'Neither document says which is current.', fix: 'Pick one place.', confidence: 'medium' },
 }
 
 /**
  * A comparer that groups the facts briefed under one subject, and judges a
  * group in conflict when `conflicting` names a pair of its facts (side a
- * first); every other fact is alone.
+ * first), each conflict carrying `review`; every other fact is alone.
  */
 export async function compare(
   call: StubCall,
   conflicting: (a: BriefedFact, b: BriefedFact) => boolean = () => false,
+  review: StubReview = REVIEW,
 ): Promise<DriverResult> {
   const facts = compareBriefing(call.briefing)
   const bySubject = new Map<string, BriefedFact[]>()
@@ -136,7 +148,7 @@ export async function compare(
       continue
     }
     const conflicts = group.flatMap((a) =>
-      group.filter((b) => b !== a && conflicting(a, b)).map((b) => ({ a: a.id, b: b.id, note: `${a.doc} and ${b.doc} disagree on ${subject}`, review: REVIEW })),
+      group.filter((b) => b !== a && conflicting(a, b)).map((b) => ({ a: a.id, b: b.id, note: `${a.doc} and ${b.doc} disagree on ${subject}`, review })),
     )
     const paired = new Set(conflicts.flatMap((c) => [c.a, c.b]))
     comparison.groups.push({

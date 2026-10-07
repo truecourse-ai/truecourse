@@ -33,7 +33,7 @@ import type {
 import type { ActivityEvent, ActivityProgress } from '@truecourse/shared/activity-stream';
 import type { PublicSessionRun } from '@/lib/api';
 import { displayBlocks, runChecklist, type StepStatus } from './run-model';
-import type { ChatFinding } from './conversation-pieces';
+import type { ChatConflict } from './conversation-pieces';
 
 /** A `key: value` pair of an event's own fields. */
 export type DataField = { label: string; value: string };
@@ -53,7 +53,7 @@ export type ConversationLine = { key: string; seq: number; ts: string } & (
     }
   | { kind: 'tool'; toolName: string; content: string; isError: boolean }
   /** The outcome value in full; of its display blocks only findings render. */
-  | { kind: 'outcome'; value: string; findings: ChatFinding[] }
+  | { kind: 'outcome'; value: string; conflicts: ChatConflict[] }
   | { kind: 'failure'; fields: DataField[] }
   | { kind: 'question'; question: UserInputQuestion }
   | { kind: 'child'; phase: 'started' | 'completed'; child: ChildLinkage; status?: SessionStatus; spent?: BudgetSpent }
@@ -301,7 +301,7 @@ function toLine(event: SessionEvent): ConversationLine | null {
         isError: event.isError === true,
       };
     case 'outcome':
-      return { ...at, kind: 'outcome', value: pretty(event.value), findings: findingsOf(event.display) };
+      return { ...at, kind: 'outcome', value: pretty(event.value), conflicts: conflictsOf(event.display) };
     case 'failure':
       return { ...at, kind: 'failure', fields: fieldsOf(event.failure) };
     case 'question-asked':
@@ -323,21 +323,21 @@ function toLine(event: SessionEvent): ConversationLine | null {
   }
 }
 
-/** The finding blocks of an outcome's display; checklist blocks are dropped. */
-function findingsOf(display: unknown): ChatFinding[] {
-  const findings: ChatFinding[] = [];
+/** The conflict blocks of an outcome's display; checklist blocks are dropped. */
+function conflictsOf(display: unknown): ChatConflict[] {
+  const conflicts: ChatConflict[] = [];
   for (const block of displayBlocks(display)) {
-    if (block.kind !== 'finding') continue;
-    const { claim, quotes, recommendation, dispute } = block as Record<string, unknown>;
+    if (block.kind !== 'conflict') continue;
+    const { claim, quotes, recommendation, conflict } = block as Record<string, unknown>;
     if (typeof claim !== 'string' || !Array.isArray(quotes)) continue;
-    findings.push({
+    conflicts.push({
       claim,
-      quotes: quotes as ChatFinding['quotes'],
-      ...(recommendation ? { recommendation: recommendation as ChatFinding['recommendation'] } : {}),
-      ...(dispute ? { dispute: dispute as ChatFinding['dispute'] } : {}),
+      quotes: quotes as ChatConflict['quotes'],
+      ...(recommendation ? { recommendation: recommendation as ChatConflict['recommendation'] } : {}),
+      ...(conflict ? { conflict: conflict as ChatConflict['conflict'] } : {}),
     });
   }
-  return findings;
+  return conflicts;
 }
 
 /** An object's own fields as `label: value`, the envelope left out. */

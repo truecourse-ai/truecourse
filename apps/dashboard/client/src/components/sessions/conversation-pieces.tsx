@@ -1,89 +1,81 @@
 /**
- * The one piece of a conversation that is more than text: the disagreement
- * card an outcome can carry, with the verdict row that records a resolution in
+ * The one piece of a conversation that is more than text: the conflict card
+ * an outcome can carry, with the verdict row that records a resolution in
  * place.
  *
  * The card is presentational. What it needs to write a verdict comes from
- * {@link FindingResolveProvider}, which the surface rendering the cards wraps
+ * {@link ConflictResolveProvider}, which the surface rendering the cards wraps
  * around them, so the card itself knows nothing about the API.
  */
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Check } from 'lucide-react';
-import { buildCorpusConflicts, resolutionForConflict, type OverlapSectionLike } from '@truecourse/shared';
-import type { DisplayDispute, KnownDisplayBlock } from '@truecourse/agent-loop';
+import { buildCorpusConflicts, resolutionForConflict, type ConflictSideLike } from '@truecourse/shared';
+import type { DisplayConflict, KnownDisplayBlock } from '@truecourse/agent-loop';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import * as api from '@/lib/api';
 import type { SpecConflictResolution } from '@/lib/api';
-import { passageNames } from '@/lib/passage-names';
+import { sentenceNames } from '@/lib/sentence-names';
 
-/**
- * The dispute identity of a finding: the SAME key `conflictResolutions`
- * entries carry (unordered doc pair + per-side section anchor, and per-side
- * passage key when the finding names its passages), so a verdict recorded
- * here matches the corpus conflict. The quotes ride along as evidence.
- */
-export type FindingDispute = DisplayDispute;
-
-/** A dispute's two sides as the pointers the shared identity reads. */
-const disputePointers = (d: FindingDispute): OverlapSectionLike[] => [
-  { doc: d.docA, heading: d.anchorA, quote: d.quoteA, ...(d.passageA !== undefined ? { passage: d.passageA } : {}) },
-  { doc: d.docB, heading: d.anchorB, quote: d.quoteB, ...(d.passageB !== undefined ? { passage: d.passageB } : {}) },
+/** A conflict's two sides as the shared identity reads them. */
+const conflictPointers = (d: DisplayConflict): ConflictSideLike[] => [
+  { doc: d.docA, heading: d.anchorA, quote: d.quoteA, sentence: d.sentenceA },
+  { doc: d.docB, heading: d.anchorB, quote: d.quoteB, sentence: d.sentenceB },
 ];
 
-/** A `finding` display block as the card consumes it. */
-export type ChatFinding = Omit<Extract<KnownDisplayBlock, { kind: 'finding' }>, 'kind'>;
+/** A `conflict` display block as the card consumes it. */
+export type ChatConflict = Omit<Extract<KnownDisplayBlock, { kind: 'conflict' }>, 'kind'>;
 
 /**
- * What a finding card needs to RESOLVE its dispute in place: the same verdict
+ * What a conflict card needs to RESOLVE its conflict in place: the same verdict
  * API the Coverage conflicts page uses. `resolutions` is the persisted verdict
- * list (null while loading); `coverageHref` deep-links the same dispute there.
+ * list (null while loading); `coverageHref` deep-links the same conflict there.
  */
-interface FindingResolveCtx {
+interface ConflictResolveCtx {
   resolutions: SpecConflictResolution[] | null;
-  resolve: (dispute: FindingDispute, verdict: 'a' | 'b' | 'dismissed') => Promise<void>;
-  undo: (dispute: FindingDispute) => Promise<void>;
-  coverageHref: (dispute: FindingDispute) => string;
+  resolve: (conflict: DisplayConflict, verdict: 'a' | 'b' | 'dismissed') => Promise<void>;
+  undo: (conflict: DisplayConflict) => Promise<void>;
+  coverageHref: (conflict: DisplayConflict) => string;
 }
 
-const FindingResolveContext = createContext<FindingResolveCtx | null>(null);
+const ConflictResolveContext = createContext<ConflictResolveCtx | null>(null);
 
 /** One derived Coverage conflict record: the same shape both pages build. */
 type ConflictRecord = ReturnType<typeof buildCorpusConflicts>[number];
 
 /**
- * The side the finding's recommendation picks. A card written before the side
+ * The side the card's recommendation picks. A card written before the side
  * was recorded names only the doc, which is enough between two docs; inside
- * one doc only the side tells the passages apart.
+ * one doc only the side tells the sentences apart.
  */
-function recommendedSide(finding: ChatFinding): 'a' | 'b' | undefined {
-  const rec = finding.recommendation;
+function recommendedSide(card: ChatConflict): 'a' | 'b' | undefined {
+  const rec = card.recommendation;
   if (rec?.side) return rec.side;
-  const dispute = finding.dispute;
-  if (!rec?.doc || !dispute || dispute.docA === dispute.docB) return undefined;
-  return rec.doc === dispute.docA ? 'a' : rec.doc === dispute.docB ? 'b' : undefined;
+  const conflict = card.conflict;
+  if (!rec?.doc || !conflict || conflict.docA === conflict.docB) return undefined;
+  return rec.doc === conflict.docA ? 'a' : rec.doc === conflict.docB ? 'b' : undefined;
 }
 
-export function FindingCard({ finding }: { finding: ChatFinding }) {
-  const side = recommendedSide(finding);
-  const dispute = finding.dispute;
+export function ConflictCard({ card }: { card: ChatConflict }) {
+  const side = recommendedSide(card);
+  const conflict = card.conflict;
   // Inside one doc a quote is the recommended one by its words, not its doc.
-  const recommendedQuote = (q: ChatFinding['quotes'][number]): boolean =>
-    dispute && dispute.docA === dispute.docB
-      ? side !== undefined && q.quote === (side === 'a' ? dispute.quoteA : dispute.quoteB)
-      : finding.recommendation?.doc === q.doc;
+  const recommendedQuote = (q: ChatConflict['quotes'][number]): boolean =>
+    conflict && conflict.docA === conflict.docB
+      ? side !== undefined && q.quote === (side === 'a' ? conflict.quoteA : conflict.quoteB)
+      : card.recommendation?.doc === q.doc;
   return (
     <div className="max-w-full overflow-hidden rounded-xl rounded-tl border border-border">
       <div className="px-3 py-2">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-500">
           Disagreement
         </div>
-        <p className="mt-0.5 text-xs leading-relaxed text-foreground">{finding.claim}</p>
+        <p className="mt-0.5 text-xs leading-relaxed text-foreground">{card.claim}</p>
       </div>
-      {finding.quotes.length > 0 && (
-        <div className={`grid border-t border-border ${finding.quotes.length > 1 ? 'sm:grid-cols-2' : ''}`}>
-          {finding.quotes.map((q, i) => (
+      {card.quotes.length > 0 && (
+        <div className={`grid border-t border-border ${card.quotes.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+          {card.quotes.map((q, i) => (
             <div key={i} className={`min-w-0 px-3 py-2 ${i > 0 ? 'border-t border-border sm:border-l sm:border-t-0' : ''}`}>
               <HoverPopover content={q.heading ?? q.doc} width="narrow">
                 <div
@@ -101,26 +93,26 @@ export function FindingCard({ finding }: { finding: ChatFinding }) {
           ))}
         </div>
       )}
-      {finding.recommendation && (
+      {card.recommendation && (
         <div className="flex items-baseline gap-2 border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
           <span className="min-w-0">
-            {finding.recommendation.doc ? (
+            {card.recommendation.doc ? (
               <>
-                I'd follow <span className="text-foreground">{shortDocRef(finding.recommendation.doc)}</span>
-                {finding.recommendation.rationale && <>: {finding.recommendation.rationale}</>}
+                I'd follow <span className="text-foreground">{shortDocRef(card.recommendation.doc)}</span>
+                {card.recommendation.rationale && <>: {card.recommendation.rationale}</>}
               </>
             ) : (
-              finding.recommendation.rationale || 'No clear side to pick.'
+              card.recommendation.rationale || 'No clear side to pick.'
             )}
           </span>
-          {finding.recommendation.confidence && (
+          {card.recommendation.confidence && (
             <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70">
-              {finding.recommendation.confidence} confidence
+              {card.recommendation.confidence} confidence
             </span>
           )}
         </div>
       )}
-      {dispute && <FindingResolveFooter dispute={dispute} recommended={side} />}
+      {conflict && <ConflictResolveFooter conflict={conflict} recommended={side} />}
     </div>
   );
 }
@@ -130,38 +122,38 @@ const VERDICT_BTN =
 
 /**
  * The in-place resolution row: the same pick-a-side / dismiss verdicts the
- * Coverage conflicts page records, writing the identical dispute identity to
+ * Coverage conflicts page records, writing the identical conflict identity to
  * decisions.json, plus the deep link to that page for the full detail. The
  * side the agent recommended carries the same green its quote header does.
  */
-function FindingResolveFooter({
-  dispute,
+function ConflictResolveFooter({
+  conflict,
   recommended,
 }: {
-  dispute: FindingDispute;
+  conflict: DisplayConflict;
   recommended?: 'a' | 'b';
 }) {
-  const ctx = useContext(FindingResolveContext);
+  const ctx = useContext(ConflictResolveContext);
   const [busy, setBusy] = useState<'a' | 'b' | 'dismissed' | 'undo' | null>(null);
   const [error, setError] = useState<string | null>(null);
   if (!ctx) return null;
-  const [nameA, nameB] = disputeSideNames(dispute);
+  const [nameA, nameB] = conflictSideNames(conflict);
   // Same chrome on every verdict button; the recommended side is marked by a
   // check inside the button, matching its quote header's green.
   const recommendedMark = (
     <Check aria-hidden className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-500" />
   );
 
-  const resolution = resolutionForConflict(ctx.resolutions ?? [], dispute.docA, dispute.docB, disputePointers(dispute));
+  const resolution = resolutionForConflict(ctx.resolutions ?? [], conflict.docA, conflict.docB, conflictPointers(conflict));
 
   const act = async (verdict: 'a' | 'b' | 'dismissed' | 'undo'): Promise<void> => {
     setBusy(verdict);
     setError(null);
     try {
       if (verdict === 'undo') {
-        await ctx.undo(dispute);
+        await ctx.undo(conflict);
       } else {
-        await ctx.resolve(dispute, verdict);
+        await ctx.resolve(conflict, verdict);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -192,7 +184,7 @@ function FindingResolveFooter({
               <>
                 Resolved:{' '}
                 <span className="text-emerald-600 dark:text-emerald-500">
-                  {disputeSideNames(resolution)[resolution.verdict === 'a' ? 0 : 1]}
+                  {conflictSideNames(resolution)[resolution.verdict === 'a' ? 0 : 1]}
                 </span>{' '}
                 wins
               </>
@@ -216,7 +208,7 @@ function FindingResolveFooter({
       )}
       {error && <span className="text-[11px] text-red-500">{error}</span>}
       <Link
-        to={ctx.coverageHref(dispute)}
+        to={ctx.coverageHref(conflict)}
         className="ml-auto inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
       >
         Open in Coverage
@@ -227,17 +219,17 @@ function FindingResolveFooter({
 }
 
 /**
- * What every finding card under it needs to record a verdict: the conflict
+ * What every conflict card under it needs to record a verdict: the conflict
  * verdicts and the derived conflicts list, read once `active` says a card with
- * a dispute is on screen.
+ * a conflict is on screen.
  */
-export function FindingResolveProvider({
+export function ConflictResolveProvider({
   repoId,
   active,
   children,
 }: {
   /**
-   * The repository whose corpus the finding is about, or NULL for a run of the
+   * The repository whose corpus the conflict is about, or NULL for a run of the
    * workspace (a Document scan): its corpus and its decisions are the
    * workspace's, settled once for every repository that reads the documents.
    */
@@ -278,40 +270,33 @@ export function FindingResolveProvider({
     const list = (res as { conflictResolutions?: SpecConflictResolution[] }).conflictResolutions;
     if (list) setResolutions(list);
   };
-  const resolveCtx: FindingResolveCtx = {
+  const resolveCtx: ConflictResolveCtx = {
     resolutions,
-    // The verdict is the WORKSPACE's however the finding was reached: the
+    // The verdict is the WORKSPACE's however the conflict was reached: the
     // repository read above is only its slice of those documents, and the
     // decisions folded into it are the workspace's.
     resolve: async (d, verdict) => applyAck(await api.postContextConflictResolution({ ...d, verdict })),
     undo: async (d) => {
       applyAck(
-        await api.deleteContextConflictResolution({
-          docA: d.docA,
-          anchorA: d.anchorA,
-          ...(d.passageA !== undefined ? { passageA: d.passageA } : {}),
-          docB: d.docB,
-          anchorB: d.anchorB,
-          ...(d.passageB !== undefined ? { passageB: d.passageB } : {}),
-        }),
+        await api.deleteContextConflictResolution({ docA: d.docA, sentenceA: d.sentenceA, docB: d.docB, sentenceB: d.sentenceB }),
       );
     },
-    // Link the dispute's EXACT Coverage record: match against the same derived
+    // Link the conflict's EXACT Coverage record: match against the same derived
     // conflicts list that page renders (a hand-minted pair-form id would land
-    // on the pair's FIRST dispute, which can be a sibling without the review).
-    // Treating the dispute as a resolution-like reuses the canonical identity
-    // matcher, passages included, which tells apart the many conflicts two
+    // on the pair's FIRST conflict, which can be a sibling without the review).
+    // Treating the conflict as a resolution-like reuses the canonical identity
+    // matcher, sentences included, which tells apart the many conflicts two
     // sections can hold. No match yet (corpus not folded, mid-flight) is the
     // Coverage tab.
     coverageHref: (d) => {
       const match = (conflicts ?? []).find((c) =>
-        resolutionForConflict([{ ...d, verdict: 'a' }], c.a, c.b, c.overlap.sections),
+        resolutionForConflict([{ ...d, verdict: 'a' }], c.a, c.b, c.sections),
       );
       return match ? `?tab=coverage&conflict=${encodeURIComponent(match.id)}` : '?tab=coverage';
     },
   };
 
-  return <FindingResolveContext.Provider value={resolveCtx}>{children}</FindingResolveContext.Provider>;
+  return <ConflictResolveContext.Provider value={resolveCtx}>{children}</ConflictResolveContext.Provider>;
 }
 
 /** The last two path segments: enough to tell sibling docs apart. */
@@ -326,13 +311,13 @@ export function shortDocRef(path: string): string {
 }
 
 /**
- * How a dispute's two sides are named on a card: the doc pair's shortest
- * distinct names, or inside one doc that doc's name with each passage.
+ * How a conflict's two sides are named on a card: the doc pair's shortest
+ * distinct names, or inside one doc that doc's name with each sentence.
  */
-function disputeSideNames(d: Pick<FindingDispute, 'docA' | 'anchorA' | 'docB' | 'anchorB'>): [string, string] {
+function conflictSideNames(d: Pick<DisplayConflict, 'docA' | 'anchorA' | 'docB' | 'anchorB'>): [string, string] {
   if (d.docA !== d.docB) return distinctDocRefs(d.docA, d.docB);
   const doc = d.docA.split('/').filter(Boolean).pop() ?? d.docA;
-  const [a, b] = passageNames(d.anchorA, d.anchorB);
+  const [a, b] = sentenceNames(d.anchorA, d.anchorB);
   return [`${doc} · ${a}`, `${doc} · ${b}`];
 }
 

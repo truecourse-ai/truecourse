@@ -178,7 +178,7 @@ function runScan(opts: RunOptions) {
     decisions: opts.decisions,
     repoIdentity: opts.identity === undefined ? IDENTITY : opts.identity,
     skipGit: true,
-    disableOverlapDetection: true,
+    disableConflictDetection: true,
     concurrency: 2,
   })
 }
@@ -595,7 +595,7 @@ describe('spec-scan.curate-doc — the fold backstops', () => {
       decisions,
       repoIdentity: IDENTITY,
       skipGit: true,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
       concurrency: 1,
     })
 
@@ -650,7 +650,7 @@ describe('spec-scan.curate-doc — progress', () => {
       decisions,
       repoIdentity: IDENTITY,
       skipGit: true,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
       onDiscover: (docs, toCurate) => discovered.push([docs, toCurate]),
       onCurateProgress: (done, total) => ticks.push([done, total]),
     })
@@ -756,7 +756,7 @@ describe('curateInProcess — the scan command over the session run', () => {
         decisions: covering(['docs']),
         repoIdentity: IDENTITY,
         skipGit: true,
-        disableOverlapDetection: true,
+        disableConflictDetection: true,
       }),
     ).rejects.toBeInstanceOf(LlmStageFailureError)
 
@@ -788,7 +788,7 @@ describe('curateInProcess — the scan command over the session run', () => {
         decisions: covering(['docs']),
         repoIdentity: IDENTITY,
         skipGit: true,
-        disableOverlapDetection: true,
+        disableConflictDetection: true,
         concurrency: 2,
         signal: controller.signal,
       }),
@@ -818,7 +818,7 @@ describe('curateInProcess — the scan command over the session run', () => {
       decisions: covering(['docs']),
       repoIdentity: IDENTITY,
       skipGit: true,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
     })
 
     expect(noChanges).toBe(false)

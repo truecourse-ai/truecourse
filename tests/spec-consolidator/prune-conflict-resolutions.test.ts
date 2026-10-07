@@ -1,7 +1,7 @@
 /**
  * `pruneOrphanedConflictResolutions` deletes ONLY resolutions whose docs left
  * the corpus. It must NEVER delete a row just because the fresh scan didn't
- * re-flag its dispute — the overlap session is a stochastic judge (~50–60%
+ * re-flag its conflict — the conflict session is a stochastic judge (~50–60%
  * pair recall) and re-excerpts quotes on every scan, so "matches no current
  * flag" is not staleness. (The 2026-08-20 reference runs lost 16 of 20
  * code-verified user verdicts to the old flag-matching prune.)
@@ -25,10 +25,10 @@ afterEach(() => {
 
 const doc = (ref: string) => ({ ref, kind: 'unknown' as const, lastTouched: '2026-08-20T00:00:00Z' });
 
-/** Corpus holding docs A+B with ONE flagged dispute between them (quoted). */
-function corpusWith(overlapQuoteA: string): CuratedCorpus {
+/** Corpus holding docs A+B with ONE flagged conflict between them (quoted). */
+function corpusWith(conflictQuoteA: string): CuratedCorpus {
   return {
-    version: 3,
+    version: 5,
     generatedAt: '2026-08-20T00:00:00Z',
     docs: [doc('docs/a.md'), doc('docs/b.md')],
     areas: [
@@ -37,13 +37,13 @@ function corpusWith(overlapQuoteA: string): CuratedCorpus {
         product: 'core',
         concern: 'x',
         docRefs: ['docs/a.md', 'docs/b.md'],
-        overlaps: [
+        conflicts: [
           {
             docs: ['docs/a.md', 'docs/b.md'],
             note: 'disagree',
             sections: [
-              { doc: 'docs/a.md', heading: 'A', quote: overlapQuoteA },
-              { doc: 'docs/b.md', heading: 'B', quote: 'b says otherwise' },
+              { doc: 'docs/a.md', heading: 'A', quote: conflictQuoteA, sentence: 's-a' },
+              { doc: 'docs/b.md', heading: 'B', quote: 'b says otherwise', sentence: 's-b' },
             ],
           },
         ],
@@ -57,9 +57,11 @@ const resolution = (over: Partial<ConflictResolution> = {}): ConflictResolution 
   docA: 'docs/a.md',
   anchorA: 'A',
   quoteA: 'a says this',
+  sentenceA: 's-a',
   docB: 'docs/b.md',
   anchorB: 'B',
   quoteB: 'b says otherwise',
+  sentenceB: 's-b',
   verdict: 'a',
   resolvedAt: '2026-08-14T00:00:00Z',
   note: 'code-verified',
@@ -71,7 +73,7 @@ const written = (): DecisionsFile => JSON.parse(fs.readFileSync(decisionsPath(re
 describe('pruneOrphanedConflictResolutions', () => {
   it('KEEPS a resolution whose quotes drifted (pair re-flagged with new excerpts)', () => {
     const r = resolution();
-    const decisions: DecisionsFile = { version: 2, conflictResolutions: [r] };
+    const decisions: DecisionsFile = { version: 3, conflictResolutions: [r] };
     // Fresh flag quotes a DIFFERENT sentence — the old flag-matching identity
     // would have called this orphaned.
     const out = pruneOrphanedConflictResolutions(repo, corpusWith('a says this, reworded'), decisions);
@@ -82,9 +84,9 @@ describe('pruneOrphanedConflictResolutions', () => {
 
   it('KEEPS a resolution whose pair the fresh scan did not re-flag at all', () => {
     const corpus = corpusWith('a says this');
-    corpus.areas[0].overlaps = []; // recall miss — no flag this run
+    corpus.areas[0].conflicts = []; // recall miss — no flag this run
     const r = resolution();
-    const out = pruneOrphanedConflictResolutions(repo, corpus, { version: 2, conflictResolutions: [r] });
+    const out = pruneOrphanedConflictResolutions(repo, corpus, { version: 3, conflictResolutions: [r] });
     expect(out.conflictResolutions).toEqual([r]);
   });
 
@@ -92,7 +94,7 @@ describe('pruneOrphanedConflictResolutions', () => {
     const keep = resolution();
     const stale = resolution({ docB: 'docs/gone.md' });
     const out = pruneOrphanedConflictResolutions(repo, corpusWith('a says this'), {
-      version: 2,
+      version: 3,
       conflictResolutions: [keep, stale],
     });
     expect(out.conflictResolutions).toEqual([keep]);
@@ -100,7 +102,7 @@ describe('pruneOrphanedConflictResolutions', () => {
   });
 
   it('no resolutions → decisions returned untouched', () => {
-    const decisions: DecisionsFile = { version: 2 };
+    const decisions: DecisionsFile = { version: 3 };
     expect(pruneOrphanedConflictResolutions(repo, corpusWith('a says this'), decisions)).toBe(decisions);
   });
 });

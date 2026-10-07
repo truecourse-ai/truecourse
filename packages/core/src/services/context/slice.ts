@@ -10,10 +10,10 @@
  * the repository different documents.
  *
  * Everything that names a document is restricted together: an area keeps only
- * the docRefs it still has (and disappears when it has none), an overlap
+ * the docRefs it still has (and disappears when it has none), a conflict
  * survives only when BOTH its documents do (a disagreement with one side gone
  * is not this repository's disagreement), and the same holds for the
- * not-reached list and the unchecked candidate pairs.
+ * not-reached list.
  */
 
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
@@ -47,20 +47,11 @@ export function sliceCorpus(
   const areas = corpus.areas
     .map((area) => {
       const docRefs = area.docRefs.filter((ref) => kept.has(ref));
-      const overlaps = area.overlaps.filter(
-        (overlap) => kept.has(overlap.docs[0]) && kept.has(overlap.docs[1]),
+      const conflicts = area.conflicts.filter(
+        (conflict) => kept.has(conflict.docs[0]) && kept.has(conflict.docs[1]),
       );
       const notReached = area.notReached?.filter((ref) => kept.has(ref));
-      const uncheckedPairs = area.uncheckedPairs?.filter(
-        (pair) => kept.has(pair.a.doc) && kept.has(pair.b.doc),
-      );
-      return {
-        ...area,
-        docRefs,
-        overlaps,
-        ...(notReached ? { notReached } : {}),
-        ...(uncheckedPairs ? { uncheckedPairs } : {}),
-      };
+      return { ...area, docRefs, conflicts, ...(notReached ? { notReached } : {}) };
     })
     .filter((area) => area.docRefs.length > 0);
 

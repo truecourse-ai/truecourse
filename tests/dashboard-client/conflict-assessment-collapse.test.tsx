@@ -12,13 +12,13 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
+import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
 import type { SpecCorpusResponse } from '@/lib/api';
 
 const DOC_A = 'context/site-x/adr-0002.md';
 const DOC_B = 'context/site-x/adr-002.md';
 
-const overlap = {
+const record = {
   docs: [DOC_A, DOC_B] as [string, string],
   note: 'Both claim the number two.',
   sections: [],
@@ -40,22 +40,24 @@ const data = {
       { ref: DOC_A, title: 'ADR 0002', areaTags: ['core/architecture'] },
       { ref: DOC_B, title: 'ADR-002', areaTags: ['core/architecture'] },
     ],
-    areas: [{ id: 'core/architecture', product: 'core', concern: 'architecture', overlaps: [overlap] }],
+    areas: [{ id: 'core/architecture', product: 'core', concern: 'architecture', conflicts: [record] }],
     skippedDocs: [],
   },
   decisions: { conflictResolutions: [] },
 } as unknown as SpecCorpusResponse;
 
 const conflict = {
+  ...record,
   id: 'c1',
-  docs: [DOC_A, DOC_B] as [string, string],
   area: 'core/architecture',
-  overlap,
+  a: DOC_A,
+  b: DOC_B,
+  resolved: false,
 } as never;
 
 function renderPane() {
   return render(
-    <SpecOverlapDetail
+    <SpecConflictDetail
       repoId=""
       area="core/architecture"
       docA={DOC_A}

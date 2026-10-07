@@ -91,7 +91,7 @@ import {
  * always resolve a kind back to its command:
  *
  *   spec-scan.curate-doc          spec-scan.settle-areas
- *   spec-scan.overlap             spec-scan.orchestrate
+ *   spec-scan.orchestrate
  *   spec-scan.corpus-review       spec-scan.record-facts
  *   spec-scan.settle-subjects     spec-scan.compare-facts
  *   guard-setup.recipe-repair     guard-setup.dependency-catalog

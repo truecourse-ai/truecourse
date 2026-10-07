@@ -210,7 +210,7 @@ describe('a real guard setup, folded', () => {
     const outcome = eventsOf(RECIPE).at(-1) as Extract<SessionEvent, { type: 'outcome' }>;
     expect(line.value).toBe(JSON.stringify(outcome.value, null, 2));
     expect(line.value).toContain('"install": "corepack pnpm install --frozen-lockfile"');
-    expect(line.findings).toEqual([]);
+    expect(line.conflicts).toEqual([]);
   });
 
   it('gives an event that is only fields a data line of exactly those fields', () => {
@@ -361,7 +361,7 @@ describe('the shapes one run cannot show', () => {
     seq = 0;
     const events = journal(
       { sessionId: 'ses-a', events: [ev({ type: 'session-start', kind: 'spec-scan.curate-doc', workItem: 'doc:MANIFEST.md', systemPrompt: 'S', toolNames: [] })] },
-      { sessionId: 'ses-b', events: [ev({ type: 'session-start', kind: 'spec-scan.overlap', workItem: 'area:core:1', systemPrompt: 'S', toolNames: [] })] },
+      { sessionId: 'ses-b', events: [ev({ type: 'session-start', kind: 'spec-scan.conflicts', workItem: 'area:core:1', systemPrompt: 'S', toolNames: [] })] },
     );
     const { steps } = foldConversation(
       run({
@@ -373,14 +373,14 @@ describe('the shapes one run cannot show', () => {
         },
         sessions: [
           entry({ sessionId: 'ses-a', kind: 'spec-scan.curate-doc', workItem: 'doc:MANIFEST.md' }),
-          entry({ sessionId: 'ses-b', kind: 'spec-scan.overlap', workItem: 'area:core:1' }),
+          entry({ sessionId: 'ses-b', kind: 'spec-scan.conflicts', workItem: 'area:core:1' }),
         ],
       }),
       events,
     );
     expect(steps.map((s) => [s.key, s.label])).toEqual([
       ['tag', 'Tagging doc areas'],
-      ['kind:spec-scan.overlap', 'spec-scan.overlap'],
+      ['kind:spec-scan.conflicts', 'spec-scan.conflicts'],
     ]);
   });
 
@@ -411,12 +411,12 @@ describe('the shapes one run cannot show', () => {
     ]);
   });
 
-  it('renders only the finding blocks of an outcome, never a summary of the value', () => {
+  it('renders only the conflict blocks of an outcome, never a summary of the value', () => {
     seq = 0;
     const events = journal({
       sessionId: 'ses-a',
       events: [
-        ev({ type: 'session-start', kind: 'spec-scan.overlap', workItem: 'area:billing', systemPrompt: 'S', toolNames: [] }),
+        ev({ type: 'session-start', kind: 'spec-scan.conflicts', workItem: 'area:billing', systemPrompt: 'S', toolNames: [] }),
         ev({
           type: 'outcome',
           value: { uncheckedPairs: 2 },
@@ -424,7 +424,7 @@ describe('the shapes one run cannot show', () => {
             blocks: [
               { kind: 'text', text: 'Two docs disagree about the refund window.' },
               { kind: 'facts', lines: ['2 pairs compared'] },
-              { kind: 'finding', claim: 'The refund window disagrees', quotes: [{ doc: 'a.md', quote: '24 hours' }] },
+              { kind: 'conflict', claim: 'The refund window disagrees', quotes: [{ doc: 'a.md', quote: '24 hours' }] },
               { kind: 'budget', spentUsd: 1.4 },
             ],
           },
@@ -432,11 +432,11 @@ describe('the shapes one run cannot show', () => {
       ],
     });
     const line = foldConversation(
-      run({ command: 'spec-scan', sessions: [entry({ kind: 'spec-scan.overlap', workItem: 'area:billing' })] }),
+      run({ command: 'spec-scan', sessions: [entry({ kind: 'spec-scan.conflicts', workItem: 'area:billing' })] }),
       events,
     ).steps[0].sessions[0].lines[1] as Extract<ConversationLine, { kind: 'outcome' }>;
     expect(line.value).toBe('{\n  "uncheckedPairs": 2\n}');
-    expect(line.findings.map((f) => f.claim)).toEqual(['The refund window disagrees']);
+    expect(line.conflicts.map((f) => f.claim)).toEqual(['The refund window disagrees']);
   });
 
   it('says what is happening right now only when the stream says it', () => {

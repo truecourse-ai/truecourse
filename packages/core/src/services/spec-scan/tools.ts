@@ -1,12 +1,12 @@
 /**
  * THE SCAN SESSIONS' READ TOOLS — every one of them read-only and bounded.
  * A scan session reads the doc universe the run
- * discovered; it writes nothing. Every write — skips, tags, areas, overlap
+ * discovered; it writes nothing. Every write — skips, tags, areas, conflicts
  * flags — happens in the run's FOLD (`run.ts`), after the outcome, so a
  * session that dies mid-budget strands no half-curated state.
  *
- * The validator tools (`check_settlement` in settle-areas.ts, `check_findings`
- * in overlap.ts) live beside the schemas they validate; this module holds the
+ * The validator tools (`check_settlement` in settle-areas.ts, `check_groups`
+ * in compare-facts.ts) live beside the schemas they validate; this module holds the
  * data tools the session kinds share, plus the one cache-key convention every
  * kind builds with ({@link scanCacheKey}).
  */
@@ -118,7 +118,7 @@ const transitionLine = (t: { at?: string; from: string; to: string }): string =>
 
 /**
  * The lifecycle in words, for a briefing. `classify` adds the run's own
- * five-word reading of the status name beside it — the overlap session weighs
+ * five-word reading of the status name beside it — the sessions weigh
  * documents against each other and needs the classification the corpus will
  * carry, while the curation session REPORTS the status and must read the
  * document rather than echo us.
@@ -357,7 +357,7 @@ export function docsWithLabelTool(
 
 /**
  * `read_section` — one section of a doc, by heading (or the lead for `null`).
- * The overlap session's main read: the briefing carries outlines, and the
+ * A doc's section, read by a session whose briefing carries outlines: the
  * session opens only the sections where topics collide. The fold counts calls
  * to THIS tool off the transcript as the area's `sectionsOpened`.
  */
@@ -407,33 +407,3 @@ export function readSectionTool(universe: ScanDocUniverse): SessionTool {
   })
 }
 
-/** `read_doc_chunk` — a whole-doc page for the overlap session (a doc whose
- *  structure the outline does not carry, e.g. heading-free prose). */
-const READ_DOC_CHUNK = defineToolSpec({
-  name: 'read_doc_chunk',
-  description:
-    'Read one chunk of a whole doc (1-based). Use it for a doc whose outline is too thin to pick sections from; prefer `read_section` everywhere else.',
-  kind: 'read-doc-chunk',
-  readOnly: true,
-  destructive: false,
-  display: {
-    one: 'I read a doc straight through where its outline was too thin to pick sections from',
-    many: 'I read {n} doc chunks straight through where outlines were too thin',
-  },
-  inputSchema: z
-    .object({
-      doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
-      chunk: z.number().int().positive().describe('Chunk number, 1-based.'),
-    })
-    .strict(),
-})
-
-export function readDocChunkTool(universe: ScanDocUniverse): SessionTool {
-  return READ_DOC_CHUNK.bind({
-    async execute(args) {
-      const doc = universe.byPath.get(args.doc)
-      if (!doc) return { content: `No doc \`${args.doc}\` in the universe.`, isError: true }
-      return renderChunk(doc, args.chunk)
-    },
-  })
-}

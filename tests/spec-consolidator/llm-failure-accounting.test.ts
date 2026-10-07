@@ -84,7 +84,7 @@ function run(script: StubScript) {
       persistence: memoryPersistence().persistence,
       docSource: () => DOCS,
       decisions: EMPTY_DECISIONS,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
       skipGit: true,
     }),
   };
@@ -95,7 +95,7 @@ function seedCorpus(): string {
   const file = corpusFilePath(repo);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const prior = JSON.stringify({
-    version: 3,
+    version: 5,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [{ ref: 'docs/orders.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/orders'] }],
     areas: [],
@@ -198,7 +198,7 @@ describe('the scan run — what is NOT a transport failure', () => {
       persistence: memoryPersistence().persistence,
       docSource: () => DOCS,
       decisions: EMPTY_DECISIONS,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
       skipGit: true,
     });
     expect(second.stats.llmFailures).toEqual([]);

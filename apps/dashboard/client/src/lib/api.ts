@@ -181,33 +181,31 @@ export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse>
 
 // ---------------------------------------------------------------------------
 // Corpus path (spec-scan redesign) — the curated doc corpus. Areas group docs;
-// an overlap is two same-area docs that may disagree, resolved by a
-// section-scoped verdict (pick-a-side / dismissal) or a force-exclude.
+// a conflict is two same-area docs that disagree, resolved by a
+// verdict (pick-a-side / dismissal) or a force-exclude.
 // ---------------------------------------------------------------------------
 
-export interface SpecOverlapSection {
+export interface SpecConflictSide {
   doc: string;
-  /** Heading of the conflicting section, or null when it lives in the doc's preamble. */
+  /** Heading of the section this side points at, or null when it lives in the doc's preamble. */
   heading: string | null;
-  /** The verbatim disputed sentence, when the detector captured one — carried into a
-   *  pick-a-side verdict so the loser's claim is suppressed at guard generate. */
+  /** The disputed words — carried into a pick-a-side verdict so the loser's claim is suppressed at guard generate. */
   quote?: string;
-  /** The passage key, when the finding named its passage: part of the dispute's identity. */
-  passage?: string;
+  /** The sentence key: with the doc, the side's identity. */
+  sentence: string;
 }
 
-/** A section-scoped conflict verdict — pick-a-side ('a'/'b') or dismissal.
- *  Identity is the unordered doc pair + each side's section anchor (+ its passage
- *  key when the conflict names its passages). */
+/** A conflict verdict — pick-a-side ('a'/'b') or dismissal. Identity is each
+ *  side's doc and sentence key; the anchors and quotes ride along for display. */
 export interface SpecConflictResolution {
   docA: string;
   anchorA: string | null;
   quoteA?: string;
-  passageA?: string;
+  sentenceA: string;
   docB: string;
   anchorB: string | null;
   quoteB?: string;
-  passageB?: string;
+  sentenceB: string;
   verdict: 'a' | 'b' | 'dismissed';
   resolvedAt?: string;
   note?: string;
@@ -220,10 +218,10 @@ export interface SpecConflictResolution {
  * `explanation` is a human-readable account of the disagreement; `recommendation`
  * is a suggested action the user may apply. Absent on unverified/legacy flags.
  */
-export interface SpecOverlapReview {
+export interface SpecConflictReview {
   explanation: string;
   recommendation: {
-    /** 'pick-a' backs the overlap's first doc, 'pick-b' the second. */
+    /** 'pick-a' backs the conflict's first doc, 'pick-b' the second. */
     action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss';
     rationale: string;
     /** For `fix-doc`: the suggested doc edit the user applies themselves. */
@@ -233,18 +231,18 @@ export interface SpecOverlapReview {
   };
 }
 
-export interface SpecOverlap {
+export interface SpecConflict {
   docs: [string, string];
   note: string;
   /** The verify judge's resolution brief, when this flag was reviewed. */
-  review?: SpecOverlapReview;
-  /** Conflicting sections per doc (markdown headings), when known. */
-  sections?: SpecOverlapSection[];
+  review?: SpecConflictReview;
+  /** The sides, one per sentence: the conflict's identity. */
+  sections: SpecConflictSide[];
   /**
-   * Every area this (possibly cross-area-merged) dispute spans. Detection runs
+   * Every area this (possibly cross-area-merged) conflict spans. Detection runs
    * per area, so one disagreement on a pair sharing several areas is flagged in
    * each and merged to one record; a resolution scoped to any spanned area (or an
-   * unscoped one) clears it everywhere. Empty on older corpora.
+   * unscoped one) clears it everywhere.
    */
   areas?: string[];
 }
@@ -278,7 +276,7 @@ export interface SpecCorpusArea {
   product: string;
   concern: string;
   docRefs: string[];
-  overlaps: SpecOverlap[];
+  conflicts: SpecConflict[];
 }
 
 export interface SpecSkippedDoc {
@@ -337,7 +335,7 @@ export interface SpecCorpusResponse {
   manualIncludes?: string[];
   /** Doc refs the user force-excluded (dropped from the corpus). */
   manualExcludes?: string[];
-  /** Section-scoped conflict verdicts — the client derives resolved/dismissed/orphaned state from these. */
+  /** Conflict verdicts — the client derives resolved/dismissed/orphaned state from these. */
   conflictResolutions?: SpecConflictResolution[];
   /**
    * Workspace corpus only: a skipped-docs summary in place of `corpus.skippedDocs`
@@ -1099,11 +1097,11 @@ export function postContextConflictResolution(payload: {
   docA: string;
   anchorA: string | null;
   quoteA?: string;
-  passageA?: string;
+  sentenceA: string;
   docB: string;
   anchorB: string | null;
   quoteB?: string;
-  passageB?: string;
+  sentenceB: string;
   verdict: 'a' | 'b' | 'dismissed';
   note?: string;
 }): Promise<SpecConflictAck> {
@@ -1113,14 +1111,12 @@ export function postContextConflictResolution(payload: {
   });
 }
 
-/** Withdraw a verdict, named by its dispute: the two sections, and the two passages when it names them. */
+/** Withdraw a verdict, named by its conflict: the two docs and their two sentences. */
 export function deleteContextConflictResolution(payload: {
   docA: string;
-  anchorA: string | null;
-  passageA?: string;
+  sentenceA: string;
   docB: string;
-  anchorB: string | null;
-  passageB?: string;
+  sentenceB: string;
 }): Promise<SpecConflictAck> {
   return fetchApi<SpecConflictAck>('/api/context/conflict-resolution', {
     method: 'DELETE',

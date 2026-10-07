@@ -1,7 +1,6 @@
 /**
- * Concurrency knob shared by the corpus-path LLM stages (area-tagger,
- * overlap-detector, relevance-filter, relation). Each stage owns its own
- * p-limit; this is the default cap, env-overridable via
+ * Concurrency knob shared by the scan's session pools. Each pool owns its own
+ * limit; this is the default cap, env-overridable via
  * `TRUECOURSE_MAX_CONCURRENCY`.
  */
 

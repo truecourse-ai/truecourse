@@ -1,25 +1,25 @@
 /**
  * A contradiction INSIDE one document, as the two surfaces that resolve a
  * conflict render it. Both sides are the same doc, so each is named by its
- * passage, the recommendation names the passage it picks, and a verdict is
- * recorded against the passage the reader chose.
+ * sentence, the recommendation names the sentence it picks, and a verdict is
+ * recorded against the sentence the reader chose.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { buildCorpusConflicts, passageKey } from '@truecourse/shared';
-import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
+import { buildCorpusConflicts, sentenceKey } from '@truecourse/shared';
+import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
 import { SpecSourceProvider, type SpecSource } from '@/components/spec/spec-source';
-import { FindingCard, FindingResolveProvider } from '@/components/sessions/conversation-pieces';
+import { ConflictCard, ConflictResolveProvider } from '@/components/sessions/conversation-pieces';
 import type { SpecCorpusResponse } from '@/lib/api';
 
 const DOC = 'context/site-x/design.md';
-const PRESS = { doc: DOC, heading: 'Buttons', quote: 'A press translates the button down 1px.' };
-const SCALE = { doc: DOC, heading: 'Motion', quote: 'A press scales the button to 0.97.' };
+const PRESS = { doc: DOC, heading: 'Buttons', quote: 'A press translates the button down 1px.', sentence: sentenceKey('A press translates the button down 1px.') };
+const SCALE = { doc: DOC, heading: 'Motion', quote: 'A press scales the button to 0.97.', sentence: sentenceKey('A press scales the button to 0.97.') };
 
-const overlap = {
+const conflict = {
   docs: [DOC, DOC] as [string, string],
   note: 'A press is a translate under Buttons and a scale under Motion.',
   sections: [PRESS, SCALE],
@@ -31,10 +31,10 @@ const overlap = {
 };
 
 const CORPUS = {
-  version: 3,
+  version: 5,
   generatedAt: '',
   docs: [{ ref: DOC, title: 'Design', kind: 'prd', lastTouched: '', areaTags: ['core/design'] }],
-  areas: [{ id: 'core/design', product: 'core', concern: 'design', docRefs: [DOC], overlaps: [overlap] }],
+  areas: [{ id: 'core/design', product: 'core', concern: 'design', docRefs: [DOC], conflicts: [conflict] }],
   skippedDocs: [],
 };
 
@@ -57,18 +57,18 @@ function source(post: SpecSource['postConflictResolution']): SpecSource {
 }
 
 describe('the conflict pane, for a conflict inside one doc', () => {
-  it('names each side by its passage, recommends the second, and records a verdict against the passage chosen', async () => {
+  it('names each side by its sentence, recommends the second, and records a verdict against the sentence chosen', async () => {
     const post = vi.fn(async () => ({ conflictResolutions: [] }));
     const [conflict] = buildCorpusConflicts(CORPUS, {});
     render(
       <SpecSourceProvider source={source(post)}>
-        <SpecOverlapDetail repoId="" area="core/design" docA={DOC} docB={DOC} conflict={conflict as never} data={data} onResolved={() => {}} />
+        <SpecConflictDetail repoId="" area="core/design" docA={DOC} docB={DOC} conflict={conflict as never} data={data} onResolved={() => {}} />
       </SpecSourceProvider>,
     );
-    const detail = screen.getByTestId('overlap-detail');
+    const detail = screen.getByTestId('conflict-detail');
     expect(detail).toHaveTextContent('Design · Buttons↔Design · Motion');
     expect(screen.getByTestId('conflict-assessment')).toHaveTextContent('Design · Motion is right');
-    // Newer or older means nothing between two passages of one doc.
+    // Newer or older means nothing between two sentences of one doc.
     expect(detail).not.toHaveTextContent(/Newer|Older/);
 
     await userEvent.setup().click(screen.getByRole('button', { name: /Design · Buttons\s*is right/ }));
@@ -78,8 +78,8 @@ describe('the conflict pane, for a conflict inside one doc', () => {
   });
 });
 
-describe('the finding card, for a conflict inside one doc', () => {
-  it('offers each passage by name and marks the one recommended', async () => {
+describe('the conflict card, for a conflict inside one doc', () => {
+  it('offers each sentence by name and marks the one recommended', async () => {
     const realFetch = window.fetch;
     window.fetch = vi.fn(async () =>
       new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } }),
@@ -87,16 +87,16 @@ describe('the finding card, for a conflict inside one doc', () => {
     try {
       render(
         <MemoryRouter>
-          <FindingResolveProvider repoId="web" active>
-            <FindingCard
-              finding={{
-                claim: overlap.note,
+          <ConflictResolveProvider repoId="web" active>
+            <ConflictCard
+              card={{
+                claim: conflict.note,
                 quotes: [PRESS, SCALE],
                 recommendation: { doc: DOC, side: 'b', rationale: 'Motion is newer.' },
-                dispute: { docA: DOC, anchorA: 'Buttons', quoteA: PRESS.quote, docB: DOC, anchorB: 'Motion', quoteB: SCALE.quote },
+                conflict: { docA: DOC, anchorA: 'Buttons', quoteA: PRESS.quote, sentenceA: PRESS.sentence, docB: DOC, anchorB: 'Motion', quoteB: SCALE.quote, sentenceB: SCALE.sentence },
               }}
             />
-          </FindingResolveProvider>
+          </ConflictResolveProvider>
         </MemoryRouter>,
       );
       const second = await screen.findByRole('button', { name: /Follow design\.md · Motion/ });
@@ -111,7 +111,7 @@ describe('the finding card, for a conflict inside one doc', () => {
 });
 
 describe('the conflict pane, for one of several contradictions under one heading', () => {
-  const at = (quote: string) => ({ doc: DOC, heading: 'Buttons', quote, passage: passageKey(quote) });
+  const at = (quote: string) => ({ doc: DOC, heading: 'Buttons', quote, sentence: sentenceKey(quote) });
   const press = [at('A press translates the button down 1px.'), at('A press scales the button to 0.97.')];
   const focus = [at('Focus draws a 2px ring.'), at('Focus draws no ring.')];
   const corpus = {
@@ -119,15 +119,15 @@ describe('the conflict pane, for one of several contradictions under one heading
     areas: [
       {
         ...CORPUS.areas[0]!,
-        overlaps: [
-          { ...overlap, note: 'press', sections: press },
-          { ...overlap, note: 'focus', sections: focus },
+        conflicts: [
+          { ...conflict, note: 'press', sections: press },
+          { ...conflict, note: 'focus', sections: focus },
         ],
       },
     ],
   };
 
-  it('records its verdict, and withdraws it, by its own two passages', async () => {
+  it('records its verdict, and withdraws it, by its own two sentences', async () => {
     const post = vi.fn(async () => ({ conflictResolutions: [] }));
     const del = vi.fn(async () => ({ conflictResolutions: [] }));
     const withSource = (resolutions: unknown[]) => {
@@ -135,32 +135,30 @@ describe('the conflict pane, for one of several contradictions under one heading
       const focusConflict = buildCorpusConflicts(read.corpus, read).find((c) => c.note === 'focus');
       return render(
         <SpecSourceProvider source={{ ...source(post), deleteConflictResolution: del }}>
-          <SpecOverlapDetail repoId="" area="core/design" docA={DOC} docB={DOC} conflict={focusConflict as never} data={read} onResolved={() => {}} />
+          <SpecConflictDetail repoId="" area="core/design" docA={DOC} docB={DOC} conflict={focusConflict as never} data={read} onResolved={() => {}} />
         </SpecSourceProvider>,
       );
     };
     const user = userEvent.setup();
     const first = withSource([]);
-    expect(screen.getByTestId('overlap-detail')).toHaveTextContent('Design · Buttons, first passage↔Design · Buttons, second passage');
-    await user.click(screen.getByRole('button', { name: /first passage\s*is right/ }));
+    expect(screen.getByTestId('conflict-detail')).toHaveTextContent('Design · Buttons, first sentence↔Design · Buttons, second sentence');
+    await user.click(screen.getByRole('button', { name: /first sentence\s*is right/ }));
     expect(post).toHaveBeenCalledWith(
-      expect.objectContaining({ anchorA: 'Buttons', passageA: focus[0]!.passage, anchorB: 'Buttons', passageB: focus[1]!.passage, verdict: 'a' }),
+      expect.objectContaining({ anchorA: 'Buttons', sentenceA: focus[0]!.sentence, anchorB: 'Buttons', sentenceB: focus[1]!.sentence, verdict: 'a' }),
     );
     first.unmount();
 
     // Another contradiction's verdict on the same heading leaves this one open; its own resolves it.
-    const pressVerdict = { docA: DOC, anchorA: 'Buttons', passageA: press[0]!.passage, docB: DOC, anchorB: 'Buttons', passageB: press[1]!.passage, verdict: 'a', resolvedAt: '' };
-    const focusVerdict = { ...pressVerdict, passageA: focus[0]!.passage, passageB: focus[1]!.passage, verdict: 'b' };
+    const pressVerdict = { docA: DOC, anchorA: 'Buttons', sentenceA: press[0]!.sentence, docB: DOC, anchorB: 'Buttons', sentenceB: press[1]!.sentence, verdict: 'a', resolvedAt: '' };
+    const focusVerdict = { ...pressVerdict, sentenceA: focus[0]!.sentence, sentenceB: focus[1]!.sentence, verdict: 'b' };
     withSource([pressVerdict, focusVerdict]);
     await user.click(screen.getByRole('button', { name: 'Undo' }));
     await waitFor(() =>
       expect(del).toHaveBeenCalledWith({
         docA: DOC,
-        anchorA: 'Buttons',
-        passageA: focus[0]!.passage,
+        sentenceA: focus[0]!.sentence,
         docB: DOC,
-        anchorB: 'Buttons',
-        passageB: focus[1]!.passage,
+        sentenceB: focus[1]!.sentence,
       }),
     );
   });
