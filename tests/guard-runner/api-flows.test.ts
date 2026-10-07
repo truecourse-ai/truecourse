@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { runGuard, guardInterfacesPath } from '@truecourse/guard-runner'
 import { interfaceFingerprint, type Interface, type InterfacesFile } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeApiRecipe, writeScenario, apiScenario, specBinds } from './helpers.js'
+import { makeTempRepo, rmrf, writeApiRecipe, writeScenario, apiScenario, specBinds, staleSpecBind } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -81,7 +81,7 @@ describe('runGuard — api driver flow annotations', () => {
       apiScenario({
         id: 'todo-lifecycle.api.3',
         flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
-        binds: [specBinds('a/b')[0], { doc: SPEC_DOC, section: 'cli/version', fingerprint: 'sha256:older-text' }],
+        binds: [specBinds('a/b')[0], staleSpecBind('cli/version')],
         steps: [{ request: { method: 'GET', path: '/todos' }, expect: { status: 200 }, milestone: 1 }],
       }),
     )

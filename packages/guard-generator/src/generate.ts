@@ -129,6 +129,7 @@ import {
   DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
   autoResolutionKey,
   composeBlockedOnReason,
+  bindRealizes,
   dismissedClaimKey,
   firstInvalidMatchPattern,
   guardDriver,
@@ -1580,8 +1581,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (scenario && scenarioReviewFingerprint(bindScenarioPrerequisites(work.flow, scenario, prerequisiteResolution.targets)) !== scenarioReviewFingerprint(scenario)) return false
     if (!scenario || scenarioFullFlowDefect(work.flow.milestones, scenario.steps) || prior.reviewed === false || work.prior?.flowFingerprint !== work.flow.fingerprint ||
       scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(work.flow, recipe, scenario) || scenarioCasePrerequisiteProblems(work.flow, scenario, prerequisiteResolution.targets, scenario.setup?.preparation ? recipe.preparations?.[scenario.setup.preparation]?.env : undefined, recipe).length) return false
-    if (!work.flow.bindings.every(b => scenario.binds.some(s =>
-      s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) return false
+    if (!work.flow.bindings.every(b => scenario.binds.some(s => bindRealizes(s, b)))) return false
     return !work.flow.milestones.some(m => m.verification?.cases) ||
       (prior.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION &&
         prior.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) &&
@@ -3359,7 +3359,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               if (!scenario || !review || review.policyVersion !== GUARD_REVIEW_POLICY_VERSION ||
                 review.scenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
                 scenario.flow?.fingerprint !== task.work.flow.fingerprint ||
-                !task.work.flow.bindings.every(b => scenario.binds.some(s => s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint)) ||
+                !task.work.flow.bindings.every(b => scenario.binds.some(s => bindRealizes(s, b))) ||
                 scenarioFullFlowDefect(task.work.flow.milestones, scenario.steps, review.caseEvidence ?? [])) return false
               if (scenarioReviewFingerprint(bindScenarioPrerequisites(task.work.flow, scenario, prerequisiteResolution.targets)) !== scenarioReviewFingerprint(scenario)) return false
               const authored = rawScenarioSchemaFor(task.surface).safeParse(scenario)

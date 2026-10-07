@@ -10,6 +10,7 @@ import {
   claimId,
   interfaceFingerprint,
   parseDocTree,
+  sectionSentences,
   sentenceKey,
   type ApiRequestContract,
   type Claim,
@@ -118,12 +119,15 @@ export function writeCorpus(repo: string, docs: { ref: string; areaTags?: string
   )
 }
 
-/** The live binding (doc + anchor + fingerprint) for a section by its heading text. */
+/** The live binding for a section by its heading text, bound to the section's first sentence as {@link writeClaims}'s default claim is. */
 export function bindsFor(repo: string, docRel: string, headingText: string): GuardScenario['binds'] {
   const content = fs.readFileSync(path.join(repo, docRel), 'utf-8')
   const section = buildDocSectionIndex(docRel, content).sections.find((s) => s.headingText === headingText)
   if (!section) throw new Error(`no section "${headingText}" in ${docRel}`)
-  return [{ doc: docRel, section: section.anchor, fingerprint: section.fingerprint }]
+  const tree = parseDocTree(docRel, content)
+  const first = sectionSentences(tree, tree.sections.find((s) => s.anchor === section.anchor)!)[0]
+  if (!first) throw new Error(`section "${headingText}" in ${docRel} has no sentence`)
+  return [{ doc: docRel, section: section.anchor, fingerprint: section.fingerprint, sentences: [sentenceKey(first.text, first.repeat)] }]
 }
 
 /** A raw generated CLI scenario as a model would return it (behavioral fields only). */
@@ -346,7 +350,7 @@ export function writeClaims(repo: string, byAnchor: ClaimsSpec = {}): Claim[] {
       if (!fs.existsSync(abs)) continue
       const tree = parseDocTree(d.ref, fs.readFileSync(abs, 'utf-8'))
       for (const section of tree.sections) {
-        const first = tree.sentences.find((s) => s.startLine >= section.startLine && s.startLine <= section.ownEndLine)
+        const first = sectionSentences(tree, section)[0]
         if (!first) continue
         const key = sentenceKey(first.text, first.repeat)
         const spec = byAnchor[section.anchor] ?? [{}]
@@ -422,7 +426,7 @@ export function flowPerClaimSession(onArea?: (areaId: string) => void): FlowsAre
         ...continuing(prior, c.anchor),
         title: c.anchor,
         goal: `verify ${c.title}`,
-        milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) }],
+        milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, sentences: [c.anchor], ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) }],
       })),
       noFlowClaims: [],
     }
@@ -441,7 +445,7 @@ export function flowOfAllSession(title: string, onArea?: (areaId: string) => voi
           ...continuing(prior, title),
           title,
           goal: `walk ${area.claims.length} milestone(s)`,
-          milestones: area.claims.map((c, i) => ({ order: i + 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) })),
+          milestones: area.claims.map((c, i) => ({ order: i + 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, sentences: [c.anchor], ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) })),
         },
       ],
       noFlowClaims: [],

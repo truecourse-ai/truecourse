@@ -57,7 +57,7 @@ const manifest: GuardManifest = {
     {
       flowId: `${DOC}#s-guarded`,
       flowFingerprint: fp,
-      bindings: [{ doc: DOC, anchor: 's-guarded', fingerprint: fp }],
+      bindings: [{ doc: DOC, anchor: 's-guarded', fingerprint: fp, sentences: ['s-guarded'] }],
       scenarios: [{ id: 'sg1', drivers: ['cli'] }],
       generationInputsHash: null,
       gaps: [],

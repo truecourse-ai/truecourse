@@ -54,9 +54,9 @@ function seededRepo() {
 
 /** The flow the web fixture's own action realizes — the shortlist's terms. */
 function webFlow(): GuardFlow {
-  const milestones = [{ order: 1, doc: 'synthetic.md', anchor: 'creation', claimTitle: 'Creating an organisation displays its dialog', proofDrivers: ['web' as const] }]
+  const milestones = [{ order: 1, doc: 'synthetic.md', anchor: 'creation', claimTitle: 'Creating an organisation displays its dialog', sentences: ['creation'], proofDrivers: ['web' as const] }]
   return { id: 'organisation', title: 'Create organisation', goal: 'Show the creation dialog', fingerprint: flowFingerprint(milestones),
-    milestones, bindings: [{ doc: 'synthetic.md', anchor: 'creation', fingerprint: 'sha256:doc' }], composedOf: [], synthesisInputsHash: 'same' }
+    milestones, bindings: [{ doc: 'synthetic.md', anchor: 'creation', fingerprint: 'sha256:doc', sentences: ['creation'] }], composedOf: [], synthesisInputsHash: 'same' }
 }
 
 /** Everything a flow's settle record folds except the web read-set under test. */
@@ -76,7 +76,7 @@ const BASE_PARTS: FlowGenerationInputParts = {
 describe('author-only changes retain upstream cache compatibility', () => {
   it('reads seeded synthesis outcomes with zero upstream driver calls', async () => {
     const { root, doc, area } = seededRepo()
-    const flows = { flows: [{ title: 'Create task', goal: 'Create task', milestones: [{ order: 1, doc: DOC, anchor: ANCHOR, claimTitle: CLAIM }] }], noFlowClaims: [] }
+    const flows = { flows: [{ title: 'Create task', goal: 'Create task', milestones: [{ order: 1, doc: DOC, anchor: ANCHOR, claimTitle: CLAIM, sentences: [ANCHOR] }] }], noFlowClaims: [] }
     const keys = [flowsSessionCacheKey(area)]
     await setCacheEntry(root, FLOWS_SESSION_CACHE_NAME, keys[0], flows)
     const f = authoringFixture(); const catalog = createAuthorCatalog(f.interfaces, f.resources)
@@ -94,10 +94,10 @@ describe('author-only changes retain upstream cache compatibility', () => {
     const root = makeTempRepo(); roots.push(root)
     const fixture = authoringFixture(); const catalog = buildSurfaceCatalogs([fixture.own]).get('web')!
     const makeFlow = (id: string, implementation = false): GuardFlow => {
-      const milestones = [{ order: 1, doc: 'synthetic.md', anchor: id, claimTitle: 'Show dialog', proofDrivers: ['web' as const],
+      const milestones = [{ order: 1, doc: 'synthetic.md', anchor: id, claimTitle: 'Show dialog', sentences: [id], proofDrivers: ['web' as const],
         ...(implementation ? { verification: { method: 'implementation' as const, observable: 'Inspect source algorithm' } } : {}) }]
       return { id, title: id, goal: 'Show dialog', fingerprint: flowFingerprint(milestones), milestones,
-        bindings: [{ doc: 'synthetic.md', anchor: id, fingerprint: 'sha256:doc' }], composedOf: [], synthesisInputsHash: 'same' }
+        bindings: [{ doc: 'synthetic.md', anchor: id, fingerprint: 'sha256:doc', sentences: [id] }], composedOf: [], synthesisInputsHash: 'same' }
     }
     const valid = makeFlow('valid'), invalid = makeFlow('invalid'), missing = makeFlow('missing'), skipped = makeFlow('skipped', true)
     const reply = { plan: [{ interfaceId: fixture.own.id, milestone: 1 }], gaps: [] }

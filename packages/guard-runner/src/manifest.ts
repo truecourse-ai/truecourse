@@ -55,6 +55,7 @@ function manualFlow(scenario: GuardScenario): { id: string; fingerprint: string 
         doc: scenario.binds[0].doc,
         anchor: scenario.binds[0].section,
         claimTitle: scenario.title,
+        sentences: [...scenario.binds[0].sentences],
       },
     ]),
   }
@@ -88,10 +89,13 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
       byFlow.set(flow.id, entry)
     }
     for (const b of s.binds) {
-      entry.bindings.set(`${b.doc}\x00${b.section}`, {
+      const key = `${b.doc}\x00${b.section}`
+      const prior = entry.bindings.get(key)
+      entry.bindings.set(key, {
         doc: b.doc,
         anchor: b.section,
         fingerprint: b.fingerprint,
+        sentences: [...new Set([...(prior?.sentences ?? []), ...b.sentences])].sort(),
       })
     }
     // Rebuilding from the committed YAML alone cannot know a test's birth status

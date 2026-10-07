@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { guardCoverageProgress, describeOutstandingObligations, type GuardFlowMilestone } from '@truecourse/shared'
-const milestones: GuardFlowMilestone[] = [1, 2].map(order => ({ order, doc: 'spec.md', anchor: 'list', claimTitle: 'List behavior',
+const milestones: GuardFlowMilestone[] = [1, 2].map(order => ({ order, doc: 'spec.md', anchor: 'list', claimTitle: 'List behavior', sentences: ['list'],
   proofDrivers: [order === 1 ? 'web' : 'api'], verification: { method: 'behavior', observable: 'result',
     cases: Array.from({ length: 5 }, (_, i) => ({ id: `case-${i}`, claim: `Requirement ${i}`, method: 'behavior', requires: ['browser'], conditions: [] })) } }))
 

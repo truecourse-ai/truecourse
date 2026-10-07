@@ -21,7 +21,7 @@ function entry(overrides: Partial<GuardManifestFlow> = {}): GuardManifestFlow {
   return {
     flowId: 'create-a-task',
     flowFingerprint: 'sha256:flow',
-    bindings: [{ doc: 'docs/cli.md', anchor: 'tasks', fingerprint: 'sha256:section' }],
+    bindings: [{ doc: 'docs/cli.md', anchor: 'tasks', fingerprint: 'sha256:section', sentences: ['tasks'] }],
     scenarios: [],
     interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks'] }],
     generationInputsHash: HASH,

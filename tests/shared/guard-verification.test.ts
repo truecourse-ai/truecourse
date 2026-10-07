@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { GuardFlowMilestoneSchema, SessionExtractedClaimSchema, flowFingerprint, scenarioMilestoneScopeDefect, verificationCapabilityGap } from '@truecourse/shared'
 
-const milestone = { order: 1, doc: 'spec.md', anchor: 'money', claimTitle: 'Returns integer cents', proofDrivers: ['api'] as const }
+const milestone = { order: 1, doc: 'spec.md', anchor: 'money', claimTitle: 'Returns integer cents', sentences: ['money'], proofDrivers: ['api'] as const }
 const m = GuardFlowMilestoneSchema.parse(milestone)
 describe('verification obligations and scoped proof', () => {
   it('retains legacy milestones and fingerprints verification changes', () => {

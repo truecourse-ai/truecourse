@@ -84,15 +84,15 @@ const FLOWS_FILE = {
       goal: 'Create, list, complete and filter a task from the CLI',
       fingerprint: 'sha256:41ac',
       milestones: [
-        { order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Creating a task prints its id' },
-        { order: 2, doc: DOC, anchor: 'tasks/listing-tasks', claimTitle: 'The list shows tasks newest-first' },
-        { order: 3, doc: DOC, anchor: 'tasks/completing-tasks', claimTitle: 'A task can be marked done' },
-        { order: 4, doc: DOC, anchor: 'tasks/completing-tasks', claimTitle: 'Done tasks appear under --done' },
+        { order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Creating a task prints its id', sentences: ['tasks/creating-tasks'] },
+        { order: 2, doc: DOC, anchor: 'tasks/listing-tasks', claimTitle: 'The list shows tasks newest-first', sentences: ['tasks/listing-tasks'] },
+        { order: 3, doc: DOC, anchor: 'tasks/completing-tasks', claimTitle: 'A task can be marked done', sentences: ['tasks/completing-tasks'] },
+        { order: 4, doc: DOC, anchor: 'tasks/completing-tasks', claimTitle: 'Done tasks appear under --done', sentences: ['tasks/completing-tasks'] },
       ],
       bindings: [
-        { doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: FP.creating },
-        { doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing },
-        { doc: DOC, anchor: 'tasks/completing-tasks', fingerprint: STALE_COMPLETING },
+        { doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: FP.creating, sentences: ['tasks/creating-tasks'] },
+        { doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] },
+        { doc: DOC, anchor: 'tasks/completing-tasks', fingerprint: STALE_COMPLETING, sentences: ['tasks/completing-tasks'] },
       ],
       composedOf: [],
       synthesisInputsHash: 'sha256:inputs',
@@ -103,9 +103,9 @@ const FLOWS_FILE = {
       goal: 'Export tasks to a file from the CLI',
       fingerprint: 'sha256:77bb',
       milestones: [
-        { order: 1, doc: DOC, anchor: 'tasks/listing-tasks', claimTitle: 'The list can be written to a file' },
+        { order: 1, doc: DOC, anchor: 'tasks/listing-tasks', claimTitle: 'The list can be written to a file', sentences: ['tasks/listing-tasks'] },
       ],
-      bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing }],
+      bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] }],
       composedOf: [],
       synthesisInputsHash: 'sha256:inputs',
     },
@@ -218,7 +218,7 @@ const LATEST = {
     {
       id: SCENARIO_ID,
       title: 'Tasks are created, listed newest-first, completed and filterable',
-      binds: { doc: DOC, section: 'tasks/creating-tasks', fingerprint: FP.creating },
+      binds: { doc: DOC, section: 'tasks/creating-tasks', fingerprint: FP.creating, sentences: ['tasks/creating-tasks'] },
       outcome: 'fail',
       durationMs: 412,
       failure: { step: 3, expected: 'exit 0', actual: 'exit 1: unknown command `done`' },
@@ -230,7 +230,7 @@ const LATEST = {
     {
       id: MANUAL_ID,
       title: '`tasks --help` prints usage',
-      binds: { doc: DOC, section: 'tasks', fingerprint: FP.tasks },
+      binds: { doc: DOC, section: 'tasks', fingerprint: FP.tasks, sentences: ['tasks'] },
       outcome: 'pass',
       durationMs: 21,
     },
@@ -287,9 +287,9 @@ const SCENARIO_YAML = [
   '  path: [cli/tasks-add, cli/tasks-list, cli/tasks-done]',
   '  fingerprints: ["sha256:j1", "sha256:j2", "sha256:j3"]',
   'binds:',
-  `  - { doc: ${DOC}, section: tasks/creating-tasks, fingerprint: "${FP.creating}" }`,
-  `  - { doc: ${DOC}, section: tasks/listing-tasks, fingerprint: "${FP.listing}" }`,
-  `  - { doc: ${DOC}, section: tasks/completing-tasks, fingerprint: "${STALE_COMPLETING}" }`,
+  `  - { doc: ${DOC}, section: tasks/creating-tasks, fingerprint: "${FP.creating}", sentences: [tasks/creating-tasks] }`,
+  `  - { doc: ${DOC}, section: tasks/listing-tasks, fingerprint: "${FP.listing}", sentences: [tasks/listing-tasks] }`,
+  `  - { doc: ${DOC}, section: tasks/completing-tasks, fingerprint: "${STALE_COMPLETING}", sentences: [tasks/completing-tasks] }`,
   'driver: cli',
   'steps:',
   '  - run: [add, "Buy milk"]',
@@ -311,7 +311,7 @@ const MANUAL_YAML = [
   `id: ${MANUAL_ID}`,
   'title: "`tasks --help` prints usage"',
   'binds:',
-  `  - { doc: ${DOC}, section: tasks, fingerprint: "${FP.tasks}" }`,
+  `  - { doc: ${DOC}, section: tasks, fingerprint: "${FP.tasks}", sentences: [tasks] }`,
   'driver: cli',
   'steps:',
   '  - run: [--help]',
@@ -386,12 +386,12 @@ describe('Guard flow read surfaces', () => {
       { id: 'create', claim: 'Created item appears', method: 'behavior', requires: ['browser'], conditions: [] },
       { id: 'reload', claim: 'Item survives reload', method: 'behavior', requires: ['browser'], conditions: [] },
     ] };
-    const milestones = [{ order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Create and reload', proofDrivers: ['web'], verification }];
-    const bindings = [{ doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: FP.creating }];
+    const milestones = [{ order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Create and reload', sentences: ['tasks/creating-tasks'], proofDrivers: ['web'], verification }];
+    const bindings = [{ doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: FP.creating, sentences: ['tasks/creating-tasks'] }];
     write(DOC, DOC_CONTENT);
     writeJson('.truecourse/scenarios/flows.json', { version: 1, generatedAt: '2026-09-09T00:00:00Z', flows: [{ id: 'case-flow', title: 'Create and reload', goal: 'Create and reload', fingerprint: 'sha256:cases', milestones, bindings, composedOf: [], synthesisInputsHash: 'sha256:inputs' }], noFlowClaims: [] });
     const evidence = [{ milestone: 1, caseId: 'create', steps: [1], reason: 'The created item is visible.' }];
-    const scenario = { id: 'case-test', title: 'Create', binds: [{ doc: DOC, section: bindings[0].anchor, fingerprint: FP.creating }], flow: { id: 'case-flow', fingerprint: 'sha256:cases' }, steps: [{ driver: 'web', navigate: '/items', milestone: 1, checks: ['create'], expect: { visible: { text: 'Created item' } } }] };
+    const scenario = { id: 'case-test', title: 'Create', binds: [{ doc: DOC, section: bindings[0].anchor, fingerprint: FP.creating, sentences: [bindings[0].anchor] }], flow: { id: 'case-flow', fingerprint: 'sha256:cases' }, steps: [{ driver: 'web', navigate: '/items', milestone: 1, checks: ['create'], expect: { visible: { text: 'Created item' } } }] };
     // JSON is valid YAML and uses the ordinary scenario loader.
     writeJson('.truecourse/scenarios/tasks/case-test.yaml', scenario);
     const manifest = { flows: [{ flowId: 'case-flow', flowFingerprint: 'sha256:cases', milestones, bindings, scenarios: [{ id: 'case-test', drivers: ['web'], status: 'passing', reviewed: true, caseEvidence: evidence, reviewPolicyVersion: GUARD_REVIEW_POLICY_VERSION, reviewedScenarioFingerprint: scenarioReviewFingerprint(GuardScenarioSchema.parse(scenario)), milestoneCoverage: [{ milestone: 1, driver: 'web', checks: ['create'] }] }], gaps: [{ surface: 'web', kind: 'blocked-on', milestones: [1], obligations: [{ milestone: 1, caseId: 'reload' }], reason: 'Milestone 1: reload is not verified', blocker: { kind: 'generation' } }, { surface: 'web', kind: 'no-interface', milestones: [1], obligations: [{ milestone: 1, caseId: 'create' }], reason: 'Historical missing create action', blocker: { kind: 'generation' } }] }] };
@@ -1061,7 +1061,7 @@ describe('Guard flow read surfaces', () => {
       'title: Purged tasks leave the list',
       `flow: { id: ${ORPHAN_ID}, fingerprint: "sha256:purge" }`,
       'binds:',
-      `  - { doc: ${DOC}, section: tasks/listing-tasks, fingerprint: "${FP.listing}" }`,
+      `  - { doc: ${DOC}, section: tasks/listing-tasks, fingerprint: "${FP.listing}", sentences: [tasks/listing-tasks] }`,
       'driver: cli',
       'steps:',
       '  - run: [purge, --force]',
@@ -1085,7 +1085,7 @@ describe('Guard flow read surfaces', () => {
           {
             flowId: ORPHAN_ID,
             flowFingerprint: 'sha256:purge',
-            bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing }],
+            bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] }],
             scenarios: [{ id: ORPHAN_SCENARIO, surface: 'cli', status: 'passing' }],
             generationInputsHash: 'sha256:gen',
             gaps: [],
@@ -1345,9 +1345,9 @@ describe('Guard flow read surfaces', () => {
             goal: 'Analyze a repo containing a minified bundle without freezing',
             fingerprint: 'sha256:red',
             milestones: [
-              { order: 1, doc: DOC, anchor: 'tasks/listing-tasks', claimTitle: 'The list shows tasks newest-first' },
+              { order: 1, doc: DOC, anchor: 'tasks/listing-tasks', claimTitle: 'The list shows tasks newest-first', sentences: ['tasks/listing-tasks'] },
             ],
-            bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing }],
+            bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] }],
             composedOf: [],
             synthesisInputsHash: 'sha256:inputs',
           },
@@ -1359,7 +1359,7 @@ describe('Guard flow read surfaces', () => {
           {
             flowId: RED_FLOW,
             flowFingerprint: 'sha256:red',
-            bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing }],
+            bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] }],
             // Committed with the status its birth execution gave it.
             scenarios: [{ id: RED_SCENARIO, surface: 'cli', status: 'failing' }],
             generationInputsHash: 'sha256:gen',
@@ -1374,7 +1374,7 @@ describe('Guard flow read surfaces', () => {
           'title: Analyze survives a pathological file',
           `flow: { id: ${RED_FLOW}, fingerprint: "sha256:red" }`,
           'binds:',
-          `  - { doc: ${DOC}, section: tasks/listing-tasks, fingerprint: "${FP.listing}" }`,
+          `  - { doc: ${DOC}, section: tasks/listing-tasks, fingerprint: "${FP.listing}", sentences: [tasks/listing-tasks] }`,
           'driver: cli',
           'steps:',
           '  - run: [list]',
@@ -1545,7 +1545,7 @@ describe('Guard flow read surfaces', () => {
           {
             id: RED_SCENARIO,
             title: 'Analyze survives a pathological file',
-            binds: { doc: DOC, section: 'tasks/listing-tasks', fingerprint: FP.listing },
+            binds: { doc: DOC, section: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] },
             outcome: 'pass',
             durationMs: 40,
             flowId: RED_FLOW,
@@ -1611,7 +1611,7 @@ describe('Guard flow read surfaces', () => {
             {
               id: RED_SCENARIO,
               title: 'Analyze survives a pathological file',
-              binds: { doc: DOC, section: 'tasks/listing-tasks', fingerprint: FP.listing },
+              binds: { doc: DOC, section: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] },
               outcome: 'pass',
               durationMs: 40,
               flowId: RED_FLOW,

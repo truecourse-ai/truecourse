@@ -37,6 +37,8 @@ export const GuardFlowMilestoneSchema = z
     anchor: z.string().min(1),
     /** The extracted claim's stable text. */
     claimTitle: z.string().min(1),
+    /** The keys of the sentences the claim is read from: what the flow stays bound to. */
+    sentences: z.array(z.string().min(1)).min(1),
     /** Selected authoritative cases; omission reads the whole legacy claim. */
     caseIds: z.array(z.string().min(1)).min(1).optional(),
     /** Each listed driver can prove this entire milestone independently. Absent on legacy flows. */
@@ -49,9 +51,11 @@ export const GuardFlowMilestoneSchema = z
 export type GuardFlowMilestone = z.infer<typeof GuardFlowMilestoneSchema>
 
 /**
- * A section a flow binds to — the staleness anchor. Same triple as a scenario's
- * `binds` entry (`doc` + section anchor + the section-text fingerprint), resolved
- * through the runner's `resolveBinding` against the live section index.
+ * A section a flow binds to. The SENTENCES are what the flow stays bound to:
+ * the runner resolves them against the live document, and a flow whose
+ * sentences all stand still runs whatever else changed around them. The
+ * anchor and the section-text fingerprint are the section's bookkeeping: what
+ * coverage pivots on, and what tells a generate the section's text moved.
  */
 export const GuardFlowBindingSchema = z
   .object({
@@ -61,9 +65,22 @@ export const GuardFlowBindingSchema = z
     anchor: z.string().min(1),
     /** `sha256:…` over the normalized section text at synthesis time. */
     fingerprint: z.string().min(1),
+    /** The keys of the sentences the flow's milestones in this section are read from. */
+    sentences: z.array(z.string().min(1)).min(1),
   })
   .strict()
 export type GuardFlowBinding = z.infer<typeof GuardFlowBindingSchema>
+
+/** Whether a scenario's bind realizes a flow's binding: the same doc, section and sentences. */
+export function bindRealizes(
+  bind: { doc: string; section: string; sentences: readonly string[] },
+  binding: Pick<GuardFlowBinding, 'doc' | 'anchor' | 'sentences'>,
+): boolean {
+  if (bind.doc !== binding.doc || bind.section !== binding.anchor) return false
+  const a = [...bind.sentences].sort()
+  const b = [...binding.sentences].sort()
+  return a.length === b.length && a.every((key, i) => key === b[i])
+}
 
 /**
  * What KIND of path a flow walks. Coverage is not a count of flows but a spread

@@ -206,6 +206,11 @@ export function sectionOwnText(tree: DocTree, section: Pick<DocSection, 'startLi
   return tree.lines.slice(section.startLine - 1, section.ownEndLine).join('\n')
 }
 
+/** The sentences of a section's own text, in document order. */
+export function sectionSentences(tree: DocTree, section: Pick<DocSection, 'startLine' | 'ownEndLine'>): DocSentence[] {
+  return tree.sentences.filter((s) => s.startLine >= section.startLine && s.startLine <= section.ownEndLine)
+}
+
 /** The lead section, or null when the doc opens with a heading or the text above it is blank. */
 export function leadSection(tree: DocTree): DocSection | null {
   return tree.sections.find((s) => s.level === 0) ?? null

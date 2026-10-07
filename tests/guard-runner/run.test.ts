@@ -535,7 +535,7 @@ describe('runGuard — tests committed FAILING at birth', () => {
         {
           flowId: 'flow',
           flowFingerprint: 'sha256:f',
-          bindings: [{ doc: 'docs/spec.md', anchor: 'cli/version', fingerprint: 'sha256:cli/version' }],
+          bindings: [{ doc: 'docs/spec.md', anchor: 'cli/version', fingerprint: 'sha256:cli/version', sentences: ['cli/version'] }],
           scenarios: [
             { id: 'flow.cli.1', surface: 'cli', status: 'failing' },
             { id: 'flow.cli.2', surface: 'cli', status: 'failing' },

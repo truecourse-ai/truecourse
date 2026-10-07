@@ -68,12 +68,12 @@ const FLOWS = {
       goal: 'Add a task, then see it',
       fingerprint: 'sha256:f',
       milestones: [
-        { order: 1, doc: DOC, anchor: 'tasks', claimTitle: ADD.title, note: 'the create half' },
-        { order: 2, doc: DOC, anchor: 'listing-tasks', claimTitle: LIST.title },
+        { order: 1, doc: DOC, anchor: 'tasks', claimTitle: ADD.title, sentences: ['tasks'], note: 'the create half' },
+        { order: 2, doc: DOC, anchor: 'listing-tasks', claimTitle: LIST.title, sentences: ['listing-tasks'] },
       ],
       bindings: [
-        { doc: DOC, anchor: 'tasks', fingerprint: 'sha256:s1' },
-        { doc: DOC, anchor: 'listing-tasks', fingerprint: 'sha256:s2' },
+        { doc: DOC, anchor: 'tasks', fingerprint: 'sha256:s1', sentences: ['tasks'] },
+        { doc: DOC, anchor: 'listing-tasks', fingerprint: 'sha256:s2', sentences: ['listing-tasks'] },
       ],
       composedOf: [],
       synthesisInputsHash: 'sha256:i',
@@ -105,8 +105,8 @@ const SCENARIO = {
   driver: 'cli',
   flow: { id: 'add-then-list', fingerprint: 'sha256:f' },
   binds: [
-    { doc: DOC, section: 'tasks', fingerprint: 'sha256:s1' },
-    { doc: DOC, section: 'listing-tasks', fingerprint: 'sha256:s2' },
+    { doc: DOC, section: 'tasks', fingerprint: 'sha256:s1', sentences: ['tasks'] },
+    { doc: DOC, section: 'listing-tasks', fingerprint: 'sha256:s2', sentences: ['listing-tasks'] },
   ],
   steps: [
     { run: ['add', 'write the docs'], expect: { exit: 0 }, milestone: ADD.id },
@@ -139,7 +139,7 @@ const latestWith = (outcome: 'pass' | 'fail') => ({
     {
       id: SCENARIO.id,
       title: SCENARIO.title,
-      binds: { doc: DOC, section: 'tasks', fingerprint: 'sha256:s1' },
+      binds: { doc: DOC, section: 'tasks', fingerprint: 'sha256:s1', sentences: ['tasks'] },
       outcome,
       durationMs: 5,
     },

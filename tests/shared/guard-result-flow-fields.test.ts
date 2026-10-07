@@ -12,7 +12,7 @@ import {
 // step's `failedMilestone`, and the `interfaceDrifted` dot. All optional, so runs
 // stored before flows existed keep parsing.
 
-const binds = { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }
+const binds = { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }
 
 describe('GuardScenarioResultSchema — flow annotations', () => {
   it('parses a result carrying flowId, failedMilestone and the drift dot', () => {

@@ -83,6 +83,7 @@ import {
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
 import { GUARD_FORMAT_VERSION, type FlowTestsFile, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
+import { sectionBind } from '../guard-runner/helpers.js';
 import { flowTestsDir, flowTestsIndexPath, worldScriptPath } from '@truecourse/shared/work-tree';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
 import { captureJobStarted } from '../../apps/dashboard/server/src/observability/posthog';
@@ -213,7 +214,7 @@ const SOURCE_ID = 'repo-acme-widgets';
 const contextRef = (docPath: string): string => `context/${SOURCE_ID}/${docPath}`;
 
 /** The body every seeded document carries — one markdown section. */
-const contextDocBody = (docPath: string): string => `# ${docPath}\n`;
+const contextDocBody = (docPath: string): string => `# ${docPath}\n\nThe ${docPath} document states one thing.\n`;
 
 /**
  * The scan's output, as the store holds it now: a workspace corpus over the
@@ -813,6 +814,7 @@ describe('the guard generate job', () => {
         '  - doc: docs/orgs.md',
         '    section: create',
         '    fingerprint: "sha256:x"',
+        '    sentences: [create]',
         'driver: cli',
         'steps:',
         '  - run: ["--help"]',
@@ -1317,6 +1319,7 @@ describe('the guard generate job', () => {
         '  - doc: docs/orgs.md',
         '    section: create',
         '    fingerprint: "sha256:x"',
+        '    sentences: [create]',
         'steps:',
         '  - run: ["--help"]',
         '    expect:',
@@ -1579,7 +1582,7 @@ describe('the guard run job', () => {
       {
         id: 'a1',
         title: 'create an org',
-        binds: { doc: 'docs/orgs.md', section: 'create', fingerprint: 'sha256:x' },
+        binds: { doc: 'docs/orgs.md', section: 'create', fingerprint: 'sha256:x', sentences: ['create'] },
         outcome: 'fail',
         durationMs: 12,
         failure: { step: 1, expected: 'exit 0', actual: 'exit 1' },
@@ -1650,8 +1653,9 @@ describe('the guard run job', () => {
     doc: string;
     section: string;
     fingerprint: string;
+    sentences: string[];
   }
-  const DEFAULT_BIND: StoredBind = { doc: 'docs/orgs.md', section: 'create', fingerprint: 'sha256:x' };
+  const DEFAULT_BIND: StoredBind = { doc: 'docs/orgs.md', section: 'create', fingerprint: 'sha256:x', sentences: ['sentence:create'] };
 
   /** What generate left: a stored scenario set and its baseline report. */
   async function storeGeneratedSet(bind: StoredBind = DEFAULT_BIND): Promise<void> {
@@ -1660,7 +1664,7 @@ describe('the guard run job', () => {
     fs.mkdirSync(orgs, { recursive: true });
     fs.writeFileSync(
       path.join(orgs, 'a1.yaml'),
-      ['id: a1', 'title: create an org', 'binds:', `  - doc: ${bind.doc}`, `    section: ${bind.section}`, `    fingerprint: "${bind.fingerprint}"`, 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
+      ['id: a1', 'title: create an org', 'binds:', `  - doc: ${bind.doc}`, `    section: ${bind.section}`, `    fingerprint: "${bind.fingerprint}"`, `    sentences: [${bind.sentences.map((s) => JSON.stringify(s)).join(', ')}]`, 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
     );
     fs.writeFileSync(manifestPath(dir), JSON.stringify({ version: GUARD_FORMAT_VERSION, flows: [] }, null, 2) + '\n');
     const ref = { repoKey: REPO, commitSha: GEN_COMMIT };
@@ -1978,9 +1982,10 @@ describe('the guard run job', () => {
   /** The section the seeded document really holds, as the runner derives it. */
   function seededBind(): StoredBind {
     const doc = contextRef(DOC_PATH);
-    const section = buildDocSectionIndex(doc, contextDocBody(DOC_PATH)).sections[0];
+    const index = buildDocSectionIndex(doc, contextDocBody(DOC_PATH));
+    const section = index.sections[0];
     if (!section) throw new Error(`the seeded ${doc} holds no section to bind to`);
-    return { doc, section: section.anchor, fingerprint: section.fingerprint };
+    return sectionBind(index, section.anchor);
   }
 
   it('materializes the document the scenario binds to into the clone', async () => {
@@ -2015,11 +2020,7 @@ describe('the guard run job', () => {
       // The runner's own binding pass, over the clone the job prepared.
       const docs = indexRepoDocs(repoRoot, [bind.doc]);
       resolved.missing = [...docs.missing];
-      resolved.kind = resolveBinding(
-        docs.indexes.get(bind.doc) ?? null,
-        bind.section,
-        bind.fingerprint,
-      ).kind;
+      resolved.kind = resolveBinding(docs.indexes.get(bind.doc) ?? null, bind).kind;
       return failingRun(repoRoot, options);
     };
 
@@ -2038,8 +2039,9 @@ describe('the guard run job', () => {
     const docPath = 'docs/orgs.md';
     const docRef = contextRef(docPath);
     const original = '# Widgets\n\n## Help\nThe command prints help.\n';
-    const section = buildDocSectionIndex(docRef, original).sections.find((s) => s.headingText === 'Help')!;
-    await storeGeneratedSet({ doc: docRef, section: section.anchor, fingerprint: section.fingerprint });
+    const index = buildDocSectionIndex(docRef, original);
+    const section = index.sections.find((s) => s.headingText === 'Help')!;
+    await storeGeneratedSet(sectionBind(index, section.anchor));
     await seedWorkspaceSpec(document === 'missing' ? [] : [docPath]);
     if (document !== 'missing') {
       await writeContextDocuments(ORG, SOURCE_ID, {
@@ -2068,7 +2070,7 @@ describe('the guard run job', () => {
     expect(latest?.scenarios).toHaveLength(1);
     expect(latest?.scenarios[0]).toMatchObject({
       id: 'a1', outcome: expected,
-      binds: { doc: docRef, section: section.anchor, fingerprint: section.fingerprint },
+      binds: sectionBind(index, section.anchor),
     });
     if (expected === 'pass') {
       expect(latest?.scenarios[0].evidencePath).toBeTruthy();

@@ -36,6 +36,7 @@ vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
 }))
 
 import { getCacheEntry } from '@truecourse/llm'
+import { parseDocTree, sentenceKey } from '@truecourse/shared'
 import {
   collectWorkDocs,
   planGuardWork,
@@ -111,7 +112,7 @@ const transportFailure = { kind: 'failure' as const, failure: { kind: 'transport
 
 const AREA = (r: string): FlowSynthesisArea => ({
   areaId: 'tasks',
-  claims: [{ doc: DOC, anchor: ANCHOR, title: CLAIM, driver: 'cli' }],
+  claims: [{ id: 'claim::tasks::create', doc: DOC, anchor: ANCHOR, title: CLAIM, sentences: [sentenceKey(parseDocTree(DOC, CONTENT).sentences.find((s) => s.text.includes(CLAIM))!.text)] }],
   docs: [
     {
       doc: DOC,

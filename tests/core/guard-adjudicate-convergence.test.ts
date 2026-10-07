@@ -47,7 +47,7 @@ function row(id: string, outcome: GuardScenarioResult['outcome'], over: Partial<
   return {
     id,
     title: `${id} title`,
-    binds: { doc: 'docs/x.md', section: `${id}/sec`, fingerprint: 'sha256:x' },
+    binds: { doc: 'docs/x.md', section: `${id}/sec`, fingerprint: 'sha256:x', sentences: [`${id}/sec`] },
     outcome,
     durationMs: 1,
     ...(outcome === 'fail' || outcome === 'error'

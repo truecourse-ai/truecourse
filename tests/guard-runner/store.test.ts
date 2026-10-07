@@ -131,7 +131,7 @@ describe('guard store — LATEST', () => {
       {
         id: 'flow.cli.1',
         title: 'born red',
-        binds: { doc: 'docs/x.md', section: 'x', fingerprint: 'sha256:x' },
+        binds: { doc: 'docs/x.md', section: 'x', fingerprint: 'sha256:x', sentences: ['x'] },
         outcome: 'fail',
         stage: 'birth',
         durationMs: 12,
@@ -141,7 +141,7 @@ describe('guard store — LATEST', () => {
       {
         id: 'flow.cli.2',
         title: 'from a run',
-        binds: { doc: 'docs/x.md', section: 'y', fingerprint: 'sha256:y' },
+        binds: { doc: 'docs/x.md', section: 'y', fingerprint: 'sha256:y', sentences: ['y'] },
         outcome: 'pass',
         durationMs: 8,
       },

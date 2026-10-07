@@ -25,7 +25,7 @@ const report = (reason = OUTPUT): GuardGenerateReport => ({
 const latest = (actual = OUTPUT): GuardLatest => ({
   run: { runId: 'baseline-1', ranAt: '2026-01-01T00:00:00Z', branch: 'main', commit: 'c1', recipeFingerprint: 'sha256:r' },
   summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
-  scenarios: [{ id: 'download', title: 'download PDF', binds: [{ doc: 'README.md', section: 'download', fingerprint: 'sha256:d' }],
+  scenarios: [{ id: 'download', title: 'download PDF', binds: [{ doc: 'README.md', section: 'download', fingerprint: 'sha256:d', sentences: ['download'] }],
     outcome: 'fail', durationMs: 1, failure: { step: 1, expected: 'public', actual, stdout: actual } }],
   sections: [],
 });

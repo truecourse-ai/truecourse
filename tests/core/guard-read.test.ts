@@ -43,6 +43,7 @@ const yaml = (id: string, section: string): string =>
     `  - doc: ${DOC}`,
     `    section: ${section}`,
     '    fingerprint: "sha256:x"',
+    `    sentences: [${section}]`,
     'driver: cli',
     'steps:',
     '  - run: ["--help"]',
@@ -90,7 +91,7 @@ async function saveSetFor(
       flows.push({
         flowId: `${DOC}#${section}`,
         flowFingerprint: 'sha256:x',
-        bindings: [{ doc: DOC, anchor: section, fingerprint: 'sha256:x' }],
+        bindings: [{ doc: DOC, anchor: section, fingerprint: 'sha256:x', sentences: [section] }],
         scenarios: [{ id, surface: 'cli', ...(status ? { status } : {}) }],
         generationInputsHash: null,
         gaps: [],
@@ -131,7 +132,7 @@ const RUN = (runId: string, commit: string, ranAt = '2026-07-08T00:00:00.000Z') 
     {
       id: 'a1',
       title: 'alpha claim',
-      binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' },
+      binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] },
       outcome: 'pass' as const,
       durationMs: 1,
     },
@@ -259,7 +260,7 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
     await guardStore.writeGuardLatest(REPO, {
       run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r' },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
-      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
+      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] }, outcome: 'pass', durationMs: 1 }],
       sections: [],
     });
     const inv = await listGuardScenarios(REPO, 'shaA1234567');
@@ -517,7 +518,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await guardStore.writeGuardRun(REPO, {
       run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r' },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
-      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
+      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] }, outcome: 'pass', durationMs: 1 }],
       sections: [],
     });
     const s = await computeGuardStaleness(REPO, 'shaA1234567');
@@ -530,7 +531,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await guardStore.writeGuardLatest(REPO, {
       run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r' },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
-      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
+      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] }, outcome: 'pass', durationMs: 1 }],
       sections: [],
     });
     const s = await computeGuardStaleness(REPO, 'shaA1234567');
@@ -578,7 +579,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await guardStore.writeGuardRun(REPO, {
       run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r' },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
-      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
+      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] }, outcome: 'pass', durationMs: 1 }],
       sections: [],
     });
     const s = await computeGuardStaleness(REPO, 'shaA1234567');

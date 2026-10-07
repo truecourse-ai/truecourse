@@ -46,8 +46,8 @@ const flows: GuardFlowsFile = {
       title: 'A developer reads the rule coverage',
       goal: 'Read the rule coverage',
       fingerprint: 'sha256:f',
-      milestones: [{ order: 1, doc: DOC, anchor: 'rule-coverage', claimTitle: 'the counts drift' }],
-      bindings: [{ doc: DOC, anchor: 'rule-coverage', fingerprint: 'sha256:s' }],
+      milestones: [{ order: 1, doc: DOC, anchor: 'rule-coverage', claimTitle: 'the counts drift', sentences: ['rule-coverage'] }],
+      bindings: [{ doc: DOC, anchor: 'rule-coverage', fingerprint: 'sha256:s', sentences: ['rule-coverage'] }],
       composedOf: [],
       synthesisInputsHash: 'sha256:i',
     },
@@ -63,7 +63,7 @@ const manifest: GuardManifest = {
     {
       flowId: 'read-the-rule-coverage',
       flowFingerprint: 'sha256:f',
-      bindings: [{ doc: DOC, anchor: 'rule-coverage', fingerprint: 'sha256:s' }],
+      bindings: [{ doc: DOC, anchor: 'rule-coverage', fingerprint: 'sha256:s', sentences: ['rule-coverage'] }],
       scenarios: [{ id: 'read-the-rule-coverage.cli.1', drivers: ['cli'], status: 'passing' }],
       interfaces: [],
       gaps: [],
@@ -184,7 +184,7 @@ const ran = (outcome: 'pass' | 'fail'): GuardLatest =>
       {
         id: 'read-the-rule-coverage.cli.1',
         title: 'reads the rule coverage',
-        binds: { doc: DOC, section: 'rule-coverage', fingerprint: 'sha256:s' },
+        binds: { doc: DOC, section: 'rule-coverage', fingerprint: 'sha256:s', sentences: ['rule-coverage'] },
         outcome,
         durationMs: 5,
       },

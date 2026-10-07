@@ -105,7 +105,7 @@ function storedRun(repoPath: string): void {
         {
           flowId: 'f1',
           flowFingerprint: 'sha256:f1',
-          bindings: [{ doc: REFUNDS, anchor: 'refunds', fingerprint: 'sha256:a' }],
+          bindings: [{ doc: REFUNDS, anchor: 'refunds', fingerprint: 'sha256:a', sentences: ['refunds'] }],
           scenarios: [{ id: 's1', drivers: ['cli'] }],
           interfaces: [],
           generationInputsHash: null,
@@ -115,7 +115,7 @@ function storedRun(repoPath: string): void {
         {
           flowId: 'f2',
           flowFingerprint: 'sha256:f2',
-          bindings: [{ doc: SHIPPING, anchor: 'shipping', fingerprint: 'sha256:b' }],
+          bindings: [{ doc: SHIPPING, anchor: 'shipping', fingerprint: 'sha256:b', sentences: ['shipping'] }],
           scenarios: [{ id: 's2', drivers: ['cli'] }],
           interfaces: [],
           generationInputsHash: null,
@@ -138,14 +138,14 @@ function storedRun(repoPath: string): void {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: REFUNDS, section: 'refunds', fingerprint: 'sha256:a' },
+        binds: { doc: REFUNDS, section: 'refunds', fingerprint: 'sha256:a', sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
       },
       {
         id: 's2',
         title: 'a parcel ships',
-        binds: { doc: SHIPPING, section: 'shipping', fingerprint: 'sha256:b' },
+        binds: { doc: SHIPPING, section: 'shipping', fingerprint: 'sha256:b', sentences: ['shipping'] },
         outcome: 'pass',
         durationMs: 1,
       },

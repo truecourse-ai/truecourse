@@ -467,7 +467,7 @@ describe('generateGuards — change detection', () => {
             ...(existing ? { id: existing.id } : {}),
             title: existing ? `re-worded ${c.anchor}` : c.anchor,
             goal: `verify ${c.title}`,
-            milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title }],
+            milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, sentences: [c.anchor] }],
           }
         }),
         noFlowClaims: [],
@@ -616,7 +616,7 @@ describe('generateGuards — the committed scenario', () => {
             yaml.dump(
               {
                 title: 'walks both',
-                binds: { doc: 'other.md', section: 'nope', fingerprint: 'sha256:wrong' },
+                binds: { doc: 'other.md', section: 'nope', fingerprint: 'sha256:wrong', sentences: ['nope'] },
                 steps: [
                   { run: ['--version'], expect: { exit: 0 }, milestone: 1 },
                   { run: ['--version'], expect: { exit: 0 }, milestone: 2 },
@@ -1323,7 +1323,7 @@ describe('generateGuards — manifest + orphans', () => {
         {
           flowId: 'a-removed-flow',
           flowFingerprint: 'sha256:old',
-          bindings: [{ doc: 'docs/gone.md', anchor: 'removed/section', fingerprint: 'sha256:old' }],
+          bindings: [{ doc: 'docs/gone.md', anchor: 'removed/section', fingerprint: 'sha256:old', sentences: ['removed/section'] }],
           scenarios: [{ id: 'orphan', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }],
           generationInputsHash: 'sha256:x',
           gaps: [],
@@ -1371,7 +1371,7 @@ describe('generateGuards — manifest + orphans', () => {
     const ghost = (flowId: string, extra: object) => ({
       flowId,
       flowFingerprint: 'sha256:old',
-      bindings: [{ doc: 'docs/gone.md', anchor: `${flowId}/section`, fingerprint: 'sha256:old' }],
+      bindings: [{ doc: 'docs/gone.md', anchor: `${flowId}/section`, fingerprint: 'sha256:old', sentences: [`${flowId}/section`] }],
       scenarios: [],
       generationInputsHash: 'sha256:x',
       gaps: [{ surface: 'cli' as const, kind: 'no-interface' as const, reason: 'no cli interface does this' }],
@@ -1546,8 +1546,8 @@ function candidate(repoRoot: string, id: string, steps: GuardScenario['steps']):
     title: 'version',
     goal: 'the version prints',
     fingerprint: 'sha256:flow',
-    milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: 'c' }],
-    bindings: [{ doc: DOC, anchor: 'version', fingerprint: binds[0].fingerprint }],
+    milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: 'c', sentences: ['version'] }],
+    bindings: [{ doc: DOC, anchor: 'version', fingerprint: binds[0].fingerprint, sentences: ['version'] }],
     composedOf: [],
     synthesisInputsHash: 'sha256:inputs',
   }

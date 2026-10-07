@@ -480,6 +480,8 @@ export const GuardBindsSchema = z
     section: z.string().min(1),
     /** `sha256:…` over the normalized section text. */
     fingerprint: z.string().min(1),
+    /** The keys of the sentences the scenario's milestones in this section are read from: what the runner resolves. */
+    sentences: z.array(z.string().min(1)).min(1),
   })
   .strict()
 

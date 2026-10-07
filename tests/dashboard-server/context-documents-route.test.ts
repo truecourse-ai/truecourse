@@ -89,7 +89,7 @@ const corpus = (): CuratedCorpus =>
  * the flow to the section, and the run says the flow's scenario failed there.
  */
 function failingRun(repoPath: string): void {
-  const binding = { doc: REFUNDS, anchor: 'refunds', fingerprint: 'sha256:x' };
+  const binding = { doc: REFUNDS, anchor: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] };
   fs.mkdirSync(path.dirname(manifestPath(repoPath)), { recursive: true });
   fs.writeFileSync(
     manifestPath(repoPath),
@@ -121,7 +121,7 @@ function failingRun(repoPath: string): void {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: REFUNDS, section: 'refunds', fingerprint: 'sha256:x' },
+        binds: { doc: REFUNDS, section: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
       },

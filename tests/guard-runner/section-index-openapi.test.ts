@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   buildDocSectionIndex,
   extractSectionTexts,
-  resolveBinding,
 } from '@truecourse/guard-runner'
 
 const TODOS = `openapi: 3.0.3
@@ -115,57 +114,3 @@ info:
   })
 })
 
-describe('resolveBinding — OpenAPI stale / orphan', () => {
-  const doc = 'api/openapi.yaml'
-
-  it('binds a matching operation', () => {
-    const idx = buildDocSectionIndex(doc, TODOS)
-    const s = idx.byAnchor.get('paths/get-listtodos')!
-    expect(resolveBinding(idx, s.anchor, s.fingerprint)).toEqual({ kind: 'match', section: s })
-  })
-
-  it('flips scenarios stale when an operation is edited in place', () => {
-    const before = buildDocSectionIndex(doc, TODOS)
-    const bound = before.byAnchor.get('paths/get-gettodo')!
-    // Edit only the getTodo operation (add a 404 response) — its anchor stays,
-    // its canonical slice (and fingerprint) changes.
-    const edited = TODOS.replace(
-      `  /todos/{id}:
-    get:
-      operationId: getTodo
-      responses:
-        '200': { description: ok }`,
-      `  /todos/{id}:
-    get:
-      operationId: getTodo
-      responses:
-        '200': { description: ok }
-        '404': { description: not found }`,
-    )
-    const after = buildDocSectionIndex(doc, edited)
-    const res = resolveBinding(after, bound.anchor, bound.fingerprint)
-    expect(res.kind).toBe('stale')
-    // The other operations' bindings still match.
-    const list = before.byAnchor.get('paths/get-listtodos')!
-    expect(resolveBinding(after, list.anchor, list.fingerprint).kind).toBe('match')
-  })
-
-  it('orphans scenarios when the operation is deleted', () => {
-    const before = buildDocSectionIndex(doc, TODOS)
-    const bound = before.byAnchor.get('paths/post-createtodo')!
-    const deleted = TODOS.replace(
-      `    post:
-      operationId: createTodo
-      responses:
-        '201': { description: created }
-`,
-      '',
-    )
-    const after = buildDocSectionIndex(doc, deleted)
-    expect(after.byAnchor.has('paths/post-createtodo')).toBe(false)
-    expect(resolveBinding(after, bound.anchor, bound.fingerprint)).toEqual({
-      kind: 'orphaned',
-      anchor: bound.anchor,
-    })
-  })
-})

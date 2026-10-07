@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import { describeGuardScenarioSetup, describeGuardScenarioSteps } from '@truecourse/shared'
 
-const BINDS = [{ doc: 'docs/tasks.md', section: 'tasks/creating', fingerprint: 'sha256:abc' }]
+const BINDS = [{ doc: 'docs/tasks.md', section: 'tasks/creating', fingerprint: 'sha256:abc', sentences: ['tasks/creating'] }]
 
 const CLI_SCENARIO = {
   id: 'task-lifecycle.cli.1',

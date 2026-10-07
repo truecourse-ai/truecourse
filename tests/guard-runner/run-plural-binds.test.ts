@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { runGuard, buildDocSectionIndex, guardRunPath, type GuardScenario } from '@truecourse/guard-runner'
 import { GuardLatestSchema, type GuardBinds } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds, sectionBind, staleSpecBind } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -18,14 +18,12 @@ function repo(): string {
 /** The shared spec doc `writeRecipe` seeds — the live-binding source. */
 const SPEC_DOC = specBinds('a/b')[0].doc
 
-/** A bind whose anchor exists but whose fingerprint doesn't — an EDITED section. */
-function staleBind(section: string): GuardBinds {
-  return { doc: SPEC_DOC, section, fingerprint: 'sha256:authored-against-older-text' }
-}
+/** A bind one of whose sentences the doc no longer holds — an EDITED section. */
+const staleBind = staleSpecBind
 
-/** A bind whose anchor is gone from the doc — a REMOVED section. */
+/** A bind none of whose sentences the doc holds — a REMOVED section. */
 function orphanBind(section: string): GuardBinds {
-  return { doc: SPEC_DOC, section, fingerprint: 'sha256:section-that-no-longer-exists' }
+  return { doc: SPEC_DOC, section, fingerprint: 'sha256:section-that-no-longer-exists', sentences: ['sentence:that-no-longer-exists'] }
 }
 
 /** A one-step passing scenario over the given binds. */
@@ -48,9 +46,10 @@ function writeMoveDoc(root: string, content: string): void {
 
 /** The live binding of `headingText` in `content`. */
 function moveBind(content: string, headingText: string): GuardBinds {
-  const s = buildDocSectionIndex(MOVE_DOC, content).sections.find((x) => x.headingText === headingText)
+  const index = buildDocSectionIndex(MOVE_DOC, content)
+  const s = index.sections.find((x) => x.headingText === headingText)
   if (!s) throw new Error(`no section "${headingText}"`)
-  return { doc: MOVE_DOC, section: s.anchor, fingerprint: s.fingerprint }
+  return sectionBind(index, s.anchor)
 }
 
 describe('runGuard — plural-bind staleness', () => {

@@ -98,7 +98,7 @@ describe('planGuardWork — securityFingerprint stamping', () => {
       flows: plan0.sections.map((s) => ({
         flowId: `${s.doc}#${s.anchor}`,
         flowFingerprint: s.fingerprint,
-        bindings: [{ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }],
+        bindings: [{ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint, sentences: [s.anchor] }],
         scenarios: [],
         generationInputsHash: legacyFlowGenerationInputsHash({
           flowFingerprint: s.fingerprint,

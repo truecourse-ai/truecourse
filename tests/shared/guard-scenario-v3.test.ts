@@ -32,7 +32,7 @@ import {
 } from '@truecourse/shared'
 import type { GuardRunArg } from '@truecourse/shared'
 
-const BINDS = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }]
+const BINDS = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }]
 
 /** A whole scenario using every v3 capability, as a reference file writes it. */
 const V3_SCENARIO = {
@@ -391,8 +391,8 @@ describe('guard flow corpus — kind, variant, notes and the starting state', ()
       supplied: ['llm-api-credentials — a provider key the user registered'],
     },
     fingerprint: 'sha256:f',
-    milestones: [{ order: 1, doc: 'docs/spec.md', anchor: 'a/b', claimTitle: 'c' }],
-    bindings: [{ doc: 'docs/spec.md', anchor: 'a/b', fingerprint: 'sha256:x' }],
+    milestones: [{ order: 1, doc: 'docs/spec.md', anchor: 'a/b', claimTitle: 'c', sentences: ['a/b'] }],
+    bindings: [{ doc: 'docs/spec.md', anchor: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }],
     composedOf: [],
     synthesisInputsHash: 'sha256:h',
   }

@@ -23,7 +23,7 @@ import {
   type FlowClaimInput,
   type FlowSynthesisResult,
 } from '@truecourse/guard-generator'
-import { GuardFlowsFileSchema, type GuardFlow, type GuardNoFlowClaim } from '@truecourse/shared'
+import { GuardFlowsFileSchema, parseDocTree, sectionSentences, sentenceKey, type DocTree, type GuardFlow, type GuardNoFlowClaim } from '@truecourse/shared'
 import { makeTempRepo, rmrf, sessionSummary, FLOWS_KIND } from './helpers.js'
 
 const repos: string[] = []
@@ -72,6 +72,7 @@ const AUTH_CONTENT = [
 
 interface DocFixture {
   doc: string
+  tree: DocTree
   outline: { anchor: string; headingText: string; level: number }[]
   anchors: Record<string, string>
   fingerprints: Map<string, string>
@@ -89,10 +90,23 @@ function indexDoc(doc: string, content: string): DocFixture {
   }
   return {
     doc,
+    tree: parseDocTree(doc, content),
     outline: index.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
     anchors,
     fingerprints,
   }
+}
+
+/**
+ * The key of the fixture sentence a claim title is read from: the one holding
+ * the title, else the section's first; a claim outside the fixture doc keys
+ * its own title.
+ */
+function sentencesFor(fixture: DocFixture, heading: string, title: string): string[] {
+  const section = fixture.tree.sections.find((s) => s.headingText === heading)
+  const own = section ? sectionSentences(fixture.tree, section) : []
+  const quoted = own.find((s) => s.text.includes(title)) ?? own[0]
+  return [quoted ? sentenceKey(quoted.text, quoted.repeat) : sentenceKey(title)]
 }
 
 const TASKS = indexDoc(TASKS_DOC, TASKS_CONTENT)
@@ -106,8 +120,8 @@ const LIST_DONE = '`relkit list --done` prints only the completed tasks'
 const SIGN_IN = '`POST /session` with valid credentials answers 200 and sets a session cookie'
 const SIGN_OUT = '`DELETE /session` answers 204 and clears the session cookie'
 
-function claim(fixture: DocFixture, heading: string, title: string, driver: FlowClaimInput['driver'] = 'cli'): FlowClaimInput {
-  return { doc: fixture.doc, anchor: fixture.anchors[heading], title, driver }
+function claim(fixture: DocFixture, heading: string, title: string): FlowClaimInput {
+  return { id: `claim::${fixture.doc}::${heading}::${title}`, doc: fixture.doc, anchor: fixture.anchors[heading], title, sentences: sentencesFor(fixture, heading, title) }
 }
 
 const TASK_CLAIMS: FlowClaimInput[] = [
@@ -294,7 +308,7 @@ describe('synthesizeFlows — composition', () => {
     const r = repo()
     const area: FlowSynthesisArea = {
       ...tasksArea,
-      claims: [...TASK_CLAIMS, { doc: TASKS_DOC, anchor: 'tasks/deleted-section', title: 'stale claim', driver: 'cli' }],
+      claims: [...TASK_CLAIMS, { id: 'claim::stale', doc: TASKS_DOC, anchor: 'tasks/deleted-section', title: 'stale claim', sentences: ['sentence:stale'] }],
     }
     const res = await synth(r, [area], areaSessions({ tasks: TASK_LIFECYCLE }))
     expect(res.noFlowClaims.map((c) => c.claimTitle)).toContain('stale claim')
@@ -1400,7 +1414,7 @@ describe('buildFlowAreas — chunking an oversized area', () => {
    */
   const BIG_DOC = 'docs/big.md'
   const claimsFor = (doc: string, n: number): FlowClaimInput[] =>
-    Array.from({ length: n }, (_, i) => claim(TASKS, `claim ${i} of ${doc}`))
+    Array.from({ length: n }, (_, i) => claim(TASKS, 'Creating tasks', `claim ${i} of ${doc}`))
   const docInput = (doc: string, n: number) => ({
     doc,
     areaTags: ['one'],

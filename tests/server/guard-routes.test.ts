@@ -33,7 +33,7 @@ const LATEST = {
   run: { runId: RUN_ID, ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r' },
   summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
-    { id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'fail', durationMs: 3, failure: { step: 1, expected: 'x', actual: 'y' }, evidencePath: `.truecourse/guard/evidence/${RUN_ID}/a1` },
+    { id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] }, outcome: 'fail', durationMs: 3, failure: { step: 1, expected: 'x', actual: 'y' }, evidencePath: `.truecourse/guard/evidence/${RUN_ID}/a1` },
   ],
   sections: [{ doc: DOC, section: 'alpha', status: 'fail', scenarioIds: ['a1'] }],
 };
@@ -43,7 +43,7 @@ const MANIFEST = {
     {
       flowId: `${DOC}#alpha`,
       flowFingerprint: 'sha256:x',
-      bindings: [{ doc: DOC, anchor: 'alpha', fingerprint: 'sha256:x' }],
+      bindings: [{ doc: DOC, anchor: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] }],
       scenarios: [{ id: 'a1', surface: 'cli' }],
       generationInputsHash: null,
       gaps: [],
@@ -78,6 +78,7 @@ const scenarioYaml = (id: string, section: string) =>
     `  - doc: ${DOC}`,
     `    section: ${section}`,
     '    fingerprint: sha256:x',
+    `    sentences: [${section}]`,
     'driver: cli',
     'steps:',
     '  - run: []',
@@ -327,6 +328,7 @@ describe('Guard routes', () => {
     `  - doc: ${DOC}`,
     '    section: alpha',
     '    fingerprint: sha256:x',
+    '    sentences: [alpha]',
     'setup:',
     '  files:',
     '    "tasks.json": "[]\\n"',
@@ -596,6 +598,7 @@ describe('Guard routes', () => {
     `  - doc: ${DOC}`,
     '    section: alpha',
     '    fingerprint: sha256:x',
+    '    sentences: [alpha]',
     'driver: cli',
     'steps:',
     '  - run: ["init"]',

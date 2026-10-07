@@ -44,7 +44,7 @@ export function failRow(
   return {
     id,
     title: `${id} title`,
-    binds: { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' },
+    binds: { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] },
     outcome: 'fail',
     durationMs: 5,
     failure: { step: 3, expected: 'exit 0', actual: 'exit 2 — unknown flag' },
@@ -112,7 +112,7 @@ export function scenarioDoc(id: string, over: Partial<GuardScenario> = {}): Guar
   return {
     id,
     title: `${id} title`,
-    binds: [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }],
+    binds: [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }],
     steps: [{ run: ['--version'], expect: { exit: 0 } }],
     normalize: [],
     ...over,

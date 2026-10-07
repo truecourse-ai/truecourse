@@ -102,7 +102,7 @@ export function buildFlowScenario(opts: {
       path: interfaces.map((j) => j.id),
       fingerprints: interfaces.map((j) => j.fingerprint || interfaceFingerprint(j)),
     },
-    binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint })),
+    binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint, sentences: [...b.sentences] })),
     ...(surface === 'api' && server && server !== defaultServer ? { server } : {}),
     ...(raw.world ? { world: raw.world } : {}),
     ...(raw.setup ? { setup: raw.setup } : {}),

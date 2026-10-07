@@ -2,7 +2,7 @@ import type { GuardCaseEvidence, GuardEvidenceProofContext, GuardScenario } from
 
 /** Sanitized shape of the September 9 empty-ledger review-reference incident. */
 export const emptyLedgerEvidenceContext: GuardEvidenceProofContext = {
-  milestones: [{ order: 3, doc: 'spec.md', anchor: 'empty-ledger', claimTitle: 'The pristine ledger shows its empty presentation.',
+  milestones: [{ order: 3, doc: 'spec.md', anchor: 'empty-ledger', claimTitle: 'The pristine ledger shows its empty presentation.', sentences: ['empty-ledger'],
     proofDrivers: ['web'], verification: { scope: 'web', method: 'behavior', observable: 'Pristine empty ledger text',
       cases: [{ id: 'empty-ledger-state', claim: 'An empty ledger shows the empty heading and add-expense guidance.',
         method: 'behavior', requires: ['browser'], conditions: ['fresh-state'] }] } }],

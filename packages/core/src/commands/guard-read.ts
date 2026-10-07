@@ -1,6 +1,6 @@
 import { withGuardReadTree } from '../lib/guard-read-tree.js'
 import { log } from '../lib/logger.js'
-import { GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect, type GuardFlowProgress } from '@truecourse/shared'
+import { GUARD_REVIEW_POLICY_VERSION, bindRealizes, scenarioFullFlowDefect, type GuardFlowProgress } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * Read-surface drivers for the guard dashboard. All route logic lives here so the
@@ -901,8 +901,7 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
     const recorded = entry?.scenarios.find((s) => s.id === row.scenarioId)
     const bindings = flow?.bindings ?? entry?.bindings ?? []
     const current = scenario
-      ? scenario.flow?.fingerprint === fingerprint && bindings.every((binding) => scenario.binds.some((bind) =>
-        bind.doc === binding.doc && bind.section === binding.anchor && bind.fingerprint === binding.fingerprint))
+      ? scenario.flow?.fingerprint === fingerprint && bindings.every((binding) => scenario.binds.some((bind) => bindRealizes(bind, binding)))
       : entry?.flowFingerprint === fingerprint
     // Retained stale scenarios and unreviewed candidates remain visible, but
     // cannot discharge new or unaudited obligations.
@@ -1714,7 +1713,7 @@ function flowPassingProof(
     const record = entry?.scenarios.find(s => s.id === row.scenarioId)
     const scenario = join.scenarioById.get(row.scenarioId!)
     if (record?.reviewed === false || !scenario || scenario.flow?.fingerprint !== (flow?.fingerprint ?? entry?.flowFingerprint)) continue
-    if (!(flow?.bindings ?? entry?.bindings ?? []).every(b => scenario.binds.some(s => s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) continue
+    if (!(flow?.bindings ?? entry?.bindings ?? []).every(b => scenario.binds.some(s => bindRealizes(s, b)))) continue
     if (milestones.some(m => m.verification?.cases) && (record?.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !record?.caseEvidence || record.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) || scenarioFullFlowDefect(milestones, scenario.steps, record.caseEvidence))) continue
     if (!scenarioFullFlowDefect(milestones, scenario.steps)) proof.push(...scenarioMilestoneProof(scenario.steps))
   }

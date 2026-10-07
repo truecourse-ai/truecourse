@@ -17,7 +17,7 @@ import {
 const RECIPE: Recipe = { build: 'true', entry: ['node', 'bin.mjs'] }
 
 function candidate(id: string): BirthCandidate {
-  const binds = { doc: 'docs/cli.md', section: 'version', fingerprint: 'sha256:abc' }
+  const binds = { doc: 'docs/cli.md', section: 'version', fingerprint: 'sha256:abc', sentences: ['version'] }
   const scenario: GuardScenario = {
     id,
     title: id,

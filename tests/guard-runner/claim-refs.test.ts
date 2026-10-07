@@ -63,9 +63,9 @@ const flow = (milestoneTitles: string[]): GuardFlowsFile['flows'][number] => ({
     order: i + 1,
     doc: DOC,
     anchor: 'a/b',
-    claimTitle,
+    claimTitle, sentences: ['a/b'],
   })),
-  bindings: [{ doc: DOC, anchor: 'a/b', fingerprint: 'sha256:s' }],
+  bindings: [{ doc: DOC, anchor: 'a/b', fingerprint: 'sha256:s', sentences: ['a/b'] }],
   composedOf: [],
   synthesisInputsHash: 'sha256:i',
 })
@@ -159,7 +159,7 @@ describe('crossCheckClaimRefs', () => {
         flows: [
           {
             ...flow([known.title]),
-            milestones: [{ order: 1, doc: DOC, anchor: 'other/section', claimTitle: known.title }],
+            milestones: [{ order: 1, doc: DOC, anchor: 'other/section', claimTitle: known.title, sentences: ['other/section'] }],
           },
         ],
       }),

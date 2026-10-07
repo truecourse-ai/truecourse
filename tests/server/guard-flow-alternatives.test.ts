@@ -9,11 +9,11 @@ import {
 const doc = 'docs/spec.md'
 const content = '# Expenses\nAdd and edit expenses.'
 const milestones: GuardFlowMilestone[] = [1, 2].map((order) => ({
-  order, doc, anchor: 'expenses', claimTitle: `Expense milestone ${order}`, proofDrivers: ['web', 'api'],
+  order, doc, anchor: 'expenses', claimTitle: `Expense milestone ${order}`, sentences: ['sentence:expenses'], proofDrivers: ['web', 'api'],
 }))
 function sources(ms = milestones): GuardCoverageSources {
   const fingerprint = flowFingerprint(ms)
-  const bindings = [{ doc, anchor: 'expenses', fingerprint: 'sha256:section' }]
+  const bindings = [{ doc, anchor: 'expenses', fingerprint: 'sha256:section', sentences: ['sentence:expenses'] }]
   return {
     latest: null, result: null,
     flows: GuardFlowsFileSchema.parse({ version: 1, generatedAt: '2026-09-08T00:00:00Z', flows: [{
@@ -117,7 +117,7 @@ describe('coverage across alternative flow proofs', () => {
     s.latest = GuardLatestSchema.parse({
       run: { runId: 'run', ranAt: '2026-09-08T00:00:00Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:recipe' },
       summary: { total: 1, pass: 0, fail: 0, error: 0, stale: 0, orphaned: 0 }, sections: [],
-      scenarios: [{ id: 'expenses.web', title: 'Expenses', outcome, durationMs: 1, flowId: 'expenses', binds: { doc, section: 'expenses', fingerprint: 'sha256:section' } }],
+      scenarios: [{ id: 'expenses.web', title: 'Expenses', outcome, durationMs: 1, flowId: 'expenses', binds: { doc, section: 'expenses', fingerprint: 'sha256:section', sentences: ['sentence:expenses'] } }],
     })
     expect(read(s).flow.status).toBe(outcome)
     expect(read(s).flow.surfaces.find((r) => r.gap)?.coveredByAlternative).toBe(outcome === 'pass' ? true : undefined)
@@ -128,7 +128,7 @@ describe('coverage across alternative flow proofs', () => {
     const flow = s.flows!.flows[0]
     s.scenarios = [GuardScenarioSchema.parse({
       id: 'expenses.web', title: 'Manage expenses', flow: { id: flow.id, fingerprint: flow.fingerprint },
-      binds: [{ doc, section: 'expenses', fingerprint: 'sha256:section' }],
+      binds: [{ doc, section: 'expenses', fingerprint: 'sha256:section', sentences: ['sentence:expenses'] }],
       steps: milestones.map((m) => ({ driver: 'web', navigate: '/expenses', milestone: m.order, expect: { visible: { role: 'heading', name: 'Expenses' } } })),
     })]
     s.result = GuardGenerateReportSchema.parse({
@@ -138,9 +138,9 @@ describe('coverage across alternative flow proofs', () => {
     })
     s.manifest = null
     expect(read(s).flow.status).toBe('guarded')
-    s.scenarios[0].binds[0].fingerprint = 'sha256:old-section'
+    s.scenarios[0].binds[0].sentences = ['sentence:old-section']
     expect(read(s).flow.status).toBe('no-interface')
-    s.scenarios[0].binds[0].fingerprint = 'sha256:section'
+    s.scenarios[0].binds[0].sentences = ['sentence:expenses']
     const written = s.result.written
     s.result.written = []
     expect(read(s).flow.status).toBe('no-interface')
@@ -172,7 +172,7 @@ it('never promotes two independently reviewed partial case tests through their u
   const s = sources(ms)
   const fingerprint = s.flows!.flows[0].fingerprint
   s.scenarios = ['created','reload'].map(id => GuardScenarioSchema.parse({ id, title: id,
-    binds: [{ doc, section: 'expenses', fingerprint: 'sha256:section' }], flow: { id: 'expenses', fingerprint },
+    binds: [{ doc, section: 'expenses', fingerprint: 'sha256:section', sentences: ['sentence:expenses'] }], flow: { id: 'expenses', fingerprint },
     steps: [{ driver: 'web', navigate: '/', milestone: 1, checks: [id], expect: { text: { contains: id } } }],
   }))
   s.manifest!.flows[0].scenarios = s.scenarios.map(scenario => ({ id: scenario.id, drivers: ['web'], status: 'passing', reviewed: true,
