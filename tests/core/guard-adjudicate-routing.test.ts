@@ -42,7 +42,7 @@ function row(over: Partial<GuardScenarioResult> = {}): GuardScenarioResult {
   return {
     id: 'a',
     title: 'a title',
-    binds: { doc: 'docs/x.md', section: 'a/sec', fingerprint: 'sha256:x' },
+    binds: { doc: 'docs/x.md', section: 'a/sec', fingerprint: 'sha256:x', sentences: ['a/sec'] },
     outcome: 'fail',
     durationMs: 1,
     failure: { step: 2, expected: 'exit 0', actual: 'exit 2 — unknown flag' },
@@ -82,10 +82,10 @@ const FLOW: GuardFlow = {
   goal: 'see the resolved config',
   fingerprint: 'sha256:flow',
   milestones: [
-    { order: 1, doc: 'docs/cli.md', anchor: 'flags', claimTitle: 'flags exist' },
-    { order: 2, doc: 'docs/cli.md', anchor: 'flags/verbose', claimTitle: 'the verbose flag prints config' },
+    { order: 1, doc: 'docs/cli.md', anchor: 'flags', claimTitle: 'flags exist', sentences: ['flags'] },
+    { order: 2, doc: 'docs/cli.md', anchor: 'flags/verbose', claimTitle: 'the verbose flag prints config', sentences: ['flags/verbose'] },
   ],
-  bindings: [{ doc: 'docs/cli.md', anchor: 'flags/verbose', fingerprint: 'sha256:x' }],
+  bindings: [{ doc: 'docs/cli.md', anchor: 'flags/verbose', fingerprint: 'sha256:x', sentences: ['flags/verbose'] }],
   composedOf: [],
   synthesisInputsHash: 'sha256:inputs',
 }

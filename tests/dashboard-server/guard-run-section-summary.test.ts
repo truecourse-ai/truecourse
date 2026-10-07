@@ -40,7 +40,7 @@ function writeManifest(repoPath: string, extraFlows: object[] = []): void {
         {
           flowId: 'f1',
           flowFingerprint: 'sha256:f',
-          bindings: [{ doc: DOC, anchor: 'refunds', fingerprint: 'sha256:x' }],
+          bindings: [{ doc: DOC, anchor: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] }],
           scenarios: [{ id: 's1', drivers: ['cli'] }],
           interfaces: [],
           generationInputsHash: null,
@@ -67,7 +67,7 @@ function run(runId: string, ranAt: string): GuardLatest {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: DOC, section: 'refunds', fingerprint: 'sha256:x' },
+        binds: { doc: DOC, section: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
       },
@@ -126,7 +126,7 @@ describe('a run’s coverage summaries', () => {
       {
         flowId: 'retired-flow',
         flowFingerprint: 'sha256:old',
-        bindings: [{ doc: DOC, anchor: 'timing', fingerprint: 'sha256:old' }],
+        bindings: [{ doc: DOC, anchor: 'timing', fingerprint: 'sha256:old', sentences: ['timing'] }],
         scenarios: [{ id: 's-old', drivers: ['cli'], status: 'passing' }],
         interfaces: [],
         generationInputsHash: null,
@@ -152,7 +152,7 @@ describe('a run’s coverage summaries', () => {
       {
         flowId: 'retired-flow',
         flowFingerprint: 'sha256:old',
-        bindings: [{ doc: DOC, anchor: 'timing', fingerprint: 'sha256:old' }],
+        bindings: [{ doc: DOC, anchor: 'timing', fingerprint: 'sha256:old', sentences: ['timing'] }],
         scenarios: [{ id: 's-old', drivers: ['cli'], status: 'passing' }],
         interfaces: [],
         generationInputsHash: null,

@@ -41,7 +41,7 @@ const latest: GuardLatest = {
     {
       id: 'a.web.1',
       title: 'signs in',
-      binds: { doc: 'docs/auth.md', section: 'sign-in', fingerprint: 'sha256:x' },
+      binds: { doc: 'docs/auth.md', section: 'sign-in', fingerprint: 'sha256:x', sentences: ['sign-in'] },
       outcome: 'fail',
       durationMs: 5,
     },

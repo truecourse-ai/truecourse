@@ -13,7 +13,7 @@ import {
   GuardSetupTaxonomyStepSchema,
 } from '@truecourse/shared'
 
-const binds = [{ doc: 'docs/a.md', section: 'a/b', fingerprint: 'sha256:x' }]
+const binds = [{ doc: 'docs/a.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }]
 
 function scenario(over: Record<string, unknown> = {}): unknown {
   return {

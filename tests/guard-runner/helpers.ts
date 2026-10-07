@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { GuardApiScenario, GuardSandboxScenario, GuardScenario } from '@truecourse/shared'
-import { buildDocSectionIndex } from '@truecourse/guard-runner'
+import { parseDocTree, sectionSentences, sentenceKey, type GuardApiScenario, type GuardBinds, type GuardSandboxScenario, type GuardScenario } from '@truecourse/shared'
+import { buildDocSectionIndex, type DocSectionIndex } from '@truecourse/guard-runner'
 
 /** Absolute path to the realistic fixture CLI (`relkit`). */
 export const FIXTURE_BIN = fileURLToPath(
@@ -48,14 +48,40 @@ function buildSpecDoc(anchors: readonly string[]): string {
 const SPEC_DOC = buildSpecDoc(SPEC_ANCHORS)
 const SPEC_INDEX = buildDocSectionIndex(SPEC_DOC_PATH, SPEC_DOC)
 
-/** The live binding list (doc + anchor + fingerprint) for sections of the shared doc. */
+/** The live binding list for sections of the shared doc. */
 export function specBinds(...sections: string[]): GuardScenario['binds'] {
-  return sections.map((section) => {
-    const s = SPEC_INDEX.byAnchor.get(section)
-    if (!s) throw new Error(`shared spec doc has no section "${section}"`)
-    return { doc: SPEC_DOC_PATH, section, fingerprint: s.fingerprint }
-  }) as GuardScenario['binds']
+  return sections.map((section) => sectionBind(SPEC_INDEX, section)) as GuardScenario['binds']
 }
+
+/**
+ * A live bind to one section of an indexed document: its anchor, fingerprint
+ * and the keys of every sentence of its own text, so any edit to the section's
+ * text reads stale and a move with the text intact still matches.
+ */
+export function sectionBind(index: DocSectionIndex, anchor: string): GuardBinds {
+  const s = index.byAnchor.get(anchor)
+  const t = index.tree.sections.find((x) => x.anchor === anchor)
+  if (!s || !t) throw new Error(`${index.doc} has no section "${anchor}"`)
+  const sentences = sectionSentences(index.tree, t).map((x) => sentenceKey(x.text, x.repeat))
+  if (sentences.length === 0) throw new Error(`section "${anchor}" of ${index.doc} has no sentence`)
+  return { doc: index.doc, section: anchor, fingerprint: s.fingerprint, sentences }
+}
+
+/**
+ * A bind to a shared-doc section as authored against older text: its
+ * fingerprint is not the live one and one of its sentences the doc no longer
+ * holds, so the runner reads it stale.
+ */
+export function staleSpecBind(section: string): GuardBinds {
+  return staleBind(specBinds(section)[0])
+}
+
+/** `live` as authored against older text: one sentence the doc no longer holds. */
+export function staleBind(live: GuardBinds): GuardBinds {
+  return { ...live, fingerprint: 'sha256:authored-against-older-text', sentences: [...live.sentences, 'sentence:authored-against-older-text'] }
+}
+
+export { parseDocTree }
 
 /** Seed the shared spec doc into a repo (idempotent). */
 export function writeSpecDoc(repo: string): void {

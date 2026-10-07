@@ -2644,7 +2644,7 @@ export interface FlowDigest {
   areaId: string
   title: string
   goal: string
-  milestones: { doc: string; anchor: string; claimTitle: string; caseIds?: string[] }[]
+  milestones: { doc: string; anchor: string; claimTitle: string; sentences: string[]; caseIds?: string[] }[]
 }
 
 /** The epic pass's engine feedback for its ONE corrective re-ask. */

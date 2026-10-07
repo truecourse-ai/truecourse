@@ -59,7 +59,7 @@ function bind(content = DOC_CONTENT): { doc: string; section: string; fingerprin
   const index = buildDocSectionIndex(DOC, content)
   const section = index.sections.find((s) => s.headingText === 'verbose')
   if (!section) throw new Error('fixture doc has no `verbose` section')
-  return { doc: DOC, section: section.anchor, fingerprint: section.fingerprint }
+  return { doc: DOC, section: section.anchor, fingerprint: section.fingerprint, sentences: [section.anchor] }
 }
 
 function writeDoc(content: string): void {

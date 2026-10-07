@@ -9,7 +9,7 @@ import { diffScenarioSets, type GuardManifest, type GuardManifestFlow } from '@t
 
 const flow = (over: Partial<GuardManifestFlow> & Pick<GuardManifestFlow, 'flowId'>): GuardManifestFlow => ({
   flowFingerprint: 'sha256:f',
-  bindings: [{ doc: 'docs/a.md', anchor: over.flowId, fingerprint: 'sha256:s' }],
+  bindings: [{ doc: 'docs/a.md', anchor: over.flowId, fingerprint: 'sha256:s', sentences: [over.flowId] }],
   scenarios: [{ id: `${over.flowId}-1`, drivers: ['cli'], status: 'passing' }],
   interfaces: [],
   generationInputsHash: 'h1',

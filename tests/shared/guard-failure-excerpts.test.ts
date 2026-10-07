@@ -32,7 +32,7 @@ describe('GuardFailureDetailSchema — program-output excerpts', () => {
     const parsed = GuardScenarioResultSchema.parse({
       id: 's1',
       title: 't',
-      binds: { doc: 'd.md', section: 'a', fingerprint: 'sha256:x' },
+      binds: { doc: 'd.md', section: 'a', fingerprint: 'sha256:x', sentences: ['a'] },
       outcome: 'fail',
       durationMs: 5,
       failure: { step: 2, expected: 'exit 0', actual: 'exit 7', stderr: 'boom\n' },

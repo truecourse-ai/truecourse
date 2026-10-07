@@ -40,7 +40,7 @@ import {
   type FlowsSessionGrounding,
   type GuardDoc,
 } from '@truecourse/guard-generator'
-import { interfaceFingerprint, type GuardFlow, type Interface } from '@truecourse/shared'
+import { interfaceFingerprint, parseDocTree, sentenceKey, type GuardFlow, type Interface } from '@truecourse/shared'
 import { runAgentLoop, type SessionRunInput } from '../../packages/agent-loop/src/index'
 import {
   FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT,
@@ -122,8 +122,15 @@ const ADD = '`relkit add <title>` creates a task and prints its id'
 const LS = '`relkit list` prints one line per open task'
 const FIN = '`relkit done <id>` marks the task complete'
 
+const TREE = parseDocTree(DOC, CONTENT)
+/** The key of the fixture sentence a claim title opens, else a key of the title itself. */
+const sentencesFor = (title: string): string[] => {
+  const s = TREE.sentences.find((x) => x.text.includes(title))
+  return [s ? sentenceKey(s.text, s.repeat) : sentenceKey(title)]
+}
+
 function claim(anchor: string, title: string, over: Partial<FlowClaimInput> = {}): FlowClaimInput {
-  return { doc: DOC, anchor, title, driver: 'cli', ...over }
+  return { id: `claim::${DOC}::${anchor}::${title}`, doc: DOC, anchor, title, sentences: sentencesFor(title), ...over }
 }
 
 const CLAIMS: FlowClaimInput[] = [claim(CREATE, ADD), claim(LIST, LS), claim(DONE, FIN)]
@@ -234,11 +241,11 @@ describe('guard-generate.flows — the area session through the loop', () => {
       goal: 'A user adds a task, sees it, and completes it.',
       fingerprint: 'sha256:f',
       milestones: [
-        { order: 1, doc: DOC, anchor: CREATE, claimTitle: ADD },
-        { order: 2, doc: DOC, anchor: LIST, claimTitle: LS },
-        { order: 3, doc: DOC, anchor: DONE, claimTitle: FIN },
+        { order: 1, doc: DOC, anchor: CREATE, claimTitle: ADD, sentences: [CREATE] },
+        { order: 2, doc: DOC, anchor: LIST, claimTitle: LS, sentences: [LIST] },
+        { order: 3, doc: DOC, anchor: DONE, claimTitle: FIN, sentences: [DONE] },
       ],
-      bindings: [{ doc: DOC, anchor: CREATE, fingerprint: 'sha256:s' }],
+      bindings: [{ doc: DOC, anchor: CREATE, fingerprint: 'sha256:s', sentences: [CREATE] }],
       composedOf: [],
       synthesisInputsHash: 'sha256:i',
     }
@@ -465,8 +472,8 @@ describe('checkFlowSet — the tool and the fold agree', () => {
 // ---------------------------------------------------------------------------
 
 const DIGESTS: FlowDigest[] = [
-  { ref: 'F1', areaId: 'tasks', title: 'Create a task', goal: 'g', milestones: [{ doc: DOC, anchor: CREATE, claimTitle: ADD }] },
-  { ref: 'F2', areaId: 'accounts', title: 'List tasks', goal: 'g', milestones: [{ doc: DOC, anchor: LIST, claimTitle: LS }] },
+  { ref: 'F1', areaId: 'tasks', title: 'Create a task', goal: 'g', milestones: [{ doc: DOC, anchor: CREATE, claimTitle: ADD, sentences: sentencesFor(ADD) }] },
+  { ref: 'F2', areaId: 'accounts', title: 'List tasks', goal: 'g', milestones: [{ doc: DOC, anchor: LIST, claimTitle: LS, sentences: sentencesFor(LS) }] },
 ]
 
 describe('checkEpicSet', () => {
@@ -579,10 +586,10 @@ describe('flowsSessionBriefing', () => {
       startingState: { stepCreatable: ['a task'], seedable: [], supplied: [] },
       fingerprint: 'sha256:f',
       milestones: [
-        { order: 2, doc: DOC, anchor: LIST, claimTitle: LS },
-        { order: 1, doc: DOC, anchor: CREATE, claimTitle: ADD, caseIds: ['c1'] },
+        { order: 2, doc: DOC, anchor: LIST, claimTitle: LS, sentences: [LIST] },
+        { order: 1, doc: DOC, anchor: CREATE, claimTitle: ADD, sentences: [CREATE], caseIds: ['c1'] },
       ],
-      bindings: [{ doc: DOC, anchor: CREATE, fingerprint: 'sha256:s' }],
+      bindings: [{ doc: DOC, anchor: CREATE, fingerprint: 'sha256:s', sentences: [CREATE] }],
       composedOf: [],
       synthesisInputsHash: 'sha256:i',
     }
@@ -807,7 +814,7 @@ it('briefs the composer with complete case, source, condition and preparation me
   const verification: NonNullable<FlowClaimInput['verification']> = { scope: 'web', method: 'behavior', observable: 'Empty ledger', cases: [
     { id: 'empty-ledger', claim: 'Empty ledger total is zero', method: 'behavior', requires: ['browser'], conditions: ['fresh-state'], preparation: 'empty' },
   ] }
-  const briefing = flowsSessionBriefing({ ...AREA, claims: [{ ...CLAIMS[0], driver: 'web', verification }] }, undefined)
+  const briefing = flowsSessionBriefing({ ...AREA, claims: [{ ...CLAIMS[0], verification }] }, undefined)
   expect(briefing).toContain(`verification: ${JSON.stringify(verification)}`)
   expect(briefing).toContain(`doc: ${DOC}`)
   expect(briefing).toContain(`anchor: ${CLAIMS[0].anchor}`)

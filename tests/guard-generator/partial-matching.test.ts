@@ -16,9 +16,9 @@ const control: Interface = { id: 'web/cancel-add', title: 'Cancel adding', type:
 const catalog = buildSurfaceCatalogs([control]).get('web')!
 function flow(extra: Partial<GuardFlowMilestone> = {}): GuardFlow {
   const milestones: GuardFlowMilestone[] = [1, 2].map((order) => ({ order, doc: 'spec.md', anchor: 'expenses',
-    claimTitle: `Obligation ${order}`, proofDrivers: ['web'], ...(order === 2 ? extra : {}) }))
+    claimTitle: `Obligation ${order}`, sentences: ['expenses'], proofDrivers: ['web'], ...(order === 2 ? extra : {}) }))
   return { id: 'expenses', title: 'Expenses', goal: 'Manage expenses', fingerprint: flowFingerprint(milestones),
-    milestones, bindings: [{ doc: 'spec.md', anchor: 'expenses', fingerprint: 'sha256:spec' }], composedOf: [], synthesisInputsHash: 'inputs' }
+    milestones, bindings: [{ doc: 'spec.md', anchor: 'expenses', fingerprint: 'sha256:spec', sentences: ['expenses'] }], composedOf: [], synthesisInputsHash: 'inputs' }
 }
 
 describe('matching incomplete catalogs and verification capabilities', () => {

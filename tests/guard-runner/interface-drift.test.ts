@@ -9,7 +9,7 @@ import {
   readInterfaceCatalog,
 } from '@truecourse/guard-runner'
 import { interfaceFingerprint, type Interface, type InterfacesFile } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds, staleSpecBind } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -171,7 +171,7 @@ describe('runGuard — interface-drift annotation', () => {
       'stale.yaml',
       scenario({
         id: 'stale',
-        binds: [{ doc: specBinds('a/b')[0].doc, section: 'cli/version', fingerprint: 'sha256:older-text' }],
+        binds: [staleSpecBind('cli/version')],
         interface: { path: ['cli/version'], fingerprints: ['sha256:older-surface'] },
         steps: [{ run: ['--version'], expect: { exit: 0 } }],
       }),

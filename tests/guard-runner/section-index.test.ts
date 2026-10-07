@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { sectionSentences, sentenceKey } from '@truecourse/shared'
 import {
   buildDocSectionIndex,
   resolveBinding,
@@ -170,28 +171,39 @@ describe('resolveBinding', () => {
   const doc = md(['# Spec', '## Top', 'top body', '### Rate limiting', 'limits after 5', '## Other', 'other body'])
   const idx = buildDocSectionIndex('docs/spec.md', doc)
   const rate = idx.byAnchor.get('spec/top/rate-limiting')!
+  const keys = (anchor: string): string[] =>
+    sectionSentences(idx.tree, idx.tree.sections.find((s) => s.anchor === anchor)!).map((s) => sentenceKey(s.text, s.repeat))
 
-  it('matches on exact anchor + fingerprint', () => {
-    expect(resolveBinding(idx, rate.anchor, rate.fingerprint)).toEqual({ kind: 'match', section: rate })
+  it('matches when every bound sentence still stands in its section', () => {
+    expect(resolveBinding(idx, { section: rate.anchor, sentences: keys(rate.anchor) })).toEqual({ kind: 'match', section: rate })
   })
 
-  it('remaps when the fingerprint is found at a different anchor', () => {
-    const res = resolveBinding(idx, 'spec/moved/rate-limiting', rate.fingerprint)
-    expect(res).toMatchObject({ kind: 'remap', from: 'spec/moved/rate-limiting' })
-    if (res.kind === 'remap') expect(res.section.anchor).toBe('spec/top/rate-limiting')
+  it('matches at the section the sentences now sit in, naming the anchor that was bound', () => {
+    const res = resolveBinding(idx, { section: 'spec/moved/rate-limiting', sentences: keys(rate.anchor) })
+    expect(res).toEqual({ kind: 'match', section: rate, from: 'spec/moved/rate-limiting' })
   })
 
-  it('is stale when the anchor exists but the fingerprint differs', () => {
-    const res = resolveBinding(idx, rate.anchor, 'sha256:deadbeef')
-    expect(res).toEqual({ kind: 'stale', anchor: rate.anchor, currentFingerprint: rate.fingerprint })
+  it('is stale when some sentences are gone, naming them and the bound section’s current fingerprint', () => {
+    const res = resolveBinding(idx, { section: rate.anchor, sentences: [...keys(rate.anchor), 'sentence:gone'] })
+    expect(res).toEqual({ kind: 'stale', anchor: rate.anchor, currentFingerprint: rate.fingerprint, missing: ['sentence:gone'] })
   })
 
-  it('is orphaned when neither anchor nor fingerprint is found', () => {
-    expect(resolveBinding(idx, 'spec/gone', 'sha256:deadbeef')).toEqual({ kind: 'orphaned', anchor: 'spec/gone' })
+  it('is stale without a current fingerprint when the bound section is gone but a sentence survives elsewhere', () => {
+    const res = resolveBinding(idx, { section: 'spec/gone', sentences: [keys('spec/top')[0]!, 'sentence:gone'] })
+    expect(res).toEqual({ kind: 'stale', anchor: 'spec/gone', missing: ['sentence:gone'] })
+  })
+
+  it('is stale when the bound section stands but none of its sentences do', () => {
+    const res = resolveBinding(idx, { section: rate.anchor, sentences: ['sentence:rewritten'] })
+    expect(res).toEqual({ kind: 'stale', anchor: rate.anchor, currentFingerprint: rate.fingerprint, missing: ['sentence:rewritten'] })
+  })
+
+  it('is orphaned when the section and every sentence are gone', () => {
+    expect(resolveBinding(idx, { section: 'spec/gone', sentences: ['sentence:gone'] })).toEqual({ kind: 'orphaned', anchor: 'spec/gone' })
   })
 
   it('is orphaned when the doc is missing (null index)', () => {
-    expect(resolveBinding(null, 'spec/top', 'sha256:x')).toEqual({ kind: 'orphaned', anchor: 'spec/top' })
+    expect(resolveBinding(null, { section: 'spec/top', sentences: keys('spec/top') })).toEqual({ kind: 'orphaned', anchor: 'spec/top' })
   })
 })
 
@@ -199,40 +211,30 @@ describe('resolveScenarioBinds', () => {
   const doc = md(['# Spec', '## Top', 'top body', '### Rate limiting', 'limits after 5', '## Other', 'other body'])
   const idx = buildDocSectionIndex('docs/spec.md', doc)
   const indexFor = (d: string): typeof idx | null => (d === 'docs/spec.md' ? idx : null)
+  const keys = (anchor: string): string[] =>
+    sectionSentences(idx.tree, idx.tree.sections.find((s) => s.anchor === anchor)!).map((s) => sentenceKey(s.text, s.repeat))
 
-  const at = (anchor: string): { doc: string; section: string; fingerprint: string } => ({
-    doc: 'docs/spec.md',
-    section: anchor,
-    fingerprint: idx.byAnchor.get(anchor)!.fingerprint,
-  })
-  const edited = (anchor: string): { doc: string; section: string; fingerprint: string } => ({
-    doc: 'docs/spec.md',
-    section: anchor,
-    fingerprint: 'sha256:older-text',
-  })
-  const removed = { doc: 'docs/spec.md', section: 'spec/gone', fingerprint: 'sha256:older-text' }
-  const movedRate = {
-    doc: 'docs/spec.md',
-    section: 'spec/moved/rate-limiting',
-    fingerprint: idx.byAnchor.get('spec/top/rate-limiting')!.fingerprint,
-  }
+  const at = (anchor: string) => ({ doc: 'docs/spec.md', section: anchor, sentences: keys(anchor) })
+  const edited = (anchor: string) => ({ doc: 'docs/spec.md', section: anchor, sentences: [...keys(anchor), 'sentence:older-text'] })
+  const removed = { doc: 'docs/spec.md', section: 'spec/gone', sentences: ['sentence:older-text'] }
+  const movedRate = { doc: 'docs/spec.md', section: 'spec/moved/rate-limiting', sentences: keys('spec/top/rate-limiting') }
 
   it('is executable when every bind matches', () => {
     expect(resolveScenarioBinds([at('spec/top'), at('spec/other')], indexFor).kind).toBe('executable')
   })
 
-  it('is executable when a bind only moved, re-anchoring the primary', () => {
+  it('is executable when a bind’s sentences only moved, re-anchoring the primary', () => {
     expect(resolveScenarioBinds([movedRate, at('spec/other')], indexFor)).toMatchObject({
       kind: 'executable',
       remappedTo: 'spec/top/rate-limiting',
     })
-    // A non-primary remap runs too, but leaves the result's re-anchor hint unset.
+    // A non-primary move runs too, but leaves the result's re-anchor hint unset.
     const secondary = resolveScenarioBinds([at('spec/other'), movedRate], indexFor)
     expect(secondary.kind).toBe('executable')
     expect(secondary.kind === 'executable' && secondary.remappedTo).toBeUndefined()
   })
 
-  it('is stale when any bind is stale, reporting that section’s current fingerprint', () => {
+  it('is stale when any bind lost a sentence, reporting that section’s current fingerprint', () => {
     const verdict = resolveScenarioBinds([at('spec/other'), edited('spec/top')], indexFor)
     expect(verdict).toMatchObject({
       kind: 'stale',

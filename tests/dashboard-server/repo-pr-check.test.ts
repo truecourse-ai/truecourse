@@ -176,7 +176,7 @@ function latestOf(runId: string, commit: string, outcome: 'pass' | 'fail' | 'err
       {
         id: 'a1',
         title: 'create an org',
-        binds: { doc: 'docs/orgs.md', section: 'orgs', fingerprint: 'sha256:x' },
+        binds: { doc: 'docs/orgs.md', section: 'orgs', fingerprint: 'sha256:x', sentences: ['orgs'] },
         outcome,
         durationMs: 1,
         ...(failure ? { failure: { step: 1, ...failure } } : {}),
@@ -193,7 +193,7 @@ async function storeBase(commit = BASE): Promise<void> {
   fs.mkdirSync(orgs, { recursive: true });
   fs.writeFileSync(
     path.join(orgs, 'a1.yaml'),
-    ['id: a1', 'title: create an org', 'binds:', '  - doc: docs/orgs.md', '    section: orgs', '    fingerprint: "sha256:x"', 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
+    ['id: a1', 'title: create an org', 'binds:', '  - doc: docs/orgs.md', '    section: orgs', '    fingerprint: "sha256:x"', '    sentences: [orgs]', 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
   );
   fs.writeFileSync(
     manifestPath(dir),
@@ -203,7 +203,7 @@ async function storeBase(commit = BASE): Promise<void> {
         {
           flowId: 'f1',
           flowFingerprint: 'sha256:f',
-          bindings: [{ doc: 'docs/orgs.md', anchor: 'orgs', fingerprint: 'sha256:x' }],
+          bindings: [{ doc: 'docs/orgs.md', anchor: 'orgs', fingerprint: 'sha256:x', sentences: ['orgs'] }],
           scenarios: [{ id: 'a1', drivers: ['cli'] }],
           interfaces: [],
           generationInputsHash: null,

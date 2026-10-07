@@ -113,7 +113,7 @@ const HEAD_RUN = {
     {
       id: 'write-then-read.cli.1',
       title: 'Writes a file and reads it back',
-      binds: { doc: 'docs/cli.md', section: 'round-trip', fingerprint: 'sha256:x' },
+      binds: { doc: 'docs/cli.md', section: 'round-trip', fingerprint: 'sha256:x', sentences: ['round-trip'] },
       outcome: 'fail',
       durationMs: 12,
       flowId: 'write-then-read',

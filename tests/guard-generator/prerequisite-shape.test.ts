@@ -59,7 +59,7 @@ function flow(): GuardFlow {
         order: 1,
         doc: 'spec.md',
         anchor: 'quote',
-        claimTitle: 'Quote',
+        claimTitle: 'Quote', sentences: ['quote'],
         proofDrivers: ['api'],
         verification: structuredClone(verification),
       },

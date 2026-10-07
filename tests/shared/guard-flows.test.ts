@@ -19,7 +19,7 @@ import {
 const DOC = 'docs/specs/tasks.md'
 
 function milestone(order: number, anchor: string, claimTitle: string): GuardFlowMilestone {
-  return { order, doc: DOC, anchor, claimTitle }
+  return { order, doc: DOC, anchor, claimTitle, sentences: [anchor] }
 }
 
 function flow(id: string, milestones: GuardFlowMilestone[], title = id): GuardFlow {
@@ -33,6 +33,7 @@ function flow(id: string, milestones: GuardFlowMilestone[], title = id): GuardFl
       doc: DOC,
       anchor,
       fingerprint: `sha256:${anchor}`,
+      sentences: [anchor],
     })),
     composedOf: [],
     synthesisInputsHash: 'sha256:inputs',
@@ -236,8 +237,8 @@ describe('guard manifest v2 (flow-keyed)', () => {
         flowId: 'task-lifecycle',
         flowFingerprint: flowFingerprint([CREATE, LIST]),
         bindings: [
-          { doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: 'sha256:c' },
-          { doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: 'sha256:l' },
+          { doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: 'sha256:c', sentences: ['tasks/creating-tasks'] },
+          { doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: 'sha256:l', sentences: ['tasks/listing-tasks'] },
         ],
         scenarios: [
           { id: 'task-lifecycle.cli.1', drivers: ['cli'] as const, status: 'passing' as const },

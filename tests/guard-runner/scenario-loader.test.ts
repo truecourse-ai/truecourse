@@ -60,7 +60,7 @@ describe('loadScenarios', () => {
         guard: 1,
         id: 'old',
         title: 'an older corpus',
-        binds: [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }],
+        binds: [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }],
         normalize: [],
         steps: [{ run: ['--version'], expect: { exit: 0 } }],
       }),

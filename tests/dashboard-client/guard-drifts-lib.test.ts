@@ -15,7 +15,7 @@ function scn(id: string, outcome: GuardScenarioResult['outcome']): GuardScenario
   return {
     id,
     title: id,
-    binds: { doc: 'docs/spec.md', section: id, fingerprint: 'sha256:x' },
+    binds: { doc: 'docs/spec.md', section: id, fingerprint: 'sha256:x', sentences: [id] },
     outcome,
     durationMs: 1,
   };

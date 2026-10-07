@@ -376,6 +376,7 @@ function orderMilestones(raw: { milestone: SynthesizedMilestone; claim: FlowClai
       doc: e.claim.doc,
       anchor: e.claim.anchor,
       claimTitle: e.claim.title,
+      sentences: [...e.claim.sentences],
       ...(e.milestone.caseIds ? { caseIds: [...e.milestone.caseIds].sort() } : {}),
       ...(e.claim.verification ? { verification: { ...e.claim.verification, ...(e.claim.verification.cases ? { cases: e.claim.verification.cases.filter(c => !e.milestone.caseIds || e.milestone.caseIds.includes(c.id)).sort((a, b) => a.id.localeCompare(b.id)) } : {}) } } : {}),
       ...(e.milestone.note ? { note: e.milestone.note } : {}),
@@ -723,7 +724,7 @@ function digestFlow(d: FlowDigest): DraftFlow {
     areaId: d.areaId,
     title: d.title,
     goal: d.goal,
-    milestones: d.milestones.map((m, i) => ({ order: i + 1, doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
+    milestones: d.milestones.map((m, i) => ({ order: i + 1, doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle, sentences: m.sentences, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
     composedRefs: [],
     synthesisInputsHash: '',
   }
@@ -748,7 +749,7 @@ function digestsOf(flows: readonly DraftFlow[]): FlowDigest[] {
     areaId: f.areaId,
     title: f.title,
     goal: f.goal,
-    milestones: f.milestones.map((m) => ({ doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
+    milestones: f.milestones.map((m) => ({ doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle, sentences: m.sentences, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
   }))
 }
 
@@ -1295,16 +1296,16 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
 
   // Bindings + fingerprints, then identity against the committed corpus.
   const provisional = new Set<string>()
+  const liveClaims = buildClaimIndex(areas.flatMap((a) => a.claims))
   const bindingsOf = (milestones: readonly GuardFlowMilestone[]): GuardFlowBinding[] => {
-    const bindings: GuardFlowBinding[] = []
-    const seenSection = new Set<string>()
+    const bySection = new Map<string, GuardFlowBinding>()
     for (const m of milestones) {
       const key = flowSectionKey(m.doc, m.anchor)
-      if (seenSection.has(key)) continue
-      seenSection.add(key)
-      bindings.push({ doc: m.doc, anchor: m.anchor, fingerprint: sectionFingerprints.get(key)! })
+      const binding = bySection.get(key)
+      if (binding) binding.sentences = [...new Set([...binding.sentences, ...m.sentences])].sort()
+      else bySection.set(key, { doc: m.doc, anchor: m.anchor, fingerprint: sectionFingerprints.get(key)!, sentences: [...new Set(m.sentences)].sort() })
     }
-    return bindings
+    return [...bySection.values()]
   }
   const next: GuardFlow[] = drafts.map((draft) => {
     const id = freeId(slugForTitle(draft.title), provisional)
@@ -1346,10 +1347,15 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
       return
     }
     // KEPT: the committed flow, byte for byte — a retitle or a re-worded goal
-    // of an unchanged path is the reinvention the rule forbids. Only the
-    // bindings are re-read, and they move only when a section's text did.
+    // of an unchanged path is the reinvention the rule forbids. Only what is
+    // re-read moves: each milestone's sentences follow the live claim it names,
+    // and the bindings are rebuilt from them.
     const kept = priorById.get(v.id)!
-    next[i] = { ...kept, bindings: bindingsOf(kept.milestones) }
+    const milestones = kept.milestones.map((m) => {
+      const claim = snapClaim(m, liveClaims)
+      return claim ? { ...m, sentences: [...claim.sentences] } : m
+    })
+    next[i] = { ...kept, milestones, bindings: bindingsOf(milestones) }
     reconciliation.kept.push(v.id)
   })
   verdicts.forEach((v, i) => {

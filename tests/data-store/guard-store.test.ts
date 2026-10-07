@@ -41,7 +41,7 @@ function makeLatest(over: {
   commit?: string | null;
   summary?: GuardLatest['summary'];
 }): GuardLatest {
-  const binds = { doc: 'README.md', section: 'intro', fingerprint: 'sha256:abc' };
+  const binds = { doc: 'README.md', section: 'intro', fingerprint: 'sha256:abc', sentences: ['intro'] };
   return {
     run: {
       runId: over.runId,
@@ -97,6 +97,7 @@ binds:
   - doc: README.md
     section: intro
     fingerprint: sha256:abc
+    sentences: [intro]
 driver: cli
 steps:
   - run:
@@ -111,7 +112,7 @@ const MANIFEST_JSON = JSON.stringify({
     {
       flowId: 'README.md#intro',
       flowFingerprint: 'sha256:abc',
-      bindings: [{ doc: 'README.md', anchor: 'intro', fingerprint: 'sha256:abc' }],
+      bindings: [{ doc: 'README.md', anchor: 'intro', fingerprint: 'sha256:abc', sentences: ['intro'] }],
       scenarios: [{ id: 's1', surface: 'cli' }],
       generationInputsHash: null,
       gaps: [],

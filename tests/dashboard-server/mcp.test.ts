@@ -174,7 +174,7 @@ function failingRun(repoPath: string): void {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: 'docs/refunds.md', section: 'refunds', fingerprint: 'sha256:x' },
+        binds: { doc: 'docs/refunds.md', section: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
         failure: { step: 2, expected: 'exit 0', actual: 'exit 1' },
@@ -202,9 +202,9 @@ function writeFlow(repoPath: string): void {
           goal: 'Create and complete a task',
           fingerprint: 'sha256:41ac',
           milestones: [
-            { order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Creating a task prints its id' },
+            { order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Creating a task prints its id', sentences: ['tasks/creating-tasks'] },
           ],
-          bindings: [{ doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: 'sha256:c' }],
+          bindings: [{ doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: 'sha256:c', sentences: ['tasks/creating-tasks'] }],
           composedOf: [],
           synthesisInputsHash: 'sha256:inputs',
         },

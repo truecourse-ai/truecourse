@@ -295,7 +295,7 @@ describe('the result RUN IDENTITY on a merged board', () => {
     const base = {
       id: 'flow.cli.1',
       title: 'X',
-      binds: { doc: 'docs/x.md', section: 'x', fingerprint: 'sha256:x' },
+      binds: { doc: 'docs/x.md', section: 'x', fingerprint: 'sha256:x', sentences: ['x'] },
       outcome: 'pass',
       durationMs: 4,
     };

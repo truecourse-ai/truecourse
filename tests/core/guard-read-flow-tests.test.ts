@@ -39,8 +39,8 @@ const flow = (id: string, title: string) => ({
   title,
   goal: `${title}.`,
   fingerprint: `sha256:${id}`,
-  milestones: [{ order: 1, doc: DOC, anchor: 'expenses', claimTitle: `${title} works` }],
-  bindings: [{ doc: DOC, anchor: 'expenses', fingerprint: 'sha256:x' }],
+  milestones: [{ order: 1, doc: DOC, anchor: 'expenses', claimTitle: `${title} works`, sentences: ['expenses'] }],
+  bindings: [{ doc: DOC, anchor: 'expenses', fingerprint: 'sha256:x', sentences: ['expenses'] }],
   composedOf: [],
   synthesisInputsHash: 'sha256:s',
 });

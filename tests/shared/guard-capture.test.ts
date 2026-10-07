@@ -246,7 +246,7 @@ function cliScenario(steps: unknown[]): unknown {
   return {
     id: 'x',
     title: 'x',
-    binds: [{ doc: 'docs/a.md', section: 'a', fingerprint: 'sha256:1' }],
+    binds: [{ doc: 'docs/a.md', section: 'a', fingerprint: 'sha256:1', sentences: ['a'] }],
     driver: 'cli',
     steps,
     normalize: [],

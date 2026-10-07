@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { runGuard, buildDocSectionIndex, evidenceRunDir, type GuardScenario } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, sectionBind, staleBind } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -26,11 +26,12 @@ function writeDoc(root: string, content: string): void {
 
 /** A passing scenario (runs `--version`) bound to a doc section by its live identity. */
 function boundScenario(id: string, content: string, headingText: string): GuardScenario {
-  const section = buildDocSectionIndex(DOC, content).sections.find((s) => s.headingText === headingText)
+  const index = buildDocSectionIndex(DOC, content)
+  const section = index.sections.find((s) => s.headingText === headingText)
   if (!section) throw new Error(`no section "${headingText}"`)
   return scenario({
     id,
-    binds: [{ doc: DOC, section: section.anchor, fingerprint: section.fingerprint }],
+    binds: [sectionBind(index, section.anchor)],
     steps: [{ run: ['--version'], expect: { exit: 0 } }],
   })
 }
@@ -128,7 +129,7 @@ describe('runGuard — binding resolution', () => {
       'stale.yaml',
       scenario({
         id: 'stale',
-        binds: [{ doc: DOC, section: 'spec/top', fingerprint: 'sha256:staleoldhash' }],
+        binds: [staleBind(sectionBind(buildDocSectionIndex(DOC, DOC_V1), 'spec/top'))],
         steps: [{ run: ['--version'], expect: { exit: 0 } }],
       }),
     )

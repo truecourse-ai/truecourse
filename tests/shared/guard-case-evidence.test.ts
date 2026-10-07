@@ -8,7 +8,7 @@ const verification: GuardVerification = {
   scope: 'api', method: 'behavior', observable: 'Read filtered results over HTTP',
   cases: ['literal-percent', 'ascii-case'].map(id => ({ id, claim: `Search handles ${id}`, method: 'behavior', requires: ['http'], conditions: [] })),
 }
-const milestones: GuardFlowMilestone[] = [{ order: 1, doc: 'spec.md', anchor: 'search', claimTitle: 'Search handles literal characters and ASCII case', proofDrivers: ['api'], verification }]
+const milestones: GuardFlowMilestone[] = [{ order: 1, doc: 'spec.md', anchor: 'search', claimTitle: 'Search handles literal characters and ASCII case', sentences: ['search'], proofDrivers: ['api'], verification }]
 const step = { request: { method: 'GET', path: '/items?q=%25' }, expect: { status: 200, json: { totalCount: { equals: 1 } } }, milestone: 1, checks: ['literal-percent'] }
 
 describe('independent case evidence', () => {
@@ -58,7 +58,7 @@ describe('independent case evidence', () => {
       { logs: { stream: 'stdout', match: 'Listening' }, milestone: 2, checks: ['startup-log'] },
       { signal: { name: 'SIGTERM', expect: { exitCode: 0 } }, milestone: 3, checks: ['shutdown'] },
     ]
-    const parsed = GuardScenarioSchema.parse({ id: 'lifecycle', title: 'Lifecycle', binds: [{ doc: 'spec.md', section: 'start', fingerprint: 'sha256:abc' }], steps })
+    const parsed = GuardScenarioSchema.parse({ id: 'lifecycle', title: 'Lifecycle', binds: [{ doc: 'spec.md', section: 'start', fingerprint: 'sha256:abc', sentences: ['start'] }], steps })
     expect(scenarioMilestoneProof(parsed.steps)).toEqual([
       { milestone: 1, driver: 'api', checks: ['ready'] },
       { milestone: 2, driver: 'api', checks: ['startup-log'] },
@@ -67,7 +67,7 @@ describe('independent case evidence', () => {
     expect(scenarioMilestoneProof([{ signal: { name: 'SIGTERM' }, milestone: 3 }])).toEqual([])
   })
   it('preserves case tags through the executable scenario schema', () => {
-    const scenario = GuardScenarioSchema.parse({ id: 'search', title: 'Literal search', binds: [{ doc: 'spec.md', section: 'search', fingerprint: 'sha256:abc' }], steps: [step] })
+    const scenario = GuardScenarioSchema.parse({ id: 'search', title: 'Literal search', binds: [{ doc: 'spec.md', section: 'search', fingerprint: 'sha256:abc', sentences: ['search'] }], steps: [step] })
     expect(scenario.steps[0]).toMatchObject({ checks: ['literal-percent'] })
   })
   it('binds a review to assertion content, while ignoring object key ordering', () => {

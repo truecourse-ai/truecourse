@@ -14,7 +14,7 @@ function repo(): string {
 }
 
 const bindsFor = (...sections: string[]) =>
-  sections.map((section) => ({ doc: 'docs/spec.md', section, fingerprint: `sha256:${section}` }))
+  sections.map((section) => ({ doc: 'docs/spec.md', section, fingerprint: `sha256:${section}`, sentences: [`sentence:${section}`] }))
 
 describe('GuardManifestSchema', () => {
   it('round-trips through JSON', () => {
@@ -23,7 +23,7 @@ describe('GuardManifestSchema', () => {
         {
           flowId: 'task-lifecycle',
           flowFingerprint: 'sha256:flow',
-          bindings: [{ doc: 'docs/spec.md', anchor: 'a/b', fingerprint: 'sha256:1' }],
+          bindings: [{ doc: 'docs/spec.md', anchor: 'a/b', fingerprint: 'sha256:1', sentences: ['a/b'] }],
           scenarios: [{ id: 'task-lifecycle.cli.1', drivers: ['cli'], status: 'passing' }],
           interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-add'] }],
           generationInputsHash: null,
@@ -93,8 +93,8 @@ describe('rebuildManifestFromScenarios', () => {
       flowId: 'task-lifecycle',
       flowFingerprint: 'sha256:flow',
       bindings: [
-        { doc: 'docs/spec.md', anchor: 'one', fingerprint: 'sha256:one' },
-        { doc: 'docs/spec.md', anchor: 'two', fingerprint: 'sha256:two' },
+        { doc: 'docs/spec.md', anchor: 'one', fingerprint: 'sha256:one', sentences: ['sentence:one'] },
+        { doc: 'docs/spec.md', anchor: 'two', fingerprint: 'sha256:two', sentences: ['sentence:two'] },
       ],
       scenarios: [
         { id: 'task-lifecycle.cli.1', drivers: ['cli'], status: 'passing' },
@@ -142,7 +142,7 @@ describe('rebuildManifestFromScenarios', () => {
     const manifest = rebuildManifestFromScenarios(r)
     expect(manifest.flows.map((f) => f.flowId)).toEqual(['manual/hand.1', 'manual/hand.2'])
     expect(manifest.flows[0].flowFingerprint).toBe(
-      flowFingerprint([{ order: 1, doc: 'docs/spec.md', anchor: 'one', claimTitle: 'a hand-written guard' }]),
+      flowFingerprint([{ order: 1, doc: 'docs/spec.md', anchor: 'one', claimTitle: 'a hand-written guard', sentences: ['one'] }]),
     )
     expect(manifest.flows[0].scenarios).toEqual([{ id: 'hand.1', drivers: ['cli'], status: 'passing' }])
   })

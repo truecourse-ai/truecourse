@@ -108,9 +108,9 @@ describe('incremental authoring — editing committed scenarios', () => {
     const res = await generate(r, (ids) => ({ edit: [{ replaces: ids[0]!, scenario: ORIGINAL }] }))
     expect(res.status).toBe('ok')
     expect(res.written.map((w) => w.id)).toEqual([prior.id])
-    // Byte-identical except the bind's section fingerprint, which the engine
-    // re-stamps to the text the scenario now stands against.
-    const sansBinds = (yaml: string) => yaml.replace(/^\s*fingerprint: sha256:[0-9a-f]+$/gm, '')
+    // Byte-identical except the bind's section fingerprint and sentence keys,
+    // which the engine re-stamps to the text the scenario now stands against.
+    const sansBinds = (yaml: string) => yaml.replace(/^\s*(fingerprint: sha256:[0-9a-f]+|- [0-9a-f]{8})$/gm, '')
     expect(sansBinds(fs.readFileSync(prior.file, 'utf-8'))).toBe(sansBinds(prior.bytes))
     expect(fs.readFileSync(prior.file, 'utf-8')).not.toBe(prior.bytes)
     const flow = readManifest(r)!.flows[0]!

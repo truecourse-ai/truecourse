@@ -313,7 +313,7 @@ describe('mergeGuardBoard — the merge itself', () => {
   const row = (id: string, outcome: 'pass' | 'fail'): GuardLatest['scenarios'][number] => ({
     id,
     title: id,
-    binds: { doc: 'docs/spec.md', section: id, fingerprint: `sha256:${id}` },
+    binds: { doc: 'docs/spec.md', section: id, fingerprint: `sha256:${id}`, sentences: [id] },
     outcome,
     durationMs: 1,
   })
@@ -464,7 +464,7 @@ describe('mergeGuardBoard — the merge itself', () => {
     const prior = latest('r1', '2026-01-01T00:00:00.000Z', [row('a', 'pass')])
     const moved = {
       ...row('a', 'fail'),
-      binds: { doc: 'docs/spec.md', section: 'elsewhere', fingerprint: 'sha256:new' },
+      binds: { doc: 'docs/spec.md', section: 'elsewhere', fingerprint: 'sha256:new', sentences: ['elsewhere'] },
     }
     const run = latest('r2', '2026-01-02T00:00:00.000Z', [moved])
     const merged = mergeGuardBoard(prior, run, new Set(['a']))

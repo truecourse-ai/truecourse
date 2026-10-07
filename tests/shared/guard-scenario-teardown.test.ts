@@ -16,7 +16,7 @@ import {
 const base: GuardSandboxScenario = {
   id: 'svc.cli.1',
   title: 'installs and removes a service',
-  binds: [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }],
+  binds: [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }],
   steps: [
     { run: ['install'], expect: { exit: 0 } },
     { run: ['status'], expect: { exit: 0 } },

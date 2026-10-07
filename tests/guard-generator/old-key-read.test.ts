@@ -39,7 +39,7 @@ const FLOW: GuardFlow = {
   fingerprint: 'sha256:flow',
   bindings: [],
   milestones: [
-    { order: 1, doc: 'docs/cli.md', anchor: 'version', claimTitle: 'prints the version', driver: 'cli' },
+    { order: 1, doc: 'docs/cli.md', anchor: 'version', claimTitle: 'prints the version', sentences: ['version'], driver: 'cli' },
   ],
   composedOf: [],
 } as unknown as GuardFlow
